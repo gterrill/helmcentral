@@ -79,18 +79,18 @@ export function ForecastDrawer({ forecast, loading = false, error = null, onRetr
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           6-Day Forecast
         </h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-6">
           {forecast.slice(0, 6).map((day, idx) => (
             <div
               key={idx}
-              className="rounded-lg border bg-background/60 px-3 py-3 text-center"
+              className="rounded-lg border bg-background/60 px-2 py-2 text-center"
             >
               <p className="text-xs font-semibold uppercase text-muted-foreground">
                 {day.dayName}
               </p>
               <p className="text-[10px] text-muted-foreground">{day.date}</p>
 
-              <div className="my-2 flex justify-center">
+              <div className="my-1.5 flex justify-center">
                 {getWeatherIcon(day.condition, 32)}
               </div>
 
@@ -111,7 +111,7 @@ export function ForecastDrawer({ forecast, loading = false, error = null, onRetr
                 <span>{Math.round(day.low)}{tempUnit}</span>
               </div>
 
-              <div className="mt-2 border-t pt-2 text-[10px]">
+              <div className="mt-1.5 border-t pt-1.5 text-[10px]">
                 <p className="font-semibold text-secondary">
                   {Math.round(day.windSpeed)} {windUnit}
                 </p>

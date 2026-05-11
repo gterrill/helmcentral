@@ -110,7 +110,7 @@ export function App() {
   const acLoadsLabel = acLoadsW !== null ? `${Math.round(acLoadsW)}W` : '—'
 
   return (
-    <div className="min-h-screen p-4 md:p-6">
+    <div className="min-h-screen p-4 pb-20 md:p-6 md:pb-24">
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
         <MarineHeader />
 
@@ -441,6 +441,7 @@ export function App() {
         {/* Bottom Drawers */}
         <BottomDrawer
           isOpen={isDrawerOpen}
+          onOpen={() => setIsDrawerOpen(true)}
           onClose={() => setIsDrawerOpen(false)}
           title="Forecast"
           tabs={[

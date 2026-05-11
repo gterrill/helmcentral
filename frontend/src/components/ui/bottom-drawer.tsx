@@ -3,6 +3,7 @@ import React from 'react'
 
 interface BottomDrawerProps {
   isOpen: boolean
+  onOpen?: () => void
   onClose: () => void
   title: string
   tabs?: Array<{
@@ -17,6 +18,7 @@ interface BottomDrawerProps {
 
 export function BottomDrawer({
   isOpen,
+  onOpen,
   onClose,
   title,
   tabs,
@@ -24,7 +26,39 @@ export function BottomDrawer({
   onTabChange,
   children,
 }: BottomDrawerProps) {
-  if (!isOpen) return null
+  const hasTabs = Boolean(tabs && tabs.length > 0)
+
+  const handleTabSelect = (tabId: string) => {
+    onTabChange?.(tabId)
+    onOpen?.()
+  }
+
+  if (!isOpen) {
+    if (!hasTabs) return null
+
+    return (
+      <div className="fixed bottom-0 left-0 right-0 z-30 border-t bg-card/95 shadow-[0_-6px_20px_rgba(0,0,0,0.08)] backdrop-blur-sm">
+        <div className="mx-auto flex w-full max-w-[1800px] items-center gap-1 px-3 py-2 md:px-5">
+          {tabs!.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => handleTabSelect(tab.id)}
+              className={`min-h-10 min-w-10 flex-1 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-background text-primary'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2">
+                {tab.icon}
+                {tab.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <>
@@ -50,9 +84,9 @@ export function BottomDrawer({
         </div>
 
         {/* Tabs */}
-        {tabs && tabs.length > 0 && (
+        {hasTabs && (
           <div className="flex gap-1 border-b px-4 py-2">
-            {tabs.map((tab) => (
+            {tabs!.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => onTabChange?.(tab.id)}
