@@ -352,17 +352,28 @@ func weatherToday(c echo.Context) error {
 			} else {
 				log.Printf("WeatherKit API error: %v", weatherErr)
 			}
+
+			// Fetch tide data from Storm Glass
+			currentTide, tideDir, highTideTime, highTideHeight, lowTideTime, lowTideHeight, tideErr := fetchStormGlassTideData(vesselState.Latitude, vesselState.Longitude)
+			if tideErr == nil {
+				state.CurrentTideHeightFt = currentTide
+				state.TideDirection = tideDir
+				state.HighTideTime = highTideTime
+				state.HighTideHeightFt = highTideHeight
+				state.LowTideTime = lowTideTime
+				state.LowTideHeightFt = lowTideHeight
+			} else {
+				log.Printf("Storm Glass API error: %v", tideErr)
+				// Fall back to mock data
+				state.CurrentTideHeightFt = 1.5
+				state.TideDirection = "Rising"
+				state.HighTideTime = time.Now().AddDate(0, 0, 0).Add(12*time.Hour + 57*time.Minute)
+				state.HighTideHeightFt = 1.9
+				state.LowTideTime = time.Now().AddDate(0, 0, 0).Add(19*time.Hour + 11*time.Minute)
+				state.LowTideHeightFt = -0.1
+			}
 		}
 	}
-
-	// Parse tide data (placeholder for now - would come from a tide service)
-	// For now using mock data that matches the UI
-	state.CurrentTideHeightFt = 1.5
-	state.TideDirection = "Rising"
-	state.HighTideTime = time.Now().AddDate(0, 0, 0).Add(12*time.Hour + 57*time.Minute)
-	state.HighTideHeightFt = 1.9
-	state.LowTideTime = time.Now().AddDate(0, 0, 0).Add(19*time.Hour + 11*time.Minute)
-	state.LowTideHeightFt = -0.1
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"datetime":               state.Datetime.Format(time.RFC3339),
@@ -407,12 +418,12 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 		return data, fmt.Errorf("failed to generate JWT: %v", err)
 	}
 
-	url := fmt.Sprintf(
-		"https://weatherkit.apple.com/api/v1/weather?latitude=%.4f&longitude=%.4f&dataSets=currentWeather,forecastDaily&timezone=America/Los_Angeles",
+	requestURL := fmt.Sprintf(
+		"https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=currentWeather,forecastDaily&timezone=America/Los_Angeles",
 		latitude, longitude,
 	)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", requestURL, nil)
 	if err != nil {
 		return data, fmt.Errorf("failed to create request: %v", err)
 	}
@@ -434,21 +445,18 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 	// Log the response status and content type for debugging
 	log.Printf("WeatherKit API status: %d, content-type: %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return data, fmt.Errorf("failed to parse response: %v", err)
-		// Read response body for logging
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		if len(bodyBytes) > 500 {
-			log.Printf("WeatherKit API response (first 500 chars): %s", string(bodyBytes[:500]))
-		} else {
-			log.Printf("WeatherKit API response: %s", string(bodyBytes))
-		}
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return data, fmt.Errorf("failed to read response body: %v", err)
+	}
 
-		var result map[string]any
-		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return data, fmt.Errorf("failed to parse response: %v", err)
+	var result map[string]any
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		snippet := string(bodyBytes)
+		if len(snippet) > 500 {
+			snippet = snippet[:500]
 		}
+		return data, fmt.Errorf("failed to parse response: %v; body: %s", err, snippet)
 	}
 
 	// Parse current weather
@@ -457,6 +465,8 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 			data.TemperatureF = (temp * 9 / 5) + 32 // Convert Celsius to Fahrenheit
 		}
 		if condition, ok := current["conditionCode"].(string); ok {
+			data.Condition = formatWeatherCondition(condition)
+		} else if condition, ok := current["condition"].(string); ok {
 			data.Condition = formatWeatherCondition(condition)
 		}
 		if windSpeed, ok := current["windSpeed"].(float64); ok {
@@ -467,6 +477,9 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 		}
 		if precip, ok := current["precipitationChance"].(float64); ok {
 			data.PrecipitationPct = precip * 100
+		} else if precip, ok := current["precipitationIntensity"].(float64); ok {
+			// Intensity is not a percentage; still surface a non-negative value when available.
+			data.PrecipitationPct = math.Max(0, precip)
 		}
 	}
 
@@ -479,6 +492,24 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 				}
 				if low, ok := day["temperatureMin"].(float64); ok {
 					data.LowTempF = (low * 9 / 5) + 32
+				}
+				if data.PrecipitationPct < 0 {
+					if precip, ok := day["precipitationChance"].(float64); ok {
+						data.PrecipitationPct = precip * 100
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to hourly precipitation chance when current/daily values are absent.
+	if data.PrecipitationPct < 0 {
+		if hourly, ok := result["forecastHourly"].(map[string]any); ok {
+			if hours, ok := hourly["hours"].([]any); ok && len(hours) > 0 {
+				if hour0, ok := hours[0].(map[string]any); ok {
+					if precip, ok := hour0["precipitationChance"].(float64); ok {
+						data.PrecipitationPct = precip * 100
+					}
 				}
 			}
 		}
@@ -529,39 +560,164 @@ func generateWeatherKitJWT(keyID, teamID, serviceID, privateKeyPEM string) (stri
 	return tokenString, nil
 }
 
+func fetchStormGlassTideData(latitude, longitude float64) (currentHeight float64, direction string, highTime time.Time, highHeight float64, lowTime time.Time, lowHeight float64, err error) {
+	// Initialize defaults
+	currentHeight = 0
+	direction = "—"
+	highTime = time.Now()
+	highHeight = 0
+	lowTime = time.Now().Add(24 * time.Hour)
+	lowHeight = 0
+
+	apiKey := getEnv("STORMGLASS_API_KEY", "")
+	if apiKey == "" {
+		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("Storm Glass API key not configured")
+	}
+
+	now := time.Now().UTC()
+	startTime := now.Truncate(24 * time.Hour)
+
+	// Fetch tide extremes (high and low tides)
+	extremesURL := fmt.Sprintf(
+		"https://api.stormglass.io/v2/tide/extremes/point?lat=%.4f&lng=%.4f&start=%d&end=%d",
+		latitude, longitude, startTime.Unix(), startTime.Add(48*time.Hour).Unix(),
+	)
+
+	req, err := http.NewRequest("GET", extremesURL, nil)
+	if err != nil {
+		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to fetch tide data: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("Storm Glass API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	// Parse tide extremes data
+	if data, ok := result["data"].([]any); ok {
+		for _, item := range data {
+			if extreme, ok := item.(map[string]any); ok {
+				typeVal, _ := extreme["type"].(string)
+				timeStr, _ := extreme["time"].(string)
+				height, _ := extreme["height"].(float64)
+
+				if t, parseErr := time.Parse(time.RFC3339, timeStr); parseErr == nil {
+					heightFt := height * 3.28084 // Convert meters to feet
+
+					// Track the first high and low tide times after now
+					if typeVal == "high" && t.After(now) && highHeight == 0 {
+						highTime = t
+						highHeight = heightFt
+					} else if typeVal == "low" && t.After(now) && lowHeight == 0 {
+						lowTime = t
+						lowHeight = heightFt
+					}
+
+					// Get current height if this is close to now
+					if t.Sub(now).Abs() < time.Minute && currentHeight == 0 {
+						currentHeight = heightFt
+					}
+				}
+			}
+		}
+	}
+
+	// Fetch current sea level to get more accurate current height
+	seaLevelURL := fmt.Sprintf(
+		"https://api.stormglass.io/v2/tide/sea-level/point?lat=%.4f&lng=%.4f&start=%d",
+		latitude, longitude, now.Unix(),
+	)
+
+	req2, err := http.NewRequest("GET", seaLevelURL, nil)
+	if err == nil {
+		req2.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+		resp2, err := client.Do(req2)
+		if err == nil && resp2.StatusCode == http.StatusOK {
+			defer resp2.Body.Close()
+			bodyBytes2, _ := io.ReadAll(resp2.Body)
+			var seaResult map[string]any
+			if json.Unmarshal(bodyBytes2, &seaResult) == nil {
+				if data, ok := seaResult["data"].([]any); ok && len(data) > 0 {
+					if current, ok := data[0].(map[string]any); ok {
+						if height, ok := current["height"].(float64); ok {
+							currentHeight = height * 3.28084 // Convert meters to feet
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Determine tide direction based on comparison with previous reading
+	// Simplified: use "Rising" if height is positive (above datum), "Falling" otherwise
+	if currentHeight > 0 {
+		direction = "Rising"
+	} else {
+		direction = "Falling"
+	}
+
+	return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, nil
+}
+
 func formatWeatherCondition(code string) string {
+	normalized := strings.ToLower(strings.TrimSpace(code))
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	normalized = strings.ReplaceAll(normalized, "-", "")
+
 	conditions := map[string]string{
 		"clear":             "Clear",
 		"cloudy":            "Cloudy",
 		"dusty":             "Dusty",
 		"foggy":             "Foggy",
 		"haze":              "Hazy",
-		"mostlyClear":       "Mostly Clear",
-		"mostlyCloudy":      "Mostly Cloudy",
-		"partlyCloudy":      "Partly Cloudy",
+		"mostlyclear":       "Mostly Clear",
+		"mostlycloudy":      "Mostly Cloudy",
+		"partlycloudy":      "Partly Cloudy",
 		"smoky":             "Smoky",
 		"breezy":            "Breezy",
 		"windy":             "Windy",
 		"drizzle":           "Drizzle",
-		"heavyRain":         "Heavy Rain",
+		"heavyrain":         "Heavy Rain",
 		"rain":              "Rain",
 		"snow":              "Snow",
 		"sleet":             "Sleet",
-		"freezingDrizzle":   "Freezing Drizzle",
-		"freezingRain":      "Freezing Rain",
+		"freezingdrizzle":   "Freezing Drizzle",
+		"freezingrain":      "Freezing Rain",
 		"hail":              "Hail",
-		"mixedRainAndSnow":  "Mixed Rain & Snow",
-		"mixedRainAndSleet": "Mixed Rain & Sleet",
-		"mixedSnowAndSleet": "Mixed Snow & Sleet",
+		"mixedrainandsnow":  "Mixed Rain & Snow",
+		"mixedrainandsleet": "Mixed Rain & Sleet",
+		"mixedsnowandsleet": "Mixed Snow & Sleet",
 		"thunderstorms":     "Thunderstorms",
-		"heavySnow":         "Heavy Snow",
+		"heavysnow":         "Heavy Snow",
 		"blizzard":          "Blizzard",
 	}
 
-	if condition, ok := conditions[code]; ok {
+	if condition, ok := conditions[normalized]; ok {
 		return condition
 	}
-	return "Unknown"
+	if code == "" {
+		return "Unknown"
+	}
+	return code
 }
 
 func degreesToDirection(degrees float64) string {
