@@ -4,6 +4,7 @@ import { MarineHeader } from '@/components/marine-header'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
+import { Tile } from '@/components/ui/tile'
 
 function formatCoordinate(value: number | null, latitude: boolean) {
   if (value === null) {
@@ -42,17 +43,15 @@ export function App() {
 
         <div className="grid gap-4 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur-sm md:grid-cols-[260px_1fr_360px]">
         <aside className="space-y-4">
-          <section className="rounded-lg border bg-card p-4">
-            <h2 className="font-display text-xs tracking-[0.22em] text-muted-foreground">Depth</h2>
+          <Tile title="Depth">
             <p className="mt-2 font-display text-6xl text-secondary">{depth !== null ? depth.toFixed(1) : '—'}</p>
             <p className="text-sm text-muted-foreground">{depth !== null ? 'metres' : 'unavailable'}</p>
-          </section>
-          <section className="rounded-lg border bg-card p-4">
-            <h2 className="font-display text-xs tracking-[0.22em] text-muted-foreground">Position</h2>
+          </Tile>
+          <Tile title="Position">
             <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
             <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
             <div className="mt-3 rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">{formatHeading(headingTrue)}</div>
-          </section>
+          </Tile>
         </aside>
 
         <main className="rounded-lg border bg-card p-4">
@@ -78,8 +77,7 @@ export function App() {
         </main>
 
         <aside className="space-y-4">
-          <section className="rounded-lg border bg-card p-4">
-            <h2 className="font-display text-xs tracking-[0.22em] text-muted-foreground">Battery & Power</h2>
+          <Tile title="Battery & Power">
             <div className="mt-2 flex items-end gap-2">
               <span className="font-display text-7xl text-primary">68</span>
               <span className="pb-2 text-3xl">%</span>
@@ -95,9 +93,8 @@ export function App() {
                 <span className="font-semibold">1017W</span>
               </div>
             </div>
-          </section>
-          <section className="rounded-lg border bg-card p-4">
-            <h2 className="font-display text-xs tracking-[0.22em] text-muted-foreground">Actions</h2>
+          </Tile>
+          <Tile title="Actions">
             <div className="mt-3 grid gap-2">
               <Button>
                 <Sailboat className="h-4 w-4" />
@@ -108,7 +105,7 @@ export function App() {
                 Drop Here
               </Button>
             </div>
-          </section>
+          </Tile>
         </aside>
         </div>
       </div>
