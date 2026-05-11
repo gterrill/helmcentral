@@ -133,8 +133,10 @@ export function App() {
                         <p className="font-display text-xl text-primary lg:text-2xl">
                           {windSideLabel} {relativeAngleLabel}
                         </p>
-                        <p className="font-display text-6xl leading-none text-primary lg:text-7xl">{apparentWindSpeedLabel}</p>
-                        <p className="font-display text-2xl text-muted-foreground">kts</p>
+                        <p className="font-display text-6xl leading-none text-primary lg:text-7xl">
+                          {apparentWindSpeedLabel}
+                          <span className="ml-1 align-baseline text-2xl text-muted-foreground lg:text-3xl">kts</span>
+                        </p>
                       </div>
                     </div>
                     <div className="absolute left-1/2 top-6 h-[96px] w-[2px] -translate-x-1/2 bg-secondary lg:h-[112px]" />
@@ -154,8 +156,10 @@ export function App() {
             </section>
 
             <Tile title="Depth">
-              <p className="mt-2 font-display text-6xl text-secondary">{depthValue}</p>
-              <p className="text-sm text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</p>
+              <p className="mt-2 font-display text-6xl text-secondary">
+                {depthValue}
+                <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
+              </p>
             </Tile>
             <Tile title="Position">
               <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
@@ -202,8 +206,8 @@ export function App() {
                     <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Tide Now</p>
                     <p className="mt-1 font-display text-5xl leading-none text-secondary">
                       {tide.current_tide_height_ft >= 0 ? tide.current_tide_height_ft.toFixed(1) : '—'}
+                      <span className="ml-1 align-baseline text-lg text-muted-foreground">ft</span>
                     </p>
-                    <p className="-mt-1 text-lg font-semibold text-secondary">ft</p>
                     <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-secondary">
                       <ArrowUp className="h-3.5 w-3.5" />
                       {tide.tide_direction}
@@ -231,18 +235,24 @@ export function App() {
               <div className="mt-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-md bg-muted/50 px-2 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Distance</p>
-                  <p className="font-display text-2xl text-primary">121</p>
-                  <p className="text-[11px] text-muted-foreground">ft</p>
+                  <p className="font-display text-2xl text-primary">
+                    121
+                    <span className="ml-1 text-base text-muted-foreground">ft</span>
+                  </p>
                 </div>
                 <div className="rounded-md bg-muted/50 px-2 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Bearing</p>
-                  <p className="font-display text-2xl text-secondary">72</p>
-                  <p className="text-[11px] text-muted-foreground">deg</p>
+                  <p className="font-display text-2xl text-secondary">
+                    72
+                    <span className="ml-1 text-base text-muted-foreground">deg</span>
+                  </p>
                 </div>
                 <div className="rounded-md bg-muted/50 px-2 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Radius</p>
-                  <p className="font-display text-2xl text-secondary">160</p>
-                  <p className="text-[11px] text-muted-foreground">ft</p>
+                  <p className="font-display text-2xl text-secondary">
+                    160
+                    <span className="ml-1 text-base text-muted-foreground">ft</span>
+                  </p>
                 </div>
               </div>
               <div className="mt-3 rounded-md border bg-background/60 px-3 py-2 text-sm">
@@ -269,30 +279,40 @@ export function App() {
               <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md bg-muted/50 px-3 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Chain Counter</p>
-                  <p className="font-display text-2xl text-primary">122</p>
-                  <p className="text-[11px] text-muted-foreground">ft</p>
+                  <p className="font-display text-2xl text-primary">
+                    122
+                    <span className="ml-1 text-base text-muted-foreground">ft</span>
+                  </p>
                 </div>
                 <div className="rounded-md bg-muted/50 px-3 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Drop Deduct</p>
-                  <p className="font-display text-2xl text-primary">5</p>
-                  <p className="text-[11px] text-muted-foreground">ft</p>
+                  <p className="font-display text-2xl text-primary">
+                    5
+                    <span className="ml-1 text-base text-muted-foreground">ft</span>
+                  </p>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-md border bg-background/60 px-2 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Rode</p>
-                  <p className="font-display text-2xl text-secondary">117</p>
-                  <p className="text-[11px] text-muted-foreground">ft</p>
+                  <p className="font-display text-2xl text-secondary">
+                    117
+                    <span className="ml-1 text-base text-muted-foreground">ft</span>
+                  </p>
                 </div>
                 <div className="rounded-md border bg-background/60 px-2 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Total+BOW</p>
-                  <p className="font-display text-2xl text-secondary">17.5</p>
-                  <p className="text-[11px] text-muted-foreground">ft</p>
+                  <p className="font-display text-2xl text-secondary">
+                    17.5
+                    <span className="ml-1 text-base text-muted-foreground">ft</span>
+                  </p>
                 </div>
                 <div className="rounded-md border bg-background/60 px-2 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Scope</p>
-                  <p className="font-display text-2xl text-secondary">6.7</p>
-                  <p className="text-[11px] text-muted-foreground">:1</p>
+                  <p className="font-display text-2xl text-secondary">
+                    6.7
+                    <span className="ml-1 text-base text-muted-foreground">:1</span>
+                  </p>
                 </div>
               </div>
             </Tile>
@@ -321,26 +341,35 @@ export function App() {
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar Output</p>
-                  <p className="font-display text-4xl leading-none text-primary">{solarOutputLabel}</p>
-                  <p className="text-sm text-muted-foreground">W</p>
+                  <p className="font-display text-4xl leading-none text-primary">
+                    {solarOutputLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">W</span>
+                  </p>
                 </div>
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Output</p>
-                  <p className="font-display text-4xl leading-none text-primary">{acOutputLabel}</p>
-                  <p className="text-sm text-muted-foreground">W</p>
+                  <p className="font-display text-4xl leading-none text-primary">
+                    {acOutputLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">W</span>
+                  </p>
                 </div>
               </div>
 
               <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">24V DC Power</p>
-                  <p className="font-display text-4xl leading-none text-foreground">{dc12vPowerLabel}</p>
-                  <p className="text-sm text-muted-foreground">W {dc12vCurrentLabel}A</p>
+                  <p className="font-display text-4xl leading-none text-foreground">
+                    {dc12vPowerLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">W</span>
+                    <span className="ml-3 text-2xl text-muted-foreground">{dc12vCurrentLabel}A</span>
+                  </p>
                 </div>
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">24V Voltage</p>
-                  <p className="font-display text-4xl leading-none text-secondary">{dc24vVoltageLabel}</p>
-                  <p className="text-sm text-muted-foreground">V</p>
+                  <p className="font-display text-4xl leading-none text-secondary">
+                    {dc24vVoltageLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">V</span>
+                  </p>
                 </div>
               </div>
 
