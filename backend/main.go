@@ -53,6 +53,14 @@ type electricalStateData struct {
 	ACLoadsW          float64
 }
 
+type tankLevelData struct {
+	ID           string  `json:"id"`
+	Label        string  `json:"label"`
+	Category     string  `json:"category"`
+	Kind         string  `json:"kind"`
+	LevelPercent float64 `json:"level_percent"`
+}
+
 func main() {
 	e := echo.New()
 	port := getEnv("PORT", "8080")
@@ -69,6 +77,7 @@ func main() {
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
 	e.GET("/api/electrical-state", electricalState)
+	e.GET("/api/tanks-state", tanksState)
 	e.GET("/api/nearby-vessels", nearbyVessels)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
 	e.POST("/api/settings/signalk", updateSignalKSettingsHandler)
@@ -203,6 +212,38 @@ func electricalState(c echo.Context) error {
 		"dc_24v_voltage_v":    state.DC24VVoltageV,
 		"ac_loads_w":          state.ACLoadsW,
 		"source":              source,
+	})
+}
+
+func tanksState(c echo.Context) error {
+	now := time.Now().UTC()
+	tanks := []tankLevelData{}
+	source := "backend-fallback"
+
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	address, port, err := loadSignalKSettings(settingsPath)
+	if err != nil {
+		address = defaultSignalKAddress
+		port = defaultSignalKPort
+	}
+
+	signalkURL := buildSignalKURL(address, port)
+	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
+	labelOverrides := loadTankLabelOverrides(settingsPath)
+
+	if signalkURL != "" {
+		stateTanks, datetime, fetchErr := fetchSignalKTanksState(signalkURL, vesselPath, labelOverrides)
+		if fetchErr == nil {
+			tanks = stateTanks
+			now = datetime
+			source = "signalk"
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"datetime": now.Format(time.RFC3339),
+		"source":   source,
+		"tanks":    tanks,
 	})
 }
 
@@ -771,6 +812,190 @@ func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitu
 	return vessels, nil
 }
 
+func fetchSignalKTanksState(signalkURL string, vesselPath string, labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
+	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(url)
+	if err != nil {
+		return nil, time.Now().UTC(), err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, time.Now().UTC(), fmt.Errorf("signalk returned status %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, time.Now().UTC(), err
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, time.Now().UTC(), err
+	}
+
+	datetime := time.Now().UTC()
+	datetimeString := firstNonEmptyString(
+		lookupString(payload, "navigation", "datetime", "value"),
+		lookupString(payload, "navigation", "datetime"),
+		lookupString(payload, "timestamp"),
+	)
+	if datetimeString != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
+		if parseErr == nil {
+			datetime = parsed.UTC()
+		}
+	}
+
+	tanksMap := lookupAnyMap(payload, "tanks")
+	if tanksMap == nil {
+		return []tankLevelData{}, datetime, nil
+	}
+
+	categoryOrder := []string{"freshWater", "fuel", "blackWater", "greyWater", "liveWell", "lubrication", "water", "wasteWater"}
+	knownCategory := map[string]struct{}{}
+	for _, category := range categoryOrder {
+		knownCategory[category] = struct{}{}
+	}
+
+	orderedCategories := make([]string, 0, len(tanksMap))
+	for _, category := range categoryOrder {
+		if _, ok := tanksMap[category]; ok {
+			orderedCategories = append(orderedCategories, category)
+		}
+	}
+	for category := range tanksMap {
+		if _, ok := knownCategory[category]; ok {
+			continue
+		}
+		orderedCategories = append(orderedCategories, category)
+	}
+
+	tanks := make([]tankLevelData, 0)
+	for _, category := range orderedCategories {
+		categoryRaw, ok := tanksMap[category]
+		if !ok {
+			continue
+		}
+
+		categoryEntries, ok := categoryRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		entryIDs := make([]string, 0, len(categoryEntries))
+		for entryID := range categoryEntries {
+			entryIDs = append(entryIDs, entryID)
+		}
+		sort.Strings(entryIDs)
+
+		for _, entryID := range entryIDs {
+			rawEntry := categoryEntries[entryID]
+			entry, ok := rawEntry.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			level := lookupFirstNumber(entry,
+				[]string{"currentLevel", "value"},
+				[]string{"currentLevel"},
+			)
+			if level < 0 {
+				continue
+			}
+
+			if level <= 1 {
+				level *= 100
+			}
+			level = math.Max(0, math.Min(100, roundTo1(level)))
+
+			label := firstNonEmptyString(
+				lookupString(entry, "name", "value"),
+				lookupString(entry, "name"),
+				lookupString(entry, "displayName", "value"),
+				lookupString(entry, "displayName"),
+			)
+			override := tankLabelOverride(labelOverrides, category, entryID)
+			if override != "" {
+				label = override
+			}
+			if label == "" {
+				label = buildTankLabel(category, entryID)
+			}
+
+			tanks = append(tanks, tankLevelData{
+				ID:           category + "." + entryID,
+				Label:        strings.TrimSpace(label),
+				Category:     category,
+				Kind:         tankKindFromCategory(category),
+				LevelPercent: level,
+			})
+		}
+	}
+
+	return tanks, datetime, nil
+}
+
+func loadTankLabelOverrides(settingsPath string) map[string]string {
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return map[string]string{}
+	}
+
+	uiMap, ok := settings["ui"].(map[string]any)
+	if !ok {
+		return map[string]string{}
+	}
+
+	rawLabels, ok := uiMap["tank_labels"].(map[string]any)
+	if !ok {
+		return map[string]string{}
+	}
+
+	labels := map[string]string{}
+	for key, value := range rawLabels {
+		label, ok := value.(string)
+		if !ok {
+			continue
+		}
+
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		normalizedLabel := strings.TrimSpace(label)
+		if normalizedKey == "" || normalizedLabel == "" {
+			continue
+		}
+
+		labels[normalizedKey] = normalizedLabel
+	}
+
+	return labels
+}
+
+func tankLabelOverride(overrides map[string]string, category string, entryID string) string {
+	if len(overrides) == 0 {
+		return ""
+	}
+
+	category = strings.ToLower(strings.TrimSpace(category))
+	entryID = strings.TrimSpace(entryID)
+
+	keys := []string{
+		category + "." + strings.ToLower(entryID),
+		category + "/" + strings.ToLower(entryID),
+		strings.ToLower(entryID),
+	}
+
+	for _, key := range keys {
+		if value, ok := overrides[key]; ok {
+			return value
+		}
+	}
+
+	return ""
+}
+
 func lookupString(payload map[string]any, keys ...string) string {
 	var current any = payload
 	for _, key := range keys {
@@ -1195,6 +1420,57 @@ func parseFloat(value string) (float64, error) {
 	}
 
 	return parsed, nil
+}
+
+func buildTankLabel(category string, entryID string) string {
+	base := humanizeCategory(category)
+	if strings.TrimSpace(entryID) == "" {
+		return base
+	}
+
+	return fmt.Sprintf("%s %s", base, strings.ToUpper(strings.TrimSpace(entryID)))
+}
+
+func tankKindFromCategory(category string) string {
+	normalized := strings.ToLower(strings.TrimSpace(category))
+	if strings.Contains(normalized, "fuel") {
+		return "fuel"
+	}
+
+	if strings.Contains(normalized, "black") || strings.Contains(normalized, "grey") || strings.Contains(normalized, "waste") || strings.Contains(normalized, "sewage") || strings.Contains(normalized, "holding") {
+		return "waste"
+	}
+
+	return "water"
+}
+
+func humanizeCategory(category string) string {
+	if strings.TrimSpace(category) == "" {
+		return "Tank"
+	}
+
+	r := strings.NewReplacer(
+		"freshWater", "Fresh Water",
+		"blackWater", "Black Water",
+		"greyWater", "Grey Water",
+		"wasteWater", "Waste Water",
+		"liveWell", "Live Well",
+	)
+	converted := r.Replace(category)
+
+	if strings.EqualFold(converted, category) {
+		converted = strings.ReplaceAll(converted, "_", " ")
+	}
+
+	parts := strings.Fields(converted)
+	for i, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+	}
+
+	return strings.Join(parts, " ")
 }
 
 func isRecentTimestamp(value string, maxAge time.Duration) bool {

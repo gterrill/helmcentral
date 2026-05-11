@@ -2,8 +2,10 @@ import { Anchor, Compass, Sailboat, Waves } from 'lucide-react'
 
 import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
+import { TanksTile } from '@/components/tanks-tile'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
+import { useTanksState } from '@/hooks/use-tanks-state'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
@@ -50,6 +52,7 @@ export function App() {
     maxGust1hKts,
   } = useVesselState(uiConfig.vesselStateRefreshSeconds)
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
+  const { tanks, loading: tanksLoading } = useTanksState(uiConfig.vesselStateRefreshSeconds)
   const {
     batterySocPercent,
     chargingCurrentA,
@@ -200,6 +203,8 @@ export function App() {
                 </div>
               </div>
             </Tile>
+
+            <TanksTile tanks={tanks} loading={tanksLoading} />
           </aside>
 
           <aside className="space-y-4">

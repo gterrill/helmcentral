@@ -6,4 +6,13 @@ signalk:
     port: 3000
 ui:
     distance_units: metric
+    tank_labels:
+        blackWater.1: PORT
+        blackWater.6: STBD
+        freshWater.0: PORT
+        freshWater.3: STBD
+        fuel.2: PORT FWD
+        fuel.4: PORT AFT
+        fuel.5: STBD FWD
+        fuel.7: STBD AFT
     vessel_state_refresh_seconds: 10
