@@ -40,6 +40,19 @@ type vesselStateData struct {
 	WindAngleRelativeDeg float64
 }
 
+type electricalStateData struct {
+	Datetime          time.Time
+	BatterySocPercent float64
+	ChargingCurrentA  float64
+	ChargingPowerW    float64
+	SolarOutputW      float64
+	ACOutputW         float64
+	DC12VPowerW       float64
+	DC12VCurrentA     float64
+	DC24VVoltageV     float64
+	ACLoadsW          float64
+}
+
 func main() {
 	e := echo.New()
 	port := getEnv("PORT", "8080")
@@ -55,6 +68,7 @@ func main() {
 	// Routes
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
+	e.GET("/api/electrical-state", electricalState)
 	e.GET("/api/nearby-vessels", nearbyVessels)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
 	e.POST("/api/settings/signalk", updateSignalKSettingsHandler)
@@ -139,6 +153,56 @@ func vesselState(c echo.Context) error {
 		"max_gust_10m_kts":        maxGust10mKts,
 		"max_gust_1h_kts":         maxGust1hKts,
 		"source":                  source,
+	})
+}
+
+func electricalState(c echo.Context) error {
+	state := electricalStateData{
+		Datetime:          time.Now().UTC(),
+		BatterySocPercent: -1,
+		ChargingCurrentA:  -1,
+		ChargingPowerW:    -1,
+		SolarOutputW:      -1,
+		ACOutputW:         -1,
+		DC12VPowerW:       -1,
+		DC12VCurrentA:     -1,
+		DC24VVoltageV:     -1,
+		ACLoadsW:          -1,
+	}
+	source := "backend-fallback"
+
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	address, port, err := loadSignalKSettings(settingsPath)
+	if err != nil {
+		address = defaultSignalKAddress
+		port = defaultSignalKPort
+	}
+
+	signalkURL := buildSignalKURL(address, port)
+	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
+
+	if signalkURL != "" {
+		electrical, fetchErr := fetchSignalKElectricalState(signalkURL, vesselPath)
+		if fetchErr == nil {
+			state = electrical
+			source = "signalk"
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"datetime":            state.Datetime.Format(time.RFC3339),
+		"battery_soc_percent": state.BatterySocPercent,
+		"charging_current_a":  state.ChargingCurrentA,
+		"charging_power_w":    state.ChargingPowerW,
+		"solar_output_w":      state.SolarOutputW,
+		"ac_output_w":         state.ACOutputW,
+		"dc_power_w":          state.DC12VPowerW,
+		"dc_current_a":        state.DC12VCurrentA,
+		"dc_12v_power_w":      state.DC12VPowerW,
+		"dc_12v_current_a":    state.DC12VCurrentA,
+		"dc_24v_voltage_v":    state.DC24VVoltageV,
+		"ac_loads_w":          state.ACLoadsW,
+		"source":              source,
 	})
 }
 
@@ -379,6 +443,227 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 	return state, nil
 }
 
+func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electricalStateData, error) {
+	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
+
+	state := electricalStateData{
+		Datetime:          time.Now().UTC(),
+		BatterySocPercent: -1,
+		ChargingCurrentA:  -1,
+		ChargingPowerW:    -1,
+		SolarOutputW:      -1,
+		ACOutputW:         -1,
+		DC12VPowerW:       -1,
+		DC12VCurrentA:     -1,
+		DC24VVoltageV:     -1,
+		ACLoadsW:          -1,
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(url)
+	if err != nil {
+		return state, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return state, fmt.Errorf("signalk returned status %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return state, err
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return state, err
+	}
+
+	datetimeString := firstNonEmptyString(
+		lookupString(payload, "timestamp"),
+		lookupString(payload, "navigation", "datetime", "value"),
+		lookupString(payload, "navigation", "datetime"),
+	)
+	if datetimeString != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
+		if parseErr == nil {
+			state.Datetime = parsed.UTC()
+		}
+	}
+
+	soc := lookupFirstNumber(payload,
+		[]string{"electrical", "batteries", "house", "capacity", "stateOfCharge", "value"},
+		[]string{"electrical", "batteries", "house", "capacity", "stateOfCharge"},
+		[]string{"electrical", "batteries", "service", "capacity", "stateOfCharge", "value"},
+		[]string{"electrical", "batteries", "service", "capacity", "stateOfCharge"},
+	)
+	if soc == -1 {
+		soc = lookupNumberFromAnyChild(payload,
+			[]string{"electrical", "batteries"},
+			[]string{"capacity", "stateOfCharge", "value"},
+		)
+	}
+	if soc >= 0 {
+		if soc <= 1 {
+			soc *= 100
+		}
+		state.BatterySocPercent = math.Max(0, math.Min(100, roundTo1(soc)))
+	}
+
+	batteryVoltage := lookupFirstNumber(payload,
+		[]string{"electrical", "venus", "batteryVoltage", "value"},
+		[]string{"electrical", "venus", "batteryVoltage"},
+		[]string{"electrical", "batteries", "house", "voltage", "value"},
+		[]string{"electrical", "batteries", "house", "voltage"},
+		[]string{"electrical", "batteries", "service", "voltage", "value"},
+		[]string{"electrical", "batteries", "service", "voltage"},
+	)
+	if batteryVoltage == -1 {
+		batteryVoltage = lookupNumberFromAnyChild(payload,
+			[]string{"electrical", "batteries"},
+			[]string{"voltage", "value"},
+		)
+	}
+
+	current := lookupFirstNumber(payload,
+		[]string{"electrical", "batteries", "house", "current", "value"},
+		[]string{"electrical", "batteries", "house", "current"},
+		[]string{"electrical", "batteries", "service", "current", "value"},
+		[]string{"electrical", "batteries", "service", "current"},
+	)
+	if current == -1 {
+		current = lookupNumberFromAnyChild(payload,
+			[]string{"electrical", "batteries"},
+			[]string{"current", "value"},
+		)
+	}
+	if current == -1 {
+		state.ChargingCurrentA = -1
+	} else if current >= 0 {
+		state.ChargingCurrentA = roundTo1(current)
+	} else {
+		state.ChargingCurrentA = 0
+	}
+
+	power := lookupFirstNumber(payload,
+		[]string{"electrical", "batteries", "house", "power", "value"},
+		[]string{"electrical", "batteries", "house", "power"},
+		[]string{"electrical", "batteries", "service", "power", "value"},
+		[]string{"electrical", "batteries", "service", "power"},
+	)
+	if power == -1 {
+		power = lookupNumberFromAnyChild(payload,
+			[]string{"electrical", "batteries"},
+			[]string{"power", "value"},
+		)
+	}
+	if power == -1 {
+		state.ChargingPowerW = -1
+	} else if power >= 0 {
+		state.ChargingPowerW = roundTo1(power)
+	} else {
+		state.ChargingPowerW = 0
+	}
+
+	if state.ChargingPowerW == -1 && state.ChargingCurrentA >= 0 && batteryVoltage > 0 {
+		state.ChargingPowerW = roundTo1(state.ChargingCurrentA * batteryVoltage)
+	}
+	if state.ChargingCurrentA == -1 && state.ChargingPowerW >= 0 && batteryVoltage > 0 {
+		state.ChargingCurrentA = roundTo1(state.ChargingPowerW / batteryVoltage)
+	}
+
+	solar := lookupFirstNumber(payload,
+		[]string{"electrical", "solar", "0", "panelPower", "value"},
+		[]string{"electrical", "solar", "0", "panelPower"},
+		[]string{"electrical", "solar", "0", "power", "value"},
+		[]string{"electrical", "solar", "0", "power"},
+		[]string{"electrical", "solar", "panelPower", "value"},
+		[]string{"electrical", "solar", "panelPower"},
+	)
+	if solar == -1 {
+		solar = lookupNumberFromAnyChild(payload,
+			[]string{"electrical", "solar"},
+			[]string{"panelPower", "value"},
+		)
+	}
+	if solar >= 0 {
+		state.SolarOutputW = roundTo1(solar)
+	}
+
+	acOutput := lookupFirstNumber(payload,
+		[]string{"electrical", "inverters", "0", "ac", "output", "power", "value"},
+		[]string{"electrical", "inverters", "0", "ac", "output", "power"},
+		[]string{"electrical", "inverters", "0", "acout", "power", "value"},
+		[]string{"electrical", "inverters", "0", "acout", "power"},
+		[]string{"electrical", "inverters", "0", "acOutputPower", "value"},
+		[]string{"electrical", "inverters", "0", "acOutputPower"},
+		[]string{"electrical", "alternators", "0", "ac", "output", "power", "value"},
+		[]string{"electrical", "alternators", "0", "ac", "output", "power"},
+	)
+	if acOutput == -1 {
+		acOutput = lookupNumberFromAnyChild(payload,
+			[]string{"electrical", "inverters"},
+			[]string{"acout", "power", "value"},
+		)
+	}
+	if acOutput >= 0 {
+		state.ACOutputW = roundTo1(acOutput)
+	}
+
+	dc12Power := lookupFirstNumber(payload,
+		[]string{"electrical", "venus", "dcPower", "value"},
+		[]string{"electrical", "venus", "dcPower"},
+		[]string{"electrical", "dc", "12v", "power", "value"},
+		[]string{"electrical", "dc", "12v", "power"},
+		[]string{"electrical", "loads", "12v", "power", "value"},
+		[]string{"electrical", "loads", "12v", "power"},
+	)
+	if dc12Power >= 0 {
+		state.DC12VPowerW = roundTo1(dc12Power)
+	}
+
+	dc12Current := lookupFirstNumber(payload,
+		[]string{"electrical", "venus", "dcCurrent", "value"},
+		[]string{"electrical", "venus", "dcCurrent"},
+		[]string{"electrical", "dc", "12v", "current", "value"},
+		[]string{"electrical", "dc", "12v", "current"},
+		[]string{"electrical", "loads", "12v", "current", "value"},
+		[]string{"electrical", "loads", "12v", "current"},
+	)
+	if dc12Current >= 0 {
+		state.DC12VCurrentA = roundTo1(dc12Current)
+	} else if state.DC12VPowerW >= 0 && batteryVoltage > 0 {
+		state.DC12VCurrentA = roundTo1(state.DC12VPowerW / batteryVoltage)
+	}
+
+	dc24Voltage := lookupFirstNumber(payload,
+		[]string{"electrical", "dc", "24v", "voltage", "value"},
+		[]string{"electrical", "dc", "24v", "voltage"},
+		[]string{"electrical", "batteries", "starter", "voltage", "value"},
+		[]string{"electrical", "batteries", "starter", "voltage"},
+	)
+	if dc24Voltage >= 0 {
+		state.DC24VVoltageV = roundTo1(dc24Voltage)
+	} else if batteryVoltage >= 0 {
+		state.DC24VVoltageV = roundTo1(batteryVoltage)
+	}
+
+	acLoads := lookupFirstNumber(payload,
+		[]string{"electrical", "ac", "loads", "total", "power", "value"},
+		[]string{"electrical", "ac", "loads", "total", "power"},
+		[]string{"electrical", "ac", "loads", "power", "value"},
+		[]string{"electrical", "ac", "loads", "power"},
+	)
+	if acLoads >= 0 {
+		state.ACLoadsW = roundTo1(acLoads)
+	} else if state.ACOutputW >= 0 {
+		state.ACLoadsW = state.ACOutputW
+	}
+
+	return state, nil
+}
+
 func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselsPath, "/")
 
@@ -536,6 +821,62 @@ func lookupNumber(payload map[string]any, keys ...string) float64 {
 	}
 }
 
+func lookupFirstNumber(payload map[string]any, paths ...[]string) float64 {
+	for _, path := range paths {
+		value := lookupNumber(payload, path...)
+		if value != -1 {
+			return value
+		}
+	}
+
+	return -1
+}
+
+func lookupNumberFromAnyChild(payload map[string]any, prefix []string, suffix []string) float64 {
+	parent := lookupAnyMap(payload, prefix...)
+	if parent == nil {
+		return -1
+	}
+
+	for _, rawChild := range parent {
+		child, ok := rawChild.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		value := lookupNumber(child, suffix...)
+		if value != -1 {
+			return value
+		}
+	}
+
+	return -1
+}
+
+func lookupAnyMap(payload map[string]any, keys ...string) map[string]any {
+	var current any = payload
+	for _, key := range keys {
+		asMap, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		next, ok := asMap[key]
+		if !ok {
+			return nil
+		}
+
+		current = next
+	}
+
+	result, ok := current.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	return result
+}
+
 func firstNonEmptyString(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -667,6 +1008,10 @@ func normalizeSignedDegrees(value float64) float64 {
 	}
 
 	return normalized
+}
+
+func roundTo1(value float64) float64 {
+	return math.Round(value*10) / 10
 }
 
 func haversineMeters(lat1 float64, lon1 float64, lat2 float64, lon2 float64) float64 {

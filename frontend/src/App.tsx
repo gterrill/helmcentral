@@ -2,6 +2,7 @@ import { Anchor, Compass, Sailboat, Waves } from 'lucide-react'
 
 import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
+import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { uiConfig } from '@/config/app-config'
@@ -49,6 +50,17 @@ export function App() {
     maxGust1hKts,
   } = useVesselState(uiConfig.vesselStateRefreshSeconds)
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
+  const {
+    batterySocPercent,
+    chargingCurrentA,
+    chargingPowerW,
+    solarOutputW,
+    acOutputW,
+    dc12vPowerW,
+    dc12vCurrentA,
+    dc24vVoltageV,
+    acLoadsW,
+  } = useElectricalState(5)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
     depth !== null
@@ -63,6 +75,16 @@ export function App() {
   const apparentWindSpeedLabel = windSpeedApparentKts !== null ? Math.round(windSpeedApparentKts).toString() : '—'
   const gust10mLabel = maxGust10mKts !== null ? `${maxGust10mKts.toFixed(1)} kts` : '—'
   const gust1hLabel = maxGust1hKts !== null ? `${maxGust1hKts.toFixed(1)} kts` : '—'
+  const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
+  const socBarWidth = `${Math.max(0, Math.min(100, batterySocPercent ?? 0))}%`
+  const chargingCurrentLabel = chargingCurrentA !== null ? `+${chargingCurrentA.toFixed(1)}` : '—'
+  const chargingPowerLabel = chargingPowerW !== null ? `+${Math.round(chargingPowerW)}` : '—'
+  const solarOutputLabel = solarOutputW !== null ? Math.round(solarOutputW).toString() : '—'
+  const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
+  const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
+  const dc12vCurrentLabel = dc12vCurrentA !== null ? dc12vCurrentA.toFixed(1) : '—'
+  const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
+  const acLoadsLabel = acLoadsW !== null ? `${Math.round(acLoadsW)}W` : '—'
 
   return (
     <div className="min-h-screen p-4 md:p-6">
@@ -182,19 +204,105 @@ export function App() {
 
           <aside className="space-y-4">
             <Tile title="Battery & Power">
-              <div className="mt-2 flex items-end gap-2">
-                <span className="font-display text-7xl text-primary">68</span>
-                <span className="pb-2 text-3xl">%</span>
-              </div>
-              <p className="text-secondary">+24.8A / +663W</p>
-              <div className="mt-4 space-y-2 text-sm">
-                <div className="flex justify-between rounded-md bg-muted/50 px-3 py-2">
-                  <span>Solar Output</span>
-                  <span className="font-semibold">1868W</span>
+              <div className="mt-1 grid grid-cols-[1fr_1.4fr] gap-2">
+                <div className="flex items-end gap-2 rounded-md border bg-background/60 px-3 py-3">
+                  <span className="font-display text-7xl leading-none text-primary">{socLabel}</span>
+                  <span className="pb-2 text-3xl leading-none text-foreground">%</span>
                 </div>
-                <div className="flex justify-between rounded-md bg-muted/50 px-3 py-2">
-                  <span>AC Output</span>
-                  <span className="font-semibold">1017W</span>
+                <div className="rounded-md border bg-background/60 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charging</p>
+                  <p className="font-display text-5xl leading-none text-secondary">{chargingCurrentLabel}A</p>
+                  <p className="mt-1 font-display text-4xl leading-none text-secondary">{chargingPowerLabel}W</p>
+                </div>
+              </div>
+
+              <div className="mt-2 h-1.5 rounded-full bg-muted/60">
+                <div className="h-full rounded-full bg-primary" style={{ width: socBarWidth }} />
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar Output</p>
+                  <p className="font-display text-4xl leading-none text-primary">{solarOutputLabel}</p>
+                  <p className="text-sm text-muted-foreground">W</p>
+                </div>
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Output</p>
+                  <p className="font-display text-4xl leading-none text-primary">{acOutputLabel}</p>
+                  <p className="text-sm text-muted-foreground">W</p>
+                </div>
+              </div>
+
+              <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">24V DC Power</p>
+                  <p className="font-display text-4xl leading-none text-foreground">{dc12vPowerLabel}</p>
+                  <p className="text-sm text-muted-foreground">W {dc12vCurrentLabel}A</p>
+                </div>
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">24V Voltage</p>
+                  <p className="font-display text-4xl leading-none text-secondary">{dc24vVoltageLabel}</p>
+                  <p className="text-sm text-muted-foreground">V</p>
+                </div>
+              </div>
+
+              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
+                <div className="flex items-end justify-between">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Emporia AC Loads</p>
+                  <p className="font-display text-3xl leading-none text-primary">{acLoadsLabel}</p>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">Outlet Salon/Cockpit 112W · Starlink 90W</p>
+              </div>
+
+              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Time To Go / Charge Rate</p>
+                <p className="mt-1 font-display text-4xl leading-none text-secondary">~4h 38m to full +6.7%/hr</p>
+              </div>
+
+              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="inline-flex items-center gap-2 text-sm uppercase tracking-[0.16em] text-muted-foreground">
+                    <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
+                    Generator
+                  </div>
+                  <span className="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground">Standby</span>
+                  <Button size="sm" variant="outline" className="h-9 min-w-20">
+                    Start
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
+                <div className="flex items-center justify-between text-sm uppercase tracking-[0.16em] text-muted-foreground">
+                  <div className="inline-flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
+                    Hot Water
+                  </div>
+                  <span className="font-semibold">Off</span>
+                </div>
+                <div className="mt-2 grid grid-cols-4 gap-2">
+                  <Button variant="outline" size="sm" className="h-9 text-xs">
+                    1 HR
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-9 text-xs">
+                    1.5 HR
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-9 text-xs">
+                    2 HR
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-9 text-xs">
+                    ON
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">8PM Forecast</p>
+                    <p className="mt-1 text-xs text-muted-foreground">-7m generator needed</p>
+                  </div>
+                  <p className="font-display text-4xl leading-none text-secondary">94%</p>
                 </div>
               </div>
             </Tile>
