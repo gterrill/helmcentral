@@ -185,7 +185,6 @@ export function App() {
                 </div>
               </div>
             </Tile>
-            <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
           </aside>
 
           <aside className="space-y-4">
@@ -259,7 +258,7 @@ export function App() {
               </div>
             </Tile>
 
-            <TanksTile tanks={tanks} loading={tanksLoading} />
+            <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
           </aside>
 
           <aside className="space-y-4">
@@ -366,6 +365,8 @@ export function App() {
                 </div>
               </div>
             </Tile>
+
+            <TanksTile tanks={tanks} loading={tanksLoading} />
           </aside>
         </div>
       </div>
