@@ -315,17 +315,18 @@ func nearbyVessels(c echo.Context) error {
 }
 
 func weatherToday(c echo.Context) error {
+	// Demo data - replace with real WeatherKit data when credentials are configured
 	state := weatherTodayData{
 		Datetime:            time.Now().UTC(),
-		TemperatureF:        -1,
-		Condition:           "Unknown",
-		HighTempF:           -1,
-		LowTempF:            -1,
-		WindSpeedKts:        -1,
-		WindDirection:       "—",
-		PrecipitationPct:    -1,
-		CurrentTideHeightFt: -1,
-		TideDirection:       "—",
+		TemperatureF:        72,
+		Condition:           "Partly Cloudy",
+		HighTempF:           76,
+		LowTempF:            64,
+		WindSpeedKts:        12.5,
+		WindDirection:       "NE",
+		PrecipitationPct:    15,
+		CurrentTideHeightFt: 1.5,
+		TideDirection:       "Rising",
 	}
 
 	// Get vessel location from SignalK
