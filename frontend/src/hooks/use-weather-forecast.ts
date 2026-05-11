@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface WeatherForecastDay {
   date: string;
@@ -28,11 +28,14 @@ export function useWeatherForecast(refreshIntervalSeconds = 600) {
   const [forecast, setForecast] = useState<WeatherForecastDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedDataRef = useRef(false);
 
   const fetchForecast = useCallback(async () => {
       try {
-        setLoading(true);
-        setError(null);
+        if (!hasLoadedDataRef.current) {
+          setLoading(true);
+        }
+
         const response = await fetch('/api/weather-forecast');
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -65,7 +68,12 @@ export function useWeatherForecast(refreshIntervalSeconds = 600) {
             };
           });
 
+        if (mappedForecast.length > 0) {
+          hasLoadedDataRef.current = true;
+        }
+
         setForecast(mappedForecast);
+        setError(null);
       } catch (error) {
         console.error('Error fetching weather forecast:', error);
         setError(error instanceof Error ? error.message : 'Failed to load forecast data');

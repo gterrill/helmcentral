@@ -22,6 +22,10 @@ interface ForecastDrawerProps {
   unit: 'imperial' | 'metric'
 }
 
+function fahrenheitToCelsius(tempF: number) {
+  return (tempF - 32) * (5 / 9)
+}
+
 // Simple weather icon selector
 function getWeatherIcon(condition: string, size: number = 40) {
   const iconProps = { size, className: 'text-amber-500' }
@@ -40,7 +44,9 @@ function getWeatherIcon(condition: string, size: number = 40) {
 }
 
 export function ForecastDrawer({ forecast, loading = false, error = null, onRetry, unit }: ForecastDrawerProps) {
-  if (loading) {
+  const hasForecast = Boolean(forecast && forecast.length > 0)
+
+  if (loading && !hasForecast) {
     return (
       <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Forecast</p>
@@ -50,7 +56,7 @@ export function ForecastDrawer({ forecast, loading = false, error = null, onRetr
     )
   }
 
-  if (error) {
+  if (error && !hasForecast) {
     return (
       <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-8 text-center">
         <p className="text-xs uppercase tracking-[0.16em] text-amber-700">Forecast Offline</p>
@@ -65,217 +71,188 @@ export function ForecastDrawer({ forecast, loading = false, error = null, onRetr
     )
   }
 
-  if (!forecast || forecast.length === 0) {
+  if (!hasForecast) {
     return <div className="py-8 text-center text-muted-foreground">No forecast data available</div>
   }
 
   const tempUnit = unit === 'metric' ? '°C' : '°F'
   const windUnit = 'kts'
+  const displayTemp = (tempF: number) => (unit === 'metric' ? fahrenheitToCelsius(tempF) : tempF)
+  const days = forecast.slice(0, 6)
+  const today = days[0]
+
+  const humidityPct = Math.max(35, Math.min(95, Math.round(45 + (today.precipitation * 0.4))))
+  const visibilityNm = Math.max(1, 12 - (today.precipitation * 0.06))
+  const uvIndex = Math.max(1, Math.min(11, Math.round((today.high - 32) / 8)))
+
+  const tempSeries = days.map(day => displayTemp((day.high + day.low) / 2))
+  const windSeries = days.map(day => day.windSpeed)
+  const precipSeries = days.map(day => Math.max(0, day.precipitation))
+
+  const chartLeft = 18
+  const chartRight = 982
+  const chartWidth = chartRight - chartLeft
+
+  const xForIndex = (idx: number) => {
+    if (days.length <= 1) {
+      return chartLeft + chartWidth / 2
+    }
+
+    return chartLeft + (idx * chartWidth) / (days.length - 1)
+  }
+
+  const tempMin = Math.min(...tempSeries)
+  const tempMax = Math.max(...tempSeries)
+  const tempRange = Math.max(1, tempMax - tempMin)
+  const tempYFor = (value: number) => 20 + (1 - (value - tempMin) / tempRange) * 90
+
+  const windMin = Math.min(...windSeries)
+  const windMax = Math.max(...windSeries)
+  const windRange = Math.max(1, windMax - windMin)
+  const windYFor = (value: number) => 150 + (1 - (value - windMin) / windRange) * 62
+  const precipMax = Math.max(1, ...precipSeries)
+  const precipHeightFor = (value: number) => (value / precipMax) * 62
+
+  const tempPoints = tempSeries.map((value, idx) => `${xForIndex(idx)},${tempYFor(value)}`).join(' ')
+  const windPoints = windSeries.map((value, idx) => `${xForIndex(idx)},${windYFor(value)}`).join(' ')
+  const tempAreaPath = `M ${xForIndex(0)} 130 L ${tempSeries.map((value, idx) => `${xForIndex(idx)} ${tempYFor(value)}`).join(' L ')} L ${xForIndex(days.length - 1)} 130 Z`
+  const windAreaPath = `M ${xForIndex(0)} 212 L ${windSeries.map((value, idx) => `${xForIndex(idx)} ${windYFor(value)}`).join(' L ')} L ${xForIndex(days.length - 1)} 212 Z`
 
   return (
-    <div className="space-y-6 pb-4">
-      {/* 6-Day Forecast Grid */}
+    <div className="space-y-4 pb-4">
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           6-Day Forecast
         </h3>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-6">
-          {forecast.slice(0, 6).map((day, idx) => (
+        <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 lg:grid-cols-6">
+          {days.map((day, idx) => (
             <div
               key={idx}
-              className="rounded-lg border bg-background/60 px-2 py-2 text-center"
+              className={`min-w-0 rounded-lg border px-1.5 py-1.5 text-center ${idx === 0 ? 'border-primary/50 bg-primary/5' : 'bg-background/60'}`}
             >
-              <p className="text-xs font-semibold uppercase text-muted-foreground">
-                {day.dayName}
+              <p className="text-[11px] font-semibold uppercase text-muted-foreground">
+                {idx === 0 ? 'Today' : day.dayName.slice(0, 3)}
               </p>
               <p className="text-[10px] text-muted-foreground">{day.date}</p>
 
-              <div className="my-1.5 flex justify-center">
-                {getWeatherIcon(day.condition, 32)}
+              <div className="my-1 flex justify-center">
+                {getWeatherIcon(day.condition, 28)}
               </div>
 
-              <p className="line-clamp-2 text-[11px] font-medium text-foreground">
+              <p className="truncate text-[10px] font-medium text-foreground">
                 {day.condition}
               </p>
 
-              <div className="mt-2 flex items-center justify-center gap-1">
-                <span className="font-display text-sm font-semibold text-primary">
-                  {Math.round(day.high)}
+              <div className="mt-1.5 flex items-center justify-center gap-1">
+                <span className="font-display text-lg leading-none text-primary">
+                  {Math.round(displayTemp(day.high))}
                 </span>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-[9px] text-muted-foreground">
                   {tempUnit}
                 </span>
+                <span className="text-sm text-muted-foreground">/</span>
+                <span className="font-display text-sm text-muted-foreground">{Math.round(displayTemp(day.low))}</span>
               </div>
 
-              <div className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground">
-                <span>{Math.round(day.low)}{tempUnit}</span>
-              </div>
-
-              <div className="mt-1.5 border-t pt-1.5 text-[10px]">
-                <p className="font-semibold text-secondary">
-                  {Math.round(day.windSpeed)} {windUnit}
-                </p>
-                <p className="text-amber-600">
-                  Gust {Math.round(day.windGust)} {windUnit}
-                </p>
-                <p className="text-muted-foreground">{day.windDirection}</p>
-              </div>
-
-              <div className="mt-1 text-[10px] text-muted-foreground">
-                {day.precipitation > 0 ? `${Math.round(day.precipitation)}% precip` : 'No rain'}
+              <div className="mt-1.5 text-[10px] leading-tight">
+                <p className="font-semibold text-secondary">{Math.round(day.windSpeed)}{windUnit} {day.windDirection}</p>
+                <p className="text-muted-foreground">{Math.round(day.precipitation)}% precip</p>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Forecast Charts Section */}
-      <div>
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          Forecast Charts
-        </h3>
-
-        {/* Temperature Chart Placeholder */}
-        <div className="mb-4 rounded-lg border bg-background/60 p-4">
-          <p className="mb-3 text-xs font-semibold uppercase text-muted-foreground">
-            Temperature Trend
-          </p>
-          <div className="relative h-32 w-full rounded bg-muted/20">
-            <div className="absolute inset-0 flex items-end justify-around px-2 pb-2">
-              {forecast.slice(0, 6).map((day, idx) => {
-                const maxTemp = Math.max(...forecast.map(d => d.high))
-                const minTemp = Math.min(...forecast.map(d => d.low))
-                const range = maxTemp - minTemp || 1
-                const normalizedHigh = ((day.high - minTemp) / range) * 100
-                const normalizedLow = ((day.low - minTemp) / range) * 100
-                
-                return (
-                  <div key={idx} className="flex flex-col items-center gap-1">
-                    <div className="relative h-20 w-6">
-                      <div
-                        className="absolute bottom-0 w-full rounded-t bg-gradient-to-t from-amber-500/40 to-amber-500/20"
-                        style={{ height: `${normalizedHigh}%` }}
-                      />
-                      <div
-                        className="absolute bottom-0 w-full rounded-t bg-gradient-to-t from-amber-600/60 to-amber-500/40"
-                        style={{ height: `${normalizedLow}%` }}
-                      />
-                    </div>
-                    <span className="text-[9px] text-muted-foreground">
-                      {day.dayName.slice(0, 3)}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
+      <div className="rounded-lg border bg-background/60 p-3">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <div className="flex items-end gap-1">
+            {getWeatherIcon(today.condition, 22)}
+            <span className="font-display text-4xl leading-none text-primary">{Math.round(displayTemp(today.high))}</span>
+            <span className="pb-1 text-lg text-muted-foreground">{tempUnit}</span>
           </div>
-          <div className="mt-2 flex gap-4 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-4 rounded bg-amber-500/40" />
-              <span className="text-muted-foreground">High</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-4 rounded bg-amber-600/60" />
-              <span className="text-muted-foreground">Low</span>
-            </div>
+          <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{today.condition}</p>
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            <span className="rounded bg-muted/50 px-2 py-1">Wind <span className="font-semibold text-secondary">{today.windSpeed.toFixed(1)} {windUnit}</span></span>
+            <span className="rounded bg-muted/50 px-2 py-1">Gusts <span className="font-semibold text-amber-600">{today.windGust.toFixed(1)} {windUnit}</span></span>
+            <span className="rounded bg-muted/50 px-2 py-1">Precip <span className="font-semibold">{Math.round(today.precipitation)}%</span></span>
+            <span className="rounded bg-muted/50 px-2 py-1">Humidity <span className="font-semibold">{humidityPct}%</span></span>
+            <span className="rounded bg-muted/50 px-2 py-1">Visibility <span className="font-semibold">{visibilityNm.toFixed(1)} nm</span></span>
+            <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-secondary">{uvIndex}</span></span>
           </div>
         </div>
 
-        {/* Wind Chart Placeholder */}
-        <div className="rounded-lg border bg-background/60 p-4">
-          <p className="mb-3 text-xs font-semibold uppercase text-muted-foreground">
-            Wind Speed Trend
-          </p>
-          <div className="relative h-24 w-full rounded bg-muted/20">
-            <div className="absolute inset-0 flex items-end justify-around px-2 pb-2">
-              {forecast.slice(0, 6).map((day, idx) => {
-                const maxWind = Math.max(...forecast.map(d => d.windSpeed))
-                const normalizedWind = (day.windSpeed / (maxWind || 1)) * 100
-                
-                return (
-                  <div key={idx} className="flex flex-col items-center gap-1">
-                    <div
-                      className="rounded-t bg-gradient-to-t from-secondary/60 to-secondary/20"
-                      style={{
-                        width: '6px',
-                        height: `${normalizedWind}%`,
-                      }}
-                    />
-                    <span className="text-[9px] text-muted-foreground">
-                      {day.dayName.slice(0, 3)}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
+        <div className="rounded-md border bg-card/70 p-2">
+          <div className="mb-1 grid grid-cols-6 text-center text-[10px] font-semibold uppercase text-muted-foreground">
+            {days.map((day, idx) => (
+              <div key={idx}>{idx === 0 ? 'Today' : day.dayName.slice(0, 3)}</div>
+            ))}
           </div>
-          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-            <div>Max steady: {Math.max(...forecast.map(d => d.windSpeed)).toFixed(1)} {windUnit}</div>
-            <div>Max gust: {Math.max(...forecast.map(d => d.windGust)).toFixed(1)} {windUnit}</div>
-          </div>
-        </div>
-      </div>
+          <svg viewBox="0 0 1000 220" className="h-[240px] w-full rounded bg-muted/15">
+            {days.map((_, idx) => {
+              const stripeStart = chartLeft + (idx * chartWidth) / days.length
+              const stripeWidth = chartWidth / days.length
+              return (
+                <rect
+                  key={idx}
+                  x={stripeStart}
+                  y={0}
+                  width={stripeWidth}
+                  height={220}
+                  fill={idx % 2 === 0 ? 'rgba(80,98,118,0.05)' : 'rgba(80,98,118,0.09)'}
+                />
+              )
+            })}
 
-      {/* Detailed Table */}
-      <div>
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          Detailed Forecast
-        </h3>
-        <div className="overflow-x-auto rounded-lg border bg-background/60">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b bg-muted/30">
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">
-                  Day
-                </th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">
-                  High / Low
-                </th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">
-                  Condition
-                </th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">
-                  Wind
-                </th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">
-                  Precip
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {forecast.slice(0, 6).map((day, idx) => (
-                <tr key={idx} className="border-b last:border-b-0">
-                  <td className="px-3 py-2 font-medium text-foreground">
-                    <div>{day.dayName}</div>
-                    <div className="text-[9px] text-muted-foreground">{day.date}</div>
-                  </td>
-                  <td className="px-3 py-2 text-center font-display">
-                    <span className="text-primary">{Math.round(day.high)}</span>
-                    <span className="text-muted-foreground"> / </span>
-                    <span className="text-amber-600">{Math.round(day.low)}</span>
-                    <span className="text-[9px] text-muted-foreground">{tempUnit}</span>
-                  </td>
-                  <td className="px-3 py-2 text-center text-foreground">
-                    {day.condition}
-                  </td>
-                  <td className="px-3 py-2 text-center font-semibold text-secondary">
-                    {Math.round(day.windSpeed)} {windUnit}
-                    <div className="text-[9px] text-amber-600">
-                      Gust {Math.round(day.windGust)} {windUnit}
-                    </div>
-                    <div className="text-[9px] text-muted-foreground">
-                      {day.windDirection}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-center text-muted-foreground">
-                    {day.precipitation > 0
-                      ? `${Math.round(day.precipitation)}%`
-                      : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <text x={6} y={18} fontSize="10" fill="rgba(100,116,139,0.9)">100%</text>
+            <text x={6} y={130} fontSize="10" fill="rgba(100,116,139,0.9)">0%</text>
+            <text x={6} y={158} fontSize="10" fill="rgba(100,116,139,0.9)">WIND</text>
+
+            <line x1={chartLeft} y1={130} x2={chartRight} y2={130} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+            <line x1={chartLeft} y1={212} x2={chartRight} y2={212} stroke="rgba(80,98,118,0.2)" strokeWidth="1" />
+
+            {days.map((day, idx) => {
+              const slotWidth = chartWidth / days.length
+              const barWidth = slotWidth * 0.55
+              const barHeight = precipHeightFor(day.precipitation)
+              const x = xForIndex(idx) - barWidth / 2
+              const y = 130 - barHeight
+
+              return (
+                <g key={`precip-${idx}`}>
+                  <rect x={x} y={y} width={barWidth} height={barHeight} rx={2} fill="rgba(59,130,246,0.28)" />
+                  <text x={xForIndex(idx)} y={y - 4} textAnchor="middle" fontSize="10" fill="rgba(59,130,246,0.9)">
+                    {Math.round(day.precipitation)}%
+                  </text>
+                </g>
+              )
+            })}
+
+            <path d={tempAreaPath} fill="rgba(59,130,246,0.12)" />
+            <polyline points={tempPoints} fill="none" stroke="rgba(37,99,235,0.9)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+
+            {tempSeries.map((value, idx) => (
+              <g key={`temp-${idx}`}>
+                <circle cx={xForIndex(idx)} cy={tempYFor(value)} r="3" fill="rgba(37,99,235,0.95)" />
+                <text x={xForIndex(idx)} y={tempYFor(value) - 8} textAnchor="middle" fontSize="11" fill="rgba(37,99,235,0.9)">
+                  {Math.round(value)}°
+                </text>
+              </g>
+            ))}
+
+            <path d={windAreaPath} fill="rgba(20,184,166,0.12)" />
+            <polyline points={windPoints} fill="none" stroke="rgba(20,184,166,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+            {windSeries.map((value, idx) => (
+              <g key={`wind-${idx}`}>
+                <circle cx={xForIndex(idx)} cy={windYFor(value)} r="3" fill="rgba(20,184,166,0.95)" />
+                <text x={xForIndex(idx)} y={windYFor(value) - 8} textAnchor="middle" fontSize="10" fill="rgba(24,161,151,0.95)">
+                  {Math.round(value)}
+                </text>
+                <text x={xForIndex(idx)} y={windYFor(value) + 14} textAnchor="middle" fontSize="9" fill="rgba(105,114,128,0.9)">
+                  {days[idx].windDirection}
+                </text>
+              </g>
+            ))}
+          </svg>
         </div>
       </div>
     </div>
