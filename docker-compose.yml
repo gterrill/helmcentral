@@ -1,5 +1,6 @@
 services:
   backend:
+    profiles: ["prod"]
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -13,6 +14,7 @@ services:
       - ./settings.yaml:/app/settings.yaml
 
   frontend:
+    profiles: ["prod"]
     build:
       context: .
       dockerfile: ./frontend/Dockerfile
@@ -29,7 +31,7 @@ services:
     environment:
       - SETTINGS_FILE=/app/settings.yaml
     ports:
-      - "8081:8080"
+      - "8080:8080"
     volumes:
       - ./backend:/app
       - ./settings.yaml:/app/settings.yaml
@@ -38,12 +40,12 @@ services:
     profiles: ["dev"]
     image: node:18-alpine
     working_dir: /workspace/frontend
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5174"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     environment:
       - CHOKIDAR_USEPOLLING=1
       - CHOKIDAR_INTERVAL=300
     ports:
-      - "5174:5174"
+      - "5173:5173"
     volumes:
       - ./:/workspace
       - frontend_node_modules:/workspace/frontend/node_modules
