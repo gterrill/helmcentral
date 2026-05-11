@@ -1,9 +1,12 @@
 import { Compass, Sailboat, Waves } from 'lucide-react'
 
 import { MarineHeader } from '@/components/marine-header'
+import { useVesselState } from '@/hooks/use-vessel-state'
+import { uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 
 export function App() {
+  const { depth } = useVesselState(uiConfig.vesselStateRefreshSeconds)
   return (
     <div className="min-h-screen p-4 md:p-6">
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
@@ -13,8 +16,8 @@ export function App() {
         <aside className="space-y-4">
           <section className="rounded-lg border bg-card p-4">
             <h2 className="font-display text-xs tracking-[0.22em] text-muted-foreground">Depth</h2>
-            <p className="mt-2 font-display text-6xl text-secondary">6.3</p>
-            <p className="text-sm text-muted-foreground">ft under keel</p>
+            <p className="mt-2 font-display text-6xl text-secondary">{depth !== null ? depth.toFixed(1) : '—'}</p>
+            <p className="text-sm text-muted-foreground">{depth !== null ? 'metres' : 'unavailable'}</p>
           </section>
           <section className="rounded-lg border bg-card p-4">
             <h2 className="font-display text-xs tracking-[0.22em] text-muted-foreground">Position</h2>
