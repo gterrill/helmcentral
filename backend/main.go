@@ -1,11 +1,11 @@
 package main
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
+	"crypto/ecdsa"
+	"crypto/x509"
 	"encoding/csv"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
@@ -345,10 +345,12 @@ func weatherToday(c echo.Context) error {
 		if err == nil && vesselState.Latitude >= -90 && vesselState.Latitude <= 90 &&
 			vesselState.Longitude >= -180 && vesselState.Longitude <= 180 {
 			// Fetch weather from WeatherKit
-			weather, err := fetchWeatherKitData(vesselState.Latitude, vesselState.Longitude)
-			if err == nil {
+			weather, weatherErr := fetchWeatherKitData(vesselState.Latitude, vesselState.Longitude)
+			if weatherErr == nil {
 				state = weather
 				state.Datetime = time.Now().UTC()
+			} else {
+				log.Printf("WeatherKit API error: %v", weatherErr)
 			}
 		}
 	}
@@ -471,25 +473,23 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 }
 
 func generateWeatherKitJWT(keyID, teamID, serviceID, privateKeyPEM string) (string, error) {
-	// Parse the ECDSA private key
-	block := strings.Split(strings.TrimSpace(privateKeyPEM), "\n")
-	var keyData string
-	for _, line := range block {
-		if !strings.HasPrefix(line, "-----") {
-			keyData += line
-		}
+	// Parse the EC private key from PEM format
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return "", fmt.Errorf("failed to parse PEM block containing the key")
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(keyData)
+	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode private key: %v", err)
+		return "", fmt.Errorf("failed to parse private key: %v", err)
 	}
 
-	// For EC P-256, we need to construct the key from the raw bytes
-	// Since we don't have a direct way to parse EC keys, we'll use a simpler approach
-	// In production, you'd want to use crypto/x509 package properly
+	ecdsaKey, ok := privateKey.(*ecdsa.PrivateKey)
+	if !ok {
+		return "", fmt.Errorf("key is not an ECDSA key")
+	}
 
-	// Create JWT header and payload
+	// Create JWT claims
 	now := time.Now()
 	exp := now.Add(time.Hour) // Token valid for 1 hour
 
@@ -501,23 +501,17 @@ func generateWeatherKitJWT(keyID, teamID, serviceID, privateKeyPEM string) (stri
 		"exp": exp.Unix(),
 	}
 
-	// Create a simple HMAC-SHA256 token for now (note: WeatherKit actually requires ECDSA)
-	// In production, you'd need proper EC key parsing
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	// Create token with ES256 (ECDSA SHA-256)
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["kid"] = keyID
 
-	// Use HMAC with the raw key data for now
-	// This is a workaround - production should use proper ECDSA
-	h := hmac.New(sha256.New, decoded)
-	h.Write([]byte(base64.StdEncoding.EncodeToString(decoded)))
-	signature := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+	// Sign with the ECDSA private key
+	tokenString, err := token.SignedString(ecdsaKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign token: %v", err)
+	}
 
-	// Manually construct JWT (header.payload.signature)
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","kid":"` + keyID + `"}`))
-	payload, _ := json.Marshal(claims)
-	payloadB64 := base64.RawURLEncoding.EncodeToString(payload)
-
-	return header + "." + payloadB64 + "." + signature, nil
+	return tokenString, nil
 }
 
 func formatWeatherCondition(code string) string {
