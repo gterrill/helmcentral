@@ -5,8 +5,36 @@ import { useVesselState } from '@/hooks/use-vessel-state'
 import { uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 
+function formatCoordinate(value: number | null, latitude: boolean) {
+  if (value === null) {
+    return '—'
+  }
+
+  const absolute = Math.abs(value)
+  const degrees = Math.floor(absolute)
+  const minutesFloat = (absolute - degrees) * 60
+  const minutes = Math.floor(minutesFloat)
+  const seconds = (minutesFloat - minutes) * 60
+  const hemisphere = latitude ? (value >= 0 ? 'N' : 'S') : value >= 0 ? 'E' : 'W'
+
+  return `${degrees}° ${String(minutes).padStart(2, '0')}' ${seconds.toFixed(1).padStart(4, '0')}" ${hemisphere}`
+}
+
+function formatHeading(headingTrue: number | null) {
+  if (headingTrue === null) {
+    return '—'
+  }
+
+  const normalized = ((headingTrue % 360) + 360) % 360
+  const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  const direction = directions[Math.round(normalized / 22.5) % directions.length]
+
+  return `${Math.round(normalized)}° ${direction}`
+}
+
 export function App() {
-  const { depth } = useVesselState(uiConfig.vesselStateRefreshSeconds)
+  const { depth, latitude, longitude, headingTrue } = useVesselState(uiConfig.vesselStateRefreshSeconds)
+
   return (
     <div className="min-h-screen p-4 md:p-6">
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
@@ -21,9 +49,9 @@ export function App() {
           </section>
           <section className="rounded-lg border bg-card p-4">
             <h2 className="font-display text-xs tracking-[0.22em] text-muted-foreground">Position</h2>
-            <p className="mt-2 font-mono text-sm">25° 29' 10.2\" N</p>
-            <p className="font-mono text-sm">76° 38' 14.0\" W</p>
-            <div className="mt-3 rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">63° ENE</div>
+            <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
+            <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
+            <div className="mt-3 rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">{formatHeading(headingTrue)}</div>
           </section>
         </aside>
 

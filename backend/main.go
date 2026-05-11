@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -76,22 +77,31 @@ func vesselState(c echo.Context) error {
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
 	var depth float64 = -1
+	var latitude float64 = -1
+	var longitude float64 = -1
+	var headingTrue float64 = -1
 
 	if signalkURL != "" {
-		signalkStatus, signalkDatetime, signalkDepth, err := fetchSignalKVesselState(signalkURL, vesselPath)
+		signalkStatus, signalkDatetime, signalkDepth, signalkLatitude, signalkLongitude, signalkHeadingTrue, err := fetchSignalKVesselState(signalkURL, vesselPath)
 		if err == nil {
 			status = signalkStatus
 			datetime = signalkDatetime
 			depth = signalkDepth
+			latitude = signalkLatitude
+			longitude = signalkLongitude
+			headingTrue = signalkHeadingTrue
 			source = "signalk"
 		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"status":   status,
-		"datetime": datetime.Format(time.RFC3339),
-		"depth":    depth,
-		"source":   source,
+		"status":       status,
+		"datetime":     datetime.Format(time.RFC3339),
+		"depth":        depth,
+		"latitude":     latitude,
+		"longitude":    longitude,
+		"heading_true": headingTrue,
+		"source":       source,
 	})
 }
 
@@ -135,7 +145,7 @@ func updateSignalKSettingsHandler(c echo.Context) error {
 	signalkURL := buildSignalKURL(address, port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
-	if _, _, _, err := fetchSignalKVesselState(signalkURL, vesselPath); err != nil {
+	if _, _, _, _, _, _, err := fetchSignalKVesselState(signalkURL, vesselPath); err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{
 			"error": fmt.Sprintf("unable to connect to SignalK at %s", signalkURL),
 		})
@@ -156,28 +166,28 @@ func updateSignalKSettingsHandler(c echo.Context) error {
 	})
 }
 
-func fetchSignalKVesselState(signalkURL string, vesselPath string) (string, time.Time, float64, error) {
+func fetchSignalKVesselState(signalkURL string, vesselPath string) (string, time.Time, float64, float64, float64, float64, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get(url)
 	if err != nil {
-		return "", time.Time{}, -1, err
+		return "", time.Time{}, -1, -1, -1, -1, err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return "", time.Time{}, -1, fmt.Errorf("signalk returned status %d", response.StatusCode)
+		return "", time.Time{}, -1, -1, -1, -1, fmt.Errorf("signalk returned status %d", response.StatusCode)
 	}
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return "", time.Time{}, -1, err
+		return "", time.Time{}, -1, -1, -1, -1, err
 	}
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", time.Time{}, -1, err
+		return "", time.Time{}, -1, -1, -1, -1, err
 	}
 
 	status := firstNonEmptyString(
@@ -207,7 +217,29 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (string, time
 		depth = lookupNumber(payload, "environment", "depth", "belowTransducer")
 	}
 
-	return status, datetime, depth, nil
+	latitude := lookupNumber(payload, "navigation", "position", "value", "latitude")
+	if latitude == -1 {
+		latitude = lookupNumber(payload, "navigation", "position", "latitude")
+	}
+
+	longitude := lookupNumber(payload, "navigation", "position", "value", "longitude")
+	if longitude == -1 {
+		longitude = lookupNumber(payload, "navigation", "position", "longitude")
+	}
+
+	headingTrue := lookupNumber(payload, "navigation", "headingTrue", "value")
+	if headingTrue == -1 {
+		headingTrue = lookupNumber(payload, "navigation", "headingTrue")
+	}
+
+	if headingTrue >= 0 {
+		if headingTrue <= 2*math.Pi {
+			headingTrue = headingTrue * 180 / math.Pi
+		}
+		headingTrue = normalizeDegrees(headingTrue)
+	}
+
+	return status, datetime, depth, latitude, longitude, headingTrue, nil
 }
 
 func lookupString(payload map[string]any, keys ...string) string {
@@ -373,4 +405,13 @@ func coercePort(value any) int {
 	}
 
 	return 0
+}
+
+func normalizeDegrees(value float64) float64 {
+	normalized := math.Mod(value, 360)
+	if normalized < 0 {
+		normalized += 360
+	}
+
+	return normalized
 }
