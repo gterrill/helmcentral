@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -30,6 +31,26 @@ const (
 	metersPerSecondToKnots = 1.943844
 	defaultWindMaxAge      = 5 * time.Minute
 )
+
+// Cache for Storm Glass tide data by location+date
+type tideCache struct {
+	mu   sync.RWMutex
+	data map[string]tideData
+}
+
+type tideData struct {
+	currentHeight float64
+	direction     string
+	highTime      time.Time
+	highHeight    float64
+	lowTime       time.Time
+	lowHeight     float64
+	cachedAt      time.Time
+}
+
+var tideCacheStore = &tideCache{
+	data: make(map[string]tideData),
+}
 
 type vesselStateData struct {
 	Status               string
@@ -569,18 +590,32 @@ func fetchStormGlassTideData(latitude, longitude float64) (currentHeight float64
 	lowTime = time.Now().Add(24 * time.Hour)
 	lowHeight = 0
 
+	now := time.Now().UTC()
+	dateKey := now.Format("2006-01-02")
+
+	// Round coordinates to 1 decimal place (~11km precision) to handle GPS noise
+	// and improve cache hit rate for nearby locations
+	roundedLat := math.Round(latitude*10) / 10
+	roundedLng := math.Round(longitude*10) / 10
+	cacheKey := fmt.Sprintf("%.1f,%.1f,%s", roundedLat, roundedLng, dateKey)
+	if cached, ok := tideCacheStore.data[cacheKey]; ok {
+		tideCacheStore.mu.RUnlock()
+		log.Printf("Using cached tide data for %s", cacheKey)
+		return cached.currentHeight, cached.direction, cached.highTime, cached.highHeight, cached.lowTime, cached.lowHeight, nil
+	}
+	tideCacheStore.mu.RUnlock()
+
 	apiKey := getEnv("STORMGLASS_API_KEY", "")
 	if apiKey == "" {
 		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("Storm Glass API key not configured")
 	}
 
-	now := time.Now().UTC()
 	startTime := now.Truncate(24 * time.Hour)
 
-	// Fetch tide extremes (high and low tides)
+	// Fetch tide extremes (high and low tides) using rounded coordinates
 	extremesURL := fmt.Sprintf(
-		"https://api.stormglass.io/v2/tide/extremes/point?lat=%.4f&lng=%.4f&start=%d&end=%d",
-		latitude, longitude, startTime.Unix(), startTime.Add(48*time.Hour).Unix(),
+		"https://api.stormglass.io/v2/tide/extremes/point?lat=%.1f&lng=%.1f&start=%d&end=%d",
+		roundedLat, roundedLng, startTime.Unix(), startTime.Add(48*time.Hour).Unix(),
 	)
 
 	req, err := http.NewRequest("GET", extremesURL, nil)
@@ -588,7 +623,8 @@ func fetchStormGlassTideData(latitude, longitude float64) (currentHeight float64
 		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to create request: %v", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+	req.Header.Set("Authorization", apiKey)
+	log.Printf("Fetching Storm Glass tide data for %s", cacheKey)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -643,13 +679,13 @@ func fetchStormGlassTideData(latitude, longitude float64) (currentHeight float64
 
 	// Fetch current sea level to get more accurate current height
 	seaLevelURL := fmt.Sprintf(
-		"https://api.stormglass.io/v2/tide/sea-level/point?lat=%.4f&lng=%.4f&start=%d",
-		latitude, longitude, now.Unix(),
+		"https://api.stormglass.io/v2/tide/sea-level/point?lat=%.2f&lng=%.2f&start=%d",
+		roundedLat, roundedLng, now.Unix(),
 	)
 
 	req2, err := http.NewRequest("GET", seaLevelURL, nil)
 	if err == nil {
-		req2.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+		req2.Header.Set("Authorization", apiKey)
 		resp2, err := client.Do(req2)
 		if err == nil && resp2.StatusCode == http.StatusOK {
 			defer resp2.Body.Close()
@@ -674,6 +710,20 @@ func fetchStormGlassTideData(latitude, longitude float64) (currentHeight float64
 	} else {
 		direction = "Falling"
 	}
+
+	// Cache the results
+	tideCacheStore.mu.Lock()
+	tideCacheStore.data[cacheKey] = tideData{
+		currentHeight: currentHeight,
+		direction:     direction,
+		highTime:      highTime,
+		highHeight:    highHeight,
+		lowTime:       lowTime,
+		lowHeight:     lowHeight,
+		cachedAt:      now,
+	}
+	tideCacheStore.mu.Unlock()
+	log.Printf("Cached tide data for %s", cacheKey)
 
 	return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, nil
 }
