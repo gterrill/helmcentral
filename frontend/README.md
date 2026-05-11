@@ -1,12 +1,14 @@
 # Helmcentral Dashboard Frontend
 
-TypeScript + Web Components dashboard for Helmcentral.
+React + TypeScript dashboard for Helmcentral, styled with Tailwind CSS and shadcn/ui.
 
 ## Features
 
-- Modern Web Components architecture
+- React component architecture
 - TypeScript for type safety
 - Vite for fast development and building
+- Tailwind CSS utility styling
+- shadcn/ui component foundation
 - Real-time data visualization from SignalK and InfluxDB
 - Responsive dashboard design
 
@@ -42,10 +44,7 @@ Output files will be in the `dist/` directory.
 ### Components
 
 Components are located in `src/components/` and are built as Web Components using the Custom Elements API.
-
-#### dashboard-container
-
-Main container component that manages the dashboard layout.
+Components are located in `src/components/` and `src/components/ui/`.
 
 ## API Integration
 

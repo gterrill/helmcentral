@@ -1,0 +1,34 @@
+@import url('https://fonts.googleapis.com/css2?family=Aldrich&family=Barlow:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 21% 90%;
+    --foreground: 209 45% 27%;
+    --card: 44 25% 94%;
+    --card-foreground: 209 45% 27%;
+    --primary: 39 100% 39%;
+    --primary-foreground: 40 24% 95%;
+    --secondary: 175 42% 32%;
+    --secondary-foreground: 44 25% 94%;
+    --muted: 45 12% 84%;
+    --muted-foreground: 209 15% 42%;
+    --border: 42 15% 80%;
+    --radius: 0.6rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    margin: 0;
+    min-height: 100vh;
+    background-image: radial-gradient(circle at 10% 10%, hsl(44 27% 96%) 0%, transparent 32%),
+      radial-gradient(circle at 90% 0%, hsl(176 24% 92%) 0%, transparent 28%);
+  }
+}
