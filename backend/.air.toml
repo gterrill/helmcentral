@@ -1,0 +1,12 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/helmcentral ."
+bin = "./tmp/helmcentral"
+delay = 500
+exclude_dir = ["tmp", "cache"]
+include_ext = ["go", "yaml", "yml", "env"]
+
+[log]
+time = true

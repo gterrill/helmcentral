@@ -27,6 +27,7 @@ const (
 	weatherTodayCacheTTL    = 10 * time.Minute
 	defaultWeatherCacheFile = "cache/weather_today_cache.json"
 	defaultTideCacheFile    = "cache/tide_cache.json"
+	kphToKnots              = 0.539957
 )
 
 type tideCache struct {
@@ -459,7 +460,7 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 			data.Condition = formatWeatherCondition(condition)
 		}
 		if windSpeed, ok := current["windSpeed"].(float64); ok {
-			data.WindSpeedKts = windSpeed / 0.51444
+			data.WindSpeedKts = windSpeed * kphToKnots
 		}
 		if windDir, ok := current["windDirection"].(float64); ok {
 			data.WindDirection = degreesToDirection(windDir)

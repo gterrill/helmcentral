@@ -23,9 +23,10 @@ services:
 
   backend-dev:
     profiles: ["dev"]
-    image: golang:1.22-alpine
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
     working_dir: /app
-    command: sh -c "go mod tidy && go run main.go"
     env_file:
       - ./backend/.env
     environment:
@@ -55,3 +56,4 @@ services:
 
 volumes:
   frontend_node_modules:
+
