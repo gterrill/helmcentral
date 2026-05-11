@@ -25,6 +25,7 @@ function formatDate(date: Date) {
 export function MarineHeader() {
   const [now, setNow] = useState(() => new Date())
   const [vesselStatus, setVesselStatus] = useState('At Anchor')
+  const [depth, setDepth] = useState<number | null>(null)
   const [signalKAddress, setSignalKAddress] = useState('localhost')
   const [signalKPort, setSignalKPort] = useState('3000')
   const [isConnecting, setIsConnecting] = useState(false)
@@ -71,6 +72,15 @@ export function MarineHeader() {
         const data = (await response.json()) as {
           status?: string
           datetime?: string
+          depth?: number
+        }
+
+        if (data.status) {
+          setVesselStatus(data.status)
+        }
+
+        if (typeof data.depth === 'number' && data.depth >= 0) {
+          setDepth(data.depth)
         }
 
         if (data.status) {
@@ -210,6 +220,11 @@ export function MarineHeader() {
           <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 sm:inline md:text-[11px]">
             {currentDate}
           </span>
+          {depth !== null && (
+            <div className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 md:text-[11px]">
+              Depth: <span className="font-display text-[12px] font-semibold md:text-[13px]">{depth.toFixed(1)}m</span>
+            </div>
+          )}
           <time className="whitespace-nowrap text-right font-display text-[1.9rem] leading-none tabular-nums tracking-[0.02em] text-secondary sm:w-[7.5rem] sm:text-[2rem] md:w-[8.2rem] md:text-[2.2rem] lg:w-[9rem] lg:text-[2.6rem]">
             {formatClock(now)}
           </time>
