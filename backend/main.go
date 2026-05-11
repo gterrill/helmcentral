@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,9 +21,24 @@ import (
 )
 
 const (
-	defaultSignalKAddress = "localhost"
-	defaultSignalKPort    = 3000
+	defaultSignalKAddress  = "localhost"
+	defaultSignalKPort     = 3000
+	metersPerSecondToKnots = 1.943844
+	defaultWindMaxAge      = 5 * time.Minute
 )
+
+type vesselStateData struct {
+	Status               string
+	Datetime             time.Time
+	Depth                float64
+	Latitude             float64
+	Longitude            float64
+	HeadingTrue          float64
+	WindSpeedApparentKts float64
+	WindAngleApparentDeg float64
+	WindSide             string
+	WindAngleRelativeDeg float64
+}
 
 func main() {
 	e := echo.New()
@@ -64,8 +81,17 @@ func healthCheck(c echo.Context) error {
 }
 
 func vesselState(c echo.Context) error {
-	status := getEnv("VESSEL_STATUS", "At Anchor")
-	datetime := time.Now().UTC()
+	state := vesselStateData{
+		Status:               getEnv("VESSEL_STATUS", "At Anchor"),
+		Datetime:             time.Now().UTC(),
+		Depth:                -1,
+		Latitude:             -1,
+		Longitude:            -1,
+		HeadingTrue:          -1,
+		WindSpeedApparentKts: -1,
+		WindAngleApparentDeg: -1,
+		WindAngleRelativeDeg: -1,
+	}
 	source := "backend-fallback"
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
@@ -78,32 +104,41 @@ func vesselState(c echo.Context) error {
 	signalkURL := buildSignalKURL(address, port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
-	var depth float64 = -1
-	var latitude float64 = -1
-	var longitude float64 = -1
-	var headingTrue float64 = -1
-
 	if signalkURL != "" {
-		signalkStatus, signalkDatetime, signalkDepth, signalkLatitude, signalkLongitude, signalkHeadingTrue, err := fetchSignalKVesselState(signalkURL, vesselPath)
+		signalkState, err := fetchSignalKVesselState(signalkURL, vesselPath)
 		if err == nil {
-			status = signalkStatus
-			datetime = signalkDatetime
-			depth = signalkDepth
-			latitude = signalkLatitude
-			longitude = signalkLongitude
-			headingTrue = signalkHeadingTrue
+			state = signalkState
 			source = "signalk"
 		}
 	}
 
+	maxGust10mKts := 0.0
+	maxGust1hKts := 0.0
+	if state.WindSpeedApparentKts > 0 {
+		maxGust10mKts = queryInfluxMaxWindGustKts("10m")
+		maxGust1hKts = queryInfluxMaxWindGustKts("1h")
+		if maxGust10mKts < 0 {
+			maxGust10mKts = 0
+		}
+		if maxGust1hKts < 0 {
+			maxGust1hKts = 0
+		}
+	}
+
 	return c.JSON(http.StatusOK, map[string]any{
-		"status":       status,
-		"datetime":     datetime.Format(time.RFC3339),
-		"depth":        depth,
-		"latitude":     latitude,
-		"longitude":    longitude,
-		"heading_true": headingTrue,
-		"source":       source,
+		"status":                  state.Status,
+		"datetime":                state.Datetime.Format(time.RFC3339),
+		"depth":                   state.Depth,
+		"latitude":                state.Latitude,
+		"longitude":               state.Longitude,
+		"heading_true":            state.HeadingTrue,
+		"wind_speed_apparent_kts": state.WindSpeedApparentKts,
+		"wind_angle_apparent_deg": state.WindAngleApparentDeg,
+		"wind_side":               state.WindSide,
+		"wind_angle_relative_deg": state.WindAngleRelativeDeg,
+		"max_gust_10m_kts":        maxGust10mKts,
+		"max_gust_1h_kts":         maxGust1hKts,
+		"source":                  source,
 	})
 }
 
@@ -135,9 +170,9 @@ func nearbyVessels(c echo.Context) error {
 		signalkSelfName := fetchSignalKSelfName(signalkURL, vesselPath)
 		excludedNames := []string{ownVesselName, signalkSelfName}
 
-		_, _, _, selfLatitude, selfLongitude, _, selfErr := fetchSignalKVesselState(signalkURL, vesselPath)
-		if selfErr == nil && selfLatitude >= -90 && selfLatitude <= 90 && selfLongitude >= -180 && selfLongitude <= 180 {
-			nearby, nearbyErr := fetchSignalKNearbyVessels(signalkURL, vesselsPath, selfLatitude, selfLongitude, now, excludedNames)
+		state, selfErr := fetchSignalKVesselState(signalkURL, vesselPath)
+		if selfErr == nil && state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
+			nearby, nearbyErr := fetchSignalKNearbyVessels(signalkURL, vesselsPath, state.Latitude, state.Longitude, now, excludedNames)
 			if nearbyErr == nil {
 				vessels = nearby
 				source = "signalk"
@@ -192,7 +227,7 @@ func updateSignalKSettingsHandler(c echo.Context) error {
 	signalkURL := buildSignalKURL(address, port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
-	if _, _, _, _, _, _, err := fetchSignalKVesselState(signalkURL, vesselPath); err != nil {
+	if _, err := fetchSignalKVesselState(signalkURL, vesselPath); err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{
 			"error": fmt.Sprintf("unable to connect to SignalK at %s", signalkURL),
 		})
@@ -213,36 +248,48 @@ func updateSignalKSettingsHandler(c echo.Context) error {
 	})
 }
 
-func fetchSignalKVesselState(signalkURL string, vesselPath string) (string, time.Time, float64, float64, float64, float64, error) {
+func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateData, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
+
+	state := vesselStateData{
+		Status:               "Unknown",
+		Datetime:             time.Now().UTC(),
+		Depth:                -1,
+		Latitude:             -1,
+		Longitude:            -1,
+		HeadingTrue:          -1,
+		WindSpeedApparentKts: -1,
+		WindAngleApparentDeg: -1,
+		WindAngleRelativeDeg: -1,
+	}
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get(url)
 	if err != nil {
-		return "", time.Time{}, -1, -1, -1, -1, err
+		return state, err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return "", time.Time{}, -1, -1, -1, -1, fmt.Errorf("signalk returned status %d", response.StatusCode)
+		return state, fmt.Errorf("signalk returned status %d", response.StatusCode)
 	}
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return "", time.Time{}, -1, -1, -1, -1, err
+		return state, err
 	}
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", time.Time{}, -1, -1, -1, -1, err
+		return state, err
 	}
 
-	status := firstNonEmptyString(
+	state.Status = firstNonEmptyString(
 		lookupString(payload, "navigation", "state", "value"),
 		lookupString(payload, "navigation", "state"),
 	)
-	if status == "" {
-		status = "Unknown"
+	if state.Status == "" {
+		state.Status = "Unknown"
 	}
 
 	datetimeString := firstNonEmptyString(
@@ -251,42 +298,85 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (string, time
 		lookupString(payload, "timestamp"),
 	)
 
-	datetime := time.Now().UTC()
 	if datetimeString != "" {
 		parsed, err := time.Parse(time.RFC3339, datetimeString)
 		if err == nil {
-			datetime = parsed.UTC()
+			state.Datetime = parsed.UTC()
 		}
 	}
 
-	depth := lookupNumber(payload, "environment", "depth", "belowTransducer", "value")
-	if depth == -1 {
-		depth = lookupNumber(payload, "environment", "depth", "belowTransducer")
+	state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer", "value")
+	if state.Depth == -1 {
+		state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer")
 	}
 
-	latitude := lookupNumber(payload, "navigation", "position", "value", "latitude")
-	if latitude == -1 {
-		latitude = lookupNumber(payload, "navigation", "position", "latitude")
+	state.Latitude = lookupNumber(payload, "navigation", "position", "value", "latitude")
+	if state.Latitude == -1 {
+		state.Latitude = lookupNumber(payload, "navigation", "position", "latitude")
 	}
 
-	longitude := lookupNumber(payload, "navigation", "position", "value", "longitude")
-	if longitude == -1 {
-		longitude = lookupNumber(payload, "navigation", "position", "longitude")
+	state.Longitude = lookupNumber(payload, "navigation", "position", "value", "longitude")
+	if state.Longitude == -1 {
+		state.Longitude = lookupNumber(payload, "navigation", "position", "longitude")
 	}
 
-	headingTrue := lookupNumber(payload, "navigation", "headingTrue", "value")
-	if headingTrue == -1 {
-		headingTrue = lookupNumber(payload, "navigation", "headingTrue")
+	state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue", "value")
+	if state.HeadingTrue == -1 {
+		state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue")
 	}
 
-	if headingTrue >= 0 {
-		if headingTrue <= 2*math.Pi {
-			headingTrue = headingTrue * 180 / math.Pi
+	if state.HeadingTrue >= 0 {
+		if state.HeadingTrue <= 2*math.Pi {
+			state.HeadingTrue = state.HeadingTrue * 180 / math.Pi
 		}
-		headingTrue = normalizeDegrees(headingTrue)
+		state.HeadingTrue = normalizeDegrees(state.HeadingTrue)
 	}
 
-	return status, datetime, depth, latitude, longitude, headingTrue, nil
+	windSpeedApparent := lookupNumber(payload, "environment", "wind", "speedApparent", "value")
+	if windSpeedApparent == -1 {
+		windSpeedApparent = lookupNumber(payload, "environment", "wind", "speedApparent")
+	}
+	windTimestamp := firstNonEmptyString(
+		lookupString(payload, "environment", "wind", "speedApparent", "timestamp"),
+		lookupString(payload, "environment", "wind", "angleApparent", "timestamp"),
+		lookupString(payload, "environment", "wind", "timestamp"),
+	)
+
+	windDataRecent := isRecentTimestamp(windTimestamp, defaultWindMaxAge)
+	if !windDataRecent {
+		windDataRecent = state.Datetime.After(time.Now().UTC().Add(-defaultWindMaxAge))
+	}
+
+	if windSpeedApparent >= 0 && windDataRecent {
+		state.WindSpeedApparentKts = windSpeedApparent * metersPerSecondToKnots
+	} else {
+		state.WindSpeedApparentKts = 0
+	}
+
+	windAngleApparent := lookupNumber(payload, "environment", "wind", "angleApparent", "value")
+	if windAngleApparent == -1 {
+		windAngleApparent = lookupNumber(payload, "environment", "wind", "angleApparent")
+	}
+	if windAngleApparent != -1 && windDataRecent {
+		if windAngleApparent >= -2*math.Pi && windAngleApparent <= 2*math.Pi {
+			windAngleApparent = windAngleApparent * 180 / math.Pi
+		}
+
+		signedAngle := normalizeSignedDegrees(windAngleApparent)
+		state.WindAngleApparentDeg = normalizeDegrees(signedAngle)
+		state.WindAngleRelativeDeg = math.Abs(signedAngle)
+		if signedAngle < 0 {
+			state.WindSide = "port"
+		} else {
+			state.WindSide = "starboard"
+		}
+	} else {
+		state.WindAngleApparentDeg = 0
+		state.WindAngleRelativeDeg = 0
+		state.WindSide = "starboard"
+	}
+
+	return state, nil
 }
 
 func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
@@ -570,6 +660,15 @@ func normalizeDegrees(value float64) float64 {
 	return normalized
 }
 
+func normalizeSignedDegrees(value float64) float64 {
+	normalized := normalizeDegrees(value)
+	if normalized > 180 {
+		normalized -= 360
+	}
+
+	return normalized
+}
+
 func haversineMeters(lat1 float64, lon1 float64, lat2 float64, lon2 float64) float64 {
 	const earthRadiusMeters = 6371000.0
 
@@ -655,4 +754,115 @@ func matchesExcludedName(candidate string, excludedNames []string) bool {
 	}
 
 	return false
+}
+
+func queryInfluxMaxWindGustKts(window string) float64 {
+	influxURL := trimEnvValue(getEnv("INFLUXDB_URL", ""))
+	org := trimEnvValue(getEnv("INFLUXDB_ORG", ""))
+	bucket := trimEnvValue(getEnv("INFLUXDB_BUCKET", ""))
+	token := trimEnvValue(getEnv("INFLUXDB_TOKEN", ""))
+	measurement := trimEnvValue(getEnv("INFLUX_WIND_MEASUREMENT", "environment.wind.speedApparent"))
+	field := trimEnvValue(getEnv("INFLUX_WIND_FIELD", "value"))
+
+	if influxURL == "" || org == "" || bucket == "" || token == "" {
+		return -1
+	}
+
+	flux := fmt.Sprintf(
+		`from(bucket: %q) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> max(column: "_value") |> keep(columns: ["_value"])`,
+		bucket,
+		window,
+		measurement,
+		field,
+	)
+
+	bodyBytes, err := json.Marshal(map[string]string{
+		"query": flux,
+		"type":  "flux",
+	})
+	if err != nil {
+		return -1
+	}
+
+	queryURL := strings.TrimRight(influxURL, "/") + "/api/v2/query?org=" + url.QueryEscape(org)
+	request, err := http.NewRequest(http.MethodPost, queryURL, strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return -1
+	}
+
+	request.Header.Set("Authorization", "Token "+token)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/csv")
+
+	client := &http.Client{Timeout: 4 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return -1
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return -1
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return -1
+	}
+
+	csvReader := csv.NewReader(strings.NewReader(string(body)))
+	records, err := csvReader.ReadAll()
+	if err != nil {
+		return -1
+	}
+
+	maxMS := -1.0
+	for _, record := range records {
+		if len(record) == 0 || strings.HasPrefix(record[0], "#") {
+			continue
+		}
+
+		valueCandidate := strings.TrimSpace(record[len(record)-1])
+		value, parseErr := parseFloat(valueCandidate)
+		if parseErr == nil {
+			maxMS = value
+		}
+	}
+
+	if maxMS < 0 {
+		return -1
+	}
+
+	return math.Round((maxMS*metersPerSecondToKnots)*10) / 10
+}
+
+func trimEnvValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	trimmed = strings.Trim(trimmed, `"`)
+	return strings.TrimSpace(trimmed)
+}
+
+func parseFloat(value string) (float64, error) {
+	var parsed float64
+	_, err := fmt.Sscanf(value, "%f", &parsed)
+	if err != nil {
+		return 0, err
+	}
+
+	return parsed, nil
+}
+
+func isRecentTimestamp(value string, maxAge time.Duration) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return false
+	}
+
+	age := time.Since(parsed.UTC())
+	return age >= 0 && age <= maxAge
 }

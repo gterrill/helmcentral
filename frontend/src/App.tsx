@@ -36,7 +36,18 @@ function formatHeading(headingTrue: number | null) {
 }
 
 export function App() {
-  const { depth, latitude, longitude, headingTrue } = useVesselState(uiConfig.vesselStateRefreshSeconds)
+  const {
+    depth,
+    latitude,
+    longitude,
+    headingTrue,
+    windSpeedApparentKts,
+    windAngleApparentDeg,
+    windSide,
+    windAngleRelativeDeg,
+    maxGust10mKts,
+    maxGust1hKts,
+  } = useVesselState(uiConfig.vesselStateRefreshSeconds)
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
@@ -46,6 +57,12 @@ export function App() {
         : depth.toFixed(1)
       : '—'
   const depthUnitLabel = isImperialDistance ? 'feet' : 'metres'
+  const awaLabel = windAngleApparentDeg !== null ? `${Math.round(windAngleApparentDeg).toString().padStart(3, '0')}°` : '---°'
+  const windSideLabel = windSide ? windSide.toUpperCase() : '—'
+  const relativeAngleLabel = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : '—'
+  const apparentWindSpeedLabel = windSpeedApparentKts !== null ? Math.round(windSpeedApparentKts).toString() : '—'
+  const gust10mLabel = maxGust10mKts !== null ? `${maxGust10mKts.toFixed(1)} kts` : '—'
+  const gust1hLabel = maxGust1hKts !== null ? `${maxGust1hKts.toFixed(1)} kts` : '—'
 
   return (
     <div className="min-h-screen p-4 md:p-6">
@@ -53,72 +70,85 @@ export function App() {
         <MarineHeader />
 
         <div className="grid gap-4 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur-sm md:grid-cols-[260px_1fr_360px]">
-        <aside className="space-y-4">
-          <Tile title="Depth">
-            <p className="mt-2 font-display text-6xl text-secondary">{depthValue}</p>
-            <p className="text-sm text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</p>
-          </Tile>
-          <Tile title="Position">
-            <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
-            <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
-            <div className="mt-3 rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">{formatHeading(headingTrue)}</div>
-          </Tile>
-          <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
-        </aside>
 
-        <main className="rounded-lg border bg-card p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - Course Up</h1>
-            <Button variant="outline" size="sm">
-              <Compass className="h-4 w-4" />
-              AWA 061°
-            </Button>
-          </div>
-          <div className="grid place-items-center rounded-xl border bg-background/70 p-8">
-            <div className="relative h-[420px] w-[420px] rounded-full border-2 border-border bg-card shadow-inner">
-              <div className="absolute inset-0 grid place-items-center">
-                <div className="text-center">
-                  <p className="font-display text-3xl text-primary">PORT 2°</p>
-                  <p className="font-display text-9xl leading-none text-primary">13</p>
-                  <p className="font-display text-4xl text-muted-foreground">kts</p>
+          <aside className="space-y-4">
+            <Tile title="Depth">
+              <p className="mt-2 font-display text-6xl text-secondary">{depthValue}</p>
+              <p className="text-sm text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</p>
+            </Tile>
+            <Tile title="Position">
+              <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
+              <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
+              <div className="mt-3 rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">{formatHeading(headingTrue)}</div>
+            </Tile>
+            <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
+          </aside>
+
+          <main className="rounded-lg border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - Course Up</h1>
+              <Button variant="outline" size="sm">
+                <Compass className="h-4 w-4" />
+                AWA {awaLabel}
+              </Button>
+            </div>
+            <div className="grid place-items-center rounded-xl border bg-background/70 p-8">
+              <div className="relative h-[420px] w-[420px] rounded-full border-2 border-border bg-card shadow-inner">
+                <div className="absolute inset-0 grid place-items-center">
+                  <div className="text-center">
+                    <p className="font-display text-3xl text-primary">
+                      {windSideLabel} {relativeAngleLabel}
+                    </p>
+                    <p className="font-display text-9xl leading-none text-primary">{apparentWindSpeedLabel}</p>
+                    <p className="font-display text-4xl text-muted-foreground">kts</p>
+                    <div className="mt-6 grid grid-cols-2 gap-2">
+                      <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 10m</p>
+                        <p className="font-display text-xl text-primary">{gust10mLabel}</p>
+                      </div>
+                      <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 1h</p>
+                        <p className="font-display text-xl text-primary">{gust1hLabel}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="absolute left-1/2 top-8 h-[160px] w-[2px] -translate-x-1/2 bg-secondary" />
+              </div>
+            </div>
+          </main>
+
+          <aside className="space-y-4">
+            <Tile title="Battery & Power">
+              <div className="mt-2 flex items-end gap-2">
+                <span className="font-display text-7xl text-primary">68</span>
+                <span className="pb-2 text-3xl">%</span>
+              </div>
+              <p className="text-secondary">+24.8A / +663W</p>
+              <div className="mt-4 space-y-2 text-sm">
+                <div className="flex justify-between rounded-md bg-muted/50 px-3 py-2">
+                  <span>Solar Output</span>
+                  <span className="font-semibold">1868W</span>
+                </div>
+                <div className="flex justify-between rounded-md bg-muted/50 px-3 py-2">
+                  <span>AC Output</span>
+                  <span className="font-semibold">1017W</span>
                 </div>
               </div>
-              <div className="absolute left-1/2 top-8 h-[160px] w-[2px] -translate-x-1/2 bg-secondary" />
-            </div>
-          </div>
-        </main>
-
-        <aside className="space-y-4">
-          <Tile title="Battery & Power">
-            <div className="mt-2 flex items-end gap-2">
-              <span className="font-display text-7xl text-primary">68</span>
-              <span className="pb-2 text-3xl">%</span>
-            </div>
-            <p className="text-secondary">+24.8A / +663W</p>
-            <div className="mt-4 space-y-2 text-sm">
-              <div className="flex justify-between rounded-md bg-muted/50 px-3 py-2">
-                <span>Solar Output</span>
-                <span className="font-semibold">1868W</span>
+            </Tile>
+            <Tile title="Actions">
+              <div className="mt-3 grid gap-2">
+                <Button>
+                  <Sailboat className="h-4 w-4" />
+                  Set Anchor
+                </Button>
+                <Button variant="secondary">
+                  <Waves className="h-4 w-4" />
+                  Drop Here
+                </Button>
               </div>
-              <div className="flex justify-between rounded-md bg-muted/50 px-3 py-2">
-                <span>AC Output</span>
-                <span className="font-semibold">1017W</span>
-              </div>
-            </div>
-          </Tile>
-          <Tile title="Actions">
-            <div className="mt-3 grid gap-2">
-              <Button>
-                <Sailboat className="h-4 w-4" />
-                Set Anchor
-              </Button>
-              <Button variant="secondary">
-                <Waves className="h-4 w-4" />
-                Drop Here
-              </Button>
-            </div>
-          </Tile>
-        </aside>
+            </Tile>
+          </aside>
         </div>
       </div>
     </div>
