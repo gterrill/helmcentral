@@ -9,12 +9,6 @@ export interface WeatherToday {
   wind_speed_kts: number;
   wind_direction: string;
   precipitation_pct: number;
-  current_tide_height_ft: number;
-  tide_direction: string;
-  high_tide_time: string;
-  high_tide_height_ft: number;
-  low_tide_time: string;
-  low_tide_height_ft: number;
 }
 
 const defaultWeather: WeatherToday = {
@@ -26,12 +20,6 @@ const defaultWeather: WeatherToday = {
   wind_speed_kts: -1,
   wind_direction: '—',
   precipitation_pct: -1,
-  current_tide_height_ft: -1,
-  tide_direction: '—',
-  high_tide_time: new Date().toISOString(),
-  high_tide_height_ft: -1,
-  low_tide_time: new Date().toISOString(),
-  low_tide_height_ft: -1,
 };
 
 export function useWeatherToday(refreshIntervalSeconds = 600) {
@@ -72,21 +60,6 @@ export function useWeatherToday(refreshIntervalSeconds = 600) {
           precipitation_pct:
             typeof data.precipitation_pct === 'number' && data.precipitation_pct >= -1
               ? data.precipitation_pct
-              : -1,
-          current_tide_height_ft:
-            typeof data.current_tide_height_ft === 'number' && data.current_tide_height_ft >= -1
-              ? data.current_tide_height_ft
-              : -1,
-          tide_direction: data.tide_direction || '—',
-          high_tide_time: data.high_tide_time || new Date().toISOString(),
-          high_tide_height_ft:
-            typeof data.high_tide_height_ft === 'number' && data.high_tide_height_ft >= -1
-              ? data.high_tide_height_ft
-              : -1,
-          low_tide_time: data.low_tide_time || new Date().toISOString(),
-          low_tide_height_ft:
-            typeof data.low_tide_height_ft === 'number' && data.low_tide_height_ft >= -1
-              ? data.low_tide_height_ft
               : -1,
         };
 

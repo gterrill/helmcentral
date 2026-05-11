@@ -9,6 +9,7 @@ import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useTanksState } from '@/hooks/use-tanks-state'
+import { useTideToday } from '@/hooks/use-tide-today'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { uiConfig } from '@/config/app-config'
@@ -100,6 +101,7 @@ export function App() {
     acLoadsW,
   } = useElectricalState(5)
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
+  const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
     depth !== null
@@ -214,24 +216,24 @@ export function App() {
                   <div>
                     <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Tide Now</p>
                     <p className="mt-1 font-display text-5xl leading-none text-secondary">
-                      {weather.current_tide_height_ft >= 0 ? weather.current_tide_height_ft.toFixed(1) : '—'}
+                      {tide.current_tide_height_ft >= 0 ? tide.current_tide_height_ft.toFixed(1) : '—'}
                     </p>
                     <p className="-mt-1 text-lg font-semibold text-secondary">ft</p>
                     <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-secondary">
                       <ArrowUp className="h-3.5 w-3.5" />
-                      {weather.tide_direction}
+                      {tide.tide_direction}
                     </p>
                   </div>
                   <div className="space-y-2 pt-1 text-sm">
                     <p className="inline-flex items-center gap-1 text-foreground">
                       <ArrowUp className="h-4 w-4 text-secondary" />
-                      High Today {new Date(weather.high_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      <span className="text-muted-foreground">{weather.high_tide_height_ft >= 0 ? `${weather.high_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
+                      High Today {new Date(tide.high_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      <span className="text-muted-foreground">{tide.high_tide_height_ft >= 0 ? `${tide.high_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
                     </p>
                     <p className="inline-flex items-center gap-1 text-foreground">
                       <ArrowDown className="h-4 w-4 text-amber-600" />
-                      Low Today {new Date(weather.low_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      <span className="text-muted-foreground">{weather.low_tide_height_ft >= 0 ? `${weather.low_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
+                      Low Today {new Date(tide.low_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      <span className="text-muted-foreground">{tide.low_tide_height_ft >= 0 ? `${tide.low_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
                     </p>
                   </div>
                 </div>
