@@ -1,12 +1,13 @@
 # Build stage
 FROM node:18-alpine AS builder
 
-WORKDIR /app
+WORKDIR /app/frontend
 
-COPY package*.json ./
+COPY frontend/package*.json ./
 RUN npm install
 
-COPY . .
+COPY frontend/. ./
+COPY settings.yaml /app/settings.yaml
 RUN npm run build
 
 # Production stage
@@ -16,7 +17,7 @@ WORKDIR /app
 
 RUN npm install -g http-server
 
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/frontend/dist ./dist
 
 EXPOSE 5173
 

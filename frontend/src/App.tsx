@@ -1,11 +1,15 @@
 import { Compass, Sailboat, Waves } from 'lucide-react'
 
+import { MarineHeader } from '@/components/marine-header'
 import { Button } from '@/components/ui/button'
 
 export function App() {
   return (
     <div className="min-h-screen p-4 md:p-6">
-      <div className="mx-auto grid max-w-[1500px] gap-4 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur-sm md:grid-cols-[260px_1fr_360px]">
+      <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
+        <MarineHeader />
+
+        <div className="grid gap-4 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur-sm md:grid-cols-[260px_1fr_360px]">
         <aside className="space-y-4">
           <section className="rounded-lg border bg-card p-4">
             <h2 className="font-display text-xs tracking-[0.22em] text-muted-foreground">Depth</h2>
@@ -75,6 +79,7 @@ export function App() {
             </div>
           </section>
         </aside>
+        </div>
       </div>
     </div>
   )
