@@ -69,7 +69,7 @@ export function App() {
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
         <MarineHeader />
 
-        <div className="grid gap-4 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur-sm md:grid-cols-[260px_1fr_360px]">
+        <div className="grid gap-4 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur-sm xl:grid-cols-[260px_minmax(560px,1fr)_320px_320px]">
 
           <aside className="space-y-4">
             <Tile title="Depth">
@@ -117,6 +117,68 @@ export function App() {
               </div>
             </div>
           </main>
+
+          <aside className="space-y-4">
+            <Tile title="Anchor Watch">
+              <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-md bg-muted/50 px-2 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Distance</p>
+                  <p className="font-display text-2xl text-primary">121</p>
+                  <p className="text-[11px] text-muted-foreground">ft</p>
+                </div>
+                <div className="rounded-md bg-muted/50 px-2 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Bearing</p>
+                  <p className="font-display text-2xl text-secondary">72</p>
+                  <p className="text-[11px] text-muted-foreground">deg</p>
+                </div>
+                <div className="rounded-md bg-muted/50 px-2 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Radius</p>
+                  <p className="font-display text-2xl text-secondary">160</p>
+                  <p className="text-[11px] text-muted-foreground">ft</p>
+                </div>
+              </div>
+              <div className="mt-3 rounded-md border bg-background/60 px-3 py-2 text-sm">
+                <p className="text-muted-foreground">Anchor Position</p>
+                <p className="font-mono text-xs">N 25 29.181&apos; W 76 38.213&apos;</p>
+              </div>
+              <div className="mt-3 grid gap-2">
+                <Button variant="secondary">Set Anchor</Button>
+                <Button variant="outline">Drop Here (Use Current GPS)</Button>
+              </div>
+            </Tile>
+
+            <Tile title="Rode & Scope">
+              <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-md bg-muted/50 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Chain Counter</p>
+                  <p className="font-display text-2xl text-primary">122</p>
+                  <p className="text-[11px] text-muted-foreground">ft</p>
+                </div>
+                <div className="rounded-md bg-muted/50 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Drop Deduct</p>
+                  <p className="font-display text-2xl text-primary">5</p>
+                  <p className="text-[11px] text-muted-foreground">ft</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-md border bg-background/60 px-2 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Rode</p>
+                  <p className="font-display text-2xl text-secondary">117</p>
+                  <p className="text-[11px] text-muted-foreground">ft</p>
+                </div>
+                <div className="rounded-md border bg-background/60 px-2 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Total+BOW</p>
+                  <p className="font-display text-2xl text-secondary">17.5</p>
+                  <p className="text-[11px] text-muted-foreground">ft</p>
+                </div>
+                <div className="rounded-md border bg-background/60 px-2 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Scope</p>
+                  <p className="font-display text-2xl text-secondary">6.7</p>
+                  <p className="text-[11px] text-muted-foreground">:1</p>
+                </div>
+              </div>
+            </Tile>
+          </aside>
 
           <aside className="space-y-4">
             <Tile title="Battery & Power">
