@@ -1,4 +1,4 @@
-import { Compass, Sailboat, Waves } from 'lucide-react'
+import { Anchor, Compass, Sailboat, Waves } from 'lucide-react'
 
 import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
@@ -69,9 +69,43 @@ export function App() {
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
         <MarineHeader />
 
-        <div className="grid gap-4 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur-sm xl:grid-cols-[260px_minmax(560px,1fr)_320px_320px]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
 
           <aside className="space-y-4">
+            <section className="rounded-lg border bg-card p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - Course Up</h1>
+                <Button variant="outline" size="sm">
+                  <Compass className="h-4 w-4" />
+                  AWA {awaLabel}
+                </Button>
+              </div>
+              <div className="grid place-items-center rounded-xl border bg-background/70 p-4">
+                <div className="relative h-[300px] w-[300px] rounded-full border-2 border-border bg-card shadow-inner lg:h-[330px] lg:w-[330px]">
+                  <div className="absolute inset-0 grid place-items-center">
+                    <div className="text-center">
+                      <p className="font-display text-2xl text-primary lg:text-3xl">
+                        {windSideLabel} {relativeAngleLabel}
+                      </p>
+                      <p className="font-display text-7xl leading-none text-primary lg:text-8xl">{apparentWindSpeedLabel}</p>
+                      <p className="font-display text-3xl text-muted-foreground">kts</p>
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
+                          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 10m</p>
+                          <p className="font-display text-lg text-primary">{gust10mLabel}</p>
+                        </div>
+                        <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
+                          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 1h</p>
+                          <p className="font-display text-lg text-primary">{gust1hLabel}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="absolute left-1/2 top-8 h-[120px] w-[2px] -translate-x-1/2 bg-secondary lg:h-[135px]" />
+                </div>
+              </div>
+            </section>
+
             <Tile title="Depth">
               <p className="mt-2 font-display text-6xl text-secondary">{depthValue}</p>
               <p className="text-sm text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</p>
@@ -84,42 +118,8 @@ export function App() {
             <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
           </aside>
 
-          <main className="rounded-lg border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - Course Up</h1>
-              <Button variant="outline" size="sm">
-                <Compass className="h-4 w-4" />
-                AWA {awaLabel}
-              </Button>
-            </div>
-            <div className="grid place-items-center rounded-xl border bg-background/70 p-8">
-              <div className="relative h-[420px] w-[420px] rounded-full border-2 border-border bg-card shadow-inner">
-                <div className="absolute inset-0 grid place-items-center">
-                  <div className="text-center">
-                    <p className="font-display text-3xl text-primary">
-                      {windSideLabel} {relativeAngleLabel}
-                    </p>
-                    <p className="font-display text-9xl leading-none text-primary">{apparentWindSpeedLabel}</p>
-                    <p className="font-display text-4xl text-muted-foreground">kts</p>
-                    <div className="mt-6 grid grid-cols-2 gap-2">
-                      <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
-                        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 10m</p>
-                        <p className="font-display text-xl text-primary">{gust10mLabel}</p>
-                      </div>
-                      <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
-                        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 1h</p>
-                        <p className="font-display text-xl text-primary">{gust1hLabel}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="absolute left-1/2 top-8 h-[160px] w-[2px] -translate-x-1/2 bg-secondary" />
-              </div>
-            </div>
-          </main>
-
           <aside className="space-y-4">
-            <Tile title="Anchor Watch">
+            <Tile title="Anchor Watch" icon={<Anchor className="h-3.5 w-3.5" />}>
               <div className="mt-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-md bg-muted/50 px-2 py-2">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Distance</p>
