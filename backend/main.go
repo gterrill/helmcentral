@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -10,6 +12,7 @@ import (
 
 func main() {
 	e := echo.New()
+	port := getEnv("PORT", "8080")
 
 	// Middleware
 	e.Use(middleware.Logger())
@@ -22,10 +25,19 @@ func main() {
 	// Routes
 	e.GET("/api/health", healthCheck)
 
-	log.Printf("Starting server on :8080")
-	if err := e.Start(":8080"); err != nil && err != http.ErrServerClosed {
+	addr := fmt.Sprintf(":%s", port)
+	log.Printf("Starting server on %s", addr)
+	if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("error starting server: %v", err)
 	}
+}
+
+func getEnv(key string, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+
+	return fallback
 }
 
 func healthCheck(c echo.Context) error {

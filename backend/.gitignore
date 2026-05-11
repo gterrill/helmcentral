@@ -12,6 +12,10 @@
 # Dependency cache
 go.sum
 
+# Environment variables
+.env
+.env.local
+
 # IDE
 .vscode/
 .idea/

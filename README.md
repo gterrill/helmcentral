@@ -25,22 +25,42 @@ helmcentral/
   - Real-time data visualization
   - Responsive design
 
-## Quick Start
+## How To Run
 
 ### Prerequisites
 
 - Docker & Docker Compose (recommended)
 - OR: Go 1.22+, Node.js 18+
 
-### Development with Docker Compose
+### Production Mode (Docker)
 
 ```bash
-docker-compose up
+docker compose up --build -d
 ```
 
 - Backend API: http://localhost:8080
 - Frontend Dashboard: http://localhost:5173
-- InfluxDB: http://localhost:8086
+
+To stop:
+
+```bash
+docker compose down
+```
+
+### Development Mode (Docker Profiles)
+
+```bash
+docker compose --profile dev up -d backend-dev frontend-dev
+```
+
+- Backend Dev API: http://localhost:8081
+- Frontend Dev Dashboard (Vite): http://localhost:5174
+
+To stop dev services:
+
+```bash
+docker compose --profile dev down
+```
 
 ### Local Development
 

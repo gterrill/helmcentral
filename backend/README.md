@@ -42,7 +42,14 @@ docker run -p 8080:8080 helmcentral-backend
 
 ## Configuration
 
+Create a `.env` file in the backend directory. See `.env.example` for a template.
+
 Environment variables:
 - `PORT` - Server port (default: 8080)
+- `ENVIRONMENT` - Environment name (development/production)
+- `LOG_LEVEL` - Logging level (debug/info/warn/error)
 - `INFLUXDB_URL` - InfluxDB connection URL
+- `INFLUXDB_ORG` - InfluxDB organization
+- `INFLUXDB_BUCKET` - InfluxDB bucket for time-series data
+- `INFLUXDB_TOKEN` - InfluxDB API token
 - `SIGNALK_URL` - SignalK server URL
