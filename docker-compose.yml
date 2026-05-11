@@ -35,6 +35,9 @@ services:
     volumes:
       - ./backend:/app
       - ./settings.yaml:/app/settings.yaml
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
   frontend-dev:
     profiles: ["dev"]

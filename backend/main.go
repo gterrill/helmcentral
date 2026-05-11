@@ -408,7 +408,7 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 	}
 
 	url := fmt.Sprintf(
-		"https://api.weatherkit.apple.com/v1/weather?latitude=%.4f&longitude=%.4f&dataSets=currentWeather,forecastDaily&timezone=America/Los_Angeles",
+		"https://weatherkit.apple.com/api/v1/weather?latitude=%.4f&longitude=%.4f&dataSets=currentWeather,forecastDaily&timezone=America/Los_Angeles",
 		latitude, longitude,
 	)
 
@@ -431,9 +431,24 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 		return data, fmt.Errorf("WeatherKit API returned %d: %s", resp.StatusCode, string(body))
 	}
 
+	// Log the response status and content type for debugging
+	log.Printf("WeatherKit API status: %d, content-type: %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+
 	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return data, fmt.Errorf("failed to parse response: %v", err)
+		// Read response body for logging
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		if len(bodyBytes) > 500 {
+			log.Printf("WeatherKit API response (first 500 chars): %s", string(bodyBytes[:500]))
+		} else {
+			log.Printf("WeatherKit API response: %s", string(bodyBytes))
+		}
+
+		var result map[string]any
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
+			return data, fmt.Errorf("failed to parse response: %v", err)
+		}
 	}
 
 	// Parse current weather
@@ -496,7 +511,7 @@ func generateWeatherKitJWT(keyID, teamID, serviceID, privateKeyPEM string) (stri
 	claims := jwt.MapClaims{
 		"iss": teamID,
 		"sub": serviceID,
-		"aud": "https://api.weatherkit.apple.com",
+		"aud": "https://weatherkit.apple.com",
 		"iat": now.Unix(),
 		"exp": exp.Unix(),
 	}
