@@ -142,27 +142,29 @@ export function App() {
                 </Button>
               </div>
               <div className="grid place-items-center rounded-xl border bg-background/70 p-4">
-                <div className="relative h-[300px] w-[300px] rounded-full border-2 border-border bg-card shadow-inner lg:h-[330px] lg:w-[330px]">
-                  <div className="absolute inset-0 grid place-items-center">
-                    <div className="text-center">
-                      <p className="font-display text-2xl text-primary lg:text-3xl">
-                        {windSideLabel} {relativeAngleLabel}
-                      </p>
-                      <p className="font-display text-7xl leading-none text-primary lg:text-8xl">{apparentWindSpeedLabel}</p>
-                      <p className="font-display text-3xl text-muted-foreground">kts</p>
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
-                          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 10m</p>
-                          <p className="font-display text-lg text-primary">{gust10mLabel}</p>
-                        </div>
-                        <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
-                          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 1h</p>
-                          <p className="font-display text-lg text-primary">{gust1hLabel}</p>
-                        </div>
+                <div className="w-full max-w-[320px] lg:max-w-[360px]">
+                  <div className="relative mx-auto h-[240px] w-[240px] rounded-full border-2 border-border bg-card shadow-inner lg:h-[280px] lg:w-[280px]">
+                    <div className="absolute inset-0 grid place-items-center">
+                      <div className="text-center">
+                        <p className="font-display text-xl text-primary lg:text-2xl">
+                          {windSideLabel} {relativeAngleLabel}
+                        </p>
+                        <p className="font-display text-6xl leading-none text-primary lg:text-7xl">{apparentWindSpeedLabel}</p>
+                        <p className="font-display text-2xl text-muted-foreground">kts</p>
                       </div>
                     </div>
+                    <div className="absolute left-1/2 top-6 h-[96px] w-[2px] -translate-x-1/2 bg-secondary lg:h-[112px]" />
                   </div>
-                  <div className="absolute left-1/2 top-8 h-[120px] w-[2px] -translate-x-1/2 bg-secondary lg:h-[135px]" />
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 10m</p>
+                      <p className="font-display text-lg text-primary">{gust10mLabel}</p>
+                    </div>
+                    <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 1h</p>
+                      <p className="font-display text-lg text-primary">{gust1hLabel}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
