@@ -1,5 +1,7 @@
 import { Cloud, CloudRain, Sun } from 'lucide-react'
 
+import { Button } from '@/components/ui/button'
+
 interface ForecastDay {
   date: string
   dayName: string
@@ -7,12 +9,16 @@ interface ForecastDay {
   high: number
   low: number
   windSpeed: number
+  windGust: number
   windDirection: string
   precipitation: number
 }
 
 interface ForecastDrawerProps {
   forecast: ForecastDay[]
+  loading?: boolean
+  error?: string | null
+  onRetry?: () => void
   unit: 'imperial' | 'metric'
 }
 
@@ -33,7 +39,32 @@ function getWeatherIcon(condition: string, size: number = 40) {
   return <Cloud {...iconProps} className="text-gray-400" />
 }
 
-export function ForecastDrawer({ forecast, unit }: ForecastDrawerProps) {
+export function ForecastDrawer({ forecast, loading = false, error = null, onRetry, unit }: ForecastDrawerProps) {
+  if (loading) {
+    return (
+      <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
+        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Forecast</p>
+        <p className="mt-2 font-medium text-foreground">Loading latest marine forecast...</p>
+        <p className="mt-1 text-xs text-muted-foreground">Pulling weather and wind guidance for your position</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-8 text-center">
+        <p className="text-xs uppercase tracking-[0.16em] text-amber-700">Forecast Offline</p>
+        <p className="mt-2 font-medium text-foreground">Unable to load forecast data right now</p>
+        <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+        <div className="mt-4 flex justify-center">
+          <Button type="button" size="sm" variant="outline" className="h-9 min-w-24" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   if (!forecast || forecast.length === 0) {
     return <div className="py-8 text-center text-muted-foreground">No forecast data available</div>
   }
@@ -83,6 +114,9 @@ export function ForecastDrawer({ forecast, unit }: ForecastDrawerProps) {
               <div className="mt-2 border-t pt-2 text-[10px]">
                 <p className="font-semibold text-secondary">
                   {Math.round(day.windSpeed)} {windUnit}
+                </p>
+                <p className="text-amber-600">
+                  Gust {Math.round(day.windGust)} {windUnit}
                 </p>
                 <p className="text-muted-foreground">{day.windDirection}</p>
               </div>
@@ -175,8 +209,9 @@ export function ForecastDrawer({ forecast, unit }: ForecastDrawerProps) {
               })}
             </div>
           </div>
-          <div className="mt-2 text-xs text-muted-foreground">
-            Max: {Math.max(...forecast.map(d => d.windSpeed)).toFixed(1)} {windUnit}
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>Max steady: {Math.max(...forecast.map(d => d.windSpeed)).toFixed(1)} {windUnit}</div>
+            <div>Max gust: {Math.max(...forecast.map(d => d.windGust)).toFixed(1)} {windUnit}</div>
           </div>
         </div>
       </div>
@@ -225,6 +260,9 @@ export function ForecastDrawer({ forecast, unit }: ForecastDrawerProps) {
                   </td>
                   <td className="px-3 py-2 text-center font-semibold text-secondary">
                     {Math.round(day.windSpeed)} {windUnit}
+                    <div className="text-[9px] text-amber-600">
+                      Gust {Math.round(day.windGust)} {windUnit}
+                    </div>
                     <div className="text-[9px] text-muted-foreground">
                       {day.windDirection}
                     </div>

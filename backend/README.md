@@ -49,6 +49,9 @@ docker run -p 8080:8080 helmcentral-backend
 ## API Endpoints
 
 - `GET /api/health` - Health check
+- `GET /api/weather-today` - Current weather summary for vessel position
+- `GET /api/weather-forecast` - 6-day daily forecast including sustained wind and gusts
+- `GET /api/tide-today` - Current and upcoming tide conditions
 
 ## Configuration
 

@@ -7,6 +7,7 @@ export interface WeatherToday {
   high_temp_f: number;
   low_temp_f: number;
   wind_speed_kts: number;
+  wind_gust_kts: number;
   wind_direction: string;
   precipitation_pct: number;
 }
@@ -18,6 +19,7 @@ const defaultWeather: WeatherToday = {
   high_temp_f: -1,
   low_temp_f: -1,
   wind_speed_kts: -1,
+  wind_gust_kts: -1,
   wind_direction: '—',
   precipitation_pct: -1,
 };
@@ -55,6 +57,10 @@ export function useWeatherToday(refreshIntervalSeconds = 600) {
           wind_speed_kts:
             typeof data.wind_speed_kts === 'number' && data.wind_speed_kts >= -1
               ? data.wind_speed_kts
+              : -1,
+          wind_gust_kts:
+            typeof data.wind_gust_kts === 'number' && data.wind_gust_kts >= -1
+              ? data.wind_gust_kts
               : -1,
           wind_direction: data.wind_direction || '—',
           precipitation_pct:

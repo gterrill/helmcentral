@@ -11,6 +11,7 @@ import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { useVesselState } from '@/hooks/use-vessel-state'
+import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
@@ -47,31 +48,6 @@ function fahrenheitToCelsius(temp: number) {
   return (temp - 32) * (5 / 9)
 }
 
-// Generate sample forecast data
-function generateForecast() {
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-  const conditions = ['Mostly Clear', 'Clear', 'Overcast', 'Partly Cloudy', 'Cloudy', 'Drizzle']
-  const directions = ['NE', 'E', 'SE', 'S', 'SW', 'W']
-  
-  const today = new Date()
-  
-  return days.map((day, idx) => {
-    const date = new Date(today)
-    date.setDate(date.getDate() + idx)
-    
-    return {
-      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      dayName: day,
-      condition: conditions[idx % conditions.length],
-      high: 72 + Math.random() * 8,
-      low: 62 + Math.random() * 8,
-      windSpeed: 10 + Math.random() * 15,
-      windDirection: directions[idx % directions.length],
-      precipitation: Math.random() > 0.6 ? Math.random() * 80 : 0,
-    }
-  })
-}
-
 export function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [activeDrawerTab, setActiveDrawerTab] = useState('forecast')
@@ -102,6 +78,12 @@ export function App() {
   } = useElectricalState(5)
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
+  const {
+    forecast,
+    loading: forecastLoading,
+    error: forecastError,
+    refetch: refetchForecast,
+  } = useWeatherForecast(uiConfig.vesselStateRefreshSeconds)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
     depth !== null
@@ -203,6 +185,9 @@ export function App() {
                   <div className="text-right">
                     <p className="font-display text-xl leading-none text-secondary">
                       {weather.wind_speed_kts >= 0 ? `${Math.round(weather.wind_speed_kts)} kts` : '— kts'} {weather.wind_direction}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Gust {weather.wind_gust_kts >= 0 ? `${Math.round(weather.wind_gust_kts)} kts` : '— kts'}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {weather.precipitation_pct >= 0 ? `${Math.round(weather.precipitation_pct)}% precip` : '—% precip'}
@@ -439,7 +424,10 @@ export function App() {
         >
           {activeDrawerTab === 'forecast' && (
             <ForecastDrawer
-              forecast={generateForecast()}
+              forecast={forecast}
+              loading={forecastLoading}
+              error={forecastError}
+              onRetry={refetchForecast}
               unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
             />
           )}

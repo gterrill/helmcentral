@@ -72,7 +72,10 @@ func main() {
 	e.GET("/api/tanks-state", tanksState)
 	e.GET("/api/nearby-vessels", nearbyVessels)
 	e.GET("/api/weather-today", weatherToday)
+	e.GET("/api/weather-forecast", weatherForecast)
 	e.GET("/api/tide-today", tideToday)
+	e.GET("/api/caches", listCaches)
+	e.POST("/api/caches/:name/invalidate", invalidateCache)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
 	e.POST("/api/settings/signalk", updateSignalKSettingsHandler)
 
