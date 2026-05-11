@@ -9,11 +9,21 @@ type BoatConfig = {
   }
 }
 
+type UiConfig = {
+  ui?: {
+    vessel_state_refresh_seconds?: number
+  }
+}
+
 const fallbackConfig: BoatConfig = {
   boat: {
     name: 'S/V INGENUITY',
     model: '2018 FP SAONA 47',
   },
+}
+
+const fallbackUiConfig = {
+  vesselStateRefreshSeconds: 10,
 }
 
 function parseBoatConfig(): BoatConfig {
@@ -35,4 +45,22 @@ function parseBoatConfig(): BoatConfig {
   }
 }
 
+function parseUiConfig(): { vesselStateRefreshSeconds: number } {
+  try {
+    const parsed = YAML.parse(settingsRaw) as UiConfig | null
+    const configuredSeconds = parsed?.ui?.vessel_state_refresh_seconds
+
+    if (typeof configuredSeconds === 'number' && configuredSeconds > 0) {
+      return {
+        vesselStateRefreshSeconds: configuredSeconds,
+      }
+    }
+  } catch {
+    // Keep fallback.
+  }
+
+  return fallbackUiConfig
+}
+
 export const appConfig = parseBoatConfig()
+export const uiConfig = parseUiConfig()

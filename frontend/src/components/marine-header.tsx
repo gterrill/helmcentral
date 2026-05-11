@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Circle, Sun } from 'lucide-react'
 
-import { appConfig } from '@/config/app-config'
+import { appConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 
 function formatClock(date: Date) {
@@ -32,6 +32,10 @@ export function MarineHeader() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:8080`
 
   useEffect(() => {
+    const clockTimer = window.setInterval(() => {
+      setNow((current) => new Date(current.getTime() + 1000))
+    }, 1000)
+
     const fetchSignalKSettings = async () => {
       try {
         const response = await fetch(`${apiBaseUrl}/api/settings/signalk`)
@@ -86,11 +90,14 @@ export function MarineHeader() {
 
     void fetchSignalKSettings()
     void fetchVesselState()
-    const timer = window.setInterval(() => {
+    const syncTimer = window.setInterval(() => {
       void fetchVesselState()
-    }, 1000)
+    }, uiConfig.vesselStateRefreshSeconds * 1000)
 
-    return () => window.clearInterval(timer)
+    return () => {
+      window.clearInterval(clockTimer)
+      window.clearInterval(syncTimer)
+    }
   }, [apiBaseUrl])
 
   const currentDate = useMemo(() => formatDate(now).toUpperCase(), [now])
@@ -140,63 +147,72 @@ export function MarineHeader() {
 
   return (
     <header className="rounded-xl border bg-card/90 shadow-sm backdrop-blur-sm">
-      <div className="grid min-h-20 items-center gap-3 px-4 py-3 md:grid-cols-[max-content_max-content_1fr_auto_auto] md:px-6">
-        <div className="flex min-h-10 items-center gap-3 border-border/70 pr-0 md:border-r md:pr-6">
-          <p className="font-display text-[2rem] leading-none tracking-[0.16em] text-primary">{appConfig.boat.name}</p>
-          <p className="pt-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">{statusText}</p>
+      <div className="flex min-h-16 items-center gap-2 overflow-hidden px-2 py-2 md:px-4">
+        <div className="flex min-w-0 flex-[1.3] items-center gap-2 border-border/70 pr-0 md:border-r md:pr-4">
+          <p className="min-w-0 shrink-0 font-display text-[1.28rem] leading-none tracking-[0.12em] text-primary md:text-[1.45rem] lg:text-[1.7rem]">
+            {appConfig.boat.name}
+          </p>
+          <p className="min-w-0 truncate pt-1 text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground md:text-[10px] lg:text-xs">
+            {statusText}
+          </p>
         </div>
 
-        <div className="grid grid-cols-[auto_auto_auto] items-center gap-2 border-border/70 pl-0 md:border-r md:px-6">
-          <div className="flex min-w-[190px] items-center gap-2 rounded-md border border-primary/40 bg-background/80 px-2 py-1.5 text-xs uppercase tracking-[0.12em]">
-            <span className="text-muted-foreground">SignalK</span>
-            <input
-              className="w-full bg-transparent font-semibold text-foreground/80 outline-none"
-              value={signalKAddress}
-              onChange={(event) => setSignalKAddress(event.target.value)}
-              aria-label="SignalK address"
-            />
+        <div className="flex min-w-0 flex-[1.35] flex-col gap-1 border-border/70 pl-0 md:border-r md:px-4">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,0.68fr)_auto] items-center gap-1">
+            <div className="flex min-w-0 items-center gap-1 rounded-md border border-primary/40 bg-background/80 px-2 py-1 text-[10px] uppercase tracking-[0.1em] md:text-[11px]">
+              <span className="text-muted-foreground">SignalK</span>
+              <input
+                className="min-w-0 w-full bg-transparent font-semibold text-foreground/80 outline-none"
+                value={signalKAddress}
+                onChange={(event) => setSignalKAddress(event.target.value)}
+                aria-label="SignalK address"
+              />
+            </div>
+            <div className="flex min-w-0 items-center gap-1 rounded-md border border-border bg-background/80 px-2 py-1 text-[10px] uppercase tracking-[0.1em] md:text-[11px]">
+              <span className="text-muted-foreground">Port</span>
+              <input
+                className="min-w-0 w-full bg-transparent font-semibold text-foreground/80 outline-none"
+                value={signalKPort}
+                onChange={(event) => setSignalKPort(event.target.value)}
+                aria-label="SignalK port"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 whitespace-nowrap border-primary/55 px-3 font-display text-[0.63rem] tracking-[0.14em] text-primary md:px-4 md:text-[0.68rem]"
+              onClick={connectSignalK}
+              disabled={isConnecting}
+            >
+              {isConnecting ? 'Connecting' : 'Connect'}
+            </Button>
           </div>
-          <div className="flex min-w-[100px] items-center gap-2 rounded-md border border-border bg-background/80 px-2 py-1.5 text-xs uppercase tracking-[0.12em]">
-            <span className="text-muted-foreground">Port</span>
-            <input
-              className="w-full bg-transparent font-semibold text-foreground/80 outline-none"
-              value={signalKPort}
-              onChange={(event) => setSignalKPort(event.target.value)}
-              aria-label="SignalK port"
-            />
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 border-primary/55 px-5 font-display text-[0.72rem] tracking-[0.18em] text-primary"
-            onClick={connectSignalK}
-            disabled={isConnecting}
-          >
-            {isConnecting ? 'Connecting' : 'Connect'}
-          </Button>
+
+          {connectError ? (
+            <div className="min-h-4 text-[9px] uppercase tracking-[0.08em] text-destructive md:text-[10px]">
+              {connectError}
+            </div>
+          ) : null}
         </div>
 
-        <div className="hidden items-center gap-2 pl-6 md:flex">
-          <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">VRM:</span>
-          <span className="text-xs font-semibold tracking-[0.1em] text-muted-foreground/90">
-            {connectError ?? 'Connected'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 border-border/70 pl-0 md:border-l md:pl-6">
-          <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <div className="flex items-center gap-1 border-border/70 pl-0 md:border-l md:pl-4">
+          <div className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground md:text-[11px]">
             <Circle className="h-2.5 w-2.5 fill-secondary text-secondary" />
             Live
           </div>
-          <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <div className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground md:text-[11px]">
             <Sun className="h-3.5 w-3.5" />
             Day Mode
           </div>
         </div>
 
-        <div className="flex items-center gap-5 justify-self-end">
-          <span className="hidden text-sm font-semibold uppercase tracking-[0.14em] text-foreground/85 md:inline">{currentDate}</span>
-          <time className="font-display text-5xl leading-none tracking-[0.05em] text-secondary">{formatClock(now)}</time>
+        <div className="flex shrink-0 items-center gap-2 justify-self-end md:gap-3">
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 sm:inline md:text-[11px]">
+            {currentDate}
+          </span>
+          <time className="whitespace-nowrap text-right font-display text-[1.9rem] leading-none tabular-nums tracking-[0.02em] text-secondary sm:w-[7.5rem] sm:text-[2rem] md:w-[8.2rem] md:text-[2.2rem] lg:w-[9rem] lg:text-[2.6rem]">
+            {formatClock(now)}
+          </time>
         </div>
       </div>
     </header>
