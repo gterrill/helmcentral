@@ -39,6 +39,10 @@ function formatHeading(headingTrue: number | null) {
   return `${Math.round(normalized)}° ${direction}`
 }
 
+function fahrenheitToCelsius(temp: number) {
+  return (temp - 32) * (5 / 9)
+}
+
 export function App() {
   const {
     depth,
@@ -150,15 +154,15 @@ export function App() {
                 <div>
                   <div className="flex items-end gap-1">
                     <p className="font-display text-5xl leading-none text-amber-700">
-                      {weather.temperature_f >= 0 ? Math.round(weather.temperature_f) : '—'}
+                      {weather.temperature_f >= 0 ? Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.temperature_f) : weather.temperature_f) : '—'}
                     </p>
-                    <p className="pb-1 text-xl font-semibold text-amber-700">°F</p>
+                    <p className="pb-1 text-xl font-semibold text-amber-700">{uiConfig.distanceUnits === 'metric' ? '°C' : '°F'}</p>
                   </div>
                   <p className="text-sm font-semibold uppercase tracking-[0.1em] text-foreground">
                     {weather.condition}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {weather.high_temp_f >= 0 ? `↑${Math.round(weather.high_temp_f)}°` : '↑—°'} {weather.low_temp_f >= 0 ? `↓${Math.round(weather.low_temp_f)}°` : '↓—°'}
+                    {weather.high_temp_f >= 0 ? `↑${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.high_temp_f) : weather.high_temp_f)}°` : '↑—°'} {weather.low_temp_f >= 0 ? `↓${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.low_temp_f) : weather.low_temp_f)}°` : '↓—°'}
                   </p>
                 </div>
                 <div className="text-right">

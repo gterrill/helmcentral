@@ -11,9 +11,9 @@ type BoatConfig = {
 
 type UiConfig = {
   ui?: {
-    distance_units?: string
     vessel_state_refresh_seconds?: number
   }
+  units?: string
 }
 
 export type DistanceUnits = 'metric' | 'imperial'
@@ -57,10 +57,10 @@ function parseUiConfig(): { vesselStateRefreshSeconds: number; distanceUnits: Di
   try {
     const parsed = YAML.parse(settingsRaw) as UiConfig | null
     const configuredSeconds = parsed?.ui?.vessel_state_refresh_seconds
-    const configuredDistanceUnits = parsed?.ui?.distance_units
+    const configuredUnits = parsed?.units
 
-    if (typeof configuredDistanceUnits === 'string') {
-      const normalized = configuredDistanceUnits.trim().toLowerCase()
+    if (typeof configuredUnits === 'string') {
+      const normalized = configuredUnits.trim().toLowerCase()
       if (normalized === 'metric' || normalized === 'imperial') {
         parsedConfig.distanceUnits = normalized
       }
