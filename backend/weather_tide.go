@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -78,20 +79,29 @@ type jsonCacheDescriptor struct {
 	Name     string
 	EnvKey   string
 	Fallback string
+	TTL      time.Duration
 }
 
 type cacheInfoResponse struct {
 	Name            string  `json:"name"`
 	FilePath        string  `json:"file_path"`
+	TTLSeconds      int64   `json:"ttl_seconds"`
 	Exists          bool    `json:"exists"`
 	SizeBytes       int64   `json:"size_bytes"`
 	ModifiedAt      *string `json:"modified_at"`
 	InMemoryEntries int     `json:"in_memory_entries"`
+	CacheHits       uint64  `json:"cache_hits"`
+	CacheMisses     uint64  `json:"cache_misses"`
 }
 
+var weatherTodayCacheHits uint64
+var weatherTodayCacheMisses uint64
+var tideCacheHits uint64
+var tideCacheMisses uint64
+
 var jsonCacheDescriptors = []jsonCacheDescriptor{
-	{Name: "weather_today", EnvKey: "WEATHER_TODAY_CACHE_FILE", Fallback: defaultWeatherCacheFile},
-	{Name: "tide", EnvKey: "TIDE_CACHE_FILE", Fallback: defaultTideCacheFile},
+	{Name: "weather_today", EnvKey: "WEATHER_TODAY_CACHE_FILE", Fallback: defaultWeatherCacheFile, TTL: weatherTodayCacheTTL},
+	{Name: "tide", EnvKey: "TIDE_CACHE_FILE", Fallback: defaultTideCacheFile, TTL: 72 * time.Hour},
 }
 
 func listCaches(c echo.Context) error {
@@ -113,24 +123,33 @@ func listCaches(c echo.Context) error {
 		}
 
 		inMemoryEntries := 0
+		cacheHits := uint64(0)
+		cacheMisses := uint64(0)
 		switch descriptor.Name {
 		case "weather_today":
 			weatherTodayCacheStore.mu.RLock()
 			inMemoryEntries = len(weatherTodayCacheStore.data)
 			weatherTodayCacheStore.mu.RUnlock()
+			cacheHits = atomic.LoadUint64(&weatherTodayCacheHits)
+			cacheMisses = atomic.LoadUint64(&weatherTodayCacheMisses)
 		case "tide":
 			tideCacheStore.mu.RLock()
 			inMemoryEntries = len(tideCacheStore.data)
 			tideCacheStore.mu.RUnlock()
+			cacheHits = atomic.LoadUint64(&tideCacheHits)
+			cacheMisses = atomic.LoadUint64(&tideCacheMisses)
 		}
 
 		result = append(result, cacheInfoResponse{
 			Name:            descriptor.Name,
 			FilePath:        filePath,
+			TTLSeconds:      int64(descriptor.TTL / time.Second),
 			Exists:          exists,
 			SizeBytes:       sizeBytes,
 			ModifiedAt:      modifiedAt,
 			InMemoryEntries: inMemoryEntries,
+			CacheHits:       cacheHits,
+			CacheMisses:     cacheMisses,
 		})
 	}
 
@@ -455,6 +474,7 @@ func weatherToday(c echo.Context) error {
 			cached, ok := weatherTodayCacheStore.data[cacheKey]
 			weatherTodayCacheStore.mu.RUnlock()
 			if ok && time.Since(cached.cachedAt) < weatherTodayCacheTTL {
+				atomic.AddUint64(&weatherTodayCacheHits, 1)
 				state = cached.state
 				state.Datetime = time.Now().UTC()
 				response := weatherTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct}
@@ -464,6 +484,8 @@ func weatherToday(c echo.Context) error {
 				}
 				return respondJSONWithETag(c, http.StatusOK, etag, response)
 			}
+
+			atomic.AddUint64(&weatherTodayCacheMisses, 1)
 
 			fetchedWeather := false
 			weather, weatherErr := fetchWeatherKitData(vesselState.Latitude, vesselState.Longitude)
@@ -920,10 +942,12 @@ func fetchStormGlassTideData(latitude, longitude float64) (currentHeight float64
 	tideCacheStore.mu.RLock()
 	if cached, ok := tideCacheStore.data[cacheKey]; ok {
 		tideCacheStore.mu.RUnlock()
+		atomic.AddUint64(&tideCacheHits, 1)
 		log.Printf("Using cached tide data for %s", cacheKey)
 		return cached.currentHeight, cached.direction, cached.highTime, cached.highHeight, cached.lowTime, cached.lowHeight, nil
 	}
 	tideCacheStore.mu.RUnlock()
+	atomic.AddUint64(&tideCacheMisses, 1)
 
 	apiKey := getEnv("STORMGLASS_API_KEY", "")
 	if apiKey == "" {

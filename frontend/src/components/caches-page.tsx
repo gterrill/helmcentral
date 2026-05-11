@@ -6,10 +6,13 @@ import { Tile } from '@/components/ui/tile'
 interface CacheInfo {
   name: string
   file_path: string
+  ttl_seconds: number
   exists: boolean
   size_bytes: number
   modified_at: string | null
   in_memory_entries: number
+  cache_hits: number
+  cache_misses: number
 }
 
 function formatBytes(bytes: number) {
@@ -26,6 +29,26 @@ function formatBytes(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatTTL(ttlSeconds: number) {
+  if (ttlSeconds <= 0) {
+    return '—'
+  }
+
+  const hours = Math.floor(ttlSeconds / 3600)
+  const minutes = Math.floor((ttlSeconds % 3600) / 60)
+  const seconds = ttlSeconds % 60
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
+  }
+
+  if (minutes > 0) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+  }
+
+  return `${seconds}s`
 }
 
 export function AdminPage() {
@@ -111,8 +134,10 @@ export function AdminPage() {
                   <tr className="bg-muted/30 text-left uppercase tracking-[0.12em] text-muted-foreground">
                     <th className="px-3 py-2">Cache</th>
                     <th className="px-3 py-2">File</th>
+                    <th className="px-3 py-2">TTL</th>
                     <th className="px-3 py-2">State</th>
                     <th className="px-3 py-2">Entries</th>
+                    <th className="px-3 py-2">Hit / Miss</th>
                     <th className="px-3 py-2">Updated</th>
                     <th className="px-3 py-2 text-right">Action</th>
                   </tr>
@@ -120,13 +145,13 @@ export function AdminPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
+                      <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
                         Loading caches...
                       </td>
                     </tr>
                   ) : caches.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
+                      <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
                         No caches found.
                       </td>
                     </tr>
@@ -135,10 +160,14 @@ export function AdminPage() {
                       <tr key={cache.name} className="border-t border-border/70">
                         <td className="px-3 py-3 font-semibold text-foreground">{cache.name}</td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{cache.file_path}</td>
+                        <td className="px-3 py-3 text-muted-foreground">{formatTTL(cache.ttl_seconds)}</td>
                         <td className="px-3 py-3 text-muted-foreground">
                           {cache.exists ? `Present (${formatBytes(cache.size_bytes)})` : 'Missing'}
                         </td>
                         <td className="px-3 py-3 text-muted-foreground">{cache.in_memory_entries}</td>
+                        <td className="px-3 py-3 text-muted-foreground">
+                          {cache.cache_hits} / {cache.cache_misses}
+                        </td>
                         <td className="px-3 py-3 text-muted-foreground">
                           {cache.modified_at ? new Date(cache.modified_at).toLocaleString() : '—'}
                         </td>
