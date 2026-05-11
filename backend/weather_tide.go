@@ -563,7 +563,7 @@ func weatherForecast(c echo.Context) error {
 }
 
 func tideToday(c echo.Context) error {
-	state := tideTodayData{Datetime: time.Now().UTC(), CurrentTideHeightFt: 1.5, TideDirection: "Rising", HighTideTime: time.Now().Add(12*time.Hour + 57*time.Minute), HighTideHeightFt: 1.9, LowTideTime: time.Now().Add(19*time.Hour + 11*time.Minute), LowTideHeightFt: -0.1}
+	state := tideTodayData{Datetime: time.Now().UTC(), CurrentTideHeightFt: 0, TideDirection: "—", HighTideTime: time.Time{}, HighTideHeightFt: 0, LowTideTime: time.Time{}, LowTideHeightFt: 0}
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	address, port, err := loadSignalKSettings(settingsPath)
