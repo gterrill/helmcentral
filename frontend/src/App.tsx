@@ -1,6 +1,8 @@
 import { Compass, Sailboat, Waves } from 'lucide-react'
 
 import { MarineHeader } from '@/components/marine-header'
+import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
+import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
@@ -35,6 +37,15 @@ function formatHeading(headingTrue: number | null) {
 
 export function App() {
   const { depth, latitude, longitude, headingTrue } = useVesselState(uiConfig.vesselStateRefreshSeconds)
+  const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
+  const isImperialDistance = uiConfig.distanceUnits === 'imperial'
+  const depthValue =
+    depth !== null
+      ? isImperialDistance
+        ? (depth * 3.28084).toFixed(1)
+        : depth.toFixed(1)
+      : '—'
+  const depthUnitLabel = isImperialDistance ? 'feet' : 'metres'
 
   return (
     <div className="min-h-screen p-4 md:p-6">
@@ -44,14 +55,15 @@ export function App() {
         <div className="grid gap-4 rounded-xl border bg-card/80 p-4 shadow-sm backdrop-blur-sm md:grid-cols-[260px_1fr_360px]">
         <aside className="space-y-4">
           <Tile title="Depth">
-            <p className="mt-2 font-display text-6xl text-secondary">{depth !== null ? depth.toFixed(1) : '—'}</p>
-            <p className="text-sm text-muted-foreground">{depth !== null ? 'metres' : 'unavailable'}</p>
+            <p className="mt-2 font-display text-6xl text-secondary">{depthValue}</p>
+            <p className="text-sm text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</p>
           </Tile>
           <Tile title="Position">
             <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
             <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
             <div className="mt-3 rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">{formatHeading(headingTrue)}</div>
           </Tile>
+          <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
         </aside>
 
         <main className="rounded-lg border bg-card p-4">

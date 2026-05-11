@@ -5,4 +5,5 @@ signalk:
     address: 100.103.214.1
     port: 3000
 ui:
+    distance_units: metric
     vessel_state_refresh_seconds: 10

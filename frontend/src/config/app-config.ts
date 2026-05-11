@@ -11,9 +11,12 @@ type BoatConfig = {
 
 type UiConfig = {
   ui?: {
+    distance_units?: string
     vessel_state_refresh_seconds?: number
   }
 }
+
+export type DistanceUnits = 'metric' | 'imperial'
 
 const fallbackConfig: BoatConfig = {
   boat: {
@@ -23,6 +26,7 @@ const fallbackConfig: BoatConfig = {
 }
 
 const fallbackUiConfig = {
+  distanceUnits: 'metric' as DistanceUnits,
   vesselStateRefreshSeconds: 10,
 }
 
@@ -45,21 +49,31 @@ function parseBoatConfig(): BoatConfig {
   }
 }
 
-function parseUiConfig(): { vesselStateRefreshSeconds: number } {
+function parseUiConfig(): { vesselStateRefreshSeconds: number; distanceUnits: DistanceUnits } {
+  const parsedConfig = {
+    ...fallbackUiConfig,
+  }
+
   try {
     const parsed = YAML.parse(settingsRaw) as UiConfig | null
     const configuredSeconds = parsed?.ui?.vessel_state_refresh_seconds
+    const configuredDistanceUnits = parsed?.ui?.distance_units
+
+    if (typeof configuredDistanceUnits === 'string') {
+      const normalized = configuredDistanceUnits.trim().toLowerCase()
+      if (normalized === 'metric' || normalized === 'imperial') {
+        parsedConfig.distanceUnits = normalized
+      }
+    }
 
     if (typeof configuredSeconds === 'number' && configuredSeconds > 0) {
-      return {
-        vesselStateRefreshSeconds: configuredSeconds,
-      }
+      parsedConfig.vesselStateRefreshSeconds = configuredSeconds
     }
   } catch {
     // Keep fallback.
   }
 
-  return fallbackUiConfig
+  return parsedConfig
 }
 
 export const appConfig = parseBoatConfig()

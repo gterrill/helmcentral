@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ func main() {
 	// Routes
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
+	e.GET("/api/nearby-vessels", nearbyVessels)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
 	e.POST("/api/settings/signalk", updateSignalKSettingsHandler)
 
@@ -102,6 +104,51 @@ func vesselState(c echo.Context) error {
 		"longitude":    longitude,
 		"heading_true": headingTrue,
 		"source":       source,
+	})
+}
+
+type nearbyVessel struct {
+	Name       string   `json:"name"`
+	RangeFt    int      `json:"range_ft"`
+	AgeSeconds int      `json:"age_seconds"`
+	SogKnots   *float64 `json:"sog_knots,omitempty"`
+}
+
+func nearbyVessels(c echo.Context) error {
+	source := "backend-fallback"
+	now := time.Now().UTC()
+	vessels := []nearbyVessel{}
+
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	address, port, err := loadSignalKSettings(settingsPath)
+	if err != nil {
+		address = defaultSignalKAddress
+		port = defaultSignalKPort
+	}
+	ownVesselName := loadBoatName(settingsPath)
+
+	signalkURL := buildSignalKURL(address, port)
+	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
+	vesselsPath := getEnv("SIGNALK_VESSELS_PATH", "/signalk/v1/api/vessels")
+
+	if signalkURL != "" {
+		signalkSelfName := fetchSignalKSelfName(signalkURL, vesselPath)
+		excludedNames := []string{ownVesselName, signalkSelfName}
+
+		_, _, _, selfLatitude, selfLongitude, _, selfErr := fetchSignalKVesselState(signalkURL, vesselPath)
+		if selfErr == nil && selfLatitude >= -90 && selfLatitude <= 90 && selfLongitude >= -180 && selfLongitude <= 180 {
+			nearby, nearbyErr := fetchSignalKNearbyVessels(signalkURL, vesselsPath, selfLatitude, selfLongitude, now, excludedNames)
+			if nearbyErr == nil {
+				vessels = nearby
+				source = "signalk"
+			}
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"datetime": now.Format(time.RFC3339),
+		"source":   source,
+		"vessels":  vessels,
 	})
 }
 
@@ -240,6 +287,113 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (string, time
 	}
 
 	return status, datetime, depth, latitude, longitude, headingTrue, nil
+}
+
+func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
+	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselsPath, "/")
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("signalk returned status %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+
+	vessels := make([]nearbyVessel, 0, len(payload))
+	for vesselID, raw := range payload {
+		vesselMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		if vesselID == "self" {
+			continue
+		}
+
+		latitude := lookupNumber(vesselMap, "navigation", "position", "value", "latitude")
+		if latitude == -1 {
+			latitude = lookupNumber(vesselMap, "navigation", "position", "latitude")
+		}
+
+		longitude := lookupNumber(vesselMap, "navigation", "position", "value", "longitude")
+		if longitude == -1 {
+			longitude = lookupNumber(vesselMap, "navigation", "position", "longitude")
+		}
+
+		if latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {
+			continue
+		}
+
+		name := firstNonEmptyString(
+			lookupString(vesselMap, "name"),
+			lookupString(vesselMap, "design", "name"),
+		)
+		if name == "" {
+			name = compactVesselID(vesselID)
+		}
+		if matchesExcludedName(name, excludedNames) {
+			continue
+		}
+
+		rangeFeet := int(math.Round(haversineMeters(selfLatitude, selfLongitude, latitude, longitude) * 3.28084))
+		if rangeFeet < 30 {
+			continue
+		}
+
+		ageSeconds := 0
+		timestamp := firstNonEmptyString(
+			lookupString(vesselMap, "navigation", "position", "timestamp"),
+			lookupString(vesselMap, "navigation", "position", "value", "timestamp"),
+			lookupString(vesselMap, "timestamp"),
+		)
+		if timestamp != "" {
+			parsed, parseErr := time.Parse(time.RFC3339, timestamp)
+			if parseErr == nil {
+				delta := int(now.Sub(parsed.UTC()).Seconds())
+				if delta > 0 {
+					ageSeconds = delta
+				}
+			}
+		}
+
+		var sogKnots *float64
+		sog := lookupNumber(vesselMap, "navigation", "speedOverGround", "value")
+		if sog >= 0 {
+			knots := math.Round((sog*1.943844)*10) / 10
+			sogKnots = &knots
+		}
+
+		vessels = append(vessels, nearbyVessel{
+			Name:       strings.ToUpper(name),
+			RangeFt:    rangeFeet,
+			AgeSeconds: ageSeconds,
+			SogKnots:   sogKnots,
+		})
+	}
+
+	sort.Slice(vessels, func(i int, j int) bool {
+		return vessels[i].RangeFt < vessels[j].RangeFt
+	})
+
+	if len(vessels) > 10 {
+		vessels = vessels[:10]
+	}
+
+	return vessels, nil
 }
 
 func lookupString(payload map[string]any, keys ...string) string {
@@ -414,4 +568,91 @@ func normalizeDegrees(value float64) float64 {
 	}
 
 	return normalized
+}
+
+func haversineMeters(lat1 float64, lon1 float64, lat2 float64, lon2 float64) float64 {
+	const earthRadiusMeters = 6371000.0
+
+	lat1Rad := lat1 * math.Pi / 180
+	lon1Rad := lon1 * math.Pi / 180
+	lat2Rad := lat2 * math.Pi / 180
+	lon2Rad := lon2 * math.Pi / 180
+
+	deltaLat := lat2Rad - lat1Rad
+	deltaLon := lon2Rad - lon1Rad
+
+	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) + math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+
+	return earthRadiusMeters * c
+}
+
+func compactVesselID(vesselID string) string {
+	trimmed := strings.TrimSpace(vesselID)
+	if trimmed == "" {
+		return "UNKNOWN"
+	}
+
+	segments := strings.Split(trimmed, ":")
+	return segments[len(segments)-1]
+}
+
+func loadBoatName(settingsPath string) string {
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return ""
+	}
+
+	boatMap, ok := settings["boat"].(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	name, _ := boatMap["name"].(string)
+	return strings.TrimSpace(name)
+}
+
+func fetchSignalKSelfName(signalkURL string, vesselPath string) string {
+	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(url)
+	if err != nil {
+		return ""
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return ""
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return ""
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(firstNonEmptyString(
+		lookupString(payload, "name"),
+		lookupString(payload, "design", "name"),
+	))
+}
+
+func matchesExcludedName(candidate string, excludedNames []string) bool {
+	trimmedCandidate := strings.TrimSpace(candidate)
+	if trimmedCandidate == "" {
+		return false
+	}
+
+	for _, excluded := range excludedNames {
+		if excluded != "" && strings.EqualFold(trimmedCandidate, strings.TrimSpace(excluded)) {
+			return true
+		}
+	}
+
+	return false
 }
