@@ -1,8 +1,11 @@
 import { Anchor, ArrowDown, ArrowUp, CloudSun, Compass, Sailboat, Waves, X } from 'lucide-react'
+import { useState } from 'react'
 
 import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { TanksTile } from '@/components/tanks-tile'
+import { BottomDrawer } from '@/components/ui/bottom-drawer'
+import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useTanksState } from '@/hooks/use-tanks-state'
@@ -43,7 +46,34 @@ function fahrenheitToCelsius(temp: number) {
   return (temp - 32) * (5 / 9)
 }
 
+// Generate sample forecast data
+function generateForecast() {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+  const conditions = ['Mostly Clear', 'Clear', 'Overcast', 'Partly Cloudy', 'Cloudy', 'Drizzle']
+  const directions = ['NE', 'E', 'SE', 'S', 'SW', 'W']
+  
+  const today = new Date()
+  
+  return days.map((day, idx) => {
+    const date = new Date(today)
+    date.setDate(date.getDate() + idx)
+    
+    return {
+      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      dayName: day,
+      condition: conditions[idx % conditions.length],
+      high: 72 + Math.random() * 8,
+      low: 62 + Math.random() * 8,
+      windSpeed: 10 + Math.random() * 15,
+      windDirection: directions[idx % directions.length],
+      precipitation: Math.random() > 0.6 ? Math.random() * 80 : 0,
+    }
+  })
+}
+
 export function App() {
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const [activeDrawerTab, setActiveDrawerTab] = useState('forecast')
   const {
     depth,
     latitude,
@@ -146,63 +176,65 @@ export function App() {
               <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
               <div className="mt-3 rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">{formatHeading(headingTrue)}</div>
             </Tile>
-            <Tile title="Today & Now">
-              <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-3">
-                <div className="grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-amber-600">
-                  <CloudSun className="h-7 w-7" />
-                </div>
-                <div>
-                  <div className="flex items-end gap-1">
-                    <p className="font-display text-5xl leading-none text-amber-700">
-                      {weather.temperature_f >= 0 ? Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.temperature_f) : weather.temperature_f) : '—'}
-                    </p>
-                    <p className="pb-1 text-xl font-semibold text-amber-700">{uiConfig.distanceUnits === 'metric' ? '°C' : '°F'}</p>
+            <div onClick={() => setIsDrawerOpen(true)} className="cursor-pointer transition-opacity hover:opacity-80">
+              <Tile title="Today & Now">
+                <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                  <div className="grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-amber-600">
+                    <CloudSun className="h-7 w-7" />
                   </div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.1em] text-foreground">
-                    {weather.condition}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {weather.high_temp_f >= 0 ? `↑${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.high_temp_f) : weather.high_temp_f)}°` : '↑—°'} {weather.low_temp_f >= 0 ? `↓${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.low_temp_f) : weather.low_temp_f)}°` : '↓—°'}
-                  </p>
+                  <div>
+                    <div className="flex items-end gap-1">
+                      <p className="font-display text-5xl leading-none text-amber-700">
+                        {weather.temperature_f >= 0 ? Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.temperature_f) : weather.temperature_f) : '—'}
+                      </p>
+                      <p className="pb-1 text-xl font-semibold text-amber-700">{uiConfig.distanceUnits === 'metric' ? '°C' : '°F'}</p>
+                    </div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.1em] text-foreground">
+                      {weather.condition}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {weather.high_temp_f >= 0 ? `↑${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.high_temp_f) : weather.high_temp_f)}°` : '↑—°'} {weather.low_temp_f >= 0 ? `↓${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.low_temp_f) : weather.low_temp_f)}°` : '↓—°'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-display text-xl leading-none text-secondary">
+                      {weather.wind_speed_kts >= 0 ? `${Math.round(weather.wind_speed_kts)} kts` : '— kts'} {weather.wind_direction}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {weather.precipitation_pct >= 0 ? `${Math.round(weather.precipitation_pct)}% precip` : '—% precip'}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="font-display text-xl leading-none text-secondary">
-                    {weather.wind_speed_kts >= 0 ? `${Math.round(weather.wind_speed_kts)} kts` : '— kts'} {weather.wind_direction}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {weather.precipitation_pct >= 0 ? `${Math.round(weather.precipitation_pct)}% precip` : '—% precip'}
-                  </p>
-                </div>
-              </div>
 
-              <div className="my-3 h-px bg-border/70" />
+                <div className="my-3 h-px bg-border/70" />
 
-              <div className="grid grid-cols-[auto_1fr] gap-3">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Tide Now</p>
-                  <p className="mt-1 font-display text-5xl leading-none text-secondary">
-                    {weather.current_tide_height_ft >= 0 ? weather.current_tide_height_ft.toFixed(1) : '—'}
-                  </p>
-                  <p className="-mt-1 text-lg font-semibold text-secondary">ft</p>
-                  <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-secondary">
-                    <ArrowUp className="h-3.5 w-3.5" />
-                    {weather.tide_direction}
-                  </p>
+                <div className="grid grid-cols-[auto_1fr] gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Tide Now</p>
+                    <p className="mt-1 font-display text-5xl leading-none text-secondary">
+                      {weather.current_tide_height_ft >= 0 ? weather.current_tide_height_ft.toFixed(1) : '—'}
+                    </p>
+                    <p className="-mt-1 text-lg font-semibold text-secondary">ft</p>
+                    <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-secondary">
+                      <ArrowUp className="h-3.5 w-3.5" />
+                      {weather.tide_direction}
+                    </p>
+                  </div>
+                  <div className="space-y-2 pt-1 text-sm">
+                    <p className="inline-flex items-center gap-1 text-foreground">
+                      <ArrowUp className="h-4 w-4 text-secondary" />
+                      High Today {new Date(weather.high_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      <span className="text-muted-foreground">{weather.high_tide_height_ft >= 0 ? `${weather.high_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
+                    </p>
+                    <p className="inline-flex items-center gap-1 text-foreground">
+                      <ArrowDown className="h-4 w-4 text-amber-600" />
+                      Low Today {new Date(weather.low_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      <span className="text-muted-foreground">{weather.low_tide_height_ft >= 0 ? `${weather.low_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-2 pt-1 text-sm">
-                  <p className="inline-flex items-center gap-1 text-foreground">
-                    <ArrowUp className="h-4 w-4 text-secondary" />
-                    High Today {new Date(weather.high_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                    <span className="text-muted-foreground">{weather.high_tide_height_ft >= 0 ? `${weather.high_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
-                  </p>
-                  <p className="inline-flex items-center gap-1 text-foreground">
-                    <ArrowDown className="h-4 w-4 text-amber-600" />
-                    Low Today {new Date(weather.low_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                    <span className="text-muted-foreground">{weather.low_tide_height_ft >= 0 ? `${weather.low_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
-                  </p>
-                </div>
-              </div>
-            </Tile>
+              </Tile>
+            </div>
           </aside>
 
           <aside className="space-y-4">
@@ -387,6 +419,33 @@ export function App() {
             <TanksTile tanks={tanks} loading={tanksLoading} />
           </aside>
         </div>
+
+        {/* Bottom Drawers */}
+        <BottomDrawer
+          isOpen={isDrawerOpen}
+          onClose={() => setIsDrawerOpen(false)}
+          title="Forecast"
+          tabs={[
+            { id: 'forecast', label: 'Forecast' },
+            { id: 'tides', label: 'Tides' },
+            { id: 'wind', label: 'Wind' },
+          ]}
+          activeTab={activeDrawerTab}
+          onTabChange={setActiveDrawerTab}
+        >
+          {activeDrawerTab === 'forecast' && (
+            <ForecastDrawer
+              forecast={generateForecast()}
+              unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
+            />
+          )}
+          {activeDrawerTab === 'tides' && (
+            <div className="py-8 text-center text-muted-foreground">Tide details coming soon</div>
+          )}
+          {activeDrawerTab === 'wind' && (
+            <div className="py-8 text-center text-muted-foreground">Wind details coming soon</div>
+          )}
+        </BottomDrawer>
       </div>
     </div>
   )
