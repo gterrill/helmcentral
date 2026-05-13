@@ -17,6 +17,7 @@ const (
 	defaultSignalKPort     = 3000
 	metersPerSecondToKnots = 1.943844
 	defaultWindMaxAge      = 5 * time.Minute
+	defaultHouseBatteryCapacityAh = 1440
 )
 
 type vesselStateData struct {
@@ -35,6 +36,7 @@ type vesselStateData struct {
 type electricalStateData struct {
 	Datetime          time.Time
 	BatterySocPercent float64
+	BatteryCapacityAh float64
 	ChargingCurrentA  float64
 	ChargingPowerW    float64
 	SolarOutputW      float64
@@ -166,6 +168,7 @@ func electricalState(c echo.Context) error {
 	state := electricalStateData{
 		Datetime:          time.Now().UTC(),
 		BatterySocPercent: -1,
+		BatteryCapacityAh: -1,
 		ChargingCurrentA:  -1,
 		ChargingPowerW:    -1,
 		SolarOutputW:      -1,
@@ -198,6 +201,7 @@ func electricalState(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"datetime":            state.Datetime.Format(time.RFC3339),
 		"battery_soc_percent": state.BatterySocPercent,
+		"battery_capacity_ah": state.BatteryCapacityAh,
 		"charging_current_a":  state.ChargingCurrentA,
 		"charging_power_w":    state.ChargingPowerW,
 		"solar_output_w":      state.SolarOutputW,

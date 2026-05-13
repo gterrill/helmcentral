@@ -178,7 +178,7 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electricalStateData, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
 
-	state := electricalStateData{Datetime: time.Now().UTC(), BatterySocPercent: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1}
+	state := electricalStateData{Datetime: time.Now().UTC(), BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1}
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get(url)
@@ -218,6 +218,33 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 			soc *= 100
 		}
 		state.BatterySocPercent = math.Max(0, math.Min(100, roundTo1(soc)))
+	}
+
+	batteryCapacityAh := lookupFirstNumber(
+		payload,
+		[]string{"electrical", "batteries", "house", "capacity", "nominal", "value"},
+		[]string{"electrical", "batteries", "house", "capacity", "nominal"},
+		[]string{"electrical", "batteries", "service", "capacity", "nominal", "value"},
+		[]string{"electrical", "batteries", "service", "capacity", "nominal"},
+		[]string{"electrical", "batteries", "house", "capacity", "total", "value"},
+		[]string{"electrical", "batteries", "house", "capacity", "total"},
+		[]string{"electrical", "batteries", "service", "capacity", "total", "value"},
+		[]string{"electrical", "batteries", "service", "capacity", "total"},
+	)
+	if batteryCapacityAh == -1 {
+		batteryCapacityAh = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"capacity", "nominal", "value"})
+	}
+	if batteryCapacityAh == -1 {
+		batteryCapacityAh = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"capacity", "total", "value"})
+	}
+	if batteryCapacityAh == -1 {
+		batteryCapacityAh = loadHouseBatteryCapacityAh(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	}
+	if batteryCapacityAh == -1 {
+		batteryCapacityAh = defaultHouseBatteryCapacityAh
+	}
+	if batteryCapacityAh > 0 {
+		state.BatteryCapacityAh = roundTo1(batteryCapacityAh)
 	}
 
 	batteryVoltage := lookupFirstNumber(payload, []string{"electrical", "venus", "batteryVoltage", "value"}, []string{"electrical", "venus", "batteryVoltage"}, []string{"electrical", "batteries", "house", "voltage", "value"}, []string{"electrical", "batteries", "house", "voltage"}, []string{"electrical", "batteries", "service", "voltage", "value"}, []string{"electrical", "batteries", "service", "voltage"})
@@ -817,6 +844,24 @@ func coercePort(value any) int {
 	return 0
 }
 
+func coerceFloat(value any) float64 {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case float64:
+		return typed
+	case string:
+		var parsed float64
+		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%f", &parsed); err == nil {
+			return parsed
+		}
+	}
+
+	return -1
+}
+
 func normalizeDegrees(value float64) float64 {
 	normalized := math.Mod(value, 360)
 	if normalized < 0 {
@@ -870,6 +915,25 @@ func loadBoatName(settingsPath string) string {
 	}
 	name, _ := boatMap["name"].(string)
 	return strings.TrimSpace(name)
+}
+
+func loadHouseBatteryCapacityAh(settingsPath string) float64 {
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return -1
+	}
+
+	boatMap, ok := settings["boat"].(map[string]any)
+	if !ok {
+		return -1
+	}
+
+	capacity := coerceFloat(boatMap["house_battery_capacity_ah"])
+	if capacity <= 0 {
+		return -1
+	}
+
+	return capacity
 }
 
 func fetchSignalKSelfName(signalkURL string, vesselPath string) string {

@@ -48,6 +48,18 @@ function fahrenheitToCelsius(temp: number) {
   return (temp - 32) * (5 / 9)
 }
 
+function formatTimeToGo(hours: number | null) {
+  if (hours === null || !Number.isFinite(hours) || hours < 0) {
+    return '—'
+  }
+
+  const totalMinutes = Math.max(0, Math.round(hours * 60))
+  const hh = Math.floor(totalMinutes / 60)
+  const mm = totalMinutes % 60
+
+  return `~${hh}h ${mm.toString().padStart(2, '0')}m to full`
+}
+
 export function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [activeDrawerTab, setActiveDrawerTab] = useState('forecast')
@@ -75,6 +87,8 @@ export function App() {
     dc12vCurrentA,
     dc24vVoltageV,
     acLoadsW,
+    chargeRatePercentPerHour,
+    timeToFullHours,
   } = useElectricalState(5)
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
@@ -108,6 +122,8 @@ export function App() {
   const dc12vCurrentLabel = dc12vCurrentA !== null ? dc12vCurrentA.toFixed(1) : '—'
   const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
   const acLoadsLabel = acLoadsW !== null ? `${Math.round(acLoadsW)}W` : '—'
+  const chargeRateLabel = chargeRatePercentPerHour !== null ? `+${chargeRatePercentPerHour.toFixed(1)}%/hr` : '—'
+  const timeToGoLabel = formatTimeToGo(timeToFullHours)
 
   return (
     <div className="min-h-screen p-4 pb-20 md:p-6 md:pb-24">
@@ -383,7 +399,9 @@ export function App() {
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Time To Go / Charge Rate</p>
-                <p className="mt-1 font-display text-4xl leading-none text-secondary">~4h 38m to full +6.7%/hr</p>
+                <p className="mt-1 font-display text-4xl leading-none text-secondary">
+                  {timeToGoLabel} {chargeRateLabel}
+                </p>
               </div>
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
