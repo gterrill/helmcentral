@@ -1,19 +1,22 @@
-import { Anchor, ArrowDown, ArrowUp, CloudSun, Compass, Sailboat, Waves, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, CloudSun, Compass } from 'lucide-react'
 import { useState } from 'react'
 
+import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
+import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { BottomDrawer } from '@/components/ui/bottom-drawer'
 import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
+import { useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
-import { uiConfig } from '@/config/app-config'
+import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 
@@ -65,6 +68,7 @@ export function App() {
   const [activeDrawerTab, setActiveDrawerTab] = useState('forecast')
   const {
     depth,
+    navigationState,
     latitude,
     longitude,
     headingTrue,
@@ -98,6 +102,7 @@ export function App() {
     error: forecastError,
     refetch: refetchForecast,
   } = useWeatherForecast(uiConfig.vesselStateRefreshSeconds)
+  const anchorWatch = useAnchorWatch(latitude, longitude, navigationState, uiConfig.vesselStateRefreshSeconds)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
     depth !== null
@@ -247,91 +252,24 @@ export function App() {
           </aside>
 
           <aside className="space-y-4">
-            <Tile title="Anchor Watch" icon={<Anchor className="h-3.5 w-3.5" />}>
-              <div className="mt-2 grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-md bg-muted/50 px-2 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Distance</p>
-                  <p className="font-display text-2xl text-primary">
-                    121
-                    <span className="ml-1 text-base text-muted-foreground">ft</span>
-                  </p>
-                </div>
-                <div className="rounded-md bg-muted/50 px-2 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Bearing</p>
-                  <p className="font-display text-2xl text-secondary">
-                    72
-                    <span className="ml-1 text-base text-muted-foreground">deg</span>
-                  </p>
-                </div>
-                <div className="rounded-md bg-muted/50 px-2 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Radius</p>
-                  <p className="font-display text-2xl text-secondary">
-                    160
-                    <span className="ml-1 text-base text-muted-foreground">ft</span>
-                  </p>
-                </div>
-              </div>
-              <div className="mt-3 rounded-md border bg-background/60 px-3 py-2 text-sm">
-                <p className="text-muted-foreground">Anchor Position</p>
-                <p className="font-mono text-xs">N 25 29.181&apos; W 76 38.213&apos;</p>
-              </div>
-              <div className="mt-3 grid gap-2">
-                <Button className="h-11 bg-amber-600 text-amber-50 hover:bg-amber-700">
-                  <Sailboat className="h-4 w-4" />
-                  Set Anchor
-                </Button>
-                <Button className="h-11 border border-teal-500 bg-teal-600 text-teal-50 hover:bg-teal-700">
-                  <Waves className="h-4 w-4" />
-                  Drop Here (Use Current GPS)
-                </Button>
-                <Button variant="outline" className="h-11 text-muted-foreground">
-                  <X className="h-4 w-4" />
-                  Clear
-                </Button>
-              </div>
-            </Tile>
+            <AnchorWatchTile
+              watch={anchorWatch}
+              lat={latitude}
+              lon={longitude}
+              isImperial={isImperialDistance}
+            />
 
-            <Tile title="Rode & Scope">
-              <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Chain Counter</p>
-                  <p className="font-display text-2xl text-primary">
-                    122
-                    <span className="ml-1 text-base text-muted-foreground">ft</span>
-                  </p>
-                </div>
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Drop Deduct</p>
-                  <p className="font-display text-2xl text-primary">
-                    5
-                    <span className="ml-1 text-base text-muted-foreground">ft</span>
-                  </p>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-md border bg-background/60 px-2 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Rode</p>
-                  <p className="font-display text-2xl text-secondary">
-                    117
-                    <span className="ml-1 text-base text-muted-foreground">ft</span>
-                  </p>
-                </div>
-                <div className="rounded-md border bg-background/60 px-2 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Total+BOW</p>
-                  <p className="font-display text-2xl text-secondary">
-                    17.5
-                    <span className="ml-1 text-base text-muted-foreground">ft</span>
-                  </p>
-                </div>
-                <div className="rounded-md border bg-background/60 px-2 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Scope</p>
-                  <p className="font-display text-2xl text-secondary">
-                    6.7
-                    <span className="ml-1 text-base text-muted-foreground">:1</span>
-                  </p>
-                </div>
-              </div>
-            </Tile>
+            <RodeScopeTile
+              anchorState={anchorWatch.anchorState}
+              rodeDeployedM={anchorWatch.rodeDeployedM}
+              seaState={anchorWatch.seaState}
+              seabedType={anchorWatch.seabedType}
+              depthM={depth}
+              windKts={windSpeedApparentKts}
+              isImperial={isImperialDistance}
+              anchorConfig={anchorConfig}
+              onUpdate={anchorWatch.updateRodeAndConditions}
+            />
 
             <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
           </aside>

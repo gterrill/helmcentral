@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	defaultSignalKAddress  = "localhost"
-	defaultSignalKPort     = 3000
-	metersPerSecondToKnots = 1.943844
-	defaultWindMaxAge      = 5 * time.Minute
+	defaultSignalKAddress         = "localhost"
+	defaultSignalKPort            = 3000
+	metersPerSecondToKnots        = 1.943844
+	defaultWindMaxAge             = 5 * time.Minute
 	defaultHouseBatteryCapacityAh = 1440
 )
 
@@ -27,6 +27,7 @@ type vesselStateData struct {
 	Latitude             float64
 	Longitude            float64
 	HeadingTrue          float64
+	SpeedOverGroundKts   float64
 	WindSpeedApparentKts float64
 	WindAngleApparentDeg float64
 	WindSide             string
@@ -64,7 +65,7 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
 	}))
 
 	// Routes
@@ -80,6 +81,12 @@ func main() {
 	e.POST("/api/caches/:name/invalidate", invalidateCache)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
 	e.POST("/api/settings/signalk", updateSignalKSettingsHandler)
+	e.GET("/api/anchor-watch", getAnchorWatch)
+	e.POST("/api/anchor-watch", setAnchorWatch)
+	e.PATCH("/api/anchor-watch", patchAnchorWatch)
+	e.DELETE("/api/anchor-watch", deleteAnchorWatch)
+
+	loadAnchorWatch()
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("Starting server on %s", addr)
@@ -154,6 +161,7 @@ func vesselState(c echo.Context) error {
 		"latitude":                state.Latitude,
 		"longitude":               state.Longitude,
 		"heading_true":            state.HeadingTrue,
+		"speed_over_ground_kts":   state.SpeedOverGroundKts,
 		"wind_speed_apparent_kts": state.WindSpeedApparentKts,
 		"wind_angle_apparent_deg": state.WindAngleApparentDeg,
 		"wind_side":               state.WindSide,

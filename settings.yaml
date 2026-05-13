@@ -2,6 +2,12 @@ boat:
     model: 2025 Granocean W-60
     name: M/V PIKORUA
     house_battery_capacity_ah: 1440
+anchor:
+    bow_roller_height_m: 1.5
+    chain_size_mm: 12
+    chain_onboard_m: 150
+    hull_type: power_cat
+    windage_area_m2: 35
 signalk:
     address: 100.103.214.1
     port: 3000

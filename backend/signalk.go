@@ -69,7 +69,7 @@ func updateSignalKSettingsHandler(c echo.Context) error {
 func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateData, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
 
-	state := vesselStateData{Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, Latitude: -1, Longitude: -1, HeadingTrue: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1}
+	state := vesselStateData{Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, Latitude: -1, Longitude: -1, HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1}
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get(url)
@@ -170,6 +170,14 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 		state.WindAngleApparentDeg = 0
 		state.WindAngleRelativeDeg = 0
 		state.WindSide = "starboard"
+	}
+
+	sog := lookupNumber(payload, "navigation", "speedOverGround", "value")
+	if sog == -1 {
+		sog = lookupNumber(payload, "navigation", "speedOverGround")
+	}
+	if sog >= 0 {
+		state.SpeedOverGroundKts = math.Round(sog*metersPerSecondToKnots*10) / 10
 	}
 
 	return state, nil
