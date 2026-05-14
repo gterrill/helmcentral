@@ -3,7 +3,6 @@
 dist/
 build/
 .vscode/settings.json
-backend/helmcentral
-backend/cache/
 backend/cache/
 backend/tmp/
+backend/helmcentral
