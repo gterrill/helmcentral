@@ -5,6 +5,7 @@ import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
+import { RadarDrawer } from '@/components/radar-drawer'
 import { TanksTile } from '@/components/tanks-tile'
 import { BottomDrawer } from '@/components/ui/bottom-drawer'
 import { ForecastDrawer } from '@/components/forecast-drawer'
@@ -129,6 +130,13 @@ export function App() {
   const acLoadsLabel = acLoadsW !== null ? `${Math.round(acLoadsW)}W` : '—'
   const chargeRateLabel = chargeRatePercentPerHour !== null ? `+${chargeRatePercentPerHour.toFixed(1)}%/hr` : '—'
   const timeToGoLabel = formatTimeToGo(timeToFullHours)
+  const drawerTitle = activeDrawerTab === 'radar'
+    ? 'Radar'
+    : activeDrawerTab === 'wind'
+      ? 'Wind'
+      : activeDrawerTab === 'tides'
+        ? 'Tides'
+        : 'Forecast'
 
   return (
     <div className="min-h-screen p-4 pb-20 md:p-6 md:pb-24">
@@ -399,11 +407,12 @@ export function App() {
           isOpen={isDrawerOpen}
           onOpen={() => setIsDrawerOpen(true)}
           onClose={() => setIsDrawerOpen(false)}
-          title="Forecast"
+          title={drawerTitle}
           tabs={[
             { id: 'forecast', label: 'Forecast' },
             { id: 'tides', label: 'Tides' },
             { id: 'wind', label: 'Wind' },
+            { id: 'radar', label: 'Radar' },
           ]}
           activeTab={activeDrawerTab}
           onTabChange={setActiveDrawerTab}
@@ -422,6 +431,9 @@ export function App() {
           )}
           {activeDrawerTab === 'wind' && (
             <div className="py-8 text-center text-muted-foreground">Wind details coming soon</div>
+          )}
+          {activeDrawerTab === 'radar' && (
+            <RadarDrawer latitude={latitude} longitude={longitude} />
           )}
         </BottomDrawer>
       </div>
