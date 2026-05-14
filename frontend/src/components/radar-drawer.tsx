@@ -5,31 +5,37 @@ interface RadarDrawerProps {
   longitude: number | null
 }
 
-const RADAR_ZOOM = 8
-const RECENTER_THRESHOLD_NM = 0.5
-const OVERLAYS = ['radar', 'wind', 'temp', 'pressure'] as const
-type Overlay = (typeof OVERLAYS)[number]
-
-function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180
-  const dLat = toRad(lat2 - lat1)
-  const dLon = toRad(lon2 - lon1)
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
-  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+interface LatLon {
+  lat: number
+  lon: number
 }
 
-function buildWindyEmbedUrl(latitude: number, longitude: number, overlay: Overlay): string {
+const RADAR_ZOOM = 8
+const OVERLAYS = ['radar', 'wind', 'temp', 'pressure'] as const
+const WIND_UNITS = ['kt', 'm/s', 'mph', 'bft'] as const
+const TEMP_UNITS = ['default', 'C', 'F'] as const
+type Overlay = (typeof OVERLAYS)[number]
+type WindUnit = (typeof WIND_UNITS)[number]
+type TempUnit = (typeof TEMP_UNITS)[number]
+
+function buildWindyEmbedUrl(
+  latitude: number,
+  longitude: number,
+  overlay: Overlay,
+  menuVisible: boolean,
+  markerVisible: boolean,
+  windUnit: WindUnit,
+  tempUnit: TempUnit,
+): string {
   const params = new URLSearchParams({
     lat: latitude.toFixed(5),
     lon: longitude.toFixed(5),
     zoom: String(RADAR_ZOOM),
     level: 'surface',
     overlay,
-    menu: 'true',
+    menu: menuVisible ? 'true' : '',
     message: '',
-    marker: '',
+    marker: markerVisible ? 'true' : '',
     calendar: 'now',
     pressure: 'true',
     type: 'map',
@@ -37,8 +43,8 @@ function buildWindyEmbedUrl(latitude: number, longitude: number, overlay: Overla
     detail: 'true',
     detailLat: latitude.toFixed(5),
     detailLon: longitude.toFixed(5),
-    metricWind: 'kt',
-    metricTemp: 'default',
+    metricWind: windUnit,
+    metricTemp: tempUnit,
     radarRange: '0',
   })
 
@@ -47,39 +53,58 @@ function buildWindyEmbedUrl(latitude: number, longitude: number, overlay: Overla
 
 export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
   const [overlay, setOverlay] = useState<Overlay>('radar')
-  const [mapCenter, setMapCenter] = useState<{ lat: number; lon: number } | null>(null)
-  const hasPosition = latitude !== null && longitude !== null
+  const [menuVisible, setMenuVisible] = useState(true)
+  const [markerVisible, setMarkerVisible] = useState(false)
+  const [windUnit, setWindUnit] = useState<WindUnit>('kt')
+  const [tempUnit, setTempUnit] = useState<TempUnit>('default')
+  const [mapCenter, setMapCenter] = useState<LatLon | null>(null)
+  const [lastKnownPosition, setLastKnownPosition] = useState<LatLon | null>(null)
+  const [iframeSrc, setIframeSrc] = useState<string | null>(null)
+  const hasLivePosition = latitude !== null && longitude !== null
 
   useEffect(() => {
-    if (!hasPosition || latitude === null || longitude === null) {
+    if (!hasLivePosition || latitude === null || longitude === null) {
       return
     }
 
-    setMapCenter((prev) => {
-      if (!prev) {
-        return { lat: latitude, lon: longitude }
-      }
+    setLastKnownPosition({ lat: latitude, lon: longitude })
 
-      const distanceMeters = haversineMeters(prev.lat, prev.lon, latitude, longitude)
-      const thresholdMeters = RECENTER_THRESHOLD_NM * 1852
+    // Lock initial center to avoid periodic iframe reloads on GPS polling updates.
+    setMapCenter((prev) => prev ?? { lat: latitude, lon: longitude })
+  }, [hasLivePosition, latitude, longitude])
 
-      if (distanceMeters >= thresholdMeters) {
-        return { lat: latitude, lon: longitude }
-      }
-
-      return prev
-    })
-  }, [hasPosition, latitude, longitude])
-
-  const embedUrl = useMemo(() => {
-    if (!hasPosition || !mapCenter) {
+  const draftEmbedUrl = useMemo(() => {
+    if (!mapCenter) {
       return null
     }
 
-    return buildWindyEmbedUrl(mapCenter.lat, mapCenter.lon, overlay)
-  }, [hasPosition, mapCenter, overlay])
+    return buildWindyEmbedUrl(mapCenter.lat, mapCenter.lon, overlay, menuVisible, markerVisible, windUnit, tempUnit)
+  }, [mapCenter, markerVisible, menuVisible, overlay, tempUnit, windUnit])
 
-  if (!hasPosition) {
+  useEffect(() => {
+    if (iframeSrc !== null || draftEmbedUrl === null) {
+      return
+    }
+    setIframeSrc(draftEmbedUrl)
+  }, [draftEmbedUrl, iframeSrc])
+
+  const handleApply = () => {
+    if (!draftEmbedUrl) {
+      return
+    }
+    setIframeSrc(draftEmbedUrl)
+  }
+
+  const handleRecenter = () => {
+    if (!lastKnownPosition) {
+      return
+    }
+    const nextCenter = { lat: lastKnownPosition.lat, lon: lastKnownPosition.lon }
+    setMapCenter(nextCenter)
+    setIframeSrc(buildWindyEmbedUrl(nextCenter.lat, nextCenter.lon, overlay, menuVisible, markerVisible, windUnit, tempUnit))
+  }
+
+  if (!lastKnownPosition) {
     return (
       <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Radar</p>
@@ -105,12 +130,74 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
           </select>
         </label>
 
+        <label className="inline-flex items-center gap-2 text-muted-foreground">
+          Wind Unit
+          <select
+            value={windUnit}
+            onChange={(e) => setWindUnit(e.target.value as WindUnit)}
+            className="rounded border bg-background px-2 py-1 text-foreground"
+          >
+            {WIND_UNITS.map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="inline-flex items-center gap-2 text-muted-foreground">
+          Temp Unit
+          <select
+            value={tempUnit}
+            onChange={(e) => setTempUnit(e.target.value as TempUnit)}
+            className="rounded border bg-background px-2 py-1 text-foreground"
+          >
+            {TEMP_UNITS.map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="inline-flex items-center gap-2 text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={menuVisible}
+            onChange={(e) => setMenuVisible(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Menu
+        </label>
+
+        <label className="inline-flex items-center gap-2 text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={markerVisible}
+            onChange={(e) => setMarkerVisible(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Marker
+        </label>
+
+        <button
+          type="button"
+          onClick={handleApply}
+          className="rounded border px-2 py-1 text-foreground hover:bg-muted"
+        >
+          Apply
+        </button>
+
+        <button
+          type="button"
+          onClick={handleRecenter}
+          className="rounded border px-2 py-1 text-foreground hover:bg-muted"
+        >
+          Recenter
+        </button>
+
       </div>
 
       <div className="rounded-lg border bg-background/60 p-2">
         <iframe
           title="Windy Weather Map"
-          src={embedUrl ?? undefined}
+          src={iframeSrc ?? undefined}
           className="h-[60vh] min-h-[360px] w-full overflow-hidden rounded-md border-0"
           loading="lazy"
           referrerPolicy="no-referrer-when-downgrade"
@@ -118,9 +205,11 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
         />
       </div>
       <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>Center: {latitude?.toFixed(5)}, {longitude?.toFixed(5)}</span>
+        <span>
+          Center: {mapCenter?.lat.toFixed(5)}, {mapCenter?.lon.toFixed(5)}
+        </span>
         <a
-          href={embedUrl ?? '#'}
+          href={iframeSrc ?? '#'}
           target="_blank"
           rel="noreferrer"
           className="rounded border px-2 py-1 hover:bg-muted"
@@ -128,9 +217,10 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
           Open in Windy
         </a>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Auto recenter threshold: {RECENTER_THRESHOLD_NM.toFixed(1)} nm
-      </p>
+      {!hasLivePosition && (
+        <p className="text-xs text-amber-700">Live GPS temporarily unavailable, using last known position.</p>
+      )}
+      <p className="text-xs text-muted-foreground">Live GPS updates no longer auto-reload the map. Use Recenter when needed.</p>
     </div>
   )
 }
