@@ -287,15 +287,15 @@ export function App() {
 
           <aside className="space-y-4">
             <Tile title="Battery & Power">
-              <div className="mt-1 grid grid-cols-[1fr_1.4fr] gap-2">
-                <div className="flex items-end gap-2 rounded-md border bg-background/60 px-3 py-3">
-                  <span className="font-display text-7xl leading-none text-primary">{socLabel}</span>
-                  <span className="pb-2 text-3xl leading-none text-foreground">%</span>
+              <div className="mt-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2">
+                <div className="flex min-w-0 items-end gap-2 rounded-md border bg-background/60 px-3 py-3">
+                  <span className="font-display text-6xl leading-none tabular-nums text-primary md:text-7xl">{socLabel}</span>
+                  <span className="shrink-0 pb-2 text-2xl leading-none text-foreground md:text-3xl">%</span>
                 </div>
-                <div className="rounded-md border bg-background/60 px-3 py-3">
+                <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charging</p>
-                  <p className="font-display text-5xl leading-none text-secondary">{chargingCurrentLabel}A</p>
-                  <p className="mt-1 font-display text-4xl leading-none text-secondary">{chargingPowerLabel}W</p>
+                  <p className="font-display text-4xl leading-none text-secondary md:text-5xl">{chargingCurrentLabel}A</p>
+                  <p className="mt-1 font-display text-3xl leading-none text-secondary md:text-4xl">{chargingPowerLabel}W</p>
                 </div>
               </div>
 
