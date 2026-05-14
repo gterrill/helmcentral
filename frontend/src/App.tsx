@@ -6,6 +6,7 @@ import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
+import { SignalKSettingsPanel } from '@/components/signalk-settings-panel'
 import { TanksTile } from '@/components/tanks-tile'
 import { BottomDrawer } from '@/components/ui/bottom-drawer'
 import { ForecastDrawer } from '@/components/forecast-drawer'
@@ -132,6 +133,8 @@ export function App() {
   const timeToGoLabel = formatTimeToGo(timeToFullHours)
   const drawerTitle = activeDrawerTab === 'radar'
     ? 'Radar'
+    : activeDrawerTab === 'settings'
+      ? 'Settings'
     : activeDrawerTab === 'wind'
       ? 'Wind'
       : activeDrawerTab === 'tides'
@@ -413,6 +416,7 @@ export function App() {
             { id: 'tides', label: 'Tides' },
             { id: 'wind', label: 'Wind' },
             { id: 'radar', label: 'Radar' },
+            { id: 'settings', label: 'Settings' },
           ]}
           activeTab={activeDrawerTab}
           onTabChange={setActiveDrawerTab}
@@ -434,6 +438,9 @@ export function App() {
           )}
           {activeDrawerTab === 'radar' && (
             <RadarDrawer latitude={latitude} longitude={longitude} />
+          )}
+          {activeDrawerTab === 'settings' && (
+            <SignalKSettingsPanel />
           )}
         </BottomDrawer>
       </div>

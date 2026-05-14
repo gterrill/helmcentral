@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 interface RadarDrawerProps {
   latitude: number | null
@@ -60,7 +60,58 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
   const [mapCenter, setMapCenter] = useState<LatLon | null>(null)
   const [lastKnownPosition, setLastKnownPosition] = useState<LatLon | null>(null)
   const [iframeSrc, setIframeSrc] = useState<string | null>(null)
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const hasLivePosition = latitude !== null && longitude !== null
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !iframeRef.current) {
+      return
+    }
+
+    const iframeEl = iframeRef.current
+    const shouldBreak = (window as Window & { __RADAR_DEBUG_BREAKPOINT__?: boolean }).__RADAR_DEBUG_BREAKPOINT__ === true
+
+    const srcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src')
+    const originalSetAttribute = Element.prototype.setAttribute
+
+    const traceMutation = (kind: string, value: string) => {
+      const traceError = new Error(`[Radar Debug] iframe src mutated via ${kind}`)
+      // eslint-disable-next-line no-console
+      console.warn('[Radar Debug] iframe src mutation', { kind, value, stack: traceError.stack })
+      if (shouldBreak) {
+        // eslint-disable-next-line no-debugger
+        debugger
+      }
+    }
+
+    if (srcDescriptor?.set) {
+      Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
+        configurable: true,
+        enumerable: srcDescriptor.enumerable ?? true,
+        get: srcDescriptor.get,
+        set(value: string) {
+          if (this === iframeEl) {
+            traceMutation('property:setter', String(value))
+          }
+          srcDescriptor.set?.call(this, value)
+        },
+      })
+    }
+
+    Element.prototype.setAttribute = function patchedSetAttribute(name: string, value: string) {
+      if (this === iframeEl && name.toLowerCase() === 'src') {
+        traceMutation('setAttribute', String(value))
+      }
+      return originalSetAttribute.call(this, name, value)
+    }
+
+    return () => {
+      Element.prototype.setAttribute = originalSetAttribute
+      if (srcDescriptor) {
+        Object.defineProperty(HTMLIFrameElement.prototype, 'src', srcDescriptor)
+      }
+    }
+  }, [iframeSrc])
 
   useEffect(() => {
     if (!hasLivePosition || latitude === null || longitude === null) {
@@ -196,6 +247,7 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
 
       <div className="rounded-lg border bg-background/60 p-2">
         <iframe
+          ref={iframeRef}
           title="Windy Weather Map"
           src={iframeSrc ?? undefined}
           className="h-[60vh] min-h-[360px] w-full overflow-hidden rounded-md border-0"
