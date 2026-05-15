@@ -110,7 +110,7 @@ export function MarineHeader() {
             <span className="inline-flex items-baseline text-[1.65rem] tabular-nums sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
               <span className="inline-flex w-[2ch] justify-center">{hh}</span>
               <span className="inline-flex w-[0.45ch] justify-center">:</span>
-              <span className="inline-flex w-[2ch] justify-center">{mm}</span>
+              <span className="inline-flex w-[ch] justify-center">{mm}</span>
               <span className="inline-flex w-[0.45ch] justify-center">:</span>
               <span className="inline-flex w-[2ch] justify-center">{ss}</span>
             </span>
