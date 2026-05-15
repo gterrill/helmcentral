@@ -46,8 +46,8 @@ export function useElectricalState(refreshInterval: number) {
           typeof data.battery_soc_percent === 'number' && data.battery_soc_percent >= 0 ? data.battery_soc_percent : null
 
         setBatterySocPercent(nextBatterySocPercent)
-        setChargingCurrentA(typeof data.charging_current_a === 'number' && data.charging_current_a >= 0 ? data.charging_current_a : null)
-        setChargingPowerW(typeof data.charging_power_w === 'number' && data.charging_power_w >= 0 ? data.charging_power_w : null)
+        setChargingCurrentA(typeof data.charging_current_a === 'number' ? data.charging_current_a : null)
+        setChargingPowerW(typeof data.charging_power_w === 'number' ? data.charging_power_w : null)
         setSolarOutputW(typeof data.solar_output_w === 'number' && data.solar_output_w >= 0 ? data.solar_output_w : null)
         setAcOutputW(typeof data.ac_output_w === 'number' && data.ac_output_w >= 0 ? data.ac_output_w : null)
         setDc12vPowerW(typeof data.dc_12v_power_w === 'number' && data.dc_12v_power_w >= 0 ? data.dc_12v_power_w : null)
@@ -58,7 +58,7 @@ export function useElectricalState(refreshInterval: number) {
         const batteryCapacityAh =
           typeof data.battery_capacity_ah === 'number' && data.battery_capacity_ah > 0 ? data.battery_capacity_ah : null
         const chargingCurrentA =
-          typeof data.charging_current_a === 'number' && data.charging_current_a >= 0 ? data.charging_current_a : null
+          typeof data.charging_current_a === 'number' ? data.charging_current_a : null
 
         if (nextBatterySocPercent === null) {
           previousSocSample = null

@@ -121,8 +121,14 @@ export function App() {
   const gust1hLabel = maxGust1hKts !== null ? `${maxGust1hKts.toFixed(1)} kts` : '—'
   const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
   const socBarWidth = `${Math.max(0, Math.min(100, batterySocPercent ?? 0))}%`
-  const chargingCurrentLabel = chargingCurrentA !== null ? `+${chargingCurrentA.toFixed(1)}` : '—'
-  const chargingPowerLabel = chargingPowerW !== null ? `+${Math.round(chargingPowerW)}` : '—'
+  const chargingCurrentLabel = chargingCurrentA !== null
+    ? `${chargingCurrentA >= 0 ? '+' : '-'}${Math.abs(chargingCurrentA).toFixed(1)}`
+    : '—'
+  const chargingPowerLabel = chargingPowerW !== null
+    ? `${chargingPowerW >= 0 ? '+' : '-'}${Math.abs(Math.round(chargingPowerW))}`
+    : '—'
+  const isDischarging = (chargingCurrentA !== null && chargingCurrentA < 0) || (chargingPowerW !== null && chargingPowerW < 0)
+  const chargingValueClass = isDischarging ? 'text-amber-600' : 'text-secondary'
   const solarOutputLabel = solarOutputW !== null ? Math.round(solarOutputW).toString() : '—'
   const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
   const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
@@ -294,8 +300,14 @@ export function App() {
                 </div>
                 <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charging</p>
-                  <p className="font-display text-4xl leading-none text-secondary md:text-5xl">{chargingCurrentLabel}A</p>
-                  <p className="mt-1 font-display text-3xl leading-none text-secondary md:text-4xl">{chargingPowerLabel}W</p>
+                  <p className={`font-display text-4xl leading-none md:text-5xl ${chargingValueClass}`}>
+                    {chargingCurrentLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">A</span>
+                  </p>
+                  <p className={`mt-1 font-display text-3xl leading-none md:text-4xl ${chargingValueClass}`}>
+                    {chargingPowerLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">W</span>
+                  </p>
                 </div>
               </div>
 
