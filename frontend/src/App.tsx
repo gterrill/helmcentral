@@ -294,9 +294,14 @@ export function App() {
           <aside className="space-y-4">
             <Tile title="Battery & Power">
               <div className="mt-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2">
-                <div className="flex min-w-0 items-end gap-2 rounded-md border bg-background/60 px-3 py-3">
-                  <span className="font-display text-6xl leading-none tabular-nums text-primary md:text-7xl">{socLabel}</span>
-                  <span className="shrink-0 pb-2 text-2xl leading-none text-foreground md:text-3xl">%</span>
+                <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-display text-6xl leading-none tabular-nums text-primary md:text-7xl">{socLabel}</span>
+                    <span className="shrink-0 text-2xl leading-none text-foreground md:text-3xl">%</span>
+                  </div>
+                  <div className="mt-3 h-1.5 rounded-full bg-muted/60">
+                    <div className="h-full rounded-full bg-primary" style={{ width: socBarWidth }} />
+                  </div>
                 </div>
                 <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charging</p>
@@ -309,10 +314,6 @@ export function App() {
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
                   </p>
                 </div>
-              </div>
-
-              <div className="mt-2 h-1.5 rounded-full bg-muted/60">
-                <div className="h-full rounded-full bg-primary" style={{ width: socBarWidth }} />
               </div>
 
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
