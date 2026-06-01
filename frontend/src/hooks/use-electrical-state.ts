@@ -25,8 +25,8 @@ export function useElectricalState(refreshInterval: number) {
   const [dc12vCurrentA, setDc12vCurrentA] = useState<number | null>(null)
   const [dc24vVoltageV, setDc24vVoltageV] = useState<number | null>(null)
   const [acLoadsW, setAcLoadsW] = useState<number | null>(null)
-  const [chargeRatePercentPerHour, setChargeRatePercentPerHour] = useState<number | null>(null)
-  const [timeToFullHours, setTimeToFullHours] = useState<number | null>(null)
+  const [batteryRatePercentPerHour, setBatteryRatePercentPerHour] = useState<number | null>(null)
+  const [timeToGoHours, setTimeToGoHours] = useState<number | null>(null)
 
   useEffect(() => {
     let previousSocSample: { socPercent: number; timestampMs: number } | null = null
@@ -63,8 +63,8 @@ export function useElectricalState(refreshInterval: number) {
         if (nextBatterySocPercent === null) {
           previousSocSample = null
           smoothedChargeRatePercentPerHour = null
-          setChargeRatePercentPerHour(null)
-          setTimeToFullHours(null)
+          setBatteryRatePercentPerHour(null)
+          setTimeToGoHours(null)
           return
         }
 
@@ -93,15 +93,20 @@ export function useElectricalState(refreshInterval: number) {
           rate = (chargingCurrentA / batteryCapacityAh) * 100
         }
 
-        if (rate === null || !Number.isFinite(rate) || rate <= 0.01) {
-          setChargeRatePercentPerHour(null)
-          setTimeToFullHours(null)
+        if (rate === null || !Number.isFinite(rate) || Math.abs(rate) <= 0.01) {
+          setBatteryRatePercentPerHour(null)
+          setTimeToGoHours(null)
           return
         }
 
-        setChargeRatePercentPerHour(rate)
-        const socRemaining = Math.max(0, 100 - nextBatterySocPercent)
-        setTimeToFullHours(socRemaining / rate)
+        setBatteryRatePercentPerHour(rate)
+        if (rate > 0) {
+          // Charging: time until full
+          setTimeToGoHours(Math.max(0, 100 - nextBatterySocPercent) / rate)
+        } else {
+          // Discharging: time until empty (returned as negative to signal direction)
+          setTimeToGoHours(-(nextBatterySocPercent / Math.abs(rate)))
+        }
       } catch (err) {
         console.error('Failed to fetch electrical state:', err)
       }
@@ -127,7 +132,7 @@ export function useElectricalState(refreshInterval: number) {
     dc12vCurrentA,
     dc24vVoltageV,
     acLoadsW,
-    chargeRatePercentPerHour,
-    timeToFullHours,
+    batteryRatePercentPerHour,
+    timeToGoHours,
   }
 }

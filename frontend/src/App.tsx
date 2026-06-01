@@ -54,15 +54,18 @@ function fahrenheitToCelsius(temp: number) {
 }
 
 function formatTimeToGo(hours: number | null) {
-  if (hours === null || !Number.isFinite(hours) || hours < 0) {
+  if (hours === null || !Number.isFinite(hours)) {
     return '—'
   }
 
-  const totalMinutes = Math.max(0, Math.round(hours * 60))
+  const discharging = hours < 0
+  const totalMinutes = Math.max(0, Math.round(Math.abs(hours) * 60))
   const hh = Math.floor(totalMinutes / 60)
   const mm = totalMinutes % 60
 
-  return `~${hh}h ${mm.toString().padStart(2, '0')}m to full`
+  return discharging
+    ? `~${hh}h ${mm.toString().padStart(2, '0')}m to empty`
+    : `~${hh}h ${mm.toString().padStart(2, '0')}m to full`
 }
 
 export function App() {
@@ -93,8 +96,8 @@ export function App() {
     dc12vCurrentA,
     dc24vVoltageV,
     acLoadsW,
-    chargeRatePercentPerHour,
-    timeToFullHours,
+    batteryRatePercentPerHour,
+    timeToGoHours,
   } = useElectricalState(5)
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
@@ -135,8 +138,11 @@ export function App() {
   const dc12vCurrentLabel = dc12vCurrentA !== null ? dc12vCurrentA.toFixed(1) : '—'
   const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
   const acLoadsLabel = acLoadsW !== null ? `${Math.round(acLoadsW)}W` : '—'
-  const chargeRateLabel = chargeRatePercentPerHour !== null ? `+${chargeRatePercentPerHour.toFixed(1)}%/hr` : '—'
-  const timeToGoLabel = formatTimeToGo(timeToFullHours)
+  const chargeRateLabel = batteryRatePercentPerHour !== null
+    ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}%/hr`
+    : '—'
+  const timeToGoLabel = formatTimeToGo(timeToGoHours)
+  const timeToGoClass = timeToGoHours !== null && timeToGoHours < 0 ? 'text-amber-600' : 'text-secondary'
   const drawerTitle = activeDrawerTab === 'radar'
     ? 'Radar'
     : activeDrawerTab === 'settings'
@@ -361,7 +367,7 @@ export function App() {
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Time To Go / Charge Rate</p>
-                <p className="mt-1 font-display text-4xl leading-none text-secondary">
+                <p className={`mt-1 font-display text-4xl leading-none ${timeToGoClass}`}>
                   {timeToGoLabel} {chargeRateLabel}
                 </p>
               </div>
