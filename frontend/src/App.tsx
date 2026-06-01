@@ -304,7 +304,7 @@ export function App() {
                   </div>
                 </div>
                 <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charging</p>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Battery</p>
                   <p className={`font-display text-4xl leading-none md:text-5xl ${chargingValueClass}`}>
                     {chargingCurrentLabel}
                     <span className="ml-1 text-xl text-muted-foreground">A</span>

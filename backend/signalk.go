@@ -217,9 +217,28 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 		}
 	}
 
-	soc := lookupFirstNumber(payload, []string{"electrical", "batteries", "house", "capacity", "stateOfCharge", "value"}, []string{"electrical", "batteries", "house", "capacity", "stateOfCharge"}, []string{"electrical", "batteries", "service", "capacity", "stateOfCharge", "value"}, []string{"electrical", "batteries", "service", "capacity", "stateOfCharge"})
+	// Identify the main house battery before reading any values from it.
+	mainBattery := lookupMainBattery(payload)
+
+	soc := -1.0
+	if mainBattery != nil {
+		soc = lookupNumber(mainBattery, "capacity", "stateOfCharge", "value")
+	}
 	if soc == -1 {
-		soc = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"capacity", "stateOfCharge", "value"})
+		soc = lookupFirstNumber(payload,
+			[]string{"electrical", "batteries", "house", "capacity", "stateOfCharge", "value"},
+			[]string{"electrical", "batteries", "house", "capacity", "stateOfCharge"},
+			[]string{"electrical", "batteries", "service", "capacity", "stateOfCharge", "value"},
+			[]string{"electrical", "batteries", "service", "capacity", "stateOfCharge"},
+		)
+	}
+	if soc == -1 {
+		soc = lookupFirstNumber(payload,
+			[]string{"electrical", "chargers", "276", "capacity", "stateOfCharge", "value"},
+		)
+	}
+	if soc == -1 {
+		soc = lookupNumberFromAnyChild(payload, []string{"electrical", "chargers"}, []string{"capacity", "stateOfCharge", "value"})
 	}
 	if soc >= 0 {
 		if soc <= 1 {
@@ -255,45 +274,69 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 		state.BatteryCapacityAh = roundTo1(batteryCapacityAh)
 	}
 
-	batteryVoltage := lookupFirstNumber(payload, []string{"electrical", "venus", "batteryVoltage", "value"}, []string{"electrical", "venus", "batteryVoltage"}, []string{"electrical", "batteries", "house", "voltage", "value"}, []string{"electrical", "batteries", "house", "voltage"}, []string{"electrical", "batteries", "service", "voltage", "value"}, []string{"electrical", "batteries", "service", "voltage"})
+	// Identify the main house battery: the one with valid SOC and highest absolute current.
+	batteryVoltage := -1.0
+	if mainBattery != nil {
+		batteryVoltage = lookupNumber(mainBattery, "voltage", "value")
+	}
+	if batteryVoltage == -1 {
+		batteryVoltage = lookupFirstNumber(payload,
+			[]string{"electrical", "venus", "batteryVoltage", "value"},
+			[]string{"electrical", "venus", "batteryVoltage"},
+			[]string{"electrical", "batteries", "house", "voltage", "value"},
+			[]string{"electrical", "batteries", "house", "voltage"},
+			[]string{"electrical", "batteries", "service", "voltage", "value"},
+			[]string{"electrical", "batteries", "service", "voltage"},
+		)
+	}
 	if batteryVoltage == -1 {
 		batteryVoltage = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"voltage", "value"})
 	}
 
-	current := lookupFirstNumber(payload, []string{"electrical", "batteries", "house", "current", "value"}, []string{"electrical", "batteries", "house", "current"}, []string{"electrical", "batteries", "service", "current", "value"}, []string{"electrical", "batteries", "service", "current"})
-	if current == -1 {
-		current = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"current", "value"})
+	current := -1.0
+	if mainBattery != nil {
+		current = lookupNumber(mainBattery, "current", "value")
 	}
 	if current == -1 {
-		state.ChargingCurrentA = -1
-	} else if current >= 0 {
+		current = lookupFirstNumber(payload,
+			[]string{"electrical", "batteries", "house", "current", "value"},
+			[]string{"electrical", "batteries", "house", "current"},
+			[]string{"electrical", "batteries", "service", "current", "value"},
+			[]string{"electrical", "batteries", "service", "current"},
+		)
+	}
+	if current != -1 {
 		state.ChargingCurrentA = roundTo1(current)
-	} else {
-		state.ChargingCurrentA = 0
 	}
 
-	power := lookupFirstNumber(payload, []string{"electrical", "batteries", "house", "power", "value"}, []string{"electrical", "batteries", "house", "power"}, []string{"electrical", "batteries", "service", "power", "value"}, []string{"electrical", "batteries", "service", "power"})
-	if power == -1 {
-		power = lookupNumberFromAnyChild(payload, []string{"electrical", "batteries"}, []string{"power", "value"})
+	power := -1.0
+	if mainBattery != nil {
+		power = lookupNumber(mainBattery, "power", "value")
 	}
 	if power == -1 {
-		state.ChargingPowerW = -1
-	} else if power >= 0 {
+		power = lookupFirstNumber(payload,
+			[]string{"electrical", "batteries", "house", "power", "value"},
+			[]string{"electrical", "batteries", "house", "power"},
+			[]string{"electrical", "batteries", "service", "power", "value"},
+			[]string{"electrical", "batteries", "service", "power"},
+		)
+	}
+	if power != -1 {
 		state.ChargingPowerW = roundTo1(power)
-	} else {
-		state.ChargingPowerW = 0
-	}
-
-	if state.ChargingPowerW == -1 && state.ChargingCurrentA >= 0 && batteryVoltage > 0 {
+	} else if state.ChargingCurrentA != -1 && batteryVoltage > 0 {
 		state.ChargingPowerW = roundTo1(state.ChargingCurrentA * batteryVoltage)
 	}
-	if state.ChargingCurrentA == -1 && state.ChargingPowerW >= 0 && batteryVoltage > 0 {
+	if state.ChargingCurrentA == -1 && state.ChargingPowerW != -1 && batteryVoltage > 0 {
 		state.ChargingCurrentA = roundTo1(state.ChargingPowerW / batteryVoltage)
 	}
 
-	solar := lookupFirstNumber(payload, []string{"electrical", "solar", "0", "panelPower", "value"}, []string{"electrical", "solar", "0", "panelPower"}, []string{"electrical", "solar", "0", "power", "value"}, []string{"electrical", "solar", "0", "power"}, []string{"electrical", "solar", "panelPower", "value"}, []string{"electrical", "solar", "panelPower"})
+	// venus.totalPanelPower is the Victron system aggregate; sum individual chargers as fallback.
+	solar := lookupFirstNumber(payload,
+		[]string{"electrical", "venus", "totalPanelPower", "value"},
+		[]string{"electrical", "venus", "totalPanelPower"},
+	)
 	if solar == -1 {
-		solar = lookupNumberFromAnyChild(payload, []string{"electrical", "solar"}, []string{"panelPower", "value"})
+		solar = sumNumberFromAllChildren(payload, []string{"electrical", "solar"}, []string{"panelPower", "value"})
 	}
 	if solar >= 0 {
 		state.SolarOutputW = roundTo1(solar)
@@ -714,6 +757,70 @@ func lookupNumberFromAnyChild(payload map[string]any, prefix []string, suffix []
 	}
 
 	return -1
+}
+
+// sumNumberFromAllChildren sums a numeric field across all children of a map node.
+// Returns -1 if no children have the field.
+func sumNumberFromAllChildren(payload map[string]any, prefix []string, suffix []string) float64 {
+	parent := lookupAnyMap(payload, prefix...)
+	if parent == nil {
+		return -1
+	}
+
+	sum := 0.0
+	found := false
+	for _, rawChild := range parent {
+		child, ok := rawChild.(map[string]any)
+		if !ok {
+			continue
+		}
+		value := lookupNumber(child, suffix...)
+		if value != -1 {
+			sum += value
+			found = true
+		}
+	}
+
+	if !found {
+		return -1
+	}
+	return sum
+}
+
+// lookupMainBattery returns the battery sub-object with valid SOC data and the
+// highest absolute current — i.e. the actively monitored house bank.
+func lookupMainBattery(payload map[string]any) map[string]any {
+	batteries := lookupAnyMap(payload, "electrical", "batteries")
+	if batteries == nil {
+		return nil
+	}
+
+	var best map[string]any
+	bestAbsCurrent := -1.0
+
+	for _, rawBattery := range batteries {
+		battery, ok := rawBattery.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		soc := lookupNumber(battery, "capacity", "stateOfCharge", "value")
+		if soc == -1 || soc < 0 || soc > 1.01 {
+			continue
+		}
+
+		current := lookupNumber(battery, "current", "value")
+		if current == -1 {
+			continue
+		}
+
+		if absCurrent := math.Abs(current); absCurrent > bestAbsCurrent {
+			bestAbsCurrent = absCurrent
+			best = battery
+		}
+	}
+
+	return best
 }
 
 func lookupAnyMap(payload map[string]any, keys ...string) map[string]any {
