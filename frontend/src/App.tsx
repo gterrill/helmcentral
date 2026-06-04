@@ -13,6 +13,7 @@ import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
+import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { useVesselState } from '@/hooks/use-vessel-state'
@@ -108,6 +109,7 @@ export function App() {
     refetch: refetchForecast,
   } = useWeatherForecast(uiConfig.vesselStateRefreshSeconds)
   const anchorWatch = useAnchorWatch(latitude, longitude, navigationState, uiConfig.vesselStateRefreshSeconds)
+  const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
     depth !== null
@@ -208,7 +210,9 @@ export function App() {
             <Tile title="Position">
               <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
               <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
-              <div className="mt-3 rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">{formatHeading(headingTrue)}</div>
+              <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
+                {placeName ?? '—'}
+              </div>
             </Tile>
             <div onClick={() => setIsDrawerOpen(true)} className="cursor-pointer transition-opacity hover:opacity-80">
               <Tile title="Today & Now">
@@ -324,14 +328,14 @@ export function App() {
 
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar Output</p>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
                   <p className="font-display text-4xl leading-none text-primary">
                     {solarOutputLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
                   </p>
                 </div>
                 <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Output</p>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Draw</p>
                   <p className="font-display text-4xl leading-none text-primary">
                     {acOutputLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
@@ -341,7 +345,7 @@ export function App() {
 
               <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">24V DC Power</p>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">DC Draw</p>
                   <p className="font-display text-4xl leading-none text-foreground">
                     {dc12vPowerLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
