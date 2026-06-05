@@ -8,6 +8,7 @@ import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
 import { SignalKSettingsPanel } from '@/components/signalk-settings-panel'
 import { TanksTile } from '@/components/tanks-tile'
+import { WindCompass } from '@/components/wind-compass'
 import { BottomDrawer } from '@/components/ui/bottom-drawer'
 import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
@@ -119,10 +120,7 @@ export function App() {
       : '—'
   const depthUnitLabel = isImperialDistance ? 'feet' : 'metres'
   const awaLabel = windAngleApparentDeg !== null ? `${Math.round(windAngleApparentDeg).toString().padStart(3, '0')}°` : '---°'
-  const windSideLabel = windSide ? windSide.toUpperCase() : '—'
   const headingLabel = formatHeading(headingTrue)
-  const relativeAngleLabel = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : '—'
-  const apparentWindSpeedLabel = windSpeedApparentKts !== null ? Math.round(windSpeedApparentKts).toString() : '—'
   const gust10mLabel = maxGust10mKts !== null ? `${maxGust10mKts.toFixed(1)} kts` : '—'
   const gust1hLabel = maxGust1hKts !== null ? `${maxGust1hKts.toFixed(1)} kts` : '—'
   const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
@@ -174,19 +172,14 @@ export function App() {
               </div>
               <div className="grid place-items-center rounded-xl border bg-background/70 p-4">
                 <div className="w-full max-w-[320px] lg:max-w-[360px]">
-                  <div className="relative mx-auto h-[240px] w-[240px] rounded-full border-2 border-border bg-card shadow-inner lg:h-[280px] lg:w-[280px]">
-                    <div className="absolute inset-0 grid place-items-center">
-                      <div className="text-center">
-                        <p className="font-display text-xl text-primary lg:text-2xl">
-                          {windSideLabel} {relativeAngleLabel}
-                        </p>
-                        <p className="font-display text-6xl leading-none text-primary lg:text-7xl">
-                          {apparentWindSpeedLabel}
-                          <span className="ml-1 align-baseline text-2xl text-muted-foreground lg:text-3xl">kts</span>
-                        </p>
-                      </div>
-                    </div>
-                    <div className="absolute left-1/2 top-6 h-[96px] w-[2px] -translate-x-1/2 bg-secondary lg:h-[112px]" />
+                  <div className="mx-auto aspect-square w-full max-w-[280px] lg:max-w-[320px]">
+                    <WindCompass
+                      headingTrue={headingTrue}
+                      windAngleApparentDeg={windAngleApparentDeg}
+                      windSide={windSide}
+                      windAngleRelativeDeg={windAngleRelativeDeg}
+                      windSpeedKts={windSpeedApparentKts}
+                    />
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
