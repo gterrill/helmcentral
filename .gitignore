@@ -6,3 +6,6 @@ build/
 backend/cache/
 backend/tmp/
 backend/helmcentral
+# Allow the embed placeholder while ignoring real build output
+!backend/dist/
+!backend/dist/.gitkeep

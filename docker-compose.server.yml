@@ -1,0 +1,15 @@
+services:
+  helmcentral:
+    image: ghcr.io/gterrill/helmcentral:main
+    container_name: helmcentral
+    restart: unless-stopped
+    ports:
+      - "9091:8080"
+    dns:
+      - 192.168.50.240
+      - 1.1.1.1
+    environment:
+      SETTINGS_FILE: /app/settings.yaml
+      # GEONAMES_USERNAME: your_username
+    volumes:
+      - ./settings.yaml:/app/settings.yaml:ro

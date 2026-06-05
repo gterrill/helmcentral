@@ -87,6 +87,8 @@ func main() {
 	e.PATCH("/api/anchor-watch", patchAnchorWatch)
 	e.DELETE("/api/anchor-watch", deleteAnchorWatch)
 
+	registerStaticHandler(e)
+
 	loadAnchorWatch()
 
 	addr := fmt.Sprintf(":%s", port)
