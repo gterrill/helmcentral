@@ -1,6 +1,6 @@
 services:
   helmcentral:
-    image: ghcr.io/gterrill/helmcentral:main
+    image: ghcr.io/gterrill/helmcentral:latest
     container_name: helmcentral
     restart: unless-stopped
     ports:
