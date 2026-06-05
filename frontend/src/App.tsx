@@ -120,6 +120,7 @@ export function App() {
   const depthUnitLabel = isImperialDistance ? 'feet' : 'metres'
   const awaLabel = windAngleApparentDeg !== null ? `${Math.round(windAngleApparentDeg).toString().padStart(3, '0')}°` : '---°'
   const windSideLabel = windSide ? windSide.toUpperCase() : '—'
+  const headingLabel = formatHeading(headingTrue)
   const relativeAngleLabel = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : '—'
   const apparentWindSpeedLabel = windSpeedApparentKts !== null ? Math.round(windSpeedApparentKts).toString() : '—'
   const gust10mLabel = maxGust10mKts !== null ? `${maxGust10mKts.toFixed(1)} kts` : '—'
@@ -210,6 +211,7 @@ export function App() {
             <Tile title="Position">
               <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
               <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
+              <p className="font-mono text-sm">HDG {headingLabel}</p>
               <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
                 {placeName ?? '—'}
               </div>
