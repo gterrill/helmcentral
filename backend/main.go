@@ -86,6 +86,7 @@ func main() {
 	e.POST("/api/anchor-watch", setAnchorWatch)
 	e.PATCH("/api/anchor-watch", patchAnchorWatch)
 	e.DELETE("/api/anchor-watch", deleteAnchorWatch)
+	e.GET("/api/depth-trend", depthTrend)
 
 	registerStaticHandler(e)
 
@@ -110,6 +111,18 @@ func healthCheck(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "ok",
 	})
+}
+
+func depthTrend(c echo.Context) error {
+	window := c.QueryParam("window")
+	if window == "" {
+		window = "2h"
+	}
+	points := queryInfluxDepthTrend(window)
+	if points == nil {
+		points = []depthTrendPoint{}
+	}
+	return c.JSON(http.StatusOK, points)
 }
 
 func vesselState(c echo.Context) error {

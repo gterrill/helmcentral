@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, CloudSun, Compass } from 'lucide-react'
 import { useState } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
+import { DepthSparkline } from '@/components/depth-sparkline'
 import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
@@ -20,6 +21,7 @@ import { useTideToday } from '@/hooks/use-tide-today'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
+import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
@@ -111,6 +113,7 @@ export function App() {
   } = useWeatherForecast(uiConfig.vesselStateRefreshSeconds)
   const anchorWatch = useAnchorWatch(latitude, longitude, navigationState, uiConfig.vesselStateRefreshSeconds)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
+  const depthTrendPoints = useDepthTrend('2h', 60)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
     depth !== null
@@ -196,10 +199,17 @@ export function App() {
             </section>
 
             <Tile title="Depth">
-              <p className="mt-2 font-display text-6xl text-secondary">
-                {depthValue}
-                <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
-              </p>
+              <div className="mt-2 flex items-center gap-4">
+                <p className="shrink-0 font-display text-6xl text-secondary">
+                  {depthValue}
+                  <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
+                </p>
+                <DepthSparkline
+                  points={depthTrendPoints}
+                  isImperial={isImperialDistance}
+                  className="min-w-0 flex-1"
+                />
+              </div>
             </Tile>
             <Tile title="Position">
               <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
