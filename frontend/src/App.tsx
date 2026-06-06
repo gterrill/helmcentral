@@ -330,11 +330,11 @@ export function App() {
                 </div>
                 <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Battery</p>
-                  <p className={`font-display text-4xl leading-none md:text-5xl ${chargingValueClass}`}>
+                  <p className={`font-display text-3xl leading-none md:text-3xl ${chargingValueClass}`}>
                     {chargingCurrentLabel}
                     <span className="ml-1 text-xl text-muted-foreground">A</span>
                   </p>
-                  <p className={`mt-1 font-display text-3xl leading-none md:text-4xl ${chargingValueClass}`}>
+                  <p className={`mt-1 font-display text-3xl leading-none ${chargingValueClass}`}>
                     {chargingPowerLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
                   </p>
@@ -354,7 +354,7 @@ export function App() {
                   <p className="font-display text-4xl leading-none text-foreground">
                     {dc12vPowerLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
-                    <span className="ml-3 text-2xl text-muted-foreground">{dc12vCurrentLabel}A</span>
+                    <span className="ml-3 text-sm text-muted-foreground">{dc12vCurrentLabel}A</span>
                   </p>
                 </div>
               </div>
