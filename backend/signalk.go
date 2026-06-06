@@ -437,7 +437,7 @@ func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitu
 		}
 
 		rangeFeet := int(math.Round(haversineMeters(selfLatitude, selfLongitude, latitude, longitude) * 3.28084))
-		if rangeFeet < 30 {
+		if rangeFeet < 30 || rangeFeet > 16404 { // ignore <30ft (self) and >5km
 			continue
 		}
 
