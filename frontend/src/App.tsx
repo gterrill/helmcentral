@@ -212,9 +212,13 @@ export function App() {
               </div>
             </Tile>
             <Tile title="Position">
-              <p className="mt-2 font-mono text-sm">{formatCoordinate(latitude, true)}</p>
-              <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
-              <p className="font-mono text-sm">HDG {headingLabel}</p>
+              <div className="mt-2 flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>
+                  <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
+                </div>
+                <p className="shrink-0 font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
+              </div>
               <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
                 {placeName ?? '—'}
               </div>
