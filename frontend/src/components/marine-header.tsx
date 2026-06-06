@@ -82,16 +82,16 @@ export function MarineHeader() {
   return (
     <header className="rounded-xl border bg-card/90 shadow-sm backdrop-blur-sm">
       <div className="flex min-h-16 items-center gap-2 px-2 py-2 md:px-4">
-        <div className="flex min-w-0 flex-[1.3] items-center gap-2 border-border/70 pr-0 md:border-r md:pr-4">
-          <p className="min-w-0 shrink-0 font-display text-[1.28rem] leading-none tracking-[0.12em] text-primary md:text-[1.45rem] lg:text-[1.7rem]">
+        <div className="flex min-w-0 shrink flex-col border-border/70 pr-0 md:border-r md:pr-4">
+          <p className="shrink-0 font-display text-[1.28rem] leading-none tracking-[0.12em] text-primary md:text-[1.45rem] lg:text-[1.7rem]">
             {appConfig.boat.name}
           </p>
-          <p className="min-w-0 truncate pt-1 text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground md:text-[10px] lg:text-xs">
+          <p className="truncate text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground md:text-[10px] lg:text-xs">
             {statusText}
           </p>
         </div>
 
-        <div className="flex items-center gap-1 border-border/70 pl-0 md:border-l md:pl-4">
+        <div className="ml-auto flex shrink-0 items-center gap-1 border-border/70 pl-0 md:border-l md:pl-4">
           <div className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground md:text-[11px]">
             <Circle className="h-2.5 w-2.5 fill-secondary text-secondary" />
             Live
@@ -102,19 +102,18 @@ export function MarineHeader() {
           </div>
         </div>
 
-        <div className="flex min-w-0 items-center gap-2 md:gap-2.5">
-          <span className="max-w-[13rem] truncate whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 sm:inline md:text-[11px] lg:max-w-[16rem]">
+        <div className="flex shrink-0 flex-col items-end border-border/70 pl-0 md:border-l md:pl-4">
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 md:text-[11px]">
             {currentDate}
           </span>
-          <time className="inline-flex items-baseline gap-1 whitespace-nowrap text-right font-display leading-[1.08] tracking-[0.02em] text-secondary">
-            <span className="inline-flex items-baseline text-[1.65rem] tabular-nums sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
-              <span className="inline-flex w-[2ch] justify-center">{hh}</span>
-              <span className="inline-flex w-[0.45ch] justify-center">:</span>
-              <span className="inline-flex w-[ch] justify-center">{mm}</span>
-              <span className="inline-flex w-[0.45ch] justify-center">:</span>
-              <span className="inline-flex w-[2ch] justify-center">{ss}</span>
+          <time className="inline-flex items-baseline whitespace-nowrap font-display leading-[1.08] tracking-[0.02em] text-secondary">
+            <span className="inline-block w-[5ch] text-right tabular-nums text-[1.65rem] sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
+              {hh}:{mm}
             </span>
-            <span className="w-[2.35ch] text-[1.05rem] tracking-[0.06em] sm:text-[1.15rem] md:text-[1.3rem] lg:text-[1.4rem]">
+            <span className="inline-block w-[3ch] text-left tabular-nums text-[1.65rem] sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
+              :{ss}
+            </span>
+            <span className="ml-1 text-[1.05rem] tracking-[0.06em] sm:text-[1.15rem] md:text-[1.3rem] lg:text-[1.4rem]">
               {clock.meridiem}
             </span>
           </time>
