@@ -376,6 +376,15 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 		state.ACLoadsW = state.ACOutputW
 	}
 
+	generatorPower := lookupFirstNumber(payload,
+		[]string{"electrical", "ac", "1", "phase", "A", "realPower", "value"},
+		[]string{"electrical", "ac", "1", "phaseA", "realPower", "value"},
+		[]string{"electrical", "ac", "1", "realPower", "value"},
+	)
+	if generatorPower >= 0 {
+		state.GeneratorRealPowerW = roundTo1(generatorPower)
+	}
+
 	return state, nil
 }
 

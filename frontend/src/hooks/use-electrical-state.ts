@@ -12,6 +12,7 @@ interface ElectricalState {
   dc_12v_current_a: number
   dc_24v_voltage_v: number
   ac_loads_w: number
+  generator_real_power_w: number
   source: string
 }
 
@@ -25,6 +26,7 @@ export function useElectricalState(refreshInterval: number) {
   const [dc12vCurrentA, setDc12vCurrentA] = useState<number | null>(null)
   const [dc24vVoltageV, setDc24vVoltageV] = useState<number | null>(null)
   const [acLoadsW, setAcLoadsW] = useState<number | null>(null)
+  const [generatorRealPowerW, setGeneratorRealPowerW] = useState<number | null>(null)
   const [batteryRatePercentPerHour, setBatteryRatePercentPerHour] = useState<number | null>(null)
   const [timeToGoHours, setTimeToGoHours] = useState<number | null>(null)
 
@@ -54,6 +56,7 @@ export function useElectricalState(refreshInterval: number) {
         setDc12vCurrentA(typeof data.dc_12v_current_a === 'number' && data.dc_12v_current_a >= 0 ? data.dc_12v_current_a : null)
         setDc24vVoltageV(typeof data.dc_24v_voltage_v === 'number' && data.dc_24v_voltage_v >= 0 ? data.dc_24v_voltage_v : null)
         setAcLoadsW(typeof data.ac_loads_w === 'number' && data.ac_loads_w >= 0 ? data.ac_loads_w : null)
+        setGeneratorRealPowerW(typeof data.generator_real_power_w === 'number' && data.generator_real_power_w >= 0 ? data.generator_real_power_w : null)
 
         const batteryCapacityAh =
           typeof data.battery_capacity_ah === 'number' && data.battery_capacity_ah > 0 ? data.battery_capacity_ah : null
@@ -132,6 +135,7 @@ export function useElectricalState(refreshInterval: number) {
     dc12vCurrentA,
     dc24vVoltageV,
     acLoadsW,
+    generatorRealPowerW,
     batteryRatePercentPerHour,
     timeToGoHours,
   }

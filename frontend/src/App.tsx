@@ -99,7 +99,7 @@ export function App() {
     dc12vPowerW,
     dc12vCurrentA,
     dc24vVoltageV,
-    acLoadsW,
+    generatorRealPowerW,
     batteryRatePercentPerHour,
     timeToGoHours,
   } = useElectricalState(5)
@@ -141,7 +141,8 @@ export function App() {
   const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
   const dc12vCurrentLabel = dc12vCurrentA !== null ? dc12vCurrentA.toFixed(1) : '—'
   const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
-  const acLoadsLabel = acLoadsW !== null ? `${Math.round(acLoadsW)}W` : '—'
+  const isGeneratorRunning = generatorRealPowerW !== null && generatorRealPowerW > 0
+  const generatorPowerLabel = isGeneratorRunning ? Math.round(generatorRealPowerW!).toString() : '0'
   const chargeRateLabel = batteryRatePercentPerHour !== null
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}%/hr`
     : '—'
@@ -198,6 +199,18 @@ export function App() {
               </div>
             </section>
 
+            <Tile title="Position">
+              <div className="mt-2 flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>
+                  <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
+                </div>
+                <p className="shrink-0 font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
+              </div>
+              <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
+                {placeName ?? '—'}
+              </div>
+            </Tile>
             <Tile title="Depth">
               <div className="mt-2 flex items-center gap-4">
                 <p className="shrink-0 font-display text-6xl text-secondary">
@@ -209,18 +222,6 @@ export function App() {
                   isImperial={isImperialDistance}
                   className="min-w-0 flex-1"
                 />
-              </div>
-            </Tile>
-            <Tile title="Position">
-              <div className="mt-2 flex items-start justify-between gap-4">
-                <div>
-                  <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>
-                  <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
-                </div>
-                <p className="shrink-0 font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
-              </div>
-              <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
-                {placeName ?? '—'}
               </div>
             </Tile>
             <div onClick={() => setIsDrawerOpen(true)} className="cursor-pointer transition-opacity hover:opacity-80">
@@ -318,8 +319,13 @@ export function App() {
                     <span className="font-display text-6xl leading-none tabular-nums text-primary md:text-7xl">{socLabel}</span>
                     <span className="shrink-0 text-2xl leading-none text-foreground md:text-3xl">%</span>
                   </div>
-                  <div className="mt-3 h-1.5 rounded-full bg-muted/60">
-                    <div className="h-full rounded-full bg-primary" style={{ width: socBarWidth }} />
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="h-1.5 flex-1 rounded-full bg-muted/60">
+                      <div className="h-full rounded-full bg-primary" style={{ width: socBarWidth }} />
+                    </div>
+                    <span className="shrink-0 font-display text-sm tabular-nums leading-none text-secondary">
+                      {dc24vVoltageLabel}<span className="text-xs text-muted-foreground">V</span>
+                    </span>
                   </div>
                 </div>
                 <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
@@ -337,22 +343,12 @@ export function App() {
 
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
-                  <p className="font-display text-4xl leading-none text-primary">
-                    {solarOutputLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">W</span>
-                  </p>
-                </div>
-                <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Draw</p>
                   <p className="font-display text-4xl leading-none text-primary">
                     {acOutputLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
                   </p>
                 </div>
-              </div>
-
-              <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">DC Draw</p>
                   <p className="font-display text-4xl leading-none text-foreground">
@@ -361,21 +357,28 @@ export function App() {
                     <span className="ml-3 text-2xl text-muted-foreground">{dc12vCurrentLabel}A</span>
                   </p>
                 </div>
-                <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">24V Voltage</p>
-                  <p className="font-display text-4xl leading-none text-secondary">
-                    {dc24vVoltageLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">V</span>
-                  </p>
-                </div>
               </div>
 
-              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-                <div className="flex items-end justify-between">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Emporia AC Loads</p>
-                  <p className="font-display text-3xl leading-none text-primary">{acLoadsLabel}</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
+                  <p className="font-display text-4xl leading-none text-primary">
+                    {solarOutputLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">W</span>
+                  </p>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">Outlet Salon/Cockpit 112W · Starlink 90W</p>
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Generator</p>
+                  <div className="flex items-center justify-between gap-1">
+                    <p className={`font-display text-4xl leading-none ${isGeneratorRunning ? 'text-primary' : 'text-muted-foreground'}`}>
+                      {generatorPowerLabel}
+                      <span className="ml-1 text-xl text-muted-foreground">W</span>
+                    </p>
+                    <Button size="sm" variant="outline" className="h-8 shrink-0 px-2 text-xs">
+                      {isGeneratorRunning ? 'Stop' : 'Start'}
+                    </Button>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
@@ -383,19 +386,6 @@ export function App() {
                 <p className={`mt-1 font-display text-4xl leading-none ${timeToGoClass}`}>
                   {timeToGoLabel} {chargeRateLabel}
                 </p>
-              </div>
-
-              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="inline-flex items-center gap-2 text-sm uppercase tracking-[0.16em] text-muted-foreground">
-                    <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
-                    Generator
-                  </div>
-                  <span className="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground">Standby</span>
-                  <Button size="sm" variant="outline" className="h-9 min-w-20">
-                    Start
-                  </Button>
-                </div>
               </div>
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
