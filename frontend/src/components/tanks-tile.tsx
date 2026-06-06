@@ -55,7 +55,7 @@ function tankKindIcon(kind: TankLevel['kind']) {
   }
 
   if (kind === 'waste') {
-    return <Droplet className="h-4 w-4 text-black" aria-hidden="true" />
+    return <Droplet className="h-4 w-4 text-amber-900" aria-hidden="true" />
   }
 
   return <Icon iconNode={faucet} className="h-4 w-4 text-emerald-700" aria-hidden="true" />

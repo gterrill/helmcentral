@@ -572,16 +572,12 @@ func fetchSignalKTanksState(signalkURL string, vesselPath string, labelOverrides
 			}
 			level = math.Max(0, math.Min(100, roundTo1(level)))
 
-			label := firstNonEmptyString(lookupString(entry, "name", "value"), lookupString(entry, "name"), lookupString(entry, "displayName", "value"), lookupString(entry, "displayName"))
-			override := tankLabelOverride(labelOverrides, category, entryID)
-			if override != "" {
-				label = override
-			}
+			label := tankLabelOverride(labelOverrides, category, entryID)
 			if label == "" {
-				label = buildTankLabel(category, entryID)
+				continue
 			}
 
-			tanks = append(tanks, tankLevelData{ID: category + "." + entryID, Label: strings.TrimSpace(label), Category: category, Kind: tankKindFromCategory(category), LevelPercent: level})
+			tanks = append(tanks, tankLevelData{ID: category + "." + entryID, Label: label, Category: category, Kind: tankKindFromCategory(category), LevelPercent: level})
 		}
 	}
 
