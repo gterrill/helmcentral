@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -178,6 +180,39 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 	}
 	if sog >= 0 {
 		state.SpeedOverGroundKts = math.Round(sog*metersPerSecondToKnots*10) / 10
+	}
+
+	// Generator state (com.victronenergy.generator.0 via signalk-venus-plugin)
+	state.GeneratorState = firstNonEmptyString(
+		lookupString(payload, "electrical", "generator", "0", "state", "value"),
+		lookupString(payload, "electrical", "generator", "0", "state"),
+	)
+
+	if v, ok := lookupBool(payload, "electrical", "generator", "0", "manualStart", "value"); ok {
+		state.GeneratorManualStart = v
+	} else if v, ok := lookupBool(payload, "electrical", "generator", "0", "manualStart"); ok {
+		state.GeneratorManualStart = v
+	}
+
+	genTimer := lookupNumber(payload, "electrical", "generator", "0", "manualStartTimer", "value")
+	if genTimer == -1 {
+		genTimer = lookupNumber(payload, "electrical", "generator", "0", "manualStartTimer")
+	}
+	if genTimer >= 0 {
+		state.GeneratorManualStartTimer = genTimer
+	}
+
+	state.GeneratorRunningByCondition = firstNonEmptyString(
+		lookupString(payload, "electrical", "generator", "0", "runningByCondition", "value"),
+		lookupString(payload, "electrical", "generator", "0", "runningByCondition"),
+	)
+
+	genRuntime := lookupNumber(payload, "electrical", "generator", "0", "runtime", "value")
+	if genRuntime == -1 {
+		genRuntime = lookupNumber(payload, "electrical", "generator", "0", "runtime")
+	}
+	if genRuntime >= 0 {
+		state.GeneratorRuntime = genRuntime
 	}
 
 	return state, nil
@@ -732,6 +767,28 @@ func lookupNumber(payload map[string]any, keys ...string) float64 {
 	}
 }
 
+func lookupBool(payload map[string]any, keys ...string) (bool, bool) {
+	var current any = payload
+	for _, key := range keys {
+		asMap, ok := current.(map[string]any)
+		if !ok {
+			return false, false
+		}
+		next, ok := asMap[key]
+		if !ok {
+			return false, false
+		}
+		current = next
+	}
+	switch v := current.(type) {
+	case bool:
+		return v, true
+	case float64:
+		return v != 0, true
+	}
+	return false, false
+}
+
 func lookupFirstNumber(payload map[string]any, paths ...[]string) float64 {
 	for _, path := range paths {
 		value := lookupNumber(payload, path...)
@@ -860,6 +917,77 @@ func firstNonEmptyString(values ...string) string {
 	}
 
 	return ""
+}
+
+// ── SignalK authentication token cache ───────────────────────────────────────
+
+type cachedToken struct {
+	token     string
+	expiresAt time.Time
+}
+
+var skTokenMu sync.Mutex
+var skTokenCache *cachedToken
+
+// loadSignalKCredentials reads username/password from environment variables.
+func loadSignalKCredentials(_ string) (username, password string) {
+	username = getEnv("SIGNALK_USERNAME", "")
+	password = getEnv("SIGNALK_PASSWORD", "")
+	return
+}
+
+// acquireSignalKToken returns a cached JWT or fetches a fresh one.
+func acquireSignalKToken(signalkURL, username, password string) (string, error) {
+	if username == "" || password == "" {
+		return "", nil
+	}
+
+	skTokenMu.Lock()
+	defer skTokenMu.Unlock()
+
+	if skTokenCache != nil && time.Now().Before(skTokenCache.expiresAt) {
+		return skTokenCache.token, nil
+	}
+
+	url := strings.TrimRight(signalkURL, "/") + "/signalk/v1/auth/login"
+	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("signalk auth: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("signalk auth returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Token      string  `json:"token"`
+		TimeToLive float64 `json:"timeToLive"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil || result.Token == "" {
+		return "", fmt.Errorf("signalk auth: could not parse token response")
+	}
+
+	ttl := result.TimeToLive
+	if ttl <= 0 {
+		ttl = 86400 // default 24h
+	}
+	skTokenCache = &cachedToken{
+		token:     result.Token,
+		expiresAt: time.Now().Add(time.Duration(ttl-60) * time.Second),
+	}
+	return result.Token, nil
+}
+
+// invalidateSignalKToken clears the cached token so the next call re-authenticates.
+func invalidateSignalKToken() {
+	skTokenMu.Lock()
+	skTokenCache = nil
+	skTokenMu.Unlock()
 }
 
 func buildSignalKURL(address string, port int) string {

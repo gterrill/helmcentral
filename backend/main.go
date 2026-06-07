@@ -21,17 +21,22 @@ const (
 )
 
 type vesselStateData struct {
-	Status               string
-	Datetime             time.Time
-	Depth                float64
-	Latitude             float64
-	Longitude            float64
-	HeadingTrue          float64
-	SpeedOverGroundKts   float64
-	WindSpeedApparentKts float64
-	WindAngleApparentDeg float64
-	WindSide             string
-	WindAngleRelativeDeg float64
+	Status                      string
+	Datetime                    time.Time
+	Depth                       float64
+	Latitude                    float64
+	Longitude                   float64
+	HeadingTrue                 float64
+	SpeedOverGroundKts          float64
+	WindSpeedApparentKts        float64
+	WindAngleApparentDeg        float64
+	WindSide                    string
+	WindAngleRelativeDeg        float64
+	GeneratorState              string
+	GeneratorManualStart        bool
+	GeneratorManualStartTimer   float64
+	GeneratorRunningByCondition string
+	GeneratorRuntime            float64
 }
 
 type electricalStateData struct {
@@ -88,6 +93,10 @@ func main() {
 	e.PATCH("/api/anchor-watch", patchAnchorWatch)
 	e.DELETE("/api/anchor-watch", deleteAnchorWatch)
 	e.GET("/api/depth-trend", depthTrend)
+	e.GET("/api/czone/switches", getCZoneSwitchesHandler)
+	e.PUT("/api/czone/switches/:id/state", putCZoneSwitchStateHandler)
+	e.POST("/api/generator/start", postGeneratorStartHandler)
+	e.POST("/api/generator/stop", postGeneratorStopHandler)
 
 	registerStaticHandler(e)
 
@@ -172,20 +181,25 @@ func vesselState(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"status":                  state.Status,
-		"datetime":                state.Datetime.Format(time.RFC3339),
-		"depth":                   state.Depth,
-		"latitude":                state.Latitude,
-		"longitude":               state.Longitude,
-		"heading_true":            state.HeadingTrue,
-		"speed_over_ground_kts":   state.SpeedOverGroundKts,
-		"wind_speed_apparent_kts": state.WindSpeedApparentKts,
-		"wind_angle_apparent_deg": state.WindAngleApparentDeg,
-		"wind_side":               state.WindSide,
-		"wind_angle_relative_deg": state.WindAngleRelativeDeg,
-		"max_gust_10m_kts":        maxGust10mKts,
-		"max_gust_1h_kts":         maxGust1hKts,
-		"source":                  source,
+		"status":                         state.Status,
+		"datetime":                       state.Datetime.Format(time.RFC3339),
+		"depth":                          state.Depth,
+		"latitude":                       state.Latitude,
+		"longitude":                      state.Longitude,
+		"heading_true":                   state.HeadingTrue,
+		"speed_over_ground_kts":          state.SpeedOverGroundKts,
+		"wind_speed_apparent_kts":        state.WindSpeedApparentKts,
+		"wind_angle_apparent_deg":        state.WindAngleApparentDeg,
+		"wind_side":                      state.WindSide,
+		"wind_angle_relative_deg":        state.WindAngleRelativeDeg,
+		"max_gust_10m_kts":               maxGust10mKts,
+		"max_gust_1h_kts":                maxGust1hKts,
+		"generator_state":                state.GeneratorState,
+		"generator_manual_start":         state.GeneratorManualStart,
+		"generator_manual_start_timer":   state.GeneratorManualStartTimer,
+		"generator_running_by_condition": state.GeneratorRunningByCondition,
+		"generator_runtime":              state.GeneratorRuntime,
+		"source":                         source,
 	})
 }
 

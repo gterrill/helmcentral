@@ -8,6 +8,8 @@ import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
 import { SignalKSettingsPanel } from '@/components/signalk-settings-panel'
+import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
+import { GeneratorTile } from '@/components/generator-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { WindCompass } from '@/components/wind-compass'
 import { BottomDrawer } from '@/components/ui/bottom-drawer'
@@ -21,6 +23,7 @@ import { useTideToday } from '@/hooks/use-tide-today'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
+import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
@@ -87,6 +90,11 @@ export function App() {
     windAngleRelativeDeg,
     maxGust10mKts,
     maxGust1hKts,
+    generatorState,
+    generatorManualStart,
+    generatorManualStartTimer,
+    generatorRunningByCondition,
+    generatorRuntime,
   } = useVesselState(uiConfig.vesselStateRefreshSeconds)
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
   const { tanks, loading: tanksLoading } = useTanksState(uiConfig.vesselStateRefreshSeconds)
@@ -114,6 +122,7 @@ export function App() {
   const anchorWatch = useAnchorWatch(latitude, longitude, navigationState, uiConfig.vesselStateRefreshSeconds)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
   const depthTrendPoints = useDepthTrend('2h', 60)
+  const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
     depth !== null
@@ -141,8 +150,6 @@ export function App() {
   const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
   const dc12vCurrentLabel = dc12vCurrentA !== null ? dc12vCurrentA.toFixed(1) : '—'
   const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
-  const isGeneratorRunning = generatorRealPowerW !== null && generatorRealPowerW > 0
-  const generatorPowerLabel = isGeneratorRunning ? Math.round(generatorRealPowerW!).toString() : '0'
   const chargeRateLabel = batteryRatePercentPerHour !== null
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}%/hr`
     : '—'
@@ -341,24 +348,6 @@ export function App() {
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Draw</p>
-                  <p className="font-display text-4xl leading-none text-primary">
-                    {acOutputLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">W</span>
-                  </p>
-                </div>
-                <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">DC Draw</p>
-                  <p className="font-display text-4xl leading-none text-foreground">
-                    {dc12vPowerLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">W</span>
-                    <span className="ml-3 text-sm text-muted-foreground">{dc12vCurrentLabel}A</span>
-                  </p>
-                </div>
-              </div>
-
               <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
@@ -368,16 +357,11 @@ export function App() {
                   </p>
                 </div>
                 <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Generator</p>
-                  <div className="flex items-center justify-between gap-1">
-                    <p className={`font-display text-4xl leading-none ${isGeneratorRunning ? 'text-primary' : 'text-muted-foreground'}`}>
-                      {generatorPowerLabel}
-                      <span className="ml-1 text-xl text-muted-foreground">W</span>
-                    </p>
-                    <Button size="sm" variant="outline" className="h-8 shrink-0 px-2 text-xs">
-                      {isGeneratorRunning ? 'Stop' : 'Start'}
-                    </Button>
-                  </div>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Draw</p>
+                  <p className="font-display text-4xl leading-none text-primary">
+                    {acOutputLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">W</span>
+                  </p>
                 </div>
               </div>
 
@@ -423,7 +407,16 @@ export function App() {
               </div>
             </Tile>
 
+            <GeneratorTile
+              generatorState={generatorState}
+              generatorManualStart={generatorManualStart}
+              generatorManualStartTimer={generatorManualStartTimer}
+              generatorRunningByCondition={generatorRunningByCondition}
+              generatorRuntime={generatorRuntime}
+              generatorRealPowerW={generatorRealPowerW}
+            />
             <TanksTile tanks={tanks} loading={tanksLoading} />
+            <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
           </aside>
         </div>
 

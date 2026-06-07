@@ -14,6 +14,11 @@ interface VesselState {
   wind_angle_relative_deg: number
   max_gust_10m_kts: number
   max_gust_1h_kts: number
+  generator_state: string
+  generator_manual_start: boolean
+  generator_manual_start_timer: number
+  generator_running_by_condition: string
+  generator_runtime: number
   source: string
 }
 
@@ -30,6 +35,11 @@ export function useVesselState(refreshInterval: number) {
   const [speedOverGroundKts, setSpeedOverGroundKts] = useState<number | null>(null)
   const [maxGust10mKts, setMaxGust10mKts] = useState<number | null>(null)
   const [maxGust1hKts, setMaxGust1hKts] = useState<number | null>(null)
+  const [generatorState, setGeneratorState] = useState<string | null>(null)
+  const [generatorManualStart, setGeneratorManualStart] = useState<boolean>(false)
+  const [generatorManualStartTimer, setGeneratorManualStartTimer] = useState<number>(0)
+  const [generatorRunningByCondition, setGeneratorRunningByCondition] = useState<string | null>(null)
+  const [generatorRuntime, setGeneratorRuntime] = useState<number | null>(null)
 
   useEffect(() => {
     const fetchVesselState = async () => {
@@ -60,6 +70,12 @@ export function useVesselState(refreshInterval: number) {
         setMaxGust10mKts(typeof data.max_gust_10m_kts === 'number' && data.max_gust_10m_kts >= 0 ? data.max_gust_10m_kts : null)
         setMaxGust1hKts(typeof data.max_gust_1h_kts === 'number' && data.max_gust_1h_kts >= 0 ? data.max_gust_1h_kts : null)
         setSpeedOverGroundKts(typeof data.speed_over_ground_kts === 'number' && data.speed_over_ground_kts >= 0 ? data.speed_over_ground_kts : null)
+
+        setGeneratorState(typeof data.generator_state === 'string' && data.generator_state !== '' ? data.generator_state : null)
+        setGeneratorManualStart(data.generator_manual_start === true)
+        setGeneratorManualStartTimer(typeof data.generator_manual_start_timer === 'number' ? data.generator_manual_start_timer : 0)
+        setGeneratorRunningByCondition(typeof data.generator_running_by_condition === 'string' && data.generator_running_by_condition !== '' ? data.generator_running_by_condition : null)
+        setGeneratorRuntime(typeof data.generator_runtime === 'number' && data.generator_runtime >= 0 ? data.generator_runtime : null)
       } catch (err) {
         console.error('Failed to fetch vessel state:', err)
       }
@@ -88,5 +104,10 @@ export function useVesselState(refreshInterval: number) {
     windAngleRelativeDeg,
     maxGust10mKts,
     maxGust1hKts,
+    generatorState,
+    generatorManualStart,
+    generatorManualStartTimer,
+    generatorRunningByCondition,
+    generatorRuntime,
   }
 }
