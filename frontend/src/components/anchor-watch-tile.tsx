@@ -92,6 +92,7 @@ export function AnchorWatchTile({ watch, lat, lon, depthMeters, currentDriftKts,
           distanceMeters={distanceMeters}
           bearingDeg={bearingDeg}
           isImperial={isImperial}
+          anchorSetAt={watch.setAt}
           vesselTrail={vesselTrail}
           aisVessels={aisVessels}
           aisTrails={aisTrails}

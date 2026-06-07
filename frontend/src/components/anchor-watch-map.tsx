@@ -116,6 +116,7 @@ export interface AnchorWatchMapProps {
   distanceMeters: number | null
   bearingDeg: number | null
   isImperial: boolean
+  anchorSetAt: string | null
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
@@ -140,6 +141,7 @@ export function AnchorWatchMap({
   distanceMeters,
   bearingDeg: bearingDegProp,
   isImperial,
+  anchorSetAt,
   vesselTrail,
   aisVessels,
   aisTrails,
@@ -190,6 +192,7 @@ export function AnchorWatchMap({
   const displayBearingDeg = editMode === 'reposition' && ghostAnchor
     ? Math.round(bearingDeg(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon))
     : bearingDegProp
+  const showRepositionBreadcrumbs = editMode === 'reposition'
 
   // GeoJSON data
   const circleGeoJSON = useMemo(
@@ -205,9 +208,50 @@ export function AnchorWatchMap({
     [ghostAnchor, displayRadius],
   )
 
+  const anchorSetAtMs = useMemo(() => {
+    if (!anchorSetAt) return null
+    const ms = Date.parse(anchorSetAt)
+    return Number.isFinite(ms) ? ms : null
+  }, [anchorSetAt])
+
+  const trailPointTimeMs = useCallback((point: TrailPoint): number | null => {
+    if (typeof point.timestampMs === 'number' && Number.isFinite(point.timestampMs)) {
+      return point.timestampMs
+    }
+    if (typeof point.timestamp === 'string') {
+      const ms = Date.parse(point.timestamp)
+      return Number.isFinite(ms) ? ms : null
+    }
+    return null
+  }, [])
+
   // Trail data (re-derived each render triggered by renderKey bump)
+  const { motoringTrailGeoJSON, postAnchorTrailGeoJSON } = useMemo(() => {
+    const allPoints = vesselTrail()
+    if (anchorSetAtMs === null) {
+      return {
+        motoringTrailGeoJSON: trailToGeoJSON(allPoints),
+        postAnchorTrailGeoJSON: trailToGeoJSON([]),
+      }
+    }
+
+    const motoringPoints: TrailPoint[] = []
+    const postAnchorPoints: TrailPoint[] = []
+    for (const point of allPoints) {
+      const pointTime = trailPointTimeMs(point)
+      if (pointTime !== null && pointTime < anchorSetAtMs) {
+        motoringPoints.push(point)
+      } else {
+        postAnchorPoints.push(point)
+      }
+    }
+
+    return {
+      motoringTrailGeoJSON: trailToGeoJSON(motoringPoints),
+      postAnchorTrailGeoJSON: trailToGeoJSON(postAnchorPoints),
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const vesselTrailGeoJSON = useMemo(() => trailToGeoJSON(vesselTrail()), [renderKey, vesselTrail])
+  }, [renderKey, vesselTrail, anchorSetAtMs, trailPointTimeMs])
 
   const aisTrailsData = useMemo(() => {
     const trails = aisTrails()
@@ -527,37 +571,56 @@ export function AnchorWatchMap({
           </Source>
         )}
 
-        {/* AIS vessel trails */}
-        <Source id="ais-trails" type="geojson" data={aisTrailsData}>
-          <Layer
-            id="ais-trails-layer"
-            type="line"
-            paint={{
-              'line-color': '#f59e0b',
-              'line-width': 1.5,
-              'line-opacity': 0.5,
-            }}
-            layout={{ 'line-join': 'round', 'line-cap': 'round' }}
-          />
-        </Source>
-
-        {/* Vessel swing trail */}
-        {vesselTrailGeoJSON.geometry.coordinates.length >= 2 && (
-          <Source id="vessel-trail" type="geojson" lineMetrics data={vesselTrailGeoJSON}>
+        {/* AIS vessel trails (hidden during reposition to reduce clutter) */}
+        {showRepositionBreadcrumbs && (
+          <Source id="ais-trails" type="geojson" data={aisTrailsData}>
             <Layer
-              id="vessel-trail-layer"
+              id="ais-trails-layer"
               type="line"
               paint={{
-                'line-color': '#38bdf8',
-                'line-width': 2,
+                'line-color': '#f59e0b',
+                'line-width': 1.5,
+                'line-opacity': 0.5,
+              }}
+              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+            />
+          </Source>
+        )}
+
+        {/* Motoring breadcrumb trail (pre-anchor) */}
+        {showRepositionBreadcrumbs && motoringTrailGeoJSON.geometry.coordinates.length >= 2 && (
+          <Source id="vessel-trail-motoring" type="geojson" data={motoringTrailGeoJSON}>
+            <Layer
+              id="vessel-trail-motoring-layer"
+              type="line"
+              paint={{
+                'line-color': '#ef4444',
+                'line-width': 4,
+                'line-opacity': 0.95,
+                'line-blur': 0.2,
+              }}
+              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+            />
+          </Source>
+        )}
+
+        {/* Post-anchor tracking trail (ring buffer) */}
+        {showRepositionBreadcrumbs && postAnchorTrailGeoJSON.geometry.coordinates.length >= 2 && (
+          <Source id="vessel-trail-anchor" type="geojson" lineMetrics data={postAnchorTrailGeoJSON}>
+            <Layer
+              id="vessel-trail-anchor-layer"
+              type="line"
+              paint={{
+                'line-width': 3,
                 'line-gradient': [
                   'interpolate',
                   ['linear'],
                   ['line-progress'],
-                  0, 'rgba(56,189,248,0)',
-                  0.6, 'rgba(56,189,248,0.4)',
-                  1, 'rgba(56,189,248,0.9)',
+                  0, '#fde047',
+                  0.7, '#facc15',
+                  1, '#f59e0b',
                 ],
+                'line-opacity': 0.9,
               }}
               layout={{ 'line-join': 'round', 'line-cap': 'round' }}
             />

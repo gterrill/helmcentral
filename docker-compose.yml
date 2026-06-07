@@ -36,6 +36,7 @@ services:
     volumes:
       - ./backend:/app
       - ./settings.yaml:/app/settings.yaml
+      - /Volumes/Main-Storage/data/signalk/gpx-tracks:/Volumes/Main-Storage/data/signalk/gpx-tracks:ro
     dns:
       - 8.8.8.8
       - 1.1.1.1

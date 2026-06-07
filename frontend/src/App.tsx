@@ -529,6 +529,7 @@ export function App() {
                   currentSetDeg={currentSetDeg}
                   distanceMeters={anchorWatch.distanceMeters}
                   bearingDeg={anchorWatch.bearingDeg}
+                  anchorSetAt={anchorWatch.setAt}
                   vesselTrail={vesselTrail}
                   aisVessels={nearbyVessels}
                   aisTrails={aisTrails}

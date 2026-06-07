@@ -207,7 +207,7 @@ func vesselState(c echo.Context) error {
 		}
 	}
 
-	// Record self trail point if anchor watch is active
+	// Record self position into rolling pre-set trail, and active anchor trail when set
 	if state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
 		recordSelfTrailPoint(state.Latitude, state.Longitude)
 	}

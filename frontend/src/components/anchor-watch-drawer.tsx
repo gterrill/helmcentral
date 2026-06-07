@@ -14,6 +14,7 @@ interface AnchorWatchDrawerProps {
   currentSetDeg: number | null
   distanceMeters: number | null
   bearingDeg: number | null
+  anchorSetAt: string | null
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
@@ -36,6 +37,7 @@ export function AnchorWatchDrawer({
   currentSetDeg,
   distanceMeters,
   bearingDeg,
+  anchorSetAt,
   vesselTrail,
   aisVessels,
   aisTrails,
@@ -59,6 +61,7 @@ export function AnchorWatchDrawer({
       distanceMeters={distanceMeters}
       bearingDeg={bearingDeg}
       isImperial={isImperial}
+      anchorSetAt={anchorSetAt}
       vesselTrail={vesselTrail}
       aisVessels={aisVessels}
       aisTrails={aisTrails}
