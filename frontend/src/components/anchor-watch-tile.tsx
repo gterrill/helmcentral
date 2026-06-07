@@ -16,6 +16,8 @@ interface AnchorWatchTileProps {
   lat: number | null
   lon: number | null
   depthMeters: number | null
+  currentDriftKts: number | null
+  currentSetDeg: number | null
   isImperial: boolean
   vesselHeadingDeg: number | null
   vesselTrail: () => TrailPoint[]
@@ -25,7 +27,7 @@ interface AnchorWatchTileProps {
   onFullscreen: () => void
 }
 
-export function AnchorWatchTile({ watch, lat, lon, depthMeters, isImperial, vesselHeadingDeg, vesselTrail, aisVessels, aisTrails, isDarkTheme, onFullscreen }: AnchorWatchTileProps) {
+export function AnchorWatchTile({ watch, lat, lon, depthMeters, currentDriftKts, currentSetDeg, isImperial, vesselHeadingDeg, vesselTrail, aisVessels, aisTrails, isDarkTheme, onFullscreen }: AnchorWatchTileProps) {
   const {
     anchorState,
     anchorLat,
@@ -85,6 +87,8 @@ export function AnchorWatchTile({ watch, lat, lon, depthMeters, isImperial, vess
           anchorLon={anchorLon!}
           radiusMeters={radiusMeters}
           depthMeters={depthMeters}
+          currentDriftKts={currentDriftKts}
+          currentSetDeg={currentSetDeg}
           distanceMeters={distanceMeters}
           bearingDeg={bearingDeg}
           isImperial={isImperial}

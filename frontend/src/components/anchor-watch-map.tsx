@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, Crosshair, Expand, MapPin, Minus, Plus, Ship } from 'lucide-react'
+import { Anchor, ArrowUp, CircleStop, Crosshair, Expand, MapPin, Minus, Plus, Ship } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-vessel-trail'
@@ -111,6 +111,8 @@ export interface AnchorWatchMapProps {
   anchorLon: number
   radiusMeters: number
   depthMeters: number | null
+  currentDriftKts: number | null
+  currentSetDeg: number | null
   distanceMeters: number | null
   bearingDeg: number | null
   isImperial: boolean
@@ -133,6 +135,8 @@ export function AnchorWatchMap({
   anchorLon,
   radiusMeters,
   depthMeters,
+  currentDriftKts,
+  currentSetDeg,
   distanceMeters,
   bearingDeg: bearingDegProp,
   isImperial,
@@ -153,6 +157,7 @@ export function AnchorWatchMap({
   const originalRadiusRef = useRef<number>(radiusMeters)
   const [transient, setTransient] = useState<TransientInfo | null>(null)
   const transientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressNextMapClickRef = useRef(false)
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
 
   // Track zoom for marker scaling
@@ -179,6 +184,12 @@ export function AnchorWatchMap({
 
   // Derived display radius (live during resize, else stored)
   const displayRadius = liveRadius ?? radiusMeters
+  const displayDistanceMeters = editMode === 'reposition' && ghostAnchor
+    ? haversineMeters(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon)
+    : distanceMeters
+  const displayBearingDeg = editMode === 'reposition' && ghostAnchor
+    ? Math.round(bearingDeg(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon))
+    : bearingDegProp
 
   // GeoJSON data
   const circleGeoJSON = useMemo(
@@ -266,6 +277,24 @@ export function AnchorWatchMap({
   // ── Map click handler ────────────────────────────────────────────────────
   const handleMapClick = useCallback(
     (e: maplibregl.MapMouseEvent) => {
+      if (suppressNextMapClickRef.current) {
+        suppressNextMapClickRef.current = false
+        return
+      }
+      if (editMode === 'reposition' && ghostAnchor) {
+        onAnchorReposition(ghostAnchor.lat, ghostAnchor.lon)
+        setGhostAnchor(null)
+        setEditMode('none')
+        setCursor('grab')
+        return
+      }
+      if (editMode === 'radius' && liveRadius !== null) {
+        onRadiusChange(liveRadius)
+        setLiveRadius(null)
+        setEditMode('none')
+        setCursor('grab')
+        return
+      }
       if (editMode !== 'none') return
       const { lat, lng } = e.lngLat
       const dist = Math.round(haversineMeters(vesselLat, vesselLon, lat, lng))
@@ -314,6 +343,15 @@ export function AnchorWatchMap({
   // ── Circle edge click detection ──────────────────────────────────────────
   const handleCircleEdgeClick = useCallback(
     (e: maplibregl.MapMouseEvent) => {
+      if (editMode === 'radius' && liveRadius !== null) {
+        e.preventDefault()
+        suppressNextMapClickRef.current = true
+        onRadiusChange(liveRadius)
+        setLiveRadius(null)
+        setEditMode('none')
+        setCursor('grab')
+        return
+      }
       if (editMode !== 'none') return
       const map = mapRef.current
       if (!map) return
@@ -330,6 +368,7 @@ export function AnchorWatchMap({
       )
       if (Math.abs(pixelDist - pixelRadius) < 15) {
         e.preventDefault()
+        suppressNextMapClickRef.current = true
         originalRadiusRef.current = radiusMeters
         setLiveRadius(radiusMeters)
         setEditMode('radius')
@@ -364,16 +403,29 @@ export function AnchorWatchMap({
     [vesselLat, vesselLon, showTransient],
   )
 
+  const confirmAnchorReposition = useCallback(() => {
+    if (!ghostAnchor) return
+    suppressNextMapClickRef.current = true
+    onAnchorReposition(ghostAnchor.lat, ghostAnchor.lon)
+    setGhostAnchor(null)
+    setEditMode('none')
+    setCursor('grab')
+  }, [ghostAnchor, onAnchorReposition, setCursor])
+
   // ── Anchor marker click ──────────────────────────────────────────────────
   const handleAnchorMarkerClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
+      if (editMode === 'reposition' && ghostAnchor) {
+        confirmAnchorReposition()
+        return
+      }
       if (editMode !== 'none') return
       setGhostAnchor({ lat: anchorLat, lon: anchorLon })
       setEditMode('reposition')
       setCursor('grabbing')
     },
-    [editMode, anchorLat, anchorLon, setCursor],
+    [confirmAnchorReposition, editMode, anchorLat, anchorLon, ghostAnchor, setCursor],
   )
 
   // ── Zoom / Recenter controls ────────────────────────────────────────────
@@ -388,32 +440,6 @@ export function AnchorWatchMap({
   const handleRecenter = useCallback(() => {
     mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
   }, [anchorLat, anchorLon])
-
-  // ── Confirm / Cancel buttons ─────────────────────────────────────────────
-  const handleConfirmReposition = useCallback(() => {
-    if (ghostAnchor) {
-      onAnchorReposition(ghostAnchor.lat, ghostAnchor.lon)
-      setGhostAnchor(null)
-    }
-    setEditMode('none')
-    setCursor('grab')
-  }, [ghostAnchor, onAnchorReposition, setCursor])
-
-  const handleCancelEdit = useCallback(() => {
-    if (editMode === 'radius') setLiveRadius(null)
-    setGhostAnchor(null)
-    setEditMode('none')
-    setCursor('grab')
-  }, [editMode, setCursor])
-
-  const handleConfirmRadius = useCallback(() => {
-    if (liveRadius !== null) {
-      onRadiusChange(liveRadius)
-      setLiveRadius(null)
-    }
-    setEditMode('none')
-    setCursor('grab')
-  }, [liveRadius, onRadiusChange, setCursor])
 
   // ── Initial map view ─────────────────────────────────────────────────────
   const initialViewState = useMemo(
@@ -586,14 +612,20 @@ export function AnchorWatchMap({
         {/* Ghost anchor (during reposition) */}
         {ghostAnchor && (
           <Marker latitude={ghostAnchor.lat} longitude={ghostAnchor.lon}>
-            <div className="flex items-center justify-center" style={{ width: 40, height: 40, cursor: 'grabbing' }}>
+            <button
+              type="button"
+              onClick={confirmAnchorReposition}
+              className="flex items-center justify-center"
+              style={{ width: 40, height: 40, cursor: 'grab' }}
+              aria-label="Confirm anchor reposition"
+            >
               <div
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-500/80"
                 style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}
               >
                 <Anchor className="h-4 w-4 text-white opacity-60" />
               </div>
-            </div>
+            </button>
           </Marker>
         )}
 
@@ -645,64 +677,47 @@ export function AnchorWatchMap({
         )}
       </Map>
 
-      {/* Edit mode overlay controls */}
       {editMode !== 'none' && (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-          <div
-            className="pointer-events-auto flex gap-2 rounded-xl bg-black/75 px-4 py-2 backdrop-blur"
-            style={{ transition: 'opacity 200ms ease-out, transform 200ms ease-out' }}
-          >
-            {editMode === 'reposition' && (
-              <span className="self-center text-xs text-neutral-300">
-                Drag anchor to new position
-              </span>
-            )}
-            {editMode === 'radius' && (
-              <span className="self-center text-xs text-neutral-300">
-                Move cursor to resize alarm circle
-              </span>
-            )}
-            <button
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-500 active:bg-sky-700"
-              onClick={editMode === 'reposition' ? handleConfirmReposition : handleConfirmRadius}
-            >
-              Confirm
-            </button>
-            <button
-              className="rounded-lg bg-neutral-700 px-3 py-1.5 text-sm font-semibold text-neutral-100 hover:bg-neutral-600"
-              onClick={handleCancelEdit}
-            >
-              Cancel
-            </button>
+          <div className="rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/70 backdrop-blur">
+            Enter to confirm, Esc to cancel
           </div>
         </div>
       )}
 
       {/* Metric overlay — top of map */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center gap-2 p-2">
+      <div
+        className={cn(
+          'pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg backdrop-blur',
+          editMode === 'none' ? 'bg-black/50' : 'bg-black/35',
+        )}
+      >
         {[
           {
             label: 'Distance',
-            value: distanceMeters !== null
+            value: displayDistanceMeters !== null
               ? isImperial
-                ? `${Math.round(distanceMeters * 3.28084)}`
-                : `${Math.round(distanceMeters)}`
+                ? `${Math.round(displayDistanceMeters * 3.28084)}`
+                : `${Math.round(displayDistanceMeters)}`
               : '—',
             unit: isImperial ? 'ft' : 'm',
-            alert: distanceMeters !== null && distanceMeters > radiusMeters + 4.572,
+            alert: displayDistanceMeters !== null && displayDistanceMeters > radiusMeters + 4.572,
           },
           {
             label: 'Bearing',
-            value: bearingDegProp !== null ? `${bearingDegProp}` : '—',
+            value: displayBearingDeg !== null ? `${displayBearingDeg}` : '—',
             unit: '°',
             alert: false,
           },
           {
             label: 'Radius',
-            value: isImperial
-              ? `${Math.round(radiusMeters * 3.28084)}`
-              : `${Math.round(radiusMeters)}`,
+            value: displayRadius !== null
+              ? isImperial
+                ? `${Math.round(displayRadius * 3.28084)}`
+                : `${Math.round(displayRadius)}`
+              : '—',
             unit: isImperial ? 'ft' : 'm',
+            live: editMode === 'radius',
             alert: false,
           },
           {
@@ -715,35 +730,51 @@ export function AnchorWatchMap({
             unit: isImperial ? 'ft' : 'm',
             alert: false,
           },
-        ].map(({ label, value, unit, alert }) => (
+          {
+            label: 'Current',
+            value: currentDriftKts !== null ? currentDriftKts.toFixed(1) : '—',
+            unit: 'kts',
+            alert: false,
+            setDeg: currentSetDeg,
+          },
+        ].map(({ label, value, unit, alert, setDeg, live }, index) => (
           <div
             key={label}
-            className="rounded-lg bg-black/50 px-3 py-1.5 text-center backdrop-blur"
+            className={cn(
+              'flex items-center justify-between gap-4 px-3 py-1.5',
+              index > 0 && 'border-t border-white/10',
+              live && 'bg-sky-500/10',
+            )}
           >
-            <p className="text-[9px] uppercase tracking-[0.16em] text-white/60">{label}</p>
-            <p className={`font-display tabular-nums leading-tight ${
-              alert ? 'text-red-400' : 'text-white'
-            }`} style={{ fontSize: '1.1rem' }}>
-              {value}
-              <span className="ml-0.5 text-[11px] text-white/50">{unit}</span>
+            <p className={cn('text-[9px] uppercase tracking-[0.16em] text-white/60', live && 'text-sky-200')}>
+              {label}
             </p>
+            {label === 'Current' ? (
+              <div className="flex items-center justify-end gap-2">
+                <ArrowUp
+                  className="h-4 w-4 shrink-0 text-white"
+                  style={{ transform: `rotate(${((setDeg ?? 0) + 180) % 360}deg)` }}
+                  aria-hidden="true"
+                />
+                <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
+                  {value}
+                  <span className="ml-0.5 text-[11px] text-white/50">{unit}</span>
+                </p>
+              </div>
+            ) : (
+              <p
+                className={`font-display tabular-nums leading-tight ${
+                  alert ? 'text-red-400' : 'text-white'
+                }`}
+                style={{ fontSize: '1.1rem' }}
+              >
+                {value}
+                <span className="ml-0.5 text-[11px] text-white/50">{unit}</span>
+              </p>
+            )}
           </div>
         ))}
       </div>
-
-      {/* Clear anchor button — bottom-left, hidden during edit modes */}
-      {editMode === 'none' && (
-        <div className="pointer-events-auto absolute bottom-4 left-3">
-          <button
-            onClick={onClearAnchor}
-            className="rounded-lg bg-black/50 px-3 py-2 text-sm font-semibold text-white/80 shadow backdrop-blur hover:bg-red-600/80 hover:text-white active:scale-95"
-            style={{ transition: 'background-color 150ms ease-out, color 150ms ease-out' }}
-            aria-label="Clear anchor watch"
-          >
-            Clear Anchor Watch
-          </button>
-        </div>
-      )}
 
       {/* Zoom + Recenter controls */}
       <div className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1">
@@ -751,7 +782,7 @@ export function AnchorWatchMap({
           <button
             onClick={onFullscreen}
             aria-label="Full screen"
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/50 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
             style={{ transition: 'background-color 150ms ease-out' }}
           >
             <Expand className="h-4 w-4" />
@@ -783,14 +814,18 @@ export function AnchorWatchMap({
         >
           <Crosshair className="h-4 w-4" />
         </button>
+        {editMode === 'none' && (
+          <button
+            onClick={onClearAnchor}
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-red-600/80 active:scale-95"
+            style={{ transition: 'background-color 150ms ease-out, color 150ms ease-out' }}
+            aria-label="Stop anchor watch"
+          >
+            <CircleStop className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
-      {/* Radius readout during resize */}
-      {editMode === 'radius' && liveRadius !== null && (
-        <div className="pointer-events-none absolute left-3 top-3 rounded-lg bg-black/70 px-3 py-1.5 text-sm font-mono text-white backdrop-blur">
-          Radius: {Math.round(liveRadius)}m
-        </div>
-      )}
     </div>
   )
 }

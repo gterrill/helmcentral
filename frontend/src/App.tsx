@@ -96,6 +96,8 @@ export function App() {
   }, [])
   const {
     depth,
+    currentDriftKts,
+    currentSetDeg,
     navigationState,
     latitude,
     longitude,
@@ -330,6 +332,8 @@ export function App() {
                   lat={latitude}
                   lon={longitude}
                   depthMeters={depth}
+                  currentDriftKts={currentDriftKts}
+                  currentSetDeg={currentSetDeg}
                   isImperial={isImperialDistance}
                   vesselHeadingDeg={headingTrue}
                   vesselTrail={vesselTrail}
@@ -521,6 +525,8 @@ export function App() {
                   anchorLon={anchorWatch.anchorLon}
                   radiusMeters={anchorWatch.radiusMeters}
                   depthMeters={depth}
+                  currentDriftKts={currentDriftKts}
+                  currentSetDeg={currentSetDeg}
                   distanceMeters={anchorWatch.distanceMeters}
                   bearingDeg={anchorWatch.bearingDeg}
                   vesselTrail={vesselTrail}

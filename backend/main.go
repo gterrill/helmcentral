@@ -24,6 +24,8 @@ type vesselStateData struct {
 	Status                      string
 	Datetime                    time.Time
 	Depth                       float64
+	CurrentDriftKts             float64
+	CurrentSetDeg               float64
 	Latitude                    float64
 	Longitude                   float64
 	HeadingTrue                 float64
@@ -159,6 +161,8 @@ func vesselState(c echo.Context) error {
 		Status:               getEnv("VESSEL_STATUS", "At Anchor"),
 		Datetime:             time.Now().UTC(),
 		Depth:                -1,
+		CurrentDriftKts:      -1,
+		CurrentSetDeg:        -1,
 		Latitude:             -1,
 		Longitude:            -1,
 		HeadingTrue:          -1,
@@ -203,6 +207,8 @@ func vesselState(c echo.Context) error {
 		"status":                         state.Status,
 		"datetime":                       state.Datetime.Format(time.RFC3339),
 		"depth":                          state.Depth,
+		"current_drift_kts":              state.CurrentDriftKts,
+		"current_set_deg":                state.CurrentSetDeg,
 		"latitude":                       state.Latitude,
 		"longitude":                      state.Longitude,
 		"heading_true":                   state.HeadingTrue,

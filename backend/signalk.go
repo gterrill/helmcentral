@@ -112,6 +112,10 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 		state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer")
 	}
 
+	currentDriftKts, currentSetDeg := parseSignalKCurrent(payload)
+	state.CurrentDriftKts = currentDriftKts
+	state.CurrentSetDeg = currentSetDeg
+
 	state.Latitude = lookupNumber(payload, "navigation", "position", "value", "latitude")
 	if state.Latitude == -1 {
 		state.Latitude = lookupNumber(payload, "navigation", "position", "latitude")
@@ -216,6 +220,52 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 	}
 
 	return state, nil
+}
+
+func parseSignalKCurrent(payload map[string]any) (float64, float64) {
+	current := lookupAnyMap(payload, "environment", "current")
+	if current == nil {
+		return -1, -1
+	}
+
+	drift := lookupNumber(current, "drift", "value")
+	if drift == -1 {
+		drift = lookupNumber(current, "drift")
+	}
+	if drift == -1 {
+		drift = lookupFirstNumber(current,
+			[]string{"drift", "speed"},
+			[]string{"drift", "speed", "value"},
+			[]string{"drift", "value", "speed"},
+		)
+	}
+	if drift >= 0 && drift <= 20 {
+		drift = math.Round((drift*metersPerSecondToKnots)*10) / 10
+	} else if drift < 0 {
+		drift = -1
+	}
+
+	setDeg := lookupNumber(current, "set", "value")
+	if setDeg == -1 {
+		setDeg = lookupNumber(current, "set")
+	}
+	if setDeg == -1 {
+		setDeg = lookupFirstNumber(current,
+			[]string{"drift", "direction"},
+			[]string{"drift", "direction", "value"},
+			[]string{"drift", "angle"},
+			[]string{"drift", "angle", "value"},
+		)
+	}
+	if setDeg >= -2*math.Pi && setDeg <= 2*math.Pi {
+		setDeg = normalizeDegrees(setDeg * 180 / math.Pi)
+	} else if setDeg >= 0 {
+		setDeg = normalizeDegrees(setDeg)
+	} else {
+		setDeg = -1
+	}
+
+	return drift, setDeg
 }
 
 func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electricalStateData, error) {
