@@ -7,7 +7,6 @@ COPY frontend/package*.json ./
 RUN npm ci
 
 COPY frontend/. ./
-COPY settings.yaml /app/settings.yaml
 
 # Empty string makes all /api calls relative so they hit the same-origin backend
 ENV VITE_API_BASE_URL=""
