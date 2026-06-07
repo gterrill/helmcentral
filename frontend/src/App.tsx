@@ -223,11 +223,13 @@ export function App() {
                   {depthValue}
                   <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
                 </p>
-                <DepthSparkline
-                  points={depthTrendPoints}
-                  isImperial={isImperialDistance}
-                  className="min-w-0 flex-1"
-                />
+                {(navigationState === 'anchored' || navigationState === 'moored') && (
+                  <DepthSparkline
+                    points={depthTrendPoints}
+                    isImperial={isImperialDistance}
+                    className="min-w-0 flex-1"
+                  />
+                )}
               </div>
             </Tile>
             <div onClick={() => setIsDrawerOpen(true)} className="cursor-pointer transition-opacity hover:opacity-80">
