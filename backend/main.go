@@ -39,6 +39,13 @@ type vesselStateData struct {
 	GeneratorRuntime            float64
 }
 
+type alternatorInstanceData struct {
+	CurrentA float64
+	VoltageV float64
+	PowerW   float64
+	TempC    float64
+}
+
 type electricalStateData struct {
 	Datetime            time.Time
 	BatterySocPercent   float64
@@ -52,6 +59,8 @@ type electricalStateData struct {
 	DC24VVoltageV       float64
 	ACLoadsW            float64
 	GeneratorRealPowerW float64
+	Alternator0         alternatorInstanceData
+	Alternator1         alternatorInstanceData
 }
 
 type tankLevelData struct {
@@ -217,6 +226,8 @@ func electricalState(c echo.Context) error {
 		DC24VVoltageV:       -1,
 		ACLoadsW:            -1,
 		GeneratorRealPowerW: -1,
+		Alternator0:         alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1},
+		Alternator1:         alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1},
 	}
 	source := "backend-fallback"
 
@@ -239,21 +250,29 @@ func electricalState(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"datetime":               state.Datetime.Format(time.RFC3339),
-		"battery_soc_percent":    state.BatterySocPercent,
-		"battery_capacity_ah":    state.BatteryCapacityAh,
-		"charging_current_a":     state.ChargingCurrentA,
-		"charging_power_w":       state.ChargingPowerW,
-		"solar_output_w":         state.SolarOutputW,
-		"ac_output_w":            state.ACOutputW,
-		"dc_power_w":             state.DC12VPowerW,
-		"dc_current_a":           state.DC12VCurrentA,
-		"dc_12v_power_w":         state.DC12VPowerW,
-		"dc_12v_current_a":       state.DC12VCurrentA,
-		"dc_24v_voltage_v":       state.DC24VVoltageV,
-		"ac_loads_w":             state.ACLoadsW,
-		"generator_real_power_w": state.GeneratorRealPowerW,
-		"source":                 source,
+		"datetime":                   state.Datetime.Format(time.RFC3339),
+		"battery_soc_percent":        state.BatterySocPercent,
+		"battery_capacity_ah":        state.BatteryCapacityAh,
+		"charging_current_a":         state.ChargingCurrentA,
+		"charging_power_w":           state.ChargingPowerW,
+		"solar_output_w":             state.SolarOutputW,
+		"ac_output_w":                state.ACOutputW,
+		"dc_power_w":                 state.DC12VPowerW,
+		"dc_current_a":               state.DC12VCurrentA,
+		"dc_12v_power_w":             state.DC12VPowerW,
+		"dc_12v_current_a":           state.DC12VCurrentA,
+		"dc_24v_voltage_v":           state.DC24VVoltageV,
+		"ac_loads_w":                 state.ACLoadsW,
+		"generator_real_power_w":     state.GeneratorRealPowerW,
+		"alternator_0_current_a":     state.Alternator0.CurrentA,
+		"alternator_0_voltage_v":     state.Alternator0.VoltageV,
+		"alternator_0_power_w":       state.Alternator0.PowerW,
+		"alternator_0_temperature_c": state.Alternator0.TempC,
+		"alternator_1_current_a":     state.Alternator1.CurrentA,
+		"alternator_1_voltage_v":     state.Alternator1.VoltageV,
+		"alternator_1_power_w":       state.Alternator1.PowerW,
+		"alternator_1_temperature_c": state.Alternator1.TempC,
+		"source":                     source,
 	})
 }
 

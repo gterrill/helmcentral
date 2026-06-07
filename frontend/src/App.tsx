@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, CloudSun, Compass } from 'lucide-react'
 import { useState } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
+import { AlternatorTile } from '@/components/alternator-tile'
 import { DepthSparkline } from '@/components/depth-sparkline'
 import { MarineHeader } from '@/components/marine-header'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
@@ -108,6 +109,8 @@ export function App() {
     dc12vCurrentA,
     dc24vVoltageV,
     generatorRealPowerW,
+    alternator0,
+    alternator1,
     batteryRatePercentPerHour,
     timeToGoHours,
   } = useElectricalState(5)
@@ -296,24 +299,35 @@ export function App() {
           </aside>
 
           <aside className="space-y-4">
-            <AnchorWatchTile
-              watch={anchorWatch}
-              lat={latitude}
-              lon={longitude}
-              isImperial={isImperialDistance}
-            />
+            {navigationState === 'motoring' && (
+              <AlternatorTile
+                port={alternator0}
+                starboard={alternator1}
+              />
+            )}
 
-            <RodeScopeTile
-              anchorState={anchorWatch.anchorState}
-              rodeDeployedM={anchorWatch.rodeDeployedM}
-              seaState={anchorWatch.seaState}
-              seabedType={anchorWatch.seabedType}
-              depthM={depth}
-              windKts={windSpeedApparentKts}
-              isImperial={isImperialDistance}
-              anchorConfig={anchorConfig}
-              onUpdate={anchorWatch.updateRodeAndConditions}
-            />
+            {navigationState !== 'motoring' && (
+              <>
+                <AnchorWatchTile
+                  watch={anchorWatch}
+                  lat={latitude}
+                  lon={longitude}
+                  isImperial={isImperialDistance}
+                />
+
+                <RodeScopeTile
+                  anchorState={anchorWatch.anchorState}
+                  rodeDeployedM={anchorWatch.rodeDeployedM}
+                  seaState={anchorWatch.seaState}
+                  seabedType={anchorWatch.seabedType}
+                  depthM={depth}
+                  windKts={windSpeedApparentKts}
+                  isImperial={isImperialDistance}
+                  anchorConfig={anchorConfig}
+                  onUpdate={anchorWatch.updateRodeAndConditions}
+                />
+              </>
+            )}
 
             <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
           </aside>

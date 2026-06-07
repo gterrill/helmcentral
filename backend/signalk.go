@@ -420,7 +420,52 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 		state.GeneratorRealPowerW = roundTo1(generatorPower)
 	}
 
+	// Alternators — read port (index 0) and starboard (index 1) separately.
+	state.Alternator0 = readAlternatorInstance(payload, "0")
+	state.Alternator1 = readAlternatorInstance(payload, "1")
+
 	return state, nil
+}
+
+func readAlternatorInstance(payload map[string]any, index string) alternatorInstanceData {
+	inst := alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1}
+
+	current := lookupFirstNumber(payload,
+		[]string{"electrical", "alternator", index, "current", "value"},
+		[]string{"electrical", "alternator", index, "current"},
+	)
+	if current >= 0 {
+		inst.CurrentA = roundTo1(current)
+	}
+
+	voltage := lookupFirstNumber(payload,
+		[]string{"electrical", "alternator", index, "voltage", "value"},
+		[]string{"electrical", "alternator", index, "voltage"},
+	)
+	if voltage >= 0 {
+		inst.VoltageV = roundTo1(voltage)
+	}
+
+	power := lookupFirstNumber(payload,
+		[]string{"electrical", "alternator", index, "power", "value"},
+		[]string{"electrical", "alternator", index, "power"},
+	)
+	if power == -1 && inst.CurrentA >= 0 && inst.VoltageV > 0 {
+		power = roundTo1(inst.CurrentA * inst.VoltageV)
+	}
+	if power >= 0 {
+		inst.PowerW = roundTo1(power)
+	}
+
+	tempK := lookupFirstNumber(payload,
+		[]string{"electrical", "alternator", index, "temperature", "value"},
+		[]string{"electrical", "alternator", index, "temperature"},
+	)
+	if tempK >= 0 {
+		inst.TempC = roundTo1(tempK - 273.15)
+	}
+
+	return inst
 }
 
 func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {

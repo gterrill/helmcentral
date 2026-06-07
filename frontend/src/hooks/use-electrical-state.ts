@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
 
+interface AlternatorInstance {
+  currentA: number | null
+  voltageV: number | null
+  powerW: number | null
+  temperatureC: number | null
+}
+
 interface ElectricalState {
   datetime: string
   battery_soc_percent: number
@@ -13,7 +20,19 @@ interface ElectricalState {
   dc_24v_voltage_v: number
   ac_loads_w: number
   generator_real_power_w: number
+  alternator_0_current_a: number
+  alternator_0_voltage_v: number
+  alternator_0_power_w: number
+  alternator_0_temperature_c: number
+  alternator_1_current_a: number
+  alternator_1_voltage_v: number
+  alternator_1_power_w: number
+  alternator_1_temperature_c: number
   source: string
+}
+
+function parseAlt(v: unknown): number | null {
+  return typeof v === 'number' && v >= 0 ? v : null
 }
 
 export function useElectricalState(refreshInterval: number) {
@@ -27,6 +46,8 @@ export function useElectricalState(refreshInterval: number) {
   const [dc24vVoltageV, setDc24vVoltageV] = useState<number | null>(null)
   const [acLoadsW, setAcLoadsW] = useState<number | null>(null)
   const [generatorRealPowerW, setGeneratorRealPowerW] = useState<number | null>(null)
+  const [alternator0, setAlternator0] = useState<AlternatorInstance>({ currentA: null, voltageV: null, powerW: null, temperatureC: null })
+  const [alternator1, setAlternator1] = useState<AlternatorInstance>({ currentA: null, voltageV: null, powerW: null, temperatureC: null })
   const [batteryRatePercentPerHour, setBatteryRatePercentPerHour] = useState<number | null>(null)
   const [timeToGoHours, setTimeToGoHours] = useState<number | null>(null)
 
@@ -57,6 +78,8 @@ export function useElectricalState(refreshInterval: number) {
         setDc24vVoltageV(typeof data.dc_24v_voltage_v === 'number' && data.dc_24v_voltage_v >= 0 ? data.dc_24v_voltage_v : null)
         setAcLoadsW(typeof data.ac_loads_w === 'number' && data.ac_loads_w >= 0 ? data.ac_loads_w : null)
         setGeneratorRealPowerW(typeof data.generator_real_power_w === 'number' && data.generator_real_power_w >= 0 ? data.generator_real_power_w : null)
+        setAlternator0({ currentA: parseAlt(data.alternator_0_current_a), voltageV: parseAlt(data.alternator_0_voltage_v), powerW: parseAlt(data.alternator_0_power_w), temperatureC: parseAlt(data.alternator_0_temperature_c) })
+        setAlternator1({ currentA: parseAlt(data.alternator_1_current_a), voltageV: parseAlt(data.alternator_1_voltage_v), powerW: parseAlt(data.alternator_1_power_w), temperatureC: parseAlt(data.alternator_1_temperature_c) })
 
         const batteryCapacityAh =
           typeof data.battery_capacity_ah === 'number' && data.battery_capacity_ah > 0 ? data.battery_capacity_ah : null
@@ -136,6 +159,8 @@ export function useElectricalState(refreshInterval: number) {
     dc24vVoltageV,
     acLoadsW,
     generatorRealPowerW,
+    alternator0,
+    alternator1,
     batteryRatePercentPerHour,
     timeToGoHours,
   }
