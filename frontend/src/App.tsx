@@ -329,6 +329,7 @@ export function App() {
                   watch={anchorWatch}
                   lat={latitude}
                   lon={longitude}
+                  depthMeters={depth}
                   isImperial={isImperialDistance}
                   vesselHeadingDeg={headingTrue}
                   vesselTrail={vesselTrail}
@@ -519,6 +520,7 @@ export function App() {
                   anchorLat={anchorWatch.anchorLat}
                   anchorLon={anchorWatch.anchorLon}
                   radiusMeters={anchorWatch.radiusMeters}
+                  depthMeters={depth}
                   distanceMeters={anchorWatch.distanceMeters}
                   bearingDeg={anchorWatch.bearingDeg}
                   vesselTrail={vesselTrail}

@@ -9,6 +9,7 @@ interface AnchorWatchDrawerProps {
   anchorLat: number
   anchorLon: number
   radiusMeters: number
+  depthMeters: number | null
   distanceMeters: number | null
   bearingDeg: number | null
   vesselTrail: () => TrailPoint[]
@@ -28,6 +29,7 @@ export function AnchorWatchDrawer({
   anchorLat,
   anchorLon,
   radiusMeters,
+  depthMeters,
   distanceMeters,
   bearingDeg,
   vesselTrail,
@@ -47,6 +49,7 @@ export function AnchorWatchDrawer({
       anchorLat={anchorLat}
       anchorLon={anchorLon}
       radiusMeters={radiusMeters}
+      depthMeters={depthMeters}
       distanceMeters={distanceMeters}
       bearingDeg={bearingDeg}
       isImperial={isImperial}

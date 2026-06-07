@@ -110,6 +110,7 @@ export interface AnchorWatchMapProps {
   anchorLat: number
   anchorLon: number
   radiusMeters: number
+  depthMeters: number | null
   distanceMeters: number | null
   bearingDeg: number | null
   isImperial: boolean
@@ -131,6 +132,7 @@ export function AnchorWatchMap({
   anchorLat,
   anchorLon,
   radiusMeters,
+  depthMeters,
   distanceMeters,
   bearingDeg: bearingDegProp,
   isImperial,
@@ -700,6 +702,16 @@ export function AnchorWatchMap({
             value: isImperial
               ? `${Math.round(radiusMeters * 3.28084)}`
               : `${Math.round(radiusMeters)}`,
+            unit: isImperial ? 'ft' : 'm',
+            alert: false,
+          },
+          {
+            label: 'Depth',
+            value: depthMeters !== null
+              ? isImperial
+                ? `${(depthMeters * 3.28084).toFixed(1)}`
+                : `${depthMeters.toFixed(1)}`
+              : '—',
             unit: isImperial ? 'ft' : 'm',
             alert: false,
           },
