@@ -42,7 +42,7 @@ services:
 
   frontend-dev:
     profiles: ["dev"]
-    image: node:18-alpine
+    image: node:20-alpine
     working_dir: /workspace/frontend
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     environment:

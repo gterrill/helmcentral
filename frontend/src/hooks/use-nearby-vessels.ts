@@ -5,6 +5,8 @@ export type NearbyVessel = {
   range_ft: number
   age_seconds: number
   sog_knots?: number
+  lat?: number
+  lon?: number
 }
 
 type NearbyVesselsResponse = {
@@ -33,7 +35,11 @@ export function useNearbyVessels(refreshInterval: number) {
               Number.isFinite(item.range_ft) &&
               typeof item.age_seconds === 'number' &&
               Number.isFinite(item.age_seconds),
-          ),
+          ).map((item) => ({
+            ...item,
+            lat: typeof item.lat === 'number' && Number.isFinite(item.lat) ? item.lat : undefined,
+            lon: typeof item.lon === 'number' && Number.isFinite(item.lon) ? item.lon : undefined,
+          })),
         )
       } catch (err) {
         console.error('Failed to fetch nearby vessels:', err)

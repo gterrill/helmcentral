@@ -1,7 +1,9 @@
 import { ArrowDown, ArrowUp, CloudSun, Compass } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
+import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
+import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import { AlternatorTile } from '@/components/alternator-tile'
 import { DepthSparkline } from '@/components/depth-sparkline'
 import { MarineHeader } from '@/components/marine-header'
@@ -18,6 +20,8 @@ import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
+import { useVesselTrail } from '@/hooks/use-vessel-trail'
+import { useAisTrails } from '@/hooks/use-ais-trails'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
@@ -79,6 +83,19 @@ function formatTimeToGo(hours: number | null) {
 export function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [activeDrawerTab, setActiveDrawerTab] = useState('forecast')
+  const [showAnchorMap, setShowAnchorMap] = useState(false)
+
+  // Detect dark theme by watching the <html> class list
+  const [isDarkTheme, setIsDarkTheme] = useState(() =>
+    document.documentElement.classList.contains('dark'),
+  )
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkTheme(document.documentElement.classList.contains('dark'))
+    })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
   const {
     depth,
     navigationState,
@@ -121,6 +138,8 @@ export function App() {
     refetch: refetchForecast,
   } = useWeatherForecast(uiConfig.vesselStateRefreshSeconds)
   const anchorWatch = useAnchorWatch(latitude, longitude, navigationState, uiConfig.vesselStateRefreshSeconds)
+  const vesselTrail = useVesselTrail(latitude, longitude, anchorWatch.setAt)
+  const aisTrails = useAisTrails(nearbyVessels)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
   const depthTrendPoints = useDepthTrend('2h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
@@ -162,7 +181,9 @@ export function App() {
       ? 'Wind'
       : activeDrawerTab === 'tides'
         ? 'Tides'
-        : 'Forecast'
+        : activeDrawerTab === 'anchor-watch'
+          ? 'Anchor Watch'
+          : 'Forecast'
 
   return (
     <div className="min-h-screen p-4 pb-20 md:p-6 md:pb-24">
@@ -311,19 +332,42 @@ export function App() {
                   lat={latitude}
                   lon={longitude}
                   isImperial={isImperialDistance}
+                  showMap={showAnchorMap}
+                  onToggleMap={() => setShowAnchorMap((v) => !v)}
                 />
 
-                <RodeScopeTile
-                  anchorState={anchorWatch.anchorState}
-                  rodeDeployedM={anchorWatch.rodeDeployedM}
-                  seaState={anchorWatch.seaState}
-                  seabedType={anchorWatch.seabedType}
-                  depthM={depth}
-                  windKts={windSpeedApparentKts}
-                  isImperial={isImperialDistance}
-                  anchorConfig={anchorConfig}
-                  onUpdate={anchorWatch.updateRodeAndConditions}
-                />
+                {showAnchorMap && anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null && latitude !== null && longitude !== null
+                  ? (
+                    <AnchorWatchMap
+                      vesselLat={latitude}
+                      vesselLon={longitude}
+                      vesselHeadingDeg={headingTrue}
+                      anchorLat={anchorWatch.anchorLat}
+                      anchorLon={anchorWatch.anchorLon}
+                      radiusMeters={anchorWatch.radiusMeters}
+                      vesselTrail={vesselTrail}
+                      aisVessels={nearbyVessels}
+                      aisTrails={aisTrails}
+                      isDarkTheme={isDarkTheme}
+                      onAnchorReposition={anchorWatch.updatePosition}
+                      onRadiusChange={anchorWatch.updateRadius}
+                      className="h-72"
+                    />
+                  )
+                  : (
+                    <RodeScopeTile
+                      anchorState={anchorWatch.anchorState}
+                      rodeDeployedM={anchorWatch.rodeDeployedM}
+                      seaState={anchorWatch.seaState}
+                      seabedType={anchorWatch.seabedType}
+                      depthM={depth}
+                      windKts={windSpeedApparentKts}
+                      isImperial={isImperialDistance}
+                      anchorConfig={anchorConfig}
+                      onUpdate={anchorWatch.updateRodeAndConditions}
+                    />
+                  )
+                }
               </>
             )}
 
@@ -443,6 +487,11 @@ export function App() {
             { id: 'tides', label: 'Tides' },
             { id: 'wind', label: 'Wind' },
             { id: 'radar', label: 'Radar' },
+            {
+              id: 'anchor-watch',
+              label: 'Anchor Watch',
+              indicator: anchorWatch.anchorState !== 'none',
+            },
             { id: 'settings', label: 'Settings' },
           ]}
           activeTab={activeDrawerTab}
@@ -468,6 +517,29 @@ export function App() {
           )}
           {activeDrawerTab === 'settings' && (
             <SignalKSettingsPanel />
+          )}
+          {activeDrawerTab === 'anchor-watch' && (
+            anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null && latitude !== null && longitude !== null
+              ? (
+                <AnchorWatchDrawer
+                  vesselLat={latitude}
+                  vesselLon={longitude}
+                  vesselHeadingDeg={headingTrue}
+                  anchorLat={anchorWatch.anchorLat}
+                  anchorLon={anchorWatch.anchorLon}
+                  radiusMeters={anchorWatch.radiusMeters}
+                  distanceMeters={anchorWatch.distanceMeters}
+                  bearingDeg={anchorWatch.bearingDeg}
+                  vesselTrail={vesselTrail}
+                  aisVessels={nearbyVessels}
+                  aisTrails={aisTrails}
+                  isDarkTheme={isDarkTheme}
+                  onAnchorReposition={anchorWatch.updatePosition}
+                  onRadiusChange={anchorWatch.updateRadius}
+                  isImperial={isImperialDistance}
+                />
+              )
+              : <div className="py-8 text-center text-muted-foreground">No anchor watch active</div>
           )}
         </BottomDrawer>
       </div>

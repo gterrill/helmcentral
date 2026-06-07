@@ -10,6 +10,7 @@ interface BottomDrawerProps {
     id: string
     label: string
     icon?: React.ReactNode
+    indicator?: boolean
   }>
   activeTab?: string
   onTabChange?: (tabId: string) => void
@@ -52,6 +53,9 @@ export function BottomDrawer({
               <span className="inline-flex items-center gap-2">
                 {tab.icon}
                 {tab.label}
+                {tab.indicator && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+                )}
               </span>
             </button>
           ))}

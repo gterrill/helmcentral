@@ -323,6 +323,8 @@ type nearbyVessel struct {
 	RangeFt    int      `json:"range_ft"`
 	AgeSeconds int      `json:"age_seconds"`
 	SogKnots   *float64 `json:"sog_knots,omitempty"`
+	Lat        float64  `json:"lat"`
+	Lon        float64  `json:"lon"`
 }
 
 func nearbyVessels(c echo.Context) error {

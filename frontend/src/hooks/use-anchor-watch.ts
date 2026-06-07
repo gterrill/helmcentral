@@ -25,7 +25,9 @@ export interface AnchorWatchResult {
   distanceMeters: number | null
   bearingDeg: number | null
   suggestSet: boolean
+  setAt: string | null
   setAnchorHere: (lat: number, lon: number, radiusMeters?: number) => Promise<void>
+  updatePosition: (lat: number, lon: number) => Promise<void>
   updateRadius: (radiusMeters: number) => Promise<void>
   updateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
   clearAnchor: () => Promise<void>
@@ -138,6 +140,18 @@ export function useAnchorWatch(
     }
   }, [])
 
+  const updatePosition = useCallback(async (lat: number, lon: number) => {
+    const res = await fetch('/api/anchor-watch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lon, radius_meters: serverState.radius_meters ?? DEFAULT_RADIUS_METERS }),
+    })
+    if (res.ok) {
+      const data = (await res.json()) as AnchorWatchServerState
+      setServerState(data)
+    }
+  }, [serverState.radius_meters])
+
   const clearAnchor = useCallback(async () => {
     const res = await fetch('/api/anchor-watch', { method: 'DELETE' })
     if (res.ok) {
@@ -177,6 +191,7 @@ export function useAnchorWatch(
   }
 
   const suggestSet = !serverState.active && navigationState === 'anchored'
+  const setAt = serverState.active && serverState.set_at ? serverState.set_at : null
 
   return {
     anchorState,
@@ -189,7 +204,9 @@ export function useAnchorWatch(
     distanceMeters,
     bearingDeg,
     suggestSet,
+    setAt,
     setAnchorHere,
+    updatePosition,
     updateRadius,
     updateRodeAndConditions,
     clearAnchor,

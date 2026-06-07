@@ -7,10 +7,11 @@ interface TileProps {
   icon?: React.ReactNode
   className?: string
   titleClassName?: string
+  titleExtra?: React.ReactNode
   children: React.ReactNode
 }
 
-export function Tile({ title, icon, className, titleClassName, children }: TileProps) {
+export function Tile({ title, icon, className, titleClassName, titleExtra, children }: TileProps) {
   return (
     <section className={cn('rounded-lg border-x border-b bg-card p-4 pt-5', className)}>
       <div className="mb-3 flex items-center gap-2">
@@ -24,6 +25,7 @@ export function Tile({ title, icon, className, titleClassName, children }: TileP
           <span>{title}</span>
         </div>
         <div className="h-px flex-1 bg-border/70" />
+        {titleExtra && <div className="shrink-0">{titleExtra}</div>}
       </div>
 
       {children}

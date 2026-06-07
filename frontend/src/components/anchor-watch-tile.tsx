@@ -1,4 +1,4 @@
-import { Anchor } from 'lucide-react'
+import { Anchor, Map as MapIcon } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
@@ -13,6 +13,8 @@ interface AnchorWatchTileProps {
   lat: number | null
   lon: number | null
   isImperial: boolean
+  showMap: boolean
+  onToggleMap: () => void
 }
 
 function formatCoord(value: number, isLat: boolean): string {
@@ -24,7 +26,7 @@ function formatCoord(value: number, isLat: boolean): string {
   return `${hemi} ${deg} ${min}\u2032`
 }
 
-export function AnchorWatchTile({ watch, lat, lon, isImperial }: AnchorWatchTileProps) {
+export function AnchorWatchTile({ watch, lat, lon, isImperial, showMap, onToggleMap }: AnchorWatchTileProps) {
   const {
     anchorState,
     anchorLat,
@@ -112,7 +114,19 @@ export function AnchorWatchTile({ watch, lat, lon, isImperial }: AnchorWatchTile
   const isDragging = anchorState === 'dragging'
 
   return (
-    <Tile title="Anchor Watch" icon={<Anchor className="h-3.5 w-3.5" />}>
+    <Tile
+      title="Anchor Watch"
+      icon={<Anchor className="h-3.5 w-3.5" />}
+      titleExtra={
+        <button
+          onClick={onToggleMap}
+          aria-label={showMap ? 'Show list view' : 'Show map'}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+        >
+          <MapIcon className="h-4 w-4" />
+        </button>
+      }
+    >
       {isDragging && (
         <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
           ⚠ Dragging — <span className="font-semibold">{draggingBeyond}{distUnit} beyond radius</span>
