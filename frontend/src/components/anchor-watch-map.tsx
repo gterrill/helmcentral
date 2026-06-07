@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, MapPin, Ship } from 'lucide-react'
+import { Anchor, Crosshair, MapPin, Minus, Plus, Ship } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-vessel-trail'
@@ -110,12 +110,16 @@ export interface AnchorWatchMapProps {
   anchorLat: number
   anchorLon: number
   radiusMeters: number
+  distanceMeters: number | null
+  bearingDeg: number | null
+  isImperial: boolean
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
   isDarkTheme: boolean
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
+  onClearAnchor: () => void
   className?: string
 }
 
@@ -126,12 +130,16 @@ export function AnchorWatchMap({
   anchorLat,
   anchorLon,
   radiusMeters,
+  distanceMeters,
+  bearingDeg: bearingDegProp,
+  isImperial,
   vesselTrail,
   aisVessels,
   aisTrails,
   isDarkTheme,
   onAnchorReposition,
   onRadiusChange,
+  onClearAnchor,
   className,
 }: AnchorWatchMapProps) {
   const mapRef = useRef<MapRef | null>(null)
@@ -355,6 +363,19 @@ export function AnchorWatchMap({
     [editMode, anchorLat, anchorLon, setCursor],
   )
 
+  // ── Zoom / Recenter controls ────────────────────────────────────────────
+  const handleZoomIn = useCallback(() => {
+    mapRef.current?.easeTo({ zoom: (mapRef.current.getZoom() ?? 14) + 1, duration: 250 })
+  }, [])
+
+  const handleZoomOut = useCallback(() => {
+    mapRef.current?.easeTo({ zoom: (mapRef.current.getZoom() ?? 14) - 1, duration: 250 })
+  }, [])
+
+  const handleRecenter = useCallback(() => {
+    mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
+  }, [anchorLat, anchorLon])
+
   // ── Confirm / Cancel buttons ─────────────────────────────────────────────
   const handleConfirmReposition = useCallback(() => {
     if (ghostAnchor) {
@@ -403,6 +424,7 @@ export function AnchorWatchMap({
         initialViewState={initialViewState}
         style={{ width: '100%', height: '100%' }}
         mapStyle={mapStyle}
+        minZoom={10}
         onClick={handleMapClick}
         onMouseMove={handleMouseMove}
         onDblClick={handleDblClick}
@@ -637,6 +659,92 @@ export function AnchorWatchMap({
           </div>
         </div>
       )}
+
+      {/* Metric overlay — top of map */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center gap-2 p-2">
+        {[
+          {
+            label: 'Distance',
+            value: distanceMeters !== null
+              ? isImperial
+                ? `${Math.round(distanceMeters * 3.28084)}`
+                : `${Math.round(distanceMeters)}`
+              : '—',
+            unit: isImperial ? 'ft' : 'm',
+            alert: distanceMeters !== null && distanceMeters > radiusMeters + 4.572,
+          },
+          {
+            label: 'Bearing',
+            value: bearingDegProp !== null ? `${bearingDegProp}` : '—',
+            unit: '°',
+            alert: false,
+          },
+          {
+            label: 'Radius',
+            value: isImperial
+              ? `${Math.round(radiusMeters * 3.28084)}`
+              : `${Math.round(radiusMeters)}`,
+            unit: isImperial ? 'ft' : 'm',
+            alert: false,
+          },
+        ].map(({ label, value, unit, alert }) => (
+          <div
+            key={label}
+            className="rounded-lg bg-black/50 px-3 py-1.5 text-center backdrop-blur"
+          >
+            <p className="text-[9px] uppercase tracking-[0.16em] text-white/60">{label}</p>
+            <p className={`font-display tabular-nums leading-tight ${
+              alert ? 'text-red-400' : 'text-white'
+            }`} style={{ fontSize: '1.1rem' }}>
+              {value}
+              <span className="ml-0.5 text-[11px] text-white/50">{unit}</span>
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Clear anchor button — bottom-left, hidden during edit modes */}
+      {editMode === 'none' && (
+        <div className="pointer-events-auto absolute bottom-4 left-3">
+          <button
+            onClick={onClearAnchor}
+            className="rounded-lg bg-black/50 px-3 py-2 text-sm font-semibold text-white/80 shadow backdrop-blur hover:bg-red-600/80 hover:text-white active:scale-95"
+            style={{ transition: 'background-color 150ms ease-out, color 150ms ease-out' }}
+            aria-label="Clear anchor watch"
+          >
+            Clear Anchor Watch
+          </button>
+        </div>
+      )}
+
+      {/* Zoom + Recenter controls */}
+      <div className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1">
+        <button
+          onClick={handleZoomIn}
+          aria-label="Zoom in"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+          style={{ transition: 'background-color 150ms ease-out' }}
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+        <button
+          onClick={handleZoomOut}
+          aria-label="Zoom out"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+          style={{ transition: 'background-color 150ms ease-out' }}
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <div className="my-0.5 h-px bg-white/20" />
+        <button
+          onClick={handleRecenter}
+          aria-label="Re-centre on anchor"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+          style={{ transition: 'background-color 150ms ease-out' }}
+        >
+          <Crosshair className="h-4 w-4" />
+        </button>
+      </div>
 
       {/* Radius readout during resize */}
       {editMode === 'radius' && liveRadius !== null && (

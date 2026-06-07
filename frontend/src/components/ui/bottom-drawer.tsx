@@ -74,7 +74,7 @@ export function BottomDrawer({
       />
 
       {/* Drawer */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[85vh] flex-col rounded-t-2xl border-t bg-card shadow-xl">
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex h-[85vh] flex-col rounded-t-2xl border-t bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b px-6 py-4">
           <h2 className="font-display text-lg tracking-[0.24em] text-foreground">{title}</h2>
@@ -108,7 +108,7 @@ export function BottomDrawer({
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {children}
         </div>
       </div>

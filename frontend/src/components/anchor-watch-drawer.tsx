@@ -17,6 +17,7 @@ interface AnchorWatchDrawerProps {
   isDarkTheme: boolean
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
+  onClearAnchor: () => void
   isImperial: boolean
 }
 
@@ -35,53 +36,29 @@ export function AnchorWatchDrawer({
   isDarkTheme,
   onAnchorReposition,
   onRadiusChange,
+  onClearAnchor,
   isImperial,
 }: AnchorWatchDrawerProps) {
-  const distLabel = distanceMeters !== null
-    ? isImperial
-      ? `${Math.round(distanceMeters * 3.28084)} ft`
-      : `${Math.round(distanceMeters)} m`
-    : '—'
-  const radiusLabel = isImperial
-    ? `${Math.round(radiusMeters * 3.28084)} ft`
-    : `${Math.round(radiusMeters)} m`
-
   return (
-    <div className="flex h-full flex-col gap-0">
-      {/* Compact metrics bar */}
-      <div className="flex shrink-0 items-center gap-6 border-b bg-background/80 px-4 py-2 backdrop-blur">
-        <div className="text-center">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Distance</p>
-          <p className="font-display text-lg tabular-nums leading-tight text-primary">{distLabel}</p>
-        </div>
-        <div className="text-center">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Bearing</p>
-          <p className="font-display text-lg tabular-nums leading-tight text-secondary">
-            {bearingDeg !== null ? `${bearingDeg}°` : '—'}
-          </p>
-        </div>
-        <div className="text-center">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Alarm Radius</p>
-          <p className="font-display text-lg tabular-nums leading-tight text-secondary">{radiusLabel}</p>
-        </div>
-      </div>
-
-      {/* Full-width map */}
-      <AnchorWatchMap
-        vesselLat={vesselLat}
-        vesselLon={vesselLon}
-        vesselHeadingDeg={vesselHeadingDeg}
-        anchorLat={anchorLat}
-        anchorLon={anchorLon}
-        radiusMeters={radiusMeters}
-        vesselTrail={vesselTrail}
-        aisVessels={aisVessels}
-        aisTrails={aisTrails}
-        isDarkTheme={isDarkTheme}
-        onAnchorReposition={onAnchorReposition}
-        onRadiusChange={onRadiusChange}
-        className="flex-1"
-      />
-    </div>
+    <AnchorWatchMap
+      vesselLat={vesselLat}
+      vesselLon={vesselLon}
+      vesselHeadingDeg={vesselHeadingDeg}
+      anchorLat={anchorLat}
+      anchorLon={anchorLon}
+      radiusMeters={radiusMeters}
+      distanceMeters={distanceMeters}
+      bearingDeg={bearingDeg}
+      isImperial={isImperial}
+      vesselTrail={vesselTrail}
+      aisVessels={aisVessels}
+      aisTrails={aisTrails}
+      isDarkTheme={isDarkTheme}
+      onAnchorReposition={onAnchorReposition}
+      onRadiusChange={onRadiusChange}
+      onClearAnchor={onClearAnchor}
+      className="h-full w-full"
+    />
   )
 }
+
