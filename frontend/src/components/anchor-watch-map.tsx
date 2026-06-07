@@ -151,6 +151,15 @@ export function AnchorWatchMap({
   const transientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
 
+  // Track zoom for marker scaling
+  const [currentZoom, setCurrentZoom] = useState(() => zoomForRadius(radiusMeters))
+  const handleZoomChange = useCallback(() => {
+    const z = mapRef.current?.getZoom()
+    if (z !== undefined) setCurrentZoom(z)
+  }, [])
+  // Scale markers: full size at zoom 14+, shrink linearly down to 0.45× at zoom 10
+  const markerScale = Math.max(0.45, Math.min(1, (currentZoom - 10) / (14 - 10)))
+
   // Re-render trails on each poll cycle (trails are stored in refs, not state)
   useEffect(() => {
     const timer = setInterval(() => setRenderKey((k) => k + 1), 5000)
@@ -425,6 +434,7 @@ export function AnchorWatchMap({
         style={{ width: '100%', height: '100%' }}
         mapStyle={mapStyle}
         minZoom={10}
+        onZoom={handleZoomChange}
         onClick={handleMapClick}
         onMouseMove={handleMouseMove}
         onDblClick={handleDblClick}
@@ -539,10 +549,12 @@ export function AnchorWatchMap({
                 style={{ minWidth: 40, minHeight: 40 }}
                 aria-label={`AIS vessel: ${vessel.name}`}
               >
-                <Ship className="h-5 w-5 text-amber-400 drop-shadow" />
-                <span className="mt-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider text-amber-300 drop-shadow">
-                  {vessel.name.length > 8 ? vessel.name.slice(0, 8) + '…' : vessel.name}
-                </span>
+                <div style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}>
+                  <Ship className="h-5 w-5 text-amber-400 drop-shadow" />
+                  <span className="mt-0.5 block font-mono text-[9px] font-semibold uppercase tracking-wider text-amber-300 drop-shadow">
+                    {vessel.name.length > 8 ? vessel.name.slice(0, 8) + '\u2026' : vessel.name}
+                  </span>
+                </div>
               </button>
             </Marker>
           )
@@ -552,22 +564,18 @@ export function AnchorWatchMap({
         <Marker latitude={vesselLat} longitude={vesselLon}>
           <div
             className="flex items-center justify-center"
-            style={{
-              width: 40,
-              height: 40,
-              transform: vesselHeadingDeg !== null ? `rotate(${vesselHeadingDeg}deg)` : undefined,
-              filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.6))',
-            }}
+            style={{ width: 40, height: 40 }}
           >
-            {/* Boat shape SVG */}
-            <svg width="22" height="32" viewBox="0 0 22 32" fill="none">
-              <path
-                d="M11 2 L20 26 L11 22 L2 26 Z"
-                fill="white"
-                stroke="#0ea5e9"
-                strokeWidth="1.5"
-              />
-            </svg>
+            <div style={{
+              transform: `${vesselHeadingDeg !== null ? `rotate(${vesselHeadingDeg}deg) ` : ''}scale(${markerScale})`,
+              transformOrigin: 'center',
+              transition: 'transform 150ms ease-out',
+              filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.6))',
+            }}>
+              <svg width="22" height="32" viewBox="0 0 22 32" fill="none">
+                <path d="M11 2 L20 26 L11 22 L2 26 Z" fill="white" stroke="#0ea5e9" strokeWidth="1.5" />
+              </svg>
+            </div>
           </div>
         </Marker>
 
@@ -575,7 +583,10 @@ export function AnchorWatchMap({
         {ghostAnchor && (
           <Marker latitude={ghostAnchor.lat} longitude={ghostAnchor.lon}>
             <div className="flex items-center justify-center" style={{ width: 40, height: 40, cursor: 'grabbing' }}>
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-500/80">
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-500/80"
+                style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}
+              >
                 <Anchor className="h-4 w-4 text-white opacity-60" />
               </div>
             </div>
@@ -590,7 +601,10 @@ export function AnchorWatchMap({
             style={{ width: 40, height: 40, cursor: editMode === 'none' ? 'grab' : 'default' }}
             aria-label="Anchor position — click to reposition"
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600/90 shadow-lg">
+            <div
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600/90 shadow-lg"
+              style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}
+            >
               <Anchor className="h-5 w-5 text-white" />
             </div>
           </button>

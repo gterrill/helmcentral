@@ -73,26 +73,28 @@ export function AnchorWatchTile({ watch, lat, lon, isImperial, vesselHeadingDeg,
 
   // ── Set or Dragging ───────────────────────────────────────────
   return (
-    <Tile title="Anchor Watch" icon={<Anchor className="h-3.5 w-3.5" />} className="overflow-hidden">
-      <AnchorWatchMap
-        vesselLat={lat ?? anchorLat!}
-        vesselLon={lon ?? anchorLon!}
-        vesselHeadingDeg={vesselHeadingDeg}
-        anchorLat={anchorLat!}
-        anchorLon={anchorLon!}
-        radiusMeters={radiusMeters}
-        distanceMeters={distanceMeters}
-        bearingDeg={bearingDeg}
-        isImperial={isImperial}
-        vesselTrail={vesselTrail}
-        aisVessels={aisVessels}
-        aisTrails={aisTrails}
-        isDarkTheme={isDarkTheme}
-        onAnchorReposition={updatePosition}
-        onRadiusChange={updateRadius}
-        onClearAnchor={clearAnchor}
-        className="-mx-4 -mb-4 h-72 rounded-none"
-      />
+    <Tile title="Anchor Watch" icon={<Anchor className="h-3.5 w-3.5" />}>
+      <div className="mt-2 rounded-xl border bg-background/70">
+        <AnchorWatchMap
+          vesselLat={lat ?? anchorLat!}
+          vesselLon={lon ?? anchorLon!}
+          vesselHeadingDeg={vesselHeadingDeg}
+          anchorLat={anchorLat!}
+          anchorLon={anchorLon!}
+          radiusMeters={radiusMeters}
+          distanceMeters={distanceMeters}
+          bearingDeg={bearingDeg}
+          isImperial={isImperial}
+          vesselTrail={vesselTrail}
+          aisVessels={aisVessels}
+          aisTrails={aisTrails}
+          isDarkTheme={isDarkTheme}
+          onAnchorReposition={updatePosition}
+          onRadiusChange={updateRadius}
+          onClearAnchor={clearAnchor}
+          className="h-64 rounded-lg"
+        />
+      </div>
     </Tile>
   )
 }
