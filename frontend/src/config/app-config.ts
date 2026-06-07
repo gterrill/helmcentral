@@ -1,6 +1,12 @@
 import YAML from 'yaml'
 
-import settingsRaw from '../../../settings.yaml?raw'
+const settingsRaw = Object.values(
+  import.meta.glob<string>('../../../settings.yaml', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }),
+)[0] ?? ''
 
 type BoatConfig = {
   boat: {

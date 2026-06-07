@@ -105,8 +105,6 @@ export function App() {
     chargingPowerW,
     solarOutputW,
     acOutputW,
-    dc12vPowerW,
-    dc12vCurrentA,
     dc24vVoltageV,
     generatorRealPowerW,
     alternator0,
@@ -150,8 +148,6 @@ export function App() {
   const chargingValueClass = isDischarging ? 'text-amber-600' : 'text-secondary'
   const solarOutputLabel = solarOutputW !== null ? Math.round(solarOutputW).toString() : '—'
   const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
-  const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
-  const dc12vCurrentLabel = dc12vCurrentA !== null ? dc12vCurrentA.toFixed(1) : '—'
   const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
   const chargeRateLabel = batteryRatePercentPerHour !== null
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}%/hr`
