@@ -21,9 +21,10 @@ interface AnchorWatchTileProps {
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
   isDarkTheme: boolean
+  onFullscreen: () => void
 }
 
-export function AnchorWatchTile({ watch, lat, lon, isImperial, vesselHeadingDeg, vesselTrail, aisVessels, aisTrails, isDarkTheme }: AnchorWatchTileProps) {
+export function AnchorWatchTile({ watch, lat, lon, isImperial, vesselHeadingDeg, vesselTrail, aisVessels, aisTrails, isDarkTheme, onFullscreen }: AnchorWatchTileProps) {
   const {
     anchorState,
     anchorLat,
@@ -92,6 +93,7 @@ export function AnchorWatchTile({ watch, lat, lon, isImperial, vesselHeadingDeg,
           onAnchorReposition={updatePosition}
           onRadiusChange={updateRadius}
           onClearAnchor={clearAnchor}
+          onFullscreen={onFullscreen}
           className="h-64 rounded-lg"
         />
       </div>

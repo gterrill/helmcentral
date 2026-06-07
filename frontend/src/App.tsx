@@ -335,6 +335,7 @@ export function App() {
                   aisVessels={nearbyVessels}
                   aisTrails={aisTrails}
                   isDarkTheme={isDarkTheme}
+                  onFullscreen={() => { setActiveDrawerTab('anchor-watch'); setIsDrawerOpen(true) }}
                 />
 
                 <RodeScopeTile

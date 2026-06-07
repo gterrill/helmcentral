@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, Crosshair, MapPin, Minus, Plus, Ship } from 'lucide-react'
+import { Anchor, Crosshair, Expand, MapPin, Minus, Plus, Ship } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-vessel-trail'
@@ -120,6 +120,7 @@ export interface AnchorWatchMapProps {
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
   onClearAnchor: () => void
+  onFullscreen?: () => void
   className?: string
 }
 
@@ -140,6 +141,7 @@ export function AnchorWatchMap({
   onAnchorReposition,
   onRadiusChange,
   onClearAnchor,
+  onFullscreen,
   className,
 }: AnchorWatchMapProps) {
   const mapRef = useRef<MapRef | null>(null)
@@ -733,6 +735,17 @@ export function AnchorWatchMap({
 
       {/* Zoom + Recenter controls */}
       <div className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1">
+        {onFullscreen && (
+          <button
+            onClick={onFullscreen}
+            aria-label="Full screen"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/50 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+            style={{ transition: 'background-color 150ms ease-out' }}
+          >
+            <Expand className="h-4 w-4" />
+          </button>
+        )}
+        {onFullscreen && <div className="my-0.5 h-px bg-white/20" />}
         <button
           onClick={handleZoomIn}
           aria-label="Zoom in"
