@@ -12,13 +12,53 @@ interface VesselTrailEntry {
 
 /**
  * Maintains per-AIS-vessel trailing trails keyed by vessel name.
+ * Fetches historical trails from server on first load, then tracks new points client-side.
  * Vessels not seen for more than 5 minutes are pruned.
  * Note: vessel name is used as the key — duplicate names will share a trail.
  */
-export function useAisTrails(vessels: NearbyVessel[]): () => Map<string, TrailPoint[]> {
+export function useAisTrails(vessels: NearbyVessel[], anchorWatchActive: boolean): () => Map<string, TrailPoint[]> {
   // Map from vessel name → { points, lastSeenMs }
   const entriesRef = useRef<Map<string, VesselTrailEntry>>(new Map())
+  const hasLoadedServerRef = useRef(false)
 
+  // Load trails from server on first anchor watch activation
+  useEffect(() => {
+    if (!anchorWatchActive || hasLoadedServerRef.current) return
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/anchor-watch/trails/ais')
+        if (!res.ok) return
+        const data = (await res.json()) as {
+          trails?: Record<string, Array<{ lat: number; lon: number; timestamp: string }>>
+        }
+        if (!data.trails) return
+
+        for (const [vesselName, serverPoints] of Object.entries(data.trails)) {
+          const points = serverPoints
+            .map(p => ({
+              lat: p.lat,
+              lon: p.lon,
+              timestampMs: new Date(p.timestamp).getTime(),
+            }))
+            .sort((a, b) => (a.timestampMs || 0) - (b.timestampMs || 0))
+            .slice(-MAX_TRAIL_POINTS)
+
+          if (points.length > 0) {
+            entriesRef.current.set(vesselName, {
+              points,
+              lastSeenMs: Date.now(),
+            })
+          }
+        }
+        hasLoadedServerRef.current = true
+      } catch {
+        hasLoadedServerRef.current = true
+      }
+    })()
+  }, [anchorWatchActive])
+
+  // Track new points from current vessels
   useEffect(() => {
     const now = Date.now()
     const entries = entriesRef.current

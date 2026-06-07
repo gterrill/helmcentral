@@ -139,7 +139,7 @@ export function App() {
   } = useWeatherForecast(uiConfig.vesselStateRefreshSeconds)
   const anchorWatch = useAnchorWatch(latitude, longitude, navigationState, uiConfig.vesselStateRefreshSeconds)
   const vesselTrail = useVesselTrail(latitude, longitude, anchorWatch.setAt)
-  const aisTrails = useAisTrails(nearbyVessels)
+  const aisTrails = useAisTrails(nearbyVessels, anchorWatch.anchorState !== 'none')
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
   const depthTrendPoints = useDepthTrend('2h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)

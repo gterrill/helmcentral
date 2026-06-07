@@ -11,6 +11,7 @@ import (
 )
 
 const defaultAnchorWatchRadiusMeters = 45.72 // 150 ft
+const maxTrailPoints = 1000
 
 type anchorWatchData struct {
 	Lat           float64   `json:"lat"`
@@ -22,13 +23,150 @@ type anchorWatchData struct {
 	SetAt         time.Time `json:"set_at"`
 }
 
+type trailPoint struct {
+	Lat       float64   `json:"lat"`
+	Lon       float64   `json:"lon"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type vesselTrail struct {
+	points []*trailPoint
+	index  int  // current write position in ring buffer
+	full   bool // whether the buffer has wrapped around
+}
+
+func newVesselTrail() *vesselTrail {
+	return &vesselTrail{
+		points: make([]*trailPoint, maxTrailPoints),
+		index:  0,
+		full:   false,
+	}
+}
+
+func (vt *vesselTrail) addPoint(lat, lon float64) {
+	vt.points[vt.index] = &trailPoint{
+		Lat:       lat,
+		Lon:       lon,
+		Timestamp: time.Now().UTC(),
+	}
+	vt.index = (vt.index + 1) % maxTrailPoints
+	if vt.index == 0 {
+		vt.full = true
+	}
+}
+
+// pointsSince returns all trail points after the given timestamp, in chronological order.
+func (vt *vesselTrail) pointsSince(since time.Time) []*trailPoint {
+	if !vt.full && vt.index == 0 {
+		// No points yet
+		return nil
+	}
+
+	var result []*trailPoint
+
+	// If buffer is full, we have all maxTrailPoints entries
+	if vt.full {
+		// Start from index (oldest point) and go around
+		start := vt.index
+		for i := 0; i < maxTrailPoints; i++ {
+			p := vt.points[(start+i)%maxTrailPoints]
+			if p != nil && p.Timestamp.After(since) {
+				result = append(result, p)
+			}
+		}
+	} else {
+		// Buffer not full yet, points are from 0 to index-1
+		for i := 0; i < vt.index; i++ {
+			if vt.points[i] != nil && vt.points[i].Timestamp.After(since) {
+				result = append(result, vt.points[i])
+			}
+		}
+	}
+
+	return result
+}
+
 var (
 	anchorWatchMu    sync.RWMutex
 	anchorWatchState *anchorWatchData
+
+	trailMu   sync.RWMutex
+	selfTrail *vesselTrail
+	aisTrails map[string]*vesselTrail // indexed by MMSI or AIS ID
 )
 
 func anchorWatchFilePath() string {
 	return cacheFilePath("ANCHOR_WATCH_FILE", "cache/anchor_watch.json")
+}
+
+// recordSelfTrailPoint adds the current vessel position to the self trail.
+// Only records if anchor watch is active.
+func recordSelfTrailPoint(lat, lon float64) {
+	trailMu.Lock()
+	defer trailMu.Unlock()
+
+	anchorWatchMu.RLock()
+	active := anchorWatchState != nil
+	anchorWatchMu.RUnlock()
+
+	if active && selfTrail != nil {
+		selfTrail.addPoint(lat, lon)
+	}
+}
+
+// recordAISTrailPoint adds an AIS vessel position to its trail.
+// Only records if anchor watch is active.
+func recordAISTrailPoint(id string, lat, lon float64) {
+	trailMu.Lock()
+	defer trailMu.Unlock()
+
+	anchorWatchMu.RLock()
+	active := anchorWatchState != nil
+	anchorWatchMu.RUnlock()
+
+	if active {
+		if aisTrails[id] == nil {
+			aisTrails[id] = newVesselTrail()
+		}
+		aisTrails[id].addPoint(lat, lon)
+	}
+}
+
+// getSelfTrailSince returns self trail points after the given timestamp.
+func getSelfTrailSince(since time.Time) []*trailPoint {
+	trailMu.RLock()
+	defer trailMu.RUnlock()
+
+	if selfTrail == nil {
+		return nil
+	}
+	return selfTrail.pointsSince(since)
+}
+
+// getAISTrailSince returns AIS trail points for a given vessel after the given timestamp.
+func getAISTrailSince(id string, since time.Time) []*trailPoint {
+	trailMu.RLock()
+	defer trailMu.RUnlock()
+
+	trail, ok := aisTrails[id]
+	if !ok {
+		return nil
+	}
+	return trail.pointsSince(since)
+}
+
+// getAllAISTrailsSince returns all AIS trails and their points after the given timestamp.
+func getAllAISTrailsSince(since time.Time) map[string][]*trailPoint {
+	trailMu.RLock()
+	defer trailMu.RUnlock()
+
+	result := make(map[string][]*trailPoint)
+	for id, trail := range aisTrails {
+		if points := trail.pointsSince(since); len(points) > 0 {
+			result[id] = points
+		}
+	}
+	return result
 }
 
 func loadAnchorWatch() {
@@ -111,6 +249,12 @@ func setAnchorWatch(c echo.Context) error {
 	anchorWatchMu.Lock()
 	anchorWatchState = aw
 	anchorWatchMu.Unlock()
+
+	// Initialize trail tracking when anchor watch is set
+	trailMu.Lock()
+	selfTrail = newVesselTrail()
+	// Don't reset aisTrails here - keep existing AIS trails
+	trailMu.Unlock()
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"active":          true,
@@ -216,7 +360,68 @@ func deleteAnchorWatch(c echo.Context) error {
 	anchorWatchState = nil
 	anchorWatchMu.Unlock()
 
+	trailMu.Lock()
+	selfTrail = nil
+	aisTrails = make(map[string]*vesselTrail)
+	trailMu.Unlock()
+
 	_ = os.Remove(anchorWatchFilePath())
 
 	return c.JSON(http.StatusOK, map[string]any{"active": false})
+}
+
+// GET /api/anchor-watch/trails/self?since=<RFC3339-timestamp>
+func getSelfTrailHandler(c echo.Context) error {
+	sinceStr := c.QueryParam("since")
+	var since time.Time
+	if sinceStr != "" {
+		var err error
+		since, err = time.Parse(time.RFC3339, sinceStr)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid since timestamp"})
+		}
+	}
+
+	points := getSelfTrailSince(since)
+	return c.JSON(http.StatusOK, map[string]any{
+		"points": points,
+	})
+}
+
+// GET /api/anchor-watch/trails/ais/:id?since=<RFC3339-timestamp>
+func getAISTrailHandler(c echo.Context) error {
+	id := c.Param("id")
+	sinceStr := c.QueryParam("since")
+	var since time.Time
+	if sinceStr != "" {
+		var err error
+		since, err = time.Parse(time.RFC3339, sinceStr)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid since timestamp"})
+		}
+	}
+
+	points := getAISTrailSince(id, since)
+	return c.JSON(http.StatusOK, map[string]any{
+		"points": points,
+	})
+}
+
+// GET /api/anchor-watch/trails/ais?since=<RFC3339-timestamp>
+// Returns all AIS trails with new points since the given timestamp.
+func getAllAISTrailsHandler(c echo.Context) error {
+	sinceStr := c.QueryParam("since")
+	var since time.Time
+	if sinceStr != "" {
+		var err error
+		since, err = time.Parse(time.RFC3339, sinceStr)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid since timestamp"})
+		}
+	}
+
+	trails := getAllAISTrailsSince(since)
+	return c.JSON(http.StatusOK, map[string]any{
+		"trails": trails,
+	})
 }
