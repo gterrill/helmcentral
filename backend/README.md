@@ -52,6 +52,8 @@ docker run -p 8080:8080 helmcentral-backend
 - `GET /api/weather-today` - Current weather summary for vessel position
 - `GET /api/weather-forecast` - 6-day daily forecast including sustained wind and gusts
 - `GET /api/tide-today` - Current and upcoming tide conditions
+- `GET /api/tracks?since=<RFC3339>` - Incremental self and AIS trail updates sampled by the server
+- `GET /api/tracks/motoring` - Motoring approach trail used by anchor reposition mode
 
 ## Configuration
 
@@ -66,3 +68,11 @@ Environment variables:
 - `INFLUXDB_BUCKET` - InfluxDB bucket for time-series data
 - `INFLUXDB_TOKEN` - InfluxDB API token
 - `SIGNALK_URL` - SignalK server URL
+
+## Architecture Decisions
+
+The durable rationale for trail handling is documented in:
+
+- [../docs/adr/0001-server-owned-trail-sampling.md](../docs/adr/0001-server-owned-trail-sampling.md)
+- [../docs/adr/0002-separate-motoring-and-anchor-trails.md](../docs/adr/0002-separate-motoring-and-anchor-trails.md)
+- [../docs/adr/0003-motoring-seed-downsampling.md](../docs/adr/0003-motoring-seed-downsampling.md)

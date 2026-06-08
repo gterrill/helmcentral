@@ -90,6 +90,14 @@ See [backend/README.md](backend/README.md) for API endpoint documentation.
 - **Data Storage**: InfluxDB for time-series data
 - **Real-time Data**: SignalK integration for live maritime sensor data
 
+### Trail Architecture
+
+- The server owns ongoing trail sampling for self and nearby AIS vessels.
+- Clients consume trail deltas from backend APIs rather than sampling SignalK directly.
+- The pre-anchor motoring approach is a separate concern from post-anchor trail history.
+
+See [docs/adr/0001-server-owned-trail-sampling.md](docs/adr/0001-server-owned-trail-sampling.md), [docs/adr/0002-separate-motoring-and-anchor-trails.md](docs/adr/0002-separate-motoring-and-anchor-trails.md), and [docs/adr/0003-motoring-seed-downsampling.md](docs/adr/0003-motoring-seed-downsampling.md).
+
 ## Next Steps
 
 1. Configure SignalK connection parameters
