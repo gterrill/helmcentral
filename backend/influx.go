@@ -305,8 +305,8 @@ func queryInfluxPositionTrailRange(start, end time.Time) []trailPoint {
 
 			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 			result, err := client.QueryAPI(org).Query(ctx, flux)
-			cancel()
 			if err != nil {
+				cancel()
 				continue
 			}
 
@@ -328,6 +328,7 @@ func queryInfluxPositionTrailRange(start, end time.Time) []trailPoint {
 				}
 			}
 			result.Close()
+			cancel()
 			if result.Err() != nil {
 				continue
 			}
@@ -346,6 +347,83 @@ func isStationaryNavState(state string) bool {
 
 func isMotoringNavState(state string) bool {
 	return state == "motoring" || state == "under way using engine" || state == "under_way_using_engine"
+}
+
+// queryInfluxMotoringTrailDownsampled fetches a downsampled vessel track for
+// the given time window. It uses aggregateWindow to reduce very high-frequency
+// SignalK position data to one fix per interval, ensuring the full span of the
+// approach is visible rather than just the last N raw fixes.
+// intervalSecs controls the bucket size; 15 gives ~480 points over 2 hours.
+func queryInfluxMotoringTrailDownsampled(start, end time.Time, intervalSecs int) []trailPoint {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok || start.IsZero() || end.IsZero() || !end.After(start) {
+		return nil
+	}
+	defer client.Close()
+
+	measurement := trimEnvValue(getEnv("INFLUX_POSITION_MEASUREMENT", "navigation.position"))
+	if measurement == "" {
+		measurement = "navigation.position"
+	}
+
+	fieldPairs := [][2]string{
+		{"lat", "lon"},
+		{"latitude", "longitude"},
+	}
+
+	for _, pair := range fieldPairs {
+		latField := pair[0]
+		lonField := pair[1]
+
+		// aggregateWindow before pivot collapses all sources to one point per
+		// interval, eliminating duplicates from multiple SignalK position sources.
+		flux := fmt.Sprintf(
+			`from(bucket: %q)`+
+				` |> range(start: %s, stop: %s)`+
+				` |> filter(fn: (r) => r._measurement == %q and (r._field == %q or r._field == %q))`+
+				` |> aggregateWindow(every: %ds, fn: last, createEmpty: false)`+
+				` |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")`+
+				` |> keep(columns:["_time",%q,%q])`+
+				` |> sort(columns:["_time"], desc: false)`,
+			bucket,
+			start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339),
+			measurement, latField, lonField,
+			intervalSecs,
+			latField, lonField,
+		)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		result, err := client.QueryAPI(org).Query(ctx, flux)
+		if err != nil {
+			cancel()
+			continue
+		}
+
+		var points []trailPoint
+		for result.Next() {
+			rec := result.Record()
+			lat := coerceFloat(rec.ValueByKey(latField))
+			lon := coerceFloat(rec.ValueByKey(lonField))
+			if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+				continue
+			}
+			points = append(points, trailPoint{
+				Lat:       lat,
+				Lon:       lon,
+				Timestamp: rec.Time(),
+			})
+		}
+		result.Close()
+		cancel()
+		if result.Err() != nil {
+			continue
+		}
+		if len(points) > 0 {
+			return points
+		}
+	}
+
+	return nil
 }
 
 func trimEnvValue(value string) string {

@@ -1,6 +1,6 @@
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { TrailPoint } from '@/hooks/use-vessel-trail'
+import type { TrailPoint } from '@/hooks/use-server-trails'
 
 interface AnchorWatchDrawerProps {
   vesselLat: number
@@ -14,7 +14,7 @@ interface AnchorWatchDrawerProps {
   currentSetDeg: number | null
   distanceMeters: number | null
   bearingDeg: number | null
-  anchorSetAt: string | null
+  anchorSetAt?: never  // removed — motoring track fetched by map on reposition
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
@@ -37,7 +37,6 @@ export function AnchorWatchDrawer({
   currentSetDeg,
   distanceMeters,
   bearingDeg,
-  anchorSetAt,
   vesselTrail,
   aisVessels,
   aisTrails,
@@ -61,7 +60,6 @@ export function AnchorWatchDrawer({
       distanceMeters={distanceMeters}
       bearingDeg={bearingDeg}
       isImperial={isImperial}
-      anchorSetAt={anchorSetAt}
       vesselTrail={vesselTrail}
       aisVessels={aisVessels}
       aisTrails={aisTrails}

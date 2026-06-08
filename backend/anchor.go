@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"sort"
 	"sync"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 
 const defaultAnchorWatchRadiusMeters = 45.72 // 150 ft
 const maxTrailPoints = 1000
-const preDropTrailWindow = 30 * time.Minute
 
 type anchorWatchData struct {
 	Lat           float64   `json:"lat"`
@@ -120,10 +118,9 @@ var (
 	anchorWatchMu    sync.RWMutex
 	anchorWatchState *anchorWatchData
 
-	trailMu          sync.RWMutex
-	selfTrail        *vesselTrail
-	preDropSelfTrail []*trailPoint
-	aisTrails        map[string]*vesselTrail // indexed by MMSI or AIS ID
+	trailMu   sync.RWMutex
+	selfTrail *vesselTrail
+	aisTrails map[string]*vesselTrail // indexed by MMSI or AIS ID
 )
 
 func anchorWatchFilePath() string {
@@ -164,27 +161,15 @@ func recordAISTrailPoint(id string, lat, lon float64) {
 	}
 }
 
-// getSelfTrailSince returns self trail points after the given timestamp.
+// getSelfTrailSince returns post-anchor ring-buffer points after the given timestamp.
 func getSelfTrailSince(since time.Time) []*trailPoint {
 	trailMu.RLock()
 	defer trailMu.RUnlock()
 
-	points := make([]*trailPoint, 0)
-	for _, p := range preDropSelfTrail {
-		if p != nil && p.Timestamp.After(since) {
-			points = append(points, p)
-		}
-	}
-	if selfTrail != nil {
-		points = append(points, selfTrail.pointsSince(since)...)
-	}
-	if len(points) == 0 {
+	if selfTrail == nil {
 		return nil
 	}
-	sort.Slice(points, func(i, j int) bool {
-		return points[i].Timestamp.Before(points[j].Timestamp)
-	})
-	return points
+	return selfTrail.pointsSince(since)
 }
 
 // getAISTrailSince returns AIS trail points for a given vessel after the given timestamp.
@@ -294,30 +279,9 @@ func setAnchorWatch(c echo.Context) error {
 	anchorWatchState = aw
 	anchorWatchMu.Unlock()
 
-	transitionAt := queryInfluxLastMotoringToStationaryTransition()
-	var preDropPoints []trailPoint
-	if !transitionAt.IsZero() {
-		windowStart := transitionAt.Add(-preDropTrailWindow)
-		preDropPoints = queryGPXPositionTrailRange(windowStart, transitionAt)
-		if len(preDropPoints) == 0 {
-			preDropPoints = queryInfluxPositionTrailRange(windowStart, transitionAt)
-		}
-	}
-
-	// Pre-drop track remains separate from post-anchor ring buffer.
+	// Reset post-anchor ring buffer. AIS trails are preserved across anchor sets.
 	trailMu.Lock()
-	preDropSelfTrail = nil
-	if len(preDropPoints) > 0 {
-		preDropSelfTrail = make([]*trailPoint, 0, len(preDropPoints))
-		for _, p := range preDropPoints {
-			pointCopy := p
-			preDropSelfTrail = append(preDropSelfTrail, &pointCopy)
-		}
-	}
-
-	// Ring buffer is reserved for positions collected after anchor mode is active.
 	selfTrail = newVesselTrail()
-	// Don't reset aisTrails here - keep existing AIS trails
 	trailMu.Unlock()
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -426,7 +390,6 @@ func deleteAnchorWatch(c echo.Context) error {
 
 	trailMu.Lock()
 	selfTrail = nil
-	preDropSelfTrail = nil
 	aisTrails = make(map[string]*vesselTrail)
 	trailMu.Unlock()
 
@@ -436,6 +399,7 @@ func deleteAnchorWatch(c echo.Context) error {
 }
 
 // GET /api/anchor-watch/trails/self?since=<RFC3339-timestamp>
+// Returns post-anchor ring-buffer positions since the given timestamp.
 func getSelfTrailHandler(c echo.Context) error {
 	sinceStr := c.QueryParam("since")
 	var since time.Time

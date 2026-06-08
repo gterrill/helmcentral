@@ -106,6 +106,8 @@ func main() {
 	e.GET("/api/anchor-watch/trails/self", getSelfTrailHandler)
 	e.GET("/api/anchor-watch/trails/ais/:id", getAISTrailHandler)
 	e.GET("/api/anchor-watch/trails/ais", getAllAISTrailsHandler)
+	e.GET("/api/tracks", getTracksHandler)
+	e.GET("/api/tracks/motoring", getMotoringTrackHandler)
 	e.GET("/api/depth-trend", depthTrend)
 	e.GET("/api/czone/switches", getCZoneSwitchesHandler)
 	e.PUT("/api/czone/switches/:id/state", putCZoneSwitchStateHandler)
@@ -116,6 +118,8 @@ func main() {
 
 	loadAnchorWatch()
 	aisTrails = make(map[string]*vesselTrail)
+	go seedMotoringTrailFromInflux()
+	go startTrackPoller(5 * time.Second)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("Starting server on %s", addr)
@@ -205,11 +209,6 @@ func vesselState(c echo.Context) error {
 		if maxGust1hKts < 0 {
 			maxGust1hKts = 0
 		}
-	}
-
-	// Record self position into rolling pre-set trail, and active anchor trail when set
-	if state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
-		recordSelfTrailPoint(state.Latitude, state.Longitude)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -369,13 +368,6 @@ func nearbyVessels(c echo.Context) error {
 			if nearbyErr == nil {
 				vessels = nearby
 				source = "signalk"
-
-				// Record trail points for each nearby AIS vessel
-				for _, v := range vessels {
-					if v.Lat >= -90 && v.Lat <= 90 && v.Lon >= -180 && v.Lon <= 180 {
-						recordAISTrailPoint(v.Name, v.Lat, v.Lon)
-					}
-				}
 			}
 		}
 	}

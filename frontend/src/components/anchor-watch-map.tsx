@@ -6,7 +6,7 @@ import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
 import { Anchor, ArrowUp, CircleStop, Crosshair, Expand, MapPin, Minus, Plus, Ship } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { TrailPoint } from '@/hooks/use-vessel-trail'
+import type { TrailPoint } from '@/hooks/use-server-trails'
 
 // ── Map style URLs (Carto, no API key required) ─────────────────────────────
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
@@ -85,8 +85,9 @@ function trailToGeoJSON(points: TrailPoint[]): GeoJSON.Feature<GeoJSON.LineStrin
 
 // ── Zoom level from radius (show ~4× radius diameter in view) ───────────────
 function zoomForRadius(radiusM: number): number {
-  // Approximate: zoom 14 ≈ 300m radius nicely visible
-  return Math.max(10, Math.min(17, 14 - Math.log2(radiusM / 300)))
+  // Approximate: zoom 14 ≈ 300m radius nicely visible.
+  // Cap at 14 so nearby AIS vessels (~1-2km) remain visible even with small alarm radii.
+  return Math.max(10, Math.min(14, 14 - Math.log2(radiusM / 300)))
 }
 
 // ── Nudge distance for arrow keys (metres) ─────────────────────────────────
@@ -116,7 +117,6 @@ export interface AnchorWatchMapProps {
   distanceMeters: number | null
   bearingDeg: number | null
   isImperial: boolean
-  anchorSetAt: string | null
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
@@ -141,7 +141,6 @@ export function AnchorWatchMap({
   distanceMeters,
   bearingDeg: bearingDegProp,
   isImperial,
-  anchorSetAt,
   vesselTrail,
   aisVessels,
   aisTrails,
@@ -161,7 +160,7 @@ export function AnchorWatchMap({
   const transientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suppressNextMapClickRef = useRef(false)
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
-
+  const [motoringPoints, setMotoringPoints] = useState<TrailPoint[]>([])
   // Track zoom for marker scaling
   const [currentZoom, setCurrentZoom] = useState(() => zoomForRadius(radiusMeters))
   const handleZoomChange = useCallback(() => {
@@ -208,50 +207,33 @@ export function AnchorWatchMap({
     [ghostAnchor, displayRadius],
   )
 
-  const anchorSetAtMs = useMemo(() => {
-    if (!anchorSetAt) return null
-    const ms = Date.parse(anchorSetAt)
-    return Number.isFinite(ms) ? ms : null
-  }, [anchorSetAt])
-
-  const trailPointTimeMs = useCallback((point: TrailPoint): number | null => {
-    if (typeof point.timestampMs === 'number' && Number.isFinite(point.timestampMs)) {
-      return point.timestampMs
+  // Fetch motoring track on-demand from /api/tracks/motoring when entering reposition mode
+  const fetchMotoringTrail = useCallback(async () => {
+    try {
+      const res = await fetch('/api/tracks/motoring')
+      if (!res.ok) return
+      const data = (await res.json()) as { points?: Array<{ lat: number; lon: number; timestamp: string }> }
+      if (!data.points) return
+      const pts: TrailPoint[] = data.points
+        .map(p => ({ lat: p.lat, lon: p.lon, timestampMs: Date.parse(p.timestamp) }))
+        .sort((a, b) => (a.timestampMs ?? 0) - (b.timestampMs ?? 0))
+      setMotoringPoints(pts)
+    } catch {
+      // silently ignore — trail simply won't render
     }
-    if (typeof point.timestamp === 'string') {
-      const ms = Date.parse(point.timestamp)
-      return Number.isFinite(ms) ? ms : null
-    }
-    return null
   }, [])
 
   // Trail data (re-derived each render triggered by renderKey bump)
-  const { motoringTrailGeoJSON, postAnchorTrailGeoJSON } = useMemo(() => {
-    const allPoints = vesselTrail()
-    if (anchorSetAtMs === null) {
-      return {
-        motoringTrailGeoJSON: trailToGeoJSON(allPoints),
-        postAnchorTrailGeoJSON: trailToGeoJSON([]),
-      }
-    }
+  const motoringTrailGeoJSON = useMemo(
+    () => trailToGeoJSON(motoringPoints),
+    [motoringPoints],
+  )
 
-    const motoringPoints: TrailPoint[] = []
-    const postAnchorPoints: TrailPoint[] = []
-    for (const point of allPoints) {
-      const pointTime = trailPointTimeMs(point)
-      if (pointTime !== null && pointTime < anchorSetAtMs) {
-        motoringPoints.push(point)
-      } else {
-        postAnchorPoints.push(point)
-      }
-    }
-
-    return {
-      motoringTrailGeoJSON: trailToGeoJSON(motoringPoints),
-      postAnchorTrailGeoJSON: trailToGeoJSON(postAnchorPoints),
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderKey, vesselTrail, anchorSetAtMs, trailPointTimeMs])
+  const postAnchorTrailGeoJSON = useMemo(
+    () => trailToGeoJSON(vesselTrail()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [renderKey, vesselTrail],
+  )
 
   const aisTrailsData = useMemo(() => {
     const trails = aisTrails()
@@ -468,8 +450,9 @@ export function AnchorWatchMap({
       setGhostAnchor({ lat: anchorLat, lon: anchorLon })
       setEditMode('reposition')
       setCursor('grabbing')
+      void fetchMotoringTrail()
     },
-    [confirmAnchorReposition, editMode, anchorLat, anchorLon, ghostAnchor, setCursor],
+    [confirmAnchorReposition, editMode, anchorLat, anchorLon, ghostAnchor, setCursor, fetchMotoringTrail],
   )
 
   // ── Zoom / Recenter controls ────────────────────────────────────────────
@@ -638,13 +621,15 @@ export function AnchorWatchMap({
               onClick={() => handleAisClick(vessel)}
             >
               <button
-                className="group flex flex-col items-center"
+                className="flex flex-col items-center"
                 style={{ minWidth: 40, minHeight: 40 }}
                 aria-label={`AIS vessel: ${vessel.name}`}
               >
                 <div style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}>
-                  <Ship className="h-5 w-5 text-amber-400 drop-shadow" />
-                  <span className="mt-0.5 block font-mono text-[9px] font-semibold uppercase tracking-wider text-amber-300 drop-shadow">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-500/90 shadow-lg">
+                    <Ship className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="mt-0.5 block text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
                     {vessel.name.length > 8 ? vessel.name.slice(0, 8) + '\u2026' : vessel.name}
                   </span>
                 </div>

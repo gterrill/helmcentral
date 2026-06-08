@@ -19,12 +19,11 @@ import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
-import { useVesselTrail } from '@/hooks/use-vessel-trail'
-import { useAisTrails } from '@/hooks/use-ais-trails'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { useVesselState } from '@/hooks/use-vessel-state'
+import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
@@ -138,8 +137,7 @@ export function App() {
     refetch: refetchForecast,
   } = useWeatherForecast(uiConfig.vesselStateRefreshSeconds)
   const anchorWatch = useAnchorWatch(latitude, longitude, navigationState, uiConfig.vesselStateRefreshSeconds)
-  const vesselTrail = useVesselTrail(latitude, longitude, anchorWatch.setAt)
-  const aisTrails = useAisTrails(nearbyVessels, anchorWatch.anchorState !== 'none')
+  const { getSelfTrail, getAisTrails } = useServerTrails(5000)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
   const depthTrendPoints = useDepthTrend('2h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
@@ -336,9 +334,9 @@ export function App() {
                   currentSetDeg={currentSetDeg}
                   isImperial={isImperialDistance}
                   vesselHeadingDeg={headingTrue}
-                  vesselTrail={vesselTrail}
+                  vesselTrail={getSelfTrail}
                   aisVessels={nearbyVessels}
-                  aisTrails={aisTrails}
+                  aisTrails={getAisTrails}
                   isDarkTheme={isDarkTheme}
                   onFullscreen={() => { setActiveDrawerTab('anchor-watch'); setIsDrawerOpen(true) }}
                 />
@@ -529,10 +527,9 @@ export function App() {
                   currentSetDeg={currentSetDeg}
                   distanceMeters={anchorWatch.distanceMeters}
                   bearingDeg={anchorWatch.bearingDeg}
-                  anchorSetAt={anchorWatch.setAt}
-                  vesselTrail={vesselTrail}
+                  vesselTrail={getSelfTrail}
                   aisVessels={nearbyVessels}
-                  aisTrails={aisTrails}
+                  aisTrails={getAisTrails}
                   isDarkTheme={isDarkTheme}
                   onAnchorReposition={anchorWatch.updatePosition}
                   onRadiusChange={anchorWatch.updateRadius}

@@ -5,7 +5,7 @@ import { Tile } from '@/components/ui/tile'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { TrailPoint } from '@/hooks/use-vessel-trail'
+import type { TrailPoint } from '@/hooks/use-server-trails'
 
 const METERS_TO_FEET = 3.28084
 const DEFAULT_RADIUS_FT = 150
@@ -92,7 +92,6 @@ export function AnchorWatchTile({ watch, lat, lon, depthMeters, currentDriftKts,
           distanceMeters={distanceMeters}
           bearingDeg={bearingDeg}
           isImperial={isImperial}
-          anchorSetAt={watch.setAt}
           vesselTrail={vesselTrail}
           aisVessels={aisVessels}
           aisTrails={aisTrails}
