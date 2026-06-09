@@ -34,7 +34,7 @@ export interface AnchorWatchResult {
 }
 
 const DRAG_BUFFER_METERS = 4.572 // 15 ft
-const DEFAULT_RADIUS_METERS = 45.72 // 150 ft
+const DEFAULT_RADIUS_METERS = 20
 const DEFAULT_SEA_STATE: SeaState = 'calm'
 const DEFAULT_SEABED_TYPE: SeabedType = 'sand'
 
@@ -97,10 +97,15 @@ export function useAnchorWatch(
   }, [fetchState, refreshInterval])
 
   const setAnchorHere = useCallback(async (lat: number, lon: number, radiusMeters?: number) => {
+    const payload: { lat: number; lon: number; radius_meters?: number } = { lat, lon }
+    if (typeof radiusMeters === 'number' && radiusMeters > 0) {
+      payload.radius_meters = radiusMeters
+    }
+
     const res = await fetch('/api/anchor-watch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lat, lon, radius_meters: radiusMeters ?? DEFAULT_RADIUS_METERS }),
+      body: JSON.stringify(payload),
     })
     if (res.ok) {
       const data = (await res.json()) as AnchorWatchServerState
@@ -141,10 +146,15 @@ export function useAnchorWatch(
   }, [])
 
   const updatePosition = useCallback(async (lat: number, lon: number) => {
+    const payload: { lat: number; lon: number; radius_meters?: number } = { lat, lon }
+    if (typeof serverState.radius_meters === 'number' && serverState.radius_meters > 0) {
+      payload.radius_meters = serverState.radius_meters
+    }
+
     const res = await fetch('/api/anchor-watch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lat, lon, radius_meters: serverState.radius_meters ?? DEFAULT_RADIUS_METERS }),
+      body: JSON.stringify(payload),
     })
     if (res.ok) {
       const data = (await res.json()) as AnchorWatchServerState

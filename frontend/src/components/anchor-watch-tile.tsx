@@ -7,10 +7,6 @@ import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 
-const METERS_TO_FEET = 3.28084
-const DEFAULT_RADIUS_FT = 150
-const DEFAULT_RADIUS_M = 15
-
 interface AnchorWatchTileProps {
   watch: AnchorWatchResult
   lat: number | null
@@ -44,9 +40,8 @@ export function AnchorWatchTile({ watch, lat, lon, depthMeters, currentDriftKts,
 
   const handleDropHere = useCallback(() => {
     if (lat === null || lon === null) return
-    const defaultMeters = isImperial ? DEFAULT_RADIUS_FT / METERS_TO_FEET : DEFAULT_RADIUS_M
-    void setAnchorHere(lat, lon, defaultMeters)
-  }, [lat, lon, isImperial, setAnchorHere])
+    void setAnchorHere(lat, lon)
+  }, [lat, lon, setAnchorHere])
 
   // ── No anchor set ─────────────────────────────────────────────
   if (anchorState === 'none') {
@@ -68,7 +63,7 @@ export function AnchorWatchTile({ watch, lat, lon, depthMeters, currentDriftKts,
             onClick={handleDropHere}
           >
             <Anchor className="h-4 w-4" />
-            Drop Here ({isImperial ? `${DEFAULT_RADIUS_FT} ft` : `${DEFAULT_RADIUS_M} m`} radius)
+            Drop
           </Button>
         </div>
       </Tile>

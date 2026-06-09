@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-const defaultAnchorWatchRadiusMeters = 45.72 // 150 ft
+const defaultAnchorWatchRadiusMeters = 20.0
 const maxTrailPoints = 1000
 
 type anchorWatchData struct {
@@ -115,8 +115,9 @@ func (vt *vesselTrail) pointsSince(since time.Time) []*trailPoint {
 }
 
 var (
-	anchorWatchMu    sync.RWMutex
-	anchorWatchState *anchorWatchData
+	anchorWatchMu               sync.RWMutex
+	anchorWatchState            *anchorWatchData
+	lastAnchorWatchRadiusMeters = defaultAnchorWatchRadiusMeters
 
 	trailMu   sync.RWMutex
 	selfTrail *vesselTrail
@@ -213,6 +214,9 @@ func loadAnchorWatch() {
 
 	anchorWatchMu.Lock()
 	anchorWatchState = &loaded
+	if loaded.RadiusMeters > 0 {
+		lastAnchorWatchRadiusMeters = loaded.RadiusMeters
+	}
 	anchorWatchMu.Unlock()
 }
 
@@ -257,8 +261,17 @@ func setAnchorWatch(c echo.Context) error {
 	}
 
 	radius := defaultAnchorWatchRadiusMeters
+	anchorWatchMu.RLock()
+	current := anchorWatchState
+	previousRadius := lastAnchorWatchRadiusMeters
+	anchorWatchMu.RUnlock()
+
 	if body.RadiusMeters != nil && *body.RadiusMeters > 0 {
 		radius = *body.RadiusMeters
+	} else if current != nil && current.RadiusMeters > 0 {
+		radius = current.RadiusMeters
+	} else if previousRadius > 0 {
+		radius = previousRadius
 	}
 
 	aw := &anchorWatchData{
@@ -277,6 +290,7 @@ func setAnchorWatch(c echo.Context) error {
 
 	anchorWatchMu.Lock()
 	anchorWatchState = aw
+	lastAnchorWatchRadiusMeters = aw.RadiusMeters
 	anchorWatchMu.Unlock()
 
 	// Reset post-anchor ring buffer. AIS trails are preserved across anchor sets.
@@ -368,6 +382,9 @@ func patchAnchorWatch(c echo.Context) error {
 
 	anchorWatchMu.Lock()
 	anchorWatchState = updated
+	if updated.RadiusMeters > 0 {
+		lastAnchorWatchRadiusMeters = updated.RadiusMeters
+	}
 	anchorWatchMu.Unlock()
 
 	return c.JSON(http.StatusOK, map[string]any{

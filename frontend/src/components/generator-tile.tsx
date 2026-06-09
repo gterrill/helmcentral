@@ -101,35 +101,44 @@ export function GeneratorTile({
 
   return (
     <Tile title="Generator">
-      <div className="mt-2 flex items-center justify-between gap-3">
-        {/* Power + state */}
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-1.5">
-            <span
-              className={`font-display text-5xl leading-none tabular-nums antialiased ${isRunning ? 'text-primary' : 'text-muted-foreground'}`}
-            >
-              {powerLabel}
-            </span>
-            <span className="text-xl leading-none text-muted-foreground">W</span>
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.1em] ${stateBadgeClass}`}
-            >
-              {stateLabelText}
-            </span>
-            {runReason && (
-              <span className="text-[11px] text-muted-foreground">{runReason}</span>
-            )}
-          </div>
-          {isRunning && (
-            <p className="mt-1 font-mono text-sm tabular-nums text-muted-foreground">
-              {formatRuntime(generatorRuntime)}
-            </p>
-          )}
+      <div className="mt-2 grid grid-cols-1 gap-2 text-center md:grid-cols-3">
+        <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-primary/30' : ''}`}>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Power</p>
+          <p className={`font-display text-2xl tabular-nums ${isRunning ? 'text-primary' : 'text-muted-foreground'}`}>
+            {powerLabel}<span className="ml-1 text-base text-muted-foreground">W</span>
+          </p>
         </div>
 
-        {/* Start / Stop button */}
+        <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-secondary/30' : ''}`}>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">State</p>
+          <p className={`font-display text-2xl tabular-nums ${isRunning ? 'text-secondary' : 'text-muted-foreground'}`}>
+            {stateLabelText}
+          </p>
+        </div>
+
+        <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-muted/40' : ''}`}>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Runtime</p>
+          <p className="font-display text-2xl tabular-nums text-secondary">
+            {formatRuntime(generatorRuntime)}
+          </p>
+        </div>
+      </div>
+
+      {(runReason || isRunning) && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {runReason && (
+            <span className="text-[11px] text-muted-foreground">{runReason}</span>
+          )}
+          {isRunning && (
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.1em] ${stateBadgeClass}`}>
+              Running
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Start / Stop button */}
+      <div className="mt-3 flex justify-end">
         <Button
           size="default"
           variant={isRunning ? 'outline' : 'default'}
