@@ -1454,6 +1454,46 @@ func coerceFloat(value any) float64 {
 	return -1
 }
 
+// loadSettingString retrieves a string value from nested settings by path (e.g., []string{"boat", "name"}).
+// Returns empty string on error or missing path.
+func loadSettingString(settingsPath string, keyPath []string) string {
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return ""
+	}
+
+	value := any(settings)
+	for _, key := range keyPath {
+		m, ok := value.(map[string]any)
+		if !ok {
+			return ""
+		}
+		value = m[key]
+	}
+
+	return strings.TrimSpace(coerceString(value))
+}
+
+// loadSettingFloat retrieves a float64 value from nested settings by path.
+// Returns -1 on error or missing path.
+func loadSettingFloat(settingsPath string, keyPath []string) float64 {
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return -1
+	}
+
+	value := any(settings)
+	for _, key := range keyPath {
+		m, ok := value.(map[string]any)
+		if !ok {
+			return -1
+		}
+		value = m[key]
+	}
+
+	return coerceFloat(value)
+}
+
 func normalizeDegrees(value float64) float64 {
 	normalized := math.Mod(value, 360)
 	if normalized < 0 {
@@ -1497,34 +1537,14 @@ func compactVesselID(vesselID string) string {
 }
 
 func loadBoatName(settingsPath string) string {
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return ""
-	}
-	boatMap, ok := settings["boat"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	name, _ := boatMap["name"].(string)
-	return strings.TrimSpace(name)
+	return loadSettingString(settingsPath, []string{"boat", "name"})
 }
 
 func loadHouseBatteryCapacityAh(settingsPath string) float64 {
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return -1
-	}
-
-	boatMap, ok := settings["boat"].(map[string]any)
-	if !ok {
-		return -1
-	}
-
-	capacity := coerceFloat(boatMap["house_battery_capacity_ah"])
+	capacity := loadSettingFloat(settingsPath, []string{"boat", "house_battery_capacity_ah"})
 	if capacity <= 0 {
 		return -1
 	}
-
 	return capacity
 }
 

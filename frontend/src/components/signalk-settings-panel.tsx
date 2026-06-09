@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { SettingsInput } from '@/components/ui/settings-input'
+import { SettingsSelect } from '@/components/ui/settings-select'
 
 type SettingsPayload = {
   signalk?: {
@@ -263,25 +265,19 @@ export function SignalKSettingsPanel() {
         <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">SignalK Connection</h3>
 
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,180px)_auto]">
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-primary/40 bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Address</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={signalKAddress}
-              onChange={(event) => setSignalKAddress(event.target.value)}
-              aria-label="SignalK address"
-            />
-          </label>
+          <SettingsInput
+            label="Address"
+            value={signalKAddress}
+            onChange={setSignalKAddress}
+            ariaLabel="SignalK address"
+          />
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Port</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={signalKPort}
-              onChange={(event) => setSignalKPort(event.target.value)}
-              aria-label="SignalK port"
-            />
-          </label>
+          <SettingsInput
+            label="Port"
+            value={signalKPort}
+            onChange={setSignalKPort}
+            ariaLabel="SignalK port"
+          />
 
           <Button
             variant="outline"
@@ -292,64 +288,50 @@ export function SignalKSettingsPanel() {
             {isConnecting ? 'Connecting' : 'Connect'}
           </Button>
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em] md:col-span-3">
-            <span className="text-muted-foreground">Refresh Seconds</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={vesselStateRefreshSeconds}
-              onChange={(event) => setVesselStateRefreshSeconds(event.target.value)}
-              aria-label="Vessel state refresh seconds"
-            />
-          </label>
+          <SettingsInput
+            label="Refresh Seconds"
+            value={vesselStateRefreshSeconds}
+            onChange={setVesselStateRefreshSeconds}
+            ariaLabel="Vessel state refresh seconds"
+            className="md:col-span-3"
+          />
         </div>
       </div>
 
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Boat And UI</h3>
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Boat Name</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={boatName}
-              onChange={(event) => setBoatName(event.target.value)}
-              aria-label="Boat name"
-            />
-          </label>
+          <SettingsInput
+            label="Boat Name"
+            value={boatName}
+            onChange={setBoatName}
+            ariaLabel="Boat name"
+          />
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Boat Model</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={boatModel}
-              onChange={(event) => setBoatModel(event.target.value)}
-              aria-label="Boat model"
-            />
-          </label>
+          <SettingsInput
+            label="Boat Model"
+            value={boatModel}
+            onChange={setBoatModel}
+            ariaLabel="Boat model"
+          />
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Battery Ah</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={houseBatteryCapacityAh}
-              onChange={(event) => setHouseBatteryCapacityAh(event.target.value)}
-              aria-label="House battery capacity"
-            />
-          </label>
+          <SettingsInput
+            label="Battery Ah"
+            value={houseBatteryCapacityAh}
+            onChange={setHouseBatteryCapacityAh}
+            ariaLabel="House battery capacity"
+          />
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Units</span>
-            <select
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={distanceUnits}
-              onChange={(event) => setDistanceUnits(event.target.value as 'metric' | 'imperial')}
-              aria-label="Distance units"
-            >
-              <option value="metric">Metric</option>
-              <option value="imperial">Imperial</option>
-            </select>
-          </label>
-
+          <SettingsSelect
+            label="Units"
+            value={distanceUnits}
+            onChange={setDistanceUnits}
+            options={[
+              { value: 'metric', label: 'Metric' },
+              { value: 'imperial', label: 'Imperial' },
+            ]}
+            ariaLabel="Distance units"
+          />
         </div>
       </div>
 
@@ -357,18 +339,13 @@ export function SignalKSettingsPanel() {
         <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Labels</h3>
         <div className="mt-3 grid grid-cols-1 gap-2">
           {tankLabelIds.map((id) => (
-            <label
+            <SettingsInput
               key={id}
-              className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]"
-            >
-              <span className="text-muted-foreground">Tank Label {id}</span>
-              <input
-                className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-                value={tankLabels[id] ?? ''}
-                onChange={(event) => setTankLabel(id, event.target.value)}
-                aria-label={`Tank label ${id}`}
-              />
-            </label>
+              label={`Tank Label ${id}`}
+              value={tankLabels[id] ?? ''}
+              onChange={(val) => setTankLabel(id, val)}
+              ariaLabel={`Tank label ${id}`}
+            />
           ))}
         </div>
       </div>
@@ -376,60 +353,47 @@ export function SignalKSettingsPanel() {
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Anchor</h3>
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Bow Roller M</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={bowRollerHeightM}
-              onChange={(event) => setBowRollerHeightM(event.target.value)}
-              aria-label="Bow roller height"
-            />
-          </label>
+          <SettingsInput
+            label="Bow Roller M"
+            value={bowRollerHeightM}
+            onChange={setBowRollerHeightM}
+            ariaLabel="Bow roller height"
+          />
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Chain Size Mm</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={chainSizeMm}
-              onChange={(event) => setChainSizeMm(event.target.value)}
-              aria-label="Chain size"
-            />
-          </label>
+          <SettingsInput
+            label="Chain Size Mm"
+            value={chainSizeMm}
+            onChange={setChainSizeMm}
+            ariaLabel="Chain size"
+          />
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Chain Onboard M</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={chainOnboardM}
-              onChange={(event) => setChainOnboardM(event.target.value)}
-              aria-label="Chain onboard length"
-            />
-          </label>
+          <SettingsInput
+            label="Chain Onboard M"
+            value={chainOnboardM}
+            onChange={setChainOnboardM}
+            ariaLabel="Chain onboard length"
+          />
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em]">
-            <span className="text-muted-foreground">Windage M2</span>
-            <input
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={windageAreaM2}
-              onChange={(event) => setWindageAreaM2(event.target.value)}
-              aria-label="Windage area"
-            />
-          </label>
+          <SettingsInput
+            label="Windage M2"
+            value={windageAreaM2}
+            onChange={setWindageAreaM2}
+            ariaLabel="Windage area"
+          />
 
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background/80 px-3 py-2 text-xs uppercase tracking-[0.1em] md:col-span-2">
-            <span className="text-muted-foreground">Hull Type</span>
-            <select
-              className="min-w-0 w-full bg-transparent text-sm font-semibold text-foreground outline-none"
-              value={hullType}
-              onChange={(event) => setHullType(event.target.value as 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat')}
-              aria-label="Hull type"
-            >
-              <option value="power_cat">power_cat</option>
-              <option value="sail_mono">sail_mono</option>
-              <option value="power_mono">power_mono</option>
-              <option value="sail_cat">sail_cat</option>
-            </select>
-          </label>
+          <SettingsSelect
+            label="Hull Type"
+            value={hullType}
+            onChange={setHullType}
+            options={[
+              { value: 'power_cat', label: 'power_cat' },
+              { value: 'sail_mono', label: 'sail_mono' },
+              { value: 'power_mono', label: 'power_mono' },
+              { value: 'sail_cat', label: 'sail_cat' },
+            ]}
+            ariaLabel="Hull type"
+            isMultiCol
+          />
         </div>
       </div>
 
