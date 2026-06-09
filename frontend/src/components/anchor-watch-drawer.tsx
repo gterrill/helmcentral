@@ -19,6 +19,8 @@ interface AnchorWatchDrawerProps {
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
   isDarkTheme: boolean
+  showImageryLayer: boolean
+  onImageryToggle: (enabled: boolean) => void
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
   onClearAnchor: () => void
@@ -41,6 +43,8 @@ export function AnchorWatchDrawer({
   aisVessels,
   aisTrails,
   isDarkTheme,
+  showImageryLayer,
+  onImageryToggle,
   onAnchorReposition,
   onRadiusChange,
   onClearAnchor,
@@ -64,6 +68,8 @@ export function AnchorWatchDrawer({
       aisVessels={aisVessels}
       aisTrails={aisTrails}
       isDarkTheme={isDarkTheme}
+      showImageryLayer={showImageryLayer}
+      onImageryToggle={onImageryToggle}
       onAnchorReposition={onAnchorReposition}
       onRadiusChange={onRadiusChange}
       onClearAnchor={onClearAnchor}

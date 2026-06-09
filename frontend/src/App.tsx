@@ -32,6 +32,8 @@ import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 
+const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
+
 function formatCoordinate(value: number | null, latitude: boolean) {
   if (value === null) {
     return '—'
@@ -81,6 +83,14 @@ function formatTimeToGo(hours: number | null) {
 export function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [activeDrawerTab, setActiveDrawerTab] = useState('forecast')
+  const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
+    const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)
+    return raw === 'true'
+  })
+
+  useEffect(() => {
+    globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
+  }, [showAnchorImagery])
 
   // Detect dark theme by watching the <html> class list
   const [isDarkTheme, setIsDarkTheme] = useState(() =>
@@ -338,6 +348,8 @@ export function App() {
                   aisVessels={nearbyVessels}
                   aisTrails={getAisTrails}
                   isDarkTheme={isDarkTheme}
+                  showImageryLayer={showAnchorImagery}
+                  onImageryToggle={setShowAnchorImagery}
                   onFullscreen={() => { setActiveDrawerTab('anchor-watch'); setIsDrawerOpen(true) }}
                 />
 
@@ -531,6 +543,8 @@ export function App() {
                   aisVessels={nearbyVessels}
                   aisTrails={getAisTrails}
                   isDarkTheme={isDarkTheme}
+                  showImageryLayer={showAnchorImagery}
+                  onImageryToggle={setShowAnchorImagery}
                   onAnchorReposition={anchorWatch.updatePosition}
                   onRadiusChange={anchorWatch.updateRadius}
                   onClearAnchor={anchorWatch.clearAnchor}

@@ -20,10 +20,28 @@ interface AnchorWatchTileProps {
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
   isDarkTheme: boolean
+  showImageryLayer: boolean
+  onImageryToggle: (enabled: boolean) => void
   onFullscreen: () => void
 }
 
-export function AnchorWatchTile({ watch, lat, lon, depthMeters, currentDriftKts, currentSetDeg, isImperial, vesselHeadingDeg, vesselTrail, aisVessels, aisTrails, isDarkTheme, onFullscreen }: AnchorWatchTileProps) {
+export function AnchorWatchTile({
+  watch,
+  lat,
+  lon,
+  depthMeters,
+  currentDriftKts,
+  currentSetDeg,
+  isImperial,
+  vesselHeadingDeg,
+  vesselTrail,
+  aisVessels,
+  aisTrails,
+  isDarkTheme,
+  showImageryLayer,
+  onImageryToggle,
+  onFullscreen,
+}: AnchorWatchTileProps) {
   const {
     anchorState,
     anchorLat,
@@ -91,6 +109,8 @@ export function AnchorWatchTile({ watch, lat, lon, depthMeters, currentDriftKts,
           aisVessels={aisVessels}
           aisTrails={aisTrails}
           isDarkTheme={isDarkTheme}
+          showImageryLayer={showImageryLayer}
+          onImageryToggle={onImageryToggle}
           onAnchorReposition={updatePosition}
           onRadiusChange={updateRadius}
           onClearAnchor={clearAnchor}

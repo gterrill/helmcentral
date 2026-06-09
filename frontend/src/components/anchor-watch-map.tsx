@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, ArrowUp, CircleStop, Crosshair, Expand, MapPin, Minus, Plus, Ship } from 'lucide-react'
+import { Anchor, ArrowUp, CircleStop, Crosshair, Expand, MapPin, Minus, Plus, Satellite, Ship } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-server-trails'
@@ -12,6 +12,22 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
+const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
+const HIMAWARI_COLORIZED_TILES = '/api/himawari/colorized/{z}/{x}/{y}'
+const SAT_HANDOFF_START_ZOOM = 9
+const SAT_HANDOFF_END_ZOOM = 10
+const WORLD_IMAGERY_MAX_ZOOM = 18
+
+export function computeSatelliteBlend(currentZoom: number, enabled: boolean) {
+  const handoffProgress = Math.max(
+    0,
+    Math.min(1, (currentZoom - SAT_HANDOFF_START_ZOOM) / (SAT_HANDOFF_END_ZOOM - SAT_HANDOFF_START_ZOOM)),
+  )
+  return {
+    himawariBlend: enabled ? 1 - handoffProgress : 0,
+    worldBlend: enabled ? handoffProgress : 0,
+  }
+}
 
 // ── Haversine distance (m) ──────────────────────────────────────────────────
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -121,6 +137,8 @@ export interface AnchorWatchMapProps {
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
   isDarkTheme: boolean
+  showImageryLayer?: boolean
+  onImageryToggle?: (enabled: boolean) => void
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
   onClearAnchor: () => void
@@ -145,6 +163,8 @@ export function AnchorWatchMap({
   aisVessels,
   aisTrails,
   isDarkTheme,
+  showImageryLayer = false,
+  onImageryToggle,
   onAnchorReposition,
   onRadiusChange,
   onClearAnchor,
@@ -169,6 +189,7 @@ export function AnchorWatchMap({
   }, [])
   // Scale markers: full size at zoom 14+, shrink linearly down to 0.45× at zoom 10
   const markerScale = Math.max(0.45, Math.min(1, (currentZoom - 10) / (14 - 10)))
+  const { himawariBlend, worldBlend } = computeSatelliteBlend(currentZoom, showImageryLayer)
 
   // Re-render trails on each poll cycle (trails are stored in refs, not state)
   useEffect(() => {
@@ -482,6 +503,10 @@ export function AnchorWatchMap({
 
   const mapStyle = isDarkTheme ? STYLE_DARK : STYLE_LIGHT
 
+  const handleImageryToggle = useCallback(() => {
+    onImageryToggle?.(!showImageryLayer)
+  }, [showImageryLayer, onImageryToggle])
+
   return (
     <div className={cn('relative overflow-hidden rounded-lg', className)}>
       <Map
@@ -500,6 +525,26 @@ export function AnchorWatchMap({
         dragRotate={false}
         touchPitch={false}
       >
+        {showImageryLayer && worldBlend > 0 && (
+          <Source
+            id="world-imagery"
+            type="raster"
+            tiles={[WORLD_IMAGERY_TILES]}
+            tileSize={256}
+            maxzoom={WORLD_IMAGERY_MAX_ZOOM}
+            attribution="Source: Esri, Maxar, Earthstar Geographics"
+          >
+            <Layer
+              id="world-imagery-layer"
+              type="raster"
+              paint={{
+                'raster-opacity': worldBlend,
+                'raster-fade-duration': 250,
+              }}
+            />
+          </Source>
+        )}
+
         {/* OpenSeaMap nautical overlay */}
         <Source
           id="openseamap"
@@ -510,6 +555,27 @@ export function AnchorWatchMap({
         >
           <Layer id="openseamap-layer" type="raster" paint={{ 'raster-opacity': 0.85 }} />
         </Source>
+
+        {/* Optional Himawari cloud overlay */}
+        {showImageryLayer && himawariBlend > 0 && (
+          <Source
+            id="himawari"
+            type="raster"
+            tiles={[HIMAWARI_COLORIZED_TILES]}
+            tileSize={256}
+            maxzoom={6}
+            attribution="Source: NOAA, Esri"
+          >
+            <Layer
+              id="himawari-layer"
+              type="raster"
+              paint={{
+                'raster-opacity': (isDarkTheme ? 0.6 : 0.52) * himawariBlend,
+                'raster-fade-duration': 250,
+              }}
+            />
+          </Source>
+        )}
 
         {/* Alarm circle fill */}
         <Source id="alarm-circle" type="geojson" data={circleGeoJSON}>
@@ -837,6 +903,18 @@ export function AnchorWatchMap({
           </button>
         )}
         {onFullscreen && <div className="my-0.5 h-px bg-white/20" />}
+        <button
+          onClick={handleImageryToggle}
+          aria-label="Toggle satellite imagery"
+          className={cn(
+            'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+            showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+          )}
+          style={{ transition: 'background-color 150ms ease-out' }}
+        >
+          <Satellite className="h-4 w-4" />
+        </button>
+        <div className="my-0.5 h-px bg-white/20" />
         <button
           onClick={handleZoomIn}
           aria-label="Zoom in"
