@@ -18,6 +18,241 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	defaultDistanceUnits             = "metric"
+	defaultVesselStateRefreshSeconds = 10
+	defaultBowRollerHeightM          = 1.5
+	defaultChainSizeMM               = 12
+	defaultChainOnboardM             = 150
+	defaultHullType                  = "power_cat"
+	defaultWindageAreaM2             = 35
+)
+
+type settingsPayload struct {
+	Signalk struct {
+		Address string `json:"address"`
+		Port    int    `json:"port"`
+	} `json:"signalk"`
+	Boat struct {
+		Name                   string  `json:"name"`
+		Model                  string  `json:"model"`
+		HouseBatteryCapacityAh float64 `json:"house_battery_capacity_ah"`
+	} `json:"boat"`
+	UI struct {
+		VesselStateRefreshSeconds int               `json:"vessel_state_refresh_seconds"`
+		TankLabels                map[string]string `json:"tank_labels"`
+	} `json:"ui"`
+	Anchor struct {
+		BowRollerHeightM float64 `json:"bow_roller_height_m"`
+		ChainSizeMM      float64 `json:"chain_size_mm"`
+		ChainOnboardM    float64 `json:"chain_onboard_m"`
+		HullType         string  `json:"hull_type"`
+		WindageAreaM2    float64 `json:"windage_area_m2"`
+	} `json:"anchor"`
+	Units string `json:"units"`
+}
+
+func getSettingsHandler(c echo.Context) error {
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings"})
+	}
+
+	return c.JSON(http.StatusOK, buildSettingsPayload(settings))
+}
+
+func updateSettingsHandler(c echo.Context) error {
+	var req settingsPayload
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+	}
+
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings"})
+	}
+
+	normalized := normalizeSettingsPayload(req)
+
+	settings["signalk"] = map[string]any{
+		"address": normalized.Signalk.Address,
+		"port":    normalized.Signalk.Port,
+	}
+	settings["boat"] = map[string]any{
+		"name":                      normalized.Boat.Name,
+		"model":                     normalized.Boat.Model,
+		"house_battery_capacity_ah": normalized.Boat.HouseBatteryCapacityAh,
+	}
+
+	uiMap := map[string]any{}
+	if existingUI, ok := settings["ui"].(map[string]any); ok {
+		for key, value := range existingUI {
+			uiMap[key] = value
+		}
+	}
+	uiMap["vessel_state_refresh_seconds"] = normalized.UI.VesselStateRefreshSeconds
+	if normalized.UI.TankLabels != nil {
+		uiMap["tank_labels"] = normalized.UI.TankLabels
+	}
+	settings["ui"] = uiMap
+
+	settings["anchor"] = map[string]any{
+		"bow_roller_height_m": normalized.Anchor.BowRollerHeightM,
+		"chain_size_mm":       normalized.Anchor.ChainSizeMM,
+		"chain_onboard_m":     normalized.Anchor.ChainOnboardM,
+		"hull_type":           normalized.Anchor.HullType,
+		"windage_area_m2":     normalized.Anchor.WindageAreaM2,
+	}
+	settings["units"] = normalized.Units
+
+	if err := writeSettings(settingsPath, settings); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
+	}
+
+	return c.JSON(http.StatusOK, normalized)
+}
+
+func buildSettingsPayload(settings map[string]any) settingsPayload {
+	payload := normalizeSettingsPayload(settingsPayload{})
+
+	if signalkMap, ok := settings["signalk"].(map[string]any); ok {
+		address := coerceString(signalkMap["address"])
+		if strings.TrimSpace(address) != "" {
+			payload.Signalk.Address = strings.TrimSpace(address)
+		}
+		port := coercePort(signalkMap["port"])
+		if port > 0 && port <= 65535 {
+			payload.Signalk.Port = port
+		}
+	}
+
+	if boatMap, ok := settings["boat"].(map[string]any); ok {
+		if name := strings.TrimSpace(coerceString(boatMap["name"])); name != "" {
+			payload.Boat.Name = name
+		}
+		if model := strings.TrimSpace(coerceString(boatMap["model"])); model != "" {
+			payload.Boat.Model = model
+		}
+		capacity := coerceFloat(boatMap["house_battery_capacity_ah"])
+		if capacity > 0 {
+			payload.Boat.HouseBatteryCapacityAh = capacity
+		}
+	}
+
+	if uiMap, ok := settings["ui"].(map[string]any); ok {
+		seconds := coercePort(uiMap["vessel_state_refresh_seconds"])
+		if seconds > 0 {
+			payload.UI.VesselStateRefreshSeconds = seconds
+		}
+
+		if labelsMap, ok := uiMap["tank_labels"].(map[string]any); ok {
+			payload.UI.TankLabels = map[string]string{}
+			for key, value := range labelsMap {
+				trimmedKey := strings.TrimSpace(key)
+				if trimmedKey == "" {
+					continue
+				}
+				payload.UI.TankLabels[trimmedKey] = strings.TrimSpace(coerceString(value))
+			}
+		}
+	}
+
+	if anchorMap, ok := settings["anchor"].(map[string]any); ok {
+		if value := coerceFloat(anchorMap["bow_roller_height_m"]); value > 0 {
+			payload.Anchor.BowRollerHeightM = value
+		}
+		if value := coerceFloat(anchorMap["chain_size_mm"]); value > 0 {
+			payload.Anchor.ChainSizeMM = value
+		}
+		if value := coerceFloat(anchorMap["chain_onboard_m"]); value > 0 {
+			payload.Anchor.ChainOnboardM = value
+		}
+		if hullType := strings.TrimSpace(coerceString(anchorMap["hull_type"])); isSupportedHullType(hullType) {
+			payload.Anchor.HullType = hullType
+		}
+		if value := coerceFloat(anchorMap["windage_area_m2"]); value > 0 {
+			payload.Anchor.WindageAreaM2 = value
+		}
+	}
+
+	units := strings.TrimSpace(coerceString(settings["units"]))
+	if strings.EqualFold(units, "metric") || strings.EqualFold(units, "imperial") {
+		payload.Units = strings.ToLower(units)
+	}
+
+	return payload
+}
+
+func normalizeSettingsPayload(req settingsPayload) settingsPayload {
+	normalized := settingsPayload{}
+	normalized.Signalk.Address = strings.TrimSpace(req.Signalk.Address)
+	if normalized.Signalk.Address == "" {
+		normalized.Signalk.Address = defaultSignalKAddress
+	}
+	normalized.Signalk.Port = req.Signalk.Port
+	if normalized.Signalk.Port <= 0 || normalized.Signalk.Port > 65535 {
+		normalized.Signalk.Port = defaultSignalKPort
+	}
+
+	normalized.Boat.Name = strings.TrimSpace(req.Boat.Name)
+	normalized.Boat.Model = strings.TrimSpace(req.Boat.Model)
+	normalized.Boat.HouseBatteryCapacityAh = req.Boat.HouseBatteryCapacityAh
+	if normalized.Boat.HouseBatteryCapacityAh <= 0 {
+		normalized.Boat.HouseBatteryCapacityAh = defaultHouseBatteryCapacityAh
+	}
+
+	normalized.UI.VesselStateRefreshSeconds = req.UI.VesselStateRefreshSeconds
+	if normalized.UI.VesselStateRefreshSeconds <= 0 {
+		normalized.UI.VesselStateRefreshSeconds = defaultVesselStateRefreshSeconds
+	}
+
+	if req.UI.TankLabels != nil {
+		normalized.UI.TankLabels = map[string]string{}
+		for key, value := range req.UI.TankLabels {
+			trimmedKey := strings.TrimSpace(key)
+			if trimmedKey == "" {
+				continue
+			}
+			normalized.UI.TankLabels[trimmedKey] = strings.TrimSpace(value)
+		}
+	}
+
+	normalized.Anchor.BowRollerHeightM = req.Anchor.BowRollerHeightM
+	if normalized.Anchor.BowRollerHeightM <= 0 {
+		normalized.Anchor.BowRollerHeightM = defaultBowRollerHeightM
+	}
+	normalized.Anchor.ChainSizeMM = req.Anchor.ChainSizeMM
+	if normalized.Anchor.ChainSizeMM <= 0 {
+		normalized.Anchor.ChainSizeMM = defaultChainSizeMM
+	}
+	normalized.Anchor.ChainOnboardM = req.Anchor.ChainOnboardM
+	if normalized.Anchor.ChainOnboardM <= 0 {
+		normalized.Anchor.ChainOnboardM = defaultChainOnboardM
+	}
+	normalized.Anchor.WindageAreaM2 = req.Anchor.WindageAreaM2
+	if normalized.Anchor.WindageAreaM2 <= 0 {
+		normalized.Anchor.WindageAreaM2 = defaultWindageAreaM2
+	}
+	normalized.Anchor.HullType = strings.TrimSpace(req.Anchor.HullType)
+	if !isSupportedHullType(normalized.Anchor.HullType) {
+		normalized.Anchor.HullType = defaultHullType
+	}
+
+	normalized.Units = strings.ToLower(strings.TrimSpace(req.Units))
+	if normalized.Units != "metric" && normalized.Units != "imperial" {
+		normalized.Units = defaultDistanceUnits
+	}
+
+	return normalized
+}
+
+func isSupportedHullType(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return trimmed == "power_cat" || trimmed == "sail_mono" || trimmed == "power_mono" || trimmed == "sail_cat"
+}
+
 func getSignalKSettingsHandler(c echo.Context) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	address, port, err := loadSignalKSettings(settingsPath)
@@ -1135,6 +1370,11 @@ func saveSignalKSettings(settingsPath string, address string, port int) error {
 	signalkMap := map[string]any{"address": strings.TrimSpace(address), "port": port}
 	settings["signalk"] = signalkMap
 
+	return writeSettings(settingsPath, settings)
+}
+
+func writeSettings(settingsPath string, settings map[string]any) error {
+
 	content, err := yaml.Marshal(settings)
 	if err != nil {
 		return err
@@ -1185,6 +1425,15 @@ func coercePort(value any) int {
 	}
 
 	return 0
+}
+
+func coerceString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	}
+
+	return ""
 }
 
 func coerceFloat(value any) float64 {

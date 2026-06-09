@@ -97,6 +97,8 @@ func main() {
 	e.GET("/api/place-name", placeName)
 	e.GET("/api/caches", listCaches)
 	e.POST("/api/caches/:name/invalidate", invalidateCache)
+	e.GET("/api/settings", getSettingsHandler)
+	e.POST("/api/settings", updateSettingsHandler)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
 	e.POST("/api/settings/signalk", updateSignalKSettingsHandler)
 	e.GET("/api/anchor-watch", getAnchorWatch)
