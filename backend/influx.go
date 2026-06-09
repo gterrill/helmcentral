@@ -371,55 +371,71 @@ func queryInfluxMotoringTrailDownsampled(start, end time.Time, intervalSecs int)
 		{"latitude", "longitude"},
 	}
 
+	positionSource := trimEnvValue(getEnv("INFLUX_POSITION_SOURCE", "WLN10.GP"))
+	sourceFilters := []string{""}
+	if positionSource != "" {
+		// Try the configured source first, but fall back to all sources if no points
+		// are returned so reposition mode does not go blank on tag-name/source drift.
+		sourceFilters = append([]string{fmt.Sprintf(
+			` |> filter(fn: (r) => (exists r.source and r.source == %q) or (exists r._source and r._source == %q))`,
+			positionSource,
+			positionSource,
+		)}, sourceFilters...)
+	}
+
 	for _, pair := range fieldPairs {
 		latField := pair[0]
 		lonField := pair[1]
 
-		// aggregateWindow before pivot collapses all sources to one point per
-		// interval, eliminating duplicates from multiple SignalK position sources.
-		flux := fmt.Sprintf(
-			`from(bucket: %q)`+
-				` |> range(start: %s, stop: %s)`+
-				` |> filter(fn: (r) => r._measurement == %q and (r._field == %q or r._field == %q))`+
-				` |> aggregateWindow(every: %ds, fn: last, createEmpty: false)`+
-				` |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")`+
-				` |> keep(columns:["_time",%q,%q])`+
-				` |> sort(columns:["_time"], desc: false)`,
-			bucket,
-			start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339),
-			measurement, latField, lonField,
-			intervalSecs,
-			latField, lonField,
-		)
+		for _, sourceFilter := range sourceFilters {
+			// aggregateWindow before pivot collapses all sources to one point per
+			// interval, eliminating duplicates from multiple SignalK position sources.
+			flux := fmt.Sprintf(
+				`from(bucket: %q)`+
+					` |> range(start: %s, stop: %s)`+
+					` |> filter(fn: (r) => r._measurement == %q and (r._field == %q or r._field == %q))`+
+					`%s`+
+					` |> aggregateWindow(every: %ds, fn: last, createEmpty: false)`+
+					` |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")`+
+					` |> keep(columns:["_time",%q,%q])`+
+					` |> sort(columns:["_time"], desc: false)`,
+				bucket,
+				start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339),
+				measurement, latField, lonField,
+				sourceFilter,
+				intervalSecs,
+				latField, lonField,
+			)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		result, err := client.QueryAPI(org).Query(ctx, flux)
-		if err != nil {
-			cancel()
-			continue
-		}
-
-		var points []trailPoint
-		for result.Next() {
-			rec := result.Record()
-			lat := coerceFloat(rec.ValueByKey(latField))
-			lon := coerceFloat(rec.ValueByKey(lonField))
-			if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			result, err := client.QueryAPI(org).Query(ctx, flux)
+			if err != nil {
+				cancel()
 				continue
 			}
-			points = append(points, trailPoint{
-				Lat:       lat,
-				Lon:       lon,
-				Timestamp: rec.Time(),
-			})
-		}
-		result.Close()
-		cancel()
-		if result.Err() != nil {
-			continue
-		}
-		if len(points) > 0 {
-			return points
+
+			var points []trailPoint
+			for result.Next() {
+				rec := result.Record()
+				lat := coerceFloat(rec.ValueByKey(latField))
+				lon := coerceFloat(rec.ValueByKey(lonField))
+				if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+					continue
+				}
+				points = append(points, trailPoint{
+					Lat:       lat,
+					Lon:       lon,
+					Timestamp: rec.Time(),
+				})
+			}
+			result.Close()
+			cancel()
+			if result.Err() != nil {
+				continue
+			}
+			if len(points) > 0 {
+				return points
+			}
 		}
 	}
 

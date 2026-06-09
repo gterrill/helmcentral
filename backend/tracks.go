@@ -135,7 +135,7 @@ func seedMotoringTrailFromInflux() {
 		start = end.Add(-2 * time.Hour)
 	}
 
-	points := queryInfluxMotoringTrailDownsampled(start, end, 15)
+	points := queryInfluxMotoringTrailDownsampled(start, end, 5)
 	if len(points) == 0 {
 		return
 	}

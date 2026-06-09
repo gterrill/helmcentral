@@ -49,6 +49,7 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=1
       - CHOKIDAR_INTERVAL=300
+      - VITE_API_PROXY_TARGET=http://host.docker.internal:8080
     ports:
       - "5173:5173"
     volumes:
