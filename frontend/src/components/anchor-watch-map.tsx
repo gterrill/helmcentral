@@ -17,6 +17,7 @@ const HIMAWARI_COLORIZED_TILES = '/api/himawari/colorized/{z}/{x}/{y}'
 const SAT_HANDOFF_START_ZOOM = 9
 const SAT_HANDOFF_END_ZOOM = 10
 const WORLD_IMAGERY_MAX_ZOOM = 18
+const ANCHOR_WATCH_ZOOM_STORAGE_KEY = 'anchor-watch-map-zoom'
 
 export function computeSatelliteBlend(currentZoom: number, enabled: boolean) {
   const handoffProgress = Math.max(
@@ -27,6 +28,16 @@ export function computeSatelliteBlend(currentZoom: number, enabled: boolean) {
     himawariBlend: enabled ? 1 - handoffProgress : 0,
     worldBlend: enabled ? handoffProgress : 0,
   }
+}
+
+function readStoredZoom(): number | null {
+  if (typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY)
+  if (!raw) return null
+  const value = Number(raw)
+  if (!Number.isFinite(value)) return null
+  // Keep persisted values within map bounds.
+  return Math.max(10, Math.min(22, value))
 }
 
 // ── Haversine distance (m) ──────────────────────────────────────────────────
@@ -182,7 +193,7 @@ export function AnchorWatchMap({
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
   const [motoringPoints, setMotoringPoints] = useState<TrailPoint[]>([])
   // Track zoom for marker scaling
-  const [currentZoom, setCurrentZoom] = useState(() => zoomForRadius(radiusMeters))
+  const [currentZoom, setCurrentZoom] = useState(() => readStoredZoom() ?? zoomForRadius(radiusMeters))
   const handleZoomChange = useCallback(() => {
     const z = mapRef.current?.getZoom()
     if (z !== undefined) setCurrentZoom(z)
@@ -190,6 +201,11 @@ export function AnchorWatchMap({
   // Scale markers: full size at zoom 14+, shrink linearly down to 0.45× at zoom 10
   const markerScale = Math.max(0.45, Math.min(1, (currentZoom - 10) / (14 - 10)))
   const { himawariBlend, worldBlend } = computeSatelliteBlend(currentZoom, showImageryLayer)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY, String(currentZoom))
+  }, [currentZoom])
 
   // Re-render trails on each poll cycle (trails are stored in refs, not state)
   useEffect(() => {
@@ -494,7 +510,7 @@ export function AnchorWatchMap({
     () => ({
       longitude: anchorLon,
       latitude: anchorLat,
-      zoom: zoomForRadius(radiusMeters),
+      zoom: currentZoom,
     }),
     // Only used as initial value — no deps to avoid re-centering on every update
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -752,10 +768,10 @@ export function AnchorWatchMap({
             aria-label="Anchor position — click to reposition"
           >
             <div
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600/90 shadow-lg"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-600/90 shadow-lg"
               style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}
             >
-              <Anchor className="h-5 w-5 text-white" />
+              <Anchor className="h-4 w-4 text-white" />
             </div>
           </button>
         </Marker>

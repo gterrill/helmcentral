@@ -193,6 +193,11 @@ export function App() {
           ? 'Anchor Watch'
           : 'Forecast'
 
+  const handleDropAnchorHere = () => {
+    if (latitude === null || longitude === null) return
+    void anchorWatch.setAnchorHere(latitude, longitude)
+  }
+
   return (
     <div className="min-h-screen p-4 pb-20 md:p-6 md:pb-24">
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
@@ -525,33 +530,55 @@ export function App() {
             </div>
           )}
           {activeDrawerTab === 'anchor-watch' && (
-            anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null && latitude !== null && longitude !== null
+            anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null
               ? (
-                <AnchorWatchDrawer
-                  vesselLat={latitude}
-                  vesselLon={longitude}
-                  vesselHeadingDeg={headingTrue}
-                  anchorLat={anchorWatch.anchorLat}
-                  anchorLon={anchorWatch.anchorLon}
-                  radiusMeters={anchorWatch.radiusMeters}
-                  depthMeters={depth}
-                  currentDriftKts={currentDriftKts}
-                  currentSetDeg={currentSetDeg}
-                  distanceMeters={anchorWatch.distanceMeters}
-                  bearingDeg={anchorWatch.bearingDeg}
-                  vesselTrail={getSelfTrail}
-                  aisVessels={nearbyVessels}
-                  aisTrails={getAisTrails}
-                  isDarkTheme={isDarkTheme}
-                  showImageryLayer={showAnchorImagery}
-                  onImageryToggle={setShowAnchorImagery}
-                  onAnchorReposition={anchorWatch.updatePosition}
-                  onRadiusChange={anchorWatch.updateRadius}
-                  onClearAnchor={anchorWatch.clearAnchor}
-                  isImperial={isImperialDistance}
-                />
+                <div className="h-full">
+                  <div className="px-6 pt-4">
+                    <Button
+                      className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
+                      disabled={latitude === null || longitude === null}
+                      onClick={handleDropAnchorHere}
+                    >
+                      Drop Here
+                    </Button>
+                  </div>
+                  <AnchorWatchDrawer
+                    vesselLat={latitude ?? anchorWatch.anchorLat}
+                    vesselLon={longitude ?? anchorWatch.anchorLon}
+                    vesselHeadingDeg={headingTrue}
+                    anchorLat={anchorWatch.anchorLat}
+                    anchorLon={anchorWatch.anchorLon}
+                    radiusMeters={anchorWatch.radiusMeters}
+                    depthMeters={depth}
+                    currentDriftKts={currentDriftKts}
+                    currentSetDeg={currentSetDeg}
+                    distanceMeters={anchorWatch.distanceMeters}
+                    bearingDeg={anchorWatch.bearingDeg}
+                    vesselTrail={getSelfTrail}
+                    aisVessels={nearbyVessels}
+                    aisTrails={getAisTrails}
+                    isDarkTheme={isDarkTheme}
+                    showImageryLayer={showAnchorImagery}
+                    onImageryToggle={setShowAnchorImagery}
+                    onAnchorReposition={anchorWatch.updatePosition}
+                    onRadiusChange={anchorWatch.updateRadius}
+                    onClearAnchor={anchorWatch.clearAnchor}
+                    isImperial={isImperialDistance}
+                  />
+                </div>
               )
-              : <div className="px-6 py-8 text-center text-muted-foreground">No anchor watch active</div>
+              : (
+                <div className="px-6 py-8 text-center text-muted-foreground">
+                  <div className="mb-4">No anchor watch active</div>
+                  <Button
+                    className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
+                    disabled={latitude === null || longitude === null}
+                    onClick={handleDropAnchorHere}
+                  >
+                    Drop Here
+                  </Button>
+                </div>
+              )
           )}
         </BottomDrawer>
       </div>
