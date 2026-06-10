@@ -334,11 +334,13 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 		state.Status = "Unknown"
 	}
 
+	hasGNSSDatetime := false
 	datetimeString := firstNonEmptyString(lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"), lookupString(payload, "timestamp"))
 	if datetimeString != "" {
 		parsed, err := time.Parse(time.RFC3339, datetimeString)
 		if err == nil {
 			state.Datetime = parsed.UTC()
+			hasGNSSDatetime = true
 		}
 	}
 
@@ -362,6 +364,14 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 	}
 
 	validation := parseGNSSPositionValidation(payload)
+	validation = applyGNSSHeuristics(validation, gnssObservedSample{
+		Latitude:      rawLatitude,
+		Longitude:     rawLongitude,
+		DepthMeters:   state.Depth,
+		Navigation:    state.Status,
+		ObservedAt:    state.Datetime,
+		HasObservedAt: hasGNSSDatetime,
+	}, time.Now().UTC())
 	state.GNSSQualityIndicator = validation.QualityIndicator
 	state.GNSSHDOP = validation.HDOP
 	state.GNSSValidationState = validation.Status

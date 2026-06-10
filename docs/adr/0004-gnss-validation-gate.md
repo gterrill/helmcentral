@@ -26,6 +26,20 @@ Fail-safe behavior:
 - Do not evaluate anchor dragging radius using the current corrupt position.
 - Surface a distinct high-priority alert path for GPS corruption or jamming.
 
+Additional heuristic checks:
+
+- Staleness:
+	- Degraded when GNSS timestamp age exceeds 10 seconds.
+	- Critical when GNSS timestamp age exceeds 30 seconds, or timestamp is unavailable.
+- Anchor/moored jump plausibility:
+	- Degraded when implied speed between samples exceeds 6 knots.
+	- Critical when implied speed between samples exceeds 12 knots.
+- Depth consistency while anchored/moored:
+	- Degraded when depth changes by more than 1.5 meters within 10 seconds.
+	- Critical when depth jump is combined with implausible position jump.
+- Recovery hysteresis after critical:
+	- Stay critical until at least 5 consecutive trusted samples and at least 15 seconds have elapsed since entering critical.
+
 ## API Contract
 
 The vessel-state payload exposes GNSS validation metadata:
@@ -59,3 +73,4 @@ No legacy fallbacks:
 - Reduces false anchor dragging alarms during GNSS attacks or outages.
 - Preserves operator trust by separating position-integrity failures from true anchor movement.
 - Adds a stable contract for UI and alarm behavior around GNSS integrity transitions.
+- Improves resilience to spoofing-like teleports and transient data spikes without alarm flapping.

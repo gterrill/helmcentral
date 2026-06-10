@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseGNSSPositionValidationFromSignalKMethodQualityAndHDOP(t *testing.T) {
 	payload := map[string]any{
@@ -65,5 +68,121 @@ func TestResolveGNSSPositionFreezesLastGoodFixOnCritical(t *testing.T) {
 	lat, lon = resolveGNSSPosition(-25.9, 152.3, critical)
 	if lat != -25.2939 || lon != 152.9103 {
 		t.Fatalf("expected critical fix to freeze last good position, got %.4f %.4f", lat, lon)
+	}
+}
+
+func TestApplyGNSSHeuristicsCriticalOnStaleTimestamp(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+	validation := gnssPositionValidation{QualityIndicator: 1, HDOP: 0.9, Status: "trusted", Trusted: true}
+	updated := applyGNSSHeuristics(validation, gnssObservedSample{
+		Latitude:      -25.2939,
+		Longitude:     152.9103,
+		DepthMeters:   4.0,
+		Navigation:    "anchored",
+		ObservedAt:    now.Add(-45 * time.Second),
+		HasObservedAt: true,
+	}, now)
+
+	if updated.Status != "critical" {
+		t.Fatalf("expected stale sample to be critical, got %q", updated.Status)
+	}
+}
+
+func TestApplyGNSSHeuristicsCriticalOnImplausibleAnchorJump(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+	base := gnssPositionValidation{QualityIndicator: 1, HDOP: 0.9, Status: "trusted", Trusted: true}
+
+	_ = applyGNSSHeuristics(base, gnssObservedSample{
+		Latitude:      -25.2939,
+		Longitude:     152.9103,
+		DepthMeters:   4.0,
+		Navigation:    "anchored",
+		ObservedAt:    now,
+		HasObservedAt: true,
+	}, now)
+
+	updated := applyGNSSHeuristics(base, gnssObservedSample{
+		Latitude:      -25.2939,
+		Longitude:     152.9203,
+		DepthMeters:   4.1,
+		Navigation:    "anchored",
+		ObservedAt:    now.Add(5 * time.Second),
+		HasObservedAt: true,
+	}, now.Add(5*time.Second))
+
+	if updated.Status != "critical" {
+		t.Fatalf("expected jump-speed heuristic to be critical, got %q", updated.Status)
+	}
+}
+
+func TestApplyGNSSHeuristicsDegradedOnDepthJump(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+	base := gnssPositionValidation{QualityIndicator: 1, HDOP: 0.9, Status: "trusted", Trusted: true}
+
+	_ = applyGNSSHeuristics(base, gnssObservedSample{
+		Latitude:      -25.2939,
+		Longitude:     152.9103,
+		DepthMeters:   4.0,
+		Navigation:    "anchored",
+		ObservedAt:    now,
+		HasObservedAt: true,
+	}, now)
+
+	updated := applyGNSSHeuristics(base, gnssObservedSample{
+		Latitude:      -25.29391,
+		Longitude:     152.91031,
+		DepthMeters:   6.2,
+		Navigation:    "anchored",
+		ObservedAt:    now.Add(5 * time.Second),
+		HasObservedAt: true,
+	}, now.Add(5*time.Second))
+
+	if updated.Status != "degraded" {
+		t.Fatalf("expected depth jump heuristic to be degraded, got %q", updated.Status)
+	}
+}
+
+func TestApplyGNSSHeuristicsHysteresisRequiresRecoverySamples(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+	critical := gnssPositionValidation{QualityIndicator: 0, HDOP: 5.0, Status: "critical", Critical: true}
+	trusted := gnssPositionValidation{QualityIndicator: 1, HDOP: 0.8, Status: "trusted", Trusted: true}
+
+	_ = applyGNSSHeuristics(critical, gnssObservedSample{Latitude: -25.2939, Longitude: 152.9103, Navigation: "anchored", ObservedAt: now, HasObservedAt: true}, now)
+
+	for i := 1; i <= 4; i++ {
+		updated := applyGNSSHeuristics(trusted, gnssObservedSample{
+			Latitude:      -25.2939,
+			Longitude:     152.9103,
+			Navigation:    "anchored",
+			ObservedAt:    now.Add(time.Duration(i) * 4 * time.Second),
+			HasObservedAt: true,
+		}, now.Add(time.Duration(i)*4*time.Second))
+		if updated.Status != "critical" {
+			t.Fatalf("expected hysteresis to remain critical at sample %d, got %q", i, updated.Status)
+		}
+	}
+
+	final := applyGNSSHeuristics(trusted, gnssObservedSample{
+		Latitude:      -25.2939,
+		Longitude:     152.9103,
+		Navigation:    "anchored",
+		ObservedAt:    now.Add(20 * time.Second),
+		HasObservedAt: true,
+	}, now.Add(20*time.Second))
+
+	if final.Status != "trusted" {
+		t.Fatalf("expected hysteresis recovery to trusted, got %q", final.Status)
 	}
 }

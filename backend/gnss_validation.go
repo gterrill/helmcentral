@@ -6,11 +6,20 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
 	gnssTrustedHDOPThreshold  = 2.5
 	gnssCriticalHDOPThreshold = 4.0
+	gnssDegradedMaxAge        = 10 * time.Second
+	gnssCriticalMaxAge        = 30 * time.Second
+	gnssDepthJumpMeters       = 1.5
+	gnssDepthJumpWindow       = 10 * time.Second
+	gnssDegradedJumpKts       = 6.0
+	gnssCriticalJumpKts       = 12.0
+	gnssRecoverySamples       = 5
+	gnssRecoveryMinDuration   = 15 * time.Second
 )
 
 type gnssPositionValidation struct {
@@ -22,12 +31,29 @@ type gnssPositionValidation struct {
 	Critical         bool
 }
 
+type gnssObservedSample struct {
+	Latitude      float64
+	Longitude     float64
+	DepthMeters   float64
+	Navigation    string
+	ObservedAt    time.Time
+	HasObservedAt bool
+}
+
+type gnssHeuristicState struct {
+	lastSample      *gnssObservedSample
+	criticalLatched bool
+	criticalSince   time.Time
+	recoveryCount   int
+}
+
 var gnssValidationMu sync.Mutex
 var lastGNSSValidationStatus string
 var lastGNSSValidationReason string
 var lastTrustedGNSSLatitude float64
 var lastTrustedGNSSLongitude float64
 var lastTrustedGNSSPositionValid bool
+var gnssHeuristic gnssHeuristicState
 
 func parseGNSSPositionValidation(payload map[string]any) gnssPositionValidation {
 	qualityIndicator := parseGNSSQualityIndicator(payload)
@@ -41,6 +67,118 @@ func parseGNSSPositionValidation(payload map[string]any) gnssPositionValidation 
 		Trusted:          status == "trusted",
 		Critical:         status == "critical",
 	}
+}
+
+func applyGNSSHeuristics(validation gnssPositionValidation, sample gnssObservedSample, now time.Time) gnssPositionValidation {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	if !sample.HasObservedAt {
+		validation = escalateValidation(validation, "critical", "gnss timestamp unavailable")
+	} else {
+		age := now.Sub(sample.ObservedAt)
+		if age > gnssCriticalMaxAge {
+			validation = escalateValidation(validation, "critical", fmt.Sprintf("gnss data stale (%ds)", int(age.Seconds())))
+		} else if age > gnssDegradedMaxAge {
+			validation = escalateValidation(validation, "degraded", fmt.Sprintf("gnss data aging (%ds)", int(age.Seconds())))
+		}
+	}
+
+	if gnssHeuristic.lastSample != nil && sample.HasObservedAt && gnssHeuristic.lastSample.HasObservedAt {
+		dt := sample.ObservedAt.Sub(gnssHeuristic.lastSample.ObservedAt)
+		if dt > 0 {
+			distance := haversineMeters(
+				gnssHeuristic.lastSample.Latitude,
+				gnssHeuristic.lastSample.Longitude,
+				sample.Latitude,
+				sample.Longitude,
+			)
+			speedKts := (distance / dt.Seconds()) * metersPerSecondToKnots
+			if isAnchoredOrMooredState(sample.Navigation) {
+				if speedKts > gnssCriticalJumpKts {
+					validation = escalateValidation(validation, "critical", fmt.Sprintf("position jump implies %.1f kts at anchor", speedKts))
+				} else if speedKts > gnssDegradedJumpKts {
+					validation = escalateValidation(validation, "degraded", fmt.Sprintf("position jump implies %.1f kts at anchor", speedKts))
+				}
+
+				if dt <= gnssDepthJumpWindow && sample.DepthMeters >= 0 && gnssHeuristic.lastSample.DepthMeters >= 0 {
+					depthDelta := math.Abs(sample.DepthMeters - gnssHeuristic.lastSample.DepthMeters)
+					if depthDelta > gnssDepthJumpMeters {
+						if speedKts > gnssDegradedJumpKts {
+							validation = escalateValidation(validation, "critical", fmt.Sprintf("depth jump %.1fm with implausible position jump", depthDelta))
+						} else {
+							validation = escalateValidation(validation, "degraded", fmt.Sprintf("depth jump %.1fm in %ds", depthDelta, int(dt.Seconds())))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if sample.Latitude >= -90 && sample.Latitude <= 90 && sample.Longitude >= -180 && sample.Longitude <= 180 {
+		copySample := sample
+		gnssHeuristic.lastSample = &copySample
+	}
+
+	validation = applyGNSSRecoveryHysteresis(validation, now)
+	return validation
+}
+
+func escalateValidation(current gnssPositionValidation, target string, reason string) gnssPositionValidation {
+	if target == "critical" {
+		current.Status = "critical"
+		current.Reason = reason
+		current.Critical = true
+		current.Trusted = false
+		return current
+	}
+	if target == "degraded" && current.Status == "trusted" {
+		current.Status = "degraded"
+		current.Reason = reason
+		current.Critical = false
+		current.Trusted = false
+	}
+	return current
+}
+
+func applyGNSSRecoveryHysteresis(validation gnssPositionValidation, now time.Time) gnssPositionValidation {
+	if validation.Status == "critical" {
+		gnssHeuristic.criticalLatched = true
+		gnssHeuristic.criticalSince = now
+		gnssHeuristic.recoveryCount = 0
+		return validation
+	}
+
+	if !gnssHeuristic.criticalLatched {
+		gnssHeuristic.recoveryCount = 0
+		return validation
+	}
+
+	if validation.Status == "trusted" {
+		gnssHeuristic.recoveryCount++
+		if gnssHeuristic.recoveryCount >= gnssRecoverySamples && now.Sub(gnssHeuristic.criticalSince) >= gnssRecoveryMinDuration {
+			gnssHeuristic.criticalLatched = false
+			gnssHeuristic.recoveryCount = 0
+			return validation
+		}
+	} else {
+		gnssHeuristic.recoveryCount = 0
+	}
+
+	validation.Status = "critical"
+	validation.Reason = "awaiting trusted recovery hysteresis"
+	validation.Critical = true
+	validation.Trusted = false
+	return validation
+}
+
+func isAnchoredOrMooredState(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	return normalized == "anchored" || normalized == "moored" || normalized == "atanchor"
 }
 
 func classifyGNSSPositionValidation(qualityIndicator int, hdop float64) (string, string) {
@@ -159,4 +297,5 @@ func resetGNSSPositionValidationState() {
 	lastTrustedGNSSLatitude = 0
 	lastTrustedGNSSLongitude = 0
 	lastTrustedGNSSPositionValid = false
+	gnssHeuristic = gnssHeuristicState{}
 }
