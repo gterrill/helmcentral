@@ -229,6 +229,15 @@ export function AnchorWatchMap({
     ? Math.round(bearingDeg(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon))
     : bearingDegProp
   const showRepositionBreadcrumbs = editMode === 'reposition'
+  const formatTransientDistance = useCallback(
+    (distanceM: number) => {
+      if (isImperial) {
+        return `${Math.round(distanceM * 3.28084)} ft`
+      }
+      return distanceM < 1000 ? `${distanceM} m` : `${(distanceM / 1000).toFixed(1)} km`
+    },
+    [isImperial],
+  )
 
   // GeoJSON data
   const circleGeoJSON = useMemo(
@@ -695,11 +704,13 @@ export function AnchorWatchMap({
         {/* AIS vessel markers */}
         {aisVessels.map((vessel) => {
           if (vessel.lat === undefined || vessel.lon === undefined) return null
+          const isSelected = transient?.label === vessel.name
           return (
             <Marker
               key={vessel.name}
               latitude={vessel.lat}
               longitude={vessel.lon}
+              style={{ zIndex: isSelected ? 30 : 10 }}
               onClick={() => handleAisClick(vessel)}
             >
               <button
@@ -707,13 +718,29 @@ export function AnchorWatchMap({
                 style={{ minWidth: 40, minHeight: 40 }}
                 aria-label={`AIS vessel: ${vessel.name}`}
               >
-                <div style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}>
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-500/90 shadow-lg">
-                    <Ship className="h-5 w-5 text-white" />
+                <div
+                  style={{
+                    transform: `scale(${markerScale * (isSelected ? 1.35 : 1)})`,
+                    transformOrigin: 'center',
+                    transition: 'transform 150ms ease-out',
+                  }}
+                >
+                  <div
+                    className={cn(
+                      'flex items-center justify-center rounded-full bg-amber-500/90 shadow-lg',
+                      isSelected ? 'h-11 w-11 ring-2 ring-white/70' : 'h-9 w-9',
+                    )}
+                  >
+                    <Ship className={cn('text-white', isSelected ? 'h-6 w-6' : 'h-5 w-5')} />
                   </div>
-                  <span className="mt-0.5 block text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-                    {vessel.name.length > 8 ? vessel.name.slice(0, 8) + '\u2026' : vessel.name}
-                  </span>
+                  <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                    <div className="truncate">{vessel.name}</div>
+                    {isSelected && transient && (
+                      <div className="mt-0.5 whitespace-nowrap text-[8px] font-medium tracking-normal text-amber-200">
+                        {formatTransientDistance(transient.distanceM)} · {Math.round(transient.bearing)}°
+                      </div>
+                    )}
+                  </div>
                 </div>
               </button>
             </Marker>
@@ -760,7 +787,7 @@ export function AnchorWatchMap({
         )}
 
         {/* Anchor marker */}
-        <Marker latitude={anchorLat} longitude={anchorLon}>
+        <Marker latitude={anchorLat} longitude={anchorLon} style={{ zIndex: 1000 }}>
           <button
             onClick={handleAnchorMarkerClick}
             className="flex items-center justify-center"
@@ -776,8 +803,8 @@ export function AnchorWatchMap({
           </button>
         </Marker>
 
-        {/* Transient pin / AIS info */}
-        {transient && (
+        {/* Transient pin */}
+        {transient?.label === 'pin' && (
           <Marker latitude={transient.lat} longitude={transient.lon}>
             <div
               className="pointer-events-none flex flex-col items-center"
@@ -793,14 +820,10 @@ export function AnchorWatchMap({
               )}
               <div className="mt-1 rounded bg-black/70 px-2 py-0.5 text-center">
                 <p className="font-mono text-[11px] text-white">
-                  {transient.distanceM < 1000
-                    ? `${transient.distanceM}m`
-                    : `${(transient.distanceM / 1000).toFixed(1)}km`}{' '}
+                  {formatTransientDistance(transient.distanceM)}{' '}
                   {Math.round(transient.bearing)}°
                 </p>
-                {transient.label !== 'pin' && (
-                  <p className="font-mono text-[9px] uppercase text-amber-300">{transient.label}</p>
-                )}
+                <p className="font-mono text-[9px] uppercase text-amber-300">{transient.label}</p>
               </div>
             </div>
           </Marker>
@@ -821,6 +844,8 @@ export function AnchorWatchMap({
           'pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg backdrop-blur',
           editMode === 'none' ? 'bg-black/50' : 'bg-black/35',
         )}
+        style={{ zIndex: 2000 }}
+        data-testid="anchor-watch-metrics"
       >
         {[
           {
@@ -907,7 +932,11 @@ export function AnchorWatchMap({
       </div>
 
       {/* Zoom + Recenter controls */}
-      <div className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1">
+      <div
+        className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1"
+        style={{ zIndex: 2100 }}
+        data-testid="anchor-watch-controls"
+      >
         {onFullscreen && (
           <button
             onClick={onFullscreen}
@@ -918,19 +947,6 @@ export function AnchorWatchMap({
             <Expand className="h-4 w-4" />
           </button>
         )}
-        {onFullscreen && <div className="my-0.5 h-px bg-white/20" />}
-        <button
-          onClick={handleImageryToggle}
-          aria-label="Toggle satellite imagery"
-          className={cn(
-            'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
-            showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-          )}
-          style={{ transition: 'background-color 150ms ease-out' }}
-        >
-          <Satellite className="h-4 w-4" />
-        </button>
-        <div className="my-0.5 h-px bg-white/20" />
         <button
           onClick={handleZoomIn}
           aria-label="Zoom in"
@@ -947,7 +963,17 @@ export function AnchorWatchMap({
         >
           <Minus className="h-4 w-4" />
         </button>
-        <div className="my-0.5 h-px bg-white/20" />
+        <button
+          onClick={handleImageryToggle}
+          aria-label="Toggle satellite imagery"
+          className={cn(
+            'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+            showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+          )}
+          style={{ transition: 'background-color 150ms ease-out' }}
+        >
+          <Satellite className="h-4 w-4" />
+        </button>
         <button
           onClick={handleRecenter}
           aria-label="Re-centre on anchor"

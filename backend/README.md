@@ -55,6 +55,13 @@ docker run -p 8080:8080 helmcentral-backend
 - `GET /api/tracks?since=<RFC3339>` - Incremental self and AIS trail updates sampled by the server
 - `GET /api/tracks/motoring` - Motoring approach trail used by anchor reposition mode
 
+The vessel-state payload includes GNSS validation fields that the client uses to freeze anchor-watch calculations when the fix is corrupt or lost:
+
+- `gnss_quality_indicator` - Normalized NMEA quality/fix indicator. Common values: `1` GPS, `2` DGPS, `8` simulation.
+- `gnss_hdop` - Horizontal dilution of precision.
+- `gnss_validation_state` - `trusted`, `degraded`, or `critical`.
+- `gnss_critical_alert` - `true` when the fix should be treated as unsafe for anchor alarm evaluation.
+
 ## Configuration
 
 Create a `.env` file in the backend directory. See `.env.example` for a template.

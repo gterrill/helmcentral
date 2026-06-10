@@ -28,6 +28,11 @@ type vesselStateData struct {
 	CurrentSetDeg               float64
 	Latitude                    float64
 	Longitude                   float64
+	GNSSQualityIndicator        int
+	GNSSHDOP                    float64
+	GNSSValidationState         string
+	GNSSValidationReason        string
+	GNSSCriticalAlert           bool
 	HeadingTrue                 float64
 	SpeedOverGroundKts          float64
 	WindSpeedApparentKts        float64
@@ -223,6 +228,11 @@ func vesselState(c echo.Context) error {
 		"current_set_deg":                state.CurrentSetDeg,
 		"latitude":                       state.Latitude,
 		"longitude":                      state.Longitude,
+		"gnss_quality_indicator":         state.GNSSQualityIndicator,
+		"gnss_hdop":                      state.GNSSHDOP,
+		"gnss_validation_state":          state.GNSSValidationState,
+		"gnss_validation_reason":         state.GNSSValidationReason,
+		"gnss_critical_alert":            state.GNSSCriticalAlert,
 		"heading_true":                   state.HeadingTrue,
 		"speed_over_ground_kts":          state.SpeedOverGroundKts,
 		"wind_speed_apparent_kts":        state.WindSpeedApparentKts,

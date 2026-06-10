@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 
-export type AnchorWatchState = 'none' | 'set' | 'dragging'
+export type AnchorWatchState = 'none' | 'set' | 'dragging' | 'critical'
 
 interface AnchorWatchServerState {
   active: boolean
@@ -73,6 +73,7 @@ export function useAnchorWatch(
   currentLon: number | null,
   navigationState: string | null,
   refreshInterval: number,
+  positionCritical = false,
 ): AnchorWatchResult {
   const [serverState, setServerState] = useState<AnchorWatchServerState>({ active: false })
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -193,7 +194,9 @@ export function useAnchorWatch(
 
   let anchorState: AnchorWatchState = 'none'
   if (serverState.active) {
-    if (distanceMeters !== null && distanceMeters > radiusMeters + DRAG_BUFFER_METERS) {
+    if (positionCritical) {
+      anchorState = 'critical'
+    } else if (distanceMeters !== null && distanceMeters > radiusMeters + DRAG_BUFFER_METERS) {
       anchorState = 'dragging'
     } else {
       anchorState = 'set'

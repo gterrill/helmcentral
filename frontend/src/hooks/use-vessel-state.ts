@@ -8,6 +8,11 @@ interface VesselState {
   current_set_deg: number
   latitude: number
   longitude: number
+  gnss_quality_indicator: number
+  gnss_hdop: number
+  gnss_validation_state: string
+  gnss_validation_reason: string
+  gnss_critical_alert: boolean
   heading_true: number
   speed_over_ground_kts: number
   wind_speed_apparent_kts: number
@@ -31,6 +36,11 @@ export function useVesselState(refreshInterval: number) {
   const [navigationState, setNavigationState] = useState<string | null>(null)
   const [latitude, setLatitude] = useState<number | null>(null)
   const [longitude, setLongitude] = useState<number | null>(null)
+  const [gnssQualityIndicator, setGnssQualityIndicator] = useState<number | null>(null)
+  const [gnssHdop, setGnssHdop] = useState<number | null>(null)
+  const [gnssValidationState, setGnssValidationState] = useState<string | null>(null)
+  const [gnssValidationReason, setGnssValidationReason] = useState<string | null>(null)
+  const [gnssCriticalAlert, setGnssCriticalAlert] = useState<boolean>(false)
   const [headingTrue, setHeadingTrue] = useState<number | null>(null)
   const [windSpeedApparentKts, setWindSpeedApparentKts] = useState<number | null>(null)
   const [windAngleApparentDeg, setWindAngleApparentDeg] = useState<number | null>(null)
@@ -69,6 +79,11 @@ export function useVesselState(refreshInterval: number) {
 
         setLatitude(typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null)
         setLongitude(typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null)
+        setGnssQualityIndicator(typeof data.gnss_quality_indicator === 'number' && data.gnss_quality_indicator >= 0 ? data.gnss_quality_indicator : null)
+        setGnssHdop(typeof data.gnss_hdop === 'number' && data.gnss_hdop >= 0 ? data.gnss_hdop : null)
+        setGnssValidationState(typeof data.gnss_validation_state === 'string' && data.gnss_validation_state !== '' ? data.gnss_validation_state : null)
+        setGnssValidationReason(typeof data.gnss_validation_reason === 'string' && data.gnss_validation_reason !== '' ? data.gnss_validation_reason : null)
+        setGnssCriticalAlert(data.gnss_critical_alert === true)
         setHeadingTrue(typeof data.heading_true === 'number' && data.heading_true >= 0 ? data.heading_true : null)
         setWindSpeedApparentKts(typeof data.wind_speed_apparent_kts === 'number' && data.wind_speed_apparent_kts >= 0 ? data.wind_speed_apparent_kts : null)
         setWindAngleApparentDeg(typeof data.wind_angle_apparent_deg === 'number' && data.wind_angle_apparent_deg >= 0 ? data.wind_angle_apparent_deg : null)
@@ -105,6 +120,11 @@ export function useVesselState(refreshInterval: number) {
     navigationState,
     latitude,
     longitude,
+    gnssQualityIndicator,
+    gnssHdop,
+    gnssValidationState,
+    gnssValidationReason,
+    gnssCriticalAlert,
     headingTrue,
     speedOverGroundKts,
     windSpeedApparentKts,

@@ -91,6 +91,11 @@ export function AnchorWatchTile({
   // ── Set or Dragging ───────────────────────────────────────────
   return (
     <Tile title="Anchor Watch" icon={<Anchor className="h-3.5 w-3.5" />}>
+      {anchorState === 'critical' && (
+        <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+          CRITICAL: GPS Signal Corrupt/Jammed
+        </div>
+      )}
       <div className="mt-2 rounded-xl border bg-background/70">
         <AnchorWatchMap
           vesselLat={lat ?? anchorLat!}

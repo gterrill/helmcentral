@@ -351,15 +351,24 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 	state.CurrentDriftKts = currentDriftKts
 	state.CurrentSetDeg = currentSetDeg
 
-	state.Latitude = lookupNumber(payload, "navigation", "position", "value", "latitude")
-	if state.Latitude == -1 {
-		state.Latitude = lookupNumber(payload, "navigation", "position", "latitude")
+	rawLatitude := lookupNumber(payload, "navigation", "position", "value", "latitude")
+	if rawLatitude == -1 {
+		rawLatitude = lookupNumber(payload, "navigation", "position", "latitude")
 	}
 
-	state.Longitude = lookupNumber(payload, "navigation", "position", "value", "longitude")
-	if state.Longitude == -1 {
-		state.Longitude = lookupNumber(payload, "navigation", "position", "longitude")
+	rawLongitude := lookupNumber(payload, "navigation", "position", "value", "longitude")
+	if rawLongitude == -1 {
+		rawLongitude = lookupNumber(payload, "navigation", "position", "longitude")
 	}
+
+	validation := parseGNSSPositionValidation(payload)
+	state.GNSSQualityIndicator = validation.QualityIndicator
+	state.GNSSHDOP = validation.HDOP
+	state.GNSSValidationState = validation.Status
+	state.GNSSValidationReason = validation.Reason
+	state.GNSSCriticalAlert = validation.Critical
+
+	state.Latitude, state.Longitude = resolveGNSSPosition(rawLatitude, rawLongitude, validation)
 
 	state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue", "value")
 	if state.HeadingTrue == -1 {
