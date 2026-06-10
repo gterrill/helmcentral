@@ -2,13 +2,15 @@ package main
 
 import "testing"
 
-func TestParseGNSSPositionValidationFromGGAQualityAndHDOP(t *testing.T) {
+func TestParseGNSSPositionValidationFromSignalKMethodQualityAndHDOP(t *testing.T) {
 	payload := map[string]any{
 		"navigation": map[string]any{
-			"position": map[string]any{
-				"value": map[string]any{
-					"quality": 1,
-					"hdop":    1.7,
+			"gnss": map[string]any{
+				"methodQuality": map[string]any{
+					"value": "GNSS Fix",
+				},
+				"horizontalDilution": map[string]any{
+					"value": 1.7,
 				},
 			},
 		},
@@ -26,14 +28,14 @@ func TestParseGNSSPositionValidationFromGGAQualityAndHDOP(t *testing.T) {
 	}
 }
 
-func TestParseGNSSPositionValidationFromNMEA2000Method(t *testing.T) {
+func TestParseGNSSPositionValidationFromSignalKDGNSSFixLabel(t *testing.T) {
 	payload := map[string]any{
 		"navigation": map[string]any{
 			"gnss": map[string]any{
-				"method": map[string]any{
-					"value": "simulation",
+				"methodQuality": map[string]any{
+					"value": "DGNSS fix",
 				},
-				"horizontalDilutionOfPrecision": map[string]any{
+				"positionDilution": map[string]any{
 					"value": 2.2,
 				},
 			},
@@ -44,8 +46,8 @@ func TestParseGNSSPositionValidationFromNMEA2000Method(t *testing.T) {
 	if validation.Status != "trusted" {
 		t.Fatalf("expected trusted validation, got %q", validation.Status)
 	}
-	if validation.QualityIndicator != 8 {
-		t.Fatalf("expected simulation quality 8, got %d", validation.QualityIndicator)
+	if validation.QualityIndicator != 2 {
+		t.Fatalf("expected DGNSS quality 2, got %d", validation.QualityIndicator)
 	}
 }
 

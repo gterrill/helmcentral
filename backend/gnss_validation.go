@@ -60,30 +60,14 @@ func classifyGNSSPositionValidation(qualityIndicator int, hdop float64) (string,
 
 func parseGNSSQualityIndicator(payload map[string]any) int {
 	numeric := lookupFirstNumber(payload,
-		[]string{"navigation", "position", "value", "quality"},
-		[]string{"navigation", "position", "value", "qualityIndicator"},
-		[]string{"navigation", "position", "quality", "value"},
-		[]string{"navigation", "position", "qualityIndicator", "value"},
-		[]string{"navigation", "gnss", "quality", "value"},
-		[]string{"navigation", "gnss", "method", "value"},
-		[]string{"navigation", "gnss", "positionFixIndicator", "value"},
-		[]string{"navigation", "gnss", "positionFix", "value"},
-		[]string{"navigation", "gnss", "fixQuality", "value"},
+		[]string{"navigation", "gnss", "methodQuality", "value"},
 	)
 	if numeric >= 0 {
 		return int(math.Round(numeric))
 	}
 
 	text := firstNonEmptyString(
-		lookupString(payload, "navigation", "position", "value", "quality"),
-		lookupString(payload, "navigation", "position", "value", "qualityIndicator"),
-		lookupString(payload, "navigation", "position", "quality", "value"),
-		lookupString(payload, "navigation", "position", "qualityIndicator", "value"),
-		lookupString(payload, "navigation", "gnss", "quality", "value"),
-		lookupString(payload, "navigation", "gnss", "method", "value"),
-		lookupString(payload, "navigation", "gnss", "positionFixIndicator", "value"),
-		lookupString(payload, "navigation", "gnss", "positionFix", "value"),
-		lookupString(payload, "navigation", "gnss", "fixQuality", "value"),
+		lookupString(payload, "navigation", "gnss", "methodQuality", "value"),
 	)
 	if text == "" {
 		return -1
@@ -94,12 +78,8 @@ func parseGNSSQualityIndicator(payload map[string]any) int {
 
 func parseGNSSHDOP(payload map[string]any) float64 {
 	hdop := lookupFirstNumber(payload,
-		[]string{"navigation", "position", "value", "hdop"},
-		[]string{"navigation", "position", "hdop", "value"},
-		[]string{"navigation", "gnss", "hdop", "value"},
-		[]string{"navigation", "gnss", "horizontalDilutionOfPrecision", "value"},
-		[]string{"navigation", "gnss", "dilutionOfPrecision", "value"},
-		[]string{"navigation", "gnss", "positionDilutionOfPrecision", "value"},
+		[]string{"navigation", "gnss", "horizontalDilution", "value"},
+		[]string{"navigation", "gnss", "positionDilution", "value"},
 	)
 	if hdop >= 0 {
 		return hdop
@@ -115,6 +95,10 @@ func parseGNSSQualityLabel(value string) int {
 	switch normalized {
 	case "", "invalid", "nofix", "none", "unavailable":
 		return 0
+	case "gnssfix", "gpsfix":
+		return 1
+	case "dgnssfix", "dgpsfix":
+		return 2
 	case "gps", "standalone", "autonomous", "sps":
 		return 1
 	case "dgps", "differential", "rtcm", "sbas", "waas":

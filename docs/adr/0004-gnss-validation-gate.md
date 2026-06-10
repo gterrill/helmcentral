@@ -38,15 +38,21 @@ The vessel-state payload exposes GNSS validation metadata:
 
 ## Source Mapping Notes
 
-NMEA 0183:
+SignalK-native extraction used by Helmcentral:
 
-- Parse quality/fix indicator from GGA or GNS position-fix fields.
-- Parse HDOP from the sentence HDOP field.
+- Parse quality/fix from navigation.gnss.methodQuality.value.
+- Parse HDOP from navigation.gnss.horizontalDilution.value.
+- If horizontal dilution is missing, use navigation.gnss.positionDilution.value.
 
-NMEA 2000:
+Current deployment evidence:
 
-- Parse quality or method from PGN 129029 GNSS Position Data.
-- Parse HDOP from GNSS DOP values when available.
+- Live SignalK data exposes GNSS fix quality under methodQuality (with source values including pgn: 129029 and GGA sentence sources).
+- Live SignalK data exposes DOP values under horizontalDilution and positionDilution.
+
+No legacy fallbacks:
+
+- The gate intentionally does not fall back to alternate legacy path names such as navigation.gnss.method, navigation.gnss.quality, or horizontalDilutionOfPrecision.
+- This fail-fast policy prevents silent drift between expected SignalK contracts and upstream plugin mapping changes.
 
 ## Consequences
 
