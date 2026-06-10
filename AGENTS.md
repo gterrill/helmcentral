@@ -25,3 +25,9 @@ This file mirrors AGENTS.md. AGENTS.md is the canonical repo instruction file.
 - Write or update a failing test that reproduces the expected behavior before implementing the fix.
 - Implement the minimal change required to make the test pass.
 - Run relevant tests after the change and include the test result summary in your response.
+
+## Documentation Location Policy
+
+- Architectural decisions, design decisions, and feature specifications must be documented in the ADR folder: https://vscode.dev/github/gterrill/helmcentral/blob/main/docs/adr
+- Do not keep durable feature-spec or architecture notes in backend/README.md or other component READMEs.
+- When adding or changing behavior that affects architecture or feature contracts, create or update an ADR in docs/adr and link it from relevant README files.
