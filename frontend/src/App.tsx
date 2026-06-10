@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, CloudSun, Compass } from 'lucide-react'
+import { Anchor, ArrowDown, ArrowUp, CloudSun, Compass } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
@@ -558,15 +558,6 @@ export function App() {
             anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null
               ? (
                 <div className="h-full">
-                  <div className="px-6 pt-4">
-                    <Button
-                      className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
-                      disabled={latitude === null || longitude === null}
-                      onClick={handleDropAnchorHere}
-                    >
-                      Drop Here
-                    </Button>
-                  </div>
                   <AnchorWatchDrawer
                     vesselLat={latitude ?? anchorWatch.anchorLat}
                     vesselLon={longitude ?? anchorWatch.anchorLon}
@@ -594,13 +585,14 @@ export function App() {
               )
               : (
                 <div className="px-6 py-8 text-center text-muted-foreground">
-                  <div className="mb-4">No anchor watch active</div>
+                  <div className="mb-4">Not monitoring</div>
                   <Button
                     className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
                     disabled={latitude === null || longitude === null}
                     onClick={handleDropAnchorHere}
                   >
-                    Drop Here
+                    <Anchor className="h-4 w-4" />
+                    Drop
                   </Button>
                 </div>
               )

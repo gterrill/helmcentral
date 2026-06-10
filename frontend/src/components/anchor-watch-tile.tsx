@@ -71,7 +71,6 @@ export function AnchorWatchTile({
           </div>
         )}
         <div className="grid place-items-center py-4 text-center">
-          <Anchor className="mb-2 h-8 w-8 text-muted-foreground/30" />
           <p className="text-sm text-muted-foreground">Not monitoring</p>
         </div>
         <div className="mt-2 grid gap-2">

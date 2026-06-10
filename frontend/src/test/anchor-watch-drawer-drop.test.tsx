@@ -3,9 +3,11 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { App } from '../App'
 
 const setAnchorHereMock = vi.fn()
+let anchorStateMock: 'none' | 'set' = 'none'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  anchorStateMock = 'none'
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: false,
     json: async () => ({}),
@@ -60,9 +62,9 @@ vi.mock('@/hooks/use-nearby-vessels', () => ({
 
 vi.mock('@/hooks/use-anchor-watch', () => ({
   useAnchorWatch: () => ({
-    anchorState: 'none',
-    anchorLat: null,
-    anchorLon: null,
+    anchorState: anchorStateMock,
+    anchorLat: anchorStateMock === 'set' ? -36.8485 : null,
+    anchorLon: anchorStateMock === 'set' ? 174.7633 : null,
     radiusMeters: 20,
     rodeDeployedM: 0,
     seaState: 'calm',
@@ -140,8 +142,18 @@ describe('Anchor watch drawer drop button', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Drop Here' }))
+    const dropButtons = screen.getAllByRole('button', { name: 'Drop' })
+    fireEvent.click(dropButtons[dropButtons.length - 1])
 
     expect(setAnchorHereMock).toHaveBeenCalledWith(-36.8485, 174.7633)
+  })
+
+  it('does not show a drawer drop button when anchor watch is active', () => {
+    anchorStateMock = 'set'
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
+
+    expect(screen.queryByRole('button', { name: 'Drop' })).toBeNull()
   })
 })
