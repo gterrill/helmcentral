@@ -143,6 +143,10 @@ func toWire(pts []*trailPoint) []trackPoint {
 type signalKTrackSnapshot struct {
 	Type        string        `json:"type"`
 	Coordinates [][][]float64 `json:"coordinates"`
+	Geometry    *struct {
+		Type        string        `json:"type"`
+		Coordinates [][][]float64 `json:"coordinates"`
+	} `json:"geometry,omitempty"`
 }
 
 func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
@@ -191,7 +195,20 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 	result := make(map[string][]trackPoint, len(payload))
 	now := time.Now().UTC()
 	for vesselID, snapshot := range payload {
-		if len(snapshot.Coordinates) == 0 || len(snapshot.Coordinates[0]) == 0 {
+		var multiCoords [][][]float64
+		if snapshot.Geometry != nil && len(snapshot.Geometry.Coordinates) > 0 {
+			multiCoords = snapshot.Geometry.Coordinates
+		} else if len(snapshot.Coordinates) > 0 {
+			multiCoords = snapshot.Coordinates
+		}
+
+		if len(multiCoords) == 0 {
+			continue
+		}
+
+		// Always take the most recent track segment
+		coords := multiCoords[len(multiCoords)-1]
+		if len(coords) == 0 {
 			continue
 		}
 
@@ -209,7 +226,6 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 			continue
 		}
 
-		coords := snapshot.Coordinates[0]
 		start := now.Add(-time.Duration(len(coords)-1) * time.Second)
 		points := make([]trackPoint, 0, len(coords))
 		for i, coord := range coords {

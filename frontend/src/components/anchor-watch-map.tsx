@@ -645,21 +645,19 @@ export function AnchorWatchMap({
           </Source>
         )}
 
-        {/* AIS vessel trails (hidden during reposition to reduce clutter) */}
-        {showRepositionBreadcrumbs && (
-          <Source id="ais-trails" type="geojson" data={aisTrailsData}>
-            <Layer
-              id="ais-trails-layer"
-              type="line"
-              paint={{
-                'line-color': '#f59e0b',
-                'line-width': 1.5,
-                'line-opacity': 0.5,
-              }}
-              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
-            />
-          </Source>
-        )}
+        {/* AIS vessel trails */}
+        <Source id="ais-trails" type="geojson" data={aisTrailsData}>
+          <Layer
+            id="ais-trails-layer"
+            type="line"
+            paint={{
+              'line-color': '#f59e0b',
+              'line-width': 1.5,
+              'line-opacity': 0.5,
+            }}
+            layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+          />
+        </Source>
 
         {/* Motoring breadcrumb trail (pre-anchor) */}
         {showRepositionBreadcrumbs && motoringTrailGeoJSON.geometry.coordinates.length >= 2 && (
@@ -679,7 +677,7 @@ export function AnchorWatchMap({
         )}
 
         {/* Post-anchor tracking trail (ring buffer) */}
-        {showRepositionBreadcrumbs && postAnchorTrailGeoJSON.geometry.coordinates.length >= 2 && (
+        {postAnchorTrailGeoJSON.geometry.coordinates.length >= 2 && (
           <Source id="vessel-trail-anchor" type="geojson" lineMetrics data={postAnchorTrailGeoJSON}>
             <Layer
               id="vessel-trail-anchor-layer"
