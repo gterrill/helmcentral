@@ -1,8 +1,10 @@
-import { Anchor } from 'lucide-react'
+import { Anchor, Volume2 } from 'lucide-react'
 import { useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
+import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
+import { primeAudioContextForAlarm } from '@/lib/audio-utils'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-server-trails'
@@ -56,8 +58,12 @@ export function AnchorWatchTile({
     clearAnchor,
   } = watch
 
+  // Monitor anchor state and trigger alarm when entering dragging/critical state
+  const { isAlarming, isSilenced, silence } = useAnchorAlarm(anchorState)
+
   const handleDropHere = useCallback(() => {
     if (lat === null || lon === null) return
+    void primeAudioContextForAlarm() // Unlock audio context for alarm
     void setAnchorHere(lat, lon)
   }, [lat, lon, setAnchorHere])
 
@@ -93,6 +99,23 @@ export function AnchorWatchTile({
       {anchorState === 'critical' && (
         <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
           CRITICAL: GPS Signal Corrupt/Jammed
+        </div>
+      )}
+      {isAlarming && !isSilenced && (
+        <div className="mb-3 flex items-center justify-between rounded-md border border-red-500/60 bg-red-500/20 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+            <span className="text-xs font-semibold text-red-400">ALARM</span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1 rounded px-2 text-xs text-red-400 hover:bg-red-500/20 hover:text-red-300"
+            onClick={silence}
+          >
+            <Volume2 className="h-3.5 w-3.5" />
+            Silence
+          </Button>
         </div>
       )}
       <div className="mt-2 rounded-xl border bg-background/70">

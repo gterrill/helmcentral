@@ -25,6 +25,8 @@ interface AnchorWatchDrawerProps {
   onRadiusChange: (radiusMeters: number) => void
   onClearAnchor: () => void
   isImperial: boolean
+  isAutoCloseArmed: boolean
+  motoringSecondsElapsed: number
 }
 
 export function AnchorWatchDrawer({
@@ -49,32 +51,47 @@ export function AnchorWatchDrawer({
   onRadiusChange,
   onClearAnchor,
   isImperial,
+  isAutoCloseArmed,
+  motoringSecondsElapsed,
 }: AnchorWatchDrawerProps) {
   return (
-    <AnchorWatchMap
-      vesselLat={vesselLat}
-      vesselLon={vesselLon}
-      vesselHeadingDeg={vesselHeadingDeg}
-      anchorLat={anchorLat}
-      anchorLon={anchorLon}
-      radiusMeters={radiusMeters}
-      depthMeters={depthMeters}
-      currentDriftKts={currentDriftKts}
-      currentSetDeg={currentSetDeg}
-      distanceMeters={distanceMeters}
-      bearingDeg={bearingDeg}
-      isImperial={isImperial}
-      vesselTrail={vesselTrail}
-      aisVessels={aisVessels}
-      aisTrails={aisTrails}
-      isDarkTheme={isDarkTheme}
-      showImageryLayer={showImageryLayer}
-      onImageryToggle={onImageryToggle}
-      onAnchorReposition={onAnchorReposition}
-      onRadiusChange={onRadiusChange}
-      onClearAnchor={onClearAnchor}
-      className="h-full w-full"
-    />
+    <div className="flex h-full flex-col gap-3">
+      {isAutoCloseArmed && (
+        <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-600">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold">Auto-close armed</span>
+            <span className="font-mono">{5 - motoringSecondsElapsed}s</span>
+          </div>
+          <p className="mt-1 text-yellow-600/80">Engines running • Outside circle • Will clear shortly</p>
+        </div>
+      )}
+      <div className="flex-1 rounded-xl border bg-background/70">
+        <AnchorWatchMap
+          vesselLat={vesselLat}
+          vesselLon={vesselLon}
+          vesselHeadingDeg={vesselHeadingDeg}
+          anchorLat={anchorLat}
+          anchorLon={anchorLon}
+          radiusMeters={radiusMeters}
+          depthMeters={depthMeters}
+          currentDriftKts={currentDriftKts}
+          currentSetDeg={currentSetDeg}
+          distanceMeters={distanceMeters}
+          bearingDeg={bearingDeg}
+          isImperial={isImperial}
+          vesselTrail={vesselTrail}
+          aisVessels={aisVessels}
+          aisTrails={aisTrails}
+          isDarkTheme={isDarkTheme}
+          showImageryLayer={showImageryLayer}
+          onImageryToggle={onImageryToggle}
+          onAnchorReposition={onAnchorReposition}
+          onRadiusChange={onRadiusChange}
+          onClearAnchor={onClearAnchor}
+          className="h-full w-full"
+        />
+      </div>
+    </div>
   )
 }
 

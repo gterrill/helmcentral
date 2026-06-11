@@ -19,6 +19,7 @@ import { ForecastDrawer } from '@/components/forecast-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
+import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
@@ -33,6 +34,7 @@ import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
+const AUTO_CLOSE_ANCHOR_WATCH_KEY = 'anchorWatch.autoClose.enabled'
 
 function formatCoordinate(value: number | null, latitude: boolean) {
   if (value === null) {
@@ -87,10 +89,19 @@ export function App() {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)
     return raw === 'true'
   })
+  const [autoCloseAnchorWatchEnabled, setAutoCloseAnchorWatchEnabled] = useState(() => {
+    const raw = globalThis.localStorage?.getItem(AUTO_CLOSE_ANCHOR_WATCH_KEY)
+    // Default to true if not set
+    return raw !== 'false'
+  })
 
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
   }, [showAnchorImagery])
+
+  useEffect(() => {
+    globalThis.localStorage?.setItem(AUTO_CLOSE_ANCHOR_WATCH_KEY, String(autoCloseAnchorWatchEnabled))
+  }, [autoCloseAnchorWatchEnabled])
 
   // Detect dark theme by watching the <html> class list
   const [isDarkTheme, setIsDarkTheme] = useState(() =>
@@ -103,6 +114,21 @@ export function App() {
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
     return () => observer.disconnect()
   }, [])
+
+  // Handle anchor watch auto-close notifications
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  useEffect(() => {
+    const handleAutoClose = () => {
+      setToastMessage('Anchor watch cleared — engines running, position outside zone')
+      // Auto-dismiss after 5 seconds
+      const timer = setTimeout(() => setToastMessage(null), 5000)
+      return () => clearTimeout(timer)
+    }
+
+    window.addEventListener('anchor-watch-auto-closed', handleAutoClose)
+    return () => window.removeEventListener('anchor-watch-auto-closed', handleAutoClose)
+  }, [])
+
   const {
     depth,
     currentDriftKts,
@@ -158,6 +184,13 @@ export function App() {
     uiConfig.vesselStateRefreshSeconds,
     gnssCriticalAlert,
   )
+  const { isAutoCloseArmed, motoringSecondsElapsed } = useAnchorWatchAutoClose(
+    navigationState,
+    anchorWatch.distanceMeters,
+    anchorWatch.radiusMeters,
+    anchorWatch.anchorState !== 'none',
+    autoCloseAnchorWatchEnabled,
+  )
   const { getSelfTrail, getAisTrails } = useServerTrails(5000)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
   const depthTrendPoints = useDepthTrend('2h', 60)
@@ -211,6 +244,11 @@ export function App() {
 
   return (
     <div className="min-h-screen p-4 pb-20 md:p-6 md:pb-24">
+      {toastMessage && (
+        <div className="fixed left-4 right-4 top-4 z-50 mx-auto max-w-md rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 shadow-lg md:left-auto md:right-4">
+          {toastMessage}
+        </div>
+      )}
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
         <MarineHeader />
 
@@ -551,7 +589,10 @@ export function App() {
           )}
           {activeDrawerTab === 'settings' && (
             <div className="px-6 py-4">
-              <SignalKSettingsPanel />
+              <SignalKSettingsPanel
+                autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
+                onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
+              />
             </div>
           )}
           {activeDrawerTab === 'anchor-watch' && (
@@ -580,6 +621,8 @@ export function App() {
                     onRadiusChange={anchorWatch.updateRadius}
                     onClearAnchor={anchorWatch.clearAnchor}
                     isImperial={isImperialDistance}
+                    isAutoCloseArmed={isAutoCloseArmed}
+                    motoringSecondsElapsed={motoringSecondsElapsed}
                   />
                 </div>
               )

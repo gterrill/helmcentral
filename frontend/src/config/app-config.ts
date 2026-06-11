@@ -51,6 +51,7 @@ const fallbackConfig: BoatConfig = {
 const fallbackUiConfig = {
   distanceUnits: 'metric' as DistanceUnits,
   vesselStateRefreshSeconds: 10,
+  autoCloseAnchorWatchOnEngine: true,
 }
 
 const fallbackAnchorConfig: AnchorConfig = {
@@ -80,7 +81,7 @@ function parseBoatConfig(): BoatConfig {
   }
 }
 
-function parseUiConfig(): { vesselStateRefreshSeconds: number; distanceUnits: DistanceUnits } {
+function parseUiConfig(): { vesselStateRefreshSeconds: number; distanceUnits: DistanceUnits; autoCloseAnchorWatchOnEngine: boolean } {
   const parsedConfig = {
     ...fallbackUiConfig,
   }

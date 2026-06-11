@@ -39,7 +39,15 @@ const defaultTankLabelIds = [
   'fuel.7',
 ]
 
-export function SignalKSettingsPanel() {
+interface SignalKSettingsPanelProps {
+  autoCloseAnchorWatchEnabled?: boolean
+  onAutoCloseAnchorWatchToggle?: (enabled: boolean) => void
+}
+
+export function SignalKSettingsPanel({
+  autoCloseAnchorWatchEnabled = true,
+  onAutoCloseAnchorWatchToggle,
+}: SignalKSettingsPanelProps) {
   const [signalKAddress, setSignalKAddress] = useState('localhost')
   const [signalKPort, setSignalKPort] = useState('3000')
 
@@ -394,6 +402,23 @@ export function SignalKSettingsPanel() {
             ariaLabel="Hull type"
             isMultiCol
           />
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Anchor Watch Options</h3>
+        <div className="mt-3 space-y-3">
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={autoCloseAnchorWatchEnabled}
+              onChange={(e) => onAutoCloseAnchorWatchToggle?.(e.target.checked)}
+              className="h-4 w-4 cursor-pointer rounded border-gray-300"
+            />
+            <span className="text-sm text-muted-foreground">
+              Auto-close anchor watch when engines start (if outside circle for 5+ seconds)
+            </span>
+          </label>
         </div>
       </div>
 

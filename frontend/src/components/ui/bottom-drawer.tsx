@@ -38,7 +38,7 @@ export function BottomDrawer({
     if (!hasTabs) return null
 
     return (
-      <div className="fixed bottom-0 left-0 right-0 z-30 border-t bg-card/95 shadow-[0_-6px_20px_rgba(0,0,0,0.08)] backdrop-blur-sm">
+      <div className="fixed bottom-0 left-0 right-0 z-[3000] border-t bg-card/95 shadow-[0_-6px_20px_rgba(0,0,0,0.08)] backdrop-blur-sm">
         <div className="mx-auto flex w-full max-w-[1800px] items-center gap-1 px-3 py-2 md:px-5">
           {tabs!.map((tab) => (
             <button
@@ -68,13 +68,13 @@ export function BottomDrawer({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 top-0 z-40 bg-black/20 backdrop-blur-sm"
+        className="fixed inset-0 top-0 z-[3100] bg-black/20 backdrop-blur-sm"
         onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Drawer */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 flex h-[85vh] flex-col rounded-t-2xl border-t bg-card shadow-xl">
+      <div className="fixed bottom-0 left-0 right-0 z-[3200] flex h-[85vh] flex-col rounded-t-2xl border-t bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b px-6 py-4">
           <h2 className="font-display text-lg tracking-[0.24em] text-foreground">{title}</h2>

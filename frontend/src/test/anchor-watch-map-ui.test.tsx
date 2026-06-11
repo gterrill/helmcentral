@@ -44,7 +44,7 @@ function renderMap() {
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={[
-        { name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_ft: 200 },
+        { name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_ft: 200, age_seconds: 5 },
       ]}
       aisTrails={() => new Map()}
       isDarkTheme={false}
