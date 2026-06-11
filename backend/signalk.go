@@ -864,6 +864,47 @@ func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitu
 	return vessels, nil
 }
 
+func fetchSignalKVesselNameMap(signalkURL string, vesselsPath string) (map[string]string, error) {
+	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselsPath, "/")
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("signalk returned status %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+
+	names := make(map[string]string, len(payload))
+	for vesselID, raw := range payload {
+		vesselMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		name := firstNonEmptyString(lookupString(vesselMap, "name"), lookupString(vesselMap, "design", "name"))
+		if name == "" {
+			name = compactVesselID(vesselID)
+		}
+		names[vesselID] = strings.ToUpper(strings.TrimSpace(name))
+	}
+
+	return names, nil
+}
+
 func fetchSignalKTanksState(signalkURL string, vesselPath string, labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
 

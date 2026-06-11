@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,12 +15,10 @@ import (
 
 const maxTrackPoints = 1000
 
-// selfTrack records self-vessel positions at all times (motoring, anchored, etc.)
-// aisTrackMap holds per-vessel trails keyed by vessel name.
+// selfTrack records self-vessel positions at all times (motoring, anchored, etc.).
 var (
-	trackMu     sync.RWMutex
-	selfTrack   = newVesselTrail()
-	aisTrackMap = make(map[string]*vesselTrail)
+	trackMu   sync.RWMutex
+	selfTrack = newVesselTrail()
 )
 
 // motoringTrail is kept separately: only records motoring state fixes
@@ -33,15 +34,6 @@ func recordTrackSelf(lat, lon float64) {
 	trackMu.Lock()
 	defer trackMu.Unlock()
 	selfTrack.addPoint(lat, lon)
-}
-
-func recordTrackAIS(name string, lat, lon float64) {
-	trackMu.Lock()
-	defer trackMu.Unlock()
-	if aisTrackMap[name] == nil {
-		aisTrackMap[name] = newVesselTrail()
-	}
-	aisTrackMap[name].addPoint(lat, lon)
 }
 
 func recordMotoringPoint(lat, lon float64) {
@@ -76,7 +68,6 @@ func sampleTracks(settingsPath string) {
 
 	signalkURL := buildSignalKURL(address, port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
-	vesselsPath := getEnv("SIGNALK_VESSELS_PATH", "/signalk/v1/api/vessels")
 
 	if signalkURL == "" {
 		return
@@ -92,24 +83,6 @@ func sampleTracks(settingsPath string) {
 		recordSelfTrailPoint(state.Latitude, state.Longitude)
 		if isMotoring(state.Status) {
 			recordMotoringPoint(state.Latitude, state.Longitude)
-		}
-
-		// Sample nearby AIS vessels
-		ownName := loadBoatName(settingsPath)
-		selfName := fetchSignalKSelfName(signalkURL, vesselPath)
-		excluded := []string{ownName, selfName}
-		nearby, nerr := fetchSignalKNearbyVessels(
-			signalkURL, vesselsPath,
-			state.Latitude, state.Longitude,
-			time.Now().UTC(), excluded,
-		)
-		if nerr == nil {
-			for _, v := range nearby {
-				if v.Lat >= -90 && v.Lat <= 90 && v.Lon >= -180 && v.Lon <= 180 {
-					recordTrackAIS(v.Name, v.Lat, v.Lon)
-					recordAISTrailPoint(v.Name, v.Lat, v.Lon)
-				}
-			}
 		}
 	}
 }
@@ -167,6 +140,97 @@ func toWire(pts []*trailPoint) []trackPoint {
 	return out
 }
 
+type signalKTrackSnapshot struct {
+	Type        string        `json:"type"`
+	Coordinates [][][]float64 `json:"coordinates"`
+}
+
+func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
+	address, port, err := loadSignalKSettings(settingsPath)
+	if err != nil {
+		address = defaultSignalKAddress
+		port = defaultSignalKPort
+	}
+
+	signalkURL := buildSignalKURL(address, port)
+	if signalkURL == "" {
+		return map[string][]trackPoint{}
+	}
+
+	vesselsPath := getEnv("SIGNALK_VESSELS_PATH", "/signalk/v1/api/vessels")
+	tracksPath := getEnv("SIGNALK_TRACKS_PATH", "/signalk/v1/api/tracks")
+	tracksURL := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(tracksPath, "/")
+
+	client := &http.Client{Timeout: 4 * time.Second}
+	response, err := client.Get(tracksURL)
+	if err != nil {
+		return map[string][]trackPoint{}
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return map[string][]trackPoint{}
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return map[string][]trackPoint{}
+	}
+
+	var payload map[string]signalKTrackSnapshot
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return map[string][]trackPoint{}
+	}
+
+	nameMap, nameErr := fetchSignalKVesselNameMap(signalkURL, vesselsPath)
+	if nameErr != nil {
+		nameMap = map[string]string{}
+	}
+	selfName := strings.ToUpper(strings.TrimSpace(loadBoatName(settingsPath)))
+	signalkSelfName := strings.ToUpper(strings.TrimSpace(fetchSignalKSelfName(signalkURL, getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self"))))
+
+	result := make(map[string][]trackPoint, len(payload))
+	now := time.Now().UTC()
+	for vesselID, snapshot := range payload {
+		if len(snapshot.Coordinates) == 0 || len(snapshot.Coordinates[0]) == 0 {
+			continue
+		}
+
+		// Track contexts are "vessels.<id>" but the vessels endpoint keys by "<id>" alone.
+		lookupKey := strings.TrimPrefix(vesselID, "vessels.")
+		if lookupKey == "self" {
+			continue
+		}
+
+		name := strings.ToUpper(strings.TrimSpace(nameMap[lookupKey]))
+		if name == "" {
+			name = strings.ToUpper(strings.TrimSpace(compactVesselID(vesselID)))
+		}
+		if name == "SELF" || name == selfName || name == signalkSelfName {
+			continue
+		}
+
+		coords := snapshot.Coordinates[0]
+		start := now.Add(-time.Duration(len(coords)-1) * time.Second)
+		points := make([]trackPoint, 0, len(coords))
+		for i, coord := range coords {
+			if len(coord) < 2 {
+				continue
+			}
+			lon := coord[0]
+			lat := coord[1]
+			if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+				continue
+			}
+			points = append(points, trackPoint{Lat: lat, Lon: lon, Timestamp: start.Add(time.Duration(i) * time.Second)})
+		}
+		if len(points) > 0 {
+			result[name] = points
+		}
+	}
+
+	return result
+}
+
 // GET /api/tracks?since=<RFC3339>
 // Returns self and AIS vessel tracks for anchor-watch display.
 // Clients pass the timestamp of the last point they received so only
@@ -184,18 +248,9 @@ func getTracksHandler(c echo.Context) error {
 
 	trackMu.RLock()
 	selfPts := selfTrack.pointsSince(since)
-	aisPts := make(map[string][]*trailPoint)
-	for name, trail := range aisTrackMap {
-		if pts := trail.pointsSince(since); len(pts) > 0 {
-			aisPts[name] = pts
-		}
-	}
 	trackMu.RUnlock()
 
-	aisWire := make(map[string][]trackPoint, len(aisPts))
-	for name, pts := range aisPts {
-		aisWire[name] = toWire(pts)
-	}
+	aisWire := fetchSignalKAISTrails(getEnv("SETTINGS_FILE", "../settings.yaml"))
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"self": toWire(selfPts),

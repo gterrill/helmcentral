@@ -65,16 +65,17 @@ export function useServerTrails(pollIntervalMs = 5000): ServerTrailsResult {
       }
 
       if (data.ais) {
+        const nextAis = new Map<string, TrailPoint[]>()
         for (const [name, rawPoints] of Object.entries(data.ais)) {
           const incoming = rawPoints
             .map(p => ({ lat: p.lat, lon: p.lon, timestampMs: toMs(p.timestamp) }))
             .sort((a, b) => a.timestampMs - b.timestampMs)
-          const existing = aisRef.current.get(name) ?? []
-          aisRef.current.set(name, appendCapped(existing, incoming))
+          nextAis.set(name, incoming.slice(-MAX_POINTS))
           if (incoming.length > 0) {
             latestMs = Math.max(latestMs, incoming[incoming.length - 1].timestampMs)
           }
         }
+        aisRef.current = nextAis
       }
 
       if (latestMs > 0) {

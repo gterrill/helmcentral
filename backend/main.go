@@ -126,7 +126,6 @@ func main() {
 	registerStaticHandler(e)
 
 	loadAnchorWatch()
-	aisTrails = make(map[string]*vesselTrail)
 	go seedMotoringTrailFromInflux()
 	go startTrackPoller(5 * time.Second)
 
