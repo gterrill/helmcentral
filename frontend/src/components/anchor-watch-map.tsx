@@ -904,11 +904,13 @@ export function AnchorWatchMap({
             </p>
             {label === 'Current' ? (
               <div className="flex items-center justify-end gap-2">
-                <ArrowUp
-                  className="h-4 w-4 shrink-0 text-white"
-                  style={{ transform: `rotate(${((setDeg ?? 0) + 180) % 360}deg)` }}
-                  aria-hidden="true"
-                />
+                {value !== '0.0' && value !== '—' && (
+                  <ArrowUp
+                    className="h-4 w-4 shrink-0 text-white"
+                    style={{ transform: `rotate(${((setDeg ?? 0) + 180) % 360}deg)` }}
+                    aria-hidden="true"
+                  />
+                )}
                 <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
                   {value}
                   <span className="ml-0.5 text-[11px] text-white/50">{unit}</span>
