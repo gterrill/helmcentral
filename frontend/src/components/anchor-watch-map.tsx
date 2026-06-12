@@ -466,7 +466,9 @@ export function AnchorWatchMap({
 
   // ── AIS vessel click ─────────────────────────────────────────────────────
   const handleAisClick = useCallback(
-    (vessel: NearbyVessel) => {
+    (e: React.MouseEvent, vessel: NearbyVessel) => {
+      e.stopPropagation()
+      suppressNextMapClickRef.current = true
       if (vessel.lat === undefined || vessel.lon === undefined) return
       const dist = Math.round(haversineMeters(vesselLat, vesselLon, vessel.lat, vessel.lon))
       const bearing = Math.round(bearingDeg(vesselLat, vesselLon, vessel.lat, vessel.lon))
@@ -709,12 +711,12 @@ export function AnchorWatchMap({
               latitude={vessel.lat}
               longitude={vessel.lon}
               style={{ zIndex: isSelected ? 30 : 10 }}
-              onClick={() => handleAisClick(vessel)}
             >
               <button
                 className="flex flex-col items-center"
                 style={{ minWidth: 40, minHeight: 40 }}
                 aria-label={`AIS vessel: ${vessel.name}`}
+                onClick={(e) => handleAisClick(e, vessel)}
               >
                 <div
                   style={{
