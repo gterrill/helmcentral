@@ -37,6 +37,9 @@ Additional heuristic checks:
 - Depth consistency while anchored/moored:
 	- Degraded when depth changes by more than 1.5 meters within 10 seconds.
 	- Critical when depth jump is combined with implausible position jump.
+- SNR-based Spoofing/Jamming Detection (when satellite data is available):
+	- Critical (Spoofing) when SNR standard deviation is < 1.5 dB and average SNR > 30 dB.
+	- Critical (Jamming) when max SNR drops below 20 dB.
 - Recovery hysteresis after critical:
 	- Stay critical until at least 5 consecutive trusted samples and at least 15 seconds have elapsed since entering critical.
 

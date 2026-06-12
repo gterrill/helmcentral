@@ -54,6 +54,69 @@ func TestParseGNSSPositionValidationFromSignalKDGNSSFixLabel(t *testing.T) {
 	}
 }
 
+func TestParseGNSSPositionValidationSpoofingUniformSNR(t *testing.T) {
+	payload := map[string]any{
+		"navigation": map[string]any{
+			"gnss": map[string]any{
+				"methodQuality": map[string]any{
+					"value": "GNSS Fix",
+				},
+				"horizontalDilution": map[string]any{
+					"value": 1.2,
+				},
+				"satellites": map[string]any{
+					"value": map[string]any{
+						"1": map[string]any{"SNR": 45.0},
+						"2": map[string]any{"SNR": 44.5},
+						"3": map[string]any{"snr": 45.1},
+						"4": map[string]any{"snr": 45.0},
+						"5": map[string]any{"snr": 44.9},
+					},
+				},
+			},
+		},
+	}
+
+	validation := parseGNSSPositionValidation(payload)
+	if validation.Status != "critical" {
+		t.Fatalf("expected critical validation for spoofing, got %q", validation.Status)
+	}
+	if validation.Reason == "" {
+		t.Fatalf("expected reason for critical status")
+	}
+}
+
+func TestParseGNSSPositionValidationJammingLowMaxSNR(t *testing.T) {
+	payload := map[string]any{
+		"navigation": map[string]any{
+			"gnss": map[string]any{
+				"methodQuality": map[string]any{
+					"value": "GNSS Fix",
+				},
+				"horizontalDilution": map[string]any{
+					"value": 1.5,
+				},
+				"satellites": map[string]any{
+					"value": []any{
+						map[string]any{"SNR": 18.0},
+						map[string]any{"snr": 12.0},
+						map[string]any{"SNR": 15.0},
+						map[string]any{"snr": 19.5},
+					},
+				},
+			},
+		},
+	}
+
+	validation := parseGNSSPositionValidation(payload)
+	if validation.Status != "critical" {
+		t.Fatalf("expected critical validation for jamming, got %q", validation.Status)
+	}
+	if validation.Reason == "" {
+		t.Fatalf("expected reason for critical status")
+	}
+}
+
 func TestResolveGNSSPositionFreezesLastGoodFixOnCritical(t *testing.T) {
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)

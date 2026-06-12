@@ -22,6 +22,9 @@ GNSS_DEGRADED_JUMP_KTS = 6.0
 GNSS_CRITICAL_JUMP_KTS = 12.0
 GNSS_RECOVERY_SAMPLES = 5
 GNSS_RECOVERY_MIN_DURATION = timedelta(seconds=15)
+GNSS_SPOOFING_UNIFORM_SNR_STDDEV = 1.5
+GNSS_SPOOFING_UNIFORM_SNR_AVG = 30.0
+GNSS_JAMMING_MAX_SNR_THRESHOLD = 20.0
 METERS_PER_SECOND_TO_KNOTS = 1.943844
 
 
@@ -29,6 +32,7 @@ METERS_PER_SECOND_TO_KNOTS = 1.943844
 class Validation:
     quality_indicator: int
     hdop: float
+    snrs: list[float]
     status: str
     reason: str
     trusted: bool
@@ -104,6 +108,33 @@ def to_float(value: object, default: float = -1.0) -> float:
         return default
 
 
+def parse_snrs(value: object) -> list[float]:
+    if not value or not isinstance(value, str):
+        return []
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+
+    snrs = []
+    
+    if isinstance(data, list):
+        for sat in data:
+            if not isinstance(sat, dict):
+                continue
+            snr = to_float(sat.get("snr", sat.get("SNR")))
+            if snr > 0:
+                snrs.append(snr)
+    elif isinstance(data, dict):
+        for key, sat in data.items():
+            if not isinstance(sat, dict):
+                continue
+            snr = to_float(sat.get("snr", sat.get("SNR")))
+            if snr > 0:
+                snrs.append(snr)
+    return snrs
+
+
 def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     earth_radius_meters = 6371000.0
     lat1_rad = math.radians(lat1)
@@ -148,13 +179,26 @@ def parse_gnss_quality_label(value: str) -> int:
     return 0
 
 
-def classify_gnss(quality_indicator: int, hdop: float) -> tuple[str, str]:
+def classify_gnss(quality_indicator: int, hdop: float, snrs: list[float]) -> tuple[str, str]:
     if quality_indicator <= 0:
         return "critical", "quality indicator reports no fix"
     if hdop < 0:
         return "critical", "hdop unavailable"
     if hdop > GNSS_CRITICAL_HDOP_THRESHOLD:
         return "critical", f"hdop {hdop:.1f} exceeds {GNSS_CRITICAL_HDOP_THRESHOLD:.1f}"
+
+    if len(snrs) >= 4:
+        avg = sum(snrs) / len(snrs)
+        variance = sum((x - avg) ** 2 for x in snrs) / len(snrs)
+        stddev = math.sqrt(variance)
+        max_snr = max(snrs)
+
+        if stddev < GNSS_SPOOFING_UNIFORM_SNR_STDDEV and avg > GNSS_SPOOFING_UNIFORM_SNR_AVG:
+            return "critical", f"suspected spoofing: uniform snr (stddev {stddev:.1f}, avg {avg:.1f})"
+
+        if max_snr < GNSS_JAMMING_MAX_SNR_THRESHOLD:
+            return "critical", f"suspected jamming: max snr only {max_snr:.1f}"
+
     if hdop <= GNSS_TRUSTED_HDOP_THRESHOLD:
         return "trusted", ""
     return "degraded", f"hdop {hdop:.1f} above trusted threshold {GNSS_TRUSTED_HDOP_THRESHOLD:.1f}"
@@ -172,6 +216,10 @@ def categorize_reason(reason: str) -> str:
         return "stale-data-critical"
     if normalized.startswith("gnss data aging"):
         return "stale-data-degraded"
+    if normalized.startswith("suspected spoofing"):
+        return "spoofing"
+    if normalized.startswith("suspected jamming"):
+        return "jamming"
     if normalized == "gnss timestamp unavailable":
         return "timestamp-missing"
     if normalized == "quality indicator reports no fix":
@@ -423,6 +471,19 @@ from(bucket: "{bucket}")
 '''.strip()
 
 
+def flux_satellites(bucket: str, source: str, window: str) -> str:
+        return f'''
+from(bucket: "{bucket}")
+    |> range(start: {window})
+    |> filter(fn: (r) => r._measurement == "navigation.gnss.satellites")
+    |> filter(fn: (r) => r._field == "value")
+    |> filter(fn: (r) => r.source == "{source}")
+    |> aggregateWindow(every: 1s, fn: last, createEmpty: false)
+    |> keep(columns: ["_time", "_value"])
+    |> sort(columns: ["_time"], desc: false)
+'''.strip()
+
+
 def run_backtest(
     influx_url: str,
     org: str,
@@ -473,13 +534,21 @@ def run_backtest(
         flux_depth(bucket=bucket, depth_measurement=depth_measurement, window=window),
         lambda row: to_float(row.get("_value"), default=-1.0),
     )
+    sat_series = fetch_time_value_series(
+        influx_url,
+        org,
+        token,
+        flux_satellites(bucket=bucket, source=source, window=window),
+        lambda row: parse_snrs(row.get("_value")),
+    )
 
-    pd_idx = mq_idx = pos_idx = nav_idx = depth_idx = 0
+    pd_idx = mq_idx = pos_idx = nav_idx = depth_idx = sat_idx = 0
     current_pd: object = None
     current_mq: object = None
     current_pos: object = (-1.0, -1.0)
     current_nav: object = ""
     current_depth: object = -1.0
+    current_sat: list[float] = []
 
     counts = {"trusted": 0, "degraded": 0, "critical": 0}
     reason_counts: dict[str, dict[str, int]] = {"degraded": {}, "critical": {}}
@@ -502,6 +571,7 @@ def run_backtest(
         pos_idx, current_pos = advance_series(pos_series, pos_idx, current_time, current_pos)
         nav_idx, current_nav = advance_series(nav_series, nav_idx, current_time, current_nav)
         depth_idx, current_depth = advance_series(depth_series, depth_idx, current_time, current_depth)
+        sat_idx, current_sat = advance_series(sat_series, sat_idx, current_time, current_sat)
 
         observed_at = rfc3339_parse(ts)
         now = observed_at
@@ -515,11 +585,13 @@ def run_backtest(
 
         latitude = to_float(current_pos[0] if isinstance(current_pos, tuple) else -1.0, default=-1.0)
         longitude = to_float(current_pos[1] if isinstance(current_pos, tuple) else -1.0, default=-1.0)
+        snrs = current_sat if isinstance(current_sat, list) else []
 
-        status, reason = classify_gnss(quality_indicator, hdop)
+        status, reason = classify_gnss(quality_indicator, hdop, snrs)
         validation = Validation(
             quality_indicator=quality_indicator,
             hdop=hdop,
+            snrs=snrs,
             status=status,
             reason=reason,
             trusted=(status == "trusted"),

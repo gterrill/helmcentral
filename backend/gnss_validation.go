@@ -10,16 +10,19 @@ import (
 )
 
 const (
-	gnssTrustedHDOPThreshold  = 2.5
-	gnssCriticalHDOPThreshold = 4.0
-	gnssDegradedMaxAge        = 10 * time.Second
-	gnssCriticalMaxAge        = 30 * time.Second
-	gnssDepthJumpMeters       = 1.5
-	gnssDepthJumpWindow       = 10 * time.Second
-	gnssDegradedJumpKts       = 6.0
-	gnssCriticalJumpKts       = 12.0
-	gnssRecoverySamples       = 5
-	gnssRecoveryMinDuration   = 15 * time.Second
+	gnssTrustedHDOPThreshold     = 2.5
+	gnssCriticalHDOPThreshold    = 4.0
+	gnssDegradedMaxAge           = 10 * time.Second
+	gnssCriticalMaxAge           = 30 * time.Second
+	gnssDepthJumpMeters          = 1.5
+	gnssDepthJumpWindow          = 10 * time.Second
+	gnssDegradedJumpKts          = 6.0
+	gnssCriticalJumpKts          = 12.0
+	gnssRecoverySamples          = 5
+	gnssRecoveryMinDuration      = 15 * time.Second
+	gnssSpoofingUniformSNRStdDev = 1.5
+	gnssSpoofingUniformSNRAvg    = 30.0
+	gnssJammingMaxSNRThreshold   = 20.0
 )
 
 type gnssPositionValidation struct {
@@ -58,7 +61,8 @@ var gnssHeuristic gnssHeuristicState
 func parseGNSSPositionValidation(payload map[string]any) gnssPositionValidation {
 	qualityIndicator := parseGNSSQualityIndicator(payload)
 	hdop := parseGNSSHDOP(payload)
-	status, reason := classifyGNSSPositionValidation(qualityIndicator, hdop)
+	snrs := parseGNSSSatellitesSNR(payload)
+	status, reason := classifyGNSSPositionValidation(qualityIndicator, hdop, snrs)
 	return gnssPositionValidation{
 		QualityIndicator: qualityIndicator,
 		HDOP:             hdop,
@@ -181,7 +185,7 @@ func isAnchoredOrMooredState(value string) bool {
 	return normalized == "anchored" || normalized == "moored" || normalized == "atanchor"
 }
 
-func classifyGNSSPositionValidation(qualityIndicator int, hdop float64) (string, string) {
+func classifyGNSSPositionValidation(qualityIndicator int, hdop float64, snrs []float64) (string, string) {
 	switch {
 	case qualityIndicator <= 0:
 		return "critical", "quality indicator reports no fix"
@@ -189,11 +193,88 @@ func classifyGNSSPositionValidation(qualityIndicator int, hdop float64) (string,
 		return "critical", "hdop unavailable"
 	case hdop > gnssCriticalHDOPThreshold:
 		return "critical", fmt.Sprintf("hdop %.1f exceeds %.1f", hdop, gnssCriticalHDOPThreshold)
+	}
+
+	if len(snrs) >= 4 {
+		sum := 0.0
+		maxSnr := 0.0
+		for _, snr := range snrs {
+			sum += snr
+			if snr > maxSnr {
+				maxSnr = snr
+			}
+		}
+		avg := sum / float64(len(snrs))
+
+		variance := 0.0
+		for _, snr := range snrs {
+			variance += (snr - avg) * (snr - avg)
+		}
+		stddev := math.Sqrt(variance / float64(len(snrs)))
+
+		if stddev < gnssSpoofingUniformSNRStdDev && avg > gnssSpoofingUniformSNRAvg {
+			return "critical", fmt.Sprintf("suspected spoofing: uniform snr (stddev %.1f, avg %.1f)", stddev, avg)
+		}
+
+		if maxSnr < gnssJammingMaxSNRThreshold {
+			return "critical", fmt.Sprintf("suspected jamming: max snr only %.1f", maxSnr)
+		}
+	}
+
+	switch {
 	case hdop <= gnssTrustedHDOPThreshold:
 		return "trusted", ""
 	default:
 		return "degraded", fmt.Sprintf("hdop %.1f above trusted threshold %.1f", hdop, gnssTrustedHDOPThreshold)
 	}
+}
+
+func parseGNSSSatellitesSNR(payload map[string]any) []float64 {
+	var current any = payload
+	for _, key := range []string{"navigation", "gnss", "satellites"} {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = m[key]
+		if current == nil {
+			return nil
+		}
+	}
+
+	if m, ok := current.(map[string]any); ok {
+		if val, hasValue := m["value"]; hasValue {
+			current = val
+		}
+	}
+
+	var snrs []float64
+
+	if slice, ok := current.([]any); ok {
+		for _, rawSat := range slice {
+			satMap, ok := rawSat.(map[string]any)
+			if !ok {
+				continue
+			}
+			snr := lookupFirstNumber(satMap, []string{"snr"}, []string{"SNR"})
+			if snr > 0 {
+				snrs = append(snrs, snr)
+			}
+		}
+	} else if m, ok := current.(map[string]any); ok {
+		for _, rawSat := range m {
+			satMap, ok := rawSat.(map[string]any)
+			if !ok {
+				continue
+			}
+			snr := lookupFirstNumber(satMap, []string{"snr"}, []string{"SNR"})
+			if snr > 0 {
+				snrs = append(snrs, snr)
+			}
+		}
+	}
+
+	return snrs
 }
 
 func parseGNSSQualityIndicator(payload map[string]any) int {
