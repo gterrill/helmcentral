@@ -48,10 +48,18 @@ export function MarineHeader() {
           status?: string
           datetime?: string
           depth?: number
+          name?: string
+          vessel_prefix?: string
         }
 
         if (data.status) {
           setVesselStatus(data.status)
+        }
+
+        if (data.name) {
+          const prefix = data.vessel_prefix?.trim() ?? 'M/V'
+          const vesselName = data.name.trim()
+          setBoatName(vesselName ? `${prefix} ${vesselName}`.trim() : null)
         }
 
         if (data.datetime) {
@@ -75,19 +83,15 @@ export function MarineHeader() {
 
         const data = (await response.json()) as {
           boat?: {
-            name?: string
             model?: string
           }
         }
 
-        const nextName = data.boat?.name?.trim() ?? ''
         const nextModel = data.boat?.model?.trim() ?? ''
 
-        setBoatName(nextName.length > 0 ? nextName : null)
         setBoatModel(nextModel.length > 0 ? nextModel : null)
       } catch {
         // Show missing settings explicitly instead of falling back to compiled defaults.
-        setBoatName(null)
         setBoatModel(null)
       }
     }

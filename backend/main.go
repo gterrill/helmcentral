@@ -27,6 +27,7 @@ var (
 )
 
 type vesselStateData struct {
+	Name                        string
 	Status                      string
 	Datetime                    time.Time
 	Depth                       float64
@@ -273,7 +274,14 @@ func vesselState(c echo.Context) error {
 		}
 	}
 
+	vesselPrefix := loadBoatVesselPrefix(settingsPath)
+	if vesselPrefix == "" {
+		vesselPrefix = "M/V"
+	}
+
 	return c.JSON(http.StatusOK, map[string]any{
+		"name":                           state.Name,
+		"vessel_prefix":                  vesselPrefix,
 		"status":                         state.Status,
 		"datetime":                       state.Datetime.Format(time.RFC3339),
 		"depth":                          state.Depth,
@@ -421,15 +429,14 @@ func nearbyVessels(c echo.Context) error {
 		address = defaultSignalKAddress
 		port = defaultSignalKPort
 	}
-	ownVesselName := loadBoatName(settingsPath)
 
 	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 	vesselsPath := getEnv("SIGNALK_VESSELS_PATH", "/signalk/v1/api/vessels")
+	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
 	if signalkURL != "" {
 		signalkSelfName := fetchSignalKSelfName(signalkURL, vesselPath)
-		excludedNames := []string{ownVesselName, signalkSelfName}
+		excludedNames := []string{signalkSelfName}
 
 		state, selfErr := fetchSignalKVesselState(signalkURL, vesselPath)
 		if selfErr == nil && state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {

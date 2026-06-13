@@ -310,10 +310,10 @@ export function SignalKSettingsPanel({
         <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Boat And UI</h3>
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
           <SettingsInput
-            label="Boat Name"
-            value={boatName}
-            onChange={setBoatName}
-            ariaLabel="Boat name"
+            label="Vessel Prefix"
+            value={vesselPrefix}
+            onChange={setVesselPrefix}
+            ariaLabel="Vessel prefix"
           />
 
           <SettingsInput

@@ -189,7 +189,6 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 	if nameErr != nil {
 		nameMap = map[string]string{}
 	}
-	selfName := strings.ToUpper(strings.TrimSpace(loadBoatName(settingsPath)))
 	signalkSelfName := strings.ToUpper(strings.TrimSpace(fetchSignalKSelfName(signalkURL, getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self"))))
 
 	result := make(map[string][]trackPoint, len(payload))
@@ -222,7 +221,7 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 		if name == "" {
 			name = strings.ToUpper(strings.TrimSpace(compactVesselID(vesselID)))
 		}
-		if name == "SELF" || name == selfName || name == signalkSelfName {
+		if name == "SELF" || name == signalkSelfName {
 			continue
 		}
 

@@ -34,7 +34,7 @@ type settingsPayload struct {
 		Port    int    `json:"port"`
 	} `json:"signalk"`
 	Boat struct {
-		Name                   string  `json:"name"`
+		VesselPrefix           string  `json:"vessel_prefix"`
 		Model                  string  `json:"model"`
 		HouseBatteryCapacityAh float64 `json:"house_battery_capacity_ah"`
 	} `json:"boat"`
@@ -81,7 +81,7 @@ func updateSettingsHandler(c echo.Context) error {
 		"port":    normalized.Signalk.Port,
 	}
 	settings["boat"] = map[string]any{
-		"name":                      normalized.Boat.Name,
+		"vessel_prefix":             normalized.Boat.VesselPrefix,
 		"model":                     normalized.Boat.Model,
 		"house_battery_capacity_ah": normalized.Boat.HouseBatteryCapacityAh,
 	}
@@ -129,8 +129,8 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 	}
 
 	if boatMap, ok := settings["boat"].(map[string]any); ok {
-		if name := strings.TrimSpace(coerceString(boatMap["name"])); name != "" {
-			payload.Boat.Name = name
+		if prefix := strings.TrimSpace(coerceString(boatMap["vessel_prefix"])); prefix != "" {
+			payload.Boat.VesselPrefix = prefix
 		}
 		if model := strings.TrimSpace(coerceString(boatMap["model"])); model != "" {
 			payload.Boat.Model = model
@@ -196,7 +196,10 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 		normalized.Signalk.Port = defaultSignalKPort
 	}
 
-	normalized.Boat.Name = strings.TrimSpace(req.Boat.Name)
+	normalized.Boat.VesselPrefix = strings.TrimSpace(req.Boat.VesselPrefix)
+	if normalized.Boat.VesselPrefix == "" {
+		normalized.Boat.VesselPrefix = "M/V"
+	}
 	normalized.Boat.Model = strings.TrimSpace(req.Boat.Model)
 	normalized.Boat.HouseBatteryCapacityAh = req.Boat.HouseBatteryCapacityAh
 	if normalized.Boat.HouseBatteryCapacityAh <= 0 {
@@ -328,6 +331,8 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return state, err
 	}
+
+	state.Name = strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))
 
 	state.Status = firstNonEmptyString(lookupString(payload, "navigation", "state", "value"), lookupString(payload, "navigation", "state"))
 	if state.Status == "" {
@@ -1621,7 +1626,7 @@ func compactVesselID(vesselID string) string {
 	return segments[len(segments)-1]
 }
 
-func loadBoatName(settingsPath string) string {
+func loadBoatVesselPrefix(settingsPath string) string {
 	return loadSettingString(settingsPath, []string{"boat", "name"})
 }
 
