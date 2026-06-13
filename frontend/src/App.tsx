@@ -1,5 +1,5 @@
 import { Anchor, ArrowDown, ArrowUp, CloudSun, Compass } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
@@ -80,6 +80,24 @@ function formatTimeToGo(hours: number | null) {
   return discharging
     ? `~${hh}h ${mm.toString().padStart(2, '0')}m to empty`
     : `~${hh}h ${mm.toString().padStart(2, '0')}m to full`
+}
+
+type WindMetricCardProps = {
+  title: string
+  value: ReactNode
+  align?: 'left' | 'right'
+  className?: string
+}
+
+function WindMetricCard({ title, value, align = 'left', className = '' }: WindMetricCardProps) {
+  const alignmentClass = align === 'right' ? 'items-end text-right' : 'items-start text-left'
+
+  return (
+    <div className={`relative flex flex-col justify-start gap-0.5 rounded-2xl border bg-background/80 px-4 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ${alignmentClass} ${className}`.trim()}>
+      <p className="text-[10px] leading-none uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
+      <p className="font-display text-2xl leading-[0.86] text-primary md:text-3xl">{value}</p>
+    </div>
+  )
 }
 
 export function App() {
@@ -207,6 +225,10 @@ export function App() {
   const depthUnitLabel = isImperialDistance ? 'feet' : 'metres'
   const awaLabel = windAngleApparentDeg !== null ? `${Math.round(windAngleApparentDeg).toString().padStart(3, '0')}°` : '---°'
   const headingLabel = formatHeading(headingTrue)
+  const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
+  const setDegreesLabel = currentSetDeg !== null ? `${Math.round(((currentSetDeg % 360) + 360) % 360)}°` : '—'
+  const setArrowRotation = currentSetDeg !== null ? ((currentSetDeg % 360) + 360) % 360 : 0
+  const driftLabel = currentDriftKts !== null ? `${currentDriftKts.toFixed(1)} kts` : '—'
   const gust10mLabel = maxGust10mKts !== null ? `${maxGust10mKts.toFixed(1)} kts` : '—'
   const gust1hLabel = maxGust1hKts !== null ? `${maxGust1hKts.toFixed(1)} kts` : '—'
   const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
@@ -238,6 +260,19 @@ export function App() {
         : activeDrawerTab === 'anchor-watch'
           ? 'Anchor Watch'
           : 'Forecast'
+  const setValue = currentSetDeg !== null
+    ? (
+      <span className="inline-flex items-center gap-2">
+        <span>{setDegreesLabel}</span>
+        <span
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 text-muted-foreground"
+          title={`Set direction ${setDirectionLabel}`}
+        >
+          <ArrowUp className="h-4 w-4" style={{ transform: `rotate(${setArrowRotation}deg)` }} />
+        </span>
+      </span>
+    )
+    : '—'
   const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
 
   const handleDropAnchorHere = () => {
@@ -266,9 +301,20 @@ export function App() {
                   AWA {awaLabel}
                 </Button>
               </div>
-              <div className="grid place-items-center rounded-xl border bg-background/70 p-4">
-                <div className="w-full max-w-[320px] lg:max-w-[360px]">
-                  <div className="mx-auto aspect-square w-full max-w-[280px] lg:max-w-[320px]">
+              <div className="rounded-xl border bg-background/70 p-3 md:p-4">
+                <div className="mx-auto grid w-full max-w-[360px] gap-2 md:hidden">
+                  <div className="grid grid-cols-2 gap-2">
+                    <WindMetricCard
+                      title="SET"
+                      value={setValue}
+                    />
+                    <WindMetricCard
+                      title="DRIFT"
+                      value={driftLabel}
+                      align="right"
+                    />
+                  </div>
+                  <div className="mx-auto aspect-square w-full max-w-[220px] sm:max-w-[240px] lg:max-w-[260px]">
                     <WindCompass
                       headingTrue={headingTrue}
                       windAngleApparentDeg={windAngleApparentDeg}
@@ -277,14 +323,61 @@ export function App() {
                       windSpeedKts={windSpeedApparentKts}
                     />
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
-                      <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 10m</p>
-                      <p className="font-display text-lg text-primary">{gust10mLabel}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <WindMetricCard
+                      title="MAX GUST 10M"
+                      value={gust10mLabel}
+                    />
+                    <WindMetricCard
+                      title="MAX GUST 1HR"
+                      value={gust1hLabel}
+                      align="right"
+                    />
+                  </div>
+                </div>
+
+                <div className="relative hidden min-h-[350px] w-full md:block lg:min-h-[372px]">
+                  <div className="grid min-h-[350px] w-full grid-cols-2 grid-rows-2 gap-4 lg:min-h-[372px]">
+                    <div className="self-start justify-self-start w-full max-w-[180px] lg:max-w-[200px]">
+                      <WindMetricCard
+                        title="SET"
+                        value={setValue}
+                      />
                     </div>
-                    <div className="rounded-md border bg-background/70 px-3 py-2 text-left">
-                      <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Max Gust 1h</p>
-                      <p className="font-display text-lg text-primary">{gust1hLabel}</p>
+
+                    <div className="self-start justify-self-end w-full max-w-[180px] lg:max-w-[200px]">
+                      <WindMetricCard
+                        title="DRIFT"
+                        value={driftLabel}
+                        align="right"
+                      />
+                    </div>
+
+                    <div className="self-end justify-self-start w-full max-w-[220px] lg:max-w-[240px]">
+                      <WindMetricCard
+                        title="MAX GUST 10M"
+                        value={gust10mLabel}
+                      />
+                    </div>
+
+                    <div className="self-end justify-self-end w-full max-w-[220px] lg:max-w-[240px]">
+                      <WindMetricCard
+                        title="MAX GUST 1HR"
+                        value={gust1hLabel}
+                        align="right"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 w-[170px] -translate-x-1/2 -translate-y-1/2 lg:w-[184px]">
+                    <div className="aspect-square w-full">
+                      <WindCompass
+                        headingTrue={headingTrue}
+                        windAngleApparentDeg={windAngleApparentDeg}
+                        windSide={windSide}
+                        windAngleRelativeDeg={windAngleRelativeDeg}
+                        windSpeedKts={windSpeedApparentKts}
+                      />
                     </div>
                   </div>
                 </div>
