@@ -527,8 +527,8 @@ export function App() {
               </>
             )}
 
-            <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
             <TanksTile tanks={tanks} loading={tanksLoading} />
+            <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
           </aside>
 
           <aside className="space-y-4">
