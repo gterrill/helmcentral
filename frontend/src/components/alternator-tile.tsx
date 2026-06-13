@@ -12,6 +12,7 @@ interface AlternatorData {
 interface AlternatorTileProps {
   port: AlternatorData
   starboard: AlternatorData
+  enginesRunning: boolean
 }
 
 function tempClass(tempC: number | null): string {
@@ -72,13 +73,19 @@ function AlternatorColumn({ label, data }: { label: string; data: AlternatorData
   )
 }
 
-export function AlternatorTile({ port, starboard }: AlternatorTileProps) {
+export function AlternatorTile({ port, starboard, enginesRunning }: AlternatorTileProps) {
   return (
     <Tile title="Alternators" icon={<Zap className="h-3.5 w-3.5 text-secondary" />}>
-      <div className="mt-1 grid grid-cols-2 gap-4">
-        <AlternatorColumn label="Port" data={port} />
-        <AlternatorColumn label="Starboard" data={starboard} />
-      </div>
+      {enginesRunning ? (
+        <div className="mt-1 grid grid-cols-2 gap-4">
+          <AlternatorColumn label="Port" data={port} />
+          <AlternatorColumn label="Starboard" data={starboard} />
+        </div>
+      ) : (
+        <div className="mt-1 flex h-24 items-center justify-center rounded-md border bg-background/60">
+          <p className="text-sm text-muted-foreground">Engines not running</p>
+        </div>
+      )}
     </Tile>
   )
 }

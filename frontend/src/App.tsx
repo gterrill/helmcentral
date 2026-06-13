@@ -684,12 +684,11 @@ export function App() {
               </div>
             </Tile>
 
-            {isAlternatorTileVisible && (
-              <AlternatorTile
-                port={alternator0}
-                starboard={alternator1}
-              />
-            )}
+            <AlternatorTile
+              port={alternator0}
+              starboard={alternator1}
+              enginesRunning={isAlternatorTileVisible}
+            />
             <GeneratorTile
               generatorState={generatorState}
               generatorManualStart={generatorManualStart}
