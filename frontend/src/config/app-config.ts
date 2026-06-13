@@ -8,13 +8,6 @@ const settingsRaw = Object.values(
   }),
 )[0] ?? ''
 
-type BoatConfig = {
-  boat: {
-    name: string
-    model: string
-  }
-}
-
 export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 
 export type AnchorConfig = {
@@ -41,13 +34,6 @@ type UiConfig = {
 
 export type DistanceUnits = 'metric' | 'imperial'
 
-const fallbackConfig: BoatConfig = {
-  boat: {
-    name: 'S/V INGENUITY',
-    model: '2018 FP SAONA 47',
-  },
-}
-
 const fallbackUiConfig = {
   distanceUnits: 'metric' as DistanceUnits,
   vesselStateRefreshSeconds: 10,
@@ -60,25 +46,6 @@ const fallbackAnchorConfig: AnchorConfig = {
   chainOnboardM: 150,
   hullType: 'power_cat',
   windageAreaM2: 35,
-}
-
-function parseBoatConfig(): BoatConfig {
-  try {
-    const parsed = YAML.parse(settingsRaw) as Partial<BoatConfig> | null
-
-    if (!parsed?.boat?.name || !parsed.boat.model) {
-      return fallbackConfig
-    }
-
-    return {
-      boat: {
-        name: parsed.boat.name,
-        model: parsed.boat.model,
-      },
-    }
-  } catch {
-    return fallbackConfig
-  }
 }
 
 function parseUiConfig(): { vesselStateRefreshSeconds: number; distanceUnits: DistanceUnits; autoCloseAnchorWatchOnEngine: boolean } {
@@ -147,6 +114,5 @@ function parseAnchorConfig(): AnchorConfig {
   return parsedConfig
 }
 
-export const appConfig = parseBoatConfig()
 export const uiConfig = parseUiConfig()
 export const anchorConfig = parseAnchorConfig()
