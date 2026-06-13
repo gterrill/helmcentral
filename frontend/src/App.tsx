@@ -153,6 +153,8 @@ export function App() {
     generatorManualStartTimer,
     generatorRunningByCondition,
     generatorRuntime,
+    engine0Rpm,
+    engine1Rpm,
   } = useVesselState(uiConfig.vesselStateRefreshSeconds)
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
   const { tanks, loading: tanksLoading } = useTanksState(uiConfig.vesselStateRefreshSeconds)
@@ -236,6 +238,7 @@ export function App() {
         : activeDrawerTab === 'anchor-watch'
           ? 'Anchor Watch'
           : 'Forecast'
+  const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
 
   const handleDropAnchorHere = () => {
     if (latitude === null || longitude === null) return
@@ -394,14 +397,14 @@ export function App() {
           </aside>
 
           <aside className="space-y-4">
-            {navigationState === 'motoring' && (
+            {isAlternatorTileVisible && (
               <AlternatorTile
                 port={alternator0}
                 starboard={alternator1}
               />
             )}
 
-            {navigationState !== 'motoring' && (
+            {!isAlternatorTileVisible && (
               <>
                 <AnchorWatchTile
                   watch={anchorWatch}

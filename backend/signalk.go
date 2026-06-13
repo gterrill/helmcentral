@@ -473,7 +473,32 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 		state.GeneratorRuntime = genRuntime
 	}
 
+	state.Engine0RPM = readEngineRPM(payload, []string{"0", "port", "main", "engine0", "engine-0"})
+	state.Engine1RPM = readEngineRPM(payload, []string{"1", "starboard", "secondary", "engine1", "engine-1"})
+
 	return state, nil
+}
+
+func readEngineRPM(payload map[string]any, aliases []string) float64 {
+	for _, alias := range aliases {
+		revPerSecond := lookupFirstNumber(payload,
+			[]string{"propulsion", alias, "revolutions", "value"},
+			[]string{"propulsion", alias, "revolutions"},
+		)
+		if revPerSecond >= 0 {
+			return roundTo1(revPerSecond * 60)
+		}
+
+		rpm := lookupFirstNumber(payload,
+			[]string{"propulsion", alias, "rpm", "value"},
+			[]string{"propulsion", alias, "rpm"},
+		)
+		if rpm >= 0 {
+			return roundTo1(rpm)
+		}
+	}
+
+	return -1
 }
 
 func parseSignalKCurrent(payload map[string]any) (float64, float64) {

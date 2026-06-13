@@ -26,6 +26,8 @@ interface VesselState {
   generator_manual_start_timer: number
   generator_running_by_condition: string
   generator_runtime: number
+  engine_0_rpm: number
+  engine_1_rpm: number
   source: string
 }
 
@@ -54,6 +56,8 @@ export function useVesselState(refreshInterval: number) {
   const [generatorManualStartTimer, setGeneratorManualStartTimer] = useState<number>(0)
   const [generatorRunningByCondition, setGeneratorRunningByCondition] = useState<string | null>(null)
   const [generatorRuntime, setGeneratorRuntime] = useState<number | null>(null)
+  const [engine0Rpm, setEngine0Rpm] = useState<number | null>(null)
+  const [engine1Rpm, setEngine1Rpm] = useState<number | null>(null)
 
   useEffect(() => {
     const fetchVesselState = async () => {
@@ -98,6 +102,8 @@ export function useVesselState(refreshInterval: number) {
         setGeneratorManualStartTimer(typeof data.generator_manual_start_timer === 'number' ? data.generator_manual_start_timer : 0)
         setGeneratorRunningByCondition(typeof data.generator_running_by_condition === 'string' && data.generator_running_by_condition !== '' ? data.generator_running_by_condition : null)
         setGeneratorRuntime(typeof data.generator_runtime === 'number' && data.generator_runtime >= 0 ? data.generator_runtime : null)
+        setEngine0Rpm(typeof data.engine_0_rpm === 'number' && data.engine_0_rpm >= 0 ? data.engine_0_rpm : null)
+        setEngine1Rpm(typeof data.engine_1_rpm === 'number' && data.engine_1_rpm >= 0 ? data.engine_1_rpm : null)
       } catch (err) {
         console.error('Failed to fetch vessel state:', err)
       }
@@ -138,5 +144,7 @@ export function useVesselState(refreshInterval: number) {
     generatorManualStartTimer,
     generatorRunningByCondition,
     generatorRuntime,
+    engine0Rpm,
+    engine1Rpm,
   }
 }
