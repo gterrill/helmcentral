@@ -2,12 +2,31 @@ import { describe, it, vi, beforeEach, expect } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import { App } from '../App'
 
+const electricalStateMock = vi.hoisted(() => ({
+  batterySocPercent: 100,
+  batteryCapacityAh: 1440,
+  chargingCurrentA: -73.8,
+  chargingPowerW: -1988,
+  solarOutputW: 0,
+  acOutputW: 1494,
+  dc12vPowerW: 422.2,
+  dc12vCurrentA: 15.7,
+  dc24vVoltageV: 26.9,
+  acLoadsW: 1494,
+  generatorRealPowerW: 0,
+  alternator0: { currentA: null, voltageV: null, powerW: null, temperatureC: null },
+  alternator1: { currentA: null, voltageV: null, powerW: null, temperatureC: null },
+  batteryRatePercentPerHour: -0.2,
+  timeToGoHours: 0,
+}))
+
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: false,
     json: async () => ({}),
   }))
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  electricalStateMock.timeToGoHours = 0
 })
 
 vi.mock('@/hooks/use-vessel-state', () => ({
@@ -24,23 +43,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({
 }))
 
 vi.mock('@/hooks/use-electrical-state', () => ({
-  useElectricalState: () => ({
-    batterySocPercent: 100,
-    batteryCapacityAh: 1440,
-    chargingCurrentA: -73.8,
-    chargingPowerW: -1988,
-    solarOutputW: 0,
-    acOutputW: 1494,
-    dc12vPowerW: 422.2,
-    dc12vCurrentA: 15.7,
-    dc24vVoltageV: 26.9,
-    acLoadsW: 1494,
-    generatorRealPowerW: 0,
-    alternator0: { currentA: null, voltageV: null, powerW: null, temperatureC: null },
-    alternator1: { currentA: null, voltageV: null, powerW: null, temperatureC: null },
-    batteryRatePercentPerHour: -0.2,
-    timeToGoHours: 0,
-  }),
+  useElectricalState: () => electricalStateMock,
 }))
 
 vi.mock('@/hooks/use-nearby-vessels', () => ({
@@ -109,5 +112,16 @@ describe('Battery tile time to go', () => {
     const card = label.closest('div')
     expect(card).not.toBeNull()
     expect(within(card as HTMLDivElement).getByText('—')).toBeInTheDocument()
+  })
+
+  it('shows days and hours for very large remaining time', () => {
+    electricalStateMock.timeToGoHours = 2057.15
+
+    render(<App />)
+
+    const label = screen.getByText('Time Remaining')
+    const card = label.closest('div')
+    expect(card).not.toBeNull()
+    expect(within(card as HTMLDivElement).getByText('~85d 17h')).toBeInTheDocument()
   })
 })

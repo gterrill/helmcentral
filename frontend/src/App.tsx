@@ -72,10 +72,28 @@ function formatTimeToGo(hours: number | null) {
     return '—'
   }
 
-  const totalMinutes = Math.max(0, Math.round(Math.abs(hours) * 60))
+  const absHours = Math.abs(hours)
+  const totalMinutes = Math.max(0, Math.round(absHours * 60))
   if (totalMinutes === 0) {
     return '—'
   }
+
+  if (absHours >= 24) {
+    const days = Math.floor(absHours / 24)
+    let remainingHours = Math.round(absHours - days * 24)
+    if (remainingHours === 24) {
+      remainingHours = 0
+    }
+    if (remainingHours === 0) {
+      return `~${days}d`
+    }
+    return `~${days}d ${remainingHours}h`
+  }
+
+  if (absHours >= 10) {
+    return `~${Math.round(absHours)}h`
+  }
+
   const hh = Math.floor(totalMinutes / 60)
   const mm = totalMinutes % 60
 
