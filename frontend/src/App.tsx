@@ -304,6 +304,9 @@ export function App() {
                   {gnssValidationReason && (
                     <div className="mt-1 text-[11px] text-red-700/90 dark:text-red-100/85">{gnssValidationReason}</div>
                   )}
+                  <div className="mt-1 text-[11px] text-red-700/90 dark:text-red-100/85">
+                    Waiting for stable GPS before clearing alarm.
+                  </div>
                 </div>
               )}
               <div className="mt-2 flex items-start justify-between gap-4">
@@ -397,13 +400,6 @@ export function App() {
           </aside>
 
           <aside className="space-y-4">
-            {isAlternatorTileVisible && (
-              <AlternatorTile
-                port={alternator0}
-                starboard={alternator1}
-              />
-            )}
-
             {!isAlternatorTileVisible && (
               <>
                 <AnchorWatchTile
@@ -439,6 +435,7 @@ export function App() {
             )}
 
             <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
+            <TanksTile tanks={tanks} loading={tanksLoading} />
           </aside>
 
           <aside className="space-y-4">
@@ -538,7 +535,12 @@ export function App() {
               generatorRuntime={generatorRuntime}
               generatorRealPowerW={generatorRealPowerW}
             />
-            <TanksTile tanks={tanks} loading={tanksLoading} />
+            {isAlternatorTileVisible && (
+              <AlternatorTile
+                port={alternator0}
+                starboard={alternator1}
+              />
+            )}
             <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
           </aside>
         </div>
