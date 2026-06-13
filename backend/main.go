@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -18,6 +19,11 @@ const (
 	metersPerSecondToKnots        = 1.943844
 	defaultWindMaxAge             = 5 * time.Minute
 	defaultHouseBatteryCapacityAh = 1440
+)
+
+var (
+	buildVersion  = "dev"
+	buildRevision = "unknown"
 )
 
 type vesselStateData struct {
@@ -147,9 +153,53 @@ func getEnv(key string, fallback string) string {
 }
 
 func healthCheck(c echo.Context) error {
+	version, revision := resolveBuildMetadata()
+
 	return c.JSON(http.StatusOK, map[string]string{
-		"status": "ok",
+		"status":   "ok",
+		"version":  version,
+		"revision": revision,
 	})
+}
+
+func resolveBuildMetadata() (string, string) {
+	version := strings.TrimSpace(buildVersion)
+	if envVersion := strings.TrimSpace(os.Getenv("APP_VERSION")); envVersion != "" {
+		version = envVersion
+	}
+
+	revision := strings.TrimSpace(buildRevision)
+	if envRevision := strings.TrimSpace(os.Getenv("APP_REVISION")); envRevision != "" {
+		revision = envRevision
+	}
+
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				if revision == "" || revision == "unknown" {
+					revision = setting.Value
+				}
+			case "vcs.tag":
+				if version == "" || version == "dev" || version == "(devel)" {
+					version = setting.Value
+				}
+			}
+		}
+
+		if (version == "" || version == "dev" || version == "(devel)") && info.Main.Version != "" {
+			version = info.Main.Version
+		}
+	}
+
+	if version == "" {
+		version = "dev"
+	}
+	if revision == "" {
+		revision = "unknown"
+	}
+
+	return version, revision
 }
 
 func depthTrend(c echo.Context) error {

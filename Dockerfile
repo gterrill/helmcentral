@@ -17,6 +17,9 @@ FROM golang:1.22-alpine AS backend-builder
 
 WORKDIR /app
 
+ARG APP_VERSION=dev
+ARG APP_REVISION=unknown
+
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
@@ -26,7 +29,9 @@ COPY backend/. .
 RUN rm -rf dist
 COPY --from=frontend-builder /app/frontend/dist ./dist
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o helmcentral .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+	-ldflags "-X main.buildVersion=${APP_VERSION} -X main.buildRevision=${APP_REVISION}" \
+	-o helmcentral .
 
 # ── Stage 3: minimal runtime image ───────────────────────────────────────────
 FROM alpine:latest
