@@ -21,12 +21,14 @@ beforeEach(() => {
 
 vi.mock('@/hooks/use-vessel-state', () => ({
   useVesselState: () => ({
-    depth: null, navigationState: null, latitude: null, longitude: null,
+    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
     headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
     windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
     maxGust10mKts: null, maxGust1hKts: null, generatorState: null,
     generatorManualStart: false, generatorManualStartTimer: 0,
     generatorRunningByCondition: null, generatorRuntime: null,
+    engine0Rpm: null, engine1Rpm: null, gnssQualityIndicator: null, gnssHdop: null,
+    gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false
   }),
 }))
 

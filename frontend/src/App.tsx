@@ -260,7 +260,7 @@ export function App() {
         : activeDrawerTab === 'anchor-watch'
           ? 'Anchor Watch'
           : 'Forecast'
-  const setValue = currentSetDeg !== null
+  const setValue = currentSetDeg !== null && currentDriftKts !== 0
     ? (
       <span className="inline-flex items-center gap-2">
         <span>{setDegreesLabel}</span>
@@ -272,7 +272,7 @@ export function App() {
         </span>
       </span>
     )
-    : '—'
+    : <span className="font-display text-4xl tabular-nums leading-none text-primary">—</span>
   const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
 
   const handleDropAnchorHere = () => {
