@@ -171,7 +171,7 @@ func applyGNSSRecoveryHysteresis(validation gnssPositionValidation, now time.Tim
 	}
 
 	validation.Status = "critical"
-	validation.Reason = "awaiting trusted recovery hysteresis"
+	validation.Reason = "waiting for stable GPS before clearing alarm"
 	validation.Critical = true
 	validation.Trusted = false
 	return validation
