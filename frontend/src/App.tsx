@@ -73,6 +73,9 @@ function formatTimeToGo(hours: number | null) {
   }
 
   const totalMinutes = Math.max(0, Math.round(Math.abs(hours) * 60))
+  if (totalMinutes === 0) {
+    return '—'
+  }
   const hh = Math.floor(totalMinutes / 60)
   const mm = totalMinutes % 60
 
@@ -226,9 +229,24 @@ export function App() {
   const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
   const setDegreesLabel = currentSetDeg !== null ? `${Math.round(((currentSetDeg % 360) + 360) % 360)}°` : '—'
   const setArrowRotation = currentSetDeg !== null ? ((currentSetDeg % 360) + 360) % 360 : 0
-  const driftLabel = currentDriftKts !== null ? `${currentDriftKts.toFixed(1)} kts` : '—'
-  const gust10mLabel = maxGust10mKts !== null ? `${maxGust10mKts.toFixed(1)} kts` : '—'
-  const gust1hLabel = maxGust1hKts !== null ? `${maxGust1hKts.toFixed(1)} kts` : '—'
+  const driftLabel = currentDriftKts !== null ? (
+    <>
+      {currentDriftKts.toFixed(1)}
+      <span className="ml-1 text-xl text-muted-foreground">kts</span>
+    </>
+  ) : '—'
+  const gust10mLabel = maxGust10mKts !== null ? (
+    <>
+      {maxGust10mKts.toFixed(1)}
+      <span className="ml-1 text-xl text-muted-foreground">kts</span>
+    </>
+  ) : '—'
+  const gust1hLabel = maxGust1hKts !== null ? (
+    <>
+      {maxGust1hKts.toFixed(1)}
+      <span className="ml-1 text-xl text-muted-foreground">kts</span>
+    </>
+  ) : '—'
   const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
   const socBarWidth = `${Math.max(0, Math.min(100, batterySocPercent ?? 0))}%`
   const chargingCurrentLabel = chargingCurrentA !== null
@@ -600,7 +618,7 @@ export function App() {
 
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Time To Go</p>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Time Remaining</p>
                   <p className={`mt-1 font-display text-4xl leading-none flex items-center ${timeToGoClass}`}>
                     {timeToGoLabel}
                     {timeToGoLabel !== '—' && (
