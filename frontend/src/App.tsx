@@ -293,16 +293,16 @@ export function App() {
 
             <Tile title="Position">
               {gnssCriticalAlert && (
-                <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  <div className="font-semibold">CRITICAL: GPS Signal Corrupt/Jammed</div>
-                  <div className="mt-1 text-[11px] text-red-300/80">
+                <div className="mb-3 rounded-md border border-red-500/50 bg-red-100/70 px-3 py-2 text-xs text-red-900 dark:bg-red-900/30 dark:text-red-100">
+                  <div className="font-semibold tracking-[0.01em]">CRITICAL: GPS Signal Corrupt/Jammed</div>
+                  <div className="mt-1 text-[11px] text-red-800/90 dark:text-red-100/90">
                     Quality {gnssQualityIndicator !== null ? gnssQualityIndicator : '—'}
                     {' · '}
                     HDOP {gnssHdop !== null ? gnssHdop.toFixed(1) : '—'}
                     {gnssValidationState ? ` · ${gnssValidationState}` : ''}
                   </div>
                   {gnssValidationReason && (
-                    <div className="mt-1 text-[11px] text-red-300/70">{gnssValidationReason}</div>
+                    <div className="mt-1 text-[11px] text-red-700/90 dark:text-red-100/85">{gnssValidationReason}</div>
                   )}
                 </div>
               )}
