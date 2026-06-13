@@ -1,4 +1,4 @@
-import { Anchor, ArrowDown, ArrowUp, CloudSun, Compass } from 'lucide-react'
+import { Anchor, ArrowDown, ArrowUp, CloudSun, Compass, BatteryCharging, BatteryFull, BatteryMedium, BatteryLow, BatteryWarning } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
@@ -72,14 +72,11 @@ function formatTimeToGo(hours: number | null) {
     return '—'
   }
 
-  const discharging = hours < 0
   const totalMinutes = Math.max(0, Math.round(Math.abs(hours) * 60))
   const hh = Math.floor(totalMinutes / 60)
   const mm = totalMinutes % 60
 
-  return discharging
-    ? `~${hh}h ${mm.toString().padStart(2, '0')}m to empty`
-    : `~${hh}h ${mm.toString().padStart(2, '0')}m to full`
+  return `~${hh}h ${mm.toString().padStart(2, '0')}m`
 }
 
 type WindMetricCardProps = {
@@ -182,6 +179,7 @@ export function App() {
     chargingPowerW,
     solarOutputW,
     acOutputW,
+    dc12vPowerW,
     dc24vVoltageV,
     generatorRealPowerW,
     alternator0,
@@ -243,12 +241,26 @@ export function App() {
   const chargingValueClass = isDischarging ? 'text-amber-600' : 'text-secondary'
   const solarOutputLabel = solarOutputW !== null ? Math.round(solarOutputW).toString() : '—'
   const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
+  const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
   const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
   const chargeRateLabel = batteryRatePercentPerHour !== null
-    ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}%/hr`
+    ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}`
     : '—'
+  const chargeRateClass = batteryRatePercentPerHour !== null && batteryRatePercentPerHour < 0 ? 'text-amber-600' : 'text-secondary'
   const timeToGoLabel = formatTimeToGo(timeToGoHours)
   const timeToGoClass = timeToGoHours !== null && timeToGoHours < 0 ? 'text-amber-600' : 'text-secondary'
+
+  let TimeToGoIcon = BatteryFull
+  if (!isDischarging && batteryRatePercentPerHour !== null && batteryRatePercentPerHour > 0) {
+    TimeToGoIcon = BatteryCharging
+  } else {
+    const soc = batterySocPercent ?? 0
+    if (soc <= 20) TimeToGoIcon = BatteryWarning
+    else if (soc <= 33) TimeToGoIcon = BatteryLow
+    else if (soc <= 66) TimeToGoIcon = BatteryMedium
+    else TimeToGoIcon = BatteryFull
+  }
+
   const drawerTitle = activeDrawerTab === 'radar'
     ? 'Radar'
     : activeDrawerTab === 'settings'
@@ -563,26 +575,48 @@ export function App() {
 
               <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
-                  <p className="font-display text-4xl leading-none text-primary">
-                    {solarOutputLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">W</span>
-                  </p>
-                </div>
-                <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Draw</p>
                   <p className="font-display text-4xl leading-none text-primary">
                     {acOutputLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
                   </p>
                 </div>
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">DC Draw</p>
+                  <p className="font-display text-4xl leading-none text-primary">
+                    {dc12vPowerLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">W</span>
+                  </p>
+                </div>
               </div>
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Time To Go / Charge Rate</p>
-                <p className={`mt-1 font-display text-4xl leading-none ${timeToGoClass}`}>
-                  {timeToGoLabel} {chargeRateLabel}
+                <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
+                <p className="font-display text-4xl leading-none text-primary">
+                  {solarOutputLabel}
+                  <span className="ml-1 text-xl text-muted-foreground">W</span>
                 </p>
+              </div>
+
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Time To Go</p>
+                  <p className={`mt-1 font-display text-4xl leading-none flex items-center ${timeToGoClass}`}>
+                    {timeToGoLabel}
+                    {timeToGoLabel !== '—' && (
+                      <span className="ml-2 text-muted-foreground inline-flex items-center">
+                        <TimeToGoIcon className="h-6 w-6" />
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className="rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charge Rate</p>
+                  <p className={`mt-1 font-display text-4xl leading-none ${chargeRateClass}`}>
+                    {chargeRateLabel}
+                    <span className="ml-1 text-xl text-muted-foreground">%/hr</span>
+                  </p>
+                </div>
               </div>
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
