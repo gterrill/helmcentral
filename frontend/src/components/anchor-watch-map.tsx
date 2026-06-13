@@ -283,13 +283,14 @@ export function AnchorWatchMap({
 
   const aisTrailsData = useMemo(() => {
     const trails = aisTrails()
+    const activeNames = new Set(aisVessels.map(v => v.name))
     const features: GeoJSON.Feature<GeoJSON.LineString>[] = []
-    for (const [, points] of trails) {
-      if (points.length >= 2) features.push(trailToGeoJSON(points))
+    for (const [name, points] of trails) {
+      if (activeNames.has(name) && points.length >= 2) features.push(trailToGeoJSON(points))
     }
     return { type: 'FeatureCollection' as const, features }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderKey, aisTrails])
+  }, [renderKey, aisTrails, aisVessels])
 
   // ── Cursor management ────────────────────────────────────────────────────
   const setCursor = useCallback((cursor: string) => {
