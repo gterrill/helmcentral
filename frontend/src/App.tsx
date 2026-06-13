@@ -527,6 +527,12 @@ export function App() {
               </div>
             </Tile>
 
+            {isAlternatorTileVisible && (
+              <AlternatorTile
+                port={alternator0}
+                starboard={alternator1}
+              />
+            )}
             <GeneratorTile
               generatorState={generatorState}
               generatorManualStart={generatorManualStart}
@@ -535,12 +541,6 @@ export function App() {
               generatorRuntime={generatorRuntime}
               generatorRealPowerW={generatorRealPowerW}
             />
-            {isAlternatorTileVisible && (
-              <AlternatorTile
-                port={alternator0}
-                starboard={alternator1}
-              />
-            )}
             <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
           </aside>
         </div>
