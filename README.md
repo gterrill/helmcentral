@@ -8,7 +8,8 @@ A modern dashboard application integrating SignalK and InfluxDB for marine monit
 helmcentral/
 ├── backend/          # Go REST API
 ├── frontend/         # TypeScript Web Components Dashboard
-├── docker-compose.yml
+├── docker-compose.yml      # Server deployment (pulls GHCR image)
+├── docker-compose.dev.yml  # Local build/dev workflows
 └── README.md
 ```
 
@@ -32,14 +33,14 @@ helmcentral/
 - Docker & Docker Compose (recommended)
 - OR: Go 1.22+, Node.js 18+
 
-### Production Mode (Docker)
+### Server Deployment (Docker)
 
 ```bash
-docker compose up --build -d
+docker compose pull
+docker compose up -d --force-recreate
 ```
 
-- Backend API: http://localhost:8080
-- Frontend Dashboard: http://localhost:5173
+- Helmcentral Dashboard/API: http://localhost:9091
 
 To stop:
 
@@ -47,19 +48,28 @@ To stop:
 docker compose down
 ```
 
+### Local Production-Like Build (Docker)
+
+```bash
+docker compose -f docker-compose.dev.yml --profile prod up --build -d backend frontend
+```
+
+- Backend API: http://localhost:8080
+- Frontend Dashboard: http://localhost:5173
+
 ### Development Mode (Docker Profiles)
 
 ```bash
-docker compose --profile dev up -d backend-dev frontend-dev
+docker compose -f docker-compose.dev.yml --profile dev up -d backend-dev frontend-dev
 ```
 
-- Backend Dev API: http://localhost:8081
-- Frontend Dev Dashboard (Vite): http://localhost:5174
+- Backend Dev API: http://localhost:8080
+- Frontend Dev Dashboard (Vite): http://localhost:5173
 
 To stop dev services:
 
 ```bash
-docker compose --profile dev down
+docker compose -f docker-compose.dev.yml --profile dev down
 ```
 
 ### Local Development

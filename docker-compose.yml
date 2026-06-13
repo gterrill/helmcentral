@@ -1,61 +1,21 @@
 services:
-  backend:
-    profiles: ["prod"]
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+  helmcentral:
+    image: ghcr.io/gterrill/helmcentral:latest
+    container_name: helmcentral
+    restart: unless-stopped
     ports:
-      - "8080:8080"
-    env_file:
-      - ./backend/.env
-    environment:
-      - SETTINGS_FILE=/app/settings.yaml
-    volumes:
-      - ./settings.yaml:/app/settings.yaml
-
-  frontend:
-    profiles: ["prod"]
-    build:
-      context: .
-      dockerfile: ./frontend/Dockerfile
-    ports:
-      - "5173:5173"
-
-  backend-dev:
-    profiles: ["dev"]
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-    working_dir: /app
-    env_file:
-      - ./backend/.env
-    environment:
-      - SETTINGS_FILE=/app/settings.yaml
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./backend:/app
-      - ./settings.yaml:/app/settings.yaml
-      - /Volumes/Main-Storage/data/signalk/gpx-tracks:/Volumes/Main-Storage/data/signalk/gpx-tracks:ro
+      - "9091:8080"
     dns:
-      - 8.8.8.8
+      - 192.168.50.240
       - 1.1.1.1
-
-  frontend-dev:
-    profiles: ["dev"]
-    image: node:20-alpine
-    working_dir: /workspace/frontend
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     environment:
-      - CHOKIDAR_USEPOLLING=1
-      - CHOKIDAR_INTERVAL=300
-      - VITE_API_PROXY_TARGET=http://host.docker.internal:8080
-    ports:
-      - "5173:5173"
+      SETTINGS_FILE: /app/settings.yaml
+      SIGNALK_GPX_TRACKS_DIR: /app/gpx-tracks
+      # GEONAMES_USERNAME: your_username
+      # INFLUXDB_TOKEN: your_token
+      # INFLUXDB_URL: "http://192.168.50.240:8086"
+      # INFLUXDB_ORG: "Pikorua"
+      # INFLUXDB_BUCKET: "SignalK_Data"
     volumes:
-      - ./:/workspace
-      - frontend_node_modules:/workspace/frontend/node_modules
-
-volumes:
-  frontend_node_modules:
-
+      - ./settings.yaml:/app/settings.yaml:ro
+      - /Main-Storage/data/signalk/gpx-tracks:/app/gpx-tracks:ro

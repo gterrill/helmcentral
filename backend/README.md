@@ -34,7 +34,7 @@ The API will be available at `http://localhost:8080`
 When running through Docker Compose `backend-dev`, the backend uses Air for code reloads. Air is baked into a dev image (`backend/Dockerfile.dev`), so it does not reinstall on every container start:
 
 ```bash
-docker compose --profile dev up backend-dev
+docker compose -f docker-compose.dev.yml --profile dev up backend-dev
 ```
 
 Any changes under `backend/` will trigger a rebuild and restart automatically.
