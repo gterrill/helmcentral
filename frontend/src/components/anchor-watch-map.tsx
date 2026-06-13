@@ -648,6 +648,7 @@ export function AnchorWatchMap({
         )}
 
         {/* AIS vessel trails */}
+      {aisTrailsData.features.length > 0 && (
         <Source id="ais-trails" type="geojson" data={aisTrailsData}>
           <Layer
             id="ais-trails-layer"
@@ -660,6 +661,7 @@ export function AnchorWatchMap({
             layout={{ 'line-join': 'round', 'line-cap': 'round' }}
           />
         </Source>
+      )}
 
         {/* Motoring breadcrumb trail (pre-anchor) */}
         {showRepositionBreadcrumbs && motoringTrailGeoJSON.geometry.coordinates.length >= 2 && (
@@ -736,7 +738,7 @@ export function AnchorWatchMap({
                   <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
                     <div className="truncate">{vessel.name}</div>
                     {isSelected && transient && (
-                      <div className="mt-0.5 whitespace-nowrap text-[8px] font-medium tracking-normal text-amber-200">
+                      <div className="whitespace-nowrap text-[8px] font-medium tracking-normal">
                         {formatTransientDistance(transient.distanceM)} · {Math.round(transient.bearing)}°
                       </div>
                     )}
