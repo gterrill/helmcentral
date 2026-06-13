@@ -114,7 +114,7 @@ describe('Battery tile time to go', () => {
     expect(within(card as HTMLDivElement).getByText('—')).toBeInTheDocument()
   })
 
-  it('shows days and hours for very large remaining time', () => {
+  it('shows rounded weeks for very large remaining time', () => {
     electricalStateMock.timeToGoHours = 2057.15
 
     render(<App />)
@@ -122,6 +122,6 @@ describe('Battery tile time to go', () => {
     const label = screen.getByText('Time Remaining')
     const card = label.closest('div')
     expect(card).not.toBeNull()
-    expect(within(card as HTMLDivElement).getByText('~85d 17h')).toBeInTheDocument()
+    expect(within(card as HTMLDivElement).getByText('~12w')).toBeInTheDocument()
   })
 })

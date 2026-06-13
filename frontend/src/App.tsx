@@ -78,6 +78,10 @@ function formatTimeToGo(hours: number | null) {
     return '—'
   }
 
+  if (absHours >= 24 * 7) {
+    return `~${Math.round(absHours / (24 * 7))}w`
+  }
+
   if (absHours >= 24) {
     const days = Math.floor(absHours / 24)
     let remainingHours = Math.round(absHours - days * 24)
@@ -676,16 +680,6 @@ export function App() {
                   <Button variant="outline" size="sm" className="h-9 text-xs">
                     ON
                   </Button>
-                </div>
-              </div>
-
-              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">8PM Forecast</p>
-                    <p className="mt-1 text-xs text-muted-foreground">-7m generator needed</p>
-                  </div>
-                  <p className="font-display text-4xl leading-none text-secondary">94%</p>
                 </div>
               </div>
             </Tile>
