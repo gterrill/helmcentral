@@ -650,14 +650,21 @@ export function AnchorWatchMap({
 
         {/* AIS vessel trails */}
       {aisTrailsData.features.length > 0 && (
-        <Source id="ais-trails" type="geojson" data={aisTrailsData}>
+        <Source id="ais-trails" type="geojson" lineMetrics data={aisTrailsData}>
           <Layer
             id="ais-trails-layer"
             type="line"
             paint={{
-              'line-color': '#f59e0b',
-              'line-width': 1.5,
-              'line-opacity': 0.5,
+              'line-width': 2.5,
+              'line-gradient': [
+                'interpolate',
+                ['linear'],
+                ['line-progress'],
+                0, 'rgba(245, 158, 11, 0)',
+                0.5, 'rgba(245, 158, 11, 0.4)',
+                1, 'rgba(245, 158, 11, 1)',
+              ],
+              'line-opacity': 0.9,
             }}
             layout={{ 'line-join': 'round', 'line-cap': 'round' }}
           />
