@@ -456,9 +456,20 @@ func nearbyVessels(c echo.Context) error {
 }
 
 func formatWeatherCondition(code string) string {
+	return formatWeatherConditionAt(code, time.Time{}, nil, false)
+}
+
+func formatWeatherConditionAt(code string, observedAt time.Time, location *time.Location, preferDaytime bool) string {
 	normalized := strings.ToLower(strings.TrimSpace(code))
 	normalized = strings.ReplaceAll(normalized, "_", "")
 	normalized = strings.ReplaceAll(normalized, "-", "")
+
+	if normalized == "mostlyclear" {
+		if preferDaytime || isDaytimeWeatherObservation(observedAt, location) {
+			return "Mostly Sunny"
+		}
+		return "Mostly Clear"
+	}
 
 	conditions := map[string]string{
 		"clear":             "Clear",
@@ -466,7 +477,6 @@ func formatWeatherCondition(code string) string {
 		"dusty":             "Dusty",
 		"foggy":             "Foggy",
 		"haze":              "Hazy",
-		"mostlyclear":       "Mostly Clear",
 		"mostlycloudy":      "Mostly Cloudy",
 		"partlycloudy":      "Partly Cloudy",
 		"smoky":             "Smoky",
@@ -495,6 +505,18 @@ func formatWeatherCondition(code string) string {
 		return "Unknown"
 	}
 	return code
+}
+
+func isDaytimeWeatherObservation(observedAt time.Time, location *time.Location) bool {
+	if observedAt.IsZero() {
+		return false
+	}
+	if location == nil {
+		location = time.UTC
+	}
+
+	hour := observedAt.In(location).Hour()
+	return hour >= 6 && hour < 18
 }
 
 func degreesToDirection(degrees float64) string {

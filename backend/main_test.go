@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -46,5 +47,32 @@ func TestHealthCheckIncludesBuildMetadata(t *testing.T) {
 	}
 	if payload["revision"] != "deadbeef" {
 		t.Fatalf("expected revision deadbeef, got %q", payload["revision"])
+	}
+}
+
+func TestFormatWeatherConditionAt_UsesMostlySunnyDuringDaytime(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*3600)
+	observedAt := time.Date(2026, time.June, 14, 12, 0, 0, 0, loc)
+
+	condition := formatWeatherConditionAt("MostlyClear", observedAt, loc, false)
+	if condition != "Mostly Sunny" {
+		t.Fatalf("expected Mostly Sunny, got %q", condition)
+	}
+}
+
+func TestFormatWeatherConditionAt_UsesMostlyClearAtNight(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*3600)
+	observedAt := time.Date(2026, time.June, 14, 23, 0, 0, 0, loc)
+
+	condition := formatWeatherConditionAt("MostlyClear", observedAt, loc, false)
+	if condition != "Mostly Clear" {
+		t.Fatalf("expected Mostly Clear, got %q", condition)
+	}
+}
+
+func TestFormatWeatherConditionAt_PrefersDaytimeForForecastCards(t *testing.T) {
+	condition := formatWeatherConditionAt("MostlyClear", time.Time{}, nil, true)
+	if condition != "Mostly Sunny" {
+		t.Fatalf("expected Mostly Sunny, got %q", condition)
 	}
 }

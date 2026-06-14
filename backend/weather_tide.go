@@ -577,7 +577,7 @@ func weatherToday(c echo.Context) error {
 			atomic.AddUint64(&weatherTodayCacheMisses, 1)
 
 			fetchedWeather := false
-			weather, weatherErr := fetchWeatherKitData(vesselState.Latitude, vesselState.Longitude)
+			weather, weatherErr := fetchWeatherKitData(vesselState.Latitude, vesselState.Longitude, vesselState.Datetime, vesselLocalLocation(vesselState.Longitude))
 			if weatherErr == nil {
 				state = weather
 				state.Datetime = time.Now().UTC()
@@ -738,7 +738,7 @@ func tideToday(c echo.Context) error {
 	return respondJSONWithETag(c, http.StatusOK, etag, response)
 }
 
-func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) {
+func fetchWeatherKitData(latitude, longitude float64, observedAt time.Time, localLocation *time.Location) (weatherTodayData, error) {
 	data := weatherTodayData{TemperatureF: -1, Condition: "Unknown", HighTempF: -1, LowTempF: -1, WindSpeedKts: -1, WindGustKts: -1, WindDirection: "—", PrecipitationPct: -1}
 
 	keyID := getEnv("WEATHERKIT_KEY_ID", "")
@@ -794,9 +794,9 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 			data.TemperatureF = (temp * 9 / 5) + 32
 		}
 		if condition, ok := current["conditionCode"].(string); ok {
-			data.Condition = formatWeatherCondition(condition)
+			data.Condition = formatWeatherConditionAt(condition, observedAt, localLocation, false)
 		} else if condition, ok := current["condition"].(string); ok {
-			data.Condition = formatWeatherCondition(condition)
+			data.Condition = formatWeatherConditionAt(condition, observedAt, localLocation, false)
 		}
 		if windSpeed, ok := current["windSpeed"].(float64); ok {
 			data.WindSpeedKts = windSpeed * kphToKnots
@@ -958,7 +958,7 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, ref
 
 		condition := "Unknown"
 		if code, ok := dayMap["conditionCode"].(string); ok && strings.TrimSpace(code) != "" {
-			condition = formatWeatherCondition(code)
+			condition = formatWeatherConditionAt(code, referenceDatetime, localLocation, true)
 		}
 
 		precipPct := 0.0
