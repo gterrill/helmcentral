@@ -32,6 +32,11 @@ helmcentral/
 
 - Docker & Docker Compose (recommended)
 - OR: Go 1.22+, Node.js 18+
+- SignalK Server with the following plugins installed and enabled:
+  - [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) - Needed to calculate true wind and other derived navigation data.
+  - [`tracks`](https://github.com/SignalK/tracks) - Needed for drawing vessel trails and retrieving historical path data.
+  - [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) - Needed to retrieve generator and advanced electrical states (e.g. from Victron GX devices).
+  - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) - Needed to write time-series data from SignalK to InfluxDB for historical graphing and analysis.
 
 ### Server Deployment (Docker)
 
