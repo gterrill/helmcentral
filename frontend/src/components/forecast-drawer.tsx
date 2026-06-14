@@ -53,12 +53,12 @@ function getWeatherIcon(condition: string, size: number = 40) {
 
 function getHourlyWeatherIcon(entry: WeatherHourlyEntry, isNight: boolean) {
   if (entry.kind === 'sunset') {
-    return <Sunset size={24} className="text-amber-300" />
+		return <Sunset size={24} className="text-primary" />
   }
 
   const normalized = entry.condition.toLowerCase()
   if (isNight && (normalized.includes('clear') || normalized.includes('sunny'))) {
-    return <Moon size={24} className="text-slate-100" />
+		return <Moon size={24} className="text-secondary" />
   }
 
   return getWeatherIcon(entry.condition, 24)
@@ -243,23 +243,37 @@ export function ForecastDrawer({
       )}
 
       {hourlyEntries.length > 0 && (
-    <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(67,122,181,0.88),rgba(34,102,171,0.82))] px-4 py-4 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-      <p className="text-sm font-medium text-white/90">
-        {summary ?? "Today's hourly forecast"}
-      </p>
-      <div className="mt-4 border-t border-white/20 pt-4">
-        <div className="flex gap-3 overflow-x-auto pb-2">
+    <div className="overflow-hidden rounded-[26px] border border-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]">
+      <div className="border-b border-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
+        <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
+          {summary ?? "Today's hourly forecast"}
+        </p>
+      </div>
+      <div className="px-2.5 py-2.5">
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
           {hourlyEntries.map((entry, idx) => {
             const nightMode = hourlyEntries.slice(0, idx).some((item) => item.kind === 'sunset')
+            const isNowEntry = entry.label === 'Now' && entry.kind === 'forecast'
             const displayTemperature = entry.temperatureF >= 0 ? Math.round(displayTemp(entry.temperatureF)) : null
 
             return (
-              <div key={`${entry.kind}-${entry.label}-${idx}`} className="flex min-w-[64px] flex-col items-center text-center">
-                <p className="text-sm font-semibold text-white/90">{entry.label}</p>
-                <div className="mt-4 flex h-8 items-center justify-center">
+              <div
+                key={`${entry.kind}-${entry.label}-${idx}`}
+                className={`relative flex min-w-[84px] flex-col items-center rounded-[20px] border px-2.5 py-3.5 text-center ${entry.kind === 'sunset' ? 'border-primary/20 bg-primary/10' : nightMode ? 'border-secondary/20 bg-secondary/10' : 'border-border/70 bg-card/80'} ${isNowEntry ? 'shadow-[0_0_0_1px_rgba(199,137,0,0.22),0_10px_18px_rgba(199,137,0,0.10)]' : ''}`}
+              >
+                {isNowEntry && (
+                  <span className="absolute left-1/2 top-1.5 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-primary" />
+                )}
+                <p className={`text-[15px] font-semibold tabular-nums ${isNowEntry ? 'text-primary' : nightMode ? 'text-secondary' : 'text-foreground/75'}`}>{entry.label}</p>
+                <div className="mt-3.5 flex h-8 items-center justify-center">
                   {getHourlyWeatherIcon(entry, nightMode)}
                 </div>
-                <p className="mt-4 text-[13px] font-semibold text-white/85">{entry.kind === 'sunset' ? 'Sunset' : displayTemperature !== null ? `${displayTemperature}°` : '—'}</p>
+                <p className={`mt-4 ${entry.kind === 'sunset' ? 'text-[13px] font-semibold uppercase tracking-[0.08em] text-primary' : nightMode ? 'font-display text-[2rem] leading-none text-secondary' : 'font-display text-[2rem] leading-none text-foreground'}`}>
+                  {entry.kind === 'sunset' ? 'Sunset' : displayTemperature !== null ? `${displayTemperature}°` : '—'}
+                </p>
+                {nightMode && entry.kind === 'forecast' && (
+                  <span className="mt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-secondary/80">Night</span>
+                )}
               </div>
             )
           })}
