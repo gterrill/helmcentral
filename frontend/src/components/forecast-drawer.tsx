@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 import { Cloud, CloudRain, Sun } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -18,6 +20,9 @@ interface ForecastDrawerProps {
   forecast: ForecastDay[]
   loading?: boolean
   error?: string | null
+  isCached?: boolean
+  updatedAt?: string | null
+  ttlSeconds?: number | null
   onRetry?: () => void
   unit: 'imperial' | 'metric'
 }
@@ -43,8 +48,84 @@ function getWeatherIcon(condition: string, size: number = 40) {
   return <Cloud {...iconProps} className="text-gray-400" />
 }
 
-export function ForecastDrawer({ forecast, loading = false, error = null, onRetry, unit }: ForecastDrawerProps) {
+function formatUpdatedAt(value: string | null | undefined) {
+  if (!value) {
+    return 'Unknown'
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Unknown'
+  }
+
+  return parsed.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+export function formatRefreshAge(value: string | null | undefined, nowMs: number) {
+  if (!value) {
+    return 'Unknown'
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Unknown'
+  }
+
+  const elapsedMs = Math.max(0, nowMs - parsed.getTime())
+  const elapsedMinutes = Math.floor(elapsedMs / 60000)
+
+  if (elapsedMinutes <= 0) {
+    return 'just now'
+  }
+
+  if (elapsedMinutes === 1) {
+    return '1 min ago'
+  }
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} mins ago`
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60)
+  if (elapsedHours === 1) {
+    return '1 hour ago'
+  }
+
+  return `${elapsedHours} hours ago`
+}
+
+export function ForecastDrawer({
+  forecast,
+  loading = false,
+  error = null,
+  isCached = false,
+  updatedAt = null,
+  ttlSeconds = null,
+  onRetry,
+  unit,
+}: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
+  const showingStaleForecast = Boolean(error && hasForecast)
+  const cacheMinutes = ttlSeconds && ttlSeconds > 0 ? Math.round(ttlSeconds / 60) : null
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0)
+
+  useEffect(() => {
+    if (!updatedAt) {
+      return
+    }
+
+    const interval = setInterval(() => {
+      setNowMs(Date.now())
+    }, 30000)
+
+    return () => clearInterval(interval)
+  }, [updatedAt])
 
   if (loading && !hasForecast) {
     return (
@@ -79,11 +160,16 @@ export function ForecastDrawer({ forecast, loading = false, error = null, onRetr
   const windUnit = 'kts'
   const displayTemp = (tempF: number) => (unit === 'metric' ? fahrenheitToCelsius(tempF) : tempF)
   const days = forecast.slice(0, 6)
-  const today = days[0]
 
-  const humidityPct = Math.max(35, Math.min(95, Math.round(45 + (today.precipitation * 0.4))))
-  const visibilityNm = Math.max(1, 12 - (today.precipitation * 0.06))
-  const uvIndex = Math.max(1, Math.min(11, Math.round((today.high - 32) / 8)))
+  useEffect(() => {
+    setSelectedDayIndex((prev) => (prev < days.length ? prev : 0))
+  }, [days.length])
+
+  const selectedDay = days[selectedDayIndex] ?? days[0]
+
+  const humidityPct = Math.max(35, Math.min(95, Math.round(45 + (selectedDay.precipitation * 0.4))))
+  const visibilityNm = Math.max(1, 12 - (selectedDay.precipitation * 0.06))
+  const uvIndex = Math.max(1, Math.min(11, Math.round((selectedDay.high - 32) / 8)))
 
   const tempSeries = days.map(day => displayTemp((day.high + day.low) / 2))
   const windSeries = days.map(day => day.windSpeed)
@@ -120,15 +206,35 @@ export function ForecastDrawer({ forecast, loading = false, error = null, onRetr
 
   return (
     <div className="space-y-4 pb-4">
+      {(isCached || showingStaleForecast) && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-900">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-semibold uppercase tracking-[0.08em]">
+              {showingStaleForecast ? 'Showing last cached forecast' : 'Forecast served from cache'}
+            </p>
+            <p className="text-amber-800">Updated {formatUpdatedAt(updatedAt)} (Age: {formatRefreshAge(updatedAt, nowMs)})</p>
+          </div>
+          {showingStaleForecast && (
+            <p className="mt-1 text-amber-800">Live refresh failed: {error}</p>
+          )}
+          {cacheMinutes !== null && (
+            <p className="mt-1 text-amber-800">Cache window: {cacheMinutes} minutes</p>
+          )}
+        </div>
+      )}
+
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           6-Day Forecast
         </h3>
         <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 lg:grid-cols-6">
           {days.map((day, idx) => (
-            <div
+            <button
               key={idx}
-              className={`min-w-0 rounded-lg border px-1.5 py-1.5 text-center ${idx === 0 ? 'border-primary/50 bg-primary/5' : 'bg-background/60'}`}
+              type="button"
+              className={`min-w-0 rounded-lg border px-1.5 py-1.5 text-center transition-colors ${idx === selectedDayIndex ? 'border-primary/50 bg-primary/5' : 'bg-background/60 hover:bg-muted/30'}`}
+              aria-label={`Select forecast day ${day.dayName} ${day.date}`}
+              onClick={() => setSelectedDayIndex(idx)}
             >
               <p className="text-[11px] font-semibold uppercase text-muted-foreground">
                 {idx === 0 ? 'Today' : day.dayName.slice(0, 3)}
@@ -158,7 +264,7 @@ export function ForecastDrawer({ forecast, loading = false, error = null, onRetr
                 <p className="font-semibold text-secondary">{Math.round(day.windSpeed)}{windUnit} {day.windDirection}</p>
                 <p className="text-muted-foreground">{Math.round(day.precipitation)}% precip</p>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -166,15 +272,15 @@ export function ForecastDrawer({ forecast, loading = false, error = null, onRetr
       <div className="rounded-lg border bg-background/60 p-3">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <div className="flex items-end gap-1">
-            {getWeatherIcon(today.condition, 22)}
-            <span className="font-display text-4xl leading-none text-primary">{Math.round(displayTemp(today.high))}</span>
+            {getWeatherIcon(selectedDay.condition, 22)}
+            <span className="font-display text-4xl leading-none text-primary">{Math.round(displayTemp(selectedDay.high))}</span>
             <span className="pb-1 text-lg text-muted-foreground">{tempUnit}</span>
           </div>
-          <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{today.condition}</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{selectedDay.condition}</p>
           <div className="flex flex-wrap gap-2 text-[11px]">
-            <span className="rounded bg-muted/50 px-2 py-1">Wind <span className="font-semibold text-secondary">{today.windSpeed.toFixed(1)} {windUnit}</span></span>
-            <span className="rounded bg-muted/50 px-2 py-1">Gusts <span className="font-semibold text-amber-600">{today.windGust.toFixed(1)} {windUnit}</span></span>
-            <span className="rounded bg-muted/50 px-2 py-1">Precip <span className="font-semibold">{Math.round(today.precipitation)}%</span></span>
+            <span className="rounded bg-muted/50 px-2 py-1">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
+            <span className="rounded bg-muted/50 px-2 py-1">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-amber-600">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
+            <span className="rounded bg-muted/50 px-2 py-1">Precip <span className="font-semibold">{Math.round(selectedDay.precipitation)}%</span></span>
             <span className="rounded bg-muted/50 px-2 py-1">Humidity <span className="font-semibold">{humidityPct}%</span></span>
             <span className="rounded bg-muted/50 px-2 py-1">Visibility <span className="font-semibold">{visibilityNm.toFixed(1)} nm</span></span>
             <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-secondary">{uvIndex}</span></span>

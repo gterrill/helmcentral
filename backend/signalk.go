@@ -21,6 +21,7 @@ import (
 const (
 	defaultDistanceUnits             = "metric"
 	defaultVesselStateRefreshSeconds = 10
+	defaultForecastRefreshSeconds    = 3600
 	defaultBowRollerHeightM          = 1.5
 	defaultChainSizeMM               = 12
 	defaultChainOnboardM             = 150
@@ -40,6 +41,7 @@ type settingsPayload struct {
 	} `json:"boat"`
 	UI struct {
 		VesselStateRefreshSeconds int               `json:"vessel_state_refresh_seconds"`
+		ForecastRefreshSeconds    int               `json:"forecast_refresh_seconds"`
 		TankLabels                map[string]string `json:"tank_labels"`
 	} `json:"ui"`
 	Anchor struct {
@@ -93,6 +95,7 @@ func updateSettingsHandler(c echo.Context) error {
 		}
 	}
 	uiMap["vessel_state_refresh_seconds"] = normalized.UI.VesselStateRefreshSeconds
+	uiMap["forecast_refresh_seconds"] = normalized.UI.ForecastRefreshSeconds
 	if normalized.UI.TankLabels != nil {
 		uiMap["tank_labels"] = normalized.UI.TankLabels
 	}
@@ -145,6 +148,11 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		seconds := coercePort(uiMap["vessel_state_refresh_seconds"])
 		if seconds > 0 {
 			payload.UI.VesselStateRefreshSeconds = seconds
+		}
+
+		forecastSeconds := coercePort(uiMap["forecast_refresh_seconds"])
+		if forecastSeconds > 0 {
+			payload.UI.ForecastRefreshSeconds = forecastSeconds
 		}
 
 		if labelsMap, ok := uiMap["tank_labels"].(map[string]any); ok {
@@ -209,6 +217,11 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.UI.VesselStateRefreshSeconds = req.UI.VesselStateRefreshSeconds
 	if normalized.UI.VesselStateRefreshSeconds <= 0 {
 		normalized.UI.VesselStateRefreshSeconds = defaultVesselStateRefreshSeconds
+	}
+
+	normalized.UI.ForecastRefreshSeconds = req.UI.ForecastRefreshSeconds
+	if normalized.UI.ForecastRefreshSeconds <= 0 {
+		normalized.UI.ForecastRefreshSeconds = defaultForecastRefreshSeconds
 	}
 
 	if req.UI.TankLabels != nil {

@@ -21,6 +21,7 @@ export type AnchorConfig = {
 type UiConfig = {
   ui?: {
     vessel_state_refresh_seconds?: number
+    forecast_refresh_seconds?: number
   }
   units?: string
   anchor?: {
@@ -37,6 +38,7 @@ export type DistanceUnits = 'metric' | 'imperial'
 const fallbackUiConfig = {
   distanceUnits: 'metric' as DistanceUnits,
   vesselStateRefreshSeconds: 10,
+  forecastRefreshSeconds: 3600,
   autoCloseAnchorWatchOnEngine: true,
 }
 
@@ -48,7 +50,12 @@ const fallbackAnchorConfig: AnchorConfig = {
   windageAreaM2: 35,
 }
 
-function parseUiConfig(): { vesselStateRefreshSeconds: number; distanceUnits: DistanceUnits; autoCloseAnchorWatchOnEngine: boolean } {
+function parseUiConfig(): {
+  vesselStateRefreshSeconds: number
+  forecastRefreshSeconds: number
+  distanceUnits: DistanceUnits
+  autoCloseAnchorWatchOnEngine: boolean
+} {
   const parsedConfig = {
     ...fallbackUiConfig,
   }
@@ -56,6 +63,7 @@ function parseUiConfig(): { vesselStateRefreshSeconds: number; distanceUnits: Di
   try {
     const parsed = YAML.parse(settingsRaw) as UiConfig | null
     const configuredSeconds = parsed?.ui?.vessel_state_refresh_seconds
+    const configuredForecastSeconds = parsed?.ui?.forecast_refresh_seconds
     const configuredUnits = parsed?.units
 
     if (typeof configuredUnits === 'string') {
@@ -67,6 +75,9 @@ function parseUiConfig(): { vesselStateRefreshSeconds: number; distanceUnits: Di
 
     if (typeof configuredSeconds === 'number' && configuredSeconds > 0) {
       parsedConfig.vesselStateRefreshSeconds = configuredSeconds
+    }
+    if (typeof configuredForecastSeconds === 'number' && configuredForecastSeconds > 0) {
+      parsedConfig.forecastRefreshSeconds = configuredForecastSeconds
     }
   } catch {
     // Keep fallback.

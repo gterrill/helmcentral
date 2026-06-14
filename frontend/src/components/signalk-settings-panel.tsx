@@ -16,6 +16,7 @@ type SettingsPayload = {
   }
   ui?: {
     vessel_state_refresh_seconds?: number
+    forecast_refresh_seconds?: number
     tank_labels?: Record<string, string>
   }
   anchor?: {
@@ -56,6 +57,7 @@ export function SignalKSettingsPanel({
   const [houseBatteryCapacityAh, setHouseBatteryCapacityAh] = useState('1440')
   const [distanceUnits, setDistanceUnits] = useState<'metric' | 'imperial'>('metric')
   const [vesselStateRefreshSeconds, setVesselStateRefreshSeconds] = useState('10')
+  const [forecastRefreshSeconds, setForecastRefreshSeconds] = useState('3600')
   const [tankLabels, setTankLabels] = useState<Record<string, string>>(
     Object.fromEntries(defaultTankLabelIds.map((id) => [id, ''])),
   )
@@ -98,6 +100,9 @@ export function SignalKSettingsPanel({
     }
     if (typeof data.ui?.vessel_state_refresh_seconds === 'number') {
       setVesselStateRefreshSeconds(String(data.ui.vessel_state_refresh_seconds))
+    }
+    if (typeof data.ui?.forecast_refresh_seconds === 'number') {
+      setForecastRefreshSeconds(String(data.ui.forecast_refresh_seconds))
     }
     if (data.ui?.tank_labels && typeof data.ui.tank_labels === 'object') {
       setTankLabels((previous) => ({
@@ -223,6 +228,7 @@ export function SignalKSettingsPanel({
       units: distanceUnits,
       ui: {
         vessel_state_refresh_seconds: Math.round(parseNumber(vesselStateRefreshSeconds, 10)),
+        forecast_refresh_seconds: Math.round(parseNumber(forecastRefreshSeconds, 3600)),
         tank_labels: tankLabels,
       },
       anchor: {
@@ -301,6 +307,14 @@ export function SignalKSettingsPanel({
             value={vesselStateRefreshSeconds}
             onChange={setVesselStateRefreshSeconds}
             ariaLabel="Vessel state refresh seconds"
+            className="md:col-span-3"
+          />
+
+          <SettingsInput
+            label="Forecast Refresh Seconds"
+            value={forecastRefreshSeconds}
+            onChange={setForecastRefreshSeconds}
+            ariaLabel="Forecast refresh seconds"
             className="md:col-span-3"
           />
         </div>

@@ -50,7 +50,7 @@ docker run -p 8080:8080 helmcentral-backend
 
 - `GET /api/health` - Health check
 - `GET /api/weather-today` - Current weather summary for vessel position
-- `GET /api/weather-forecast` - 6-day daily forecast including sustained wind and gusts
+- `GET /api/weather-forecast` - 6-day daily forecast including sustained wind and gusts. Response shape includes `days`, `cached`, `updated_at`, and `ttl_seconds`. Cached for 60 minutes per rounded vessel position; returns `502` when upstream forecast data cannot be fetched.
 - `GET /api/tide-today` - Current and upcoming tide conditions
 - `GET /api/tracks?since=<RFC3339>` - Incremental self and AIS trail updates sampled by the server
 - `GET /api/tracks/motoring` - Motoring approach trail used by anchor reposition mode

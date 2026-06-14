@@ -24,10 +24,20 @@ interface WeatherForecastDayApi {
   precipitation_pct?: number;
 }
 
-export function useWeatherForecast(refreshIntervalSeconds = 600) {
+interface WeatherForecastEnvelopeApi {
+  days?: WeatherForecastDayApi[];
+  cached?: boolean;
+  updated_at?: string;
+  ttl_seconds?: number;
+}
+
+export function useWeatherForecast(refreshIntervalSeconds = 3600) {
   const [forecast, setForecast] = useState<WeatherForecastDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isCached, setIsCached] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
   const hasLoadedDataRef = useRef(false);
 
   const fetchForecast = useCallback(async () => {
@@ -41,12 +51,13 @@ export function useWeatherForecast(refreshIntervalSeconds = 600) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const data = (await response.json()) as WeatherForecastDayApi[];
-        if (!Array.isArray(data)) {
+        const payload = (await response.json()) as WeatherForecastDayApi[] | WeatherForecastEnvelopeApi;
+        const rawDays = Array.isArray(payload) ? payload : payload.days;
+        if (!Array.isArray(rawDays)) {
           throw new Error('Unexpected weather forecast payload format');
         }
 
-        const mappedForecast = data
+        const mappedForecast = rawDays
           .slice(0, 6)
           .map((day, idx): WeatherForecastDay => {
             const fallbackDate = new Date();
@@ -73,6 +84,15 @@ export function useWeatherForecast(refreshIntervalSeconds = 600) {
         }
 
         setForecast(mappedForecast);
+        if (!Array.isArray(payload)) {
+          setIsCached(Boolean(payload.cached));
+          setUpdatedAt(typeof payload.updated_at === 'string' ? payload.updated_at : null);
+          setTtlSeconds(typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null);
+        } else {
+          setIsCached(false);
+          setUpdatedAt(null);
+          setTtlSeconds(null);
+        }
         setError(null);
       } catch (error) {
         console.error('Error fetching weather forecast:', error);
@@ -88,5 +108,5 @@ export function useWeatherForecast(refreshIntervalSeconds = 600) {
     return () => clearInterval(interval);
   }, [fetchForecast, refreshIntervalSeconds]);
 
-  return { forecast, loading, error, refetch: fetchForecast };
+  return { forecast, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchForecast };
 }

@@ -218,8 +218,11 @@ export function App() {
     forecast,
     loading: forecastLoading,
     error: forecastError,
+    isCached: forecastIsCached,
+    updatedAt: forecastUpdatedAt,
+    ttlSeconds: forecastTtlSeconds,
     refetch: refetchForecast,
-  } = useWeatherForecast(uiConfig.vesselStateRefreshSeconds)
+  } = useWeatherForecast(uiConfig.forecastRefreshSeconds)
   const anchorWatch = useAnchorWatch(
     latitude,
     longitude,
@@ -728,6 +731,9 @@ export function App() {
               forecast={forecast}
               loading={forecastLoading}
               error={forecastError}
+              isCached={forecastIsCached}
+              updatedAt={forecastUpdatedAt}
+              ttlSeconds={forecastTtlSeconds}
               onRetry={refetchForecast}
               unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
             />

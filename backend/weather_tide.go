@@ -25,10 +25,12 @@ import (
 )
 
 const (
-	weatherTodayCacheTTL    = 10 * time.Minute
-	defaultWeatherCacheFile = "cache/weather_today_cache.json"
-	defaultTideCacheFile    = "cache/tide_cache.json"
-	kphToKnots              = 0.539957
+	weatherTodayCacheTTL     = 10 * time.Minute
+	weatherForecastCacheTTL  = 60 * time.Minute
+	defaultWeatherCacheFile  = "cache/weather_today_cache.json"
+	defaultForecastCacheFile = "cache/weather_forecast_cache.json"
+	defaultTideCacheFile     = "cache/tide_cache.json"
+	kphToKnots               = 0.539957
 )
 
 type tideCache struct {
@@ -63,8 +65,18 @@ type weatherTodayCache struct {
 	data map[string]weatherTodayCacheEntry
 }
 
+type weatherForecastCache struct {
+	mu   sync.RWMutex
+	data map[string]weatherForecastCacheEntry
+}
+
 type weatherTodayCacheEntry struct {
 	state    weatherTodayData
+	cachedAt time.Time
+}
+
+type weatherForecastCacheEntry struct {
+	state    []weatherForecastDayData
 	cachedAt time.Time
 }
 
@@ -73,7 +85,13 @@ type weatherTodayCacheEntryDisk struct {
 	CachedAt time.Time        `json:"cached_at"`
 }
 
+type weatherForecastCacheEntryDisk struct {
+	State    []weatherForecastDayData `json:"state"`
+	CachedAt time.Time                `json:"cached_at"`
+}
+
 var weatherTodayCacheStore = &weatherTodayCache{data: make(map[string]weatherTodayCacheEntry)}
+var weatherForecastCacheStore = &weatherForecastCache{data: make(map[string]weatherForecastCacheEntry)}
 
 type jsonCacheDescriptor struct {
 	Name     string
@@ -96,11 +114,14 @@ type cacheInfoResponse struct {
 
 var weatherTodayCacheHits uint64
 var weatherTodayCacheMisses uint64
+var weatherForecastCacheHits uint64
+var weatherForecastCacheMisses uint64
 var tideCacheHits uint64
 var tideCacheMisses uint64
 
 var jsonCacheDescriptors = []jsonCacheDescriptor{
 	{Name: "weather_today", EnvKey: "WEATHER_TODAY_CACHE_FILE", Fallback: defaultWeatherCacheFile, TTL: weatherTodayCacheTTL},
+	{Name: "weather_forecast", EnvKey: "WEATHER_FORECAST_CACHE_FILE", Fallback: defaultForecastCacheFile, TTL: weatherForecastCacheTTL},
 	{Name: "tide", EnvKey: "TIDE_CACHE_FILE", Fallback: defaultTideCacheFile, TTL: 72 * time.Hour},
 }
 
@@ -118,7 +139,7 @@ func listCaches(c echo.Context) error {
 			sizeBytes = info.Size()
 			timestamp := info.ModTime().UTC().Format(time.RFC3339)
 			modifiedAt = &timestamp
-		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		} else if !errors.Is(err, os.ErrNotExist) {
 			log.Printf("Failed to stat cache file %s: %v", filePath, err)
 		}
 
@@ -132,6 +153,12 @@ func listCaches(c echo.Context) error {
 			weatherTodayCacheStore.mu.RUnlock()
 			cacheHits = atomic.LoadUint64(&weatherTodayCacheHits)
 			cacheMisses = atomic.LoadUint64(&weatherTodayCacheMisses)
+		case "weather_forecast":
+			weatherForecastCacheStore.mu.RLock()
+			inMemoryEntries = len(weatherForecastCacheStore.data)
+			weatherForecastCacheStore.mu.RUnlock()
+			cacheHits = atomic.LoadUint64(&weatherForecastCacheHits)
+			cacheMisses = atomic.LoadUint64(&weatherForecastCacheMisses)
 		case "tide":
 			tideCacheStore.mu.RLock()
 			inMemoryEntries = len(tideCacheStore.data)
@@ -179,6 +206,10 @@ func invalidateCache(c echo.Context) error {
 		weatherTodayCacheStore.mu.Lock()
 		weatherTodayCacheStore.data = make(map[string]weatherTodayCacheEntry)
 		weatherTodayCacheStore.mu.Unlock()
+	case "weather_forecast":
+		weatherForecastCacheStore.mu.Lock()
+		weatherForecastCacheStore.data = make(map[string]weatherForecastCacheEntry)
+		weatherForecastCacheStore.mu.Unlock()
 	case "tide":
 		tideCacheStore.mu.Lock()
 		tideCacheStore.data = make(map[string]tideData)
@@ -265,6 +296,13 @@ type weatherForecastDayResponse struct {
 	PrecipitationPct float64 `json:"precipitation_pct"`
 }
 
+type weatherForecastResponse struct {
+	Days       []weatherForecastDayResponse `json:"days"`
+	Cached     bool                         `json:"cached"`
+	UpdatedAt  string                       `json:"updated_at"`
+	TTLSeconds int64                        `json:"ttl_seconds"`
+}
+
 type tideTodayResponse struct {
 	Datetime            string  `json:"datetime"`
 	CurrentTideHeightFt float64 `json:"current_tide_height_ft"`
@@ -286,6 +324,7 @@ type tideTodayETagData struct {
 
 func init() {
 	loadWeatherTodayCacheFromDisk()
+	loadWeatherForecastCacheFromDisk()
 	loadTideCacheFromDisk()
 }
 
@@ -404,6 +443,56 @@ func persistWeatherTodayCacheToDisk() {
 	}
 }
 
+func loadWeatherForecastCacheFromDisk() {
+	path := cacheFilePath("WEATHER_FORECAST_CACHE_FILE", defaultForecastCacheFile)
+	payload := map[string]weatherForecastCacheEntryDisk{}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		log.Printf("Failed to read weather forecast cache file %s: %v", path, err)
+		return
+	}
+
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		log.Printf("Failed to parse weather forecast cache file %s: %v", path, err)
+		return
+	}
+
+	now := time.Now().UTC()
+	loaded := make(map[string]weatherForecastCacheEntry, len(payload))
+	for key, item := range payload {
+		if now.Sub(item.CachedAt) >= weatherForecastCacheTTL {
+			continue
+		}
+
+		stateCopy := append([]weatherForecastDayData(nil), item.State...)
+		loaded[key] = weatherForecastCacheEntry{state: stateCopy, cachedAt: item.CachedAt}
+	}
+
+	weatherForecastCacheStore.mu.Lock()
+	weatherForecastCacheStore.data = loaded
+	weatherForecastCacheStore.mu.Unlock()
+	log.Printf("Loaded %d weather forecast cache entries from %s", len(loaded), path)
+}
+
+func persistWeatherForecastCacheToDisk() {
+	path := cacheFilePath("WEATHER_FORECAST_CACHE_FILE", defaultForecastCacheFile)
+
+	weatherForecastCacheStore.mu.RLock()
+	payload := make(map[string]weatherForecastCacheEntryDisk, len(weatherForecastCacheStore.data))
+	for key, item := range weatherForecastCacheStore.data {
+		stateCopy := append([]weatherForecastDayData(nil), item.state...)
+		payload[key] = weatherForecastCacheEntryDisk{State: stateCopy, CachedAt: item.cachedAt}
+	}
+	weatherForecastCacheStore.mu.RUnlock()
+
+	if err := writeJSONFileAtomic(path, payload); err != nil {
+		log.Printf("Failed to persist weather forecast cache to %s: %v", path, err)
+	}
+}
+
 func loadTideCacheFromDisk() {
 	path := cacheFilePath("TIDE_CACHE_FILE", defaultTideCacheFile)
 	payload := map[string]tideDataDisk{}
@@ -515,8 +604,6 @@ func weatherToday(c echo.Context) error {
 }
 
 func weatherForecast(c echo.Context) error {
-	state := defaultWeatherForecastDays()
-
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	address, port, err := loadSignalKSettings(settingsPath)
 	if err != nil {
@@ -526,19 +613,75 @@ func weatherForecast(c echo.Context) error {
 
 	signalkURL := buildSignalKURL(address, port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
-
-	if signalkURL != "" {
-		vesselState, vesselErr := fetchSignalKVesselState(signalkURL, vesselPath)
-		if vesselErr == nil && vesselState.Latitude >= -90 && vesselState.Latitude <= 90 && vesselState.Longitude >= -180 && vesselState.Longitude <= 180 {
-			forecast, forecastErr := fetchWeatherKitForecastData(vesselState.Latitude, vesselState.Longitude, 6)
-			if forecastErr == nil && len(forecast) > 0 {
-				state = forecast
-			} else if forecastErr != nil {
-				log.Printf("WeatherKit forecast API error: %v", forecastErr)
-			}
-		}
+	if signalkURL == "" {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "SignalK URL is not configured"})
 	}
 
+	vesselState, vesselErr := fetchSignalKVesselState(signalkURL, vesselPath)
+	if vesselErr != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
+	}
+
+	if vesselState.Latitude < -90 || vesselState.Latitude > 90 || vesselState.Longitude < -180 || vesselState.Longitude > 180 {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
+	}
+
+	roundedLat := math.Round(vesselState.Latitude*10) / 10
+	roundedLng := math.Round(vesselState.Longitude*10) / 10
+	vesselLocalLocation := vesselLocalLocation(vesselState.Longitude)
+	localTodayKey := vesselState.Datetime.In(vesselLocalLocation).Format("2006-01-02")
+	cacheKey := fmt.Sprintf("%.1f,%.1f,%s", roundedLat, roundedLng, localTodayKey)
+
+	weatherForecastCacheStore.mu.RLock()
+	cached, ok := weatherForecastCacheStore.data[cacheKey]
+	weatherForecastCacheStore.mu.RUnlock()
+	if ok && time.Since(cached.cachedAt) < weatherForecastCacheTTL && len(cached.state) > 0 {
+		atomic.AddUint64(&weatherForecastCacheHits, 1)
+		response := buildWeatherForecastResponse(cached.state, true, cached.cachedAt)
+		etag, etagErr := weakETagForJSON(response)
+		if etagErr != nil {
+			log.Printf("Failed to build weather forecast ETag: %v", etagErr)
+		}
+		return respondJSONWithETag(c, http.StatusOK, etag, response)
+	}
+
+	atomic.AddUint64(&weatherForecastCacheMisses, 1)
+
+	state, forecastErr := fetchWeatherKitForecastData(vesselState.Latitude, vesselState.Longitude, 6, vesselState.Datetime, vesselLocalLocation)
+	if forecastErr != nil {
+		log.Printf("WeatherKit forecast API error: %v", forecastErr)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "failed to fetch weather forecast"})
+	}
+	if len(state) == 0 {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "weather forecast response was empty"})
+	}
+
+	weatherForecastCacheStore.mu.Lock()
+	cachedAt := time.Now().UTC()
+	weatherForecastCacheStore.data[cacheKey] = weatherForecastCacheEntry{state: append([]weatherForecastDayData(nil), state...), cachedAt: cachedAt}
+	weatherForecastCacheStore.mu.Unlock()
+	persistWeatherForecastCacheToDisk()
+
+	response := buildWeatherForecastResponse(state, false, cachedAt)
+
+	etag, etagErr := weakETagForJSON(response)
+	if etagErr != nil {
+		log.Printf("Failed to build weather forecast ETag: %v", etagErr)
+	}
+
+	return respondJSONWithETag(c, http.StatusOK, etag, response)
+}
+
+func buildWeatherForecastResponse(state []weatherForecastDayData, cached bool, updatedAt time.Time) weatherForecastResponse {
+	return weatherForecastResponse{
+		Days:       mapForecastResponse(state),
+		Cached:     cached,
+		UpdatedAt:  updatedAt.UTC().Format(time.RFC3339),
+		TTLSeconds: int64(weatherForecastCacheTTL / time.Second),
+	}
+}
+
+func mapForecastResponse(state []weatherForecastDayData) []weatherForecastDayResponse {
 	response := make([]weatherForecastDayResponse, 0, len(state))
 	for _, day := range state {
 		response = append(response, weatherForecastDayResponse{
@@ -553,13 +696,7 @@ func weatherForecast(c echo.Context) error {
 			PrecipitationPct: day.PrecipitationPct,
 		})
 	}
-
-	etag, etagErr := weakETagForJSON(response)
-	if etagErr != nil {
-		log.Printf("Failed to build weather forecast ETag: %v", etagErr)
-	}
-
-	return respondJSONWithETag(c, http.StatusOK, etag, response)
+	return response
 }
 
 func tideToday(c echo.Context) error {
@@ -710,9 +847,17 @@ func fetchWeatherKitData(latitude, longitude float64) (weatherTodayData, error) 
 	return data, nil
 }
 
-func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int) ([]weatherForecastDayData, error) {
+func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, referenceDatetime time.Time, localLocation *time.Location) ([]weatherForecastDayData, error) {
 	if daysCount <= 0 {
 		daysCount = 6
+	}
+
+	if referenceDatetime.IsZero() {
+		return nil, fmt.Errorf("missing SignalK navigation.datetime reference")
+	}
+
+	if localLocation == nil {
+		localLocation = time.Local
 	}
 
 	keyID := getEnv("WEATHERKIT_KEY_ID", "")
@@ -729,7 +874,7 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int) ([]
 		return nil, fmt.Errorf("failed to generate JWT: %v", err)
 	}
 
-	requestURL := fmt.Sprintf("https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=forecastDaily&timezone=America/Los_Angeles", latitude, longitude)
+	requestURL := fmt.Sprintf("https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=forecastDaily", latitude, longitude)
 	req, err := http.NewRequest("GET", requestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %v", err)
@@ -767,6 +912,8 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int) ([]
 		return nil, fmt.Errorf("forecastDaily missing from WeatherKit response")
 	}
 
+	localTodayKey := referenceDatetime.In(localLocation).Format("2006-01-02")
+
 	rawDays, ok := forecastDaily["days"].([]any)
 	if !ok || len(rawDays) == 0 {
 		return nil, fmt.Errorf("forecastDaily.days missing from WeatherKit response")
@@ -785,11 +932,18 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int) ([]
 
 		dateLabel := ""
 		dayName := ""
+		dayKey := ""
 		if forecastStart, ok := dayMap["forecastStart"].(string); ok {
 			if parsed, parseErr := time.Parse(time.RFC3339, forecastStart); parseErr == nil {
-				dateLabel = parsed.Format("Jan 2")
-				dayName = parsed.Weekday().String()
+				localized := parsed.In(localLocation)
+				dayKey = localized.Format("2006-01-02")
+				dateLabel = localized.Format("Jan 2")
+				dayName = localized.Weekday().String()
 			}
+		}
+
+		if dayKey != "" && dayKey < localTodayKey {
+			continue
 		}
 
 		highTempF := -1.0
@@ -868,6 +1022,41 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int) ([]
 	}
 
 	return forecast, nil
+}
+
+func weatherKitForecastLocation(result map[string]any, forecastDaily map[string]any) *time.Location {
+	if tz, ok := result["timezone"].(string); ok {
+		if loc, err := time.LoadLocation(strings.TrimSpace(tz)); err == nil {
+			return loc
+		}
+	}
+
+	if metadata, ok := forecastDaily["metadata"].(map[string]any); ok {
+		if tz, ok := metadata["timezone"].(string); ok {
+			if loc, err := time.LoadLocation(strings.TrimSpace(tz)); err == nil {
+				return loc
+			}
+		}
+	}
+
+	return time.UTC
+}
+
+func vesselLocalLocation(longitude float64) *time.Location {
+	if longitude < -180 || longitude > 180 {
+		return time.UTC
+	}
+
+	offsetHours := int(math.Round(longitude / 15))
+	if offsetHours < -12 {
+		offsetHours = -12
+	}
+	if offsetHours > 14 {
+		offsetHours = 14
+	}
+
+	zoneLabel := fmt.Sprintf("UTC%+d", offsetHours)
+	return time.FixedZone(zoneLabel, offsetHours*3600)
 }
 
 func defaultWeatherForecastDays() []weatherForecastDayData {
