@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 const V = 280
 const CX = 140
 const CY = 140
@@ -54,6 +56,8 @@ export function WindCompass({
   windAngleRelativeDeg,
   windSpeedKts,
 }: WindCompassProps) {
+  const arrowGradientId = useId()
+
   const hdg = headingTrue ?? 0
   const sideLabel  = windSide ? windSide.toUpperCase() : '—'
   const angleLabel = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : '—'
@@ -136,7 +140,7 @@ export function WindCompass({
           <defs>
             {/* userSpaceOnUse coords are in the rotated space → gradient rotates with arrow */}
             <linearGradient
-              id="windArrowGrad"
+              id={arrowGradientId}
               gradientUnits="userSpaceOnUse"
               x1={CX} y1={CY - 5}
               x2={CX} y2={TIP_Y}
@@ -146,7 +150,7 @@ export function WindCompass({
               <stop offset="100%" stopColor="#92400e" stopOpacity="0.95" />
             </linearGradient>
           </defs>
-          <path d={arrowD} fill="url(#windArrowGrad)" />
+          <path d={arrowD} fill={`url(#${arrowGradientId})`} />
         </g>
       )}
 
