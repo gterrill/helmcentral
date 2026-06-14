@@ -152,6 +152,64 @@ func queryInfluxDepthTrendSince(start time.Time) []depthTrendPoint {
 	return points
 }
 
+// tideTurnThresholdM is the minimum depth change required to confirm a
+// reversal in tide direction, filtering out sensor/wave noise.
+const tideTurnThresholdM = 0.05
+
+type tideTurningPoint struct {
+	Time   time.Time
+	DepthM float64
+	IsHigh bool
+}
+
+// findLastTideTurningPoint scans chronologically-ordered depth points for the
+// most recent local extremum (a reversal from rising to falling, or vice
+// versa), using tideTurnThresholdM to ignore small fluctuations that aren't a
+// genuine change in tide direction. Returns false if no reversal is found.
+func findLastTideTurningPoint(points []depthTrendPoint) (tideTurningPoint, bool) {
+	if len(points) < 3 {
+		return tideTurningPoint{}, false
+	}
+
+	extremeIdx := 0
+	direction := 0 // 0 = unknown, 1 = rising, -1 = falling
+	var lastTurn tideTurningPoint
+	found := false
+
+	for i := 1; i < len(points); i++ {
+		switch direction {
+		case 1:
+			if points[i].DepthM > points[extremeIdx].DepthM {
+				extremeIdx = i
+			} else if points[extremeIdx].DepthM-points[i].DepthM >= tideTurnThresholdM {
+				lastTurn = tideTurningPoint{Time: points[extremeIdx].Time, DepthM: points[extremeIdx].DepthM, IsHigh: true}
+				found = true
+				direction = -1
+				extremeIdx = i
+			}
+		case -1:
+			if points[i].DepthM < points[extremeIdx].DepthM {
+				extremeIdx = i
+			} else if points[i].DepthM-points[extremeIdx].DepthM >= tideTurnThresholdM {
+				lastTurn = tideTurningPoint{Time: points[extremeIdx].Time, DepthM: points[extremeIdx].DepthM, IsHigh: false}
+				found = true
+				direction = 1
+				extremeIdx = i
+			}
+		default:
+			if diff := points[i].DepthM - points[extremeIdx].DepthM; diff >= tideTurnThresholdM {
+				direction = 1
+				extremeIdx = i
+			} else if diff <= -tideTurnThresholdM {
+				direction = -1
+				extremeIdx = i
+			}
+		}
+	}
+
+	return lastTurn, found
+}
+
 // queryInfluxLastStationaryStart finds the timestamp when the vessel most recently
 // transitioned into a stationary state (moored or anchored) within the last 48h.
 // Returns zero time if not found.

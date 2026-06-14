@@ -203,6 +203,13 @@ func resolveBuildMetadata() (string, string) {
 	return version, revision
 }
 
+type depthTrendResponse struct {
+	Points     []depthTrendPoint `json:"points"`
+	Since      string            `json:"since"`
+	TideType   string            `json:"tide_type,omitempty"`
+	TideDepthM float64           `json:"tide_depth_m,omitempty"`
+}
+
 func depthTrend(c echo.Context) error {
 	window := c.QueryParam("window")
 	if window == "" {
@@ -212,7 +219,16 @@ func depthTrend(c echo.Context) error {
 	if points == nil {
 		points = []depthTrendPoint{}
 	}
-	return c.JSON(http.StatusOK, points)
+
+	if turn, ok := findLastTideTurningPoint(points); ok {
+		tideType := "low"
+		if turn.IsHigh {
+			tideType = "high"
+		}
+		return c.JSON(http.StatusOK, depthTrendResponse{Points: points, Since: "tide", TideType: tideType, TideDepthM: turn.DepthM})
+	}
+
+	return c.JSON(http.StatusOK, depthTrendResponse{Points: points, Since: "window"})
 }
 
 func vesselState(c echo.Context) error {

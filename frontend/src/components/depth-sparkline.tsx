@@ -1,15 +1,18 @@
 import { useId } from 'react'
-import type { DepthTrendPoint } from '@/hooks/use-depth-trend'
+import type { DepthTrendPoint, DepthTrendSince, TideType } from '@/hooks/use-depth-trend'
 
 interface DepthSparklineProps {
   points: DepthTrendPoint[]
   isImperial: boolean
+  since?: DepthTrendSince
+  tideType?: TideType
+  tideDepthM?: number
   className?: string
 }
 
 const METERS_TO_FEET = 3.28084
 
-export function DepthSparkline({ points, isImperial, className }: DepthSparklineProps) {
+export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM, className }: DepthSparklineProps) {
   const gradientId = useId()
 
   if (points.length < 2) return null
@@ -60,14 +63,19 @@ export function DepthSparkline({ points, isImperial, className }: DepthSparkline
 
   const first = values[0]
   const last = values[values.length - 1]
-  const delta = last - first
+  const tideValue = tideDepthM !== undefined ? (isImperial ? tideDepthM * METERS_TO_FEET : tideDepthM) : undefined
+  const delta = since === 'tide' && tideValue !== undefined ? last - tideValue : last - first
   const trendUp = delta > 0.1
   const trendDown = delta < -0.1
+
+  const trendLabel = since === 'tide'
+    ? (tideType === 'high' ? 'Since High Tide' : 'Since Low Tide')
+    : '3h Trend'
 
   return (
     <div className={className}>
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">3h Trend</span>
+        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{trendLabel}</span>
         {trendUp && (
           <span className="text-[10px] font-medium tabular-nums text-secondary">
             ▲ +{fmt(Math.abs(delta))}{unit}

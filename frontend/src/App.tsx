@@ -241,7 +241,7 @@ export function App() {
   )
   const { getSelfTrail, getAisTrails } = useServerTrails(5000)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
-  const depthTrendPoints = useDepthTrend('3h', 60)
+  const depthTrend = useDepthTrend('3h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
@@ -478,8 +478,11 @@ export function App() {
                 </p>
                 {(navigationState === 'anchored' || navigationState === 'moored') && (
                   <DepthSparkline
-                    points={depthTrendPoints}
+                    points={depthTrend.points}
                     isImperial={isImperialDistance}
+                    since={depthTrend.since}
+                    tideType={depthTrend.tideType}
+                    tideDepthM={depthTrend.tideDepthM}
                     className="min-w-0 flex-1"
                   />
                 )}

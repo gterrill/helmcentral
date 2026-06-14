@@ -88,7 +88,7 @@ vi.mock('@/hooks/use-czone-switches', () => ({
   useCZoneSwitches: () => ({ switches: [], loading: false, pending: {}, toggleSwitch: vi.fn() }),
 }))
 
-vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => [] }))
+vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], since: 'window' }) }))
 
 vi.mock('@/config/app-config', () => ({
   appConfig: { boat: { name: 'Test Vessel', model: 'Test' } },
