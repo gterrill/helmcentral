@@ -204,19 +204,9 @@ func resolveBuildMetadata() (string, string) {
 }
 
 func depthTrend(c echo.Context) error {
-	// If the vessel is currently stationary, find when that began and use it
-	// as the start of the depth trend so motoring data is excluded.
-	if stationaryStart := queryInfluxLastStationaryStart(); !stationaryStart.IsZero() {
-		points := queryInfluxDepthTrendSince(stationaryStart)
-		if points == nil {
-			points = []depthTrendPoint{}
-		}
-		return c.JSON(http.StatusOK, points)
-	}
-
 	window := c.QueryParam("window")
 	if window == "" {
-		window = "2h"
+		window = "3h"
 	}
 	points := queryInfluxDepthTrend(window)
 	if points == nil {

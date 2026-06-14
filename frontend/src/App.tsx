@@ -241,7 +241,7 @@ export function App() {
   )
   const { getSelfTrail, getAisTrails } = useServerTrails(5000)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
-  const depthTrendPoints = useDepthTrend('2h', 60)
+  const depthTrendPoints = useDepthTrend('3h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const depthValue =
@@ -250,7 +250,7 @@ export function App() {
         ? (depth * 3.28084).toFixed(1)
         : depth.toFixed(1)
       : '—'
-  const depthUnitLabel = isImperialDistance ? 'feet' : 'metres'
+  const depthUnitLabel = isImperialDistance ? 'feet' : 'm'
   const awaLabel = windAngleApparentDeg !== null ? `${Math.round(windAngleApparentDeg).toString().padStart(3, '0')}°` : '---°'
   const headingLabel = formatHeading(headingTrue)
   const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
