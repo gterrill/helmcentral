@@ -12,6 +12,13 @@ export interface WeatherForecastDay {
   precipitation: number;
 }
 
+export interface WeatherHourlyEntry {
+  label: string;
+  condition: string;
+  temperatureF: number;
+  kind: 'forecast' | 'sunset' | string;
+}
+
 interface WeatherForecastDayApi {
   date?: string;
   day_name?: string;
@@ -26,6 +33,13 @@ interface WeatherForecastDayApi {
 
 interface WeatherForecastEnvelopeApi {
   days?: WeatherForecastDayApi[];
+  hourly_today?: Array<{
+    label?: string;
+    condition?: string;
+    temperature_f?: number;
+    kind?: string;
+  }>;
+  summary?: string;
   cached?: boolean;
   updated_at?: string;
   ttl_seconds?: number;
@@ -35,6 +49,8 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
   const [forecast, setForecast] = useState<WeatherForecastDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hourlyToday, setHourlyToday] = useState<WeatherHourlyEntry[]>([]);
+  const [summary, setSummary] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
@@ -85,10 +101,21 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
 
         setForecast(mappedForecast);
         if (!Array.isArray(payload)) {
+          setHourlyToday(Array.isArray(payload.hourly_today)
+            ? payload.hourly_today.map((entry) => ({
+                label: entry.label || '—',
+                condition: entry.condition || 'Unknown',
+                temperatureF: typeof entry.temperature_f === 'number' ? entry.temperature_f : -1,
+                kind: entry.kind || 'forecast',
+              }))
+            : []);
+          setSummary(typeof payload.summary === 'string' ? payload.summary : null);
           setIsCached(Boolean(payload.cached));
           setUpdatedAt(typeof payload.updated_at === 'string' ? payload.updated_at : null);
           setTtlSeconds(typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null);
         } else {
+          setHourlyToday([]);
+          setSummary(null);
           setIsCached(false);
           setUpdatedAt(null);
           setTtlSeconds(null);
@@ -108,5 +135,5 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
     return () => clearInterval(interval);
   }, [fetchForecast, refreshIntervalSeconds]);
 
-  return { forecast, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchForecast };
+  return { forecast, hourlyToday, summary, loading, error, isCached, updatedAt, ttlSeconds, refetch: fetchForecast };
 }

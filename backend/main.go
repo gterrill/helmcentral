@@ -269,8 +269,8 @@ func vesselState(c echo.Context) error {
 		if maxGust10mKts < 0 {
 			maxGust10mKts = 0
 		}
-		if maxGust1hKts < 0 {
-			maxGust1hKts = 0
+		if maxGust1hKts < maxGust10mKts {
+			maxGust1hKts = maxGust10mKts
 		}
 	}
 

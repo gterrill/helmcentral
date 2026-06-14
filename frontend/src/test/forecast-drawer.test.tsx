@@ -93,4 +93,39 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByTestId('forecast-selected-wind')).toHaveTextContent('22.0 kts')
     expect(screen.getByTestId('forecast-selected-gust')).toHaveTextContent('30.0 kts')
   })
+
+  it('renders the hourly strip with summary and sunset marker', () => {
+    render(
+      <ForecastDrawer
+        forecast={[
+          {
+            date: 'Jun 14',
+            dayName: 'Sunday',
+            condition: 'Mostly Sunny',
+            high: 76,
+            low: 62,
+            windSpeed: 10,
+            windGust: 14,
+            windDirection: 'NE',
+            precipitation: 5,
+          },
+        ]}
+        hourlyToday={[
+          { label: 'Now', condition: 'Mostly Sunny', temperatureF: 72, kind: 'forecast' },
+          { label: '11AM', condition: 'Mostly Sunny', temperatureF: 72, kind: 'forecast' },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, kind: 'sunset' },
+        ]}
+        summary="Sunny conditions will continue all day."
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByText('Sunny conditions will continue all day.')).toBeInTheDocument()
+    expect(screen.getByText('Now')).toBeInTheDocument()
+    expect(screen.getByText('11AM')).toBeInTheDocument()
+    expect(screen.getByText('5:09PM')).toBeInTheDocument()
+    expect(screen.getByText('Sunset')).toBeInTheDocument()
+  })
 })

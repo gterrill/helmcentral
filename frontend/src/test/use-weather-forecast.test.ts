@@ -81,6 +81,21 @@ describe('useWeatherForecast', () => {
             precipitation_pct: 5,
           },
         ],
+        hourly_today: [
+          {
+            label: 'Now',
+            condition: 'Mostly Sunny',
+            temperature_f: 72,
+            kind: 'forecast',
+          },
+          {
+            label: '5:09PM',
+            condition: 'Sunset',
+            temperature_f: -1,
+            kind: 'sunset',
+          },
+        ],
+        summary: 'Mostly Sunny conditions will continue through today.',
         cached: true,
         updated_at: '2026-06-14T12:30:00Z',
         ttl_seconds: 3600,
@@ -95,6 +110,9 @@ describe('useWeatherForecast', () => {
     })
 
     expect(result.current.forecast).toHaveLength(1)
+    expect(result.current.hourlyToday).toHaveLength(2)
+    expect(result.current.hourlyToday[1].kind).toBe('sunset')
+    expect(result.current.summary).toBe('Mostly Sunny conditions will continue through today.')
     expect(result.current.isCached).toBe(true)
     expect(result.current.updatedAt).toBe('2026-06-14T12:30:00Z')
     expect(result.current.ttlSeconds).toBe(3600)

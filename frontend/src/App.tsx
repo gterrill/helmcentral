@@ -216,6 +216,8 @@ export function App() {
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
   const {
     forecast,
+    hourlyToday: forecastHourlyToday,
+    summary: forecastSummary,
     loading: forecastLoading,
     error: forecastError,
     isCached: forecastIsCached,
@@ -729,6 +731,8 @@ export function App() {
             <div className="px-6 py-4">
               <ForecastDrawer
               forecast={forecast}
+              hourlyToday={forecastHourlyToday}
+              summary={forecastSummary}
               loading={forecastLoading}
               error={forecastError}
               isCached={forecastIsCached}

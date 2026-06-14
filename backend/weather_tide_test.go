@@ -73,7 +73,7 @@ func TestBuildWeatherForecastResponse_UsesCacheMetadata(t *testing.T) {
 		},
 	}
 
-	response := buildWeatherForecastResponse(state, true, updatedAt)
+	response := buildWeatherForecastResponse(weatherForecastDataBundle{Days: state}, true, updatedAt)
 
 	if !response.Cached {
 		t.Fatalf("expected cached=true")
@@ -101,5 +101,20 @@ func TestVesselLocalLocation_ClampsInvalidLongitudeToUTC(t *testing.T) {
 	loc := vesselLocalLocation(181)
 	if loc != time.UTC {
 		t.Fatalf("expected UTC for invalid longitude, got %s", loc.String())
+	}
+}
+
+func TestSummarizeHourlyForecast_IncludesTypicalWindAndGust(t *testing.T) {
+	entries := []weatherHourlyEntryData{
+		{Label: "Now", Condition: "Mostly Sunny", WindSpeedKts: 10, WindGustKts: 18, Kind: "forecast"},
+		{Label: "11AM", Condition: "Mostly Sunny", WindSpeedKts: 12, WindGustKts: 20, Kind: "forecast"},
+		{Label: "12PM", Condition: "Mostly Sunny", WindSpeedKts: 11, WindGustKts: 19, Kind: "forecast"},
+		{Label: "5:09PM", Condition: "Sunset", Kind: "sunset"},
+	}
+
+	summary := summarizeHourlyForecast(entries)
+	expected := "Mostly Sunny conditions will continue all day. Winds around 11 kts with gusts up to 20 kts."
+	if summary != expected {
+		t.Fatalf("expected %q, got %q", expected, summary)
 	}
 }

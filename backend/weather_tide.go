@@ -76,7 +76,7 @@ type weatherTodayCacheEntry struct {
 }
 
 type weatherForecastCacheEntry struct {
-	state    []weatherForecastDayData
+	state    weatherForecastDataBundle
 	cachedAt time.Time
 }
 
@@ -86,8 +86,8 @@ type weatherTodayCacheEntryDisk struct {
 }
 
 type weatherForecastCacheEntryDisk struct {
-	State    []weatherForecastDayData `json:"state"`
-	CachedAt time.Time                `json:"cached_at"`
+	State    weatherForecastDataBundle `json:"state"`
+	CachedAt time.Time                 `json:"cached_at"`
 }
 
 var weatherTodayCacheStore = &weatherTodayCache{data: make(map[string]weatherTodayCacheEntry)}
@@ -251,6 +251,21 @@ type weatherForecastDayData struct {
 	PrecipitationPct float64
 }
 
+type weatherHourlyEntryData struct {
+	Label        string
+	Condition    string
+	TemperatureF float64
+	WindSpeedKts float64
+	WindGustKts  float64
+	Kind         string
+}
+
+type weatherForecastDataBundle struct {
+	Days        []weatherForecastDayData
+	HourlyToday []weatherHourlyEntryData
+	Summary     string
+}
+
 type tideTodayData struct {
 	Datetime            time.Time
 	CurrentTideHeightFt float64
@@ -296,11 +311,20 @@ type weatherForecastDayResponse struct {
 	PrecipitationPct float64 `json:"precipitation_pct"`
 }
 
+type weatherHourlyEntryResponse struct {
+	Label        string  `json:"label"`
+	Condition    string  `json:"condition"`
+	TemperatureF float64 `json:"temperature_f"`
+	Kind         string  `json:"kind"`
+}
+
 type weatherForecastResponse struct {
-	Days       []weatherForecastDayResponse `json:"days"`
-	Cached     bool                         `json:"cached"`
-	UpdatedAt  string                       `json:"updated_at"`
-	TTLSeconds int64                        `json:"ttl_seconds"`
+	Days        []weatherForecastDayResponse `json:"days"`
+	HourlyToday []weatherHourlyEntryResponse `json:"hourly_today"`
+	Summary     string                       `json:"summary"`
+	Cached      bool                         `json:"cached"`
+	UpdatedAt   string                       `json:"updated_at"`
+	TTLSeconds  int64                        `json:"ttl_seconds"`
 }
 
 type tideTodayResponse struct {
@@ -467,7 +491,7 @@ func loadWeatherForecastCacheFromDisk() {
 			continue
 		}
 
-		stateCopy := append([]weatherForecastDayData(nil), item.State...)
+		stateCopy := cloneWeatherForecastBundle(item.State)
 		loaded[key] = weatherForecastCacheEntry{state: stateCopy, cachedAt: item.CachedAt}
 	}
 
@@ -483,13 +507,21 @@ func persistWeatherForecastCacheToDisk() {
 	weatherForecastCacheStore.mu.RLock()
 	payload := make(map[string]weatherForecastCacheEntryDisk, len(weatherForecastCacheStore.data))
 	for key, item := range weatherForecastCacheStore.data {
-		stateCopy := append([]weatherForecastDayData(nil), item.state...)
+		stateCopy := cloneWeatherForecastBundle(item.state)
 		payload[key] = weatherForecastCacheEntryDisk{State: stateCopy, CachedAt: item.cachedAt}
 	}
 	weatherForecastCacheStore.mu.RUnlock()
 
 	if err := writeJSONFileAtomic(path, payload); err != nil {
 		log.Printf("Failed to persist weather forecast cache to %s: %v", path, err)
+	}
+}
+
+func cloneWeatherForecastBundle(bundle weatherForecastDataBundle) weatherForecastDataBundle {
+	return weatherForecastDataBundle{
+		Days:        append([]weatherForecastDayData(nil), bundle.Days...),
+		HourlyToday: append([]weatherHourlyEntryData(nil), bundle.HourlyToday...),
+		Summary:     bundle.Summary,
 	}
 }
 
@@ -635,7 +667,7 @@ func weatherForecast(c echo.Context) error {
 	weatherForecastCacheStore.mu.RLock()
 	cached, ok := weatherForecastCacheStore.data[cacheKey]
 	weatherForecastCacheStore.mu.RUnlock()
-	if ok && time.Since(cached.cachedAt) < weatherForecastCacheTTL && len(cached.state) > 0 {
+	if ok && time.Since(cached.cachedAt) < weatherForecastCacheTTL && len(cached.state.Days) > 0 {
 		atomic.AddUint64(&weatherForecastCacheHits, 1)
 		response := buildWeatherForecastResponse(cached.state, true, cached.cachedAt)
 		etag, etagErr := weakETagForJSON(response)
@@ -647,22 +679,22 @@ func weatherForecast(c echo.Context) error {
 
 	atomic.AddUint64(&weatherForecastCacheMisses, 1)
 
-	state, forecastErr := fetchWeatherKitForecastData(vesselState.Latitude, vesselState.Longitude, 6, vesselState.Datetime, vesselLocalLocation)
+	bundle, forecastErr := fetchWeatherKitForecastBundleData(vesselState.Latitude, vesselState.Longitude, 6, vesselState.Datetime, vesselLocalLocation)
 	if forecastErr != nil {
 		log.Printf("WeatherKit forecast API error: %v", forecastErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "failed to fetch weather forecast"})
 	}
-	if len(state) == 0 {
+	if len(bundle.Days) == 0 {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "weather forecast response was empty"})
 	}
 
 	weatherForecastCacheStore.mu.Lock()
 	cachedAt := time.Now().UTC()
-	weatherForecastCacheStore.data[cacheKey] = weatherForecastCacheEntry{state: append([]weatherForecastDayData(nil), state...), cachedAt: cachedAt}
+	weatherForecastCacheStore.data[cacheKey] = weatherForecastCacheEntry{state: cloneWeatherForecastBundle(bundle), cachedAt: cachedAt}
 	weatherForecastCacheStore.mu.Unlock()
 	persistWeatherForecastCacheToDisk()
 
-	response := buildWeatherForecastResponse(state, false, cachedAt)
+	response := buildWeatherForecastResponse(bundle, false, cachedAt)
 
 	etag, etagErr := weakETagForJSON(response)
 	if etagErr != nil {
@@ -672,12 +704,14 @@ func weatherForecast(c echo.Context) error {
 	return respondJSONWithETag(c, http.StatusOK, etag, response)
 }
 
-func buildWeatherForecastResponse(state []weatherForecastDayData, cached bool, updatedAt time.Time) weatherForecastResponse {
+func buildWeatherForecastResponse(bundle weatherForecastDataBundle, cached bool, updatedAt time.Time) weatherForecastResponse {
 	return weatherForecastResponse{
-		Days:       mapForecastResponse(state),
-		Cached:     cached,
-		UpdatedAt:  updatedAt.UTC().Format(time.RFC3339),
-		TTLSeconds: int64(weatherForecastCacheTTL / time.Second),
+		Days:        mapForecastResponse(bundle.Days),
+		HourlyToday: mapWeatherHourlyResponse(bundle.HourlyToday),
+		Summary:     bundle.Summary,
+		Cached:      cached,
+		UpdatedAt:   updatedAt.UTC().Format(time.RFC3339),
+		TTLSeconds:  int64(weatherForecastCacheTTL / time.Second),
 	}
 }
 
@@ -694,6 +728,19 @@ func mapForecastResponse(state []weatherForecastDayData) []weatherForecastDayRes
 			WindGustKts:      day.WindGustKts,
 			WindDirection:    day.WindDirection,
 			PrecipitationPct: day.PrecipitationPct,
+		})
+	}
+	return response
+}
+
+func mapWeatherHourlyResponse(entries []weatherHourlyEntryData) []weatherHourlyEntryResponse {
+	response := make([]weatherHourlyEntryResponse, 0, len(entries))
+	for _, entry := range entries {
+		response = append(response, weatherHourlyEntryResponse{
+			Label:        entry.Label,
+			Condition:    entry.Condition,
+			TemperatureF: entry.TemperatureF,
+			Kind:         entry.Kind,
 		})
 	}
 	return response
@@ -847,13 +894,14 @@ func fetchWeatherKitData(latitude, longitude float64, observedAt time.Time, loca
 	return data, nil
 }
 
-func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, referenceDatetime time.Time, localLocation *time.Location) ([]weatherForecastDayData, error) {
+func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount int, referenceDatetime time.Time, localLocation *time.Location) (weatherForecastDataBundle, error) {
+	bundle := weatherForecastDataBundle{}
 	if daysCount <= 0 {
 		daysCount = 6
 	}
 
 	if referenceDatetime.IsZero() {
-		return nil, fmt.Errorf("missing SignalK navigation.datetime reference")
+		return bundle, fmt.Errorf("missing SignalK navigation.datetime reference")
 	}
 
 	if localLocation == nil {
@@ -866,36 +914,36 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, ref
 	privateKeyPEM := getEnv("WEATHERKIT_PRIVATE_KEY", "")
 
 	if keyID == "" || teamID == "" || serviceID == "" || privateKeyPEM == "" {
-		return nil, fmt.Errorf("WeatherKit credentials not configured")
+		return bundle, fmt.Errorf("WeatherKit credentials not configured")
 	}
 
 	token, err := generateWeatherKitJWT(keyID, teamID, serviceID, privateKeyPEM)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate JWT: %v", err)
+		return bundle, fmt.Errorf("failed to generate JWT: %v", err)
 	}
 
-	requestURL := fmt.Sprintf("https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=forecastDaily", latitude, longitude)
+	requestURL := fmt.Sprintf("https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=forecastDaily,forecastHourly", latitude, longitude)
 	req, err := http.NewRequest("GET", requestURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
+		return bundle, fmt.Errorf("failed to create request: %v", err)
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch weather forecast: %v", err)
+		return bundle, fmt.Errorf("failed to fetch weather forecast: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("WeatherKit forecast API returned %d: %s", resp.StatusCode, string(body))
+		return bundle, fmt.Errorf("WeatherKit forecast API returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read forecast response body: %v", err)
+		return bundle, fmt.Errorf("failed to read forecast response body: %v", err)
 	}
 
 	var result map[string]any
@@ -904,22 +952,23 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, ref
 		if len(snippet) > 500 {
 			snippet = snippet[:500]
 		}
-		return nil, fmt.Errorf("failed to parse forecast response: %v; body: %s", err, snippet)
+		return bundle, fmt.Errorf("failed to parse forecast response: %v; body: %s", err, snippet)
 	}
 
 	forecastDaily, ok := result["forecastDaily"].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("forecastDaily missing from WeatherKit response")
+		return bundle, fmt.Errorf("forecastDaily missing from WeatherKit response")
 	}
 
 	localTodayKey := referenceDatetime.In(localLocation).Format("2006-01-02")
 
 	rawDays, ok := forecastDaily["days"].([]any)
 	if !ok || len(rawDays) == 0 {
-		return nil, fmt.Errorf("forecastDaily.days missing from WeatherKit response")
+		return bundle, fmt.Errorf("forecastDaily.days missing from WeatherKit response")
 	}
 
 	forecast := make([]weatherForecastDayData, 0, daysCount)
+	var sunsetAt time.Time
 	for _, rawDay := range rawDays {
 		if len(forecast) >= daysCount {
 			break
@@ -944,6 +993,14 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, ref
 
 		if dayKey != "" && dayKey < localTodayKey {
 			continue
+		}
+
+		if dayKey == localTodayKey {
+			if sunsetValue, ok := dayMap["sunset"].(string); ok {
+				if parsedSunset, parseErr := time.Parse(time.RFC3339, sunsetValue); parseErr == nil {
+					sunsetAt = parsedSunset.In(localLocation)
+				}
+			}
 		}
 
 		highTempF := -1.0
@@ -1018,10 +1075,148 @@ func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, ref
 	}
 
 	if len(forecast) == 0 {
-		return nil, fmt.Errorf("no forecast days parsed from WeatherKit response")
+		return bundle, fmt.Errorf("no forecast days parsed from WeatherKit response")
 	}
 
-	return forecast, nil
+	bundle.Days = forecast
+	bundle.HourlyToday = buildWeatherHourlyEntries(result, referenceDatetime, localLocation, localTodayKey, sunsetAt)
+	bundle.Summary = summarizeHourlyForecast(bundle.HourlyToday)
+
+	return bundle, nil
+}
+
+func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, referenceDatetime time.Time, localLocation *time.Location) ([]weatherForecastDayData, error) {
+	bundle, err := fetchWeatherKitForecastBundleData(latitude, longitude, daysCount, referenceDatetime, localLocation)
+	if err != nil {
+		return nil, err
+	}
+	return bundle.Days, nil
+}
+
+func buildWeatherHourlyEntries(result map[string]any, referenceDatetime time.Time, localLocation *time.Location, localTodayKey string, sunsetAt time.Time) []weatherHourlyEntryData {
+	forecastHourly, ok := result["forecastHourly"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	rawHours, ok := forecastHourly["hours"].([]any)
+	if !ok || len(rawHours) == 0 {
+		return nil
+	}
+
+	referenceLocal := referenceDatetime.In(localLocation)
+	referenceHour := referenceLocal.Truncate(time.Hour)
+	entries := make([]weatherHourlyEntryData, 0, 12)
+	insertedSunset := false
+
+	for _, rawHour := range rawHours {
+		if len(entries) >= 12 {
+			break
+		}
+		hourMap, ok := rawHour.(map[string]any)
+		if !ok {
+			continue
+		}
+		forecastStart, ok := hourMap["forecastStart"].(string)
+		if !ok {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, forecastStart)
+		if err != nil {
+			continue
+		}
+		localTime := parsed.In(localLocation)
+		if localTime.Format("2006-01-02") != localTodayKey || localTime.Before(referenceHour) {
+			continue
+		}
+
+		if !insertedSunset && !sunsetAt.IsZero() && sunsetAt.After(referenceLocal) && localTime.After(sunsetAt) {
+			entries = append(entries, weatherHourlyEntryData{Label: sunsetAt.Format("3:04PM"), Condition: "Sunset", TemperatureF: -1, Kind: "sunset"})
+			insertedSunset = true
+			if len(entries) >= 12 {
+				break
+			}
+		}
+
+		condition := "Unknown"
+		if code, ok := hourMap["conditionCode"].(string); ok {
+			condition = formatWeatherConditionAt(code, localTime, localLocation, false)
+		}
+
+		temperatureF := -1.0
+		if tempC, ok := hourMap["temperature"].(float64); ok {
+			temperatureF = (tempC * 9 / 5) + 32
+		}
+
+		windSpeedKts := -1.0
+		if speed, ok := hourMap["windSpeed"].(float64); ok {
+			windSpeedKts = speed * kphToKnots
+		}
+
+		windGustKts := -1.0
+		if gust, ok := hourMap["windGust"].(float64); ok {
+			windGustKts = gust * kphToKnots
+		} else if windSpeedKts >= 0 {
+			windGustKts = windSpeedKts
+		}
+
+		label := localTime.Format("3PM")
+		if localTime.Equal(referenceHour) {
+			label = "Now"
+		}
+
+		entries = append(entries, weatherHourlyEntryData{Label: label, Condition: condition, TemperatureF: temperatureF, WindSpeedKts: windSpeedKts, WindGustKts: windGustKts, Kind: "forecast"})
+	}
+
+	if !insertedSunset && !sunsetAt.IsZero() && sunsetAt.Format("2006-01-02") == localTodayKey && sunsetAt.After(referenceLocal) && len(entries) < 12 {
+		entries = append(entries, weatherHourlyEntryData{Label: sunsetAt.Format("3:04PM"), Condition: "Sunset", TemperatureF: -1, Kind: "sunset"})
+	}
+
+	return entries
+}
+
+func summarizeHourlyForecast(entries []weatherHourlyEntryData) string {
+	conditionCounts := map[string]int{}
+	bestCondition := ""
+	bestCount := 0
+	windSamples := 0
+	totalWindSpeed := 0.0
+	maxWindGust := 0.0
+
+	for _, entry := range entries {
+		if entry.Kind != "forecast" {
+			continue
+		}
+		if entry.Condition != "Unknown" {
+			conditionCounts[entry.Condition]++
+			if conditionCounts[entry.Condition] > bestCount {
+				bestCount = conditionCounts[entry.Condition]
+				bestCondition = entry.Condition
+			}
+		}
+		if entry.WindSpeedKts >= 0 {
+			totalWindSpeed += entry.WindSpeedKts
+			windSamples++
+		}
+		if entry.WindGustKts > maxWindGust {
+			maxWindGust = entry.WindGustKts
+		}
+	}
+
+	if bestCondition == "" {
+		return "Today's hourly forecast"
+	}
+
+	if windSamples == 0 {
+		return fmt.Sprintf("%s conditions will continue all day.", bestCondition)
+	}
+
+	typicalWind := int(math.Round(totalWindSpeed / float64(windSamples)))
+	gustWind := int(math.Round(maxWindGust))
+	if gustWind < typicalWind {
+		gustWind = typicalWind
+	}
+
+	return fmt.Sprintf("%s conditions will continue all day. Winds around %d kts with gusts up to %d kts.", bestCondition, typicalWind, gustWind)
 }
 
 func weatherKitForecastLocation(result map[string]any, forecastDaily map[string]any) *time.Location {

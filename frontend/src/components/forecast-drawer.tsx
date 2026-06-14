@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 
-import { Cloud, CloudRain, Sun } from 'lucide-react'
+import { Cloud, CloudRain, Moon, Sun, Sunset } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import type { WeatherHourlyEntry } from '@/hooks/use-weather-forecast'
 
 interface ForecastDay {
   date: string
@@ -18,6 +19,8 @@ interface ForecastDay {
 
 interface ForecastDrawerProps {
   forecast: ForecastDay[]
+  hourlyToday?: WeatherHourlyEntry[]
+  summary?: string | null
   loading?: boolean
   error?: string | null
   isCached?: boolean
@@ -46,6 +49,19 @@ function getWeatherIcon(condition: string, size: number = 40) {
   }
   
   return <Cloud {...iconProps} className="text-gray-400" />
+}
+
+function getHourlyWeatherIcon(entry: WeatherHourlyEntry, isNight: boolean) {
+  if (entry.kind === 'sunset') {
+    return <Sunset size={24} className="text-amber-300" />
+  }
+
+  const normalized = entry.condition.toLowerCase()
+  if (isNight && (normalized.includes('clear') || normalized.includes('sunny'))) {
+    return <Moon size={24} className="text-slate-100" />
+  }
+
+  return getWeatherIcon(entry.condition, 24)
 }
 
 function formatUpdatedAt(value: string | null | undefined) {
@@ -101,6 +117,8 @@ export function formatRefreshAge(value: string | null | undefined, nowMs: number
 
 export function ForecastDrawer({
   forecast,
+  hourlyToday = [],
+  summary = null,
   loading = false,
   error = null,
   isCached = false,
@@ -160,6 +178,7 @@ export function ForecastDrawer({
   const windUnit = 'kts'
   const displayTemp = (tempF: number) => (unit === 'metric' ? fahrenheitToCelsius(tempF) : tempF)
   const days = forecast.slice(0, 6)
+  const hourlyEntries = hourlyToday.slice(0, 12)
 
   useEffect(() => {
     setSelectedDayIndex((prev) => (prev < days.length ? prev : 0))
@@ -221,6 +240,32 @@ export function ForecastDrawer({
             <p className="mt-1 text-amber-800">Cache window: {cacheMinutes} minutes</p>
           )}
         </div>
+      )}
+
+      {hourlyEntries.length > 0 && (
+    <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(67,122,181,0.88),rgba(34,102,171,0.82))] px-4 py-4 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+      <p className="text-sm font-medium text-white/90">
+        {summary ?? "Today's hourly forecast"}
+      </p>
+      <div className="mt-4 border-t border-white/20 pt-4">
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {hourlyEntries.map((entry, idx) => {
+            const nightMode = hourlyEntries.slice(0, idx).some((item) => item.kind === 'sunset')
+            const displayTemperature = entry.temperatureF >= 0 ? Math.round(displayTemp(entry.temperatureF)) : null
+
+            return (
+              <div key={`${entry.kind}-${entry.label}-${idx}`} className="flex min-w-[64px] flex-col items-center text-center">
+                <p className="text-sm font-semibold text-white/90">{entry.label}</p>
+                <div className="mt-4 flex h-8 items-center justify-center">
+                  {getHourlyWeatherIcon(entry, nightMode)}
+                </div>
+                <p className="mt-4 text-[13px] font-semibold text-white/85">{entry.kind === 'sunset' ? 'Sunset' : displayTemperature !== null ? `${displayTemperature}°` : '—'}</p>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
       )}
 
       <div>
