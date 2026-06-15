@@ -138,13 +138,14 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
   )
 }
 
-// Renders a small double-headed arrow pointing toward the direction the
-// swell is coming from.
+// Renders a small double-headed arrow pointing in the direction the swell
+// is heading (the API reports the direction it's coming from, so this is
+// rotated 180 degrees to match the convention used by most swell forecasts).
 function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; directionDeg: number }) {
   if (directionDeg < 0) return null
 
   const color = 'rgba(37,99,235,0.85)'
-  const angleRad = (directionDeg * Math.PI) / 180
+  const angleRad = ((directionDeg + 180) * Math.PI) / 180
   const dirX = Math.sin(angleRad)
   const dirY = -Math.cos(angleRad)
   const perpX = -dirY
@@ -522,7 +523,7 @@ export function ForecastDrawer({
                     })}
                   </svg>
                   <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-secondary">— Wave height (m)</span>, period shown below each tick · arrows show direction the swell is coming from
+                    <span className="text-secondary">— Wave height (m)</span>, period shown below each tick · arrows show direction the swell is heading
                   </p>
                 </>
               ) : (
