@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { ReactNode } from 'react'
 
-import { Cloud, CloudRain, Moon, Sun, Sunset, Wind, Waves } from 'lucide-react'
+import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import type { WeatherHourlyEntry, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
+import type { WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
 
 interface ForecastDay {
   date: string
@@ -16,9 +16,16 @@ interface ForecastDay {
   windGust: number
   windDirection: string
   windSummary: string | null
+  waveSummary: string | null
+  precipitationSummary: string | null
   precipitation: number
+  sunriseTime: string | null
+  sunsetTime: string | null
+  moonPhase: string | null
   hourlyWind: WeatherHourlyWindPoint[]
   hourlyWave: WeatherHourlyWavePoint[]
+  hourlyPrecip: WeatherHourlyPrecipPoint[]
+  hourlyUV: WeatherHourlyUVPoint[]
 }
 
 interface ForecastDrawerProps {
@@ -53,6 +60,36 @@ function getWeatherIcon(condition: string, size: number = 40) {
   }
   
   return <Cloud {...iconProps} className="text-gray-400" />
+}
+
+const MOON_PHASE_LABELS: Record<string, string> = {
+  new: 'New Moon',
+  waxingCrescent: 'Waxing Crescent',
+  firstQuarter: 'First Quarter',
+  waxingGibbous: 'Waxing Gibbous',
+  full: 'Full Moon',
+  waningGibbous: 'Waning Gibbous',
+  lastQuarter: 'Last Quarter',
+  waningCrescent: 'Waning Crescent',
+}
+
+const MOON_PHASE_EMOJI: Record<string, string> = {
+  new: '🌑',
+  waxingCrescent: '🌒',
+  firstQuarter: '🌓',
+  waxingGibbous: '🌔',
+  full: '🌕',
+  waningGibbous: '🌖',
+  lastQuarter: '🌗',
+  waningCrescent: '🌘',
+}
+
+function moonPhaseLabel(phase: string) {
+  return MOON_PHASE_LABELS[phase] ?? phase
+}
+
+function moonPhaseEmoji(phase: string) {
+  return MOON_PHASE_EMOJI[phase] ?? '🌙'
 }
 
 function getHourlyWeatherIcon(entry: WeatherHourlyEntry, isNight: boolean) {
@@ -172,6 +209,37 @@ function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; 
   )
 }
 
+// Colors a precipitation intensity bar by Apple Weather's Light/Moderate/Heavy
+// bands (mm/hr), using progressively darker blue.
+function precipBarColor(intensityMm: number) {
+  if (intensityMm >= 7.6) return 'rgba(29,78,216,0.9)'
+  if (intensityMm >= 2.5) return 'rgba(59,130,246,0.85)'
+  return 'rgba(147,197,253,0.85)'
+}
+
+// WHO UV Index scale color stops (Low/Moderate/High/Very High/Extreme),
+// used to build the UV chart's gradient fill and line.
+const UV_GRADIENT_STOPS = [
+  { value: 0, color: 'rgb(34,197,94)' },
+  { value: 2, color: 'rgb(34,197,94)' },
+  { value: 3, color: 'rgb(250,204,21)' },
+  { value: 5, color: 'rgb(250,204,21)' },
+  { value: 6, color: 'rgb(249,115,22)' },
+  { value: 7, color: 'rgb(249,115,22)' },
+  { value: 8, color: 'rgb(239,68,68)' },
+  { value: 10, color: 'rgb(239,68,68)' },
+  { value: 11, color: 'rgb(168,85,247)' },
+]
+
+// Left-axis band labels for the UV chart, positioned at each band's center value.
+const UV_BAND_LABELS = [
+  { value: 10, label: 'Extreme' },
+  { value: 8.5, label: 'Very High' },
+  { value: 6.5, label: 'High' },
+  { value: 4, label: 'Moderate' },
+  { value: 1, label: 'Low' },
+]
+
 function formatUpdatedAt(value: string | null | undefined) {
   if (!value) {
     return 'Unknown'
@@ -240,6 +308,8 @@ export function ForecastDrawer({
   const cacheMinutes = ttlSeconds && ttlSeconds > 0 ? Math.round(ttlSeconds / 60) : null
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
+  const uvAreaGradientId = useId()
+  const uvLineGradientId = useId()
 
   useEffect(() => {
     if (!updatedAt) {
@@ -296,10 +366,11 @@ export function ForecastDrawer({
 
   const humidityPct = Math.max(35, Math.min(95, Math.round(45 + (selectedDay.precipitation * 0.4))))
   const visibilityNm = Math.max(1, 12 - (selectedDay.precipitation * 0.06))
-  const uvIndex = Math.max(1, Math.min(11, Math.round((selectedDay.high - 32) / 8)))
 
   const windHourly = selectedDay.hourlyWind ?? []
   const waveHourly = selectedDay.hourlyWave ?? []
+  const precipHourly = selectedDay.hourlyPrecip ?? []
+  const uvHourly = selectedDay.hourlyUV ?? []
 
   const hourlyChartLeft = 30
   const hourlyChartRight = 980
@@ -331,6 +402,35 @@ export function ForecastDrawer({
     ? `M ${hourlyXFor(0, waveHourly.length)} ${waveChartBottom} L ${waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)} ${waveYFor(value)}`).join(' L ')} L ${hourlyXFor(waveHourly.length - 1, waveHourly.length)} ${waveChartBottom} Z`
     : ''
   const wavePoints = waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
+
+  const precipIntensities = precipHourly.map((entry) => Math.max(0, entry.precipIntensityMm))
+  const precipChances = precipHourly.map((entry) => Math.max(0, Math.min(100, entry.precipChancePct)))
+  const precipMax = Math.max(1, ...precipIntensities)
+  const precipChartTop = 35
+  const precipChartBottom = 125
+  const precipBarYFor = (value: number) => precipChartTop + (1 - value / precipMax) * (precipChartBottom - precipChartTop)
+  const precipChanceYFor = (value: number) => precipChartTop + (1 - value / 100) * (precipChartBottom - precipChartTop)
+  const precipTickEvery = Math.max(1, Math.round(precipHourly.length / 8))
+  const precipBarWidth = precipHourly.length > 1 ? (hourlyChartWidth / (precipHourly.length - 1)) * 0.5 : 20
+  const precipChancePoints = precipChances.map((value, idx) => `${hourlyXFor(idx, precipHourly.length)},${precipChanceYFor(value)}`).join(' ')
+
+  const uvValues = uvHourly.map((entry) => Math.max(0, entry.uvIndex))
+  const uvIndex = Math.round(Math.max(0, ...uvValues))
+  const uvMax = Math.max(11, ...uvValues)
+  const uvChartTop = 35
+  const uvChartBottom = 125
+  const uvYFor = (value: number) => uvChartTop + (1 - value / uvMax) * (uvChartBottom - uvChartTop)
+  const uvTickEvery = Math.max(1, Math.round(uvHourly.length / 8))
+  const uvAreaPath = uvHourly.length > 0
+    ? `M ${hourlyXFor(0, uvHourly.length)} ${uvChartBottom} L ${uvValues.map((value, idx) => `${hourlyXFor(idx, uvHourly.length)} ${uvYFor(value)}`).join(' L ')} L ${hourlyXFor(uvHourly.length - 1, uvHourly.length)} ${uvChartBottom} Z`
+    : ''
+  const uvPoints = uvValues.map((value, idx) => `${hourlyXFor(idx, uvHourly.length)},${uvYFor(value)}`).join(' ')
+  const uvProtectionIndices = uvValues.reduce<number[]>((acc, value, idx) => {
+    if (value >= 3) acc.push(idx)
+    return acc
+  }, [])
+  const uvProtectionStart = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[0]].label : null
+  const uvProtectionEnd = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[uvProtectionIndices.length - 1]].label : null
 
   return (
     <div className="space-y-4 pb-4">
@@ -456,6 +556,29 @@ export function ForecastDrawer({
               </div>
             </div>
 
+            {(selectedDay.sunriseTime || selectedDay.sunsetTime || selectedDay.moonPhase) && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
+                {selectedDay.sunriseTime && (
+                  <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
+                    <Sunrise size={13} className="text-amber-500" />
+                    Sunrise <span className="font-semibold">{selectedDay.sunriseTime}</span>
+                  </span>
+                )}
+                {selectedDay.sunsetTime && (
+                  <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
+                    <Sunset size={13} className="text-primary" />
+                    Sunset <span className="font-semibold">{selectedDay.sunsetTime}</span>
+                  </span>
+                )}
+                {selectedDay.moonPhase && (
+                  <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
+                    <span aria-hidden>{moonPhaseEmoji(selectedDay.moonPhase)}</span>
+                    Moon <span className="font-semibold">{moonPhaseLabel(selectedDay.moonPhase)}</span>
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 <Wind size={13} className="text-secondary" /> Wind
@@ -502,6 +625,9 @@ export function ForecastDrawer({
               </h4>
               {waveHourly.length > 0 ? (
                 <>
+                  {selectedDay.waveSummary && (
+                    <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.waveSummary}</p>
+                  )}
                   <svg viewBox="0 0 1000 170" data-testid="forecast-wave-chart" className="h-[170px] w-full rounded bg-muted/15">
                     <text x={6} y={40} fontSize="10" fill="rgba(100,116,139,0.9)">{waveMax.toFixed(1)} m</text>
                     <text x={6} y={123} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
@@ -516,19 +642,126 @@ export function ForecastDrawer({
                       return (
                         <g key={idx}>
                           <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
+                          <text x={x} y={31} textAnchor="middle" fontSize="9" fill="rgba(105,114,128,0.9)">{entry.wavePeriodS.toFixed(1)}s</text>
                           <text x={x} y={140} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
-                          <text x={x} y={154} textAnchor="middle" fontSize="9" fill="rgba(105,114,128,0.9)">{entry.wavePeriodS.toFixed(1)}s</text>
                         </g>
                       )
                     })}
                   </svg>
                   <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-secondary">— Wave height (m)</span>, period shown below each tick · arrows show direction the swell is heading
+                    <span className="text-secondary">— Wave height (m)</span> · arrows show direction the swell is heading, with period (sec) below each
                   </p>
                 </>
               ) : (
                 <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-unavailable">
                   Wave forecast unavailable for this day
+                </p>
+              )}
+            </div>
+
+            <div className="mt-3 rounded-md border bg-card/70 p-2">
+              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <CloudRain size={13} className="text-secondary" /> Precipitation
+              </h4>
+              {precipHourly.length > 0 ? (
+                <>
+                  {selectedDay.precipitationSummary && (
+                    <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.precipitationSummary}</p>
+                  )}
+                  <svg viewBox="0 0 1000 175" data-testid="forecast-precip-chart" className="h-[175px] w-full rounded bg-muted/15">
+                    <text x={6} y={40} fontSize="10" fill="rgba(100,116,139,0.9)">{precipMax.toFixed(1)} mm/hr</text>
+                    <text x={6} y={123} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
+                    <text x={994} y={40} textAnchor="end" fontSize="10" fill="rgba(100,116,139,0.9)">100%</text>
+                    <text x={994} y={123} textAnchor="end" fontSize="10" fill="rgba(100,116,139,0.9)">0%</text>
+                    <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+
+                    {precipHourly.map((_entry, idx) => {
+                      const intensity = precipIntensities[idx]
+                      if (intensity <= 0) return null
+                      const x = hourlyXFor(idx, precipHourly.length)
+                      const y = precipBarYFor(intensity)
+                      return (
+                        <rect
+                          key={idx}
+                          data-testid="forecast-precip-bar"
+                          x={x - precipBarWidth / 2}
+                          y={y}
+                          width={precipBarWidth}
+                          height={precipChartBottom - y}
+                          fill={precipBarColor(intensity)}
+                        />
+                      )
+                    })}
+
+                    <polyline points={precipChancePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+
+                    {precipHourly.map((entry, idx) => {
+                      if (idx % precipTickEvery !== 0 && idx !== precipHourly.length - 1) return null
+                      const x = hourlyXFor(idx, precipHourly.length)
+                      return (
+                        <text key={idx} x={x} y={142} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                      )
+                    })}
+                  </svg>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    <span className="text-blue-500">▮ Intensity (mm/hr)</span> · <span className="text-amber-600">— Chance of precip (%)</span>
+                  </p>
+                </>
+              ) : (
+                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-precip-unavailable">
+                  Precipitation forecast unavailable for this day
+                </p>
+              )}
+            </div>
+
+            <div className="mt-3 rounded-md border bg-card/70 p-2">
+              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <Sun size={13} className="text-secondary" /> UV Index
+              </h4>
+              {uvHourly.length > 0 ? (
+                <>
+                  <p className="mb-2 text-[12px] text-foreground/80">
+                    {uvProtectionStart && uvProtectionEnd
+                      ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
+                      : 'No sun protection needed today.'}
+                  </p>
+                  <svg viewBox="0 0 1000 175" data-testid="forecast-uv-chart" className="h-[175px] w-full rounded bg-muted/15">
+                    <defs>
+                      <linearGradient id={uvAreaGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
+                        {UV_GRADIENT_STOPS.map((stop) => (
+                          <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.3" />
+                        ))}
+                      </linearGradient>
+                      <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
+                        {UV_GRADIENT_STOPS.map((stop) => (
+                          <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
+                        ))}
+                      </linearGradient>
+                    </defs>
+
+                    <text x={994} y={40} textAnchor="end" fontSize="10" fill="rgba(100,116,139,0.9)">{Math.round(uvMax)}</text>
+                    <text x={994} y={123} textAnchor="end" fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
+                    <line x1={hourlyChartLeft} y1={uvChartBottom} x2={hourlyChartRight} y2={uvChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+
+                    {UV_BAND_LABELS.map((band) => (
+                      <text key={band.label} x={6} y={uvYFor(band.value)} fontSize="8" fill="rgba(100,116,139,0.75)">{band.label}</text>
+                    ))}
+
+                    <path d={uvAreaPath} fill={`url(#${uvAreaGradientId})`} />
+                    <polyline points={uvPoints} fill="none" stroke={`url(#${uvLineGradientId})`} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+
+                    {uvHourly.map((entry, idx) => {
+                      if (idx % uvTickEvery !== 0 && idx !== uvHourly.length - 1) return null
+                      const x = hourlyXFor(idx, uvHourly.length)
+                      return (
+                        <text key={idx} x={x} y={142} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                      )
+                    })}
+                  </svg>
+                </>
+              ) : (
+                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-uv-unavailable">
+                  UV index forecast unavailable for this day
                 </p>
               )}
             </div>

@@ -169,15 +169,109 @@ func TestBuildDailyWindSeries_BucketsHoursByLocalDate(t *testing.T) {
 	}
 }
 
-func TestBuildWindSummary_FormatsRangeAndGust(t *testing.T) {
-	hourly := []weatherHourlyWindData{
-		{WindSpeedKts: 19.0, WindGustKts: 24.0},
-		{WindSpeedKts: 22.0, WindGustKts: 29.4},
-		{WindSpeedKts: 20.0, WindGustKts: 25.0},
+func TestBuildDailyPrecipitationSeries_BucketsHoursByLocalDate(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	result := map[string]any{
+		"forecastHourly": map[string]any{
+			"hours": []any{
+				map[string]any{"forecastStart": "2026-06-14T13:00:00Z", "precipitationChance": 0.65, "precipitationIntensity": 1.2}, // 23:00 AEST (Jun 14)
+				map[string]any{"forecastStart": "2026-06-14T14:00:00Z", "precipitationChance": 0.2},                                 // 00:00 AEST (Jun 15), no intensity
+				map[string]any{"forecastStart": "not-a-timestamp"},                                                                   // ignored
+			},
+		},
 	}
 
-	summary := buildWindSummary("Tuesday", hourly)
-	expected := "On Tuesday, winds will be 19 to 22 kts, with gusts up to 29 kts."
+	series := buildDailyPrecipitationSeries(result, loc)
+
+	day14 := series["2026-06-14"]
+	if len(day14) != 1 {
+		t.Fatalf("expected 1 entry for Jun 14, got %d", len(day14))
+	}
+	if day14[0].Label != "11PM" {
+		t.Fatalf("expected label 11PM, got %s", day14[0].Label)
+	}
+	if got := day14[0].PrecipitationChancePct; got < 64.99 || got > 65.01 {
+		t.Fatalf("expected ~65%% chance, got %f", got)
+	}
+	if day14[0].PrecipitationIntensityMm != 1.2 {
+		t.Fatalf("expected 1.2mm/hr intensity, got %f", day14[0].PrecipitationIntensityMm)
+	}
+
+	day15 := series["2026-06-15"]
+	if len(day15) != 1 {
+		t.Fatalf("expected 1 entry for Jun 15, got %d", len(day15))
+	}
+	if day15[0].Label != "12AM" {
+		t.Fatalf("expected label 12AM, got %s", day15[0].Label)
+	}
+	if got := day15[0].PrecipitationChancePct; got < 19.99 || got > 20.01 {
+		t.Fatalf("expected ~20%% chance, got %f", got)
+	}
+	if day15[0].PrecipitationIntensityMm != 0 {
+		t.Fatalf("expected 0mm/hr intensity for missing field, got %f", day15[0].PrecipitationIntensityMm)
+	}
+}
+
+func TestBuildDailyUVSeries_BucketsHoursByLocalDate(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	result := map[string]any{
+		"forecastHourly": map[string]any{
+			"hours": []any{
+				map[string]any{"forecastStart": "2026-06-14T13:00:00Z", "uvIndex": 5.0}, // 23:00 AEST (Jun 14)
+				map[string]any{"forecastStart": "2026-06-14T14:00:00Z"},                 // 00:00 AEST (Jun 15), no uvIndex
+				map[string]any{"forecastStart": "not-a-timestamp"},                      // ignored
+			},
+		},
+	}
+
+	series := buildDailyUVSeries(result, loc)
+
+	day14 := series["2026-06-14"]
+	if len(day14) != 1 {
+		t.Fatalf("expected 1 entry for Jun 14, got %d", len(day14))
+	}
+	if day14[0].Label != "11PM" {
+		t.Fatalf("expected label 11PM, got %s", day14[0].Label)
+	}
+	if day14[0].UVIndex != 5.0 {
+		t.Fatalf("expected UV index 5, got %f", day14[0].UVIndex)
+	}
+
+	day15 := series["2026-06-15"]
+	if len(day15) != 1 {
+		t.Fatalf("expected 1 entry for Jun 15, got %d", len(day15))
+	}
+	if day15[0].Label != "12AM" {
+		t.Fatalf("expected label 12AM, got %s", day15[0].Label)
+	}
+	if day15[0].UVIndex != 0 {
+		t.Fatalf("expected UV index 0 for missing field, got %f", day15[0].UVIndex)
+	}
+}
+
+func TestBuildWindSummary_FormatsRangeDirectionAndGust(t *testing.T) {
+	hourly := []weatherHourlyWindData{
+		{WindSpeedKts: 19.0, WindGustKts: 24.0, WindDirection: "S"},
+		{WindSpeedKts: 22.0, WindGustKts: 29.4, WindDirection: "SSE"},
+		{WindSpeedKts: 20.0, WindGustKts: 25.0, WindDirection: "SE"},
+	}
+
+	summary := buildWindSummary("Tuesday", false, hourly)
+	expected := "On Tuesday, winds will be 19 to 22 kts from the S-SE, with gusts up to 29 kts."
+	if summary != expected {
+		t.Fatalf("expected %q, got %q", expected, summary)
+	}
+}
+
+func TestBuildWindSummary_TodayUsesTodayPrefix(t *testing.T) {
+	hourly := []weatherHourlyWindData{
+		{WindSpeedKts: 8.0, WindGustKts: 24.0, WindDirection: "S"},
+		{WindSpeedKts: 14.0, WindGustKts: 20.0, WindDirection: "SSE"},
+		{WindSpeedKts: 10.0, WindGustKts: 15.0, WindDirection: "SE"},
+	}
+
+	summary := buildWindSummary("Monday", true, hourly)
+	expected := "Today winds will be 8 to 14 kts from the S-SE, with gusts up to 24 kts."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -185,25 +279,166 @@ func TestBuildWindSummary_FormatsRangeAndGust(t *testing.T) {
 
 func TestBuildWindSummary_OmitsGustWhenNotAboveSustained(t *testing.T) {
 	hourly := []weatherHourlyWindData{
-		{WindSpeedKts: 12.0, WindGustKts: 12.0},
-		{WindSpeedKts: 12.0, WindGustKts: 12.0},
+		{WindSpeedKts: 12.0, WindGustKts: 12.0, WindDirection: "NE"},
+		{WindSpeedKts: 12.0, WindGustKts: 12.0, WindDirection: "NE"},
 	}
 
-	summary := buildWindSummary("Wednesday", hourly)
-	expected := "On Wednesday, winds will be around 12 kts."
+	summary := buildWindSummary("Wednesday", false, hourly)
+	expected := "On Wednesday, winds will be around 12 kts from the NE."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
 }
 
 func TestBuildWindSummary_EmptyWhenNoHourlyData(t *testing.T) {
-	if summary := buildWindSummary("Thursday", nil); summary != "" {
+	if summary := buildWindSummary("Thursday", false, nil); summary != "" {
 		t.Fatalf("expected empty summary, got %q", summary)
 	}
 
 	hourly := []weatherHourlyWindData{{WindSpeedKts: -1, WindGustKts: -1}}
-	if summary := buildWindSummary("Thursday", hourly); summary != "" {
+	if summary := buildWindSummary("Thursday", false, hourly); summary != "" {
 		t.Fatalf("expected empty summary for all-missing data, got %q", summary)
+	}
+}
+
+func TestWindDirectionRange_SingleAndRangeAndMissing(t *testing.T) {
+	single := windDirectionRange([]weatherHourlyWindData{{WindDirection: "NE"}, {WindDirection: "NE"}})
+	if single != "NE" {
+		t.Fatalf("expected NE, got %q", single)
+	}
+
+	rangeResult := windDirectionRange([]weatherHourlyWindData{{WindDirection: "S"}, {WindDirection: "SSE"}, {WindDirection: "SE"}})
+	if rangeResult != "S-SE" {
+		t.Fatalf("expected S-SE, got %q", rangeResult)
+	}
+
+	if empty := windDirectionRange([]weatherHourlyWindData{{WindDirection: "—"}}); empty != "" {
+		t.Fatalf("expected empty, got %q", empty)
+	}
+}
+
+func TestBuildWaveSummary_FormatsRangeDirectionAndPeriod(t *testing.T) {
+	hourly := []weatherHourlyWaveData{
+		{WaveHeightM: 1.1, WavePeriodS: 8.9, WaveDirectionDeg: 63},
+		{WaveHeightM: 1.28, WavePeriodS: 8.9, WaveDirectionDeg: 63},
+		{WaveHeightM: 1.2, WavePeriodS: 9.1, WaveDirectionDeg: 67},
+	}
+
+	summary := buildWaveSummary("Tuesday", false, hourly)
+	expected := "On Tuesday, swell will be 1.1 to 1.3 m from the ENE, with a period around 9 sec."
+	if summary != expected {
+		t.Fatalf("expected %q, got %q", expected, summary)
+	}
+}
+
+func TestBuildWaveSummary_TodayUsesTodayPrefixAndAroundHeight(t *testing.T) {
+	hourly := []weatherHourlyWaveData{
+		{WaveHeightM: 1.1, WavePeriodS: 8.0, WaveDirectionDeg: 90},
+		{WaveHeightM: 1.1, WavePeriodS: 10.0, WaveDirectionDeg: 90},
+	}
+
+	summary := buildWaveSummary("Monday", true, hourly)
+	expected := "Today swell will be around 1.1 m from the E, with a period around 9 sec."
+	if summary != expected {
+		t.Fatalf("expected %q, got %q", expected, summary)
+	}
+}
+
+func TestBuildWaveSummary_EmptyWhenNoHourlyData(t *testing.T) {
+	if summary := buildWaveSummary("Thursday", false, nil); summary != "" {
+		t.Fatalf("expected empty summary, got %q", summary)
+	}
+
+	hourly := []weatherHourlyWaveData{{WaveHeightM: -1, WavePeriodS: -1, WaveDirectionDeg: -1}}
+	if summary := buildWaveSummary("Thursday", false, hourly); summary != "" {
+		t.Fatalf("expected empty summary for all-missing data, got %q", summary)
+	}
+}
+
+func TestBuildPrecipitationSummary_LittleToNoRain(t *testing.T) {
+	hourly := []weatherHourlyPrecipitationData{
+		{Label: "12AM", PrecipitationChancePct: 5, PrecipitationIntensityMm: 0},
+		{Label: "1AM", PrecipitationChancePct: 10, PrecipitationIntensityMm: 0},
+		{Label: "2AM", PrecipitationChancePct: 20, PrecipitationIntensityMm: 0},
+	}
+
+	summary := buildPrecipitationSummary("Tuesday", false, hourly)
+	expected := "On Tuesday, little to no rain is expected."
+	if summary != expected {
+		t.Fatalf("expected %q, got %q", expected, summary)
+	}
+}
+
+func TestBuildPrecipitationSummary_SlightChanceAfterHour(t *testing.T) {
+	hourly := []weatherHourlyPrecipitationData{
+		{Label: "12AM", PrecipitationChancePct: 10, PrecipitationIntensityMm: 0},
+		{Label: "1AM", PrecipitationChancePct: 15, PrecipitationIntensityMm: 0},
+		{Label: "5PM", PrecipitationChancePct: 45, PrecipitationIntensityMm: 1.0},
+	}
+
+	summary := buildPrecipitationSummary("Sunday", false, hourly)
+	expected := "On Sunday, slight chance of rain after 5PM."
+	if summary != expected {
+		t.Fatalf("expected %q, got %q", expected, summary)
+	}
+}
+
+func TestBuildPrecipitationSummary_RainThroughoutTheDay(t *testing.T) {
+	todayHourly := []weatherHourlyPrecipitationData{
+		{Label: "12AM", PrecipitationChancePct: 70, PrecipitationIntensityMm: 1.0},
+		{Label: "1AM", PrecipitationChancePct: 65, PrecipitationIntensityMm: 0.5},
+	}
+
+	todaySummary := buildPrecipitationSummary("Monday", true, todayHourly)
+	expectedToday := "Today, showers expected throughout the day."
+	if todaySummary != expectedToday {
+		t.Fatalf("expected %q, got %q", expectedToday, todaySummary)
+	}
+
+	otherHourly := []weatherHourlyPrecipitationData{
+		{Label: "12AM", PrecipitationChancePct: 80, PrecipitationIntensityMm: 4.0},
+	}
+
+	otherSummary := buildPrecipitationSummary("Wednesday", false, otherHourly)
+	expectedOther := "On Wednesday, rain expected throughout the day."
+	if otherSummary != expectedOther {
+		t.Fatalf("expected %q, got %q", expectedOther, otherSummary)
+	}
+}
+
+func TestBuildPrecipitationSummary_HeavyRainAfterHour(t *testing.T) {
+	hourly := []weatherHourlyPrecipitationData{
+		{Label: "12AM", PrecipitationChancePct: 10, PrecipitationIntensityMm: 0},
+		{Label: "12PM", PrecipitationChancePct: 20, PrecipitationIntensityMm: 0.5},
+		{Label: "1PM", PrecipitationChancePct: 80, PrecipitationIntensityMm: 8.0},
+	}
+
+	summary := buildPrecipitationSummary("Wednesday", false, hourly)
+	expected := "On Wednesday, heavy rain expected after 1PM."
+	if summary != expected {
+		t.Fatalf("expected %q, got %q", expected, summary)
+	}
+}
+
+func TestBuildPrecipitationSummary_EmptyWhenNoHourlyData(t *testing.T) {
+	if summary := buildPrecipitationSummary("Thursday", false, nil); summary != "" {
+		t.Fatalf("expected empty summary, got %q", summary)
+	}
+}
+
+func TestWaveDirectionRange_SingleAndRangeAndMissing(t *testing.T) {
+	single := waveDirectionRange([]weatherHourlyWaveData{{WaveDirectionDeg: 90}, {WaveDirectionDeg: 90}})
+	if single != "E" {
+		t.Fatalf("expected E, got %q", single)
+	}
+
+	rangeResult := waveDirectionRange([]weatherHourlyWaveData{{WaveDirectionDeg: 63}, {WaveDirectionDeg: 67}, {WaveDirectionDeg: 90}})
+	if rangeResult != "ENE-E" {
+		t.Fatalf("expected ENE-E, got %q", rangeResult)
+	}
+
+	if empty := waveDirectionRange([]weatherHourlyWaveData{{WaveDirectionDeg: -1}}); empty != "" {
+		t.Fatalf("expected empty, got %q", empty)
 	}
 }
 

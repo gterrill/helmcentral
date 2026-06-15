@@ -15,6 +15,17 @@ export interface WeatherHourlyWavePoint {
   waveDirectionDeg: number;
 }
 
+export interface WeatherHourlyPrecipPoint {
+  label: string;
+  precipChancePct: number;
+  precipIntensityMm: number;
+}
+
+export interface WeatherHourlyUVPoint {
+  label: string;
+  uvIndex: number;
+}
+
 export interface WeatherForecastDay {
   date: string;
   dayName: string;
@@ -25,9 +36,16 @@ export interface WeatherForecastDay {
   windGust: number;
   windDirection: string;
   windSummary: string | null;
+  waveSummary: string | null;
+  precipitationSummary: string | null;
   precipitation: number;
+  sunriseTime: string | null;
+  sunsetTime: string | null;
+  moonPhase: string | null;
   hourlyWind: WeatherHourlyWindPoint[];
   hourlyWave: WeatherHourlyWavePoint[];
+  hourlyPrecip: WeatherHourlyPrecipPoint[];
+  hourlyUV: WeatherHourlyUVPoint[];
 }
 
 export interface WeatherHourlyEntry {
@@ -52,6 +70,17 @@ interface WeatherHourlyWaveApi {
   wave_direction_deg?: number;
 }
 
+interface WeatherHourlyPrecipApi {
+  label?: string;
+  precipitation_chance_pct?: number;
+  precipitation_intensity_mm?: number;
+}
+
+interface WeatherHourlyUVApi {
+  label?: string;
+  uv_index?: number;
+}
+
 interface WeatherForecastDayApi {
   date?: string;
   day_name?: string;
@@ -62,9 +91,16 @@ interface WeatherForecastDayApi {
   wind_gust_kts?: number;
   wind_direction?: string;
   wind_summary?: string;
+  wave_summary?: string;
+  precipitation_summary?: string;
   precipitation_pct?: number;
+  sunrise_time?: string;
+  sunset_time?: string;
+  moon_phase?: string;
   hourly_wind?: WeatherHourlyWindApi[];
   hourly_wave?: WeatherHourlyWaveApi[];
+  hourly_precip?: WeatherHourlyPrecipApi[];
+  hourly_uv?: WeatherHourlyUVApi[];
 }
 
 interface WeatherForecastEnvelopeApi {
@@ -128,7 +164,12 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
               windGust,
               windDirection: day.wind_direction || '—',
               windSummary: typeof day.wind_summary === 'string' && day.wind_summary !== '' ? day.wind_summary : null,
+              waveSummary: typeof day.wave_summary === 'string' && day.wave_summary !== '' ? day.wave_summary : null,
+              precipitationSummary: typeof day.precipitation_summary === 'string' && day.precipitation_summary !== '' ? day.precipitation_summary : null,
               precipitation: typeof day.precipitation_pct === 'number' ? day.precipitation_pct : 0,
+              sunriseTime: typeof day.sunrise_time === 'string' && day.sunrise_time !== '' ? day.sunrise_time : null,
+              sunsetTime: typeof day.sunset_time === 'string' && day.sunset_time !== '' ? day.sunset_time : null,
+              moonPhase: typeof day.moon_phase === 'string' && day.moon_phase !== '' ? day.moon_phase : null,
               hourlyWind: Array.isArray(day.hourly_wind)
                 ? day.hourly_wind.map((entry) => ({
                     label: entry.label || '—',
@@ -144,6 +185,19 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                     waveHeightM: typeof entry.wave_height_m === 'number' ? entry.wave_height_m : -1,
                     wavePeriodS: typeof entry.wave_period_s === 'number' ? entry.wave_period_s : -1,
                     waveDirectionDeg: typeof entry.wave_direction_deg === 'number' ? entry.wave_direction_deg : -1,
+                  }))
+                : [],
+              hourlyPrecip: Array.isArray(day.hourly_precip)
+                ? day.hourly_precip.map((entry) => ({
+                    label: entry.label || '—',
+                    precipChancePct: typeof entry.precipitation_chance_pct === 'number' ? entry.precipitation_chance_pct : 0,
+                    precipIntensityMm: typeof entry.precipitation_intensity_mm === 'number' ? entry.precipitation_intensity_mm : 0,
+                  }))
+                : [],
+              hourlyUV: Array.isArray(day.hourly_uv)
+                ? day.hourly_uv.map((entry) => ({
+                    label: entry.label || '—',
+                    uvIndex: typeof entry.uv_index === 'number' ? entry.uv_index : 0,
                   }))
                 : [],
             };

@@ -240,18 +240,25 @@ type weatherTodayData struct {
 }
 
 type weatherForecastDayData struct {
-	Date             string
-	DayName          string
-	Condition        string
-	HighTempF        float64
-	LowTempF         float64
-	WindSpeedKts     float64
-	WindGustKts      float64
-	WindDirection    string
-	WindSummary      string
-	PrecipitationPct float64
-	HourlyWind       []weatherHourlyWindData
-	HourlyWave       []weatherHourlyWaveData
+	Date                 string
+	DayName              string
+	Condition            string
+	HighTempF            float64
+	LowTempF             float64
+	WindSpeedKts         float64
+	WindGustKts          float64
+	WindDirection        string
+	WindSummary          string
+	WaveSummary          string
+	PrecipitationPct     float64
+	PrecipitationSummary string
+	SunriseTime          string
+	SunsetTime           string
+	MoonPhase            string
+	HourlyWind           []weatherHourlyWindData
+	HourlyWave           []weatherHourlyWaveData
+	HourlyPrecip         []weatherHourlyPrecipitationData
+	HourlyUV             []weatherHourlyUVData
 }
 
 type weatherHourlyEntryData struct {
@@ -276,6 +283,17 @@ type weatherHourlyWaveData struct {
 	WaveHeightM      float64
 	WavePeriodS      float64
 	WaveDirectionDeg float64
+}
+
+type weatherHourlyPrecipitationData struct {
+	Label                    string
+	PrecipitationChancePct   float64
+	PrecipitationIntensityMm float64
+}
+
+type weatherHourlyUVData struct {
+	Label   string
+	UVIndex float64
 }
 
 type weatherForecastDataBundle struct {
@@ -318,18 +336,25 @@ type weatherTodayETagData struct {
 }
 
 type weatherForecastDayResponse struct {
-	Date             string                      `json:"date"`
-	DayName          string                      `json:"day_name"`
-	Condition        string                      `json:"condition"`
-	HighTempF        float64                     `json:"high_temp_f"`
-	LowTempF         float64                     `json:"low_temp_f"`
-	WindSpeedKts     float64                     `json:"wind_speed_kts"`
-	WindGustKts      float64                     `json:"wind_gust_kts"`
-	WindDirection    string                      `json:"wind_direction"`
-	WindSummary      string                      `json:"wind_summary"`
-	PrecipitationPct float64                     `json:"precipitation_pct"`
-	HourlyWind       []weatherHourlyWindResponse `json:"hourly_wind"`
-	HourlyWave       []weatherHourlyWaveResponse `json:"hourly_wave"`
+	Date                 string                               `json:"date"`
+	DayName              string                               `json:"day_name"`
+	Condition            string                               `json:"condition"`
+	HighTempF            float64                              `json:"high_temp_f"`
+	LowTempF             float64                              `json:"low_temp_f"`
+	WindSpeedKts         float64                              `json:"wind_speed_kts"`
+	WindGustKts          float64                              `json:"wind_gust_kts"`
+	WindDirection        string                               `json:"wind_direction"`
+	WindSummary          string                               `json:"wind_summary"`
+	WaveSummary          string                               `json:"wave_summary"`
+	PrecipitationPct     float64                              `json:"precipitation_pct"`
+	PrecipitationSummary string                               `json:"precipitation_summary"`
+	SunriseTime          string                               `json:"sunrise_time"`
+	SunsetTime           string                               `json:"sunset_time"`
+	MoonPhase            string                               `json:"moon_phase"`
+	HourlyWind           []weatherHourlyWindResponse          `json:"hourly_wind"`
+	HourlyWave           []weatherHourlyWaveResponse          `json:"hourly_wave"`
+	HourlyPrecip         []weatherHourlyPrecipitationResponse `json:"hourly_precip"`
+	HourlyUV             []weatherHourlyUVResponse            `json:"hourly_uv"`
 }
 
 type weatherHourlyEntryResponse struct {
@@ -352,6 +377,17 @@ type weatherHourlyWaveResponse struct {
 	WaveHeightM      float64 `json:"wave_height_m"`
 	WavePeriodS      float64 `json:"wave_period_s"`
 	WaveDirectionDeg float64 `json:"wave_direction_deg"`
+}
+
+type weatherHourlyPrecipitationResponse struct {
+	Label                    string  `json:"label"`
+	PrecipitationChancePct   float64 `json:"precipitation_chance_pct"`
+	PrecipitationIntensityMm float64 `json:"precipitation_intensity_mm"`
+}
+
+type weatherHourlyUVResponse struct {
+	Label   string  `json:"label"`
+	UVIndex float64 `json:"uv_index"`
 }
 
 type weatherForecastResponse struct {
@@ -762,18 +798,25 @@ func mapForecastResponse(state []weatherForecastDayData) []weatherForecastDayRes
 	response := make([]weatherForecastDayResponse, 0, len(state))
 	for _, day := range state {
 		response = append(response, weatherForecastDayResponse{
-			Date:             day.Date,
-			DayName:          day.DayName,
-			Condition:        day.Condition,
-			HighTempF:        day.HighTempF,
-			LowTempF:         day.LowTempF,
-			WindSpeedKts:     day.WindSpeedKts,
-			WindGustKts:      day.WindGustKts,
-			WindDirection:    day.WindDirection,
-			WindSummary:      day.WindSummary,
-			PrecipitationPct: day.PrecipitationPct,
-			HourlyWind:       mapHourlyWindResponse(day.HourlyWind),
-			HourlyWave:       mapHourlyWaveResponse(day.HourlyWave),
+			Date:                 day.Date,
+			DayName:              day.DayName,
+			Condition:            day.Condition,
+			HighTempF:            day.HighTempF,
+			LowTempF:             day.LowTempF,
+			WindSpeedKts:         day.WindSpeedKts,
+			WindGustKts:          day.WindGustKts,
+			WindDirection:        day.WindDirection,
+			WindSummary:          day.WindSummary,
+			WaveSummary:          day.WaveSummary,
+			PrecipitationPct:     day.PrecipitationPct,
+			PrecipitationSummary: day.PrecipitationSummary,
+			SunriseTime:          day.SunriseTime,
+			SunsetTime:           day.SunsetTime,
+			MoonPhase:            day.MoonPhase,
+			HourlyWind:           mapHourlyWindResponse(day.HourlyWind),
+			HourlyWave:           mapHourlyWaveResponse(day.HourlyWave),
+			HourlyPrecip:         mapHourlyPrecipitationResponse(day.HourlyPrecip),
+			HourlyUV:             mapHourlyUVResponse(day.HourlyUV),
 		})
 	}
 	return response
@@ -801,6 +844,29 @@ func mapHourlyWaveResponse(entries []weatherHourlyWaveData) []weatherHourlyWaveR
 			WaveHeightM:      entry.WaveHeightM,
 			WavePeriodS:      entry.WavePeriodS,
 			WaveDirectionDeg: entry.WaveDirectionDeg,
+		})
+	}
+	return response
+}
+
+func mapHourlyPrecipitationResponse(entries []weatherHourlyPrecipitationData) []weatherHourlyPrecipitationResponse {
+	response := make([]weatherHourlyPrecipitationResponse, 0, len(entries))
+	for _, entry := range entries {
+		response = append(response, weatherHourlyPrecipitationResponse{
+			Label:                    entry.Label,
+			PrecipitationChancePct:   entry.PrecipitationChancePct,
+			PrecipitationIntensityMm: entry.PrecipitationIntensityMm,
+		})
+	}
+	return response
+}
+
+func mapHourlyUVResponse(entries []weatherHourlyUVData) []weatherHourlyUVResponse {
+	response := make([]weatherHourlyUVResponse, 0, len(entries))
+	for _, entry := range entries {
+		response = append(response, weatherHourlyUVResponse{
+			Label:   entry.Label,
+			UVIndex: entry.UVIndex,
 		})
 	}
 	return response
@@ -1041,6 +1107,8 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 	}
 
 	windSeriesByDay := buildDailyWindSeries(result, localLocation)
+	precipSeriesByDay := buildDailyPrecipitationSeries(result, localLocation)
+	uvSeriesByDay := buildDailyUVSeries(result, localLocation)
 
 	waveSeriesByDay, waveErr := fetchOpenMeteoMarineForecast(latitude, longitude)
 	if waveErr != nil {
@@ -1141,19 +1209,34 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 			windGustKts = windSpeedKts
 		}
 
+		sunriseTime := formatWeatherKitLocalTime(dayMap, "sunrise", localLocation)
+		sunsetTime := formatWeatherKitLocalTime(dayMap, "sunset", localLocation)
+
+		moonPhase := ""
+		if phase, ok := dayMap["moonPhase"].(string); ok {
+			moonPhase = phase
+		}
+
 		forecast = append(forecast, weatherForecastDayData{
-			Date:             dateLabel,
-			DayName:          dayName,
-			Condition:        condition,
-			HighTempF:        highTempF,
-			LowTempF:         lowTempF,
-			WindSpeedKts:     windSpeedKts,
-			WindGustKts:      windGustKts,
-			WindDirection:    windDirection,
-			WindSummary:      buildWindSummary(dayName, windSeriesByDay[dayKey]),
-			PrecipitationPct: precipPct,
-			HourlyWind:       windSeriesByDay[dayKey],
-			HourlyWave:       waveSeriesByDay[dayKey],
+			Date:                 dateLabel,
+			DayName:              dayName,
+			Condition:            condition,
+			HighTempF:            highTempF,
+			LowTempF:             lowTempF,
+			WindSpeedKts:         windSpeedKts,
+			WindGustKts:          windGustKts,
+			WindDirection:        windDirection,
+			WindSummary:          buildWindSummary(dayName, dayKey == localTodayKey, windSeriesByDay[dayKey]),
+			WaveSummary:          buildWaveSummary(dayName, dayKey == localTodayKey, waveSeriesByDay[dayKey]),
+			PrecipitationPct:     precipPct,
+			PrecipitationSummary: buildPrecipitationSummary(dayName, dayKey == localTodayKey, precipSeriesByDay[dayKey]),
+			SunriseTime:          sunriseTime,
+			SunsetTime:           sunsetTime,
+			MoonPhase:            moonPhase,
+			HourlyWind:           windSeriesByDay[dayKey],
+			HourlyWave:           waveSeriesByDay[dayKey],
+			HourlyPrecip:         precipSeriesByDay[dayKey],
+			HourlyUV:             uvSeriesByDay[dayKey],
 		})
 	}
 
@@ -1231,10 +1314,125 @@ func buildDailyWindSeries(result map[string]any, localLocation *time.Location) m
 	return series
 }
 
+// buildDailyPrecipitationSeries buckets WeatherKit's hourly forecast into
+// per-day (local date) hourly precipitation series, keyed by "2006-01-02".
+func buildDailyPrecipitationSeries(result map[string]any, localLocation *time.Location) map[string][]weatherHourlyPrecipitationData {
+	forecastHourly, ok := result["forecastHourly"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	rawHours, ok := forecastHourly["hours"].([]any)
+	if !ok {
+		return nil
+	}
+
+	series := make(map[string][]weatherHourlyPrecipitationData)
+	for _, rawHour := range rawHours {
+		hourMap, ok := rawHour.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		forecastStart, ok := hourMap["forecastStart"].(string)
+		if !ok {
+			continue
+		}
+
+		parsed, err := time.Parse(time.RFC3339, forecastStart)
+		if err != nil {
+			continue
+		}
+		localTime := parsed.In(localLocation)
+
+		chancePct := 0.0
+		if chance, ok := hourMap["precipitationChance"].(float64); ok {
+			chancePct = chance * 100
+		}
+
+		intensityMm := 0.0
+		if intensity, ok := hourMap["precipitationIntensity"].(float64); ok {
+			intensityMm = math.Max(0, intensity)
+		}
+
+		dayKey := localTime.Format("2006-01-02")
+		series[dayKey] = append(series[dayKey], weatherHourlyPrecipitationData{
+			Label:                    localTime.Format("3PM"),
+			PrecipitationChancePct:   chancePct,
+			PrecipitationIntensityMm: intensityMm,
+		})
+	}
+
+	return series
+}
+
+// buildDailyUVSeries buckets WeatherKit's hourly forecast into per-day
+// (local date) hourly UV index series, keyed by "2006-01-02".
+func buildDailyUVSeries(result map[string]any, localLocation *time.Location) map[string][]weatherHourlyUVData {
+	forecastHourly, ok := result["forecastHourly"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	rawHours, ok := forecastHourly["hours"].([]any)
+	if !ok {
+		return nil
+	}
+
+	series := make(map[string][]weatherHourlyUVData)
+	for _, rawHour := range rawHours {
+		hourMap, ok := rawHour.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		forecastStart, ok := hourMap["forecastStart"].(string)
+		if !ok {
+			continue
+		}
+
+		parsed, err := time.Parse(time.RFC3339, forecastStart)
+		if err != nil {
+			continue
+		}
+		localTime := parsed.In(localLocation)
+
+		uvValue := 0.0
+		if uv, ok := hourMap["uvIndex"].(float64); ok {
+			uvValue = math.Max(0, uv)
+		}
+
+		dayKey := localTime.Format("2006-01-02")
+		series[dayKey] = append(series[dayKey], weatherHourlyUVData{
+			Label:   localTime.Format("3PM"),
+			UVIndex: uvValue,
+		})
+	}
+
+	return series
+}
+
+// formatWeatherKitLocalTime parses an RFC3339 timestamp from the given
+// WeatherKit day field and formats it in the vessel's local timezone using
+// the same "3:04PM" convention used elsewhere for sunset markers.
+func formatWeatherKitLocalTime(dayMap map[string]any, field string, localLocation *time.Location) string {
+	value, ok := dayMap[field].(string)
+	if !ok {
+		return ""
+	}
+
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return ""
+	}
+
+	return parsed.In(localLocation).Format("3:04PM")
+}
+
 // buildWindSummary formats a human-readable sentence describing a day's wind
-// speed range and peak gust, derived from its hourly wind series so it stays
-// numerically consistent with the wind graph.
-func buildWindSummary(dayName string, hourly []weatherHourlyWindData) string {
+// speed range, direction and peak gust, derived from its hourly wind series so
+// it stays numerically consistent with the wind graph.
+func buildWindSummary(dayName string, isToday bool, hourly []weatherHourlyWindData) string {
 	minSpeed := math.MaxFloat64
 	maxSpeed := -1.0
 	maxGust := -1.0
@@ -1269,11 +1467,182 @@ func buildWindSummary(dayName string, hourly []weatherHourlyWindData) string {
 		speedPhrase = fmt.Sprintf("around %d kts", maxRounded)
 	}
 
-	if gustRounded > maxRounded {
-		return fmt.Sprintf("On %s, winds will be %s, with gusts up to %d kts.", dayName, speedPhrase, gustRounded)
+	if directionRange := windDirectionRange(hourly); directionRange != "" {
+		speedPhrase = fmt.Sprintf("%s from the %s", speedPhrase, directionRange)
 	}
 
-	return fmt.Sprintf("On %s, winds will be %s.", dayName, speedPhrase)
+	dayPrefix := "Today"
+	if !isToday {
+		dayPrefix = fmt.Sprintf("On %s,", dayName)
+	}
+
+	if gustRounded > maxRounded {
+		return fmt.Sprintf("%s winds will be %s, with gusts up to %d kts.", dayPrefix, speedPhrase, gustRounded)
+	}
+
+	return fmt.Sprintf("%s winds will be %s.", dayPrefix, speedPhrase)
+}
+
+// windDirectionRange describes how a day's wind direction shifts from
+// morning to evening, e.g. "S-SE" if it backs/veers between the first and
+// last hourly readings, or a single compass point if it stays steady.
+func windDirectionRange(hourly []weatherHourlyWindData) string {
+	start := ""
+	end := ""
+
+	for _, entry := range hourly {
+		if entry.WindDirection == "" || entry.WindDirection == "—" {
+			continue
+		}
+		if start == "" {
+			start = entry.WindDirection
+		}
+		end = entry.WindDirection
+	}
+
+	if start == "" {
+		return ""
+	}
+	if end == start {
+		return start
+	}
+
+	return fmt.Sprintf("%s-%s", start, end)
+}
+
+// buildWaveSummary formats a human-readable sentence describing a day's swell
+// height range, direction and period, derived from its hourly wave series so
+// it stays numerically consistent with the wave graph.
+func buildWaveSummary(dayName string, isToday bool, hourly []weatherHourlyWaveData) string {
+	minHeight := math.MaxFloat64
+	maxHeight := -1.0
+	periodTotal := 0.0
+	periodCount := 0
+	found := false
+
+	for _, entry := range hourly {
+		if entry.WaveHeightM < 0 {
+			continue
+		}
+		found = true
+		if entry.WaveHeightM < minHeight {
+			minHeight = entry.WaveHeightM
+		}
+		if entry.WaveHeightM > maxHeight {
+			maxHeight = entry.WaveHeightM
+		}
+		if entry.WavePeriodS > 0 {
+			periodTotal += entry.WavePeriodS
+			periodCount++
+		}
+	}
+
+	if !found {
+		return ""
+	}
+
+	heightPhrase := fmt.Sprintf("%.1f to %.1f m", minHeight, maxHeight)
+	if math.Round(minHeight*10) == math.Round(maxHeight*10) {
+		heightPhrase = fmt.Sprintf("around %.1f m", maxHeight)
+	}
+
+	if directionRange := waveDirectionRange(hourly); directionRange != "" {
+		heightPhrase = fmt.Sprintf("%s from the %s", heightPhrase, directionRange)
+	}
+
+	dayPrefix := "Today"
+	if !isToday {
+		dayPrefix = fmt.Sprintf("On %s,", dayName)
+	}
+
+	if periodCount > 0 {
+		periodRounded := int(math.Round(periodTotal / float64(periodCount)))
+		return fmt.Sprintf("%s swell will be %s, with a period around %d sec.", dayPrefix, heightPhrase, periodRounded)
+	}
+
+	return fmt.Sprintf("%s swell will be %s.", dayPrefix, heightPhrase)
+}
+
+// buildPrecipitationSummary describes a day's rain outlook in a single
+// sentence, e.g. "Today, slight chance of rain after 5PM." or "On Tuesday,
+// little to no rain is expected.", mirroring buildWindSummary/buildWaveSummary.
+func buildPrecipitationSummary(dayName string, isToday bool, hourly []weatherHourlyPrecipitationData) string {
+	maxChance := -1.0
+	maxIntensity := 0.0
+	firstNotableIdx := -1
+	found := false
+
+	for i, entry := range hourly {
+		found = true
+		if entry.PrecipitationChancePct > maxChance {
+			maxChance = entry.PrecipitationChancePct
+		}
+		if entry.PrecipitationIntensityMm > maxIntensity {
+			maxIntensity = entry.PrecipitationIntensityMm
+		}
+		if firstNotableIdx == -1 && entry.PrecipitationChancePct >= 30 {
+			firstNotableIdx = i
+		}
+	}
+
+	if !found {
+		return ""
+	}
+
+	dayPrefix := "Today"
+	if !isToday {
+		dayPrefix = fmt.Sprintf("On %s", dayName)
+	}
+
+	if maxChance < 30 {
+		return fmt.Sprintf("%s, little to no rain is expected.", dayPrefix)
+	}
+
+	when := "throughout the day"
+	if firstNotableIdx > 0 {
+		when = fmt.Sprintf("after %s", hourly[firstNotableIdx].Label)
+	}
+
+	if maxChance < 60 {
+		return fmt.Sprintf("%s, slight chance of rain %s.", dayPrefix, when)
+	}
+
+	phrase := "showers"
+	if maxIntensity >= 7.6 {
+		phrase = "heavy rain"
+	} else if maxIntensity >= 2.5 {
+		phrase = "rain"
+	}
+
+	return fmt.Sprintf("%s, %s expected %s.", dayPrefix, phrase, when)
+}
+
+// waveDirectionRange describes how a day's swell direction shifts from
+// morning to evening, e.g. "ENE-E" if it backs/veers between the first and
+// last hourly readings, or a single compass point if it stays steady.
+func waveDirectionRange(hourly []weatherHourlyWaveData) string {
+	start := ""
+	end := ""
+
+	for _, entry := range hourly {
+		if entry.WaveDirectionDeg < 0 {
+			continue
+		}
+		dir := degreesToDirection(entry.WaveDirectionDeg)
+		if start == "" {
+			start = dir
+		}
+		end = dir
+	}
+
+	if start == "" {
+		return ""
+	}
+	if end == start {
+		return start
+	}
+
+	return fmt.Sprintf("%s-%s", start, end)
 }
 
 // fetchOpenMeteoMarineForecast fetches an hourly wave forecast from the free,
@@ -1281,7 +1650,11 @@ func buildWindSummary(dayName string, hourly []weatherHourlyWindData) string {
 // "2006-01-02". Open-Meteo supports at most 8 forecast days, so later days in
 // a 10-day forecast may have no wave data.
 func fetchOpenMeteoMarineForecast(latitude, longitude float64) (map[string][]weatherHourlyWaveData, error) {
-	requestURL := fmt.Sprintf("https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period&timezone=auto&forecast_days=8", latitude, longitude)
+	// Pinned to NOAA's GFS-Wave (WaveWatch III) model so swell height, period
+	// and direction line up with other WaveWatch III-based swell forecasts
+	// for this coastline; Open-Meteo's default "best_match" model runs
+	// noticeably lower/different here.
+	requestURL := fmt.Sprintf("https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period&timezone=auto&forecast_days=8&models=ncep_gfswave025", latitude, longitude)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(requestURL)
@@ -1399,7 +1772,7 @@ func buildWeatherHourlyEntries(result map[string]any, referenceDatetime time.Tim
 			continue
 		}
 		localTime := parsed.In(localLocation)
-		if localTime.Format("2006-01-02") != localTodayKey || localTime.Before(referenceHour) {
+		if localTime.Before(referenceHour) {
 			continue
 		}
 
