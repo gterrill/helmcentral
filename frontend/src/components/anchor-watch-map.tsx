@@ -18,6 +18,7 @@ const SAT_HANDOFF_START_ZOOM = 9
 const SAT_HANDOFF_END_ZOOM = 10
 const WORLD_IMAGERY_MAX_ZOOM = 18
 const ANCHOR_WATCH_ZOOM_STORAGE_KEY = 'anchor-watch-map-zoom'
+const AIS_TRAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
 export function computeSatelliteBlend(currentZoom: number, enabled: boolean) {
   const handoffProgress = Math.max(
@@ -284,9 +285,12 @@ export function AnchorWatchMap({
   const aisTrailsData = useMemo(() => {
     const trails = aisTrails()
     const activeNames = new Set(aisVessels.map(v => v.name))
+    const cutoffMs = Date.now() - AIS_TRAIL_MAX_AGE_MS
     const features: GeoJSON.Feature<GeoJSON.LineString>[] = []
     for (const [name, points] of trails) {
-      if (activeNames.has(name) && points.length >= 2) features.push(trailToGeoJSON(points))
+      if (!activeNames.has(name)) continue
+      const recentPoints = points.filter((p) => p.timestampMs >= cutoffMs)
+      if (recentPoints.length >= 2) features.push(trailToGeoJSON(recentPoints))
     }
     return { type: 'FeatureCollection' as const, features }
   // eslint-disable-next-line react-hooks/exhaustive-deps
