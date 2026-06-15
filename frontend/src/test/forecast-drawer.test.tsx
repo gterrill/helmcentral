@@ -167,6 +167,12 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getAllByTestId('forecast-wind-barb').length).toBeGreaterThan(0)
   })
 
+  it('shows wave direction arrows along the wave chart', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getAllByTestId('forecast-wave-arrow').length).toBeGreaterThan(0)
+  })
+
   it('omits the wind summary when not provided', () => {
     render(
       <ForecastDrawer

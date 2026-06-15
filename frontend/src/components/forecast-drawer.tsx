@@ -138,6 +138,39 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
   )
 }
 
+// Renders a small double-headed arrow pointing toward the direction the
+// swell is coming from.
+function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; directionDeg: number }) {
+  if (directionDeg < 0) return null
+
+  const color = 'rgba(37,99,235,0.85)'
+  const angleRad = (directionDeg * Math.PI) / 180
+  const dirX = Math.sin(angleRad)
+  const dirY = -Math.cos(angleRad)
+  const perpX = -dirY
+  const perpY = dirX
+
+  const len = 9
+  const headSize = 4
+  const tipX = cx + dirX * len
+  const tipY = cy + dirY * len
+  const tailX = cx - dirX * len
+  const tailY = cy - dirY * len
+  const headBaseX = tipX - dirX * headSize
+  const headBaseY = tipY - dirY * headSize
+  const leftX = headBaseX + perpX * (headSize * 0.6)
+  const leftY = headBaseY + perpY * (headSize * 0.6)
+  const rightX = headBaseX - perpX * (headSize * 0.6)
+  const rightY = headBaseY - perpY * (headSize * 0.6)
+
+  return (
+    <g data-testid="forecast-wave-arrow">
+      <line x1={tailX} y1={tailY} x2={tipX} y2={tipY} stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+      <polygon points={`${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`} fill={color} />
+    </g>
+  )
+}
+
 function formatUpdatedAt(value: string | null | undefined) {
   if (!value) {
     return 'Unknown'
@@ -289,10 +322,12 @@ export function ForecastDrawer({
 
   const waveHeights = waveHourly.map((entry) => Math.max(0, entry.waveHeightM))
   const waveMax = Math.max(0.5, ...waveHeights)
-  const waveYFor = (value: number) => 12 + (1 - value / waveMax) * 108
+  const waveChartTop = 35
+  const waveChartBottom = 125
+  const waveYFor = (value: number) => waveChartTop + (1 - value / waveMax) * (waveChartBottom - waveChartTop)
   const waveTickEvery = Math.max(1, Math.round(waveHourly.length / 8))
   const waveAreaPath = waveHourly.length > 0
-    ? `M ${hourlyXFor(0, waveHourly.length)} 120 L ${waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)} ${waveYFor(value)}`).join(' L ')} L ${hourlyXFor(waveHourly.length - 1, waveHourly.length)} 120 Z`
+    ? `M ${hourlyXFor(0, waveHourly.length)} ${waveChartBottom} L ${waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)} ${waveYFor(value)}`).join(' L ')} L ${hourlyXFor(waveHourly.length - 1, waveHourly.length)} ${waveChartBottom} Z`
     : ''
   const wavePoints = waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
 
@@ -466,10 +501,10 @@ export function ForecastDrawer({
               </h4>
               {waveHourly.length > 0 ? (
                 <>
-                  <svg viewBox="0 0 1000 160" data-testid="forecast-wave-chart" className="h-[160px] w-full rounded bg-muted/15">
-                    <text x={6} y={16} fontSize="10" fill="rgba(100,116,139,0.9)">{waveMax.toFixed(1)} m</text>
-                    <text x={6} y={124} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
-                    <line x1={hourlyChartLeft} y1={120} x2={hourlyChartRight} y2={120} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                  <svg viewBox="0 0 1000 170" data-testid="forecast-wave-chart" className="h-[170px] w-full rounded bg-muted/15">
+                    <text x={6} y={40} fontSize="10" fill="rgba(100,116,139,0.9)">{waveMax.toFixed(1)} m</text>
+                    <text x={6} y={123} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
+                    <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
                     <path d={waveAreaPath} fill="rgba(37,99,235,0.12)" />
                     <polyline points={wavePoints} fill="none" stroke="rgba(37,99,235,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
@@ -479,14 +514,15 @@ export function ForecastDrawer({
                       const x = hourlyXFor(idx, waveHourly.length)
                       return (
                         <g key={idx}>
-                          <text x={x} y={138} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
-                          <text x={x} y={152} textAnchor="middle" fontSize="9" fill="rgba(105,114,128,0.9)">{entry.wavePeriodS.toFixed(1)}s</text>
+                          <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
+                          <text x={x} y={140} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                          <text x={x} y={154} textAnchor="middle" fontSize="9" fill="rgba(105,114,128,0.9)">{entry.wavePeriodS.toFixed(1)}s</text>
                         </g>
                       )
                     })}
                   </svg>
                   <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-secondary">— Wave height (m)</span>, period shown below each tick
+                    <span className="text-secondary">— Wave height (m)</span>, period shown below each tick · arrows show direction the swell is coming from
                   </p>
                 </>
               ) : (
