@@ -111,7 +111,7 @@ function getHourlyWeatherIcon(entry: WeatherHourlyEntry, isNight: boolean) {
 function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; speedKts: number; directionDeg: number }) {
   if (speedKts < 0 || directionDeg < 0) return null
 
-  const color = 'rgba(20,184,166,0.85)'
+  const color = 'rgba(37,99,235,0.85)'
 
   if (speedKts < 3) {
     return <circle data-testid="forecast-wind-barb" cx={cx} cy={cy} r="2.5" fill="none" stroke={color} strokeWidth="1.2" />
@@ -181,7 +181,7 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
 function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; directionDeg: number }) {
   if (directionDeg < 0) return null
 
-  const color = 'rgba(37,99,235,0.85)'
+  const color = 'rgba(20,184,166,0.85)'
   const angleRad = ((directionDeg + 180) * Math.PI) / 180
   const dirX = Math.sin(angleRad)
   const dirY = -Math.cos(angleRad)
@@ -231,6 +231,11 @@ const UV_GRADIENT_STOPS = [
   { value: 11, color: 'rgb(168,85,247)' },
 ]
 
+// Shared axis label styling, used for every value/tick/band label across the
+// Wind, Wave, Precipitation and UV charts so they read consistently.
+const AXIS_LABEL_FONT_SIZE = '10'
+const AXIS_LABEL_COLOR = 'rgba(71,85,105,0.95)'
+
 // Left-axis band labels for the UV chart, positioned at each band's center value.
 const UV_BAND_LABELS = [
   { value: 10, label: 'Extreme' },
@@ -240,22 +245,15 @@ const UV_BAND_LABELS = [
   { value: 1, label: 'Low' },
 ]
 
-function formatUpdatedAt(value: string | null | undefined) {
-  if (!value) {
-    return 'Unknown'
-  }
+// Parses a "6:32AM"/"5:09PM"-style local time label into an hour-of-day
+// (0-23, possibly fractional), or null if unparseable.
+function parseHourFromTimeLabel(label: string | null): number | null {
+  const match = label?.match(/^(\d{1,2}):(\d{2})(AM|PM)$/)
+  if (!match) return null
 
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) {
-    return 'Unknown'
-  }
-
-  return parsed.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  let hour = parseInt(match[1], 10) % 12
+  if (match[3] === 'PM') hour += 12
+  return hour + parseInt(match[2], 10) / 60
 }
 
 export function formatRefreshAge(value: string | null | undefined, nowMs: number) {
@@ -297,31 +295,13 @@ export function ForecastDrawer({
   summary = null,
   loading = false,
   error = null,
-  isCached = false,
-  updatedAt = null,
-  ttlSeconds = null,
   onRetry,
   unit,
 }: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
-  const showingStaleForecast = Boolean(error && hasForecast)
-  const cacheMinutes = ttlSeconds && ttlSeconds > 0 ? Math.round(ttlSeconds / 60) : null
-  const [nowMs, setNowMs] = useState(() => Date.now())
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
   const uvAreaGradientId = useId()
   const uvLineGradientId = useId()
-
-  useEffect(() => {
-    if (!updatedAt) {
-      return
-    }
-
-    const interval = setInterval(() => {
-      setNowMs(Date.now())
-    }, 30000)
-
-    return () => clearInterval(interval)
-  }, [updatedAt])
 
   if (loading && !hasForecast) {
     return (
@@ -370,7 +350,12 @@ export function ForecastDrawer({
   const windHourly = selectedDay.hourlyWind ?? []
   const waveHourly = selectedDay.hourlyWave ?? []
   const precipHourly = selectedDay.hourlyPrecip ?? []
-  const uvHourly = selectedDay.hourlyUV ?? []
+  const uvHourlyFull = selectedDay.hourlyUV ?? []
+  const sunriseHour = parseHourFromTimeLabel(selectedDay.sunriseTime)
+  const sunsetHour = parseHourFromTimeLabel(selectedDay.sunsetTime)
+  const uvHourly = sunriseHour !== null && sunsetHour !== null
+    ? uvHourlyFull.filter((_entry, idx) => idx >= Math.floor(sunriseHour) && idx <= Math.ceil(sunsetHour))
+    : uvHourlyFull
 
   const hourlyChartLeft = 30
   const hourlyChartRight = 980
@@ -434,23 +419,6 @@ export function ForecastDrawer({
 
   return (
     <div className="space-y-4 pb-4">
-      {(isCached || showingStaleForecast) && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-900">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="font-semibold uppercase tracking-[0.08em]">
-              {showingStaleForecast ? 'Showing last cached forecast' : 'Forecast served from cache'}
-            </p>
-            <p className="text-amber-800">Updated {formatUpdatedAt(updatedAt)} (Age: {formatRefreshAge(updatedAt, nowMs)})</p>
-          </div>
-          {showingStaleForecast && (
-            <p className="mt-1 text-amber-800">Live refresh failed: {error}</p>
-          )}
-          {cacheMinutes !== null && (
-            <p className="mt-1 text-amber-800">Cache window: {cacheMinutes} minutes</p>
-          )}
-        </div>
-      )}
-
       {hourlyEntries.length > 0 && (
     <div className="overflow-hidden rounded-[26px] border border-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]">
       <div className="border-b border-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
@@ -589,13 +557,13 @@ export function ForecastDrawer({
                     <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.windSummary}</p>
                   )}
                   <svg viewBox="0 0 1000 175" data-testid="forecast-wind-chart" className="h-[175px] w-full rounded bg-muted/15">
-                    <text x={6} y={40} fontSize="10" fill="rgba(100,116,139,0.9)">{Math.round(windMax)} {windUnit}</text>
-                    <text x={6} y={123} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
+                    <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(windMax)} {windUnit}</text>
+                    <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
                     <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                    <path d={windAreaPath} fill="rgba(20,184,166,0.12)" />
+                    <path d={windAreaPath} fill="rgba(37,99,235,0.12)" />
                     <polyline points={windGustPoints} fill="none" stroke="rgba(245,158,11,0.75)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
-                    <polyline points={windSpeedPoints} fill="none" stroke="rgba(20,184,166,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+                    <polyline points={windSpeedPoints} fill="none" stroke="rgba(37,99,235,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
                     {windHourly.map((entry, idx) => {
                       if (idx % windTickEvery !== 0 && idx !== windHourly.length - 1) return null
@@ -603,13 +571,13 @@ export function ForecastDrawer({
                       return (
                         <g key={idx}>
                           <WindBarb cx={x} cy={16} speedKts={entry.windSpeed} directionDeg={entry.windDirectionDeg} />
-                          <text x={x} y={142} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                          <text x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
                         </g>
                       )
                     })}
                   </svg>
                   <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-secondary">— Wind</span> · <span className="text-amber-600">- - Gusts</span> ({windUnit}) · barbs show direction the wind is coming from (full feather = 10kt, half = 5kt)
+                    <span className="text-blue-600">— Wind</span> · <span className="text-amber-600">- - Gusts</span> ({windUnit}) · barbs show direction the wind is coming from (full feather = 10kt, half = 5kt)
                   </p>
                 </>
               ) : (
@@ -629,12 +597,12 @@ export function ForecastDrawer({
                     <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.waveSummary}</p>
                   )}
                   <svg viewBox="0 0 1000 170" data-testid="forecast-wave-chart" className="h-[170px] w-full rounded bg-muted/15">
-                    <text x={6} y={40} fontSize="10" fill="rgba(100,116,139,0.9)">{waveMax.toFixed(1)} m</text>
-                    <text x={6} y={123} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
+                    <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{waveMax.toFixed(1)} m</text>
+                    <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
                     <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                    <path d={waveAreaPath} fill="rgba(37,99,235,0.12)" />
-                    <polyline points={wavePoints} fill="none" stroke="rgba(37,99,235,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+                    <path d={waveAreaPath} fill="rgba(20,184,166,0.12)" />
+                    <polyline points={wavePoints} fill="none" stroke="rgba(20,184,166,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
                     {waveHourly.map((entry, idx) => {
                       if (idx % waveTickEvery !== 0 && idx !== waveHourly.length - 1) return null
@@ -642,8 +610,8 @@ export function ForecastDrawer({
                       return (
                         <g key={idx}>
                           <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
-                          <text x={x} y={31} textAnchor="middle" fontSize="9" fill="rgba(105,114,128,0.9)">{entry.wavePeriodS.toFixed(1)}s</text>
-                          <text x={x} y={140} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                          <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.wavePeriodS.toFixed(1)}s</text>
+                          <text x={x} y={140} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
                         </g>
                       )
                     })}
@@ -669,10 +637,10 @@ export function ForecastDrawer({
                     <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.precipitationSummary}</p>
                   )}
                   <svg viewBox="0 0 1000 175" data-testid="forecast-precip-chart" className="h-[175px] w-full rounded bg-muted/15">
-                    <text x={6} y={40} fontSize="10" fill="rgba(100,116,139,0.9)">{precipMax.toFixed(1)} mm/hr</text>
-                    <text x={6} y={123} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
-                    <text x={994} y={40} textAnchor="end" fontSize="10" fill="rgba(100,116,139,0.9)">100%</text>
-                    <text x={994} y={123} textAnchor="end" fontSize="10" fill="rgba(100,116,139,0.9)">0%</text>
+                    <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)} mm/hr</text>
+                    <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
+                    <text x={994} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
+                    <text x={994} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
                     <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
                     {precipHourly.map((_entry, idx) => {
@@ -699,7 +667,7 @@ export function ForecastDrawer({
                       if (idx % precipTickEvery !== 0 && idx !== precipHourly.length - 1) return null
                       const x = hourlyXFor(idx, precipHourly.length)
                       return (
-                        <text key={idx} x={x} y={142} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                        <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
                       )
                     })}
                   </svg>
@@ -739,12 +707,12 @@ export function ForecastDrawer({
                       </linearGradient>
                     </defs>
 
-                    <text x={994} y={40} textAnchor="end" fontSize="10" fill="rgba(100,116,139,0.9)">{Math.round(uvMax)}</text>
-                    <text x={994} y={123} textAnchor="end" fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
+                    <text x={994} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(uvMax)}</text>
+                    <text x={994} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
                     <line x1={hourlyChartLeft} y1={uvChartBottom} x2={hourlyChartRight} y2={uvChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
                     {UV_BAND_LABELS.map((band) => (
-                      <text key={band.label} x={6} y={uvYFor(band.value)} fontSize="8" fill="rgba(100,116,139,0.75)">{band.label}</text>
+                      <text key={band.label} x={6} y={uvYFor(band.value)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
                     ))}
 
                     <path d={uvAreaPath} fill={`url(#${uvAreaGradientId})`} />
@@ -754,7 +722,7 @@ export function ForecastDrawer({
                       if (idx % uvTickEvery !== 0 && idx !== uvHourly.length - 1) return null
                       const x = hourlyXFor(idx, uvHourly.length)
                       return (
-                        <text key={idx} x={x} y={142} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                        <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
                       )
                     })}
                   </svg>

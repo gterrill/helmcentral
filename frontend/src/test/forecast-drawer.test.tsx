@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 
 import { ForecastDrawer, formatRefreshAge } from '@/components/forecast-drawer'
 
@@ -81,28 +81,6 @@ describe('ForecastDrawer refresh age', () => {
     expect(formatRefreshAge('2026-06-14T12:30:00Z', new Date('2026-06-14T12:30:20Z').getTime())).toBe('just now')
     expect(formatRefreshAge('2026-06-14T12:29:00Z', new Date('2026-06-14T12:30:00Z').getTime())).toBe('1 min ago')
     expect(formatRefreshAge('2026-06-14T10:00:00Z', new Date('2026-06-14T12:30:00Z').getTime())).toBe('2 hours ago')
-  })
-
-  it('updates age label as time advances', async () => {
-    render(
-      <ForecastDrawer
-        forecast={[buildDay()]}
-        loading={false}
-        error={null}
-        isCached
-        updatedAt="2026-06-14T12:30:00Z"
-        ttlSeconds={3600}
-        unit="metric"
-      />,
-    )
-
-    expect(screen.getByText(/Age: just now/)).toBeInTheDocument()
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60000)
-    })
-
-    expect(screen.getByText(/Age: 1 min ago/)).toBeInTheDocument()
   })
 
   it('updates summary metrics when a day card is selected', () => {
