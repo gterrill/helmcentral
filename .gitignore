@@ -10,3 +10,4 @@ backend/helmcentral
 !backend/dist/
 !backend/dist/.gitkeep
 settings.yaml
+.claude/settings.json
