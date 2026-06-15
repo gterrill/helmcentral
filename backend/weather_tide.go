@@ -248,7 +248,10 @@ type weatherForecastDayData struct {
 	WindSpeedKts     float64
 	WindGustKts      float64
 	WindDirection    string
+	WindSummary      string
 	PrecipitationPct float64
+	HourlyWind       []weatherHourlyWindData
+	HourlyWave       []weatherHourlyWaveData
 }
 
 type weatherHourlyEntryData struct {
@@ -258,6 +261,21 @@ type weatherHourlyEntryData struct {
 	WindSpeedKts float64
 	WindGustKts  float64
 	Kind         string
+}
+
+type weatherHourlyWindData struct {
+	Label            string
+	WindSpeedKts     float64
+	WindGustKts      float64
+	WindDirection    string
+	WindDirectionDeg float64
+}
+
+type weatherHourlyWaveData struct {
+	Label            string
+	WaveHeightM      float64
+	WavePeriodS      float64
+	WaveDirectionDeg float64
 }
 
 type weatherForecastDataBundle struct {
@@ -300,15 +318,18 @@ type weatherTodayETagData struct {
 }
 
 type weatherForecastDayResponse struct {
-	Date             string  `json:"date"`
-	DayName          string  `json:"day_name"`
-	Condition        string  `json:"condition"`
-	HighTempF        float64 `json:"high_temp_f"`
-	LowTempF         float64 `json:"low_temp_f"`
-	WindSpeedKts     float64 `json:"wind_speed_kts"`
-	WindGustKts      float64 `json:"wind_gust_kts"`
-	WindDirection    string  `json:"wind_direction"`
-	PrecipitationPct float64 `json:"precipitation_pct"`
+	Date             string                      `json:"date"`
+	DayName          string                      `json:"day_name"`
+	Condition        string                      `json:"condition"`
+	HighTempF        float64                     `json:"high_temp_f"`
+	LowTempF         float64                     `json:"low_temp_f"`
+	WindSpeedKts     float64                     `json:"wind_speed_kts"`
+	WindGustKts      float64                     `json:"wind_gust_kts"`
+	WindDirection    string                      `json:"wind_direction"`
+	WindSummary      string                      `json:"wind_summary"`
+	PrecipitationPct float64                     `json:"precipitation_pct"`
+	HourlyWind       []weatherHourlyWindResponse `json:"hourly_wind"`
+	HourlyWave       []weatherHourlyWaveResponse `json:"hourly_wave"`
 }
 
 type weatherHourlyEntryResponse struct {
@@ -316,6 +337,21 @@ type weatherHourlyEntryResponse struct {
 	Condition    string  `json:"condition"`
 	TemperatureF float64 `json:"temperature_f"`
 	Kind         string  `json:"kind"`
+}
+
+type weatherHourlyWindResponse struct {
+	Label            string  `json:"label"`
+	WindSpeedKts     float64 `json:"wind_speed_kts"`
+	WindGustKts      float64 `json:"wind_gust_kts"`
+	WindDirection    string  `json:"wind_direction"`
+	WindDirectionDeg float64 `json:"wind_direction_deg"`
+}
+
+type weatherHourlyWaveResponse struct {
+	Label            string  `json:"label"`
+	WaveHeightM      float64 `json:"wave_height_m"`
+	WavePeriodS      float64 `json:"wave_period_s"`
+	WaveDirectionDeg float64 `json:"wave_direction_deg"`
 }
 
 type weatherForecastResponse struct {
@@ -518,8 +554,15 @@ func persistWeatherForecastCacheToDisk() {
 }
 
 func cloneWeatherForecastBundle(bundle weatherForecastDataBundle) weatherForecastDataBundle {
+	days := make([]weatherForecastDayData, len(bundle.Days))
+	for i, day := range bundle.Days {
+		day.HourlyWind = append([]weatherHourlyWindData(nil), day.HourlyWind...)
+		day.HourlyWave = append([]weatherHourlyWaveData(nil), day.HourlyWave...)
+		days[i] = day
+	}
+
 	return weatherForecastDataBundle{
-		Days:        append([]weatherForecastDayData(nil), bundle.Days...),
+		Days:        days,
 		HourlyToday: append([]weatherHourlyEntryData(nil), bundle.HourlyToday...),
 		Summary:     bundle.Summary,
 	}
@@ -679,7 +722,7 @@ func weatherForecast(c echo.Context) error {
 
 	atomic.AddUint64(&weatherForecastCacheMisses, 1)
 
-	bundle, forecastErr := fetchWeatherKitForecastBundleData(vesselState.Latitude, vesselState.Longitude, 6, vesselState.Datetime, vesselLocalLocation)
+	bundle, forecastErr := fetchWeatherKitForecastBundleData(vesselState.Latitude, vesselState.Longitude, 10, vesselState.Datetime, vesselLocalLocation)
 	if forecastErr != nil {
 		log.Printf("WeatherKit forecast API error: %v", forecastErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "failed to fetch weather forecast"})
@@ -727,7 +770,37 @@ func mapForecastResponse(state []weatherForecastDayData) []weatherForecastDayRes
 			WindSpeedKts:     day.WindSpeedKts,
 			WindGustKts:      day.WindGustKts,
 			WindDirection:    day.WindDirection,
+			WindSummary:      day.WindSummary,
 			PrecipitationPct: day.PrecipitationPct,
+			HourlyWind:       mapHourlyWindResponse(day.HourlyWind),
+			HourlyWave:       mapHourlyWaveResponse(day.HourlyWave),
+		})
+	}
+	return response
+}
+
+func mapHourlyWindResponse(entries []weatherHourlyWindData) []weatherHourlyWindResponse {
+	response := make([]weatherHourlyWindResponse, 0, len(entries))
+	for _, entry := range entries {
+		response = append(response, weatherHourlyWindResponse{
+			Label:            entry.Label,
+			WindSpeedKts:     entry.WindSpeedKts,
+			WindGustKts:      entry.WindGustKts,
+			WindDirection:    entry.WindDirection,
+			WindDirectionDeg: entry.WindDirectionDeg,
+		})
+	}
+	return response
+}
+
+func mapHourlyWaveResponse(entries []weatherHourlyWaveData) []weatherHourlyWaveResponse {
+	response := make([]weatherHourlyWaveResponse, 0, len(entries))
+	for _, entry := range entries {
+		response = append(response, weatherHourlyWaveResponse{
+			Label:            entry.Label,
+			WaveHeightM:      entry.WaveHeightM,
+			WavePeriodS:      entry.WavePeriodS,
+			WaveDirectionDeg: entry.WaveDirectionDeg,
 		})
 	}
 	return response
@@ -967,6 +1040,13 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 		return bundle, fmt.Errorf("forecastDaily.days missing from WeatherKit response")
 	}
 
+	windSeriesByDay := buildDailyWindSeries(result, localLocation)
+
+	waveSeriesByDay, waveErr := fetchOpenMeteoMarineForecast(latitude, longitude)
+	if waveErr != nil {
+		log.Printf("Open-Meteo marine forecast error: %v", waveErr)
+	}
+
 	forecast := make([]weatherForecastDayData, 0, daysCount)
 	var sunsetAt time.Time
 	for _, rawDay := range rawDays {
@@ -1031,7 +1111,7 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 			if speed, ok := daytimeForecast["windSpeed"].(float64); ok {
 				windSpeedKts = speed * kphToKnots
 			}
-			if gust, ok := daytimeForecast["windGust"].(float64); ok {
+			if gust, ok := daytimeForecast["windGustSpeedMax"].(float64); ok {
 				windGustKts = gust * kphToKnots
 			}
 			if directionDeg, ok := daytimeForecast["windDirection"].(float64); ok {
@@ -1046,7 +1126,7 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 		}
 
 		if windGustKts < 0 {
-			if gust, ok := dayMap["windGust"].(float64); ok {
+			if gust, ok := dayMap["windGustSpeedMax"].(float64); ok {
 				windGustKts = gust * kphToKnots
 			}
 		}
@@ -1070,7 +1150,10 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 			WindSpeedKts:     windSpeedKts,
 			WindGustKts:      windGustKts,
 			WindDirection:    windDirection,
+			WindSummary:      buildWindSummary(dayName, windSeriesByDay[dayKey]),
 			PrecipitationPct: precipPct,
+			HourlyWind:       windSeriesByDay[dayKey],
+			HourlyWave:       waveSeriesByDay[dayKey],
 		})
 	}
 
@@ -1083,6 +1166,197 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 	bundle.Summary = summarizeHourlyForecast(bundle.HourlyToday)
 
 	return bundle, nil
+}
+
+// buildDailyWindSeries buckets WeatherKit's hourly forecast into per-day
+// (local date) hourly wind series, keyed by "2006-01-02".
+func buildDailyWindSeries(result map[string]any, localLocation *time.Location) map[string][]weatherHourlyWindData {
+	forecastHourly, ok := result["forecastHourly"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	rawHours, ok := forecastHourly["hours"].([]any)
+	if !ok {
+		return nil
+	}
+
+	series := make(map[string][]weatherHourlyWindData)
+	for _, rawHour := range rawHours {
+		hourMap, ok := rawHour.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		forecastStart, ok := hourMap["forecastStart"].(string)
+		if !ok {
+			continue
+		}
+
+		parsed, err := time.Parse(time.RFC3339, forecastStart)
+		if err != nil {
+			continue
+		}
+		localTime := parsed.In(localLocation)
+
+		windSpeedKts := -1.0
+		if speed, ok := hourMap["windSpeed"].(float64); ok {
+			windSpeedKts = speed * kphToKnots
+		}
+
+		windGustKts := -1.0
+		if gust, ok := hourMap["windGust"].(float64); ok {
+			windGustKts = gust * kphToKnots
+		} else if windSpeedKts >= 0 {
+			windGustKts = windSpeedKts
+		}
+
+		windDirection := "—"
+		windDirectionDeg := -1.0
+		if directionDeg, ok := hourMap["windDirection"].(float64); ok {
+			windDirection = degreesToDirection(directionDeg)
+			windDirectionDeg = directionDeg
+		}
+
+		dayKey := localTime.Format("2006-01-02")
+		series[dayKey] = append(series[dayKey], weatherHourlyWindData{
+			Label:            localTime.Format("3PM"),
+			WindSpeedKts:     windSpeedKts,
+			WindGustKts:      windGustKts,
+			WindDirection:    windDirection,
+			WindDirectionDeg: windDirectionDeg,
+		})
+	}
+
+	return series
+}
+
+// buildWindSummary formats a human-readable sentence describing a day's wind
+// speed range and peak gust, derived from its hourly wind series so it stays
+// numerically consistent with the wind graph.
+func buildWindSummary(dayName string, hourly []weatherHourlyWindData) string {
+	minSpeed := math.MaxFloat64
+	maxSpeed := -1.0
+	maxGust := -1.0
+	found := false
+
+	for _, entry := range hourly {
+		if entry.WindSpeedKts < 0 {
+			continue
+		}
+		found = true
+		if entry.WindSpeedKts < minSpeed {
+			minSpeed = entry.WindSpeedKts
+		}
+		if entry.WindSpeedKts > maxSpeed {
+			maxSpeed = entry.WindSpeedKts
+		}
+		if entry.WindGustKts > maxGust {
+			maxGust = entry.WindGustKts
+		}
+	}
+
+	if !found {
+		return ""
+	}
+
+	minRounded := int(math.Round(minSpeed))
+	maxRounded := int(math.Round(maxSpeed))
+	gustRounded := int(math.Round(maxGust))
+
+	speedPhrase := fmt.Sprintf("%d to %d kts", minRounded, maxRounded)
+	if minRounded == maxRounded {
+		speedPhrase = fmt.Sprintf("around %d kts", maxRounded)
+	}
+
+	if gustRounded > maxRounded {
+		return fmt.Sprintf("On %s, winds will be %s, with gusts up to %d kts.", dayName, speedPhrase, gustRounded)
+	}
+
+	return fmt.Sprintf("On %s, winds will be %s.", dayName, speedPhrase)
+}
+
+// fetchOpenMeteoMarineForecast fetches an hourly wave forecast from the free,
+// keyless Open-Meteo Marine API and buckets it per-day (local date), keyed by
+// "2006-01-02". Open-Meteo supports at most 8 forecast days, so later days in
+// a 10-day forecast may have no wave data.
+func fetchOpenMeteoMarineForecast(latitude, longitude float64) (map[string][]weatherHourlyWaveData, error) {
+	requestURL := fmt.Sprintf("https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period&timezone=auto&forecast_days=8", latitude, longitude)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(requestURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch marine forecast: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read marine forecast response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("open-meteo marine API returned %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse marine forecast response: %v", err)
+	}
+
+	return parseOpenMeteoMarineResponse(result)
+}
+
+func parseOpenMeteoMarineResponse(result map[string]any) (map[string][]weatherHourlyWaveData, error) {
+	hourly, ok := result["hourly"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("hourly missing from marine forecast response")
+	}
+
+	times, ok := hourly["time"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("hourly.time missing from marine forecast response")
+	}
+
+	heights, _ := hourly["wave_height"].([]any)
+	periods, _ := hourly["wave_period"].([]any)
+	directions, _ := hourly["wave_direction"].([]any)
+
+	series := make(map[string][]weatherHourlyWaveData)
+	for i, rawTime := range times {
+		timeStr, ok := rawTime.(string)
+		if !ok {
+			continue
+		}
+
+		// Open-Meteo returns local time without a UTC offset, e.g. "2026-06-15T00:00".
+		parsed, err := time.Parse("2006-01-02T15:04", timeStr)
+		if err != nil {
+			continue
+		}
+
+		point := weatherHourlyWaveData{Label: parsed.Format("3PM")}
+		if i < len(heights) {
+			if h, ok := heights[i].(float64); ok {
+				point.WaveHeightM = h
+			}
+		}
+		if i < len(periods) {
+			if p, ok := periods[i].(float64); ok {
+				point.WavePeriodS = p
+			}
+		}
+		if i < len(directions) {
+			if d, ok := directions[i].(float64); ok {
+				point.WaveDirectionDeg = d
+			}
+		}
+
+		dayKey := parsed.Format("2006-01-02")
+		series[dayKey] = append(series[dayKey], point)
+	}
+
+	return series, nil
 }
 
 func fetchWeatherKitForecastData(latitude, longitude float64, daysCount int, referenceDatetime time.Time, localLocation *time.Location) ([]weatherForecastDayData, error) {

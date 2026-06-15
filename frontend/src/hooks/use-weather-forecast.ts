@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+export interface WeatherHourlyWindPoint {
+  label: string;
+  windSpeed: number;
+  windGust: number;
+  windDirection: string;
+  windDirectionDeg: number;
+}
+
+export interface WeatherHourlyWavePoint {
+  label: string;
+  waveHeightM: number;
+  wavePeriodS: number;
+  waveDirectionDeg: number;
+}
+
 export interface WeatherForecastDay {
   date: string;
   dayName: string;
@@ -9,7 +24,10 @@ export interface WeatherForecastDay {
   windSpeed: number;
   windGust: number;
   windDirection: string;
+  windSummary: string | null;
   precipitation: number;
+  hourlyWind: WeatherHourlyWindPoint[];
+  hourlyWave: WeatherHourlyWavePoint[];
 }
 
 export interface WeatherHourlyEntry {
@@ -17,6 +35,21 @@ export interface WeatherHourlyEntry {
   condition: string;
   temperatureF: number;
   kind: 'forecast' | 'sunset' | string;
+}
+
+interface WeatherHourlyWindApi {
+  label?: string;
+  wind_speed_kts?: number;
+  wind_gust_kts?: number;
+  wind_direction?: string;
+  wind_direction_deg?: number;
+}
+
+interface WeatherHourlyWaveApi {
+  label?: string;
+  wave_height_m?: number;
+  wave_period_s?: number;
+  wave_direction_deg?: number;
 }
 
 interface WeatherForecastDayApi {
@@ -28,7 +61,10 @@ interface WeatherForecastDayApi {
   wind_speed_kts?: number;
   wind_gust_kts?: number;
   wind_direction?: string;
+  wind_summary?: string;
   precipitation_pct?: number;
+  hourly_wind?: WeatherHourlyWindApi[];
+  hourly_wave?: WeatherHourlyWaveApi[];
 }
 
 interface WeatherForecastEnvelopeApi {
@@ -74,7 +110,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
         }
 
         const mappedForecast = rawDays
-          .slice(0, 6)
+          .slice(0, 10)
           .map((day, idx): WeatherForecastDay => {
             const fallbackDate = new Date();
             fallbackDate.setDate(fallbackDate.getDate() + idx);
@@ -91,7 +127,25 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
               windSpeed,
               windGust,
               windDirection: day.wind_direction || '—',
+              windSummary: typeof day.wind_summary === 'string' && day.wind_summary !== '' ? day.wind_summary : null,
               precipitation: typeof day.precipitation_pct === 'number' ? day.precipitation_pct : 0,
+              hourlyWind: Array.isArray(day.hourly_wind)
+                ? day.hourly_wind.map((entry) => ({
+                    label: entry.label || '—',
+                    windSpeed: typeof entry.wind_speed_kts === 'number' ? entry.wind_speed_kts : -1,
+                    windGust: typeof entry.wind_gust_kts === 'number' ? entry.wind_gust_kts : -1,
+                    windDirection: entry.wind_direction || '—',
+                    windDirectionDeg: typeof entry.wind_direction_deg === 'number' ? entry.wind_direction_deg : -1,
+                  }))
+                : [],
+              hourlyWave: Array.isArray(day.hourly_wave)
+                ? day.hourly_wave.map((entry) => ({
+                    label: entry.label || '—',
+                    waveHeightM: typeof entry.wave_height_m === 'number' ? entry.wave_height_m : -1,
+                    wavePeriodS: typeof entry.wave_period_s === 'number' ? entry.wave_period_s : -1,
+                    waveDirectionDeg: typeof entry.wave_direction_deg === 'number' ? entry.wave_direction_deg : -1,
+                  }))
+                : [],
             };
           });
 

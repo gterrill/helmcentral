@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 
-import { Cloud, CloudRain, Moon, Sun, Sunset } from 'lucide-react'
+import { Cloud, CloudRain, Moon, Sun, Sunset, Wind, Waves } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import type { WeatherHourlyEntry } from '@/hooks/use-weather-forecast'
+import type { WeatherHourlyEntry, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
 
 interface ForecastDay {
   date: string
@@ -14,7 +15,10 @@ interface ForecastDay {
   windSpeed: number
   windGust: number
   windDirection: string
+  windSummary: string | null
   precipitation: number
+  hourlyWind: WeatherHourlyWindPoint[]
+  hourlyWave: WeatherHourlyWavePoint[]
 }
 
 interface ForecastDrawerProps {
@@ -62,6 +66,76 @@ function getHourlyWeatherIcon(entry: WeatherHourlyEntry, isNight: boolean) {
   }
 
   return getWeatherIcon(entry.condition, 24)
+}
+
+// Renders a single wind barb: a staff pointing toward the direction the wind
+// is coming from, with feathers indicating speed (full barb = 10kt, half
+// barb = 5kt, pennant = 50kt).
+function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; speedKts: number; directionDeg: number }) {
+  if (speedKts < 0 || directionDeg < 0) return null
+
+  const color = 'rgba(20,184,166,0.85)'
+
+  if (speedKts < 3) {
+    return <circle data-testid="forecast-wind-barb" cx={cx} cy={cy} r="2.5" fill="none" stroke={color} strokeWidth="1.2" />
+  }
+
+  const angleRad = (directionDeg * Math.PI) / 180
+  const dirX = Math.sin(angleRad)
+  const dirY = -Math.cos(angleRad)
+  const perpX = -dirY
+  const perpY = dirX
+
+  const staffLen = 12
+  const barbLen = 5
+  const barbSpacing = 3.5
+
+  let remaining = Math.round(speedKts / 5) * 5
+  const pennants = Math.floor(remaining / 50)
+  remaining -= pennants * 50
+  const fullBarbs = Math.floor(remaining / 10)
+  remaining -= fullBarbs * 10
+  const hasHalfBarb = remaining >= 5
+
+  const features: ReactNode[] = []
+  let pos = staffLen
+
+  for (let i = 0; i < pennants; i++) {
+    const baseX = cx + dirX * pos
+    const baseY = cy + dirY * pos
+    const innerPos = pos - barbSpacing
+    const innerX = cx + dirX * innerPos
+    const innerY = cy + dirY * innerPos
+    const outerX = baseX + perpX * barbLen
+    const outerY = baseY + perpY * barbLen
+    features.push(<polygon key={`pennant-${i}`} points={`${baseX},${baseY} ${innerX},${innerY} ${outerX},${outerY}`} fill={color} />)
+    pos -= barbSpacing
+  }
+
+  for (let i = 0; i < fullBarbs; i++) {
+    const baseX = cx + dirX * pos
+    const baseY = cy + dirY * pos
+    const outerX = baseX + perpX * barbLen
+    const outerY = baseY + perpY * barbLen
+    features.push(<line key={`full-${i}`} x1={baseX} y1={baseY} x2={outerX} y2={outerY} stroke={color} strokeWidth="1.4" strokeLinecap="round" />)
+    pos -= barbSpacing
+  }
+
+  if (hasHalfBarb) {
+    const baseX = cx + dirX * pos
+    const baseY = cy + dirY * pos
+    const outerX = baseX + perpX * (barbLen / 2)
+    const outerY = baseY + perpY * (barbLen / 2)
+    features.push(<line key="half" x1={baseX} y1={baseY} x2={outerX} y2={outerY} stroke={color} strokeWidth="1.4" strokeLinecap="round" />)
+  }
+
+  return (
+    <g data-testid="forecast-wind-barb">
+      <line x1={cx} y1={cy} x2={cx + dirX * staffLen} y2={cy + dirY * staffLen} stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r="1.4" fill={color} />
+      {features}
+    </g>
+  )
 }
 
 function formatUpdatedAt(value: string | null | undefined) {
@@ -177,7 +251,7 @@ export function ForecastDrawer({
   const tempUnit = unit === 'metric' ? '°C' : '°F'
   const windUnit = 'kts'
   const displayTemp = (tempF: number) => (unit === 'metric' ? fahrenheitToCelsius(tempF) : tempF)
-  const days = forecast.slice(0, 6)
+  const days = forecast.slice(0, 10)
   const hourlyEntries = hourlyToday.slice(0, 12)
 
   useEffect(() => {
@@ -190,38 +264,37 @@ export function ForecastDrawer({
   const visibilityNm = Math.max(1, 12 - (selectedDay.precipitation * 0.06))
   const uvIndex = Math.max(1, Math.min(11, Math.round((selectedDay.high - 32) / 8)))
 
-  const tempSeries = days.map(day => displayTemp((day.high + day.low) / 2))
-  const windSeries = days.map(day => day.windSpeed)
-  const precipSeries = days.map(day => Math.max(0, day.precipitation))
+  const windHourly = selectedDay.hourlyWind ?? []
+  const waveHourly = selectedDay.hourlyWave ?? []
 
-  const chartLeft = 18
-  const chartRight = 982
-  const chartWidth = chartRight - chartLeft
+  const hourlyChartLeft = 30
+  const hourlyChartRight = 980
+  const hourlyChartWidth = hourlyChartRight - hourlyChartLeft
 
-  const xForIndex = (idx: number) => {
-    if (days.length <= 1) {
-      return chartLeft + chartWidth / 2
-    }
+  const hourlyXFor = (idx: number, count: number) =>
+    count <= 1 ? hourlyChartLeft + hourlyChartWidth / 2 : hourlyChartLeft + (idx * hourlyChartWidth) / (count - 1)
 
-    return chartLeft + (idx * chartWidth) / (days.length - 1)
-  }
+  const windSpeeds = windHourly.map((entry) => Math.max(0, entry.windSpeed))
+  const windGusts = windHourly.map((entry) => Math.max(0, entry.windGust))
+  const windMax = Math.max(5, ...windSpeeds, ...windGusts)
+  const windChartTop = 35
+  const windChartBottom = 125
+  const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
+  const windTickEvery = Math.max(1, Math.round(windHourly.length / 8))
+  const windAreaPath = windHourly.length > 0
+    ? `M ${hourlyXFor(0, windHourly.length)} ${windChartBottom} L ${windSpeeds.map((value, idx) => `${hourlyXFor(idx, windHourly.length)} ${windYFor(value)}`).join(' L ')} L ${hourlyXFor(windHourly.length - 1, windHourly.length)} ${windChartBottom} Z`
+    : ''
+  const windSpeedPoints = windSpeeds.map((value, idx) => `${hourlyXFor(idx, windHourly.length)},${windYFor(value)}`).join(' ')
+  const windGustPoints = windGusts.map((value, idx) => `${hourlyXFor(idx, windHourly.length)},${windYFor(value)}`).join(' ')
 
-  const tempMin = Math.min(...tempSeries)
-  const tempMax = Math.max(...tempSeries)
-  const tempRange = Math.max(1, tempMax - tempMin)
-  const tempYFor = (value: number) => 20 + (1 - (value - tempMin) / tempRange) * 90
-
-  const windMin = Math.min(...windSeries)
-  const windMax = Math.max(...windSeries)
-  const windRange = Math.max(1, windMax - windMin)
-  const windYFor = (value: number) => 150 + (1 - (value - windMin) / windRange) * 62
-  const precipMax = Math.max(1, ...precipSeries)
-  const precipHeightFor = (value: number) => (value / precipMax) * 62
-
-  const tempPoints = tempSeries.map((value, idx) => `${xForIndex(idx)},${tempYFor(value)}`).join(' ')
-  const windPoints = windSeries.map((value, idx) => `${xForIndex(idx)},${windYFor(value)}`).join(' ')
-  const tempAreaPath = `M ${xForIndex(0)} 130 L ${tempSeries.map((value, idx) => `${xForIndex(idx)} ${tempYFor(value)}`).join(' L ')} L ${xForIndex(days.length - 1)} 130 Z`
-  const windAreaPath = `M ${xForIndex(0)} 212 L ${windSeries.map((value, idx) => `${xForIndex(idx)} ${windYFor(value)}`).join(' L ')} L ${xForIndex(days.length - 1)} 212 Z`
+  const waveHeights = waveHourly.map((entry) => Math.max(0, entry.waveHeightM))
+  const waveMax = Math.max(0.5, ...waveHeights)
+  const waveYFor = (value: number) => 12 + (1 - value / waveMax) * 108
+  const waveTickEvery = Math.max(1, Math.round(waveHourly.length / 8))
+  const waveAreaPath = waveHourly.length > 0
+    ? `M ${hourlyXFor(0, waveHourly.length)} 120 L ${waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)} ${waveYFor(value)}`).join(' L ')} L ${hourlyXFor(waveHourly.length - 1, waveHourly.length)} 120 Z`
+    : ''
+  const wavePoints = waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
 
   return (
     <div className="space-y-4 pb-4">
@@ -284,140 +357,145 @@ export function ForecastDrawer({
 
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          6-Day Forecast
+          10-Day Forecast
         </h3>
-        <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 lg:grid-cols-6">
-          {days.map((day, idx) => (
-            <button
-              key={idx}
-              type="button"
-              className={`min-w-0 rounded-lg border px-1.5 py-1.5 text-center transition-colors ${idx === selectedDayIndex ? 'border-primary/50 bg-primary/5' : 'bg-background/60 hover:bg-muted/30'}`}
-              aria-label={`Select forecast day ${day.dayName} ${day.date}`}
-              onClick={() => setSelectedDayIndex(idx)}
-            >
-              <p className="text-[11px] font-semibold uppercase text-muted-foreground">
-                {idx === 0 ? 'Today' : day.dayName.slice(0, 3)}
-              </p>
-              <p className="text-[10px] text-muted-foreground">{day.date}</p>
-
-              <div className="my-1 flex justify-center">
-                {getWeatherIcon(day.condition, 28)}
-              </div>
-
-              <p className="truncate text-[10px] font-medium text-foreground">
-                {day.condition}
-              </p>
-
-              <div className="mt-1.5 flex items-center justify-center gap-1">
-                <span className="font-display text-lg leading-none text-primary">
-                  {Math.round(displayTemp(day.high))}
-                </span>
-                <span className="text-[9px] text-muted-foreground">
-                  {tempUnit}
-                </span>
-                <span className="text-sm text-muted-foreground">/</span>
-                <span className="font-display text-sm text-muted-foreground">{Math.round(displayTemp(day.low))}</span>
-              </div>
-
-              <div className="mt-1.5 text-[10px] leading-tight">
-                <p className="font-semibold text-secondary">{Math.round(day.windSpeed)}{windUnit} {day.windDirection}</p>
-                <p className="text-muted-foreground">{Math.round(day.precipitation)}% precip</p>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-lg border bg-background/60 p-3">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <div className="flex items-end gap-1">
-            {getWeatherIcon(selectedDay.condition, 22)}
-            <span className="font-display text-4xl leading-none text-primary">{Math.round(displayTemp(selectedDay.high))}</span>
-            <span className="pb-1 text-lg text-muted-foreground">{tempUnit}</span>
-          </div>
-          <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{selectedDay.condition}</p>
-          <div className="flex flex-wrap gap-2 text-[11px]">
-            <span className="rounded bg-muted/50 px-2 py-1">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
-            <span className="rounded bg-muted/50 px-2 py-1">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-amber-600">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
-            <span className="rounded bg-muted/50 px-2 py-1">Precip <span className="font-semibold">{Math.round(selectedDay.precipitation)}%</span></span>
-            <span className="rounded bg-muted/50 px-2 py-1">Humidity <span className="font-semibold">{humidityPct}%</span></span>
-            <span className="rounded bg-muted/50 px-2 py-1">Visibility <span className="font-semibold">{visibilityNm.toFixed(1)} nm</span></span>
-            <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-secondary">{uvIndex}</span></span>
-          </div>
-        </div>
-
-        <div className="rounded-md border bg-card/70 p-2">
-          <div className="mb-1 grid grid-cols-6 text-center text-[10px] font-semibold uppercase text-muted-foreground">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start">
+          <div className="flex gap-1.5 overflow-x-auto pb-1 md:w-[200px] md:flex-none md:flex-col md:overflow-visible md:pb-0">
             {days.map((day, idx) => (
-              <div key={idx}>{idx === 0 ? 'Today' : day.dayName.slice(0, 3)}</div>
+              <button
+                key={idx}
+                type="button"
+                className={`min-w-[150px] shrink-0 rounded-lg border px-2.5 py-2 text-left transition-colors md:min-w-0 ${idx === selectedDayIndex ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background/40 hover:bg-muted/30'}`}
+                aria-label={`Select forecast day ${day.dayName} ${day.date}`}
+                onClick={() => setSelectedDayIndex(idx)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase text-muted-foreground">
+                      {idx === 0 ? 'Today' : day.dayName.slice(0, 3)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">{day.date}</p>
+                  </div>
+                  {getWeatherIcon(day.condition, 26)}
+                </div>
+
+                <p className="mt-1 truncate text-[10px] font-medium text-foreground">
+                  {day.condition}
+                </p>
+
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="font-display text-lg leading-none text-primary">
+                      {Math.round(displayTemp(day.high))}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground">
+                      {tempUnit}
+                    </span>
+                    <span className="text-sm text-muted-foreground">/</span>
+                    <span className="font-display text-sm text-muted-foreground">{Math.round(displayTemp(day.low))}</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">{Math.round(day.precipitation)}% precip</p>
+                </div>
+
+                <p className="mt-1 text-[10px] font-semibold text-secondary">{Math.round(day.windSpeed)}{windUnit} {day.windDirection}</p>
+              </button>
             ))}
           </div>
-          <svg viewBox="0 0 1000 220" className="h-[240px] w-full rounded bg-muted/15">
-            {days.map((_, idx) => {
-              const stripeStart = chartLeft + (idx * chartWidth) / days.length
-              const stripeWidth = chartWidth / days.length
-              return (
-                <rect
-                  key={idx}
-                  x={stripeStart}
-                  y={0}
-                  width={stripeWidth}
-                  height={220}
-                  fill={idx % 2 === 0 ? 'rgba(80,98,118,0.05)' : 'rgba(80,98,118,0.09)'}
-                />
-              )
-            })}
 
-            <text x={6} y={18} fontSize="10" fill="rgba(100,116,139,0.9)">100%</text>
-            <text x={6} y={130} fontSize="10" fill="rgba(100,116,139,0.9)">0%</text>
-            <text x={6} y={158} fontSize="10" fill="rgba(100,116,139,0.9)">WIND</text>
+          <div className="flex-1 rounded-lg border bg-background/60 p-3">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <div className="flex items-end gap-1">
+                {getWeatherIcon(selectedDay.condition, 22)}
+                <span className="font-display text-4xl leading-none text-primary">{Math.round(displayTemp(selectedDay.high))}</span>
+                <span className="pb-1 text-lg text-muted-foreground">{tempUnit}</span>
+              </div>
+              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{selectedDay.condition}</p>
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                <span className="rounded bg-muted/50 px-2 py-1">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-amber-600">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Precip <span className="font-semibold">{Math.round(selectedDay.precipitation)}%</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Humidity <span className="font-semibold">{humidityPct}%</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Visibility <span className="font-semibold">{visibilityNm.toFixed(1)} nm</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-secondary">{uvIndex}</span></span>
+              </div>
+            </div>
 
-            <line x1={chartLeft} y1={130} x2={chartRight} y2={130} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
-            <line x1={chartLeft} y1={212} x2={chartRight} y2={212} stroke="rgba(80,98,118,0.2)" strokeWidth="1" />
+            <div className="rounded-md border bg-card/70 p-2">
+              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <Wind size={13} className="text-secondary" /> Wind
+              </h4>
+              {windHourly.length > 0 ? (
+                <>
+                  {selectedDay.windSummary && (
+                    <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.windSummary}</p>
+                  )}
+                  <svg viewBox="0 0 1000 175" data-testid="forecast-wind-chart" className="h-[175px] w-full rounded bg-muted/15">
+                    <text x={6} y={40} fontSize="10" fill="rgba(100,116,139,0.9)">{Math.round(windMax)} {windUnit}</text>
+                    <text x={6} y={123} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
+                    <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-            {days.map((day, idx) => {
-              const slotWidth = chartWidth / days.length
-              const barWidth = slotWidth * 0.55
-              const barHeight = precipHeightFor(day.precipitation)
-              const x = xForIndex(idx) - barWidth / 2
-              const y = 130 - barHeight
+                    <path d={windAreaPath} fill="rgba(20,184,166,0.12)" />
+                    <polyline points={windGustPoints} fill="none" stroke="rgba(245,158,11,0.75)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
+                    <polyline points={windSpeedPoints} fill="none" stroke="rgba(20,184,166,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
-              return (
-                <g key={`precip-${idx}`}>
-                  <rect x={x} y={y} width={barWidth} height={barHeight} rx={2} fill="rgba(59,130,246,0.28)" />
-                  <text x={xForIndex(idx)} y={y - 4} textAnchor="middle" fontSize="10" fill="rgba(59,130,246,0.9)">
-                    {Math.round(day.precipitation)}%
-                  </text>
-                </g>
-              )
-            })}
+                    {windHourly.map((entry, idx) => {
+                      if (idx % windTickEvery !== 0 && idx !== windHourly.length - 1) return null
+                      const x = hourlyXFor(idx, windHourly.length)
+                      return (
+                        <g key={idx}>
+                          <WindBarb cx={x} cy={16} speedKts={entry.windSpeed} directionDeg={entry.windDirectionDeg} />
+                          <text x={x} y={142} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                        </g>
+                      )
+                    })}
+                  </svg>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    <span className="text-secondary">— Wind</span> · <span className="text-amber-600">- - Gusts</span> ({windUnit}) · barbs show direction the wind is coming from (full feather = 10kt, half = 5kt)
+                  </p>
+                </>
+              ) : (
+                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wind-unavailable">
+                  Wind forecast unavailable for this day
+                </p>
+              )}
+            </div>
 
-            <path d={tempAreaPath} fill="rgba(59,130,246,0.12)" />
-            <polyline points={tempPoints} fill="none" stroke="rgba(37,99,235,0.9)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+            <div className="mt-3 rounded-md border bg-card/70 p-2">
+              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <Waves size={13} className="text-secondary" /> Wave
+              </h4>
+              {waveHourly.length > 0 ? (
+                <>
+                  <svg viewBox="0 0 1000 160" data-testid="forecast-wave-chart" className="h-[160px] w-full rounded bg-muted/15">
+                    <text x={6} y={16} fontSize="10" fill="rgba(100,116,139,0.9)">{waveMax.toFixed(1)} m</text>
+                    <text x={6} y={124} fontSize="10" fill="rgba(100,116,139,0.9)">0</text>
+                    <line x1={hourlyChartLeft} y1={120} x2={hourlyChartRight} y2={120} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-            {tempSeries.map((value, idx) => (
-              <g key={`temp-${idx}`}>
-                <circle cx={xForIndex(idx)} cy={tempYFor(value)} r="3" fill="rgba(37,99,235,0.95)" />
-                <text x={xForIndex(idx)} y={tempYFor(value) - 8} textAnchor="middle" fontSize="11" fill="rgba(37,99,235,0.9)">
-                  {Math.round(value)}°
-                </text>
-              </g>
-            ))}
+                    <path d={waveAreaPath} fill="rgba(37,99,235,0.12)" />
+                    <polyline points={wavePoints} fill="none" stroke="rgba(37,99,235,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
-            <path d={windAreaPath} fill="rgba(20,184,166,0.12)" />
-            <polyline points={windPoints} fill="none" stroke="rgba(20,184,166,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-            {windSeries.map((value, idx) => (
-              <g key={`wind-${idx}`}>
-                <circle cx={xForIndex(idx)} cy={windYFor(value)} r="3" fill="rgba(20,184,166,0.95)" />
-                <text x={xForIndex(idx)} y={windYFor(value) - 8} textAnchor="middle" fontSize="10" fill="rgba(24,161,151,0.95)">
-                  {Math.round(value)}
-                </text>
-                <text x={xForIndex(idx)} y={windYFor(value) + 14} textAnchor="middle" fontSize="9" fill="rgba(105,114,128,0.9)">
-                  {days[idx].windDirection}
-                </text>
-              </g>
-            ))}
-          </svg>
+                    {waveHourly.map((entry, idx) => {
+                      if (idx % waveTickEvery !== 0 && idx !== waveHourly.length - 1) return null
+                      const x = hourlyXFor(idx, waveHourly.length)
+                      return (
+                        <g key={idx}>
+                          <text x={x} y={138} textAnchor="middle" fontSize="9" fill="rgba(100,116,139,0.9)">{entry.label}</text>
+                          <text x={x} y={152} textAnchor="middle" fontSize="9" fill="rgba(105,114,128,0.9)">{entry.wavePeriodS.toFixed(1)}s</text>
+                        </g>
+                      )
+                    })}
+                  </svg>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    <span className="text-secondary">— Wave height (m)</span>, period shown below each tick
+                  </p>
+                </>
+              ) : (
+                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-unavailable">
+                  Wave forecast unavailable for this day
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
