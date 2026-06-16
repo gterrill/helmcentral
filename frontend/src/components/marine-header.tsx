@@ -34,6 +34,7 @@ export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderP
   const [vesselStatus, setVesselStatus] = useState('At Anchor')
   const [boatName, setBoatName] = useState<string | null>(null)
   const [boatModel, setBoatModel] = useState<string | null>(null)
+  const [signalkConnected, setSignalkConnected] = useState<boolean | null>(null)
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:8080`
 
   useEffect(() => {
@@ -55,6 +56,7 @@ export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderP
           depth?: number
           name?: string
           vessel_prefix?: string
+          source?: string
         }
 
         if (data.status) {
@@ -73,8 +75,10 @@ export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderP
             setNow(backendTime)
           }
         }
+
+        setSignalkConnected(data.source === 'signalk')
       } catch {
-        // Keep existing values when backend is temporarily unavailable.
+        setSignalkConnected(false)
       }
     }
 
@@ -134,9 +138,9 @@ export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderP
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-1 border-border/70 pl-0 md:border-l md:pl-4">
-          <div className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground md:text-[11px]">
-            <Circle className="h-2.5 w-2.5 fill-secondary text-secondary" />
-            Live
+          <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] md:text-[11px] ${signalkConnected === true ? 'border-border bg-background/70 text-muted-foreground' : signalkConnected === false ? 'border-red-300/60 bg-red-50/60 text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-400' : 'border-border bg-background/70 text-muted-foreground'}`}>
+            <Circle className={`h-2.5 w-2.5 ${signalkConnected === true ? 'fill-secondary text-secondary' : signalkConnected === false ? 'fill-red-500 text-red-500' : 'fill-muted-foreground text-muted-foreground'}`} />
+            {signalkConnected === false ? 'No Signal' : 'Live'}
           </div>
           <button
             onClick={onToggleDarkMode}
