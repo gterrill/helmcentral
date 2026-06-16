@@ -30,6 +30,7 @@ import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
+import { useTheme, type Theme } from '@/hooks/use-theme'
 import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
@@ -143,6 +144,8 @@ export function App() {
   useEffect(() => {
     globalThis.localStorage?.setItem(AUTO_CLOSE_ANCHOR_WATCH_KEY, String(autoCloseAnchorWatchEnabled))
   }, [autoCloseAnchorWatchEnabled])
+
+  const [theme, setTheme] = useTheme()
 
   // Detect dark theme by watching the <html> class list
   const [isDarkTheme, setIsDarkTheme] = useState(() =>
@@ -785,6 +788,8 @@ export function App() {
               <SignalKSettingsPanel
                 autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
                 onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
+                theme={theme}
+                onThemeChange={(v) => setTheme(v as Theme)}
               />
             </div>
           )}

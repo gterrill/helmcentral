@@ -48,11 +48,15 @@ const defaultTankLabelIds = [
 interface SignalKSettingsPanelProps {
   autoCloseAnchorWatchEnabled?: boolean
   onAutoCloseAnchorWatchToggle?: (enabled: boolean) => void
+  theme?: string
+  onThemeChange?: (theme: string) => void
 }
 
 export function SignalKSettingsPanel({
   autoCloseAnchorWatchEnabled = true,
   onAutoCloseAnchorWatchToggle,
+  theme = 'marine',
+  onThemeChange,
 }: SignalKSettingsPanelProps) {
   const [signalKAddress, setSignalKAddress] = useState('localhost')
   const [signalKPort, setSignalKPort] = useState('3000')
@@ -485,6 +489,23 @@ export function SignalKSettingsPanel({
               Auto-close anchor watch when engines start (if outside circle for 5+ seconds)
             </span>
           </label>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Appearance</h3>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <SettingsSelect
+            label="Theme"
+            value={theme}
+            onChange={(v) => onThemeChange?.(v as string)}
+            options={[
+              { value: 'marine', label: 'Marine — Aldrich / Barlow' },
+              { value: 'classic', label: 'Classic — Playfair / Lato' },
+              { value: 'clean', label: 'Clean — Inter' },
+            ]}
+            ariaLabel="UI theme"
+          />
         </div>
       </div>
 
