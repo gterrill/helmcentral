@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { SettingsInput } from '@/components/ui/settings-input'
 import { SettingsSelect } from '@/components/ui/settings-select'
+import { useTideProviders } from '@/hooks/use-tide-providers'
 
 type SettingsPayload = {
   signalk?: {
@@ -10,7 +11,7 @@ type SettingsPayload = {
     port?: number
   }
   boat?: {
-    name?: string
+    vessel_prefix?: string
     model?: string
     house_battery_capacity_ah?: number
   }
@@ -18,6 +19,9 @@ type SettingsPayload = {
     vessel_state_refresh_seconds?: number
     forecast_refresh_seconds?: number
     tank_labels?: Record<string, string>
+    tide_provider?: string
+    tide_station_id?: string
+    tide_station_name?: string
   }
   anchor?: {
     bow_roller_height_m?: number
@@ -52,7 +56,7 @@ export function SignalKSettingsPanel({
   const [signalKAddress, setSignalKAddress] = useState('localhost')
   const [signalKPort, setSignalKPort] = useState('3000')
 
-  const [boatName, setBoatName] = useState('')
+  const [vesselPrefix, setVesselPrefix] = useState('')
   const [boatModel, setBoatModel] = useState('')
   const [houseBatteryCapacityAh, setHouseBatteryCapacityAh] = useState('1440')
   const [distanceUnits, setDistanceUnits] = useState<'metric' | 'imperial'>('metric')
@@ -61,6 +65,10 @@ export function SignalKSettingsPanel({
   const [tankLabels, setTankLabels] = useState<Record<string, string>>(
     Object.fromEntries(defaultTankLabelIds.map((id) => [id, ''])),
   )
+  const [tideProvider, setTideProvider] = useState('stormglass')
+  const [tideStationId, setTideStationId] = useState('')
+  const [tideStationName, setTideStationName] = useState('')
+  const { providers: tideProviders } = useTideProviders()
 
   const [bowRollerHeightM, setBowRollerHeightM] = useState('1.5')
   const [chainSizeMm, setChainSizeMm] = useState('12')
@@ -85,8 +93,8 @@ export function SignalKSettingsPanel({
       setSignalKPort(String(data.signalk.port))
     }
 
-    if (typeof data.boat?.name === 'string') {
-      setBoatName(data.boat.name)
+    if (typeof data.boat?.vessel_prefix === 'string') {
+      setVesselPrefix(data.boat.vessel_prefix)
     }
     if (typeof data.boat?.model === 'string') {
       setBoatModel(data.boat.model)
@@ -109,6 +117,15 @@ export function SignalKSettingsPanel({
         ...previous,
         ...data.ui?.tank_labels,
       }))
+    }
+    if (typeof data.ui?.tide_provider === 'string' && data.ui.tide_provider !== '') {
+      setTideProvider(data.ui.tide_provider)
+    }
+    if (typeof data.ui?.tide_station_id === 'string') {
+      setTideStationId(data.ui.tide_station_id)
+    }
+    if (typeof data.ui?.tide_station_name === 'string') {
+      setTideStationName(data.ui.tide_station_name)
     }
 
     if (typeof data.anchor?.bow_roller_height_m === 'number') {
@@ -221,7 +238,7 @@ export function SignalKSettingsPanel({
         port: Number.parseInt(signalKPort, 10) || 3000,
       },
       boat: {
-        name: boatName.trim(),
+        vessel_prefix: vesselPrefix.trim(),
         model: boatModel.trim(),
         house_battery_capacity_ah: parseNumber(houseBatteryCapacityAh, 1440),
       },
@@ -230,6 +247,9 @@ export function SignalKSettingsPanel({
         vessel_state_refresh_seconds: Math.round(parseNumber(vesselStateRefreshSeconds, 10)),
         forecast_refresh_seconds: Math.round(parseNumber(forecastRefreshSeconds, 3600)),
         tank_labels: tankLabels,
+        tide_provider: tideProvider,
+        tide_station_id: tideStationId,
+        tide_station_name: tideStationName,
       },
       anchor: {
         bow_roller_height_m: parseNumber(bowRollerHeightM, 1.5),
@@ -353,6 +373,14 @@ export function SignalKSettingsPanel({
               { value: 'imperial', label: 'Imperial' },
             ]}
             ariaLabel="Distance units"
+          />
+
+          <SettingsSelect
+            label="Tide Provider"
+            value={tideProvider}
+            onChange={setTideProvider}
+            options={tideProviders.map((provider) => ({ value: provider.id, label: provider.name }))}
+            ariaLabel="Tide provider"
           />
         </div>
       </div>

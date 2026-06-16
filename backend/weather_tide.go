@@ -31,34 +31,8 @@ const (
 	defaultForecastCacheFile = "cache/weather_forecast_cache.json"
 	defaultTideCacheFile     = "cache/tide_cache.json"
 	kphToKnots               = 0.539957
+	metersToFeet             = 3.28084
 )
-
-type tideCache struct {
-	mu   sync.RWMutex
-	data map[string]tideData
-}
-
-type tideData struct {
-	currentHeight float64
-	direction     string
-	highTime      time.Time
-	highHeight    float64
-	lowTime       time.Time
-	lowHeight     float64
-	cachedAt      time.Time
-}
-
-type tideDataDisk struct {
-	CurrentHeight float64   `json:"current_height"`
-	Direction     string    `json:"direction"`
-	HighTime      time.Time `json:"high_time"`
-	HighHeight    float64   `json:"high_height"`
-	LowTime       time.Time `json:"low_time"`
-	LowHeight     float64   `json:"low_height"`
-	CachedAt      time.Time `json:"cached_at"`
-}
-
-var tideCacheStore = &tideCache{data: make(map[string]tideData)}
 
 type weatherTodayCache struct {
 	mu   sync.RWMutex
@@ -116,13 +90,12 @@ var weatherTodayCacheHits uint64
 var weatherTodayCacheMisses uint64
 var weatherForecastCacheHits uint64
 var weatherForecastCacheMisses uint64
-var tideCacheHits uint64
-var tideCacheMisses uint64
 
 var jsonCacheDescriptors = []jsonCacheDescriptor{
 	{Name: "weather_today", EnvKey: "WEATHER_TODAY_CACHE_FILE", Fallback: defaultWeatherCacheFile, TTL: weatherTodayCacheTTL},
 	{Name: "weather_forecast", EnvKey: "WEATHER_FORECAST_CACHE_FILE", Fallback: defaultForecastCacheFile, TTL: weatherForecastCacheTTL},
-	{Name: "tide", EnvKey: "TIDE_CACHE_FILE", Fallback: defaultTideCacheFile, TTL: 72 * time.Hour},
+	{Name: "tide", EnvKey: "TIDE_CACHE_FILE", Fallback: defaultTideCacheFile, TTL: stormGlassTideCacheTTL},
+	{Name: "tide_bom", EnvKey: "TIDE_BOM_CACHE_FILE", Fallback: defaultBomTideCacheFile, TTL: bomTideCacheTTL},
 }
 
 func listCaches(c echo.Context) error {
@@ -165,6 +138,10 @@ func listCaches(c echo.Context) error {
 			tideCacheStore.mu.RUnlock()
 			cacheHits = atomic.LoadUint64(&tideCacheHits)
 			cacheMisses = atomic.LoadUint64(&tideCacheMisses)
+		case "tide_bom":
+			bomTideCacheStore.mu.RLock()
+			inMemoryEntries = len(bomTideCacheStore.data)
+			bomTideCacheStore.mu.RUnlock()
 		}
 
 		result = append(result, cacheInfoResponse{
@@ -212,8 +189,12 @@ func invalidateCache(c echo.Context) error {
 		weatherForecastCacheStore.mu.Unlock()
 	case "tide":
 		tideCacheStore.mu.Lock()
-		tideCacheStore.data = make(map[string]tideData)
+		tideCacheStore.data = make(map[string]tideChartResult)
 		tideCacheStore.mu.Unlock()
+	case "tide_bom":
+		bomTideCacheStore.mu.Lock()
+		bomTideCacheStore.data = make(map[string]tideChartResult)
+		bomTideCacheStore.mu.Unlock()
 	}
 
 	filePath := cacheFilePath(descriptor.EnvKey, descriptor.Fallback)
@@ -407,6 +388,8 @@ type tideTodayResponse struct {
 	HighTideHeightFt    float64 `json:"high_tide_height_ft"`
 	LowTideTime         string  `json:"low_tide_time"`
 	LowTideHeightFt     float64 `json:"low_tide_height_ft"`
+	StationName         string  `json:"station_name,omitempty"`
+	Provider            string  `json:"provider,omitempty"`
 }
 
 type tideTodayETagData struct {
@@ -416,12 +399,15 @@ type tideTodayETagData struct {
 	HighTideHeightFt    float64   `json:"high_tide_height_ft"`
 	LowTideTime         time.Time `json:"low_tide_time"`
 	LowTideHeightFt     float64   `json:"low_tide_height_ft"`
+	StationName         string    `json:"station_name,omitempty"`
+	Provider            string    `json:"provider,omitempty"`
 }
 
 func init() {
 	loadWeatherTodayCacheFromDisk()
 	loadWeatherForecastCacheFromDisk()
 	loadTideCacheFromDisk()
+	loadBomTideCacheFromDisk()
 }
 
 func cacheFilePath(envKey, fallback string) string {
@@ -601,52 +587,6 @@ func cloneWeatherForecastBundle(bundle weatherForecastDataBundle) weatherForecas
 		Days:        days,
 		HourlyToday: append([]weatherHourlyEntryData(nil), bundle.HourlyToday...),
 		Summary:     bundle.Summary,
-	}
-}
-
-func loadTideCacheFromDisk() {
-	path := cacheFilePath("TIDE_CACHE_FILE", defaultTideCacheFile)
-	payload := map[string]tideDataDisk{}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return
-		}
-		log.Printf("Failed to read tide cache file %s: %v", path, err)
-		return
-	}
-
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		log.Printf("Failed to parse tide cache file %s: %v", path, err)
-		return
-	}
-
-	now := time.Now().UTC()
-	loaded := make(map[string]tideData, len(payload))
-	for key, item := range payload {
-		if now.Sub(item.CachedAt) < 72*time.Hour {
-			loaded[key] = tideData{currentHeight: item.CurrentHeight, direction: item.Direction, highTime: item.HighTime, highHeight: item.HighHeight, lowTime: item.LowTime, lowHeight: item.LowHeight, cachedAt: item.CachedAt}
-		}
-	}
-
-	tideCacheStore.mu.Lock()
-	tideCacheStore.data = loaded
-	tideCacheStore.mu.Unlock()
-	log.Printf("Loaded %d tide cache entries from %s", len(loaded), path)
-}
-
-func persistTideCacheToDisk() {
-	path := cacheFilePath("TIDE_CACHE_FILE", defaultTideCacheFile)
-
-	tideCacheStore.mu.RLock()
-	payload := make(map[string]tideDataDisk, len(tideCacheStore.data))
-	for key, item := range tideCacheStore.data {
-		payload[key] = tideDataDisk{CurrentHeight: item.currentHeight, Direction: item.direction, HighTime: item.highTime, HighHeight: item.highHeight, LowTime: item.lowTime, LowHeight: item.lowHeight, CachedAt: item.cachedAt}
-	}
-	tideCacheStore.mu.RUnlock()
-
-	if err := writeJSONFileAtomic(path, payload); err != nil {
-		log.Printf("Failed to persist tide cache to %s: %v", path, err)
 	}
 }
 
@@ -886,38 +826,59 @@ func mapWeatherHourlyResponse(entries []weatherHourlyEntryData) []weatherHourlyE
 }
 
 func tideToday(c echo.Context) error {
-	state := tideTodayData{Datetime: time.Now().UTC(), CurrentTideHeightFt: 0, TideDirection: "—", HighTideTime: time.Time{}, HighTideHeightFt: 0, LowTideTime: time.Time{}, LowTideHeightFt: 0}
+	now := time.Now().UTC()
+	state := tideTodayData{Datetime: now, CurrentTideHeightFt: 0, TideDirection: "—", HighTideTime: time.Time{}, HighTideHeightFt: 0, LowTideTime: time.Time{}, LowTideHeightFt: 0}
+	stationName := ""
+	providerID := ""
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
+	if settings, err := readSettings(settingsPath); err == nil {
+		uiMap, _ := settings["ui"].(map[string]any)
 
-	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
+		configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
+		if configuredProvider == "" {
+			configuredProvider = "stormglass"
+		}
+		configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
+		if configuredStation == "" {
+			configuredStation = stormGlassVesselStationID
+		}
 
-	if signalkURL != "" {
-		vesselState, vesselErr := fetchSignalKVesselState(signalkURL, vesselPath)
-		if vesselErr == nil && vesselState.Latitude >= -90 && vesselState.Latitude <= 90 && vesselState.Longitude >= -180 && vesselState.Longitude <= 180 {
-			currentTide, tideDir, highTideTime, highTideHeight, lowTideTime, lowTideHeight, tideErr := fetchStormGlassTideData(vesselState.Latitude, vesselState.Longitude)
-			if tideErr == nil {
-				state.CurrentTideHeightFt = currentTide
-				state.TideDirection = tideDir
-				state.HighTideTime = highTideTime
-				state.HighTideHeightFt = highTideHeight
-				state.LowTideTime = lowTideTime
-				state.LowTideHeightFt = lowTideHeight
+		if provider, ok := getTideProvider(configuredProvider); ok {
+			result, fetchErr := provider.FetchTideChart(configuredStation)
+			if fetchErr == nil {
+				state.CurrentTideHeightFt = result.CurrentHeightM * metersToFeet
+				state.TideDirection = result.Direction
+				state.HighTideTime = now
+				state.LowTideTime = now.Add(24 * time.Hour)
+
+				for _, extreme := range result.Extremes {
+					if !extreme.Time.After(now) {
+						continue
+					}
+					if extreme.High && state.HighTideHeightFt == 0 {
+						state.HighTideTime = extreme.Time
+						state.HighTideHeightFt = extreme.HeightM * metersToFeet
+					} else if !extreme.High && state.LowTideHeightFt == 0 {
+						state.LowTideTime = extreme.Time
+						state.LowTideHeightFt = extreme.HeightM * metersToFeet
+					}
+					if state.HighTideHeightFt != 0 && state.LowTideHeightFt != 0 {
+						break
+					}
+				}
+
+				stationName = result.Station.Name
+				providerID = configuredProvider
 			} else {
-				log.Printf("Storm Glass API error: %v", tideErr)
+				log.Printf("Tide provider %q error: %v", configuredProvider, fetchErr)
 			}
 		}
 	}
 
 	state.Datetime = time.Now().UTC()
-	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime.Format(time.RFC3339), HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime.Format(time.RFC3339), LowTideHeightFt: state.LowTideHeightFt}
-	etag, err := weakETagForJSON(tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt})
+	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime.Format(time.RFC3339), HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime.Format(time.RFC3339), LowTideHeightFt: state.LowTideHeightFt, StationName: stationName, Provider: providerID}
+	etag, err := weakETagForJSON(tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: stationName, Provider: providerID})
 	if err != nil {
 		log.Printf("Failed to build tide ETag: %v", err)
 	}
@@ -1955,122 +1916,4 @@ func generateWeatherKitJWT(keyID, teamID, serviceID, privateKeyPEM string) (stri
 	}
 
 	return tokenString, nil
-}
-
-func fetchStormGlassTideData(latitude, longitude float64) (currentHeight float64, direction string, highTime time.Time, highHeight float64, lowTime time.Time, lowHeight float64, err error) {
-	currentHeight = 0
-	direction = "—"
-	highTime = time.Now()
-	highHeight = 0
-	lowTime = time.Now().Add(24 * time.Hour)
-	lowHeight = 0
-
-	now := time.Now().UTC()
-	dateKey := now.Format("2006-01-02")
-	roundedLat := math.Round(latitude*10) / 10
-	roundedLng := math.Round(longitude*10) / 10
-	cacheKey := fmt.Sprintf("%.1f,%.1f,%s", roundedLat, roundedLng, dateKey)
-	tideCacheStore.mu.RLock()
-	if cached, ok := tideCacheStore.data[cacheKey]; ok {
-		tideCacheStore.mu.RUnlock()
-		atomic.AddUint64(&tideCacheHits, 1)
-		log.Printf("Using cached tide data for %s", cacheKey)
-		return cached.currentHeight, cached.direction, cached.highTime, cached.highHeight, cached.lowTime, cached.lowHeight, nil
-	}
-	tideCacheStore.mu.RUnlock()
-	atomic.AddUint64(&tideCacheMisses, 1)
-
-	apiKey := getEnv("STORMGLASS_API_KEY", "")
-	if apiKey == "" {
-		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("Storm Glass API key not configured")
-	}
-
-	startTime := now.Truncate(24 * time.Hour)
-	extremesURL := fmt.Sprintf("https://api.stormglass.io/v2/tide/extremes/point?lat=%.1f&lng=%.1f&start=%d&end=%d", roundedLat, roundedLng, startTime.Unix(), startTime.Add(48*time.Hour).Unix())
-	req, err := http.NewRequest("GET", extremesURL, nil)
-	if err != nil {
-		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	req.Header.Set("Authorization", apiKey)
-	log.Printf("Fetching Storm Glass tide data for %s", cacheKey)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to fetch tide data: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("Storm Glass API returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, fmt.Errorf("failed to parse response: %v", err)
-	}
-
-	if data, ok := result["data"].([]any); ok {
-		for _, item := range data {
-			if extreme, ok := item.(map[string]any); ok {
-				typeVal, _ := extreme["type"].(string)
-				timeStr, _ := extreme["time"].(string)
-				height, _ := extreme["height"].(float64)
-				if t, parseErr := time.Parse(time.RFC3339, timeStr); parseErr == nil {
-					heightFt := height * 3.28084
-					if typeVal == "high" && t.After(now) && highHeight == 0 {
-						highTime = t
-						highHeight = heightFt
-					} else if typeVal == "low" && t.After(now) && lowHeight == 0 {
-						lowTime = t
-						lowHeight = heightFt
-					}
-					if t.Sub(now).Abs() < time.Minute && currentHeight == 0 {
-						currentHeight = heightFt
-					}
-				}
-			}
-		}
-	}
-
-	seaLevelURL := fmt.Sprintf("https://api.stormglass.io/v2/tide/sea-level/point?lat=%.2f&lng=%.2f&start=%d", roundedLat, roundedLng, now.Unix())
-	req2, err := http.NewRequest("GET", seaLevelURL, nil)
-	if err == nil {
-		req2.Header.Set("Authorization", apiKey)
-		resp2, err := client.Do(req2)
-		if err == nil && resp2.StatusCode == http.StatusOK {
-			defer resp2.Body.Close()
-			bodyBytes2, _ := io.ReadAll(resp2.Body)
-			var seaResult map[string]any
-			if json.Unmarshal(bodyBytes2, &seaResult) == nil {
-				if data, ok := seaResult["data"].([]any); ok && len(data) > 0 {
-					if current, ok := data[0].(map[string]any); ok {
-						if height, ok := current["height"].(float64); ok {
-							currentHeight = height * 3.28084
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if currentHeight > 0 {
-		direction = "Rising"
-	} else {
-		direction = "Falling"
-	}
-
-	tideCacheStore.mu.Lock()
-	tideCacheStore.data[cacheKey] = tideData{currentHeight: currentHeight, direction: direction, highTime: highTime, highHeight: highHeight, lowTime: lowTime, lowHeight: lowHeight, cachedAt: now}
-	tideCacheStore.mu.Unlock()
-	persistTideCacheToDisk()
-	log.Printf("Cached tide data for %s", cacheKey)
-
-	return currentHeight, direction, highTime, highHeight, lowTime, lowHeight, nil
 }

@@ -8,6 +8,8 @@ export interface TideToday {
   high_tide_height_ft: number;
   low_tide_time: string;
   low_tide_height_ft: number;
+  station_name: string;
+  provider: string;
 }
 
 const defaultTide: TideToday = {
@@ -18,6 +20,8 @@ const defaultTide: TideToday = {
   high_tide_height_ft: -1,
   low_tide_time: new Date().toISOString(),
   low_tide_height_ft: -1,
+  station_name: '',
+  provider: '',
 };
 
 export function useTideToday(refreshIntervalSeconds = 600) {
@@ -51,6 +55,8 @@ export function useTideToday(refreshIntervalSeconds = 600) {
             typeof data.low_tide_height_ft === 'number' && data.low_tide_height_ft >= -1
               ? data.low_tide_height_ft
               : -1,
+          station_name: typeof data.station_name === 'string' ? data.station_name : '',
+          provider: typeof data.provider === 'string' ? data.provider : '',
         };
 
         setTide(validTide);

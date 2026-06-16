@@ -99,6 +99,10 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
 	}))
 
+	// Tide providers
+	registerTideProvider(newStormGlassTideProvider())
+	registerTideProvider(newBomTideProvider())
+
 	// Routes
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
@@ -108,6 +112,9 @@ func main() {
 	e.GET("/api/weather-today", weatherToday)
 	e.GET("/api/weather-forecast", weatherForecast)
 	e.GET("/api/tide-today", tideToday)
+	e.GET("/api/tide-providers", tideProvidersHandler)
+	e.GET("/api/tide-stations", tideStationsHandler)
+	e.GET("/api/tide-chart", tideChartHandler)
 	e.GET("/api/place-name", placeName)
 	e.GET("/api/caches", listCaches)
 	e.POST("/api/caches/:name/invalidate", invalidateCache)

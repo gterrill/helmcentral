@@ -43,6 +43,9 @@ type settingsPayload struct {
 		VesselStateRefreshSeconds int               `json:"vessel_state_refresh_seconds"`
 		ForecastRefreshSeconds    int               `json:"forecast_refresh_seconds"`
 		TankLabels                map[string]string `json:"tank_labels"`
+		TideProvider              string            `json:"tide_provider"`
+		TideStationID             string            `json:"tide_station_id"`
+		TideStationName           string            `json:"tide_station_name"`
 	} `json:"ui"`
 	Anchor struct {
 		BowRollerHeightM float64 `json:"bow_roller_height_m"`
@@ -99,6 +102,9 @@ func updateSettingsHandler(c echo.Context) error {
 	if normalized.UI.TankLabels != nil {
 		uiMap["tank_labels"] = normalized.UI.TankLabels
 	}
+	uiMap["tide_provider"] = normalized.UI.TideProvider
+	uiMap["tide_station_id"] = normalized.UI.TideStationID
+	uiMap["tide_station_name"] = normalized.UI.TideStationName
 	settings["ui"] = uiMap
 
 	settings["anchor"] = map[string]any{
@@ -165,6 +171,14 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 				payload.UI.TankLabels[trimmedKey] = strings.TrimSpace(coerceString(value))
 			}
 		}
+
+		if tideProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"])); tideProvider != "" {
+			if _, ok := getTideProvider(tideProvider); ok {
+				payload.UI.TideProvider = tideProvider
+			}
+		}
+		payload.UI.TideStationID = strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
+		payload.UI.TideStationName = strings.TrimSpace(coerceString(uiMap["tide_station_name"]))
 	}
 
 	if anchorMap, ok := settings["anchor"].(map[string]any); ok {
@@ -234,6 +248,13 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 			normalized.UI.TankLabels[trimmedKey] = strings.TrimSpace(value)
 		}
 	}
+
+	normalized.UI.TideProvider = strings.TrimSpace(req.UI.TideProvider)
+	if _, ok := getTideProvider(normalized.UI.TideProvider); !ok {
+		normalized.UI.TideProvider = "stormglass"
+	}
+	normalized.UI.TideStationID = strings.TrimSpace(req.UI.TideStationID)
+	normalized.UI.TideStationName = strings.TrimSpace(req.UI.TideStationName)
 
 	normalized.Anchor.BowRollerHeightM = req.Anchor.BowRollerHeightM
 	if normalized.Anchor.BowRollerHeightM <= 0 {

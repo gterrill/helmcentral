@@ -16,6 +16,7 @@ import { TanksTile } from '@/components/tanks-tile'
 import { WindCompass } from '@/components/wind-compass'
 import { BottomDrawer } from '@/components/ui/bottom-drawer'
 import { ForecastDrawer } from '@/components/forecast-drawer'
+import { TideDrawer } from '@/components/tide-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
@@ -244,6 +245,12 @@ export function App() {
   const depthTrend = useDepthTrend('3h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
+  const tideUnit = isImperialDistance ? 'ft' : 'm'
+  const tideFtToDisplay = (ft: number) => (isImperialDistance ? ft : ft / 3.28084)
+  const tideExtremes = [
+    { isHigh: true, time: tide.high_tide_time, heightFt: tide.high_tide_height_ft },
+    { isHigh: false, time: tide.low_tide_time, heightFt: tide.low_tide_height_ft },
+  ].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
   const depthValue =
     depth !== null
       ? isImperialDistance
@@ -470,24 +477,63 @@ export function App() {
                 {placeName ?? '—'}
               </div>
             </Tile>
-            <Tile title="Depth">
-              <div className="mt-2 flex items-center gap-4">
-                <p className="shrink-0 font-display text-6xl text-secondary">
-                  {depthValue}
-                  <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
-                </p>
-                {(navigationState === 'anchored' || navigationState === 'moored') && (
-                  <DepthSparkline
-                    points={depthTrend.points}
-                    isImperial={isImperialDistance}
-                    since={depthTrend.since}
-                    tideType={depthTrend.tideType}
-                    tideDepthM={depthTrend.tideDepthM}
-                    className="min-w-0 flex-1"
-                  />
-                )}
-              </div>
-            </Tile>
+            <div
+              onClick={() => { setActiveDrawerTab('tides'); setIsDrawerOpen(true) }}
+              className="cursor-pointer transition-opacity hover:opacity-80"
+            >
+              <Tile title="Depth & Tide">
+                <div className="mt-1 rounded-md border bg-background/60 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
+                  <div className="mt-1 flex items-center gap-4">
+                    <p className="shrink-0 font-display text-6xl text-secondary">
+                      {depthValue}
+                      <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
+                    </p>
+                    {(navigationState === 'anchored' || navigationState === 'moored') && (
+                      <DepthSparkline
+                        points={depthTrend.points}
+                        isImperial={isImperialDistance}
+                        since={depthTrend.since}
+                        tideType={depthTrend.tideType}
+                        tideDepthM={depthTrend.tideDepthM}
+                        className="min-w-0 flex-1"
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                    Tide{tide.station_name ? ` — ${tide.station_name}` : ''}
+                  </p>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="font-display text-4xl leading-none text-secondary">
+                      {tide.current_tide_height_ft >= 0 ? tideFtToDisplay(tide.current_tide_height_ft).toFixed(isImperialDistance ? 1 : 2) : '—'}
+                    </span>
+                    <span className="text-lg text-muted-foreground">{tideUnit}</span>
+                    <span className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-secondary">
+                      {tide.tide_direction === 'Falling' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />}
+                      {tide.tide_direction}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-row flex-wrap items-center gap-x-4 gap-y-1">
+                    {tideExtremes.map((extreme) => (
+                      <p key={extreme.isHigh ? 'high' : 'low'} className="inline-flex items-center gap-1.5 text-xs text-foreground">
+                        {extreme.isHigh ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-secondary" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 text-amber-600" />
+                        )}
+                        {extreme.isHigh ? 'High' : 'Low'}
+                        {extreme.heightFt >= 0 && (
+                          <span className="text-muted-foreground">({tideFtToDisplay(extreme.heightFt).toFixed(isImperialDistance ? 1 : 2)} {tideUnit})</span>
+                        )}
+                        {' '}{new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </Tile>
+            </div>
             <div onClick={() => setIsDrawerOpen(true)} className="cursor-pointer transition-opacity hover:opacity-80">
               <Tile title="Today & Now">
                 <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-3">
@@ -521,33 +567,6 @@ export function App() {
                   </div>
                 </div>
 
-                <div className="my-3 h-px bg-border/70" />
-
-                <div className="grid grid-cols-[auto_1fr] gap-3">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Tide Now</p>
-                    <p className="mt-1 font-display text-5xl leading-none text-secondary">
-                      {tide.current_tide_height_ft >= 0 ? tide.current_tide_height_ft.toFixed(1) : '—'}
-                      <span className="ml-1 align-baseline text-lg text-muted-foreground">ft</span>
-                    </p>
-                    <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-secondary">
-                      <ArrowUp className="h-3.5 w-3.5" />
-                      {tide.tide_direction}
-                    </p>
-                  </div>
-                  <div className="space-y-2 pt-1 text-sm">
-                    <p className="inline-flex items-center gap-1 text-foreground">
-                      <ArrowUp className="h-4 w-4 text-secondary" />
-                      High Today {new Date(tide.high_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      <span className="text-muted-foreground">{tide.high_tide_height_ft >= 0 ? `${tide.high_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
-                    </p>
-                    <p className="inline-flex items-center gap-1 text-foreground">
-                      <ArrowDown className="h-4 w-4 text-amber-600" />
-                      Low Today {new Date(tide.low_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      <span className="text-muted-foreground">{tide.low_tide_height_ft >= 0 ? `${tide.low_tide_height_ft.toFixed(1)}ft` : '—ft'}</span>
-                    </p>
-                  </div>
-                </div>
               </Tile>
             </div>
           </aside>
@@ -748,7 +767,7 @@ export function App() {
           )}
           {activeDrawerTab === 'tides' && (
             <div className="px-6 py-4">
-              <div className="py-8 text-center text-muted-foreground">Tide details coming soon</div>
+              <TideDrawer isImperial={isImperialDistance} />
             </div>
           )}
           {activeDrawerTab === 'wind' && (
