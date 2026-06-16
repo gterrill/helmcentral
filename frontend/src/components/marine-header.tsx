@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Circle, Sun } from 'lucide-react'
+import { Circle, Moon, Sun } from 'lucide-react'
 
 import { uiConfig } from '@/config/app-config'
 
@@ -24,7 +24,12 @@ function formatDate(date: Date) {
   }).format(date)
 }
 
-export function MarineHeader() {
+interface MarineHeaderProps {
+  isDark?: boolean
+  onToggleDarkMode?: () => void
+}
+
+export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderProps) {
   const [now, setNow] = useState(() => new Date())
   const [vesselStatus, setVesselStatus] = useState('At Anchor')
   const [boatName, setBoatName] = useState<string | null>(null)
@@ -133,10 +138,14 @@ export function MarineHeader() {
             <Circle className="h-2.5 w-2.5 fill-secondary text-secondary" />
             Live
           </div>
-          <div className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground md:text-[11px]">
-            <Sun className="h-3.5 w-3.5" />
-            Day Mode
-          </div>
+          <button
+            onClick={onToggleDarkMode}
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary md:text-[11px]"
+            aria-label={isDark ? 'Switch to day mode' : 'Switch to night mode'}
+          >
+            {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+            {isDark ? 'Night' : 'Day'}
+          </button>
         </div>
 
         <div className="flex shrink-0 flex-col items-end border-border/70 pl-0 md:border-l md:pl-4">

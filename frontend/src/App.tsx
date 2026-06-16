@@ -31,6 +31,7 @@ import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useTheme, type Theme } from '@/hooks/use-theme'
+import { useDarkMode } from '@/hooks/use-dark-mode'
 import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
@@ -146,18 +147,7 @@ export function App() {
   }, [autoCloseAnchorWatchEnabled])
 
   const [theme, setTheme] = useTheme()
-
-  // Detect dark theme by watching the <html> class list
-  const [isDarkTheme, setIsDarkTheme] = useState(() =>
-    document.documentElement.classList.contains('dark'),
-  )
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDarkTheme(document.documentElement.classList.contains('dark'))
-    })
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => observer.disconnect()
-  }, [])
+  const [isDarkTheme, toggleDarkMode] = useDarkMode()
 
   // Handle anchor watch auto-close notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -355,7 +345,7 @@ export function App() {
         </div>
       )}
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
-        <MarineHeader />
+        <MarineHeader isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
 

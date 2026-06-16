@@ -22,6 +22,20 @@
     --font-sans: 'Barlow';
   }
 
+  .dark {
+    --background: 220 30% 10%;
+    --foreground: 40 15% 85%;
+    --card: 220 25% 14%;
+    --card-foreground: 40 15% 85%;
+    --primary: 39 90% 52%;
+    --primary-foreground: 220 30% 8%;
+    --secondary: 175 50% 45%;
+    --secondary-foreground: 220 30% 8%;
+    --muted: 220 20% 18%;
+    --muted-foreground: 40 10% 60%;
+    --border: 220 20% 22%;
+  }
+
   [data-theme='classic'] {
     --font-display: 'Playfair Display';
     --font-sans: 'Lato';
@@ -42,5 +56,10 @@
     min-height: 100vh;
     background-image: radial-gradient(circle at 10% 10%, hsl(44 27% 96%) 0%, transparent 32%),
       radial-gradient(circle at 90% 0%, hsl(176 24% 92%) 0%, transparent 28%);
+  }
+
+  .dark body {
+    background-image: radial-gradient(circle at 10% 10%, hsl(220 35% 14%) 0%, transparent 32%),
+      radial-gradient(circle at 90% 0%, hsl(175 25% 12%) 0%, transparent 28%);
   }
 }
