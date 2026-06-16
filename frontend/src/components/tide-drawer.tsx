@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { formatRefreshAge } from '@/components/forecast-drawer'
@@ -24,6 +24,20 @@ export function TideDrawer({ isImperial }: TideDrawerProps) {
     saveStation,
   } = useTideSettings()
   const [showPicker, setShowPicker] = useState(false)
+  const [autoDetecting, setAutoDetecting] = useState(true)
+  const [autoDetectFailed, setAutoDetectFailed] = useState(false)
+
+  useEffect(() => {
+    if (settingsLoading || tideProvider !== 'bom' || tideStationId) {
+      setAutoDetecting(false)
+      return
+    }
+    fetch('/api/tide-nearest')
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error('unavailable')))
+      .then((s: { station_id: string; name: string }) => saveStation(s.station_id, s.name))
+      .catch(() => setAutoDetectFailed(true))
+      .finally(() => setAutoDetecting(false))
+  }, [settingsLoading, tideProvider, tideStationId, saveStation])
 
   const effectiveStationId = tideProvider === 'stormglass' ? STORM_GLASS_STATION_ID : tideStationId
   // Don't start fetching until settings have loaded — prevents the stormglass default from
@@ -43,11 +57,23 @@ export function TideDrawer({ isImperial }: TideDrawerProps) {
   }
 
   if (tideProvider === 'bom' && !tideStationId) {
+    if (autoDetecting) {
+      return (
+        <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tides</p>
+          <p className="mt-2 font-medium text-foreground">Finding nearest tide station…</p>
+        </div>
+      )
+    }
     return (
       <div className="space-y-3">
         <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tides</p>
-          <p className="mt-2 font-medium text-foreground">Choose a tide station to see a forecast chart</p>
+          <p className="mt-2 font-medium text-foreground">
+            {autoDetectFailed
+              ? 'Could not detect vessel position — choose a tide station'
+              : 'Choose a tide station to see a forecast chart'}
+          </p>
         </div>
         <TideStationPicker
           provider={tideProvider}

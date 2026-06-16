@@ -4,12 +4,14 @@ export interface TideSettings {
   tideProvider: string
   tideStationId: string
   tideStationName: string
+  tideAutoStation: boolean
 }
 
 const defaultTideSettings: TideSettings = {
   tideProvider: 'stormglass',
   tideStationId: '',
   tideStationName: '',
+  tideAutoStation: false,
 }
 
 export function useTideSettings() {
@@ -33,6 +35,7 @@ export function useTideSettings() {
           : defaultTideSettings.tideProvider,
         tideStationId: typeof data.ui?.tide_station_id === 'string' ? data.ui.tide_station_id : '',
         tideStationName: typeof data.ui?.tide_station_name === 'string' ? data.ui.tide_station_name : '',
+        tideAutoStation: typeof data.ui?.tide_auto_station === 'boolean' ? data.ui.tide_auto_station : false,
       })
       setError(null)
     } catch (err) {
@@ -46,6 +49,14 @@ export function useTideSettings() {
   useEffect(() => {
     void fetchSettings()
   }, [fetchSettings])
+
+  // When auto-update is on, re-fetch settings every 30 min so the UI picks up
+  // any station changes written by the backend's background auto-updater.
+  useEffect(() => {
+    if (!settings.tideAutoStation) return
+    const id = setInterval(() => void fetchSettings(), 30 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [settings.tideAutoStation, fetchSettings])
 
   const saveStation = useCallback(async (stationId: string, stationName: string) => {
     setSaving(true)

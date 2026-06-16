@@ -122,6 +122,21 @@ func (p *bomTideProvider) findStation(stationID string) (tideStation, bool) {
 	return tideStation{}, false
 }
 
+func (p *bomTideProvider) NearestStation(lat, lon float64) (tideStation, bool) {
+	if len(p.stations) == 0 {
+		return tideStation{}, false
+	}
+	best := p.stations[0]
+	bestDist := haversineMeters(lat, lon, best.Lat, best.Lon)
+	for _, s := range p.stations[1:] {
+		if d := haversineMeters(lat, lon, s.Lat, s.Lon); d < bestDist {
+			bestDist = d
+			best = s
+		}
+	}
+	return best, true
+}
+
 var (
 	bomTideTimeRegex   = regexp.MustCompile(`data-time-utc="([^"]+)"[^>]*class="localtime (high|low)-tide"`)
 	bomTideHeightRegex = regexp.MustCompile(`class="height (?:high|low)-tide">([\d.]+)\s*m`)

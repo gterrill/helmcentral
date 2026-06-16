@@ -17,6 +17,7 @@ export default defineConfig({
     watch: {
       usePolling: true,
       interval: 300,
+      ignored: ['**/settings.yaml'],
     },
     fs: {
       allow: ['..'],

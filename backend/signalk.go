@@ -46,6 +46,7 @@ type settingsPayload struct {
 		TideProvider              string            `json:"tide_provider"`
 		TideStationID             string            `json:"tide_station_id"`
 		TideStationName           string            `json:"tide_station_name"`
+		TideAutoStation           bool              `json:"tide_auto_station"`
 	} `json:"ui"`
 	Anchor struct {
 		BowRollerHeightM float64 `json:"bow_roller_height_m"`
@@ -105,6 +106,7 @@ func updateSettingsHandler(c echo.Context) error {
 	uiMap["tide_provider"] = normalized.UI.TideProvider
 	uiMap["tide_station_id"] = normalized.UI.TideStationID
 	uiMap["tide_station_name"] = normalized.UI.TideStationName
+	uiMap["tide_auto_station"] = normalized.UI.TideAutoStation
 	settings["ui"] = uiMap
 
 	settings["anchor"] = map[string]any{
@@ -179,6 +181,9 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		}
 		payload.UI.TideStationID = strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
 		payload.UI.TideStationName = strings.TrimSpace(coerceString(uiMap["tide_station_name"]))
+		if v, ok := uiMap["tide_auto_station"].(bool); ok {
+			payload.UI.TideAutoStation = v
+		}
 	}
 
 	if anchorMap, ok := settings["anchor"].(map[string]any); ok {
@@ -255,6 +260,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	}
 	normalized.UI.TideStationID = strings.TrimSpace(req.UI.TideStationID)
 	normalized.UI.TideStationName = strings.TrimSpace(req.UI.TideStationName)
+	normalized.UI.TideAutoStation = req.UI.TideAutoStation
 
 	normalized.Anchor.BowRollerHeightM = req.Anchor.BowRollerHeightM
 	if normalized.Anchor.BowRollerHeightM <= 0 {

@@ -115,6 +115,7 @@ func main() {
 	e.GET("/api/tide-providers", tideProvidersHandler)
 	e.GET("/api/tide-stations", tideStationsHandler)
 	e.GET("/api/tide-chart", tideChartHandler)
+	e.GET("/api/tide-nearest", tideNearestHandler)
 	e.GET("/api/place-name", placeName)
 	e.GET("/api/caches", listCaches)
 	e.POST("/api/caches/:name/invalidate", invalidateCache)
@@ -144,6 +145,7 @@ func main() {
 	loadAnchorWatch()
 	go seedMotoringTrailFromInflux()
 	go startTrackPoller(5 * time.Second)
+	go startTideAutoUpdater(30 * time.Minute)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("Starting server on %s", addr)

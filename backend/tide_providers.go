@@ -161,6 +161,36 @@ type tideChartResponse struct {
 	TTLSeconds     int64                      `json:"ttl_seconds"`
 }
 
+func tideNearestHandler(c echo.Context) error {
+	p, ok := getTideProvider("bom")
+	if !ok {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "bom provider not available"})
+	}
+	bom, ok := p.(*bomTideProvider)
+	if !ok {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "bom provider not available"})
+	}
+
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	address, port, err := loadSignalKSettings(settingsPath)
+	if err != nil {
+		address = defaultSignalKAddress
+		port = defaultSignalKPort
+	}
+	signalkURL := buildSignalKURL(address, port)
+	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
+	vesselState, err := fetchSignalKVesselState(signalkURL, vesselPath)
+	if err != nil || vesselState.Latitude < -90 || vesselState.Latitude > 90 {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "vessel position unavailable"})
+	}
+
+	station, ok := bom.NearestStation(vesselState.Latitude, vesselState.Longitude)
+	if !ok {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no stations available"})
+	}
+	return c.JSON(http.StatusOK, station)
+}
+
 func tideChartHandler(c echo.Context) error {
 	providerID := strings.TrimSpace(c.QueryParam("provider"))
 	provider, ok := getTideProvider(providerID)

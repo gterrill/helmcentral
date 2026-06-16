@@ -22,6 +22,7 @@ type SettingsPayload = {
     tide_provider?: string
     tide_station_id?: string
     tide_station_name?: string
+    tide_auto_station?: boolean
   }
   anchor?: {
     bow_roller_height_m?: number
@@ -68,6 +69,7 @@ export function SignalKSettingsPanel({
   const [tideProvider, setTideProvider] = useState('stormglass')
   const [tideStationId, setTideStationId] = useState('')
   const [tideStationName, setTideStationName] = useState('')
+  const [tideAutoStation, setTideAutoStation] = useState(false)
   const { providers: tideProviders } = useTideProviders()
 
   const [bowRollerHeightM, setBowRollerHeightM] = useState('1.5')
@@ -126,6 +128,9 @@ export function SignalKSettingsPanel({
     }
     if (typeof data.ui?.tide_station_name === 'string') {
       setTideStationName(data.ui.tide_station_name)
+    }
+    if (typeof data.ui?.tide_auto_station === 'boolean') {
+      setTideAutoStation(data.ui.tide_auto_station)
     }
 
     if (typeof data.anchor?.bow_roller_height_m === 'number') {
@@ -250,6 +255,7 @@ export function SignalKSettingsPanel({
         tide_provider: tideProvider,
         tide_station_id: tideStationId,
         tide_station_name: tideStationName,
+        tide_auto_station: tideAutoStation,
       },
       anchor: {
         bow_roller_height_m: parseNumber(bowRollerHeightM, 1.5),
@@ -375,6 +381,12 @@ export function SignalKSettingsPanel({
             ariaLabel="Distance units"
           />
 
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Tide</h3>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
           <SettingsSelect
             label="Tide Provider"
             value={tideProvider}
@@ -382,6 +394,18 @@ export function SignalKSettingsPanel({
             options={tideProviders.map((provider) => ({ value: provider.id, label: provider.name }))}
             ariaLabel="Tide provider"
           />
+
+          {tideProvider === 'bom' && (
+            <label className="flex items-center gap-3 md:col-span-2">
+              <input
+                type="checkbox"
+                checked={tideAutoStation}
+                onChange={(e) => setTideAutoStation(e.target.checked)}
+                className="h-4 w-4 cursor-pointer rounded border-gray-300"
+              />
+              <span className="text-sm text-muted-foreground">Auto-update tide station as vessel moves</span>
+            </label>
+          )}
         </div>
       </div>
 
