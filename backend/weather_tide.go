@@ -264,6 +264,8 @@ type weatherHourlyWaveData struct {
 	WaveHeightM      float64
 	WavePeriodS      float64
 	WaveDirectionDeg float64
+	WindWaveHeightM  float64
+	SwellWaveHeightM float64
 }
 
 type weatherHourlyPrecipitationData struct {
@@ -358,6 +360,8 @@ type weatherHourlyWaveResponse struct {
 	WaveHeightM      float64 `json:"wave_height_m"`
 	WavePeriodS      float64 `json:"wave_period_s"`
 	WaveDirectionDeg float64 `json:"wave_direction_deg"`
+	WindWaveHeightM  float64 `json:"wind_wave_height_m"`
+	SwellWaveHeightM float64 `json:"swell_wave_height_m"`
 }
 
 type weatherHourlyPrecipitationResponse struct {
@@ -784,6 +788,8 @@ func mapHourlyWaveResponse(entries []weatherHourlyWaveData) []weatherHourlyWaveR
 			WaveHeightM:      entry.WaveHeightM,
 			WavePeriodS:      entry.WavePeriodS,
 			WaveDirectionDeg: entry.WaveDirectionDeg,
+			WindWaveHeightM:  entry.WindWaveHeightM,
+			SwellWaveHeightM: entry.SwellWaveHeightM,
 		})
 	}
 	return response
@@ -1608,14 +1614,13 @@ func waveDirectionRange(hourly []weatherHourlyWaveData) string {
 
 // fetchOpenMeteoMarineForecast fetches an hourly wave forecast from the free,
 // keyless Open-Meteo Marine API and buckets it per-day (local date), keyed by
-// "2006-01-02". Open-Meteo supports at most 8 forecast days, so later days in
-// a 10-day forecast may have no wave data.
+// "2006-01-02".
 func fetchOpenMeteoMarineForecast(latitude, longitude float64) (map[string][]weatherHourlyWaveData, error) {
 	// Pinned to NOAA's GFS-Wave (WaveWatch III) model so swell height, period
 	// and direction line up with other WaveWatch III-based swell forecasts
 	// for this coastline; Open-Meteo's default "best_match" model runs
 	// noticeably lower/different here.
-	requestURL := fmt.Sprintf("https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period&timezone=auto&forecast_days=8&models=ncep_gfswave025", latitude, longitude)
+	requestURL := fmt.Sprintf("https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height&timezone=auto&forecast_days=10&models=ncep_gfswave025", latitude, longitude)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(requestURL)
@@ -1655,6 +1660,8 @@ func parseOpenMeteoMarineResponse(result map[string]any) (map[string][]weatherHo
 	heights, _ := hourly["wave_height"].([]any)
 	periods, _ := hourly["wave_period"].([]any)
 	directions, _ := hourly["wave_direction"].([]any)
+	windWaveHeights, _ := hourly["wind_wave_height"].([]any)
+	swellWaveHeights, _ := hourly["swell_wave_height"].([]any)
 
 	series := make(map[string][]weatherHourlyWaveData)
 	for i, rawTime := range times {
@@ -1683,6 +1690,16 @@ func parseOpenMeteoMarineResponse(result map[string]any) (map[string][]weatherHo
 		if i < len(directions) {
 			if d, ok := directions[i].(float64); ok {
 				point.WaveDirectionDeg = d
+			}
+		}
+		if i < len(windWaveHeights) {
+			if w, ok := windWaveHeights[i].(float64); ok {
+				point.WindWaveHeightM = w
+			}
+		}
+		if i < len(swellWaveHeights) {
+			if s, ok := swellWaveHeights[i].(float64); ok {
+				point.SwellWaveHeightM = s
 			}
 		}
 

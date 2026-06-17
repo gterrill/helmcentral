@@ -445,10 +445,12 @@ func TestWaveDirectionRange_SingleAndRangeAndMissing(t *testing.T) {
 func TestParseOpenMeteoMarineResponse_BucketsHoursByLocalDate(t *testing.T) {
 	result := map[string]any{
 		"hourly": map[string]any{
-			"time":           []any{"2026-06-14T23:00", "2026-06-15T00:00"},
-			"wave_height":    []any{1.2, 1.5},
-			"wave_period":    []any{6.5, 7.0},
-			"wave_direction": []any{135.0, 140.0},
+			"time":              []any{"2026-06-14T23:00", "2026-06-15T00:00"},
+			"wave_height":       []any{1.2, 1.5},
+			"wave_period":       []any{6.5, 7.0},
+			"wave_direction":    []any{135.0, 140.0},
+			"wind_wave_height":  []any{0.4, 0.5},
+			"swell_wave_height": []any{0.9, 1.1},
 		},
 	}
 
@@ -472,6 +474,12 @@ func TestParseOpenMeteoMarineResponse_BucketsHoursByLocalDate(t *testing.T) {
 	}
 	if day14[0].WaveDirectionDeg != 135.0 {
 		t.Fatalf("expected wave direction 135, got %f", day14[0].WaveDirectionDeg)
+	}
+	if day14[0].WindWaveHeightM != 0.4 {
+		t.Fatalf("expected wind wave height 0.4, got %f", day14[0].WindWaveHeightM)
+	}
+	if day14[0].SwellWaveHeightM != 0.9 {
+		t.Fatalf("expected swell wave height 0.9, got %f", day14[0].SwellWaveHeightM)
 	}
 
 	day15 := series["2026-06-15"]

@@ -13,6 +13,8 @@ export interface WeatherHourlyWavePoint {
   waveHeightM: number;
   wavePeriodS: number;
   waveDirectionDeg: number;
+  windWaveHeightM: number;
+  swellWaveHeightM: number;
 }
 
 export interface WeatherHourlyPrecipPoint {
@@ -68,6 +70,8 @@ interface WeatherHourlyWaveApi {
   wave_height_m?: number;
   wave_period_s?: number;
   wave_direction_deg?: number;
+  wind_wave_height_m?: number;
+  swell_wave_height_m?: number;
 }
 
 interface WeatherHourlyPrecipApi {
@@ -185,6 +189,8 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                     waveHeightM: typeof entry.wave_height_m === 'number' ? entry.wave_height_m : -1,
                     wavePeriodS: typeof entry.wave_period_s === 'number' ? entry.wave_period_s : -1,
                     waveDirectionDeg: typeof entry.wave_direction_deg === 'number' ? entry.wave_direction_deg : -1,
+                    windWaveHeightM: typeof entry.wind_wave_height_m === 'number' ? entry.wind_wave_height_m : -1,
+                    swellWaveHeightM: typeof entry.swell_wave_height_m === 'number' ? entry.swell_wave_height_m : -1,
                   }))
                 : [],
               hourlyPrecip: Array.isArray(day.hourly_precip)

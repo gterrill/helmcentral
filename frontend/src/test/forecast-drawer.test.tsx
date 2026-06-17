@@ -24,6 +24,8 @@ function buildHourlyWave(count = 24) {
     waveHeightM: 1 + idx * 0.05,
     wavePeriodS: 6,
     waveDirectionDeg: 90,
+    windWaveHeightM: 0.4 + idx * 0.02,
+    swellWaveHeightM: 0.8 + idx * 0.03,
   }))
 }
 

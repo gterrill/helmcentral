@@ -236,6 +236,15 @@ const UV_GRADIENT_STOPS = [
 const AXIS_LABEL_FONT_SIZE = '10'
 const AXIS_LABEL_COLOR = 'rgba(71,85,105,0.95)'
 
+// Computes a y position for a left-axis tick label, nudging the top and
+// bottom ticks inward so the text isn't clipped by the chart edges.
+function axisTickLabelY(yFor: (value: number) => number, value: number, top: number, bottom: number) {
+  const y = yFor(value)
+  if (Math.abs(y - top) < 0.5) return top + 8
+  if (Math.abs(y - bottom) < 0.5) return bottom - 2
+  return y + 3
+}
+
 // Left-axis band labels for the UV chart, positioned at each band's center value.
 const UV_BAND_LABELS = [
   { value: 10, label: 'Extreme' },
@@ -366,10 +375,12 @@ export function ForecastDrawer({
 
   const windSpeeds = windHourly.map((entry) => Math.max(0, entry.windSpeed))
   const windGusts = windHourly.map((entry) => Math.max(0, entry.windGust))
-  const windMax = Math.max(5, ...windSpeeds, ...windGusts)
+  const windDataMax = Math.max(0, ...windSpeeds, ...windGusts)
+  const windMax = windDataMax <= 30 ? 30 : Math.ceil(windDataMax / 10) * 10
   const windChartTop = 35
   const windChartBottom = 125
   const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
+  const windAxisTicks = Array.from({ length: windMax / 10 + 1 }, (_, idx) => idx * 10)
   const windTickEvery = Math.max(1, Math.round(windHourly.length / 8))
   const windAreaPath = windHourly.length > 0
     ? `M ${hourlyXFor(0, windHourly.length)} ${windChartBottom} L ${windSpeeds.map((value, idx) => `${hourlyXFor(idx, windHourly.length)} ${windYFor(value)}`).join(' L ')} L ${hourlyXFor(windHourly.length - 1, windHourly.length)} ${windChartBottom} Z`
@@ -378,15 +389,21 @@ export function ForecastDrawer({
   const windGustPoints = windGusts.map((value, idx) => `${hourlyXFor(idx, windHourly.length)},${windYFor(value)}`).join(' ')
 
   const waveHeights = waveHourly.map((entry) => Math.max(0, entry.waveHeightM))
-  const waveMax = Math.max(0.5, ...waveHeights)
+  const windWaveHeights = waveHourly.map((entry) => Math.max(0, entry.windWaveHeightM))
+  const swellWaveHeights = waveHourly.map((entry) => Math.max(0, entry.swellWaveHeightM))
+  const waveDataMax = Math.max(0, ...waveHeights, ...windWaveHeights, ...swellWaveHeights)
+  const waveMax = waveDataMax <= 3 ? 3 : Math.ceil(waveDataMax)
   const waveChartTop = 35
   const waveChartBottom = 125
   const waveYFor = (value: number) => waveChartTop + (1 - value / waveMax) * (waveChartBottom - waveChartTop)
+  const waveAxisTicks = Array.from({ length: waveMax / 0.5 + 1 }, (_, idx) => idx * 0.5)
   const waveTickEvery = Math.max(1, Math.round(waveHourly.length / 8))
   const waveAreaPath = waveHourly.length > 0
     ? `M ${hourlyXFor(0, waveHourly.length)} ${waveChartBottom} L ${waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)} ${waveYFor(value)}`).join(' L ')} L ${hourlyXFor(waveHourly.length - 1, waveHourly.length)} ${waveChartBottom} Z`
     : ''
   const wavePoints = waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
+  const windWavePoints = windWaveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
+  const swellWavePoints = swellWaveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
 
   const precipIntensities = precipHourly.map((entry) => Math.max(0, entry.precipIntensityMm))
   const precipChances = precipHourly.map((entry) => Math.max(0, Math.min(100, entry.precipChancePct)))
@@ -554,11 +571,14 @@ export function ForecastDrawer({
               {windHourly.length > 0 ? (
                 <>
                   {selectedDay.windSummary && (
-                    <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.windSummary}</p>
+                    <p className="mb-2 text-base text-foreground/80">{selectedDay.windSummary}</p>
                   )}
                   <svg viewBox="0 0 1000 175" data-testid="forecast-wind-chart" className="h-[175px] w-full rounded bg-muted/15">
-                    <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(windMax)} {windUnit}</text>
-                    <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
+                    {windAxisTicks.map((tick) => (
+                      <text key={tick} x={6} y={axisTickLabelY(windYFor, tick, windChartTop, windChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                        {tick}{tick === windMax ? ` ${windUnit}` : ''}
+                      </text>
+                    ))}
                     <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
                     <path d={windAreaPath} fill="rgba(37,99,235,0.12)" />
@@ -594,14 +614,19 @@ export function ForecastDrawer({
               {waveHourly.length > 0 ? (
                 <>
                   {selectedDay.waveSummary && (
-                    <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.waveSummary}</p>
+                    <p className="mb-2 text-base text-foreground/80">{selectedDay.waveSummary}</p>
                   )}
                   <svg viewBox="0 0 1000 170" data-testid="forecast-wave-chart" className="h-[170px] w-full rounded bg-muted/15">
-                    <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{waveMax.toFixed(1)} m</text>
-                    <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
+                    {waveAxisTicks.map((tick) => (
+                      <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                        {tick.toFixed(1)}{tick === waveMax ? ' m' : ''}
+                      </text>
+                    ))}
                     <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
                     <path d={waveAreaPath} fill="rgba(20,184,166,0.12)" />
+                    <polyline points={swellWavePoints} fill="none" stroke="rgba(139,92,246,0.85)" strokeWidth="1.5" strokeDasharray="2 3" strokeLinejoin="round" strokeLinecap="round" />
+                    <polyline points={windWavePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
                     <polyline points={wavePoints} fill="none" stroke="rgba(20,184,166,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
                     {waveHourly.map((entry, idx) => {
@@ -617,7 +642,7 @@ export function ForecastDrawer({
                     })}
                   </svg>
                   <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-secondary">— Wave height (m)</span> · arrows show direction the swell is heading, with period (sec) below each
+                    <span className="text-secondary">— Total wave height (m)</span> · <span className="text-amber-600">- - Wind wave (chop)</span> · <span className="text-violet-600">·· Swell</span> · arrows show direction the swell is heading, with period (sec) below each
                   </p>
                 </>
               ) : (
