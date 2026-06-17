@@ -18,6 +18,7 @@ const (
 	defaultSignalKPort            = 3000
 	metersPerSecondToKnots        = 1.943844
 	defaultWindMaxAge             = 5 * time.Minute
+	defaultRPMMaxAge              = 30 * time.Second
 	defaultHouseBatteryCapacityAh = 1440
 )
 

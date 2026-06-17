@@ -526,6 +526,15 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 
 func readEngineRPM(payload map[string]any, aliases []string) float64 {
 	for _, alias := range aliases {
+		ts := firstNonEmptyString(
+			lookupString(payload, "propulsion", alias, "revolutions", "timestamp"),
+			lookupString(payload, "propulsion", alias, "rpm", "timestamp"),
+			lookupString(payload, "propulsion", alias, "timestamp"),
+		)
+		if ts != "" && !isRecentTimestamp(ts, defaultRPMMaxAge) {
+			return -1
+		}
+
 		revPerSecond := lookupFirstNumber(payload,
 			[]string{"propulsion", alias, "revolutions", "value"},
 			[]string{"propulsion", alias, "revolutions"},
