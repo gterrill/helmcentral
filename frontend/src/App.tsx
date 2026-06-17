@@ -310,8 +310,6 @@ export function App() {
     ? 'Radar'
     : activeDrawerTab === 'settings'
       ? 'Settings'
-    : activeDrawerTab === 'wind'
-      ? 'Wind'
       : activeDrawerTab === 'tides'
         ? 'Tides'
         : activeDrawerTab === 'anchor-watch'
@@ -730,7 +728,6 @@ export function App() {
           tabs={[
             { id: 'forecast', label: 'Forecast' },
             { id: 'tides', label: 'Tides' },
-            { id: 'wind', label: 'Wind' },
             { id: 'radar', label: 'Radar' },
             {
               id: 'anchor-watch',
@@ -761,11 +758,6 @@ export function App() {
           {activeDrawerTab === 'tides' && (
             <div className="px-6 py-4">
               <TideDrawer isImperial={isImperialDistance} />
-            </div>
-          )}
-          {activeDrawerTab === 'wind' && (
-            <div className="px-6 py-4">
-              <div className="py-8 text-center text-muted-foreground">Wind details coming soon</div>
             </div>
           )}
           {activeDrawerTab === 'radar' && (
