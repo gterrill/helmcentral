@@ -16,6 +16,10 @@ import { TanksTile } from '@/components/tanks-tile'
 import { WindCompass } from '@/components/wind-compass'
 import { BottomDrawer } from '@/components/ui/bottom-drawer'
 import { ForecastDrawer } from '@/components/forecast-drawer'
+import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
+import { RouteTile } from '@/components/route-tile'
+import { useRoutes } from '@/hooks/use-routes'
+import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
 import { TideDrawer } from '@/components/tide-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
@@ -148,6 +152,8 @@ export function App() {
 
   const [theme, setTheme] = useTheme()
   const [isDarkTheme, toggleDarkMode] = useDarkMode()
+  const { routes, loading: routesLoading, error: routesError, createRoute, updateRoute, deleteRoute } = useRoutes()
+  const [dashboardRouteId, setDashboardRouteId] = useDashboardRouteId()
 
   // Handle anchor watch auto-close notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -189,6 +195,7 @@ export function App() {
     generatorRuntime,
     engine0Rpm,
     engine1Rpm,
+    speedOverGroundKts,
   } = useVesselState(uiConfig.vesselStateRefreshSeconds)
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
   const { tanks, loading: tanksLoading } = useTanksState(uiConfig.vesselStateRefreshSeconds)
@@ -314,7 +321,9 @@ export function App() {
         ? 'Tides'
         : activeDrawerTab === 'anchor-watch'
           ? 'Anchor Watch'
-          : 'Forecast'
+          : activeDrawerTab === 'routes'
+            ? 'Routes'
+            : 'Forecast'
   const setValue = currentSetDeg !== null && currentDriftKts !== 0
     ? (
       <span className="inline-flex items-center gap-2">
@@ -598,6 +607,12 @@ export function App() {
             )}
 
             <TanksTile tanks={tanks} loading={tanksLoading} />
+            <RouteTile
+              speedKts={speedOverGroundKts ?? 0}
+              routes={routes}
+              dashboardRouteId={dashboardRouteId}
+              onOpen={() => { setActiveDrawerTab('routes'); setIsDrawerOpen(true) }}
+            />
             <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
           </aside>
 
@@ -728,6 +743,7 @@ export function App() {
           tabs={[
             { id: 'forecast', label: 'Forecast' },
             { id: 'tides', label: 'Tides' },
+            { id: 'routes', label: 'Routes' },
             { id: 'radar', label: 'Radar' },
             {
               id: 'anchor-watch',
@@ -758,6 +774,24 @@ export function App() {
           {activeDrawerTab === 'tides' && (
             <div className="px-6 py-4">
               <TideDrawer isImperial={isImperialDistance} />
+            </div>
+          )}
+          {activeDrawerTab === 'routes' && (
+            <div className="px-6 py-4">
+              <RoutePlannerDrawer
+                isDarkTheme={isDarkTheme}
+                currentSpeedKts={speedOverGroundKts}
+                vesselLat={latitude}
+                vesselLon={longitude}
+                routes={routes}
+                loading={routesLoading}
+                error={routesError}
+                createRoute={createRoute}
+                updateRoute={updateRoute}
+                deleteRoute={deleteRoute}
+                dashboardRouteId={dashboardRouteId}
+                onSetDashboardRouteId={setDashboardRouteId}
+              />
             </div>
           )}
           {activeDrawerTab === 'radar' && (

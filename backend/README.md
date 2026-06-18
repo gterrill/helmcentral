@@ -54,6 +54,11 @@ docker run -p 8080:8080 helmcentral-backend
 - `GET /api/tide-today` - Current and upcoming tide conditions
 - `GET /api/tracks?since=<RFC3339>` - Incremental self and AIS trail updates sampled by the server
 - `GET /api/tracks/motoring` - Motoring approach trail used by anchor reposition mode
+- `GET /api/routes` - List saved routes
+- `POST /api/routes` - Create a route (`name`, `waypoints`)
+- `GET /api/routes/:id` - Fetch a single route
+- `PATCH /api/routes/:id` - Update a route's name and/or waypoints
+- `DELETE /api/routes/:id` - Delete a route
 
 ## Configuration
 
@@ -77,3 +82,5 @@ The durable rationale for trail handling is documented in:
 - [../docs/adr/0002-separate-motoring-and-anchor-trails.md](../docs/adr/0002-separate-motoring-and-anchor-trails.md)
 - [../docs/adr/0003-motoring-seed-downsampling.md](../docs/adr/0003-motoring-seed-downsampling.md)
 - [../docs/adr/0004-gnss-validation-gate.md](../docs/adr/0004-gnss-validation-gate.md)
+- [../docs/adr/0005-signalk-tracks-backed-ais-trails.md](../docs/adr/0005-signalk-tracks-backed-ais-trails.md)
+- [../docs/adr/0006-manual-route-planning.md](../docs/adr/0006-manual-route-planning.md)

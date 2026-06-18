@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 
 export type AnchorWatchState = 'none' | 'set' | 'dragging' | 'critical'
@@ -44,28 +45,6 @@ function isSeaState(value: string | undefined): value is SeaState {
 
 function isSeabedType(value: string | undefined): value is SeabedType {
   return value === 'sand' || value === 'mud' || value === 'rock' || value === 'grass'
-}
-
-function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371000
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const dLat = toRad(lat2 - lat1)
-  const dLon = toRad(lon2 - lon1)
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function bearingDegrees(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const toDeg = (r: number) => (r * 180) / Math.PI
-  const dLon = toRad(lon2 - lon1)
-  const y = Math.sin(dLon) * Math.cos(toRad(lat2))
-  const x =
-    Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
-    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon)
-  return ((toDeg(Math.atan2(y, x)) + 360) % 360)
 }
 
 export function useAnchorWatch(

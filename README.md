@@ -113,6 +113,12 @@ See [backend/README.md](backend/README.md) for API endpoint documentation.
 
 See [docs/adr/0001-server-owned-trail-sampling.md](docs/adr/0001-server-owned-trail-sampling.md), [docs/adr/0002-separate-motoring-and-anchor-trails.md](docs/adr/0002-separate-motoring-and-anchor-trails.md), and [docs/adr/0003-motoring-seed-downsampling.md](docs/adr/0003-motoring-seed-downsampling.md).
 
+### Route Planning
+
+Operators can plan multi-leg routes (waypoint sequences) with automatic per-leg distance/bearing/ETA, from the "Routes" tab in the bottom drawer or a glanceable dashboard tile. This is manual waypoint planning only — no hazard-avoidance or weather-optimized routing, and no chart licensing dependency.
+
+See [docs/adr/0006-manual-route-planning.md](docs/adr/0006-manual-route-planning.md).
+
 ## Next Steps
 
 1. Configure SignalK connection parameters

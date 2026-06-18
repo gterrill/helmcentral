@@ -6,6 +6,7 @@ build/
 backend/cache/
 backend/tmp/
 backend/helmcentral
+backend/data/routes.json
 # Allow the embed placeholder while ignoring real build output
 !backend/dist/
 !backend/dist/.gitkeep
