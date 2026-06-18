@@ -119,6 +119,10 @@ Operators can plan multi-leg routes (waypoint sequences) with automatic per-leg 
 
 See [docs/adr/0006-manual-route-planning.md](docs/adr/0006-manual-route-planning.md).
 
+A saved route can also be Activated, which pushes it to the boat's SignalK server as the vessel's active route, so other NMEA2000 equipment (autopilots, MFDs) can follow it — the same mechanism Timezero Professional uses. HelmCentral itself still does no live navigation.
+
+See [docs/adr/0007-signalk-route-activation.md](docs/adr/0007-signalk-route-activation.md).
+
 ## Next Steps
 
 1. Configure SignalK connection parameters

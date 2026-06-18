@@ -59,6 +59,9 @@ docker run -p 8080:8080 helmcentral-backend
 - `GET /api/routes/:id` - Fetch a single route
 - `PATCH /api/routes/:id` - Update a route's name and/or waypoints
 - `DELETE /api/routes/:id` - Delete a route
+- `POST /api/routes/:id/activate` - Push a route to SignalK and set it as the vessel's active route
+- `POST /api/routes/deactivate` - Clear the active route on SignalK
+- `GET /api/routes/active` - Current active-route status from SignalK
 
 ## Configuration
 
@@ -84,3 +87,4 @@ The durable rationale for trail handling is documented in:
 - [../docs/adr/0004-gnss-validation-gate.md](../docs/adr/0004-gnss-validation-gate.md)
 - [../docs/adr/0005-signalk-tracks-backed-ais-trails.md](../docs/adr/0005-signalk-tracks-backed-ais-trails.md)
 - [../docs/adr/0006-manual-route-planning.md](../docs/adr/0006-manual-route-planning.md)
+- [../docs/adr/0007-signalk-route-activation.md](../docs/adr/0007-signalk-route-activation.md)

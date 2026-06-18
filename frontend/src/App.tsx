@@ -20,6 +20,7 @@ import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
 import { RouteTile } from '@/components/route-tile'
 import { useRoutes } from '@/hooks/use-routes'
 import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
+import { useRouteActivation } from '@/hooks/use-route-activation'
 import { TideDrawer } from '@/components/tide-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
@@ -154,6 +155,14 @@ export function App() {
   const [isDarkTheme, toggleDarkMode] = useDarkMode()
   const { routes, loading: routesLoading, error: routesError, createRoute, updateRoute, deleteRoute } = useRoutes()
   const [dashboardRouteId, setDashboardRouteId] = useDashboardRouteId()
+  const {
+    status: routeActivationStatus,
+    activating: routeActivating,
+    deactivating: routeDeactivating,
+    activateError: routeActivateError,
+    activate: activateRoute,
+    deactivate: deactivateRoute,
+  } = useRouteActivation()
 
   // Handle anchor watch auto-close notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -791,6 +800,12 @@ export function App() {
                 deleteRoute={deleteRoute}
                 dashboardRouteId={dashboardRouteId}
                 onSetDashboardRouteId={setDashboardRouteId}
+                activationStatus={routeActivationStatus}
+                activating={routeActivating}
+                deactivating={routeDeactivating}
+                activateError={routeActivateError}
+                onActivate={activateRoute}
+                onDeactivate={deactivateRoute}
               />
             </div>
           )}
