@@ -493,3 +493,41 @@ func TestParseOpenMeteoMarineResponse_RequiresHourlyField(t *testing.T) {
 		t.Fatalf("expected error for missing hourly field")
 	}
 }
+
+func TestParseOpenMeteoSeaTemperatureResponse_ReturnsCurrentValue(t *testing.T) {
+	result := map[string]any{
+		"current": map[string]any{
+			"time":                    "2026-06-19T04:45",
+			"sea_surface_temperature": 59.2,
+		},
+	}
+
+	temp, err := parseOpenMeteoSeaTemperatureResponse(result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if temp != 59.2 {
+		t.Fatalf("expected sea temperature 59.2, got %f", temp)
+	}
+}
+
+func TestParseOpenMeteoSeaTemperatureResponse_RequiresCurrentField(t *testing.T) {
+	if _, err := parseOpenMeteoSeaTemperatureResponse(map[string]any{}); err == nil {
+		t.Fatalf("expected error for missing current field")
+	}
+}
+
+func TestParseOpenMeteoSeaTemperatureResponse_RequiresSeaSurfaceTemperature(t *testing.T) {
+	result := map[string]any{
+		"current": map[string]any{
+			"time": "2026-06-19T04:45",
+			// sea_surface_temperature can come back null/missing when the
+			// underlying model has no data for a given location (e.g. inland
+			// coordinates), matching the wave-model "undefined units" case.
+		},
+	}
+
+	if _, err := parseOpenMeteoSeaTemperatureResponse(result); err == nil {
+		t.Fatalf("expected error for missing sea_surface_temperature field")
+	}
+}

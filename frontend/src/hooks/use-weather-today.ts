@@ -10,6 +10,7 @@ export interface WeatherToday {
   wind_gust_kts: number;
   wind_direction: string;
   precipitation_pct: number;
+  sea_temperature_f: number;
 }
 
 const defaultWeather: WeatherToday = {
@@ -22,6 +23,7 @@ const defaultWeather: WeatherToday = {
   wind_gust_kts: -1,
   wind_direction: '—',
   precipitation_pct: -1,
+  sea_temperature_f: -1,
 };
 
 export function useWeatherToday(refreshIntervalSeconds = 600) {
@@ -66,6 +68,10 @@ export function useWeatherToday(refreshIntervalSeconds = 600) {
           precipitation_pct:
             typeof data.precipitation_pct === 'number' && data.precipitation_pct >= -1
               ? data.precipitation_pct
+              : -1,
+          sea_temperature_f:
+            typeof data.sea_temperature_f === 'number' && data.sea_temperature_f >= -1
+              ? data.sea_temperature_f
               : -1,
         };
 

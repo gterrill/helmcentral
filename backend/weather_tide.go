@@ -218,6 +218,7 @@ type weatherTodayData struct {
 	WindGustKts      float64
 	WindDirection    string
 	PrecipitationPct float64
+	SeaTemperatureF  float64
 }
 
 type weatherForecastDayData struct {
@@ -305,6 +306,7 @@ type weatherTodayResponse struct {
 	WindGustKts      float64 `json:"wind_gust_kts"`
 	WindDirection    string  `json:"wind_direction"`
 	PrecipitationPct float64 `json:"precipitation_pct"`
+	SeaTemperatureF  float64 `json:"sea_temperature_f"`
 }
 
 type weatherTodayETagData struct {
@@ -316,6 +318,7 @@ type weatherTodayETagData struct {
 	WindGustKts      float64 `json:"wind_gust_kts"`
 	WindDirection    string  `json:"wind_direction"`
 	PrecipitationPct float64 `json:"precipitation_pct"`
+	SeaTemperatureF  float64 `json:"sea_temperature_f"`
 }
 
 type weatherForecastDayResponse struct {
@@ -595,7 +598,7 @@ func cloneWeatherForecastBundle(bundle weatherForecastDataBundle) weatherForecas
 }
 
 func weatherToday(c echo.Context) error {
-	state := weatherTodayData{Datetime: time.Now().UTC(), TemperatureF: 72, Condition: "Partly Cloudy", HighTempF: 76, LowTempF: 64, WindSpeedKts: 12.5, WindGustKts: 18, WindDirection: "NE", PrecipitationPct: 15}
+	state := weatherTodayData{Datetime: time.Now().UTC(), TemperatureF: 72, Condition: "Partly Cloudy", HighTempF: 76, LowTempF: 64, WindSpeedKts: 12.5, WindGustKts: 18, WindDirection: "NE", PrecipitationPct: 15, SeaTemperatureF: -1}
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	address, port, err := loadSignalKSettings(settingsPath)
@@ -621,8 +624,8 @@ func weatherToday(c echo.Context) error {
 				atomic.AddUint64(&weatherTodayCacheHits, 1)
 				state = cached.state
 				state.Datetime = time.Now().UTC()
-				response := weatherTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct}
-				etag, err := weakETagForJSON(weatherTodayETagData{TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct})
+				response := weatherTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct, SeaTemperatureF: state.SeaTemperatureF}
+				etag, err := weakETagForJSON(weatherTodayETagData{TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct, SeaTemperatureF: state.SeaTemperatureF})
 				if err != nil {
 					log.Printf("Failed to build weather ETag: %v", err)
 				}
@@ -637,6 +640,14 @@ func weatherToday(c echo.Context) error {
 				state = weather
 				state.Datetime = time.Now().UTC()
 				fetchedWeather = true
+
+				seaTemp, seaTempErr := fetchOpenMeteoSeaTemperatureF(vesselState.Latitude, vesselState.Longitude)
+				if seaTempErr == nil {
+					state.SeaTemperatureF = seaTemp
+				} else {
+					log.Printf("Open-Meteo sea temperature error: %v", seaTempErr)
+					state.SeaTemperatureF = -1
+				}
 			} else {
 				log.Printf("WeatherKit API error: %v", weatherErr)
 			}
@@ -650,8 +661,8 @@ func weatherToday(c echo.Context) error {
 		}
 	}
 
-	response := weatherTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct}
-	etag, err := weakETagForJSON(weatherTodayETagData{TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct})
+	response := weatherTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct, SeaTemperatureF: state.SeaTemperatureF}
+	etag, err := weakETagForJSON(weatherTodayETagData{TemperatureF: state.TemperatureF, Condition: state.Condition, HighTempF: state.HighTempF, LowTempF: state.LowTempF, WindSpeedKts: state.WindSpeedKts, WindGustKts: state.WindGustKts, WindDirection: state.WindDirection, PrecipitationPct: state.PrecipitationPct, SeaTemperatureF: state.SeaTemperatureF})
 	if err != nil {
 		log.Printf("Failed to build weather ETag: %v", err)
 	}
@@ -1644,6 +1655,53 @@ func fetchOpenMeteoMarineForecast(latitude, longitude float64) (map[string][]wea
 	}
 
 	return parseOpenMeteoMarineResponse(result)
+}
+
+// fetchOpenMeteoSeaTemperatureF fetches the current sea surface temperature
+// from the free, keyless Open-Meteo Marine API. Deliberately does not pin a
+// `models=` param (unlike fetchOpenMeteoMarineForecast) — the wave-specific
+// NOAA GFS-Wave model that wave data is pinned to does not carry sea surface
+// temperature at all (returns null/"undefined" units); only Open-Meteo's
+// default model blend does.
+func fetchOpenMeteoSeaTemperatureF(latitude, longitude float64) (float64, error) {
+	requestURL := fmt.Sprintf("https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&current=sea_surface_temperature&temperature_unit=fahrenheit", latitude, longitude)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(requestURL)
+	if err != nil {
+		return -1, fmt.Errorf("failed to fetch sea temperature: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return -1, fmt.Errorf("failed to read sea temperature response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return -1, fmt.Errorf("open-meteo marine API returned %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return -1, fmt.Errorf("failed to parse sea temperature response: %v", err)
+	}
+
+	return parseOpenMeteoSeaTemperatureResponse(result)
+}
+
+func parseOpenMeteoSeaTemperatureResponse(result map[string]any) (float64, error) {
+	current, ok := result["current"].(map[string]any)
+	if !ok {
+		return -1, fmt.Errorf("current missing from sea temperature response")
+	}
+
+	temp, ok := current["sea_surface_temperature"].(float64)
+	if !ok {
+		return -1, fmt.Errorf("sea_surface_temperature missing or unavailable for this location")
+	}
+
+	return temp, nil
 }
 
 func parseOpenMeteoMarineResponse(result map[string]any) (map[string][]weatherHourlyWaveData, error) {

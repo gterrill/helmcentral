@@ -668,6 +668,9 @@ export function App() {
                     <p className="mt-1 text-xs text-muted-foreground">
                       {weather.precipitation_pct >= 0 ? `${Math.round(weather.precipitation_pct)}% precip` : '—% precip'}
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Sea {weather.sea_temperature_f >= 0 ? `${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.sea_temperature_f) : weather.sea_temperature_f)}°` : '—°'}
+                    </p>
                   </div>
                 </div>
 
