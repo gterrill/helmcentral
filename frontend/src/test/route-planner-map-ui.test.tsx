@@ -211,23 +211,21 @@ describe('RoutePlannerMap', () => {
     expect(onWaypointsChange).toHaveBeenCalledWith([{ lat: 1, lon: 1 }])
   })
 
-  it('does not show satellite imagery sources until toggled on', () => {
+  it('does not show the satellite imagery source until toggled on', () => {
     render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
 
     expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('source-himawari')).not.toBeInTheDocument()
   })
 
-  it('shows the Himawari layer at low zoom once satellite imagery is toggled on', () => {
+  it('does not show satellite imagery below the zoom handoff even when toggled on', () => {
     render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
 
-    expect(screen.getByTestId('source-himawari')).toBeInTheDocument()
     expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()
   })
 
-  it('switches to the Esri World Imagery layer once zoomed in past the handoff', () => {
+  it('shows the Esri World Imagery layer once zoomed in past the handoff', () => {
     render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
@@ -237,7 +235,6 @@ describe('RoutePlannerMap', () => {
     })
 
     expect(screen.getByTestId('source-world-imagery')).toBeInTheDocument()
-    expect(screen.queryByTestId('source-himawari')).not.toBeInTheDocument()
   })
 
   it('hides satellite imagery again when toggled off', () => {
@@ -245,9 +242,13 @@ describe('RoutePlannerMap', () => {
 
     const toggle = screen.getByRole('button', { name: 'Toggle satellite imagery' })
     fireEvent.click(toggle)
-    expect(screen.getByTestId('source-himawari')).toBeInTheDocument()
+    mockZoom = 12
+    act(() => {
+      lastZoomHandler?.()
+    })
+    expect(screen.getByTestId('source-world-imagery')).toBeInTheDocument()
 
     fireEvent.click(toggle)
-    expect(screen.queryByTestId('source-himawari')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()
   })
 })

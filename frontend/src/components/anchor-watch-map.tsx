@@ -14,22 +14,20 @@ const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.js
 const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
-const HIMAWARI_COLORIZED_TILES = '/api/himawari/colorized/{z}/{x}/{y}'
 const SAT_HANDOFF_START_ZOOM = 9
 const SAT_HANDOFF_END_ZOOM = 10
 const WORLD_IMAGERY_MAX_ZOOM = 18
 const ANCHOR_WATCH_ZOOM_STORAGE_KEY = 'anchor-watch-map-zoom'
 const AIS_TRAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
-export function computeSatelliteBlend(currentZoom: number, enabled: boolean) {
-  const handoffProgress = Math.max(
+// World Imagery (Esri/Maxar aerial photography) fades in between zoom 9-10
+// rather than appearing abruptly, since its low-zoom tiles are lower quality.
+export function computeWorldImageryOpacity(currentZoom: number, enabled: boolean): number {
+  if (!enabled) return 0
+  return Math.max(
     0,
     Math.min(1, (currentZoom - SAT_HANDOFF_START_ZOOM) / (SAT_HANDOFF_END_ZOOM - SAT_HANDOFF_START_ZOOM)),
   )
-  return {
-    himawariBlend: enabled ? 1 - handoffProgress : 0,
-    worldBlend: enabled ? handoffProgress : 0,
-  }
 }
 
 function readStoredZoom(): number | null {
@@ -160,7 +158,7 @@ export function AnchorWatchMap({
   }, [])
   // Scale markers: full size at zoom 14+, shrink linearly down to 0.45× at zoom 10
   const markerScale = Math.max(0.45, Math.min(1, (currentZoom - 10) / (14 - 10)))
-  const { himawariBlend, worldBlend } = computeSatelliteBlend(currentZoom, showImageryLayer)
+  const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -516,7 +514,7 @@ export function AnchorWatchMap({
         dragRotate={false}
         touchPitch={false}
       >
-        {showImageryLayer && worldBlend > 0 && (
+        {showImageryLayer && worldImageryOpacity > 0 && (
           <Source
             id="world-imagery"
             type="raster"
@@ -529,7 +527,7 @@ export function AnchorWatchMap({
               id="world-imagery-layer"
               type="raster"
               paint={{
-                'raster-opacity': worldBlend,
+                'raster-opacity': worldImageryOpacity,
                 'raster-fade-duration': 250,
               }}
             />
@@ -546,27 +544,6 @@ export function AnchorWatchMap({
         >
           <Layer id="openseamap-layer" type="raster" paint={{ 'raster-opacity': 0.85 }} />
         </Source>
-
-        {/* Optional Himawari cloud overlay */}
-        {showImageryLayer && himawariBlend > 0 && (
-          <Source
-            id="himawari"
-            type="raster"
-            tiles={[HIMAWARI_COLORIZED_TILES]}
-            tileSize={256}
-            maxzoom={6}
-            attribution="Source: NOAA, Esri"
-          >
-            <Layer
-              id="himawari-layer"
-              type="raster"
-              paint={{
-                'raster-opacity': (isDarkTheme ? 0.6 : 0.52) * himawariBlend,
-                'raster-fade-duration': 250,
-              }}
-            />
-          </Source>
-        )}
 
         {/* Alarm circle fill */}
         <Source id="alarm-circle" type="geojson" data={circleGeoJSON}>

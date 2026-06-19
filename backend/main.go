@@ -146,7 +146,6 @@ func main() {
 	e.PUT("/api/czone/switches/:id/state", putCZoneSwitchStateHandler)
 	e.POST("/api/generator/start", postGeneratorStartHandler)
 	e.POST("/api/generator/stop", postGeneratorStopHandler)
-	e.GET("/api/himawari/:variant/:z/:x/:y", proxyHimawariTileHandler)
 	e.GET("/api/world-imagery/:z/:x/:y", proxyWorldImageryTileHandler)
 
 	registerStaticHandler(e)

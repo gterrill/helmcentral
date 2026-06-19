@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  @keyframes wc-sway { 0%,100%{ transform: rotate(-0.6deg);} 50%{ transform: rotate(0.6deg);} }
+</style>
+</helmet>
+
+<div style="font-family:'Barlow',system-ui,sans-serif; width:1024px; height:560px; position:relative; margin:0 auto; --cA1:#1b2f4d; --cA2:#0a1626; --cA-edge:#2a456e; --cA-glow:#2d6cff; --cB1:#3c4147; --cB2:#23272c; --cB-edge:#52585f; --cB-glow:#9fb6d6;">
+
+  <!-- prop-driven theme overrides (literal fallbacks above paint instantly) -->
+  <div style="{{ themeVars }}" data-theme-vars></div>
+
+
+  <!-- ===== COMPASS ===== -->
+  <div style="position:absolute; left:512px; top:300px; width:360px; height:360px; margin-left:-180px; margin-top:-180px;">
+    <!-- metallic bezel -->
+    <div style="position:absolute; inset:0; border-radius:50%; background:conic-gradient(from 135deg,#e6e9ec,#9aa0a6 12%,#5c6168 25%,#c9ced3 38%,#7d828a 50%,#eef1f3 62%,#80858d 74%,#565b62 86%,#d7dbdf 100%); box-shadow:0 18px 40px rgba(0,0,0,0.45), 0 3px 8px rgba(0,0,0,0.35), inset 0 2px 3px rgba(255,255,255,0.6), inset 0 -3px 6px rgba(0,0,0,0.4);"></div>
+    <!-- inner metal step -->
+    <div style="position:absolute; inset:9px; border-radius:50%; background:linear-gradient(135deg,#3a3f45,#1c1f23 55%,#2c3036); box-shadow:inset 0 2px 5px rgba(0,0,0,0.7), inset 0 -1px 2px rgba(255,255,255,0.12);"></div>
+    <!-- scale band -->
+    <div style="position:absolute; inset:16px; border-radius:50%; background:radial-gradient(circle at 50% 38%,#202327,#141619 70%,#0c0d0f); overflow:hidden;">
+      <!-- ticks -->
+      <sc-for list="{{ ticks }}" as="tk" hint-placeholder-count="0">
+        <div style="{{ tk.style }}"></div>
+      </sc-for>
+      <!-- degree numbers -->
+      <sc-for list="{{ degLabels }}" as="dl" hint-placeholder-count="0">
+        <div style="{{ dl.style }}">{{ dl.text }}</div>
+      </sc-for>
+    </div>
+    <!-- dark dial face -->
+    <div style="position:absolute; left:50%; top:50%; width:250px; height:250px; margin-left:-125px; margin-top:-125px; border-radius:50%; background:radial-gradient(circle at 50% 34%,#2b2f34,#16181b 66%,#0d0e10); box-shadow:inset 0 4px 14px rgba(0,0,0,0.8), inset 0 -2px 6px rgba(255,255,255,0.05), 0 0 0 1px rgba(0,0,0,0.6);">
+      <!-- cardinals -->
+      <sc-for list="{{ cardinals }}" as="cd" hint-placeholder-count="0">
+        <div style="{{ cd.style }}">{{ cd.text }}</div>
+      </sc-for>
+      <!-- arrow -->
+      <div style="position:absolute; left:50%; top:50%; width:240px; height:240px; margin-left:-120px; margin-top:-120px; transform-origin:50% 50%; transition:transform 0.9s cubic-bezier(.34,1.2,.44,1); transform:rotate({{ dirRotation }}deg); filter:drop-shadow(0 4px 6px rgba(0,0,0,0.6));">
+        <div style="position:absolute; inset:0; background:linear-gradient(135deg,#9aa1ab,#6c7480 55%,#4c525c); clip-path:polygon(50% 7.5%, 62.5% 58%, 51.5% 50%, 50% 87.5%, 48.5% 50%, 37.5% 58%); border-radius:2px;"></div>
+      </div>
+      <!-- center readout -->
+      <div style="position:absolute; left:50%; top:62%; transform:translateX(-50%); text-align:center; white-space:nowrap;">
+        <div style="font-family:'Barlow Semi Condensed',sans-serif; font-size:30px; font-weight:700; color:#eef1f4; letter-spacing:0.5px; text-shadow:0 1px 6px rgba(0,0,0,0.8);">{{ dirText }}</div>
+      </div>
+      <!-- center hub -->
+      <div style="position:absolute; left:50%; top:50%; width:13px; height:13px; margin:-6.5px 0 0 -6.5px; border-radius:50%; background:radial-gradient(circle at 40% 35%,#cfd4da,#5a6068 70%,#34383d); box-shadow:0 1px 2px rgba(0,0,0,0.7);"></div>
+    </div>
+  </div>
+
+  <!-- ===== GAUGES ===== -->
+  <!-- TL -->
+  <div style="position:absolute; left:104px; top:70px; width:304px; height:132px; border-radius:22px; background:linear-gradient(150deg,var(--cA1),var(--cA2)); box-shadow:0 16px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.07); -webkit-mask:radial-gradient(circle at 408px 230px,transparent 197px,#000 199px); mask:radial-gradient(circle at 408px 230px,transparent 197px,#000 199px);">
+    <div style="padding:22px 26px;">
+      <div style="font-size:14px; font-weight:700; letter-spacing:1.6px; color:#aeb9cb; padding-bottom:9px; border-bottom:1px solid rgba(255,255,255,0.10); margin-bottom:16px;">{{ tlTitle }}</div>
+      <div style="font-family:'Barlow Semi Condensed',sans-serif; font-size:44px; font-weight:700; line-height:1; color:#f2f5f9; text-shadow:0 0 18px rgba(45,108,255,0.28);">{{ tlValue }}<span style="font-size:26px; font-weight:500; color:#c3ccd9;">{{ tlUnit }}</span></div>
+    </div>
+  </div>
+  <!-- TR -->
+  <div style="position:absolute; left:616px; top:70px; width:304px; height:132px; border-radius:22px; background:linear-gradient(210deg,var(--cB1),var(--cB2)); box-shadow:0 16px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.07); -webkit-mask:radial-gradient(circle at -104px 230px,transparent 197px,#000 199px); mask:radial-gradient(circle at -104px 230px,transparent 197px,#000 199px);">
+    <div style="padding:22px 26px; text-align:right;">
+      <div style="font-size:14px; font-weight:700; letter-spacing:1.6px; color:#c2c7cd; padding-bottom:9px; border-bottom:1px solid rgba(255,255,255,0.10); margin-bottom:16px;">{{ trTitle }}</div>
+      <div style="font-family:'Barlow Semi Condensed',sans-serif; font-size:44px; font-weight:700; line-height:1; color:#f2f5f9; text-shadow:0 0 18px rgba(159,182,214,0.22);">{{ trValue }}<span style="font-size:26px; font-weight:500; color:#c3ccd9; padding-left:6px;">{{ trUnit }}</span></div>
+    </div>
+  </div>
+  <!-- BL -->
+  <div style="position:absolute; left:104px; top:398px; width:304px; height:132px; border-radius:22px; background:linear-gradient(30deg,var(--cA1),var(--cA2)); box-shadow:0 16px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.07); -webkit-mask:radial-gradient(circle at 408px -98px,transparent 197px,#000 199px); mask:radial-gradient(circle at 408px -98px,transparent 197px,#000 199px);">
+    <div style="padding:22px 26px;">
+      <div style="font-size:14px; font-weight:700; letter-spacing:1.6px; color:#aeb9cb; padding-bottom:9px; border-bottom:1px solid rgba(255,255,255,0.10); margin-bottom:16px;">{{ blTitle }}</div>
+      <div style="font-family:'Barlow Semi Condensed',sans-serif; font-size:44px; font-weight:700; line-height:1; color:#f2f5f9; text-shadow:0 0 18px rgba(45,108,255,0.30);">{{ blValue }}<span style="font-size:26px; font-weight:500; color:#c3ccd9;"> {{ blUnit }}</span></div>
+    </div>
+  </div>
+  <!-- BR -->
+  <div style="position:absolute; left:616px; top:398px; width:304px; height:132px; border-radius:22px; background:linear-gradient(330deg,var(--cB1),var(--cB2)); box-shadow:0 16px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.07); -webkit-mask:radial-gradient(circle at -104px -98px,transparent 197px,#000 199px); mask:radial-gradient(circle at -104px -98px,transparent 197px,#000 199px);">
+    <div style="padding:22px 26px; text-align:right;">
+      <div style="font-size:14px; font-weight:700; letter-spacing:1.6px; color:#c2c7cd; padding-bottom:9px; border-bottom:1px solid rgba(255,255,255,0.10); margin-bottom:16px;">{{ brTitle }}</div>
+      <div style="font-family:'Barlow Semi Condensed',sans-serif; font-size:44px; font-weight:700; line-height:1; color:#f2f5f9; text-shadow:0 0 20px rgba(120,170,255,0.40);">{{ brValue }}<span style="font-size:26px; font-weight:500; color:#c3ccd9;"> {{ brUnit }}</span></div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1024,&quot;height&quot;:560},&quot;direction&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:315,&quot;min&quot;:0,&quot;max&quot;:360,&quot;step&quot;:1,&quot;tsType&quot;:&quot;number&quot;},&quot;colorA&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#16263f&quot;,&quot;options&quot;:[&quot;#16263f&quot;,&quot;#1d3a2e&quot;,&quot;#3a2333&quot;,&quot;#2a2630&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;colorB&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#34383d&quot;,&quot;options&quot;:[&quot;#34383d&quot;,&quot;#2f3b44&quot;,&quot;#3d3730&quot;,&quot;#2c2c33&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;setValue&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;134&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;driftValue&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;3.7&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;gust10Speed&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;9.1&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;gustHourSpeed&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;12.2&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  shade(hex, pct) {
+    const h = hex.replace('#','');
+    const n = parseInt(h.length===3 ? h.split('').map(c=>c+c).join('') : h, 16);
+    let r = (n>>16)&255, g = (n>>8)&255, b = n&255;
+    const t = pct < 0 ? 0 : 255, p = Math.abs(pct);
+    r = Math.round((t-r)*p+r); g = Math.round((t-g)*p+g); b = Math.round((t-b)*p+b);
+    return '#' + [r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');
+  }
+  compassPoint(deg) {
+    const pts = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return pts[Math.round(((deg%360)+360)%360 / 22.5) % 16];
+  }
+  renderVals() {
+    const p = this.props;
+    const direction = p.direction ?? 315;
+    const colorA = p.colorA ?? '#16263f';
+    const colorB = p.colorB ?? '#34383d';
+
+    const themeVars =
+      `position:absolute;width:0;height:0;` +
+      `--cA1:${this.shade(colorA,0.12)};--cA2:${this.shade(colorA,-0.45)};--cA-edge:${this.shade(colorA,0.3)};` +
+      `--cB1:${this.shade(colorB,0.12)};--cB2:${this.shade(colorB,-0.4)};--cB-edge:${this.shade(colorB,0.3)};`;
+
+    // ticks
+    const ticks = [];
+    for (let a = 0; a < 360; a += 2) {
+      const major = a % 10 === 0;
+      ticks.push({ style: {
+        position:'absolute', left:'50%', top:'50%',
+        width: major ? '2px' : '1px',
+        height: major ? '13px' : '7px',
+        background: major ? '#d3d7db' : '#6c7176',
+        transformOrigin:'50% 50%',
+        transform:`translate(-50%,-50%) rotate(${a}deg) translateY(-150px)`,
+        borderRadius:'1px'
+      }});
+    }
+    // degree labels
+    const degLabels = [];
+    for (let a = 0; a < 360; a += 10) {
+      degLabels.push({ text: String(a===0 ? 360 : a), style: {
+        position:'absolute', left:'50%', top:'50%',
+        fontSize:'11px', fontWeight:600, color:'#9aa0a7',
+        fontFamily:"'Barlow Semi Condensed',sans-serif",
+        transformOrigin:'50% 50%',
+        transform:`translate(-50%,-50%) rotate(${a}deg) translateY(-133px)`,
+        whiteSpace:'nowrap'
+      }});
+    }
+    // cardinals
+    const cdDefs = [
+      {t:'N',a:0,m:1},{t:'NE',a:45,m:0},{t:'E',a:90,m:1},{t:'SE',a:135,m:0},
+      {t:'S',a:180,m:1},{t:'SW',a:225,m:0},{t:'W',a:270,m:1},{t:'NW',a:315,m:0}
+    ];
+    const cardinals = cdDefs.map(c => ({ text:c.t, style:{
+      position:'absolute', left:'50%', top:'50%',
+      fontSize: c.m ? '26px' : '15px',
+      fontWeight: c.m ? 700 : 600,
+      color: c.m ? '#f0f3f6' : '#8b929b',
+      letterSpacing:'0.5px',
+      transformOrigin:'50% 50%',
+      transform:`translate(-50%,-50%) rotate(${c.a}deg) translateY(-92px) rotate(${-c.a}deg)`
+    }}));
+
+    return {
+      themeVars,
+      location: p.location ?? 'Brisbane, Queensland, Australia',
+      ticks, degLabels, cardinals,
+      dirRotation: direction,
+      dirText: `${Math.round(direction)}° ${this.compassPoint(direction)}`,
+      tlTitle: p.setLabel ?? 'Set',
+      tlValue: p.setValue ?? '134',
+      tlUnit: p.setUnit ?? '°',
+      trTitle: p.driftLabel ?? 'Drift',
+      trValue: p.driftValue ?? '3.7',
+      trUnit: p.driftUnit ?? 'kn',
+      blTitle: p.gust10Label ?? 'Max Gust 10 m',
+      blValue: p.gust10Speed ?? '9.1',
+      blUnit: p.gust10Unit ?? 'kts',
+      brTitle: p.gustHourLabel ?? 'Max Gust 1 hr',
+      brValue: p.gustHourSpeed ?? '12.2',
+      brUnit: p.gustHourUnit ?? 'kts'
+    };
+  }
+}
+</script>
+</body>
+</html>

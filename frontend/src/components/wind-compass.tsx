@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useRef } from 'react'
 
 const V = 280
 const CX = 140
@@ -62,6 +62,19 @@ export function WindCompass({
   const sideLabel  = windSide ? windSide.toUpperCase() : '—'
   const angleLabel = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : '—'
   const speedLabel = windSpeedKts !== null ? String(Math.round(windSpeedKts)) : '—'
+
+  // Accumulate the arrow's rotation along the shortest path rather than the
+  // raw 0-360 value, so the CSS transition doesn't spin the long way around
+  // when the angle crosses the 0°/360° wrap.
+  const unwrappedAngleRef = useRef<number | null>(null)
+  let arrowRotation: number | null = null
+  if (windAngleApparentDeg !== null) {
+    const prev = unwrappedAngleRef.current
+    arrowRotation = prev === null
+      ? windAngleApparentDeg
+      : prev + (((windAngleApparentDeg - prev + 540) % 360) - 180)
+  }
+  unwrappedAngleRef.current = arrowRotation
 
   // Bow-indicator triangle — downward-pointing, fixed at 12 o'clock
   const bowPts = [
@@ -134,9 +147,19 @@ export function WindCompass({
       {/* ── bow indicator — fixed blue triangle at 12 o'clock ──────── */}
       <polygon points={bowPts} fill="#3b82f6" />
 
-      {/* ── wind arrow — gradient defined inside the rotating group ─── */}
-      {windAngleApparentDeg !== null && (
-        <g transform={`rotate(${windAngleApparentDeg}, ${CX}, ${CY})`}>
+      {/* ── wind arrow — gradient defined inside the rotating group ───
+          Rotation is driven by the CSS `transform` property (not the SVG
+          `transform` attribute) so the `transition` below actually animates
+          it — browsers don't consistently transition attribute-driven
+          rotation on SVG elements. */}
+      {arrowRotation !== null && (
+        <g
+          style={{
+            transform: `rotate(${arrowRotation}deg)`,
+            transformOrigin: `${CX}px ${CY}px`,
+            transition: 'transform 650ms ease-out',
+          }}
+        >
           <defs>
             {/* userSpaceOnUse coords are in the rotated space → gradient rotates with arrow */}
             <linearGradient

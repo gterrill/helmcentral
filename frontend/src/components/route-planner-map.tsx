@@ -7,14 +7,13 @@ import { Crosshair, Minus, Plus, Satellite } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import { formatNm } from '@/lib/route-calc'
-import { computeSatelliteBlend } from '@/components/anchor-watch-map'
+import { computeWorldImageryOpacity } from '@/components/anchor-watch-map'
 import type { RouteWaypoint } from '@/hooks/use-routes'
 
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
-const HIMAWARI_COLORIZED_TILES = '/api/himawari/colorized/{z}/{x}/{y}'
 const WORLD_IMAGERY_MAX_ZOOM = 18
 const IMAGERY_ENABLED_KEY = 'routePlanner.imagery.enabled'
 
@@ -63,7 +62,7 @@ export function RoutePlannerMap({
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [showImageryLayer, setShowImageryLayer] = useState(readStoredImageryEnabled)
   const [currentZoom, setCurrentZoom] = useState(waypoints.length > 0 ? 12 : vesselLat !== null && vesselLon !== null ? 11 : 2)
-  const { himawariBlend, worldBlend } = computeSatelliteBlend(currentZoom, showImageryLayer)
+  const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
 
   const handleZoomChange = useCallback(() => {
     const z = mapRef.current?.getZoom()
@@ -203,7 +202,7 @@ export function RoutePlannerMap({
         dragRotate={false}
         touchPitch={false}
       >
-        {showImageryLayer && worldBlend > 0 && (
+        {showImageryLayer && worldImageryOpacity > 0 && (
           <Source
             id="world-imagery"
             type="raster"
@@ -216,7 +215,7 @@ export function RoutePlannerMap({
               id="world-imagery-layer"
               type="raster"
               paint={{
-                'raster-opacity': worldBlend,
+                'raster-opacity': worldImageryOpacity,
                 'raster-fade-duration': 250,
               }}
             />
@@ -226,26 +225,6 @@ export function RoutePlannerMap({
         <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
           <Layer id="openseamap-layer" type="raster" paint={{ 'raster-opacity': 0.85 }} />
         </Source>
-
-        {showImageryLayer && himawariBlend > 0 && (
-          <Source
-            id="himawari"
-            type="raster"
-            tiles={[HIMAWARI_COLORIZED_TILES]}
-            tileSize={256}
-            maxzoom={6}
-            attribution="Source: NOAA, Esri"
-          >
-            <Layer
-              id="himawari-layer"
-              type="raster"
-              paint={{
-                'raster-opacity': (isDarkTheme ? 0.6 : 0.52) * himawariBlend,
-                'raster-fade-duration': 250,
-              }}
-            />
-          </Source>
-        )}
 
         {waypoints.length >= 2 && (
           <Source id="route-line" type="geojson" data={routeGeoJSON}>
