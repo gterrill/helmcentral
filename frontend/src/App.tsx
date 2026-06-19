@@ -118,18 +118,20 @@ type WindMetricCardProps = {
   align?: 'left' | 'right'
   className?: string
   style?: CSSProperties
+  valueFirst?: boolean
 }
 
-function WindMetricCard({ title, value, align = 'left', className = '', style }: WindMetricCardProps) {
+function WindMetricCard({ title, value, align = 'left', className = '', style, valueFirst = false }: WindMetricCardProps) {
   const alignmentClass = align === 'right' ? 'items-end text-right' : 'items-start text-left'
+  const label = <p key="label" className="text-[10px] leading-none uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
+  const reading = <p key="value" className="font-display text-2xl leading-[0.86] text-primary md:text-3xl">{value}</p>
 
   return (
     <div
       className={`relative flex flex-col justify-start gap-0.5 rounded-2xl border bg-background/80 px-4 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ${alignmentClass} ${className}`.trim()}
       style={style}
     >
-      <p className="text-[10px] leading-none uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
-      <p className="font-display text-2xl leading-[0.86] text-primary md:text-3xl">{value}</p>
+      {valueFirst ? [reading, label] : [label, reading]}
     </div>
   )
 }
@@ -152,8 +154,8 @@ type WindCanvasConfig = {
   gap: number
 }
 
-const WIND_MOBILE_CFG: WindCanvasConfig = { width: 420, height: 321, compassBox: 222, topCardW: 173, bottomCardW: 198, cardH: 72, gap: 18 }
-const WIND_DESKTOP_CFG: WindCanvasConfig = { width: 390, height: 200, compassBox: 150, topCardW: 150, bottomCardW: 180, cardH: 64, gap: 18 }
+const WIND_MOBILE_CFG: WindCanvasConfig = { width: 420, height: 321, compassBox: 260, topCardW: 173, bottomCardW: 198, cardH: 72, gap: 18 }
+const WIND_DESKTOP_CFG: WindCanvasConfig = { width: 390, height: 200, compassBox: 175, topCardW: 150, bottomCardW: 180, cardH: 64, gap: 18 }
 
 // Width of the card's straight-edge border (Tailwind's bare `border` utility), so the
 // drawn ring along the mask's cut edge reads as a continuous border, not just 3 sides.
@@ -249,11 +251,11 @@ function WindGaugeCluster({
           </div>
 
           <div className="self-end justify-self-start">
-            <WindMetricCard title="MAX GUST 10M" value={gust10mLabel} style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.bl }} />
+            <WindMetricCard title="MAX GUST 10M" value={gust10mLabel} valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.bl }} />
           </div>
 
           <div className="self-end justify-self-end">
-            <WindMetricCard title="MAX GUST 1HR" value={gust1hLabel} align="right" style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.br }} />
+            <WindMetricCard title="MAX GUST 1HR" value={gust1hLabel} align="right" valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.br }} />
           </div>
         </div>
 
@@ -511,7 +513,7 @@ export function App() {
           <aside className="space-y-4">
             <section className="rounded-lg border bg-card p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - Course Up</h1>
+                <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - HDG Up</h1>
                 <Button variant="outline" size="sm">
                   <Compass className="h-4 w-4" />
                   AWA {awaLabel}
