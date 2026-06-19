@@ -124,7 +124,7 @@ func TestBuildDailyWindSeries_BucketsHoursByLocalDate(t *testing.T) {
 	result := map[string]any{
 		"forecastHourly": map[string]any{
 			"hours": []any{
-				map[string]any{"forecastStart": "2026-06-14T13:00:00Z", "windSpeed": 18.52, "windGust": 27.78, "windDirection": 90.0},  // 23:00 AEST (Jun 14)
+				map[string]any{"forecastStart": "2026-06-14T13:00:00Z", "windSpeed": 18.52, "windGust": 27.78, "windDirection": 90.0}, // 23:00 AEST (Jun 14)
 				map[string]any{"forecastStart": "2026-06-14T14:00:00Z", "windSpeed": 9.26, "windDirection": 180.0},                    // 00:00 AEST (Jun 15), no gust
 				map[string]any{"forecastStart": "not-a-timestamp"},                                                                    // ignored
 			},
@@ -176,7 +176,7 @@ func TestBuildDailyPrecipitationSeries_BucketsHoursByLocalDate(t *testing.T) {
 			"hours": []any{
 				map[string]any{"forecastStart": "2026-06-14T13:00:00Z", "precipitationChance": 0.65, "precipitationIntensity": 1.2}, // 23:00 AEST (Jun 14)
 				map[string]any{"forecastStart": "2026-06-14T14:00:00Z", "precipitationChance": 0.2},                                 // 00:00 AEST (Jun 15), no intensity
-				map[string]any{"forecastStart": "not-a-timestamp"},                                                                   // ignored
+				map[string]any{"forecastStart": "not-a-timestamp"},                                                                  // ignored
 			},
 		},
 	}
@@ -338,7 +338,7 @@ func TestBuildWaveSummary_TodayUsesTodayPrefixAndAroundHeight(t *testing.T) {
 	}
 
 	summary := buildWaveSummary("Monday", true, hourly)
-	expected := "Today swell will be around 1.1 m from the E, with a period around 9 sec."
+	expected := "Today's significantwave height will be around 1.1 m from the E, with a period around 9 sec."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}

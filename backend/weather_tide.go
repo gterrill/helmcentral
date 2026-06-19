@@ -1440,11 +1440,11 @@ func buildWindSummary(dayName string, isToday bool, hourly []weatherHourlyWindDa
 
 	dayPrefix := "Today"
 	if !isToday {
-		dayPrefix = fmt.Sprintf("On %s,", dayName)
+		dayPrefix = fmt.Sprintf("%s's,", dayName)
 	}
 
 	if gustRounded > maxRounded {
-		return fmt.Sprintf("%s winds will be %s, with gusts up to %d kts.", dayPrefix, speedPhrase, gustRounded)
+		return fmt.Sprintf("%s winds will be %s, gusting to %d kts.", dayPrefix, speedPhrase, gustRounded)
 	}
 
 	return fmt.Sprintf("%s winds will be %s.", dayPrefix, speedPhrase)
@@ -1519,15 +1519,15 @@ func buildWaveSummary(dayName string, isToday bool, hourly []weatherHourlyWaveDa
 
 	dayPrefix := "Today"
 	if !isToday {
-		dayPrefix = fmt.Sprintf("On %s,", dayName)
+		dayPrefix = fmt.Sprintf("%s's,", dayName)
 	}
 
 	if periodCount > 0 {
 		periodRounded := int(math.Round(periodTotal / float64(periodCount)))
-		return fmt.Sprintf("%s swell will be %s, with a period around %d sec.", dayPrefix, heightPhrase, periodRounded)
+		return fmt.Sprintf("%s significant wave height will be %s, with a period around %d sec.", dayPrefix, heightPhrase, periodRounded)
 	}
 
-	return fmt.Sprintf("%s swell will be %s.", dayPrefix, heightPhrase)
+	return fmt.Sprintf("%s significant wave height will be %s.", dayPrefix, heightPhrase)
 }
 
 // buildPrecipitationSummary describes a day's rain outlook in a single
