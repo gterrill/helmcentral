@@ -155,19 +155,27 @@ type WindCanvasConfig = {
 const WIND_MOBILE_CFG: WindCanvasConfig = { width: 420, height: 321, compassBox: 222, topCardW: 173, bottomCardW: 198, cardH: 72, gap: 18 }
 const WIND_DESKTOP_CFG: WindCanvasConfig = { width: 390, height: 200, compassBox: 150, topCardW: 150, bottomCardW: 180, cardH: 64, gap: 18 }
 
+// Width of the card's straight-edge border (Tailwind's bare `border` utility), so the
+// drawn ring along the mask's cut edge reads as a continuous border, not just 3 sides.
+const WIND_BORDER_WIDTH = 1
+
 function computeWindMasks({ width, height, compassBox, topCardW, bottomCardW, cardH, gap }: WindCanvasConfig) {
   // WindCompass draws its outer ring at radius 130 inside a 280-wide viewBox.
   const compassRadius = (compassBox / 2) * (130 / 140)
   const inner = compassRadius + gap - 1
   const outer = compassRadius + gap + 1
+  const ringOuter = outer + WIND_BORDER_WIDTH
   const centerX = width / 2
   const centerY = height / 2
 
   const mask = (cardLeft: number, cardTop: number): CSSProperties => {
     const x = centerX - cardLeft
     const y = centerY - cardTop
-    const img = `radial-gradient(circle at ${x}px ${y}px, transparent ${inner}px, #000 ${outer}px)`
-    return { maskImage: img, WebkitMaskImage: img }
+    const maskImg = `radial-gradient(circle at ${x}px ${y}px, transparent ${inner}px, #000 ${outer}px)`
+    // A thin ring drawn just outside the mask's cut line, in the card's border color,
+    // so the curved edge gets a stroke to match the card's straight-edge border.
+    const ringImg = `radial-gradient(circle at ${x}px ${y}px, transparent ${outer}px, hsl(var(--border)) ${outer}px, hsl(var(--border)) ${ringOuter}px, transparent ${ringOuter}px)`
+    return { maskImage: maskImg, WebkitMaskImage: maskImg, backgroundImage: ringImg }
   }
 
   return {
