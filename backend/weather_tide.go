@@ -843,59 +843,61 @@ func mapWeatherHourlyResponse(entries []weatherHourlyEntryData) []weatherHourlyE
 }
 
 func tideToday(c echo.Context) error {
-	now := time.Now().UTC()
-	state := tideTodayData{Datetime: now, CurrentTideHeightFt: 0, TideDirection: "—", HighTideTime: time.Time{}, HighTideHeightFt: 0, LowTideTime: time.Time{}, LowTideHeightFt: 0}
-	stationName := ""
-	providerID := ""
-
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	if settings, err := readSettings(settingsPath); err == nil {
-		uiMap, _ := settings["ui"].(map[string]any)
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to read settings: %v", err)})
+	}
 
-		configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
-		if configuredProvider == "" {
-			configuredProvider = "stormglass"
+	uiMap, _ := settings["ui"].(map[string]any)
+
+	configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
+	if configuredProvider == "" {
+		configuredProvider = "stormglass"
+	}
+	configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
+	if configuredStation == "" {
+		configuredStation = stormGlassVesselStationID
+	}
+
+	provider, ok := getTideProvider(configuredProvider)
+	if !ok {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("unknown tide provider configured: %q", configuredProvider)})
+	}
+
+	result, fetchErr := provider.FetchTideChart(configuredStation)
+	if fetchErr != nil {
+		log.Printf("Tide provider %q error: %v", configuredProvider, fetchErr)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)})
+	}
+
+	now := time.Now().UTC()
+	state := tideTodayData{
+		Datetime:            now,
+		CurrentTideHeightFt: result.CurrentHeightM * metersToFeet,
+		TideDirection:       result.Direction,
+		HighTideTime:        now,
+		LowTideTime:         now.Add(24 * time.Hour),
+	}
+
+	for _, extreme := range result.Extremes {
+		if !extreme.Time.After(now) {
+			continue
 		}
-		configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
-		if configuredStation == "" {
-			configuredStation = stormGlassVesselStationID
+		if extreme.High && state.HighTideHeightFt == 0 {
+			state.HighTideTime = extreme.Time
+			state.HighTideHeightFt = extreme.HeightM * metersToFeet
+		} else if !extreme.High && state.LowTideHeightFt == 0 {
+			state.LowTideTime = extreme.Time
+			state.LowTideHeightFt = extreme.HeightM * metersToFeet
 		}
-
-		if provider, ok := getTideProvider(configuredProvider); ok {
-			result, fetchErr := provider.FetchTideChart(configuredStation)
-			if fetchErr == nil {
-				state.CurrentTideHeightFt = result.CurrentHeightM * metersToFeet
-				state.TideDirection = result.Direction
-				state.HighTideTime = now
-				state.LowTideTime = now.Add(24 * time.Hour)
-
-				for _, extreme := range result.Extremes {
-					if !extreme.Time.After(now) {
-						continue
-					}
-					if extreme.High && state.HighTideHeightFt == 0 {
-						state.HighTideTime = extreme.Time
-						state.HighTideHeightFt = extreme.HeightM * metersToFeet
-					} else if !extreme.High && state.LowTideHeightFt == 0 {
-						state.LowTideTime = extreme.Time
-						state.LowTideHeightFt = extreme.HeightM * metersToFeet
-					}
-					if state.HighTideHeightFt != 0 && state.LowTideHeightFt != 0 {
-						break
-					}
-				}
-
-				stationName = result.Station.Name
-				providerID = configuredProvider
-			} else {
-				log.Printf("Tide provider %q error: %v", configuredProvider, fetchErr)
-			}
+		if state.HighTideHeightFt != 0 && state.LowTideHeightFt != 0 {
+			break
 		}
 	}
 
-	state.Datetime = time.Now().UTC()
-	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime.Format(time.RFC3339), HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime.Format(time.RFC3339), LowTideHeightFt: state.LowTideHeightFt, StationName: stationName, Provider: providerID}
-	etag, err := weakETagForJSON(tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: stationName, Provider: providerID})
+	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime.Format(time.RFC3339), HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime.Format(time.RFC3339), LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider}
+	etag, err := weakETagForJSON(tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider})
 	if err != nil {
 		log.Printf("Failed to build tide ETag: %v", err)
 	}
