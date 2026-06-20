@@ -279,10 +279,19 @@ func vesselState(c echo.Context) error {
 
 	if signalkURL != "" {
 		signalkState, err := fetchSignalKVesselState(signalkURL, vesselPath)
+		// Always adopt signalkState, even on error: fetchSignalKVesselState
+		// now always returns position/GNSS fields correctly marked critical
+		// (and frozen at the last trusted fix) rather than a bare sentinel,
+		// so the anchor watch alarm can tell "SignalK unreachable" apart from
+		// "vessel has actually moved."
+		state = signalkState
 		if err == nil {
-			state = signalkState
 			source = "signalk"
+		} else {
+			source = "signalk-unreachable"
 		}
+	} else {
+		state = criticalVesselState(state, "signalk not configured")
 	}
 
 	maxGust10mKts := 0.0

@@ -73,6 +73,28 @@ func parseGNSSPositionValidation(payload map[string]any) gnssPositionValidation 
 	}
 }
 
+// criticalGNSSValidation builds a critical validation result for situations
+// where there's no SignalK payload to run the normal quality/HDOP/heuristic
+// checks against at all — e.g. the connection to SignalK itself failed, or it
+// isn't configured. It explicitly engages the same recovery-hysteresis latch
+// applyGNSSRecoveryHysteresis uses for a bad-fix critical event, so a
+// reconnect still needs a stable run of trusted samples before the alarm
+// clears, rather than clearing instantly on the first good packet back.
+func criticalGNSSValidation(reason string, now time.Time) gnssPositionValidation {
+	gnssHeuristic.criticalLatched = true
+	gnssHeuristic.criticalSince = now
+	gnssHeuristic.recoveryCount = 0
+
+	return gnssPositionValidation{
+		QualityIndicator: -1,
+		HDOP:             -1,
+		Status:           "critical",
+		Reason:           reason,
+		Trusted:          false,
+		Critical:         true,
+	}
+}
+
 func applyGNSSHeuristics(validation gnssPositionValidation, sample gnssObservedSample, now time.Time) gnssPositionValidation {
 	if now.IsZero() {
 		now = time.Now().UTC()

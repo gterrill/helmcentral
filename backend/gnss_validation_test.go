@@ -214,6 +214,45 @@ func TestApplyGNSSHeuristicsDegradedOnDepthJump(t *testing.T) {
 	}
 }
 
+func TestCriticalGNSSValidation_ReturnsCriticalResult(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+	validation := criticalGNSSValidation("signalk unreachable: dial tcp: connection refused", now)
+
+	if validation.Status != "critical" || !validation.Critical || validation.Trusted {
+		t.Fatalf("expected critical/untrusted validation, got %+v", validation)
+	}
+	if validation.Reason == "" {
+		t.Fatalf("expected a reason to be set")
+	}
+}
+
+func TestCriticalGNSSValidation_EngagesRecoveryHysteresis(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	now := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+	_ = criticalGNSSValidation("signalk unreachable", now)
+
+	trusted := gnssPositionValidation{QualityIndicator: 1, HDOP: 0.8, Status: "trusted", Trusted: true}
+
+	// A single good sample right after reconnecting should not instantly clear
+	// the alarm — same hysteresis a degraded-fix critical event would apply.
+	updated := applyGNSSHeuristics(trusted, gnssObservedSample{
+		Latitude:      -25.2939,
+		Longitude:     152.9103,
+		Navigation:    "anchored",
+		ObservedAt:    now.Add(4 * time.Second),
+		HasObservedAt: true,
+	}, now.Add(4*time.Second))
+
+	if updated.Status != "critical" {
+		t.Fatalf("expected hysteresis to remain critical immediately after reconnect, got %q", updated.Status)
+	}
+}
+
 func TestApplyGNSSHeuristicsHysteresisRequiresRecoverySamples(t *testing.T) {
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)

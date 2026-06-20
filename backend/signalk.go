@@ -346,6 +346,23 @@ func updateSignalKSettingsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"address": address, "port": port, "url": signalkURL, "connected": true})
 }
 
+// criticalVesselState marks state's position/GNSS fields as critical when
+// there's no SignalK payload to validate at all — e.g. the connection itself
+// failed. It freezes position at the last trusted fix (via resolveGNSSPosition)
+// rather than leaving it at a meaningless sentinel, and reports
+// gnss_critical_alert correctly so downstream consumers like the anchor watch
+// alarm don't mistake "can't reach SignalK" for "vessel has moved."
+func criticalVesselState(state vesselStateData, reason string) vesselStateData {
+	validation := criticalGNSSValidation(reason, time.Now().UTC())
+	state.Latitude, state.Longitude = resolveGNSSPosition(-1, -1, validation)
+	state.GNSSQualityIndicator = validation.QualityIndicator
+	state.GNSSHDOP = validation.HDOP
+	state.GNSSValidationState = validation.Status
+	state.GNSSValidationReason = validation.Reason
+	state.GNSSCriticalAlert = validation.Critical
+	return state
+}
+
 func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateData, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
 
@@ -354,22 +371,23 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 	client := &http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get(url)
 	if err != nil {
-		return state, err
+		return criticalVesselState(state, fmt.Sprintf("signalk unreachable: %v", err)), err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return state, fmt.Errorf("signalk returned status %d", response.StatusCode)
+		err := fmt.Errorf("signalk returned status %d", response.StatusCode)
+		return criticalVesselState(state, err.Error()), err
 	}
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return state, err
+		return criticalVesselState(state, fmt.Sprintf("signalk response unreadable: %v", err)), err
 	}
 
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return state, err
+		return criticalVesselState(state, fmt.Sprintf("signalk response malformed: %v", err)), err
 	}
 
 	state.Name = strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))
