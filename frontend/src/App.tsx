@@ -513,7 +513,7 @@ export function App() {
           <aside className="space-y-4">
             <section className="rounded-lg border bg-card p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - HDG Up</h1>
+                <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - Course Up</h1>
                 <Button variant="outline" size="sm">
                   <Compass className="h-4 w-4" />
                   AWA {awaLabel}
