@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import React from 'react'
+import React, { useEffect } from 'react'
 
 interface BottomDrawerProps {
   isOpen: boolean
@@ -28,6 +28,19 @@ export function BottomDrawer({
   children,
 }: BottomDrawerProps) {
   const hasTabs = Boolean(tabs && tabs.length > 0)
+
+  // Lock background scroll while the drawer is open, so a wheel/touch
+  // gesture over the backdrop (or the sliver of page still visible above the
+  // drawer) scrolls nothing instead of scrolling the dashboard underneath.
+  useEffect(() => {
+    if (!isOpen) return
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [isOpen])
 
   const handleTabSelect = (tabId: string) => {
     onTabChange?.(tabId)
