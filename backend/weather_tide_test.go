@@ -398,7 +398,7 @@ func TestBuildWindSummary_FormatsRangeDirectionAndGust(t *testing.T) {
 	}
 
 	summary := buildWindSummary("Tuesday", false, hourly)
-	expected := "On Tuesday, winds will be 19 to 22 kts from the S-SE, with gusts up to 29 kts."
+	expected := "Tuesday's, winds will be 19 to 22 kts from the S-SE, gusting to 29 kts."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -412,7 +412,7 @@ func TestBuildWindSummary_TodayUsesTodayPrefix(t *testing.T) {
 	}
 
 	summary := buildWindSummary("Monday", true, hourly)
-	expected := "Today winds will be 8 to 14 kts from the S-SE, with gusts up to 24 kts."
+	expected := "Today winds will be 8 to 14 kts from the S-SE, gusting to 24 kts."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -425,7 +425,7 @@ func TestBuildWindSummary_OmitsGustWhenNotAboveSustained(t *testing.T) {
 	}
 
 	summary := buildWindSummary("Wednesday", false, hourly)
-	expected := "On Wednesday, winds will be around 12 kts from the NE."
+	expected := "Wednesday's, winds will be around 12 kts from the NE."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -466,7 +466,7 @@ func TestBuildWaveSummary_FormatsRangeDirectionAndPeriod(t *testing.T) {
 	}
 
 	summary := buildWaveSummary("Tuesday", false, hourly)
-	expected := "On Tuesday, swell will be 1.1 to 1.3 m from the ENE, with a period around 9 sec."
+	expected := "Tuesday's, significant wave height will be 1.1 to 1.3 m from the ENE, with a period around 9 sec."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -479,7 +479,7 @@ func TestBuildWaveSummary_TodayUsesTodayPrefixAndAroundHeight(t *testing.T) {
 	}
 
 	summary := buildWaveSummary("Monday", true, hourly)
-	expected := "Today's significantwave height will be around 1.1 m from the E, with a period around 9 sec."
+	expected := "Today significant wave height will be around 1.1 m from the E, with a period around 9 sec."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
