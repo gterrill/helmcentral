@@ -836,6 +836,8 @@ export function App() {
               generatorRunningByCondition={generatorRunningByCondition}
               generatorRuntime={generatorRuntime}
               generatorRealPowerW={generatorRealPowerW}
+              batterySocPercent={batterySocPercent}
+              batteryRatePercentPerHour={batteryRatePercentPerHour}
             />
             <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
           </aside>

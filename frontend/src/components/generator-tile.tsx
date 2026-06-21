@@ -10,6 +10,8 @@ interface GeneratorTileProps {
   generatorRunningByCondition: string | null
   generatorRuntime: number | null
   generatorRealPowerW: number | null
+  batterySocPercent: number | null
+  batteryRatePercentPerHour: number | null
 }
 
 function formatRuntime(seconds: number | null): string {
@@ -42,6 +44,8 @@ export function GeneratorTile({
   generatorRunningByCondition,
   generatorRuntime,
   generatorRealPowerW,
+  batterySocPercent,
+  batteryRatePercentPerHour,
 }: GeneratorTileProps) {
   const [timedRunEnabled, setTimedRunEnabled] = useState(false)
   const [timerHours, setTimerHours] = useState(1)
@@ -61,6 +65,17 @@ export function GeneratorTile({
       : '0'
 
   const runReason = formatRunReason(generatorRunningByCondition)
+
+  // Projects where the battery's state of charge will land by the time the
+  // manual-start timer finishes, using the same net charge-rate the battery
+  // tile already computes (covers generator + solar + alternator + loads
+  // combined, which is what actually determines the battery's trajectory).
+  // Only shown while genuinely charging - a negative/zero/unknown rate would
+  // make "at finish" a misleading thing to project.
+  const projectedSocPercent =
+    batterySocPercent !== null && batteryRatePercentPerHour !== null && batteryRatePercentPerHour > 0
+      ? Math.max(0, Math.min(100, batterySocPercent + batteryRatePercentPerHour * (generatorManualStartTimer / 3600)))
+      : null
 
   const stateLabelText = generatorState
     ? generatorState.charAt(0).toUpperCase() + generatorState.slice(1)
@@ -150,13 +165,23 @@ export function GeneratorTile({
         </Button>
       </div>
 
-      {/* Remaining timer while running */}
+      {/* Remaining timer while running, plus a battery forecast for the end of it */}
       {isRunning && generatorManualStart && generatorManualStartTimer > 0 && (
-        <div className="mt-3 rounded-md border bg-background/60 px-3 py-2">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Timer Remaining</p>
-          <p className="mt-0.5 font-mono text-sm tabular-nums text-secondary">
-            {formatRuntime(generatorManualStartTimer)}
-          </p>
+        <div className={`mt-3 grid gap-2 ${projectedSocPercent !== null ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className="rounded-md border bg-background/60 px-3 py-2">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Timer Remaining</p>
+            <p className="mt-0.5 font-mono text-sm tabular-nums text-secondary">
+              {formatRuntime(generatorManualStartTimer)}
+            </p>
+          </div>
+          {projectedSocPercent !== null && (
+            <div className="rounded-md border bg-background/60 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Battery at Finish</p>
+              <p className="mt-0.5 font-mono text-sm tabular-nums text-secondary">
+                {Math.round(projectedSocPercent)}%
+              </p>
+            </div>
+          )}
         </div>
       )}
 
