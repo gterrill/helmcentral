@@ -467,17 +467,6 @@ export function App() {
     else TimeToGoIcon = BatteryFull
   }
 
-  const drawerTitle = activeDrawerTab === 'radar'
-    ? 'Radar'
-    : activeDrawerTab === 'settings'
-      ? 'Settings'
-      : activeDrawerTab === 'tides'
-        ? 'Tides'
-        : activeDrawerTab === 'anchor-watch'
-          ? 'Anchor Watch'
-          : activeDrawerTab === 'routes'
-            ? 'Routes'
-            : 'Forecast'
   const setValue = currentSetDeg !== null && currentDriftKts !== 0
     ? (
       <span className="inline-flex items-center gap-2">
@@ -848,7 +837,6 @@ export function App() {
           isOpen={isDrawerOpen}
           onOpen={() => setIsDrawerOpen(true)}
           onClose={() => setIsDrawerOpen(false)}
-          title={drawerTitle}
           tabs={[
             { id: 'forecast', label: 'Forecast' },
             { id: 'tides', label: 'Tides' },

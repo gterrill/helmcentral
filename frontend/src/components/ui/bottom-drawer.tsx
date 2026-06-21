@@ -5,7 +5,6 @@ interface BottomDrawerProps {
   isOpen: boolean
   onOpen?: () => void
   onClose: () => void
-  title: string
   tabs?: Array<{
     id: string
     label: string
@@ -21,7 +20,6 @@ export function BottomDrawer({
   isOpen,
   onOpen,
   onClose,
-  title,
   tabs,
   activeTab,
   onTabChange,
@@ -88,37 +86,33 @@ export function BottomDrawer({
 
       {/* Drawer */}
       <div className="fixed bottom-0 left-0 right-0 z-[3200] flex h-[85vh] flex-col rounded-t-2xl border-t bg-card shadow-xl">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <h2 className="font-display text-lg tracking-[0.24em] text-foreground">{title}</h2>
+        {/* Tabs + close */}
+        <div className="flex items-center justify-between gap-1 border-b px-4 py-2">
+          <div className="flex gap-1">
+            {hasTabs &&
+              tabs!.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => onTabChange?.(tab.id)}
+                  className={`flex items-center gap-2 rounded-t-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                    activeTab === tab.id
+                      ? 'border-b-2 border-primary bg-background text-primary'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+          </div>
           <button
             onClick={onClose}
-            className="h-8 w-8 rounded-md p-0 hover:bg-muted transition-colors"
+            className="h-8 w-8 shrink-0 rounded-md p-0 hover:bg-muted transition-colors"
             aria-label="Close drawer"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-
-        {/* Tabs */}
-        {hasTabs && (
-          <div className="flex gap-1 border-b px-4 py-2">
-            {tabs!.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => onTabChange?.(tab.id)}
-                className={`flex items-center gap-2 rounded-t-lg px-4 py-2 text-sm font-semibold transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-b-2 border-primary bg-background text-primary'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Content */}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
