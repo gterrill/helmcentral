@@ -245,6 +245,84 @@ func TestVesselLocalLocation_ClampsInvalidLongitudeToUTC(t *testing.T) {
 	}
 }
 
+func TestBuildWeatherHourlyEntries_IncludesWindDirection(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	now := time.Date(2026, 6, 14, 23, 0, 0, 0, time.UTC) // 09:00 AEST on Jun 15
+	result := map[string]any{
+		"forecastHourly": map[string]any{
+			"hours": []any{
+				map[string]any{"forecastStart": "2026-06-14T23:00:00Z", "conditionCode": "Clear", "temperature": 20.0, "windSpeed": 18.52, "windGust": 27.78, "windDirection": 90.0},
+			},
+		},
+	}
+
+	entries := buildWeatherHourlyEntries(result, now, loc, "2026-06-15", time.Time{})
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if got := entries[0].WindSpeedKts; got < 9.99 || got > 10.01 {
+		t.Fatalf("expected ~10kt wind speed, got %f", got)
+	}
+	if entries[0].WindDirection != "E" {
+		t.Fatalf("expected E direction, got %q", entries[0].WindDirection)
+	}
+	if entries[0].WindDirectionDeg != 90.0 {
+		t.Fatalf("expected 90 degree direction, got %f", entries[0].WindDirectionDeg)
+	}
+}
+
+func TestBuildWeatherHourlyEntries_SunsetEntryHasNoWindData(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	now := time.Date(2026, 6, 14, 22, 0, 0, 0, time.UTC) // 08:00 AEST on Jun 15
+	sunset := time.Date(2026, 6, 15, 8, 30, 0, 0, loc)
+	result := map[string]any{
+		"forecastHourly": map[string]any{
+			"hours": []any{
+				map[string]any{"forecastStart": "2026-06-14T22:00:00Z", "conditionCode": "Clear", "temperature": 20.0, "windSpeed": 18.52, "windDirection": 90.0},
+				map[string]any{"forecastStart": "2026-06-14T23:00:00Z", "conditionCode": "Clear", "temperature": 19.0, "windSpeed": 18.52, "windDirection": 90.0},
+			},
+		},
+	}
+
+	entries := buildWeatherHourlyEntries(result, now, loc, "2026-06-15", sunset)
+
+	sunsetIdx := -1
+	for i, entry := range entries {
+		if entry.Kind == "sunset" {
+			sunsetIdx = i
+			break
+		}
+	}
+	if sunsetIdx == -1 {
+		t.Fatalf("expected a sunset entry, got %+v", entries)
+	}
+	if entries[sunsetIdx].WindSpeedKts != -1 || entries[sunsetIdx].WindGustKts != -1 {
+		t.Fatalf("expected sunset entry to have -1 wind sentinels, got %+v", entries[sunsetIdx])
+	}
+	if entries[sunsetIdx].WindDirection != "—" || entries[sunsetIdx].WindDirectionDeg != -1 {
+		t.Fatalf("expected sunset entry to have unavailable wind direction, got %+v", entries[sunsetIdx])
+	}
+}
+
+func TestMapWeatherHourlyResponse_IncludesWindFields(t *testing.T) {
+	entries := []weatherHourlyEntryData{
+		{Label: "Now", Condition: "Clear", TemperatureF: 68, WindSpeedKts: 10, WindGustKts: 15, WindDirection: "E", WindDirectionDeg: 90, Kind: "forecast"},
+	}
+
+	response := mapWeatherHourlyResponse(entries)
+
+	if len(response) != 1 {
+		t.Fatalf("expected 1 response entry, got %d", len(response))
+	}
+	if response[0].WindSpeedKts != 10 || response[0].WindGustKts != 15 {
+		t.Fatalf("expected wind speed/gust to carry through, got %+v", response[0])
+	}
+	if response[0].WindDirection != "E" || response[0].WindDirectionDeg != 90 {
+		t.Fatalf("expected wind direction to carry through, got %+v", response[0])
+	}
+}
+
 func TestSummarizeHourlyForecast_IncludesTypicalWindAndGust(t *testing.T) {
 	entries := []weatherHourlyEntryData{
 		{Label: "Now", Condition: "Mostly Sunny", WindSpeedKts: 10, WindGustKts: 18, Kind: "forecast"},

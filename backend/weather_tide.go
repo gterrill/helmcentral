@@ -244,12 +244,14 @@ type weatherForecastDayData struct {
 }
 
 type weatherHourlyEntryData struct {
-	Label        string
-	Condition    string
-	TemperatureF float64
-	WindSpeedKts float64
-	WindGustKts  float64
-	Kind         string
+	Label            string
+	Condition        string
+	TemperatureF     float64
+	WindSpeedKts     float64
+	WindGustKts      float64
+	WindDirection    string
+	WindDirectionDeg float64
+	Kind             string
 }
 
 type weatherHourlyWindData struct {
@@ -344,10 +346,14 @@ type weatherForecastDayResponse struct {
 }
 
 type weatherHourlyEntryResponse struct {
-	Label        string  `json:"label"`
-	Condition    string  `json:"condition"`
-	TemperatureF float64 `json:"temperature_f"`
-	Kind         string  `json:"kind"`
+	Label            string  `json:"label"`
+	Condition        string  `json:"condition"`
+	TemperatureF     float64 `json:"temperature_f"`
+	WindSpeedKts     float64 `json:"wind_speed_kts"`
+	WindGustKts      float64 `json:"wind_gust_kts"`
+	WindDirection    string  `json:"wind_direction"`
+	WindDirectionDeg float64 `json:"wind_direction_deg"`
+	Kind             string  `json:"kind"`
 }
 
 type weatherHourlyWindResponse struct {
@@ -833,10 +839,14 @@ func mapWeatherHourlyResponse(entries []weatherHourlyEntryData) []weatherHourlyE
 	response := make([]weatherHourlyEntryResponse, 0, len(entries))
 	for _, entry := range entries {
 		response = append(response, weatherHourlyEntryResponse{
-			Label:        entry.Label,
-			Condition:    entry.Condition,
-			TemperatureF: entry.TemperatureF,
-			Kind:         entry.Kind,
+			Label:            entry.Label,
+			Condition:        entry.Condition,
+			TemperatureF:     entry.TemperatureF,
+			WindSpeedKts:     entry.WindSpeedKts,
+			WindGustKts:      entry.WindGustKts,
+			WindDirection:    entry.WindDirection,
+			WindDirectionDeg: entry.WindDirectionDeg,
+			Kind:             entry.Kind,
 		})
 	}
 	return response
@@ -1815,7 +1825,7 @@ func buildWeatherHourlyEntries(result map[string]any, referenceDatetime time.Tim
 		}
 
 		if !insertedSunset && !sunsetAt.IsZero() && sunsetAt.After(referenceLocal) && localTime.After(sunsetAt) {
-			entries = append(entries, weatherHourlyEntryData{Label: sunsetAt.Format("3:04PM"), Condition: "Sunset", TemperatureF: -1, Kind: "sunset"})
+			entries = append(entries, weatherHourlyEntryData{Label: sunsetAt.Format("3:04PM"), Condition: "Sunset", TemperatureF: -1, WindSpeedKts: -1, WindGustKts: -1, WindDirection: "—", WindDirectionDeg: -1, Kind: "sunset"})
 			insertedSunset = true
 			if len(entries) >= 12 {
 				break
@@ -1844,12 +1854,19 @@ func buildWeatherHourlyEntries(result map[string]any, referenceDatetime time.Tim
 			windGustKts = windSpeedKts
 		}
 
+		windDirection := "—"
+		windDirectionDeg := -1.0
+		if directionDeg, ok := hourMap["windDirection"].(float64); ok {
+			windDirection = degreesToDirection(directionDeg)
+			windDirectionDeg = directionDeg
+		}
+
 		label := localTime.Format("3PM")
 		if localTime.Equal(referenceHour) {
 			label = "Now"
 		}
 
-		entries = append(entries, weatherHourlyEntryData{Label: label, Condition: condition, TemperatureF: temperatureF, WindSpeedKts: windSpeedKts, WindGustKts: windGustKts, Kind: "forecast"})
+		entries = append(entries, weatherHourlyEntryData{Label: label, Condition: condition, TemperatureF: temperatureF, WindSpeedKts: windSpeedKts, WindGustKts: windGustKts, WindDirection: windDirection, WindDirectionDeg: windDirectionDeg, Kind: "forecast"})
 	}
 
 	if !insertedSunset && !sunsetAt.IsZero() && sunsetAt.Format("2006-01-02") == localTodayKey && sunsetAt.After(referenceLocal) && len(entries) < 12 {

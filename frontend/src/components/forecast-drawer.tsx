@@ -587,6 +587,11 @@ export function ForecastDrawer({
                 <p className={`mt-4 ${entry.kind === 'sunset' ? 'text-[13px] font-semibold uppercase tracking-[0.08em] text-primary' : nightMode ? 'font-display text-[2rem] leading-none text-secondary' : 'font-display text-[2rem] leading-none text-foreground'}`}>
                   {entry.kind === 'sunset' ? 'Sunset' : displayTemperature !== null ? `${displayTemperature}°` : '—'}
                 </p>
+                {entry.kind === 'forecast' && entry.windSpeedKts >= 0 && (
+                  <p className={`mt-1 whitespace-nowrap text-[11px] font-semibold ${nightMode ? 'text-secondary/80' : 'text-secondary'}`}>
+                    {Math.round(entry.windSpeedKts)}kts {entry.windDirection}
+                  </p>
+                )}
                 {nightMode && entry.kind === 'forecast' && (
                   <span className="mt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-secondary/80">Night</span>
                 )}

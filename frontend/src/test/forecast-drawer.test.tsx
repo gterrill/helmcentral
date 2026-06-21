@@ -121,9 +121,9 @@ describe('ForecastDrawer refresh age', () => {
       <ForecastDrawer
         forecast={[buildDay({ condition: 'Mostly Sunny' })]}
         hourlyToday={[
-          { label: 'Now', condition: 'Mostly Sunny', temperatureF: 72, kind: 'forecast' },
-          { label: '11AM', condition: 'Mostly Sunny', temperatureF: 72, kind: 'forecast' },
-          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, kind: 'sunset' },
+          { label: 'Now', condition: 'Mostly Sunny', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' },
+          { label: '11AM', condition: 'Mostly Sunny', temperatureF: 72, windSpeedKts: 12, windGustKts: 19, windDirection: 'NE', windDirectionDeg: 50, kind: 'forecast' },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset' },
         ]}
         summary="Sunny conditions will continue all day."
         loading={false}
@@ -137,6 +137,8 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByText('11AM')).toBeInTheDocument()
     expect(screen.getByText('5:09PM')).toBeInTheDocument()
     expect(screen.getAllByText('Sunset').length).toBeGreaterThan(0)
+    expect(screen.getByText('11kts NE')).toBeInTheDocument()
+    expect(screen.getByText('12kts NE')).toBeInTheDocument()
   })
 
   it('renders up to 10 day tabs', () => {

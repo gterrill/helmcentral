@@ -54,6 +54,10 @@ export interface WeatherHourlyEntry {
   label: string;
   condition: string;
   temperatureF: number;
+  windSpeedKts: number;
+  windGustKts: number;
+  windDirection: string;
+  windDirectionDeg: number;
   kind: 'forecast' | 'sunset' | string;
 }
 
@@ -113,6 +117,10 @@ interface WeatherForecastEnvelopeApi {
     label?: string;
     condition?: string;
     temperature_f?: number;
+    wind_speed_kts?: number;
+    wind_gust_kts?: number;
+    wind_direction?: string;
+    wind_direction_deg?: number;
     kind?: string;
   }>;
   summary?: string;
@@ -220,6 +228,10 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                 label: entry.label || '—',
                 condition: entry.condition || 'Unknown',
                 temperatureF: typeof entry.temperature_f === 'number' ? entry.temperature_f : -1,
+                windSpeedKts: typeof entry.wind_speed_kts === 'number' ? entry.wind_speed_kts : -1,
+                windGustKts: typeof entry.wind_gust_kts === 'number' ? entry.wind_gust_kts : -1,
+                windDirection: entry.wind_direction || '—',
+                windDirectionDeg: typeof entry.wind_direction_deg === 'number' ? entry.wind_direction_deg : -1,
                 kind: entry.kind || 'forecast',
               }))
             : []);
