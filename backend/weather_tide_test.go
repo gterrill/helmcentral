@@ -476,7 +476,7 @@ func TestBuildWindSummary_FormatsRangeDirectionAndGust(t *testing.T) {
 	}
 
 	summary := buildWindSummary("Tuesday", false, hourly)
-	expected := "Tuesday's, winds will be 19 to 22 kts from the S-SE, gusting to 29 kts."
+	expected := "Tuesday's winds will be 19 to 22 kts from the S-SE, gusting to 29 kts."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -503,7 +503,7 @@ func TestBuildWindSummary_OmitsGustWhenNotAboveSustained(t *testing.T) {
 	}
 
 	summary := buildWindSummary("Wednesday", false, hourly)
-	expected := "Wednesday's, winds will be around 12 kts from the NE."
+	expected := "Wednesday's winds will be around 12 kts from the NE."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -544,7 +544,7 @@ func TestBuildWaveSummary_FormatsRangeDirectionAndPeriod(t *testing.T) {
 	}
 
 	summary := buildWaveSummary("Tuesday", false, hourly)
-	expected := "Tuesday's, significant wave height will be 1.1 to 1.3 m from the ENE, with a period around 9 sec."
+	expected := "Tuesday's significant wave height will be 1.1 to 1.3 m from the ENE, with a period around 9 sec."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}

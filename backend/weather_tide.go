@@ -1463,7 +1463,7 @@ func buildWindSummary(dayName string, isToday bool, hourly []weatherHourlyWindDa
 
 	dayPrefix := "Today"
 	if !isToday {
-		dayPrefix = fmt.Sprintf("%s's,", dayName)
+		dayPrefix = fmt.Sprintf("%s's", dayName)
 	}
 
 	if gustRounded > maxRounded {
@@ -1542,7 +1542,7 @@ func buildWaveSummary(dayName string, isToday bool, hourly []weatherHourlyWaveDa
 
 	dayPrefix := "Today"
 	if !isToday {
-		dayPrefix = fmt.Sprintf("%s's,", dayName)
+		dayPrefix = fmt.Sprintf("%s's", dayName)
 	}
 
 	if periodCount > 0 {
