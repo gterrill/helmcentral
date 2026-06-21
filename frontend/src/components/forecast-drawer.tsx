@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 
 import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
 
@@ -245,6 +245,99 @@ function axisTickLabelY(yFor: (value: number) => number, value: number, top: num
   return y + 3
 }
 
+// Converts a 0-360 bearing to a 16-point compass label, for the wave/swell
+// direction shown in the scrub tooltip (wind already gets this as a string
+// straight from the API).
+const COMPASS_POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+function compassLabel(directionDeg: number): string {
+  if (directionDeg < 0) return ''
+  return COMPASS_POINTS[Math.round((directionDeg % 360) / 22.5) % 16]
+}
+
+// WHO UV Index risk bands, matching the thresholds already used for the UV
+// chart's gradient stops.
+function uvRiskLabel(value: number): string {
+  if (value >= 11) return 'Extreme'
+  if (value >= 8) return 'Very High'
+  if (value >= 6) return 'High'
+  if (value >= 3) return 'Moderate'
+  return 'Low'
+}
+
+// Shows a tooltip for the nearest hourly entry on mouse hover (desktop/
+// tablet) or touch (mobile) - both go through the same pointer events, since
+// `pointermove` only fires for a mouse on hover (no button needed) and only
+// fires for touch while a finger is actually down and moving. Positioned at
+// the pointer's own X so it never requires looking elsewhere.
+//
+// Clearing is pointer-type-aware: a mouse hides the tooltip as soon as it
+// leaves the chart (normal hover behavior), but touch does NOT hide on
+// pointerup/pointerleave - those fire the instant a finger lifts, which
+// would otherwise make a quick tap flash the tooltip for a single frame
+// instead of actually showing it. A touch tooltip stays until the next tap
+// (anywhere) replaces or clears it.
+function useChartTooltip(count: number, resetKey: number, chartLeft: number, chartRight: number) {
+  const [point, setPoint] = useState<{ index: number; pixelX: number } | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  // Switching days swaps in a different hourly array (different length,
+  // different times) - drop any tooltip from the previous day's chart.
+  useEffect(() => {
+    setPoint(null)
+  }, [resetKey])
+
+  const updateFromClientX = (clientX: number) => {
+    const svg = svgRef.current
+    if (!svg || count <= 0) return
+    const rect = svg.getBoundingClientRect()
+    if (rect.width <= 0) return
+    const pixelX = Math.max(0, Math.min(rect.width, clientX - rect.left))
+    const viewBoxWidth = svg.viewBox.baseVal.width || chartRight
+    const xInViewBox = (pixelX / rect.width) * viewBoxWidth
+    const fraction = count <= 1 ? 0 : (xInViewBox - chartLeft) / (chartRight - chartLeft)
+    const idx = Math.max(0, Math.min(count - 1, Math.round(fraction * (count - 1))))
+    setPoint({ index: idx, pixelX })
+  }
+
+  // Only a mouse leaving the chart should hide the tooltip - for touch,
+  // "leave" fires the moment a finger lifts, which isn't a meaningful signal
+  // that the user is done looking at the value.
+  const clearForMouse = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === 'mouse') setPoint(null)
+  }
+
+  return {
+    svgRef,
+    activeIndex: point === null ? null : Math.min(point.index, Math.max(0, count - 1)),
+    tooltipPixelX: point?.pixelX ?? null,
+    onPointerDown: (event: ReactPointerEvent<SVGSVGElement>) => updateFromClientX(event.clientX),
+    onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => updateFromClientX(event.clientX),
+    onPointerLeave: clearForMouse,
+  }
+}
+
+// A small marker dot on the chart's primary series at the hovered/touched index.
+function ChartTooltipMarker({ x, y, color }: { x: number; y: number; color: string }) {
+  return <circle pointerEvents="none" cx={x} cy={y} r="5" fill={color} stroke="white" strokeWidth="2" />
+}
+
+// The floating time / prominent-value / secondary-value bubble, positioned
+// at the pointer's X (clamped so it can't run off either edge of the chart)
+// right above the chart - never behind a touch point, never elsewhere on
+// the page.
+function ChartTooltipBubble({ pixelX, time, primary, secondary }: { pixelX: number; time: string; primary: string; secondary: string }) {
+  return (
+    <div
+      className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-border/60 bg-card px-2.5 py-1.5 shadow-md"
+      style={{ left: `clamp(58px, ${pixelX}px, calc(100% - 58px))` }}
+    >
+      <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{time}</p>
+      <p className="font-display text-base leading-tight text-foreground">{primary}</p>
+      <p className="text-[10px] text-muted-foreground">{secondary}</p>
+    </div>
+  )
+}
+
 // Left-axis band labels for the UV chart, positioned at each band's center value.
 const UV_BAND_LABELS = [
   { value: 10, label: 'Extreme' },
@@ -453,6 +546,16 @@ export function ForecastDrawer({
   const uvProtectionStart = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[0]].label : null
   const uvProtectionEnd = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[uvProtectionIndices.length - 1]].label : null
 
+  const windTooltip = useChartTooltip(windHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
+  const waveTooltip = useChartTooltip(waveHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
+  const precipTooltip = useChartTooltip(precipHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
+  const uvTooltip = useChartTooltip(uvHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
+
+  const windTooltipEntry = windTooltip.activeIndex === null ? null : windHourly[windTooltip.activeIndex] ?? null
+  const waveTooltipEntry = waveTooltip.activeIndex === null ? null : waveHourly[waveTooltip.activeIndex] ?? null
+  const precipTooltipEntry = precipTooltip.activeIndex === null ? null : precipHourly[precipTooltip.activeIndex] ?? null
+  const uvTooltipEntry = uvTooltip.activeIndex === null ? null : uvHourly[uvTooltip.activeIndex] ?? null
+
   return (
     <div className="space-y-4 pb-4">
       {hourlyEntries.length > 0 && (
@@ -592,29 +695,55 @@ export function ForecastDrawer({
                   {selectedDay.windSummary && (
                     <p className="mb-2 text-base text-foreground/80">{selectedDay.windSummary}</p>
                   )}
-                  <svg viewBox="0 0 1000 175" data-testid="forecast-wind-chart" className="h-[175px] w-full rounded bg-muted/15">
-                    {windAxisTicks.map((tick) => (
-                      <text key={tick} x={6} y={axisTickLabelY(windYFor, tick, windChartTop, windChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                        {tick}{tick === windMax ? ` ${windUnit}` : ''}
-                      </text>
-                    ))}
-                    <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                  <div className="relative">
+                    {windTooltipEntry && (
+                      <ChartTooltipBubble
+                        pixelX={windTooltip.tooltipPixelX ?? 0}
+                        time={windTooltipEntry.label}
+                        primary={`${Math.round(windTooltipEntry.windSpeed)} ${windUnit} ${windTooltipEntry.windDirection}`}
+                        secondary={`Gusts: ${Math.round(windTooltipEntry.windGust)} ${windUnit}`}
+                      />
+                    )}
+                    <svg
+                      ref={windTooltip.svgRef}
+                      viewBox="0 0 1000 175"
+                      data-testid="forecast-wind-chart"
+                      className="h-[175px] w-full touch-none rounded bg-muted/15"
+                      onPointerDown={windTooltip.onPointerDown}
+                      onPointerMove={windTooltip.onPointerMove}
+                      onPointerLeave={windTooltip.onPointerLeave}
+                    >
+                      {windAxisTicks.map((tick) => (
+                        <text key={tick} x={6} y={axisTickLabelY(windYFor, tick, windChartTop, windChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                          {tick}{tick === windMax ? ` ${windUnit}` : ''}
+                        </text>
+                      ))}
+                      <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                    <path d={windAreaPath} fill="rgba(37,99,235,0.12)" />
-                    <polyline points={windGustPoints} fill="none" stroke="rgba(245,158,11,0.75)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
-                    <polyline points={windSpeedPoints} fill="none" stroke="rgba(37,99,235,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+                      <path d={windAreaPath} fill="rgba(37,99,235,0.12)" />
+                      <polyline points={windGustPoints} fill="none" stroke="rgba(245,158,11,0.75)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
+                      <polyline points={windSpeedPoints} fill="none" stroke="rgba(37,99,235,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
-                    {windHourly.map((entry, idx) => {
-                      if (idx % windTickEvery !== 0 && idx !== windHourly.length - 1) return null
-                      const x = hourlyXFor(idx, windHourly.length)
-                      return (
-                        <g key={idx}>
-                          <WindBarb cx={x} cy={16} speedKts={entry.windSpeed} directionDeg={entry.windDirectionDeg} />
-                          <text x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                        </g>
-                      )
-                    })}
-                  </svg>
+                      {windHourly.map((entry, idx) => {
+                        if (idx % windTickEvery !== 0 && idx !== windHourly.length - 1) return null
+                        const x = hourlyXFor(idx, windHourly.length)
+                        return (
+                          <g key={idx}>
+                            <WindBarb cx={x} cy={16} speedKts={entry.windSpeed} directionDeg={entry.windDirectionDeg} />
+                            <text x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
+                          </g>
+                        )
+                      })}
+
+                      {windTooltipEntry && (
+                        <ChartTooltipMarker
+                          x={hourlyXFor(windTooltip.activeIndex ?? 0, windHourly.length)}
+                          y={windYFor(Math.max(0, windTooltipEntry.windSpeed))}
+                          color="rgba(37,99,235,0.95)"
+                        />
+                      )}
+                    </svg>
+                  </div>
                   <p className="mt-1 text-[10px] text-muted-foreground">
                     <span className="text-blue-600">— Wind</span> · <span className="text-amber-600">- - Gusts</span> ({windUnit}) · barbs show direction the wind is coming from (full feather = 10kt, half = 5kt)
                   </p>
@@ -635,31 +764,57 @@ export function ForecastDrawer({
                   {selectedDay.waveSummary && (
                     <p className="mb-2 text-base text-foreground/80">{selectedDay.waveSummary}</p>
                   )}
-                  <svg viewBox="0 0 1000 170" data-testid="forecast-wave-chart" className="h-[170px] w-full rounded bg-muted/15">
-                    {waveAxisTicks.map((tick) => (
-                      <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                        {tick.toFixed(1)}{tick === waveMax ? ' m' : ''}
-                      </text>
-                    ))}
-                    <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                  <div className="relative">
+                    {waveTooltipEntry && (
+                      <ChartTooltipBubble
+                        pixelX={waveTooltip.tooltipPixelX ?? 0}
+                        time={waveTooltipEntry.label}
+                        primary={`${waveTooltipEntry.waveHeightM.toFixed(1)} m`}
+                        secondary={`Swell ${waveTooltipEntry.swellWaveHeightM.toFixed(1)}m from ${compassLabel(waveTooltipEntry.waveDirectionDeg)} · Chop ${waveTooltipEntry.windWaveHeightM.toFixed(1)}m`}
+                      />
+                    )}
+                    <svg
+                      ref={waveTooltip.svgRef}
+                      viewBox="0 0 1000 170"
+                      data-testid="forecast-wave-chart"
+                      className="h-[170px] w-full touch-none rounded bg-muted/15"
+                      onPointerDown={waveTooltip.onPointerDown}
+                      onPointerMove={waveTooltip.onPointerMove}
+                      onPointerLeave={waveTooltip.onPointerLeave}
+                    >
+                      {waveAxisTicks.filter((tick) => Number.isInteger(tick)).map((tick) => (
+                        <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                          {tick}{tick === waveMax ? ' m' : ''}
+                        </text>
+                      ))}
+                      <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                    <path d={waveAreaPath} fill="rgba(20,184,166,0.12)" />
-                    <polyline points={swellWavePoints} fill="none" stroke="rgba(139,92,246,0.85)" strokeWidth="1.5" strokeDasharray="2 3" strokeLinejoin="round" strokeLinecap="round" />
-                    <polyline points={windWavePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
-                    <polyline points={wavePoints} fill="none" stroke="rgba(20,184,166,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+                      <path d={waveAreaPath} fill="rgba(20,184,166,0.12)" />
+                      <polyline points={swellWavePoints} fill="none" stroke="rgba(139,92,246,0.85)" strokeWidth="1.5" strokeDasharray="2 3" strokeLinejoin="round" strokeLinecap="round" />
+                      <polyline points={windWavePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
+                      <polyline points={wavePoints} fill="none" stroke="rgba(20,184,166,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
-                    {waveHourly.map((entry, idx) => {
-                      if (idx % waveTickEvery !== 0 && idx !== waveHourly.length - 1) return null
-                      const x = hourlyXFor(idx, waveHourly.length)
-                      return (
-                        <g key={idx}>
-                          <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
-                          <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.wavePeriodS.toFixed(1)}s</text>
-                          <text x={x} y={140} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                        </g>
-                      )
-                    })}
-                  </svg>
+                      {waveHourly.map((entry, idx) => {
+                        if (idx % waveTickEvery !== 0 && idx !== waveHourly.length - 1) return null
+                        const x = hourlyXFor(idx, waveHourly.length)
+                        return (
+                          <g key={idx}>
+                            <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
+                            <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.wavePeriodS.toFixed(1)}s</text>
+                            <text x={x} y={140} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
+                          </g>
+                        )
+                      })}
+
+                      {waveTooltipEntry && (
+                        <ChartTooltipMarker
+                          x={hourlyXFor(waveTooltip.activeIndex ?? 0, waveHourly.length)}
+                          y={waveYFor(Math.max(0, waveTooltipEntry.waveHeightM))}
+                          color="rgba(20,184,166,0.9)"
+                        />
+                      )}
+                    </svg>
+                  </div>
                   <p className="mt-1 text-[10px] text-muted-foreground">
                     <span className="text-secondary">— Total wave height (m)</span> · <span className="text-amber-600">- - Wind wave (chop)</span> · <span className="text-violet-600">·· Swell</span> · arrows show direction the swell is heading, with period (sec) below each
                   </p>
@@ -680,41 +835,67 @@ export function ForecastDrawer({
                   {selectedDay.precipitationSummary && (
                     <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.precipitationSummary}</p>
                   )}
-                  <svg viewBox="0 0 1000 175" data-testid="forecast-precip-chart" className="h-[175px] w-full rounded bg-muted/15">
-                    <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)} mm/hr</text>
-                    <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
-                    <text x={994} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
-                    <text x={994} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
-                    <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                  <div className="relative">
+                    {precipTooltipEntry && (
+                      <ChartTooltipBubble
+                        pixelX={precipTooltip.tooltipPixelX ?? 0}
+                        time={precipTooltipEntry.label}
+                        primary={`${Math.round(precipTooltipEntry.precipChancePct)}% chance`}
+                        secondary={`${precipTooltipEntry.precipIntensityMm.toFixed(1)} mm/hr`}
+                      />
+                    )}
+                    <svg
+                      ref={precipTooltip.svgRef}
+                      viewBox="0 0 1000 175"
+                      data-testid="forecast-precip-chart"
+                      className="h-[175px] w-full touch-none rounded bg-muted/15"
+                      onPointerDown={precipTooltip.onPointerDown}
+                      onPointerMove={precipTooltip.onPointerMove}
+                      onPointerLeave={precipTooltip.onPointerLeave}
+                    >
+                      <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)} mm/hr</text>
+                      <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
+                      <text x={994} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
+                      <text x={994} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
+                      <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                    {precipHourly.map((_entry, idx) => {
-                      const intensity = precipIntensities[idx]
-                      if (intensity <= 0) return null
-                      const x = hourlyXFor(idx, precipHourly.length)
-                      const y = precipBarYFor(intensity)
-                      return (
-                        <rect
-                          key={idx}
-                          data-testid="forecast-precip-bar"
-                          x={x - precipBarWidth / 2}
-                          y={y}
-                          width={precipBarWidth}
-                          height={precipChartBottom - y}
-                          fill={precipBarColor(intensity)}
+                      {precipHourly.map((_entry, idx) => {
+                        const intensity = precipIntensities[idx]
+                        if (intensity <= 0) return null
+                        const x = hourlyXFor(idx, precipHourly.length)
+                        const y = precipBarYFor(intensity)
+                        return (
+                          <rect
+                            key={idx}
+                            data-testid="forecast-precip-bar"
+                            x={x - precipBarWidth / 2}
+                            y={y}
+                            width={precipBarWidth}
+                            height={precipChartBottom - y}
+                            fill={precipBarColor(intensity)}
+                          />
+                        )
+                      })}
+
+                      <polyline points={precipChancePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+
+                      {precipHourly.map((entry, idx) => {
+                        if (idx % precipTickEvery !== 0 && idx !== precipHourly.length - 1) return null
+                        const x = hourlyXFor(idx, precipHourly.length)
+                        return (
+                          <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
+                        )
+                      })}
+
+                      {precipTooltipEntry && (
+                        <ChartTooltipMarker
+                          x={hourlyXFor(precipTooltip.activeIndex ?? 0, precipHourly.length)}
+                          y={precipChanceYFor(Math.max(0, Math.min(100, precipTooltipEntry.precipChancePct)))}
+                          color="rgba(245,158,11,0.9)"
                         />
-                      )
-                    })}
-
-                    <polyline points={precipChancePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-
-                    {precipHourly.map((entry, idx) => {
-                      if (idx % precipTickEvery !== 0 && idx !== precipHourly.length - 1) return null
-                      const x = hourlyXFor(idx, precipHourly.length)
-                      return (
-                        <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                      )
-                    })}
-                  </svg>
+                      )}
+                    </svg>
+                  </div>
                   <p className="mt-1 text-[10px] text-muted-foreground">
                     <span className="text-blue-500">▮ Intensity (mm/hr)</span> · <span className="text-amber-600">— Chance of precip (%)</span>
                   </p>
@@ -737,39 +918,65 @@ export function ForecastDrawer({
                       ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
                       : 'No sun protection needed today.'}
                   </p>
-                  <svg viewBox="0 0 1000 175" data-testid="forecast-uv-chart" className="h-[175px] w-full rounded bg-muted/15">
-                    <defs>
-                      <linearGradient id={uvAreaGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
-                        {UV_GRADIENT_STOPS.map((stop) => (
-                          <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.3" />
-                        ))}
-                      </linearGradient>
-                      <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
-                        {UV_GRADIENT_STOPS.map((stop) => (
-                          <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
-                        ))}
-                      </linearGradient>
-                    </defs>
+                  <div className="relative">
+                    {uvTooltipEntry && (
+                      <ChartTooltipBubble
+                        pixelX={uvTooltip.tooltipPixelX ?? 0}
+                        time={uvTooltipEntry.label}
+                        primary={`UV ${Math.round(uvTooltipEntry.uvIndex)}`}
+                        secondary={uvRiskLabel(uvTooltipEntry.uvIndex)}
+                      />
+                    )}
+                    <svg
+                      ref={uvTooltip.svgRef}
+                      viewBox="0 0 1000 175"
+                      data-testid="forecast-uv-chart"
+                      className="h-[175px] w-full touch-none rounded bg-muted/15"
+                      onPointerDown={uvTooltip.onPointerDown}
+                      onPointerMove={uvTooltip.onPointerMove}
+                      onPointerLeave={uvTooltip.onPointerLeave}
+                    >
+                      <defs>
+                        <linearGradient id={uvAreaGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
+                          {UV_GRADIENT_STOPS.map((stop) => (
+                            <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.3" />
+                          ))}
+                        </linearGradient>
+                        <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
+                          {UV_GRADIENT_STOPS.map((stop) => (
+                            <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
+                          ))}
+                        </linearGradient>
+                      </defs>
 
-                    <text x={994} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(uvMax)}</text>
-                    <text x={994} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
-                    <line x1={hourlyChartLeft} y1={uvChartBottom} x2={hourlyChartRight} y2={uvChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                      <text x={994} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(uvMax)}</text>
+                      <text x={994} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
+                      <line x1={hourlyChartLeft} y1={uvChartBottom} x2={hourlyChartRight} y2={uvChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                    {UV_BAND_LABELS.map((band) => (
-                      <text key={band.label} x={6} y={uvYFor(band.value)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
-                    ))}
+                      {UV_BAND_LABELS.map((band) => (
+                        <text key={band.label} x={6} y={uvYFor(band.value)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
+                      ))}
 
-                    <path d={uvAreaPath} fill={`url(#${uvAreaGradientId})`} />
-                    <polyline points={uvPoints} fill="none" stroke={`url(#${uvLineGradientId})`} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+                      <path d={uvAreaPath} fill={`url(#${uvAreaGradientId})`} />
+                      <polyline points={uvPoints} fill="none" stroke={`url(#${uvLineGradientId})`} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
-                    {uvHourly.map((entry, idx) => {
-                      if (idx % uvTickEvery !== 0 && idx !== uvHourly.length - 1) return null
-                      const x = hourlyXFor(idx, uvHourly.length)
-                      return (
-                        <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                      )
-                    })}
-                  </svg>
+                      {uvHourly.map((entry, idx) => {
+                        if (idx % uvTickEvery !== 0 && idx !== uvHourly.length - 1) return null
+                        const x = hourlyXFor(idx, uvHourly.length)
+                        return (
+                          <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
+                        )
+                      })}
+
+                      {uvTooltipEntry && (
+                        <ChartTooltipMarker
+                          x={hourlyXFor(uvTooltip.activeIndex ?? 0, uvHourly.length)}
+                          y={uvYFor(Math.max(0, uvTooltipEntry.uvIndex))}
+                          color="rgb(249,115,22)"
+                        />
+                      )}
+                    </svg>
+                  </div>
                 </>
               ) : (
                 <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-uv-unavailable">
