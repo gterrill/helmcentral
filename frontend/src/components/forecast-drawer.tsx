@@ -665,11 +665,6 @@ export function ForecastDrawer({
                 <span className="rounded bg-muted/50 px-2 py-1">Humidity <span className="font-semibold">{humidityPct}%</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Visibility <span className="font-semibold">{visibilityNm.toFixed(1)} nm</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-secondary">{uvIndex}</span></span>
-              </div>
-            </div>
-
-            {(selectedDay.sunriseTime || selectedDay.sunsetTime || selectedDay.moonPhase) && (
-              <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
                 {selectedDay.sunriseTime && (
                   <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
                     <Sunrise size={13} className="text-amber-500" />
@@ -689,7 +684,7 @@ export function ForecastDrawer({
                   </span>
                 )}
               </div>
-            )}
+            </div>
 
             <div className="rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
