@@ -13,7 +13,7 @@ interface TileProps {
 
 export function Tile({ title, icon, className, titleClassName, titleExtra, children }: TileProps) {
   return (
-    <section className={cn('rounded-lg border-x border-b bg-card p-4 pt-5', className)}>
+    <section className={cn('rounded-lg border bg-card p-4 pt-5', className)}>
       <div className="mb-3 flex items-center gap-2">
         <div
           className={cn(
