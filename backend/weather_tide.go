@@ -1216,10 +1216,10 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 			WindSpeedKts:         windSpeedKts,
 			WindGustKts:          windGustKts,
 			WindDirection:        windDirection,
-			WindSummary:          buildWindSummary(dayName, dayKey == localTodayKey, windSeriesByDay[dayKey]),
-			WaveSummary:          buildWaveSummary(dayName, dayKey == localTodayKey, waveSeriesByDay[dayKey]),
+			WindSummary:          buildWindSummary(windSeriesByDay[dayKey]),
+			WaveSummary:          buildWaveSummary(waveSeriesByDay[dayKey]),
 			PrecipitationPct:     precipPct,
-			PrecipitationSummary: buildPrecipitationSummary(dayName, dayKey == localTodayKey, precipSeriesByDay[dayKey]),
+			PrecipitationSummary: buildPrecipitationSummary(precipSeriesByDay[dayKey]),
 			SunriseTime:          sunriseTime,
 			SunsetTime:           sunsetTime,
 			MoonPhase:            moonPhase,
@@ -1422,7 +1422,7 @@ func formatWeatherKitLocalTime(dayMap map[string]any, field string, localLocatio
 // buildWindSummary formats a human-readable sentence describing a day's wind
 // speed range, direction and peak gust, derived from its hourly wind series so
 // it stays numerically consistent with the wind graph.
-func buildWindSummary(dayName string, isToday bool, hourly []weatherHourlyWindData) string {
+func buildWindSummary(hourly []weatherHourlyWindData) string {
 	minSpeed := math.MaxFloat64
 	maxSpeed := -1.0
 	maxGust := -1.0
@@ -1461,16 +1461,11 @@ func buildWindSummary(dayName string, isToday bool, hourly []weatherHourlyWindDa
 		speedPhrase = fmt.Sprintf("%s from the %s", speedPhrase, directionRange)
 	}
 
-	dayPrefix := "Today"
-	if !isToday {
-		dayPrefix = fmt.Sprintf("%s's", dayName)
-	}
-
 	if gustRounded > maxRounded {
-		return fmt.Sprintf("%s winds will be %s, gusting to %d kts.", dayPrefix, speedPhrase, gustRounded)
+		return fmt.Sprintf("Winds %s, gusting to %d kts.", speedPhrase, gustRounded)
 	}
 
-	return fmt.Sprintf("%s winds will be %s.", dayPrefix, speedPhrase)
+	return fmt.Sprintf("Winds %s.", speedPhrase)
 }
 
 // windDirectionRange describes how a day's wind direction shifts from
@@ -1503,7 +1498,7 @@ func windDirectionRange(hourly []weatherHourlyWindData) string {
 // buildWaveSummary formats a human-readable sentence describing a day's swell
 // height range, direction and period, derived from its hourly wave series so
 // it stays numerically consistent with the wave graph.
-func buildWaveSummary(dayName string, isToday bool, hourly []weatherHourlyWaveData) string {
+func buildWaveSummary(hourly []weatherHourlyWaveData) string {
 	minHeight := math.MaxFloat64
 	maxHeight := -1.0
 	periodTotal := 0.0
@@ -1540,23 +1535,18 @@ func buildWaveSummary(dayName string, isToday bool, hourly []weatherHourlyWaveDa
 		heightPhrase = fmt.Sprintf("%s from the %s", heightPhrase, directionRange)
 	}
 
-	dayPrefix := "Today"
-	if !isToday {
-		dayPrefix = fmt.Sprintf("%s's", dayName)
-	}
-
 	if periodCount > 0 {
 		periodRounded := int(math.Round(periodTotal / float64(periodCount)))
-		return fmt.Sprintf("%s significant wave height will be %s, with a period around %d sec.", dayPrefix, heightPhrase, periodRounded)
+		return fmt.Sprintf("Significant wave height %s, with a period around %d sec.", heightPhrase, periodRounded)
 	}
 
-	return fmt.Sprintf("%s significant wave height will be %s.", dayPrefix, heightPhrase)
+	return fmt.Sprintf("Significant wave height %s.", heightPhrase)
 }
 
 // buildPrecipitationSummary describes a day's rain outlook in a single
-// sentence, e.g. "Today, slight chance of rain after 5PM." or "On Tuesday,
-// little to no rain is expected.", mirroring buildWindSummary/buildWaveSummary.
-func buildPrecipitationSummary(dayName string, isToday bool, hourly []weatherHourlyPrecipitationData) string {
+// sentence, e.g. "Slight chance of rain after 5PM." or "Little to no rain
+// is expected.", mirroring buildWindSummary/buildWaveSummary.
+func buildPrecipitationSummary(hourly []weatherHourlyPrecipitationData) string {
 	maxChance := -1.0
 	maxIntensity := 0.0
 	firstNotableIdx := -1
@@ -1579,13 +1569,8 @@ func buildPrecipitationSummary(dayName string, isToday bool, hourly []weatherHou
 		return ""
 	}
 
-	dayPrefix := "Today"
-	if !isToday {
-		dayPrefix = fmt.Sprintf("On %s", dayName)
-	}
-
 	if maxChance < 30 {
-		return fmt.Sprintf("%s, little to no rain is expected.", dayPrefix)
+		return "Little to no rain is expected."
 	}
 
 	when := "throughout the day"
@@ -1594,17 +1579,17 @@ func buildPrecipitationSummary(dayName string, isToday bool, hourly []weatherHou
 	}
 
 	if maxChance < 60 {
-		return fmt.Sprintf("%s, slight chance of rain %s.", dayPrefix, when)
+		return fmt.Sprintf("Slight chance of rain %s.", when)
 	}
 
-	phrase := "showers"
+	phrase := "Showers"
 	if maxIntensity >= 7.6 {
-		phrase = "heavy rain"
+		phrase = "Heavy rain"
 	} else if maxIntensity >= 2.5 {
-		phrase = "rain"
+		phrase = "Rain"
 	}
 
-	return fmt.Sprintf("%s, %s expected %s.", dayPrefix, phrase, when)
+	return fmt.Sprintf("%s expected %s.", phrase, when)
 }
 
 // waveDirectionRange describes how a day's swell direction shifts from

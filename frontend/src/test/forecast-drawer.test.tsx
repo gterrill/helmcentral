@@ -54,9 +54,9 @@ function buildDay(overrides: Record<string, unknown> = {}) {
     windSpeed: 10,
     windGust: 14,
     windDirection: 'NE',
-    windSummary: 'On Sunday, winds will be 10 to 19 kts, with gusts up to 24 kts.',
-    waveSummary: 'On Sunday, swell will be 1.0 to 1.2 m from the E, with a period around 6 sec.',
-    precipitationSummary: 'On Sunday, slight chance of rain after 5PM.',
+    windSummary: 'Winds 10 to 19 kts, with gusts up to 24 kts.',
+    waveSummary: 'Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.',
+    precipitationSummary: 'Slight chance of rain after 5PM.',
     precipitation: 5,
     sunriseTime: '6:32AM',
     sunsetTime: '5:47PM',
@@ -167,14 +167,14 @@ describe('ForecastDrawer refresh age', () => {
   it('shows the wind summary sentence and direction barbs for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByText('On Sunday, winds will be 10 to 19 kts, with gusts up to 24 kts.')).toBeInTheDocument()
+    expect(screen.getByText('Winds 10 to 19 kts, with gusts up to 24 kts.')).toBeInTheDocument()
     expect(screen.getAllByTestId('forecast-wind-barb').length).toBeGreaterThan(0)
   })
 
   it('shows the wave summary sentence, direction arrows and period for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByText('On Sunday, swell will be 1.0 to 1.2 m from the E, with a period around 6 sec.')).toBeInTheDocument()
+    expect(screen.getByText('Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.')).toBeInTheDocument()
     expect(screen.getAllByTestId('forecast-wave-arrow').length).toBeGreaterThan(0)
     expect(screen.getAllByText('6.0s').length).toBeGreaterThan(0)
   })
@@ -225,7 +225,7 @@ describe('ForecastDrawer refresh age', () => {
   it('shows the precipitation summary sentence for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByText('On Sunday, slight chance of rain after 5PM.')).toBeInTheDocument()
+    expect(screen.getByText('Slight chance of rain after 5PM.')).toBeInTheDocument()
   })
 
   it('shows an unavailable message when a day has no precipitation forecast', () => {
@@ -275,6 +275,6 @@ describe('ForecastDrawer refresh age', () => {
       />,
     )
 
-    expect(screen.getByText('No sun protection needed today.')).toBeInTheDocument()
+    expect(screen.getByText('No sun protection needed.')).toBeInTheDocument()
   })
 })

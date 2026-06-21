@@ -475,22 +475,8 @@ func TestBuildWindSummary_FormatsRangeDirectionAndGust(t *testing.T) {
 		{WindSpeedKts: 20.0, WindGustKts: 25.0, WindDirection: "SE"},
 	}
 
-	summary := buildWindSummary("Tuesday", false, hourly)
-	expected := "Tuesday's winds will be 19 to 22 kts from the S-SE, gusting to 29 kts."
-	if summary != expected {
-		t.Fatalf("expected %q, got %q", expected, summary)
-	}
-}
-
-func TestBuildWindSummary_TodayUsesTodayPrefix(t *testing.T) {
-	hourly := []weatherHourlyWindData{
-		{WindSpeedKts: 8.0, WindGustKts: 24.0, WindDirection: "S"},
-		{WindSpeedKts: 14.0, WindGustKts: 20.0, WindDirection: "SSE"},
-		{WindSpeedKts: 10.0, WindGustKts: 15.0, WindDirection: "SE"},
-	}
-
-	summary := buildWindSummary("Monday", true, hourly)
-	expected := "Today winds will be 8 to 14 kts from the S-SE, gusting to 24 kts."
+	summary := buildWindSummary(hourly)
+	expected := "Winds 19 to 22 kts from the S-SE, gusting to 29 kts."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -502,20 +488,20 @@ func TestBuildWindSummary_OmitsGustWhenNotAboveSustained(t *testing.T) {
 		{WindSpeedKts: 12.0, WindGustKts: 12.0, WindDirection: "NE"},
 	}
 
-	summary := buildWindSummary("Wednesday", false, hourly)
-	expected := "Wednesday's winds will be around 12 kts from the NE."
+	summary := buildWindSummary(hourly)
+	expected := "Winds around 12 kts from the NE."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
 }
 
 func TestBuildWindSummary_EmptyWhenNoHourlyData(t *testing.T) {
-	if summary := buildWindSummary("Thursday", false, nil); summary != "" {
+	if summary := buildWindSummary(nil); summary != "" {
 		t.Fatalf("expected empty summary, got %q", summary)
 	}
 
 	hourly := []weatherHourlyWindData{{WindSpeedKts: -1, WindGustKts: -1}}
-	if summary := buildWindSummary("Thursday", false, hourly); summary != "" {
+	if summary := buildWindSummary(hourly); summary != "" {
 		t.Fatalf("expected empty summary for all-missing data, got %q", summary)
 	}
 }
@@ -543,33 +529,33 @@ func TestBuildWaveSummary_FormatsRangeDirectionAndPeriod(t *testing.T) {
 		{WaveHeightM: 1.2, WavePeriodS: 9.1, WaveDirectionDeg: 67},
 	}
 
-	summary := buildWaveSummary("Tuesday", false, hourly)
-	expected := "Tuesday's significant wave height will be 1.1 to 1.3 m from the ENE, with a period around 9 sec."
+	summary := buildWaveSummary(hourly)
+	expected := "Significant wave height 1.1 to 1.3 m from the ENE, with a period around 9 sec."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
 }
 
-func TestBuildWaveSummary_TodayUsesTodayPrefixAndAroundHeight(t *testing.T) {
+func TestBuildWaveSummary_FormatsSteadyHeightWithPeriod(t *testing.T) {
 	hourly := []weatherHourlyWaveData{
 		{WaveHeightM: 1.1, WavePeriodS: 8.0, WaveDirectionDeg: 90},
 		{WaveHeightM: 1.1, WavePeriodS: 10.0, WaveDirectionDeg: 90},
 	}
 
-	summary := buildWaveSummary("Monday", true, hourly)
-	expected := "Today significant wave height will be around 1.1 m from the E, with a period around 9 sec."
+	summary := buildWaveSummary(hourly)
+	expected := "Significant wave height around 1.1 m from the E, with a period around 9 sec."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
 }
 
 func TestBuildWaveSummary_EmptyWhenNoHourlyData(t *testing.T) {
-	if summary := buildWaveSummary("Thursday", false, nil); summary != "" {
+	if summary := buildWaveSummary(nil); summary != "" {
 		t.Fatalf("expected empty summary, got %q", summary)
 	}
 
 	hourly := []weatherHourlyWaveData{{WaveHeightM: -1, WavePeriodS: -1, WaveDirectionDeg: -1}}
-	if summary := buildWaveSummary("Thursday", false, hourly); summary != "" {
+	if summary := buildWaveSummary(hourly); summary != "" {
 		t.Fatalf("expected empty summary for all-missing data, got %q", summary)
 	}
 }
@@ -581,8 +567,8 @@ func TestBuildPrecipitationSummary_LittleToNoRain(t *testing.T) {
 		{Label: "2AM", PrecipitationChancePct: 20, PrecipitationIntensityMm: 0},
 	}
 
-	summary := buildPrecipitationSummary("Tuesday", false, hourly)
-	expected := "On Tuesday, little to no rain is expected."
+	summary := buildPrecipitationSummary(hourly)
+	expected := "Little to no rain is expected."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
@@ -595,33 +581,33 @@ func TestBuildPrecipitationSummary_SlightChanceAfterHour(t *testing.T) {
 		{Label: "5PM", PrecipitationChancePct: 45, PrecipitationIntensityMm: 1.0},
 	}
 
-	summary := buildPrecipitationSummary("Sunday", false, hourly)
-	expected := "On Sunday, slight chance of rain after 5PM."
+	summary := buildPrecipitationSummary(hourly)
+	expected := "Slight chance of rain after 5PM."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
 }
 
 func TestBuildPrecipitationSummary_RainThroughoutTheDay(t *testing.T) {
-	todayHourly := []weatherHourlyPrecipitationData{
+	lightHourly := []weatherHourlyPrecipitationData{
 		{Label: "12AM", PrecipitationChancePct: 70, PrecipitationIntensityMm: 1.0},
 		{Label: "1AM", PrecipitationChancePct: 65, PrecipitationIntensityMm: 0.5},
 	}
 
-	todaySummary := buildPrecipitationSummary("Monday", true, todayHourly)
-	expectedToday := "Today, showers expected throughout the day."
-	if todaySummary != expectedToday {
-		t.Fatalf("expected %q, got %q", expectedToday, todaySummary)
+	lightSummary := buildPrecipitationSummary(lightHourly)
+	expectedLight := "Showers expected throughout the day."
+	if lightSummary != expectedLight {
+		t.Fatalf("expected %q, got %q", expectedLight, lightSummary)
 	}
 
-	otherHourly := []weatherHourlyPrecipitationData{
+	moderateHourly := []weatherHourlyPrecipitationData{
 		{Label: "12AM", PrecipitationChancePct: 80, PrecipitationIntensityMm: 4.0},
 	}
 
-	otherSummary := buildPrecipitationSummary("Wednesday", false, otherHourly)
-	expectedOther := "On Wednesday, rain expected throughout the day."
-	if otherSummary != expectedOther {
-		t.Fatalf("expected %q, got %q", expectedOther, otherSummary)
+	moderateSummary := buildPrecipitationSummary(moderateHourly)
+	expectedModerate := "Rain expected throughout the day."
+	if moderateSummary != expectedModerate {
+		t.Fatalf("expected %q, got %q", expectedModerate, moderateSummary)
 	}
 }
 
@@ -632,15 +618,15 @@ func TestBuildPrecipitationSummary_HeavyRainAfterHour(t *testing.T) {
 		{Label: "1PM", PrecipitationChancePct: 80, PrecipitationIntensityMm: 8.0},
 	}
 
-	summary := buildPrecipitationSummary("Wednesday", false, hourly)
-	expected := "On Wednesday, heavy rain expected after 1PM."
+	summary := buildPrecipitationSummary(hourly)
+	expected := "Heavy rain expected after 1PM."
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}
 }
 
 func TestBuildPrecipitationSummary_EmptyWhenNoHourlyData(t *testing.T) {
-	if summary := buildPrecipitationSummary("Thursday", false, nil); summary != "" {
+	if summary := buildPrecipitationSummary(nil); summary != "" {
 		t.Fatalf("expected empty summary, got %q", summary)
 	}
 }

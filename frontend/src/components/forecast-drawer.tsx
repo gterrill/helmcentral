@@ -838,7 +838,7 @@ export function ForecastDrawer({
               {precipHourly.length > 0 ? (
                 <>
                   {selectedDay.precipitationSummary && (
-                    <p className="mb-2 text-[12px] text-foreground/80">{selectedDay.precipitationSummary}</p>
+                    <p className="mb-2 text-base text-foreground/80">{selectedDay.precipitationSummary}</p>
                   )}
                   <div className="relative">
                     {precipTooltipEntry && (
@@ -918,10 +918,10 @@ export function ForecastDrawer({
               </h4>
               {uvHourly.length > 0 ? (
                 <>
-                  <p className="mb-2 text-[12px] text-foreground/80">
+                  <p className="mb-2 text-base text-foreground/80">
                     {uvProtectionStart && uvProtectionEnd
                       ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
-                      : 'No sun protection needed today.'}
+                      : 'No sun protection needed.'}
                   </p>
                   <div className="relative">
                     {uvTooltipEntry && (
