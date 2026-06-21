@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
@@ -311,6 +311,8 @@ export function ForecastDrawer({
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
   const uvAreaGradientId = useId()
   const uvLineGradientId = useId()
+  const detailsCardRef = useRef<HTMLDivElement>(null)
+  const dayTabsRowRef = useRef<HTMLDivElement>(null)
 
   if (loading && !hasForecast) {
     return (
@@ -350,6 +352,23 @@ export function ForecastDrawer({
   useEffect(() => {
     setSelectedDayIndex((prev) => (prev < days.length ? prev : 0))
   }, [days.length])
+
+  // Bring the daily summary back into view when the user picks a day, so
+  // selecting a new one doesn't leave the details card scrolled down to
+  // wherever the previous day's chart happened to be. Triggered directly
+  // from the click handler (not a `selectedDayIndex` effect) so it only
+  // fires on an actual selection, not on mount or on the index-clamping
+  // effect above.
+  const selectDay = (idx: number) => {
+    setSelectedDayIndex(idx)
+    // The day-tabs row is sticky at the top of the scroll container, so
+    // without this the details card would scroll to right behind it instead
+    // of just below it.
+    if (detailsCardRef.current && dayTabsRowRef.current) {
+      detailsCardRef.current.style.scrollMarginTop = `${dayTabsRowRef.current.offsetHeight}px`
+    }
+    detailsCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   const selectedDay = days[selectedDayIndex] ?? days[0]
 
@@ -480,15 +499,15 @@ export function ForecastDrawer({
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           10-Day Forecast
         </h3>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start">
-          <div className="flex gap-1.5 overflow-x-auto pb-1 md:w-[200px] md:flex-none md:flex-col md:overflow-visible md:pb-0">
+        <div className="flex flex-col gap-3">
+          <div ref={dayTabsRowRef} className="sticky top-0 z-10 flex gap-1.5 overflow-x-auto bg-card pb-2 pt-0.5">
             {days.map((day, idx) => (
               <button
                 key={idx}
                 type="button"
-                className={`min-w-[150px] shrink-0 rounded-lg border px-2.5 py-2 text-left transition-colors md:min-w-0 ${idx === selectedDayIndex ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background/40 hover:bg-muted/30'}`}
+                className={`min-w-[150px] shrink-0 rounded-lg border px-2.5 py-2 text-left transition-colors ${idx === selectedDayIndex ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background/40 hover:bg-muted/30'}`}
                 aria-label={`Select forecast day ${day.dayName} ${day.date}`}
-                onClick={() => setSelectedDayIndex(idx)}
+                onClick={() => selectDay(idx)}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div>
@@ -523,7 +542,7 @@ export function ForecastDrawer({
             ))}
           </div>
 
-          <div className="flex-1 rounded-lg border bg-background/60 p-3">
+          <div ref={detailsCardRef} className="rounded-lg border bg-background/60 p-3">
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <div className="flex items-end gap-1">
                 {getWeatherIcon(selectedDay.condition, 22)}

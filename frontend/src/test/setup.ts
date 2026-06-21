@@ -9,3 +9,10 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     disconnect() {}
   } as unknown as typeof ResizeObserver
 }
+
+// jsdom doesn't implement Element.scrollIntoView; stub it so components that
+// use it (e.g. to scroll a panel back into view on selection change) can
+// mount in tests.
+if (typeof Element.prototype.scrollIntoView === 'undefined') {
+  Element.prototype.scrollIntoView = () => {}
+}
