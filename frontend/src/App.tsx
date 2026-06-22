@@ -332,6 +332,7 @@ export function App() {
     longitude,
     gnssQualityIndicator,
     gnssHdop,
+    gnssSatellites,
     gnssValidationState,
     gnssValidationReason,
     gnssCriticalAlert,
@@ -414,6 +415,7 @@ export function App() {
   const depthUnitLabel = isImperialDistance ? 'feet' : 'm'
   const awaLabel = windAngleApparentDeg !== null ? `${Math.round(windAngleApparentDeg).toString().padStart(3, '0')}°` : '---°'
   const headingLabel = formatHeading(headingTrue)
+  const satellitesValueClass = gnssValidationState !== 'trusted' ? 'text-amber-600' : 'text-secondary'
   const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
   const setDegreesLabel = currentSetDeg !== null ? `${Math.round(((currentSetDeg % 360) + 360) % 360)}°` : '—'
   const setArrowRotation = currentSetDeg !== null ? ((currentSetDeg % 360) + 360) % 360 : 0
@@ -564,7 +566,12 @@ export function App() {
                   <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>
                   <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
                 </div>
-                <p className="shrink-0 font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
+                <div className="shrink-0 text-right">
+                  <p className="font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
+                  <p className="mt-1 font-mono text-sm text-muted-foreground">
+                    SATS <span className={satellitesValueClass}>{gnssSatellites !== null ? gnssSatellites : '—'}</span>
+                  </p>
+                </div>
               </div>
               <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
                 {placeName ?? '—'}

@@ -54,6 +54,71 @@ func TestParseGNSSPositionValidationFromSignalKDGNSSFixLabel(t *testing.T) {
 	}
 }
 
+func TestGnssSatelliteCount_FromPlainSignalKNumber(t *testing.T) {
+	payload := map[string]any{
+		"navigation": map[string]any{
+			"gnss": map[string]any{
+				"satellites": map[string]any{
+					"value": 9.0,
+				},
+			},
+		},
+	}
+
+	if count := gnssSatelliteCount(payload); count != 9 {
+		t.Fatalf("expected 9 satellites, got %d", count)
+	}
+}
+
+func TestGnssSatelliteCount_FromPerSatelliteArray(t *testing.T) {
+	payload := map[string]any{
+		"navigation": map[string]any{
+			"gnss": map[string]any{
+				"satellites": map[string]any{
+					"value": []any{
+						map[string]any{"SNR": 38.0},
+						map[string]any{"snr": 41.5},
+						map[string]any{"snr": 36.0},
+					},
+				},
+			},
+		},
+	}
+
+	if count := gnssSatelliteCount(payload); count != 3 {
+		t.Fatalf("expected 3 satellites, got %d", count)
+	}
+}
+
+func TestGnssSatelliteCount_MinusOneWhenUnavailable(t *testing.T) {
+	if count := gnssSatelliteCount(map[string]any{}); count != -1 {
+		t.Fatalf("expected -1 for missing satellite data, got %d", count)
+	}
+}
+
+func TestParseGNSSPositionValidationIncludesSatelliteCount(t *testing.T) {
+	payload := map[string]any{
+		"navigation": map[string]any{
+			"gnss": map[string]any{
+				"methodQuality": map[string]any{
+					"value": "GNSS Fix",
+				},
+				"horizontalDilution": map[string]any{
+					"value": 1.7,
+				},
+				"satellites": map[string]any{
+					"value": 11.0,
+				},
+			},
+		},
+	}
+
+	validation := parseGNSSPositionValidation(payload)
+	if validation.Satellites != 11 {
+		t.Fatalf("expected 11 satellites, got %d", validation.Satellites)
+	}
+}
+
 func TestParseGNSSPositionValidationSpoofingUniformSNR(t *testing.T) {
 	payload := map[string]any{
 		"navigation": map[string]any{

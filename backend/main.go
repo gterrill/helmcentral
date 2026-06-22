@@ -38,6 +38,7 @@ type vesselStateData struct {
 	Longitude                   float64
 	GNSSQualityIndicator        int
 	GNSSHDOP                    float64
+	GNSSSatellites              int
 	GNSSValidationState         string
 	GNSSValidationReason        string
 	GNSSCriticalAlert           bool
@@ -324,6 +325,7 @@ func vesselState(c echo.Context) error {
 		"longitude":                      state.Longitude,
 		"gnss_quality_indicator":         state.GNSSQualityIndicator,
 		"gnss_hdop":                      state.GNSSHDOP,
+		"gnss_satellites":                state.GNSSSatellites,
 		"gnss_validation_state":          state.GNSSValidationState,
 		"gnss_validation_reason":         state.GNSSValidationReason,
 		"gnss_critical_alert":            state.GNSSCriticalAlert,

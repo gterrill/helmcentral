@@ -17,7 +17,8 @@ func trustedSignalKPayloadServer(t *testing.T, latitude, longitude float64) *htt
 			"position": {"value": {"latitude": %f, "longitude": %f}},
 			"gnss": {
 				"methodQuality": {"value": 1},
-				"horizontalDilution": {"value": 0.9}
+				"horizontalDilution": {"value": 0.9},
+				"satellites": {"value": 8}
 			}
 		}
 	}`, time.Now().UTC().Format(time.RFC3339), latitude, longitude))
@@ -45,6 +46,9 @@ func TestFetchSignalKVesselState_MarksCriticalOnConnectionRefused(t *testing.T) 
 	}
 	if state.GNSSValidationReason == "" {
 		t.Fatalf("expected a validation reason explaining the failure")
+	}
+	if state.GNSSSatellites != -1 {
+		t.Fatalf("expected -1 satellites when signalk is unreachable, got %d", state.GNSSSatellites)
 	}
 	if state.Latitude != -1 || state.Longitude != -1 {
 		t.Fatalf("expected -1,-1 with no prior trusted fix, got %.4f %.4f", state.Latitude, state.Longitude)
@@ -84,6 +88,9 @@ func TestFetchSignalKVesselState_FreezesLastTrustedPositionWhenConnectionLost(t 
 	}
 	if state.Latitude != -25.2939 || state.Longitude != 152.9103 {
 		t.Fatalf("expected trusted fix to pass through, got %.4f %.4f", state.Latitude, state.Longitude)
+	}
+	if state.GNSSSatellites != 8 {
+		t.Fatalf("expected 8 satellites from trusted payload, got %d", state.GNSSSatellites)
 	}
 
 	goodURL := goodSrv.URL

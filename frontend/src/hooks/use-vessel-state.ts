@@ -10,6 +10,7 @@ interface VesselState {
   longitude: number
   gnss_quality_indicator: number
   gnss_hdop: number
+  gnss_satellites: number
   gnss_validation_state: string
   gnss_validation_reason: string
   gnss_critical_alert: boolean
@@ -40,6 +41,7 @@ export function useVesselState(refreshInterval: number) {
   const [longitude, setLongitude] = useState<number | null>(null)
   const [gnssQualityIndicator, setGnssQualityIndicator] = useState<number | null>(null)
   const [gnssHdop, setGnssHdop] = useState<number | null>(null)
+  const [gnssSatellites, setGnssSatellites] = useState<number | null>(null)
   const [gnssValidationState, setGnssValidationState] = useState<string | null>(null)
   const [gnssValidationReason, setGnssValidationReason] = useState<string | null>(null)
   const [gnssCriticalAlert, setGnssCriticalAlert] = useState<boolean>(false)
@@ -85,6 +87,7 @@ export function useVesselState(refreshInterval: number) {
         setLongitude(typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null)
         setGnssQualityIndicator(typeof data.gnss_quality_indicator === 'number' && data.gnss_quality_indicator >= 0 ? data.gnss_quality_indicator : null)
         setGnssHdop(typeof data.gnss_hdop === 'number' && data.gnss_hdop >= 0 ? data.gnss_hdop : null)
+        setGnssSatellites(typeof data.gnss_satellites === 'number' && data.gnss_satellites >= 0 ? data.gnss_satellites : null)
         setGnssValidationState(typeof data.gnss_validation_state === 'string' && data.gnss_validation_state !== '' ? data.gnss_validation_state : null)
         setGnssValidationReason(typeof data.gnss_validation_reason === 'string' && data.gnss_validation_reason !== '' ? data.gnss_validation_reason : null)
         setGnssCriticalAlert(data.gnss_critical_alert === true)
@@ -128,6 +131,7 @@ export function useVesselState(refreshInterval: number) {
     longitude,
     gnssQualityIndicator,
     gnssHdop,
+    gnssSatellites,
     gnssValidationState,
     gnssValidationReason,
     gnssCriticalAlert,

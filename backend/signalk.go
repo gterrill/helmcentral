@@ -357,6 +357,7 @@ func criticalVesselState(state vesselStateData, reason string) vesselStateData {
 	state.Latitude, state.Longitude = resolveGNSSPosition(-1, -1, validation)
 	state.GNSSQualityIndicator = validation.QualityIndicator
 	state.GNSSHDOP = validation.HDOP
+	state.GNSSSatellites = validation.Satellites
 	state.GNSSValidationState = validation.Status
 	state.GNSSValidationReason = validation.Reason
 	state.GNSSCriticalAlert = validation.Critical
@@ -437,6 +438,7 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 	}, time.Now().UTC())
 	state.GNSSQualityIndicator = validation.QualityIndicator
 	state.GNSSHDOP = validation.HDOP
+	state.GNSSSatellites = validation.Satellites
 	state.GNSSValidationState = validation.Status
 	state.GNSSValidationReason = validation.Reason
 	state.GNSSCriticalAlert = validation.Critical

@@ -28,6 +28,7 @@ const (
 type gnssPositionValidation struct {
 	QualityIndicator int
 	HDOP             float64
+	Satellites       int
 	Status           string
 	Reason           string
 	Trusted          bool
@@ -66,6 +67,7 @@ func parseGNSSPositionValidation(payload map[string]any) gnssPositionValidation 
 	return gnssPositionValidation{
 		QualityIndicator: qualityIndicator,
 		HDOP:             hdop,
+		Satellites:       gnssSatelliteCount(payload),
 		Status:           status,
 		Reason:           reason,
 		Trusted:          status == "trusted",
@@ -88,6 +90,7 @@ func criticalGNSSValidation(reason string, now time.Time) gnssPositionValidation
 	return gnssPositionValidation{
 		QualityIndicator: -1,
 		HDOP:             -1,
+		Satellites:       -1,
 		Status:           "critical",
 		Reason:           reason,
 		Trusted:          false,
@@ -297,6 +300,22 @@ func parseGNSSSatellitesSNR(payload map[string]any) []float64 {
 	}
 
 	return snrs
+}
+
+// gnssSatelliteCount reports how many satellites are contributing to the
+// current GNSS fix. Most SignalK servers publish navigation.gnss.satellites
+// as a plain count; this boat's server instead publishes a per-satellite
+// SNR map/array at that path, so fall back to counting those entries when
+// the plain-number form isn't present. Returns -1 when neither form is
+// available, distinguishing "unknown" from a genuine zero.
+func gnssSatelliteCount(payload map[string]any) int {
+	if count := lookupNumber(payload, "navigation", "gnss", "satellites", "value"); count >= 0 {
+		return int(count)
+	}
+	if snrs := parseGNSSSatellitesSNR(payload); snrs != nil {
+		return len(snrs)
+	}
+	return -1
 }
 
 func parseGNSSQualityIndicator(payload map[string]any) int {
