@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { RoutePlannerMap } from '@/components/route-planner-map'
 
 vi.mock('maplibre-gl', () => ({
@@ -68,6 +68,18 @@ describe('RoutePlannerMap', () => {
     easeToMock.mockClear()
     localStorage.clear()
     mockZoom = 12
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ type: 'FeatureCollection', features: [] }),
+      }),
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('centers the initial view on the vessel position when there are no waypoints', () => {
@@ -250,5 +262,66 @@ describe('RoutePlannerMap', () => {
 
     fireEvent.click(toggle)
     expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()
+  })
+
+  it('shows the GSHHG coastline fallback when no chart is available', async () => {
+    render(
+      <RoutePlannerMap
+        waypoints={[]}
+        onWaypointsChange={() => undefined}
+        isDarkTheme={false}
+        chartAvailable={false}
+      />,
+    )
+
+    expect(await screen.findByTestId('source-gshhg-coastline')).toBeInTheDocument()
+    expect(screen.getByText('No chart data — reference coastline only')).toBeInTheDocument()
+  })
+
+  it('does not show the GSHHG coastline fallback when a chart is available', async () => {
+    render(
+      <RoutePlannerMap
+        waypoints={[]}
+        onWaypointsChange={() => undefined}
+        isDarkTheme={false}
+        chartAvailable={true}
+      />,
+    )
+
+    await waitFor(() => expect(screen.queryByTestId('layer-gshhg-coastline-fill')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('source-gshhg-coastline')).not.toBeInTheDocument()
+    expect(screen.queryByText('No chart data — reference coastline only')).not.toBeInTheDocument()
+  })
+
+  it('logs an explicit fallback-used message once the coastline layer renders', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+
+    render(
+      <RoutePlannerMap
+        waypoints={[]}
+        onWaypointsChange={() => undefined}
+        isDarkTheme={false}
+        chartAvailable={false}
+      />,
+    )
+
+    await screen.findByTestId('source-gshhg-coastline')
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('[gshhg-coastline-fallback]'))
+  })
+
+  it('does not log a fallback message when a chart is available', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+
+    render(
+      <RoutePlannerMap
+        waypoints={[]}
+        onWaypointsChange={() => undefined}
+        isDarkTheme={false}
+        chartAvailable={true}
+      />,
+    )
+
+    await waitFor(() => expect(screen.queryByTestId('source-gshhg-coastline')).not.toBeInTheDocument())
+    expect(infoSpy).not.toHaveBeenCalled()
   })
 })

@@ -148,6 +148,7 @@ func main() {
 	e.POST("/api/generator/start", postGeneratorStartHandler)
 	e.POST("/api/generator/stop", postGeneratorStopHandler)
 	e.GET("/api/world-imagery/:z/:x/:y", proxyWorldImageryTileHandler)
+	e.GET("/api/gshhg-coastline", gshhgCoastlineHandler)
 
 	registerStaticHandler(e)
 

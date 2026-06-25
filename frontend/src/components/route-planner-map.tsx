@@ -9,6 +9,8 @@ import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import { formatNm } from '@/lib/route-calc'
 import { computeWorldImageryOpacity } from '@/components/anchor-watch-map'
 import type { RouteWaypoint } from '@/hooks/use-routes'
+import { useGshhgCoastline } from '@/hooks/use-gshhg-coastline'
+import { isChartAvailable } from '@/lib/chart-availability'
 
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
@@ -46,6 +48,13 @@ export interface RoutePlannerMapProps {
   vesselLat?: number | null
   vesselLon?: number | null
   className?: string
+  /**
+   * Whether a navigation-grade chart is available for the current view.
+   * STUB: real S-57 coverage detection doesn't exist yet — defaults to the
+   * placeholder in lib/chart-availability.ts, which always reports false.
+   * See docs/adr/0009-gshhg-coastline-fallback.md.
+   */
+  chartAvailable?: boolean
 }
 
 export function RoutePlannerMap({
@@ -55,6 +64,7 @@ export function RoutePlannerMap({
   vesselLat = null,
   vesselLon = null,
   className,
+  chartAvailable = isChartAvailable(),
 }: RoutePlannerMapProps) {
   const mapRef = useRef<MapRef | null>(null)
   const suppressNextMapClickRef = useRef(false)
@@ -63,6 +73,14 @@ export function RoutePlannerMap({
   const [showImageryLayer, setShowImageryLayer] = useState(readStoredImageryEnabled)
   const [currentZoom, setCurrentZoom] = useState(waypoints.length > 0 ? 12 : vesselLat !== null && vesselLon !== null ? 11 : 2)
   const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
+  const { data: coastlineData } = useGshhgCoastline()
+  const showCoastlineFallback = !chartAvailable && coastlineData !== null
+
+  useEffect(() => {
+    if (showCoastlineFallback) {
+      console.info('[gshhg-coastline-fallback] No chart available for current view — rendering GSHHG reference coastline fallback')
+    }
+  }, [showCoastlineFallback])
 
   const handleZoomChange = useCallback(() => {
     const z = mapRef.current?.getZoom()
@@ -241,6 +259,28 @@ export function RoutePlannerMap({
           </Source>
         )}
 
+        {showCoastlineFallback && (
+          <Source id="gshhg-coastline" type="geojson" data={coastlineData}>
+            <Layer
+              id="gshhg-coastline-fill"
+              type="fill"
+              paint={{
+                'fill-color': isDarkTheme ? '#7c6f57' : '#d9c8a3',
+                'fill-opacity': 0.35,
+              }}
+            />
+            <Layer
+              id="gshhg-coastline-outline"
+              type="line"
+              paint={{
+                'line-color': isDarkTheme ? '#a89968' : '#9c8a5c',
+                'line-width': 1,
+                'line-dasharray': [2, 2],
+              }}
+            />
+          </Source>
+        )}
+
         {legs.map((leg) => (
           <Marker key={leg.key} latitude={leg.midLat} longitude={leg.midLon}>
             <div className="pointer-events-none whitespace-nowrap rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
@@ -337,6 +377,14 @@ export function RoutePlannerMap({
         <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
           <div className="rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur">
             Click the map to add your first waypoint
+          </div>
+        </div>
+      )}
+
+      {showCoastlineFallback && (
+        <div className="pointer-events-none absolute bottom-4 left-3" style={{ zIndex: 2000 }}>
+          <div className="rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur">
+            No chart data — reference coastline only
           </div>
         </div>
       )}
