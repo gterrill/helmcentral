@@ -554,23 +554,6 @@ export function App() {
             </section>
 
             <Tile title="Position">
-              {gnssCriticalAlert && (
-                <div className="mb-3 rounded-md border border-red-500/50 bg-red-100/70 px-3 py-2 text-xs text-red-900 dark:bg-red-900/30 dark:text-red-100">
-                  <div className="font-semibold tracking-[0.01em]">CRITICAL: GPS Signal Corrupt/Jammed</div>
-                  <div className="mt-1 text-[11px] text-red-800/90 dark:text-red-100/90">
-                    Quality {gnssQualityIndicator !== null ? gnssQualityIndicator : '—'}
-                    {' · '}
-                    HDOP {gnssHdop !== null ? gnssHdop.toFixed(1) : '—'}
-                    {gnssValidationState ? ` · ${gnssValidationState}` : ''}
-                  </div>
-                  {gnssValidationReason && (
-                    <div className="mt-1 text-[11px] text-red-700/90 dark:text-red-100/85">{gnssValidationReason}</div>
-                  )}
-                  <div className="mt-1 text-[11px] text-red-700/90 dark:text-red-100/85">
-                    Waiting for stable GPS before clearing alarm.
-                  </div>
-                </div>
-              )}
               <div className="mt-2 flex items-start justify-between gap-4">
                 <div>
                   <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>
