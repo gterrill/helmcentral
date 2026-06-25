@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
+
 import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
 
 const AXIS_LABEL_FONT_SIZE = '10'
@@ -10,6 +13,81 @@ const CHART_TOP = 16
 const CHART_BOTTOM = 125
 const WINDOW_HOURS = 96
 const CURVE_STEPS = 12
+
+
+// Shows a tooltip for the nearest hourly entry on mouse hover (desktop/
+// tablet) or touch (mobile) - both go through the same pointer events, since
+// `pointermove` only fires for a mouse on hover (no button needed) and only
+// fires for touch while a finger is actually down and moving. Positioned at
+// the pointer's own X so it never requires looking elsewhere.
+//
+// Clearing is pointer-type-aware: a mouse hides the tooltip as soon as it
+// leaves the chart (normal hover behavior), but touch does NOT hide on
+// pointerup/pointerleave - those fire the instant a finger lifts, which
+// would otherwise make a quick tap flash the tooltip for a single frame
+// instead of actually showing it. A touch tooltip stays until the next tap
+// (anywhere) replaces or clears it.
+function useChartTooltip(count: number, resetKey: string, chartLeft: number, chartRight: number) {
+  const [point, setPoint] = useState<{ index: number; pixelX: number } | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  // Switching days/stations swaps in a different hourly array (different length,
+  // different times) - drop any tooltip from the previous chart.
+  useEffect(() => {
+    setPoint(null)
+  }, [resetKey])
+
+  const updateFromClientX = (clientX: number) => {
+    const svg = svgRef.current
+    if (!svg || count <= 0) return
+    const rect = svg.getBoundingClientRect()
+    if (rect.width <= 0) return
+    const pixelX = Math.max(0, Math.min(rect.width, clientX - rect.left))
+    const viewBoxWidth = svg.viewBox.baseVal.width || chartRight
+    const xInViewBox = (pixelX / rect.width) * viewBoxWidth
+    const fraction = count <= 1 ? 0 : (xInViewBox - chartLeft) / (chartRight - chartLeft)
+    const idx = Math.max(0, Math.min(count - 1, Math.round(fraction * (count - 1))))
+    setPoint({ index: idx, pixelX })
+  }
+
+  // Only a mouse leaving the chart should hide the tooltip - for touch,
+  // "leave" fires the moment a finger lifts, which isn't a meaningful signal
+  // that the user is done looking at the value.
+  const clearForMouse = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === 'mouse') setPoint(null)
+  }
+
+  return {
+    svgRef,
+    activeIndex: point === null ? null : Math.min(point.index, Math.max(0, count - 1)),
+    tooltipPixelX: point?.pixelX ?? null,
+    onPointerDown: (event: ReactPointerEvent<SVGSVGElement>) => updateFromClientX(event.clientX),
+    onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => updateFromClientX(event.clientX),
+    onPointerLeave: clearForMouse,
+  }
+}
+
+// A small marker dot on the chart's primary series at the hovered/touched index.
+function TideChartTooltipMarker({ x, y, color }: { x: number; y: number; color: string }) {
+  return <circle pointerEvents="none" cx={x} cy={y} r="5" fill={color} stroke="white" strokeWidth="2" />
+}
+
+// The floating time / prominent-value / secondary-value bubble, positioned
+// at the pointer's X (clamped so it can't run off either edge of the chart)
+// right above the chart - never behind a touch point, never elsewhere on
+// the page.
+function TideChartTooltipBubble({ pixelX, time, primary, secondary }: { pixelX: number; time: string; primary: string; secondary: string }) {
+  return (
+    <div
+      className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-border/60 bg-card px-2.5 py-1.5 shadow-md"
+      style={{ left: `clamp(58px, ${pixelX}px, calc(100% - 58px))` }}
+    >
+      <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{time}</p>
+      <p className="font-display text-base leading-tight text-foreground">{primary}</p>
+      <p className="text-[10px] text-muted-foreground">{secondary}</p>
+    </div>
+  )
+}
 
 interface TideChartProps {
   chart: TideChartData
@@ -82,6 +160,29 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
   const nowX = xFor(now)
   const nowY = yFor(currentDisplayHeight)
 
+  const tideTooltip = useChartTooltip(
+    curvePoints.length,
+    chart.station.stationId,
+    CHART_LEFT,
+    CHART_RIGHT,
+  )
+
+  const tideTooltipEntry =
+    tideTooltip.activeIndex === null ? null : curvePoints[tideTooltip.activeIndex] ?? null
+  let tideTooltipTime: Date | null = null
+  let tideTooltipHeight = 0
+
+  if (tideTooltipEntry) {
+    // Reverse xFor to get timeMs from pixel x
+    const timeFraction =
+      (tideTooltipEntry.x - CHART_LEFT) / (CHART_RIGHT - CHART_LEFT)
+    tideTooltipTime = new Date(
+      chartStartMs + timeFraction * (chartEndMs - chartStartMs),
+    )
+    tideTooltipHeight =
+      yMin + (1 - (tideTooltipEntry.y - CHART_TOP) / (CHART_BOTTOM - CHART_TOP)) * yRange
+  }
+
   // Day-boundary gridlines so the 4-day window has some date context.
   const dayTicks: { x: number; label: string }[] = []
   const firstMidnight = new Date(chartStartMs)
@@ -91,8 +192,29 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
   }
 
   return (
-    <div>
-      <svg viewBox="0 0 1000 175" className="h-[175px] w-full rounded bg-muted/15">
+    <div className="relative">
+      {tideTooltipEntry && tideTooltipTime && (
+        <TideChartTooltipBubble
+          pixelX={tideTooltip.tooltipPixelX ?? 0}
+          time={tideTooltipTime.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+          })}
+          primary={`${tideTooltipHeight.toFixed(1)} ${unit}`}
+          secondary={tideTooltipTime.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+          })}
+        />
+      )}
+      <svg
+        viewBox="0 0 1000 175"
+        className="h-[175px] w-full rounded bg-muted/15 touch-none"
+        ref={tideTooltip.svgRef}
+        onPointerDown={tideTooltip.onPointerDown}
+        onPointerMove={tideTooltip.onPointerMove}
+        onPointerLeave={tideTooltip.onPointerLeave}
+      >
         <text x={6} y={CHART_TOP + 4} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMax.toFixed(1)} {unit}</text>
         <text x={6} y={CHART_BOTTOM} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMin.toFixed(1)} {unit}</text>
 
@@ -132,6 +254,14 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         <line x1={nowX} y1={CHART_TOP} x2={nowX} y2={CHART_BOTTOM} stroke="rgba(199,137,0,0.7)" strokeWidth="1.5" strokeDasharray="4 3" />
         <circle cx={nowX} cy={nowY} r="3.5" fill="rgba(199,137,0,0.95)" />
         <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="rgba(199,137,0,0.95)">Now</text>
+
+        {tideTooltipEntry && (
+          <TideChartTooltipMarker
+            x={tideTooltipEntry.x}
+            y={tideTooltipEntry.y}
+            color="rgba(20,184,166,0.9)"
+          />
+        )}
       </svg>
 
       <p className="mt-1 text-[10px] text-muted-foreground">
