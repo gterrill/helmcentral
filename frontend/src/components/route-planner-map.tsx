@@ -11,6 +11,7 @@ import { computeWorldImageryOpacity } from '@/components/anchor-watch-map'
 import type { RouteWaypoint } from '@/hooks/use-routes'
 import { useGshhgCoastline } from '@/hooks/use-gshhg-coastline'
 import { isChartAvailable } from '@/lib/chart-availability'
+import type { SatChart } from '@/hooks/use-sat-charts'
 
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
@@ -55,6 +56,8 @@ export interface RoutePlannerMapProps {
    * See docs/adr/0009-gshhg-coastline-fallback.md.
    */
   chartAvailable?: boolean
+  /** User-uploaded MBTiles satellite charts to render, if any. */
+  satCharts?: SatChart[]
 }
 
 export function RoutePlannerMap({
@@ -65,6 +68,7 @@ export function RoutePlannerMap({
   vesselLon = null,
   className,
   chartAvailable = isChartAvailable(),
+  satCharts = [],
 }: RoutePlannerMapProps) {
   const mapRef = useRef<MapRef | null>(null)
   const suppressNextMapClickRef = useRef(false)
@@ -243,6 +247,26 @@ export function RoutePlannerMap({
         <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
           <Layer id="openseamap-layer" type="raster" paint={{ 'raster-opacity': 0.85 }} />
         </Source>
+
+        {satCharts.map((chart) => (
+          <Source
+            key={chart.id}
+            id={`sat-chart-${chart.id}`}
+            type="raster"
+            tiles={[`/api/sat-charts/${chart.id}/{z}/{x}/{y}`]}
+            tileSize={256}
+            bounds={chart.bounds}
+            minzoom={chart.minzoom}
+            maxzoom={chart.maxzoom}
+            attribution="User-supplied satellite chart"
+          >
+            <Layer
+              id={`sat-chart-${chart.id}-layer`}
+              type="raster"
+              paint={{ 'raster-opacity': 1, 'raster-fade-duration': 250 }}
+            />
+          </Source>
+        ))}
 
         {waypoints.length >= 2 && (
           <Source id="route-line" type="geojson" data={routeGeoJSON}>

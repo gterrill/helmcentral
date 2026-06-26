@@ -5,6 +5,7 @@ import { RoutePlannerMap } from '@/components/route-planner-map'
 import { RouteSummaryPanel } from '@/components/route-summary-panel'
 import type { Route, RouteWaypoint } from '@/hooks/use-routes'
 import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
+import type { SatChart } from '@/hooks/use-sat-charts'
 import { calculateLegs, calculateRouteTotals, formatNm, formatEtaHours } from '@/lib/route-calc'
 
 interface RoutePlannerDrawerProps {
@@ -26,6 +27,7 @@ interface RoutePlannerDrawerProps {
   activateError: string | null
   onActivate: (id: string) => Promise<boolean>
   onDeactivate: () => Promise<boolean>
+  satCharts?: SatChart[]
 }
 
 const DEFAULT_PLANNING_SPEED_KTS = 6
@@ -49,6 +51,7 @@ export function RoutePlannerDrawer({
   activateError,
   onActivate,
   onDeactivate,
+  satCharts = [],
 }: RoutePlannerDrawerProps) {
   const [editingId, setEditingId] = useState<string | 'new' | null>(null)
   const [draftName, setDraftName] = useState('')
@@ -161,6 +164,7 @@ export function RoutePlannerDrawer({
             vesselLat={vesselLat}
             vesselLon={vesselLon}
             className="min-h-[320px]"
+            satCharts={satCharts}
           />
           <RouteSummaryPanel
             waypoints={draftWaypoints}

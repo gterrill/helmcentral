@@ -17,3 +17,4 @@ services:
       # INFLUXDB_BUCKET: "SignalK_Data"
     volumes:
       - ./settings.yaml:/app/settings.yaml:ro
+      - ./backend-data:/app/data

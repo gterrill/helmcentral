@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { RoutePlannerMap } from '@/components/route-planner-map'
+import type { SatChart } from '@/hooks/use-sat-charts'
 
 vi.mock('maplibre-gl', () => ({
   default: {},
@@ -51,8 +52,24 @@ vi.mock('react-map-gl/maplibre', async () => {
     }) => (
       <div onClick={onClick as React.MouseEventHandler}>{children}</div>
     ),
-    Source: ({ children, id }: { children?: React.ReactNode; id: string }) => (
-      <div data-testid={`source-${id}`}>{children}</div>
+    Source: ({
+      children,
+      id,
+      tiles,
+      bounds,
+    }: {
+      children?: React.ReactNode
+      id: string
+      tiles?: string[]
+      bounds?: number[]
+    }) => (
+      <div
+        data-testid={`source-${id}`}
+        data-tiles={tiles ? tiles.join(',') : undefined}
+        data-bounds={bounds ? bounds.join(',') : undefined}
+      >
+        {children}
+      </div>
     ),
     Layer: ({ id }: { id: string }) => <div data-testid={`layer-${id}`} />,
   }
@@ -323,5 +340,53 @@ describe('RoutePlannerMap', () => {
 
     await waitFor(() => expect(screen.queryByTestId('source-gshhg-coastline')).not.toBeInTheDocument())
     expect(infoSpy).not.toHaveBeenCalled()
+  })
+
+  it('renders no sat-chart sources when satCharts is empty', () => {
+    render(
+      <RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} satCharts={[]} />,
+    )
+    expect(screen.queryByTestId('source-sat-chart-abc')).not.toBeInTheDocument()
+  })
+
+  it('renders a bounds-scoped raster source per uploaded chart', () => {
+    const satCharts: SatChart[] = [
+      { id: 'abc', name: 'Reef A', bounds: [150, -25, 151, -24], minzoom: 10, maxzoom: 18, format: 'png', size_bytes: 1000 },
+      { id: 'def', name: 'Reef B', bounds: [152, -26, 153, -25], minzoom: 10, maxzoom: 18, format: 'png', size_bytes: 2000 },
+    ]
+    render(
+      <RoutePlannerMap
+        waypoints={[]}
+        onWaypointsChange={() => undefined}
+        isDarkTheme={false}
+        satCharts={satCharts}
+      />,
+    )
+
+    const sourceA = screen.getByTestId('source-sat-chart-abc')
+    expect(sourceA).toBeInTheDocument()
+    expect(sourceA.getAttribute('data-tiles')).toBe('/api/sat-charts/abc/{z}/{x}/{y}')
+    expect(sourceA.getAttribute('data-bounds')).toBe('150,-25,151,-24')
+
+    expect(screen.getByTestId('source-sat-chart-def')).toBeInTheDocument()
+    expect(screen.getByTestId('layer-sat-chart-abc-layer')).toBeInTheDocument()
+    expect(screen.getByTestId('layer-sat-chart-def-layer')).toBeInTheDocument()
+  })
+
+  it('renders uploaded sat charts even when chartAvailable is true', () => {
+    const satCharts: SatChart[] = [
+      { id: 'abc', name: 'Reef A', bounds: [150, -25, 151, -24], minzoom: 10, maxzoom: 18, format: 'png', size_bytes: 1000 },
+    ]
+    render(
+      <RoutePlannerMap
+        waypoints={[]}
+        onWaypointsChange={() => undefined}
+        isDarkTheme={false}
+        chartAvailable={true}
+        satCharts={satCharts}
+      />,
+    )
+
+    expect(screen.getByTestId('source-sat-chart-abc')).toBeInTheDocument()
   })
 })

@@ -17,8 +17,10 @@ import { WindCompass } from '@/components/wind-compass'
 import { BottomDrawer } from '@/components/ui/bottom-drawer'
 import { ForecastDrawer } from '@/components/forecast-drawer'
 import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
+import { SatChartsDrawer } from '@/components/sat-charts-drawer'
 import { RouteTile } from '@/components/route-tile'
 import { useRoutes } from '@/hooks/use-routes'
+import { useSatCharts } from '@/hooks/use-sat-charts'
 import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
 import { useRouteActivation } from '@/hooks/use-route-activation'
 import { TideDrawer } from '@/components/tide-drawer'
@@ -299,6 +301,13 @@ export function App() {
   const [theme, setTheme] = useTheme()
   const [isDarkTheme, toggleDarkMode] = useDarkMode()
   const { routes, loading: routesLoading, error: routesError, createRoute, updateRoute, deleteRoute } = useRoutes()
+  const {
+    charts: satCharts,
+    loading: satChartsLoading,
+    error: satChartsError,
+    uploadChart,
+    deleteChart: deleteSatChart,
+  } = useSatCharts()
   const [dashboardRouteId, setDashboardRouteId] = useDashboardRouteId()
   const {
     status: routeActivationStatus,
@@ -850,6 +859,7 @@ export function App() {
             { id: 'forecast', label: 'Forecast' },
             { id: 'tides', label: 'Tides' },
             { id: 'routes', label: 'Routes' },
+            { id: 'charts', label: 'Charts' },
             { id: 'radar', label: 'Radar' },
             {
               id: 'anchor-watch',
@@ -903,6 +913,18 @@ export function App() {
                 activateError={routeActivateError}
                 onActivate={activateRoute}
                 onDeactivate={deactivateRoute}
+                satCharts={satCharts}
+              />
+            </div>
+          )}
+          {activeDrawerTab === 'charts' && (
+            <div className="px-6 py-4">
+              <SatChartsDrawer
+                charts={satCharts}
+                loading={satChartsLoading}
+                error={satChartsError}
+                uploadChart={uploadChart}
+                deleteChart={deleteSatChart}
               />
             </div>
           )}

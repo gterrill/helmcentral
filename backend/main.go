@@ -149,6 +149,10 @@ func main() {
 	e.POST("/api/generator/stop", postGeneratorStopHandler)
 	e.GET("/api/world-imagery/:z/:x/:y", proxyWorldImageryTileHandler)
 	e.GET("/api/gshhg-coastline", gshhgCoastlineHandler)
+	e.POST("/api/sat-charts", uploadSatChartHandler)
+	e.GET("/api/sat-charts", listSatChartsHandler)
+	e.DELETE("/api/sat-charts/:id", deleteSatChartHandler)
+	e.GET("/api/sat-charts/:id/:z/:x/:y", satChartTileHandler)
 
 	registerStaticHandler(e)
 
