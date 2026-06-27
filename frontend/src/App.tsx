@@ -156,8 +156,8 @@ type WindCanvasConfig = {
   gap: number
 }
 
-const WIND_MOBILE_CFG: WindCanvasConfig = { width: 420, height: 321, compassBox: 260, topCardW: 173, bottomCardW: 198, cardH: 72, gap: 18 }
-const WIND_DESKTOP_CFG: WindCanvasConfig = { width: 390, height: 200, compassBox: 175, topCardW: 150, bottomCardW: 180, cardH: 64, gap: 18 }
+const WIND_MOBILE_CFG: WindCanvasConfig = { width: 475, height: 363, compassBox: 295, topCardW: 195, bottomCardW: 224, cardH: 80, gap: 20 }
+const WIND_DESKTOP_CFG: WindCanvasConfig = { width: 440, height: 225, compassBox: 198, topCardW: 170, bottomCardW: 203, cardH: 72, gap: 20 }
 
 // Width of the card's straight-edge border (Tailwind's bare `border` utility), so the
 // drawn ring along the mask's cut edge reads as a continuous border, not just 3 sides.
@@ -529,37 +529,35 @@ export function App() {
                   AWA {awaLabel}
                 </Button>
               </div>
-              <div className="rounded-xl border bg-background/70 p-3 md:p-4">
-                <WindGaugeCluster
-                  cfg={WIND_MOBILE_CFG}
-                  masks={WIND_MOBILE_MASKS}
-                  visibilityClassName="md:hidden"
-                  setValue={setValue}
-                  driftLabel={driftLabel}
-                  gust10mLabel={gust10mLabel}
-                  gust1hLabel={gust1hLabel}
-                  headingTrue={headingTrue}
-                  windAngleApparentDeg={windAngleApparentDeg}
-                  windSide={windSide}
-                  windAngleRelativeDeg={windAngleRelativeDeg}
-                  windSpeedApparentKts={windSpeedApparentKts}
-                />
+              <WindGaugeCluster
+                cfg={WIND_MOBILE_CFG}
+                masks={WIND_MOBILE_MASKS}
+                visibilityClassName="md:hidden"
+                setValue={setValue}
+                driftLabel={driftLabel}
+                gust10mLabel={gust10mLabel}
+                gust1hLabel={gust1hLabel}
+                headingTrue={headingTrue}
+                windAngleApparentDeg={windAngleApparentDeg}
+                windSide={windSide}
+                windAngleRelativeDeg={windAngleRelativeDeg}
+                windSpeedApparentKts={windSpeedApparentKts}
+              />
 
-                <WindGaugeCluster
-                  cfg={WIND_DESKTOP_CFG}
-                  masks={WIND_DESKTOP_MASKS}
-                  visibilityClassName="hidden md:block"
-                  setValue={setValue}
-                  driftLabel={driftLabel}
-                  gust10mLabel={gust10mLabel}
-                  gust1hLabel={gust1hLabel}
-                  headingTrue={headingTrue}
-                  windAngleApparentDeg={windAngleApparentDeg}
-                  windSide={windSide}
-                  windAngleRelativeDeg={windAngleRelativeDeg}
-                  windSpeedApparentKts={windSpeedApparentKts}
-                />
-              </div>
+              <WindGaugeCluster
+                cfg={WIND_DESKTOP_CFG}
+                masks={WIND_DESKTOP_MASKS}
+                visibilityClassName="hidden md:block"
+                setValue={setValue}
+                driftLabel={driftLabel}
+                gust10mLabel={gust10mLabel}
+                gust1hLabel={gust1hLabel}
+                headingTrue={headingTrue}
+                windAngleApparentDeg={windAngleApparentDeg}
+                windSide={windSide}
+                windAngleRelativeDeg={windAngleRelativeDeg}
+                windSpeedApparentKts={windSpeedApparentKts}
+              />
             </section>
 
             <Tile title="Position">
