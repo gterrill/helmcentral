@@ -8,11 +8,37 @@ const AXIS_LABEL_COLOR = 'rgba(71,85,105,0.95)'
 const METERS_TO_FEET = 3.28084
 
 const CHART_LEFT = 36
-const CHART_RIGHT = 980
+const CHART_RIGHT_MARGIN = 20
 const CHART_TOP = 16
 const CHART_BOTTOM = 125
 const WINDOW_HOURS = 96
 const CURVE_STEPS = 12
+// Fallback viewBox width used only before the container's actual pixel width
+// has been measured (ResizeObserver hasn't fired yet, or in tests where it's
+// stubbed as a no-op) - chosen to match the chart's previous fixed size.
+const DEFAULT_VIEWPORT_WIDTH = 1000
+
+// Measures the actual rendered width of a container element, so the SVG's
+// viewBox can be set 1:1 with real pixels instead of a fixed coordinate
+// space. With a fixed-height SVG and the default preserveAspectRatio
+// ("xMidYMid meet"), a fixed viewBox width narrower than the container
+// would otherwise get letterboxed (centered, with empty space on each
+// side) instead of actually filling the available width.
+function useMeasuredWidth() {
+  const ref = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    setWidth(el.getBoundingClientRect().width)
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  return [ref, width] as const
+}
 
 
 // Shows a tooltip for the nearest hourly entry on mouse hover (desktop/
@@ -95,6 +121,10 @@ interface TideChartProps {
 }
 
 export function TideChart({ chart, isImperial }: TideChartProps) {
+  const [containerRef, measuredWidth] = useMeasuredWidth()
+  const viewportWidth = measuredWidth > 0 ? measuredWidth : DEFAULT_VIEWPORT_WIDTH
+  const CHART_RIGHT = viewportWidth - CHART_RIGHT_MARGIN
+
   const unit = isImperial ? 'ft' : 'm'
   const toDisplay = (meters: number) => (isImperial ? meters * METERS_TO_FEET : meters)
 
@@ -192,7 +222,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       {tideTooltipEntry && tideTooltipTime && (
         <TideChartTooltipBubble
           pixelX={tideTooltip.tooltipPixelX ?? 0}
@@ -208,7 +238,8 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         />
       )}
       <svg
-        viewBox="0 0 1000 175"
+        viewBox={`0 0 ${viewportWidth} 175`}
+        preserveAspectRatio="none"
         className="h-[175px] w-full rounded bg-muted/15 touch-none"
         ref={tideTooltip.svgRef}
         onPointerDown={tideTooltip.onPointerDown}
@@ -264,7 +295,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         )}
       </svg>
 
-      <p className="mt-1 text-[10px] text-muted-foreground">
+      <p className="mt-1 text-xs text-muted-foreground">
         <span className="text-secondary">— Tide height ({unit})</span> · <span className="text-amber-600">●</span> low · <span className="text-secondary">●</span> high · <span style={{ color: 'rgba(199,137,0,0.95)' }}>┊</span> now
       </p>
 

@@ -136,7 +136,7 @@ export function TideDrawer({ isImperial }: TideDrawerProps) {
       </div>
 
       {(isCached || updatedAt) && (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Data: {tideProvider === 'bom' ? 'Bureau of Meteorology (Australia)' : 'Storm Glass'}
           {' · '}
           {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
