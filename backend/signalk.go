@@ -598,9 +598,14 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64) {
 		drift = -1
 	}
 
-	setDeg := lookupNumber(current, "set", "value")
+	// setTrue is the official SignalK path (environment.current has no plain
+	// "set" in the spec). setMagnetic is deliberately NOT read as a stand-in
+	// for setTrue: converting it would need a magnetic variation reading
+	// this codebase doesn't have, and displaying an unconverted magnetic
+	// bearing as true would silently misreport direction.
+	setDeg := lookupNumber(current, "setTrue", "value")
 	if setDeg == -1 {
-		setDeg = lookupNumber(current, "set")
+		setDeg = lookupNumber(current, "setTrue")
 	}
 	if setDeg == -1 {
 		setDeg = lookupFirstNumber(current,
@@ -610,12 +615,16 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64) {
 			[]string{"drift", "angle", "value"},
 		)
 	}
-	if setDeg >= -2*math.Pi && setDeg <= 2*math.Pi {
+	// Check the not-found sentinel before the radian/degree heuristic below:
+	// -1 falls inside a valid radian range ([-2pi, 2pi]), so checking ranges
+	// first would silently reinterpret "no data" as a real angle of -1 rad
+	// (~303 deg once normalized) instead of reporting no data.
+	if setDeg == -1 {
+		// leave as -1 (no data)
+	} else if setDeg >= 0 && setDeg <= 2*math.Pi {
 		setDeg = normalizeDegrees(setDeg * 180 / math.Pi)
-	} else if setDeg >= 0 {
-		setDeg = normalizeDegrees(setDeg)
 	} else {
-		setDeg = -1
+		setDeg = normalizeDegrees(setDeg)
 	}
 
 	return drift, setDeg

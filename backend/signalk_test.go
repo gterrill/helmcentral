@@ -29,6 +29,49 @@ func trustedSignalKPayloadServer(t *testing.T, latitude, longitude float64) *htt
 	}))
 }
 
+func approxEqual(a, b, tolerance float64) bool {
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= tolerance
+}
+
+func TestParseSignalKCurrent_ReadsSetTrueAndDrift(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"drift":   map[string]any{"value": 0.643},  // m/s -> ~1.2 kt
+				"setTrue": map[string]any{"value": 2.4697}, // radians -> ~141.5 deg
+			},
+		},
+	}
+
+	drift, setDeg := parseSignalKCurrent(payload)
+	if !approxEqual(drift, 1.2, 0.05) {
+		t.Fatalf("expected drift ~1.2 kt, got %v", drift)
+	}
+	if !approxEqual(setDeg, 141.5, 0.1) {
+		t.Fatalf("expected set ~141.5 deg, got %v", setDeg)
+	}
+}
+
+func TestParseSignalKCurrent_DoesNotTreatSetMagneticAsTrue(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"drift":       map[string]any{"value": 0.5},
+				"setMagnetic": map[string]any{"value": 1.5707963267948966}, // 90 deg magnetic
+			},
+		},
+	}
+
+	_, setDeg := parseSignalKCurrent(payload)
+	if setDeg != -1 {
+		t.Fatalf("expected -1 (no reliable true bearing) when only setMagnetic is present, got %v", setDeg)
+	}
+}
+
 func TestFetchSignalKVesselState_MarksCriticalOnConnectionRefused(t *testing.T) {
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
