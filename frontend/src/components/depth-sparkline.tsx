@@ -18,7 +18,11 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
   if (points.length < 2) return null
 
   const values = points.map(p => isImperial ? p.depth_m * METERS_TO_FEET : p.depth_m)
-  const minVal = 0
+  // Anchor the floor at 2m (deep enough that small swings at anchor still
+  // read clearly) but drop to the actual minimum when shallower than that,
+  // so a genuinely shallow reading is never clipped out of view.
+  const floorVal = isImperial ? 2 * METERS_TO_FEET : 2
+  const minVal = Math.min(floorVal, Math.min(...values))
   const maxVal = Math.max(...values)
   const range = maxVal - minVal
 
@@ -123,9 +127,10 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
               <text
                 x={chartLeft - 4}
                 y={y + 4}
-                fontSize="12"
+                fontSize="13"
+                fontWeight="600"
                 textAnchor="end"
-                fill="hsl(var(--muted-foreground))"
+                fill="rgba(71,85,105,0.95)"
               >
                 {fmt(tick)}
               </text>
@@ -165,9 +170,10 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
               <text
                 x={x}
                 y={chartTop - 9}
-                fontSize="12"
+                fontSize="13"
+                fontWeight="600"
                 textAnchor={tickIdx === 0 ? 'start' : tickIdx === 2 ? 'end' : 'middle'}
-                fill="hsl(var(--muted-foreground))"
+                fill="rgba(71,85,105,0.95)"
               >
                 {fmtTime(points[idx].time)}
               </text>
