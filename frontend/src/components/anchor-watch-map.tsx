@@ -930,7 +930,7 @@ export function AnchorWatchMap({
           onClick={handleImageryToggle}
           aria-label="Toggle satellite imagery"
           className={cn(
-            'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+            'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
             showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
           )}
           style={{ transition: 'background-color 150ms ease-out' }}
