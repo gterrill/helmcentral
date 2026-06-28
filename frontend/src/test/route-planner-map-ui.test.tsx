@@ -71,7 +71,9 @@ vi.mock('react-map-gl/maplibre', async () => {
         {children}
       </div>
     ),
-    Layer: ({ id }: { id: string }) => <div data-testid={`layer-${id}`} />,
+    Layer: ({ id, beforeId }: { id: string; beforeId?: string }) => (
+      <div data-testid={`layer-${id}`} data-before-id={beforeId} />
+    ),
   }
 })
 
@@ -388,5 +390,37 @@ describe('RoutePlannerMap', () => {
     )
 
     expect(screen.getByTestId('source-sat-chart-abc')).toBeInTheDocument()
+  })
+
+  it('anchors imagery, seamark, and sat-chart raster layers below the invisible overlay anchor', () => {
+    // react-map-gl's addLayer call has no awareness of JSX sibling order - a
+    // raster layer added later (e.g. world-imagery toggled on mid-session,
+    // or a satellite chart uploaded after the route line is already
+    // showing) is otherwise appended on top of the whole stack, covering
+    // the route line and coastline fallback. beforeId pins each raster
+    // layer below the always-present anchor layer instead of relying on
+    // mount-order luck.
+    const satCharts: SatChart[] = [
+      { id: 'abc', name: 'Reef A', bounds: [150, -25, 151, -24], minzoom: 10, maxzoom: 18, format: 'png', size_bytes: 1000 },
+    ]
+    render(
+      <RoutePlannerMap
+        waypoints={[]}
+        onWaypointsChange={() => undefined}
+        isDarkTheme={false}
+        satCharts={satCharts}
+      />,
+    )
+
+    expect(screen.getByTestId('layer-raster-overlay-anchor')).toBeInTheDocument()
+    expect(screen.getByTestId('layer-openseamap-layer').dataset.beforeId).toBe('raster-overlay-anchor')
+    expect(screen.getByTestId('layer-sat-chart-abc-layer').dataset.beforeId).toBe('raster-overlay-anchor')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
+    mockZoom = 12
+    act(() => {
+      lastZoomHandler?.()
+    })
+    expect(screen.getByTestId('layer-world-imagery-layer').dataset.beforeId).toBe('raster-overlay-anchor')
   })
 })

@@ -224,6 +224,22 @@ export function RoutePlannerMap({
         dragRotate={false}
         touchPitch={false}
       >
+        {/*
+          Invisible, sourceless anchor layer. react-map-gl's addLayer call
+          has no awareness of JSX sibling order, so a layer that mounts
+          later (e.g. world-imagery toggled on mid-session, or a satellite
+          chart uploaded after the route line is already showing) is
+          otherwise appended on top of the whole stack, covering the route
+          line and coastline fallback outright. Unlike anchor-watch-map.tsx,
+          this map has no vector layer that's unconditionally present (route
+          line needs 2+ waypoints, the coastline fallback needs chart data
+          loaded) to anchor against, so this dedicated layer exists purely
+          to be that always-present anchor - a "background" layer needs no
+          source/data, so it mounts as soon as the style loads, before
+          anything else has a chance to.
+        */}
+        <Layer id="raster-overlay-anchor" type="background" paint={{ 'background-opacity': 0 }} />
+
         {showImageryLayer && worldImageryOpacity > 0 && (
           <Source
             id="world-imagery"
@@ -236,6 +252,7 @@ export function RoutePlannerMap({
             <Layer
               id="world-imagery-layer"
               type="raster"
+              beforeId="raster-overlay-anchor"
               paint={{
                 'raster-opacity': worldImageryOpacity,
                 'raster-fade-duration': 250,
@@ -245,7 +262,7 @@ export function RoutePlannerMap({
         )}
 
         <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
-          <Layer id="openseamap-layer" type="raster" paint={{ 'raster-opacity': 0.85 }} />
+          <Layer id="openseamap-layer" type="raster" beforeId="raster-overlay-anchor" paint={{ 'raster-opacity': 0.85 }} />
         </Source>
 
         {satCharts.map((chart) => (
@@ -263,6 +280,7 @@ export function RoutePlannerMap({
             <Layer
               id={`sat-chart-${chart.id}-layer`}
               type="raster"
+              beforeId="raster-overlay-anchor"
               paint={{ 'raster-opacity': 1, 'raster-fade-duration': 250 }}
             />
           </Source>

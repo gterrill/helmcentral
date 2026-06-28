@@ -23,7 +23,9 @@ vi.mock('react-map-gl/maplibre', async () => {
     Source: ({ children, id }: { children?: React.ReactNode; id: string }) => (
       <div data-testid={`source-${id}`}>{children}</div>
     ),
-    Layer: ({ id }: { id: string }) => <div data-testid={`layer-${id}`} />,
+    Layer: ({ id, beforeId }: { id: string; beforeId?: string }) => (
+      <div data-testid={`layer-${id}`} data-before-id={beforeId} />
+    ),
   }
 })
 
@@ -87,5 +89,17 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     expect(screen.queryByText('0 m · 0°')).not.toBeInTheDocument()
 
     vi.useRealTimers()
+  })
+
+  it('anchors the imagery and seamark raster layers below the alarm circle, regardless of mount order', () => {
+    // react-map-gl's addLayer call has no awareness of JSX sibling order - a
+    // layer added later (e.g. world-imagery toggled on mid-session, well
+    // after the map first loads) is otherwise appended on top of the whole
+    // stack, covering the alarm circle and trails. beforeId pins it below
+    // the alarm circle explicitly instead of relying on mount-order luck.
+    renderMap()
+
+    expect(screen.getByTestId('layer-world-imagery-layer').dataset.beforeId).toBe('alarm-circle-fill')
+    expect(screen.getByTestId('layer-openseamap-layer').dataset.beforeId).toBe('alarm-circle-fill')
   })
 })

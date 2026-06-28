@@ -514,37 +514,6 @@ export function AnchorWatchMap({
         dragRotate={false}
         touchPitch={false}
       >
-        {showImageryLayer && worldImageryOpacity > 0 && (
-          <Source
-            id="world-imagery"
-            type="raster"
-            tiles={[WORLD_IMAGERY_TILES]}
-            tileSize={256}
-            maxzoom={WORLD_IMAGERY_MAX_ZOOM}
-            attribution="Source: Esri, Maxar, Earthstar Geographics"
-          >
-            <Layer
-              id="world-imagery-layer"
-              type="raster"
-              paint={{
-                'raster-opacity': worldImageryOpacity,
-                'raster-fade-duration': 250,
-              }}
-            />
-          </Source>
-        )}
-
-        {/* OpenSeaMap nautical overlay */}
-        <Source
-          id="openseamap"
-          type="raster"
-          tiles={[OPENSEAMAP_TILES]}
-          tileSize={256}
-          attribution="© OpenSeaMap contributors"
-        >
-          <Layer id="openseamap-layer" type="raster" paint={{ 'raster-opacity': 0.85 }} />
-        </Source>
-
         {/* Alarm circle fill */}
         <Source id="alarm-circle" type="geojson" data={circleGeoJSON}>
           <Layer
@@ -650,6 +619,48 @@ export function AnchorWatchMap({
             />
           </Source>
         )}
+
+        {/*
+          Raster layers (imagery, seamarks) are declared last and explicitly
+          anchored with beforeId="alarm-circle-fill" - react-map-gl's addLayer
+          call has no awareness of JSX sibling order, so a layer that mounts
+          later (e.g. world-imagery toggled on mid-session, well after the
+          map's initial load) is otherwise appended on top of the whole
+          stack, covering the alarm circle and trails outright. Anchoring to
+          alarm-circle-fill, which is unconditional and always mounts first,
+          keeps these rasters below the vector layers regardless of when
+          they're toggled on.
+        */}
+        {showImageryLayer && worldImageryOpacity > 0 && (
+          <Source
+            id="world-imagery"
+            type="raster"
+            tiles={[WORLD_IMAGERY_TILES]}
+            tileSize={256}
+            maxzoom={WORLD_IMAGERY_MAX_ZOOM}
+            attribution="Source: Esri, Maxar, Earthstar Geographics"
+          >
+            <Layer
+              id="world-imagery-layer"
+              type="raster"
+              beforeId="alarm-circle-fill"
+              paint={{
+                'raster-opacity': worldImageryOpacity,
+                'raster-fade-duration': 250,
+              }}
+            />
+          </Source>
+        )}
+
+        <Source
+          id="openseamap"
+          type="raster"
+          tiles={[OPENSEAMAP_TILES]}
+          tileSize={256}
+          attribution="© OpenSeaMap contributors"
+        >
+          <Layer id="openseamap-layer" type="raster" beforeId="alarm-circle-fill" paint={{ 'raster-opacity': 0.85 }} />
+        </Source>
 
         {/* AIS vessel markers */}
         {aisVessels.map((vessel) => {
