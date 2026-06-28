@@ -57,7 +57,6 @@ export function GeneratorTile({
     generatorState === 'warm up' ||
     generatorState === 'warm uo' ||
     generatorState === 'cool down'
-  const isError = generatorState === 'error'
 
   const powerLabel =
     generatorRealPowerW !== null && generatorRealPowerW > 0
@@ -76,10 +75,6 @@ export function GeneratorTile({
     batterySocPercent !== null && batteryRatePercentPerHour !== null && batteryRatePercentPerHour > 0
       ? Math.max(0, Math.min(100, batterySocPercent + batteryRatePercentPerHour * (generatorManualStartTimer / 3600)))
       : null
-
-  const stateLabelText = generatorState
-    ? generatorState.charAt(0).toUpperCase() + generatorState.slice(1)
-    : '—'
 
   const handleStart = useCallback(async () => {
     setPending(true)
@@ -108,26 +103,13 @@ export function GeneratorTile({
     }
   }, [])
 
-  const stateBadgeClass = isRunning
-    ? 'bg-secondary/15 text-secondary'
-    : isError
-      ? 'bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400'
-      : 'bg-muted/60 text-muted-foreground'
-
   return (
     <Tile title="Generator">
-      <div className="mt-2 grid grid-cols-1 gap-2 text-center md:grid-cols-3">
-        <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-primary/30' : ''}`}>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Power</p>
-          <p className={`font-display text-2xl tabular-nums ${isRunning ? 'text-primary' : 'text-muted-foreground'}`}>
-            {powerLabel}<span className="ml-1 text-base text-muted-foreground">W</span>
-          </p>
-        </div>
-
+      <div className="mt-2 grid grid-cols-1 gap-2 text-center md:grid-cols-2">
         <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-secondary/30' : ''}`}>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">State</p>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Power</p>
           <p className={`font-display text-2xl tabular-nums ${isRunning ? 'text-secondary' : 'text-muted-foreground'}`}>
-            {stateLabelText}
+            {powerLabel}<span className="ml-1 text-base text-muted-foreground">W</span>
           </p>
         </div>
 
@@ -139,16 +121,9 @@ export function GeneratorTile({
         </div>
       </div>
 
-      {(runReason || isRunning) && (
+      {runReason && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          {runReason && (
-            <span className="text-[11px] text-muted-foreground">{runReason}</span>
-          )}
-          {isRunning && (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.1em] ${stateBadgeClass}`}>
-              Running
-            </span>
-          )}
+          <span className="text-[11px] text-muted-foreground">{runReason}</span>
         </div>
       )}
 
