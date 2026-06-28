@@ -52,11 +52,17 @@ export function GeneratorTile({
   const [timerMinutes, setTimerMinutes] = useState(0)
   const [pending, setPending] = useState(false)
 
+  // generatorState reflects the auto-generator-start controller's own state
+  // machine, which doesn't necessarily know the generator is running if it
+  // was started manually at the panel rather than through that controller.
+  // Real measured power output is a direct electrical reading, so it's
+  // trusted as evidence of "running" regardless of how it was started.
   const isRunning =
     generatorState === 'running' ||
     generatorState === 'warm up' ||
     generatorState === 'warm uo' ||
-    generatorState === 'cool down'
+    generatorState === 'cool down' ||
+    (generatorRealPowerW !== null && generatorRealPowerW > 0)
 
   const powerLabel =
     generatorRealPowerW !== null && generatorRealPowerW > 0

@@ -77,3 +77,33 @@ test('omits the forecast when there is no manual-start timer running', () => {
   expect(screen.queryByText('Battery at Finish')).not.toBeInTheDocument()
   expect(screen.queryByText('Timer Remaining')).not.toBeInTheDocument()
 })
+
+test('treats real power output as running even when generatorState has not caught up (e.g. started manually at the panel)', () => {
+  render(
+    <GeneratorTile
+      {...baseProps}
+      generatorState={null}
+      generatorRealPowerW={3000}
+      batterySocPercent={null}
+      batteryRatePercentPerHour={null}
+    />,
+  )
+
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument()
+})
+
+test('does not treat zero output as running when generatorState also says stopped', () => {
+  render(
+    <GeneratorTile
+      {...baseProps}
+      generatorState={null}
+      generatorRealPowerW={0}
+      batterySocPercent={null}
+      batteryRatePercentPerHour={null}
+    />,
+  )
+
+  expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+})
