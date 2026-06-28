@@ -89,7 +89,7 @@ function formatTimeToGo(hours: number | null) {
   }
 
   if (absHours >= 24 * 7) {
-    return `~${Math.round(absHours / (24 * 7))}w`
+    return `${Math.round(absHours / (24 * 7))}w`
   }
 
   if (absHours >= 24) {
@@ -99,19 +99,19 @@ function formatTimeToGo(hours: number | null) {
       remainingHours = 0
     }
     if (remainingHours === 0) {
-      return `~${days}d`
+      return `${days}d`
     }
-    return `~${days}d ${remainingHours}h`
+    return `${days}d ${remainingHours}h`
   }
 
   if (absHours >= 10) {
-    return `~${Math.round(absHours)}h`
+    return `${Math.round(absHours)}h`
   }
 
   const hh = Math.floor(totalMinutes / 60)
   const mm = totalMinutes % 60
 
-  return `~${hh}h ${mm.toString().padStart(2, '0')}m`
+  return `${hh}h ${mm.toString().padStart(2, '0')}m`
 }
 
 type WindMetricCardProps = {
@@ -785,19 +785,17 @@ export function App() {
 
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Time Remaining</p>
-                  <p className={`mt-1 font-display text-4xl leading-none flex items-center ${timeToGoClass}`}>
+                  <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                    Time Remaining
+                    {timeToGoLabel !== '—' && <TimeToGoIcon className="h-3 w-3" />}
+                  </p>
+                  <p className={`mt-1 font-display text-3xl leading-none ${timeToGoClass}`}>
                     {timeToGoLabel}
-                    {timeToGoLabel !== '—' && (
-                      <span className="ml-2 text-muted-foreground inline-flex items-center">
-                        <TimeToGoIcon className="h-6 w-6" />
-                      </span>
-                    )}
                   </p>
                 </div>
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charge Rate</p>
-                  <p className={`mt-1 font-display text-4xl leading-none ${chargeRateClass}`}>
+                  <p className={`mt-1 font-display text-3xl leading-none ${chargeRateClass}`}>
                     {chargeRateLabel}
                     <span className="ml-1 text-xl text-muted-foreground">%/hr</span>
                   </p>

@@ -122,6 +122,6 @@ describe('Battery tile time to go', () => {
     const label = screen.getByText('Time Remaining')
     const card = label.closest('div')
     expect(card).not.toBeNull()
-    expect(within(card as HTMLDivElement).getByText('~12w')).toBeInTheDocument()
+    expect(within(card as HTMLDivElement).getByText('12w')).toBeInTheDocument()
   })
 })
