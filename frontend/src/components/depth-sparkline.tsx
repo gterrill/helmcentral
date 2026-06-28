@@ -26,8 +26,8 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
   const H = 78
   const marginLeft = 30
   const marginRight = 8
-  const marginTop = 6
-  const marginBottom = 18
+  const marginTop = 18
+  const marginBottom = 6
 
   const chartLeft = marginLeft
   const chartRight = W - marginRight
@@ -36,18 +36,19 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
   const chartWidth = chartRight - chartLeft
   const chartHeight = chartBottom - chartTop
 
-  // deeper = higher on chart (standard y-axis convention)
+  // deeper = lower on chart (mirrors looking down through the water column,
+  // shallow near the surface/top, deep toward the bottom)
   const toX = (i: number) => chartLeft + (i / (values.length - 1)) * chartWidth
   const toY = (v: number) =>
     range < 0.01
       ? chartTop + chartHeight / 2
-      : chartTop + (1 - (v - minVal) / range) * chartHeight
+      : chartTop + ((v - minVal) / range) * chartHeight
 
   const linePts = values.map((v, i) => `${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ')
   const areaPath =
-    `M${toX(0).toFixed(1)},${chartBottom.toFixed(1)} ` +
+    `M${toX(0).toFixed(1)},${chartTop.toFixed(1)} ` +
     values.map((v, i) => `L${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ') +
-    ` L${toX(values.length - 1).toFixed(1)},${chartBottom.toFixed(1)} Z`
+    ` L${toX(values.length - 1).toFixed(1)},${chartTop.toFixed(1)} Z`
 
   const unit = isImperial ? 'ft' : 'm'
   const fmt = (v: number) => v.toFixed(1)
@@ -142,9 +143,9 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
         />
         <line
           x1={chartLeft}
-          y1={chartBottom}
+          y1={chartTop}
           x2={chartRight}
-          y2={chartBottom}
+          y2={chartTop}
           stroke="hsl(var(--border))"
           strokeWidth="1"
         />
@@ -155,15 +156,15 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
             <g key={`x-${tickIdx}`}>
               <line
                 x1={x}
-                y1={chartBottom}
+                y1={chartTop}
                 x2={x}
-                y2={chartBottom + 3}
+                y2={chartTop - 3}
                 stroke="hsl(var(--border))"
                 strokeWidth="1"
               />
               <text
                 x={x}
-                y={H - 5}
+                y={chartTop - 8}
                 fontSize="9"
                 textAnchor={tickIdx === 0 ? 'start' : tickIdx === 2 ? 'end' : 'middle'}
                 fill="hsl(var(--muted-foreground))"

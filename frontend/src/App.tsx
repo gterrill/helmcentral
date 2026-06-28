@@ -560,32 +560,6 @@ export function App() {
               />
             </section>
 
-            <Tile title="Position">
-              <div className="mt-2 flex items-start justify-between gap-4">
-                <div>
-                  <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>
-                  <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
-                  {gnssValidationState === 'degraded' || gnssValidationState === 'critical' ? (
-                    <p
-                      className={`mt-1 max-w-[170px] truncate font-mono text-[10px] ${satellitesValueClass}`}
-                      title={gnssDiagnosticLabel}
-                    >
-                      {gnssDiagnosticLabel}
-                    </p>
-                  ) : (
-                    <p className="mt-1 font-mono text-sm text-muted-foreground">
-                      SATS <span className={satellitesValueClass}>{gnssSatellites !== null ? gnssSatellites : '—'}</span>
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
-                {placeName ?? '—'}
-              </div>
-            </Tile>
             <div
               onClick={() => { setActiveDrawerTab('tides'); setIsDrawerOpen(true) }}
               className="cursor-pointer transition-opacity hover:opacity-80"
@@ -594,7 +568,7 @@ export function App() {
                 <div className="mt-1 rounded-md border bg-background/60 px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
                   <div className="mt-1 flex items-center gap-4">
-                    <p className="shrink-0 font-display text-6xl text-secondary">
+                    <p className="shrink-0 font-display text-4xl text-secondary">
                       {depthValue}
                       <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
                     </p>
@@ -643,6 +617,32 @@ export function App() {
                 </div>
               </Tile>
             </div>
+            <Tile title="Position">
+              <div className="mt-2 flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>
+                  <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
+                  {gnssValidationState === 'degraded' || gnssValidationState === 'critical' ? (
+                    <p
+                      className={`mt-1 max-w-[170px] truncate font-mono text-[10px] ${satellitesValueClass}`}
+                      title={gnssDiagnosticLabel}
+                    >
+                      {gnssDiagnosticLabel}
+                    </p>
+                  ) : (
+                    <p className="mt-1 font-mono text-sm text-muted-foreground">
+                      SATS <span className={satellitesValueClass}>{gnssSatellites !== null ? gnssSatellites : '—'}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
+                {placeName ?? '—'}
+              </div>
+            </Tile>
             <div onClick={() => setIsDrawerOpen(true)} className="cursor-pointer transition-opacity hover:opacity-80">
               <Tile title="Today & Now">
                 <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-3">
