@@ -18,15 +18,15 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
   if (points.length < 2) return null
 
   const values = points.map(p => isImperial ? p.depth_m * METERS_TO_FEET : p.depth_m)
-  const minVal = Math.min(...values)
+  const minVal = 0
   const maxVal = Math.max(...values)
   const range = maxVal - minVal
 
   const W = 320
   const H = 78
-  const marginLeft = 30
+  const marginLeft = 36
   const marginRight = 8
-  const marginTop = 18
+  const marginTop = 22
   const marginBottom = 6
 
   const chartLeft = marginLeft
@@ -41,7 +41,7 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
   const toX = (i: number) => chartLeft + (i / (values.length - 1)) * chartWidth
   const toY = (v: number) =>
     range < 0.01
-      ? chartTop + chartHeight / 2
+      ? chartTop
       : chartTop + ((v - minVal) / range) * chartHeight
 
   const linePts = values.map((v, i) => `${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ')
@@ -122,8 +122,8 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
               />
               <text
                 x={chartLeft - 4}
-                y={y + 3}
-                fontSize="9"
+                y={y + 4}
+                fontSize="12"
                 textAnchor="end"
                 fill="hsl(var(--muted-foreground))"
               >
@@ -164,8 +164,8 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
               />
               <text
                 x={x}
-                y={chartTop - 8}
-                fontSize="9"
+                y={chartTop - 9}
+                fontSize="12"
                 textAnchor={tickIdx === 0 ? 'start' : tickIdx === 2 ? 'end' : 'middle'}
                 fill="hsl(var(--muted-foreground))"
               >
