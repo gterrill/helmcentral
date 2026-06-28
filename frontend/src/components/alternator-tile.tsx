@@ -36,7 +36,7 @@ function AlternatorColumn({ label, data }: { label: string; data: AlternatorData
       <div className="rounded-md border bg-background/60 px-3 py-3">
         <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Output</p>
         <div className="flex items-baseline gap-1">
-          <span className="font-display text-4xl tabular-nums leading-none text-primary">{powerLabel}</span>
+          <span className="font-display text-4xl tabular-nums leading-none text-secondary">{powerLabel}</span>
           <span className="text-xs leading-none text-muted-foreground">W</span>
         </div>
       </div>

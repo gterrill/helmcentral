@@ -777,7 +777,7 @@ export function App() {
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
-                <p className="font-display text-4xl leading-none text-primary">
+                <p className="font-display text-4xl leading-none text-secondary">
                   {solarOutputLabel}
                   <span className="ml-1 text-xl text-muted-foreground">W</span>
                 </p>
