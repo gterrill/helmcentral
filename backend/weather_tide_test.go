@@ -371,6 +371,9 @@ func TestBuildDailyWindSeries_BucketsHoursByLocalDate(t *testing.T) {
 	if day14[0].WindDirectionDeg != 90.0 {
 		t.Fatalf("expected 90 degree direction, got %f", day14[0].WindDirectionDeg)
 	}
+	if day14[0].HourOfDay != 23 {
+		t.Fatalf("expected hour 23, got %d", day14[0].HourOfDay)
+	}
 
 	day15 := series["2026-06-15"]
 	if len(day15) != 1 {
@@ -378,6 +381,9 @@ func TestBuildDailyWindSeries_BucketsHoursByLocalDate(t *testing.T) {
 	}
 	if day15[0].Label != "12AM" {
 		t.Fatalf("expected label 12AM, got %s", day15[0].Label)
+	}
+	if day15[0].HourOfDay != 0 {
+		t.Fatalf("expected hour 0, got %d", day15[0].HourOfDay)
 	}
 	// Missing windGust falls back to windSpeed.
 	if day15[0].WindGustKts != day15[0].WindSpeedKts {
@@ -415,6 +421,9 @@ func TestBuildDailyPrecipitationSeries_BucketsHoursByLocalDate(t *testing.T) {
 	if day14[0].PrecipitationIntensityMm != 1.2 {
 		t.Fatalf("expected 1.2mm/hr intensity, got %f", day14[0].PrecipitationIntensityMm)
 	}
+	if day14[0].HourOfDay != 23 {
+		t.Fatalf("expected hour 23, got %d", day14[0].HourOfDay)
+	}
 
 	day15 := series["2026-06-15"]
 	if len(day15) != 1 {
@@ -428,6 +437,9 @@ func TestBuildDailyPrecipitationSeries_BucketsHoursByLocalDate(t *testing.T) {
 	}
 	if day15[0].PrecipitationIntensityMm != 0 {
 		t.Fatalf("expected 0mm/hr intensity for missing field, got %f", day15[0].PrecipitationIntensityMm)
+	}
+	if day15[0].HourOfDay != 0 {
+		t.Fatalf("expected hour 0, got %d", day15[0].HourOfDay)
 	}
 }
 
@@ -465,6 +477,55 @@ func TestBuildDailyUVSeries_BucketsHoursByLocalDate(t *testing.T) {
 	}
 	if day15[0].UVIndex != 0 {
 		t.Fatalf("expected UV index 0 for missing field, got %f", day15[0].UVIndex)
+	}
+}
+
+func TestBuildDailyCloudSeries_BucketsHoursByLocalDate(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	result := map[string]any{
+		"forecastHourly": map[string]any{
+			"hours": []any{
+				map[string]any{"forecastStart": "2026-06-14T13:00:00Z", "conditionCode": "Cloudy", "temperature": 18.0, "daylight": false}, // 23:00 AEST (Jun 14)
+				map[string]any{"forecastStart": "2026-06-14T14:00:00Z", "conditionCode": "Clear", "temperature": 16.0, "daylight": true},    // 00:00 AEST (Jun 15)
+				map[string]any{"forecastStart": "not-a-timestamp"},                                                                          // ignored
+			},
+		},
+	}
+
+	series := buildDailyCloudSeries(result, loc)
+
+	day14 := series["2026-06-14"]
+	if len(day14) != 1 {
+		t.Fatalf("expected 1 entry for Jun 14, got %d", len(day14))
+	}
+	if day14[0].Label != "11PM" {
+		t.Fatalf("expected label 11PM, got %s", day14[0].Label)
+	}
+	if day14[0].HourOfDay != 23 {
+		t.Fatalf("expected hour 23, got %d", day14[0].HourOfDay)
+	}
+	if day14[0].Condition != "Cloudy" {
+		t.Fatalf("expected condition Cloudy, got %s", day14[0].Condition)
+	}
+	if day14[0].TemperatureF != 64.4 {
+		t.Fatalf("expected 64.4F (18C), got %f", day14[0].TemperatureF)
+	}
+	if day14[0].IsDaylight {
+		t.Fatalf("expected IsDaylight false for the 11PM entry")
+	}
+
+	day15 := series["2026-06-15"]
+	if len(day15) != 1 {
+		t.Fatalf("expected 1 entry for Jun 15, got %d", len(day15))
+	}
+	if day15[0].HourOfDay != 0 {
+		t.Fatalf("expected hour 0, got %d", day15[0].HourOfDay)
+	}
+	if day15[0].Condition != "Clear" {
+		t.Fatalf("expected condition Clear, got %s", day15[0].Condition)
+	}
+	if !day15[0].IsDaylight {
+		t.Fatalf("expected IsDaylight true for the 12AM entry")
 	}
 }
 
@@ -686,10 +747,16 @@ func TestParseOpenMeteoMarineResponse_BucketsHoursByLocalDate(t *testing.T) {
 	if day14[0].SwellWaveHeightM != 0.9 {
 		t.Fatalf("expected swell wave height 0.9, got %f", day14[0].SwellWaveHeightM)
 	}
+	if day14[0].HourOfDay != 23 {
+		t.Fatalf("expected hour 23, got %d", day14[0].HourOfDay)
+	}
 
 	day15 := series["2026-06-15"]
 	if len(day15) != 1 {
 		t.Fatalf("expected 1 entry for Jun 15, got %d", len(day15))
+	}
+	if day15[0].HourOfDay != 0 {
+		t.Fatalf("expected hour 0, got %d", day15[0].HourOfDay)
 	}
 }
 

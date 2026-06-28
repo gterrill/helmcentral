@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 
 import { ForecastDrawer, formatRefreshAge } from '@/components/forecast-drawer'
 
@@ -11,6 +11,7 @@ const HOUR_LABELS = [
 function buildHourlyWind(count = 24) {
   return Array.from({ length: count }, (_, idx) => ({
     label: HOUR_LABELS[idx % HOUR_LABELS.length],
+    hourOfDay: idx % 24,
     windSpeed: 10 + idx,
     windGust: 15 + idx,
     windDirection: 'NE',
@@ -21,6 +22,7 @@ function buildHourlyWind(count = 24) {
 function buildHourlyWave(count = 24) {
   return Array.from({ length: count }, (_, idx) => ({
     label: HOUR_LABELS[idx % HOUR_LABELS.length],
+    hourOfDay: idx % 24,
     waveHeightM: 1 + idx * 0.05,
     wavePeriodS: 6,
     waveDirectionDeg: 90,
@@ -32,6 +34,7 @@ function buildHourlyWave(count = 24) {
 function buildHourlyPrecip(count = 24) {
   return Array.from({ length: count }, (_, idx) => ({
     label: HOUR_LABELS[idx % HOUR_LABELS.length],
+    hourOfDay: idx % 24,
     precipChancePct: (idx * 4) % 101,
     precipIntensityMm: idx % 6 === 0 ? 1.5 + idx * 0.1 : 0,
   }))
@@ -41,6 +44,18 @@ function buildHourlyUV(count = 24) {
   return Array.from({ length: count }, (_, idx) => ({
     label: HOUR_LABELS[idx % HOUR_LABELS.length],
     uvIndex: Math.max(0, Math.round(6 - Math.abs(idx - 12) * 0.6)),
+  }))
+}
+
+function buildHourlyCloud(count = 24) {
+  return Array.from({ length: count }, (_, idx) => ({
+    label: HOUR_LABELS[idx % HOUR_LABELS.length],
+    hourOfDay: idx % 24,
+    condition: idx === 12 ? 'Clear' : idx % 6 === 0 ? 'Partly Cloudy' : 'Cloudy',
+    // Smooth hump peaking at noon (idx 12) and lowest at midnight (idx 0) -
+    // gives deterministic, easy-to-assert L/H marker positions.
+    temperatureF: 60 + Math.round(10 * Math.sin((idx / 24) * Math.PI)),
+    isDaylight: idx >= 6 && idx <= 18,
   }))
 }
 
@@ -65,6 +80,7 @@ function buildDay(overrides: Record<string, unknown> = {}) {
     hourlyWave: buildHourlyWave(),
     hourlyPrecip: buildHourlyPrecip(),
     hourlyUV: buildHourlyUV(),
+    hourlyCloud: buildHourlyCloud(),
     ...overrides,
   }
 }
@@ -171,12 +187,32 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getAllByTestId('forecast-wind-barb').length).toBeGreaterThan(0)
   })
 
+  it('uses 6-hour-block labels on the wind chart', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wind-chart')
+    expect(within(chart).getByText('12AM')).toBeInTheDocument()
+    expect(within(chart).getByText('6AM')).toBeInTheDocument()
+    expect(within(chart).getByText('12PM')).toBeInTheDocument()
+    expect(within(chart).getByText('6PM')).toBeInTheDocument()
+  })
+
   it('shows the wave summary sentence, direction arrows and period for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
     expect(screen.getByText('Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.')).toBeInTheDocument()
     expect(screen.getAllByTestId('forecast-wave-arrow').length).toBeGreaterThan(0)
     expect(screen.getAllByText('6.0s').length).toBeGreaterThan(0)
+  })
+
+  it('uses 6-hour-block labels on the wave chart', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wave-chart')
+    expect(within(chart).getByText('12AM')).toBeInTheDocument()
+    expect(within(chart).getByText('6AM')).toBeInTheDocument()
+    expect(within(chart).getByText('12PM')).toBeInTheDocument()
+    expect(within(chart).getByText('6PM')).toBeInTheDocument()
   })
 
   it('shows sunrise, sunset and moon phase for the selected day', () => {
@@ -228,6 +264,16 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByText('Slight chance of rain after 5PM.')).toBeInTheDocument()
   })
 
+  it('uses 6-hour-block labels on the precipitation chart', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-precip-chart')
+    expect(within(chart).getByText('12AM')).toBeInTheDocument()
+    expect(within(chart).getByText('6AM')).toBeInTheDocument()
+    expect(within(chart).getByText('12PM')).toBeInTheDocument()
+    expect(within(chart).getByText('6PM')).toBeInTheDocument()
+  })
+
   it('shows an unavailable message when a day has no precipitation forecast', () => {
     render(
       <ForecastDrawer
@@ -243,14 +289,17 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByTestId('forecast-precip-unavailable')).toBeInTheDocument()
   })
 
-  it('renders the UV index graph with a sun protection recommendation', () => {
+  it('plots UV as a second series on the cloud & temperature chart, with a sun protection recommendation', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByTestId('forecast-uv-chart')).toBeInTheDocument()
+    const chart = screen.getByTestId('forecast-cloud-chart')
+    // Temperature + UV polylines share the same chart now, instead of UV
+    // having its own standalone chart.
+    expect(chart.querySelectorAll('polyline').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Sun protection recommended from 7AM to 5PM.')).toBeInTheDocument()
   })
 
-  it('shows an unavailable message when a day has no UV forecast', () => {
+  it('still renders the cloud & temperature chart when a day has no UV forecast', () => {
     render(
       <ForecastDrawer
         forecast={[buildDay({ hourlyUV: [] })]}
@@ -260,9 +309,8 @@ describe('ForecastDrawer refresh age', () => {
       />,
     )
 
-    expect(screen.getByTestId('forecast-precip-chart')).toBeInTheDocument()
-    expect(screen.queryByTestId('forecast-uv-chart')).not.toBeInTheDocument()
-    expect(screen.getByTestId('forecast-uv-unavailable')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-cloud-chart')).toBeInTheDocument()
+    expect(screen.getByText('No sun protection needed.')).toBeInTheDocument()
   })
 
   it('shows no sun protection needed when UV stays low all day', () => {
@@ -276,5 +324,35 @@ describe('ForecastDrawer refresh age', () => {
     )
 
     expect(screen.getByText('No sun protection needed.')).toBeInTheDocument()
+  })
+
+  it('renders the cloud & temperature graph with 6-hour-block labels and condition icons', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-cloud-chart')
+    // 6-hour-block ticks per the requested layout, not the dynamic spacing
+    // the other hourly charts use.
+    expect(within(chart).getByText('12AM')).toBeInTheDocument()
+    expect(within(chart).getByText('6AM')).toBeInTheDocument()
+    expect(within(chart).getByText('12PM')).toBeInTheDocument()
+    expect(within(chart).getByText('6PM')).toBeInTheDocument()
+    // L/H markers at the coldest (midnight) and warmest (noon) points.
+    expect(within(chart).getByText('L')).toBeInTheDocument()
+    expect(within(chart).getByText('H')).toBeInTheDocument()
+  })
+
+  it('shows an unavailable message when a day has no cloud/temperature forecast', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay({ hourlyCloud: [] })]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-wind-chart')).toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-cloud-chart')).not.toBeInTheDocument()
+    expect(screen.getByTestId('forecast-cloud-unavailable')).toBeInTheDocument()
   })
 })

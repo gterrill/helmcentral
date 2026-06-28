@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 
 import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
+import { useMeasuredWidth } from '@/hooks/use-measured-width'
 
 const AXIS_LABEL_FONT_SIZE = '10'
 const AXIS_LABEL_COLOR = 'rgba(71,85,105,0.95)'
@@ -17,29 +18,6 @@ const CURVE_STEPS = 12
 // has been measured (ResizeObserver hasn't fired yet, or in tests where it's
 // stubbed as a no-op) - chosen to match the chart's previous fixed size.
 const DEFAULT_VIEWPORT_WIDTH = 1000
-
-// Measures the actual rendered width of a container element, so the SVG's
-// viewBox can be set 1:1 with real pixels instead of a fixed coordinate
-// space. With a fixed-height SVG and the default preserveAspectRatio
-// ("xMidYMid meet"), a fixed viewBox width narrower than the container
-// would otherwise get letterboxed (centered, with empty space on each
-// side) instead of actually filling the available width.
-function useMeasuredWidth() {
-  const ref = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(0)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    setWidth(el.getBoundingClientRect().width)
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
-  return [ref, width] as const
-}
-
 
 // Shows a tooltip for the nearest hourly entry on mouse hover (desktop/
 // tablet) or touch (mobile) - both go through the same pointer events, since

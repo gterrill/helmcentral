@@ -4,7 +4,8 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import type { WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
+import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
+import { useMeasuredWidth } from '@/hooks/use-measured-width'
 
 interface ForecastDay {
   date: string
@@ -26,6 +27,7 @@ interface ForecastDay {
   hourlyWave: WeatherHourlyWavePoint[]
   hourlyPrecip: WeatherHourlyPrecipPoint[]
   hourlyUV: WeatherHourlyUVPoint[]
+  hourlyCloud: WeatherHourlyCloudPoint[]
 }
 
 interface ForecastDrawerProps {
@@ -103,6 +105,17 @@ function getHourlyWeatherIcon(entry: WeatherHourlyEntry, isNight: boolean) {
   }
 
   return getWeatherIcon(entry.condition, 24)
+}
+
+// Same clear-night-becomes-moon override as getHourlyWeatherIcon, but keyed
+// off the cloud chart's own per-hour isDaylight flag (sourced directly from
+// WeatherKit) rather than re-deriving day/night from sunrise/sunset.
+function getCloudChartIcon(condition: string, isDaylight: boolean, size: number) {
+  const normalized = condition.toLowerCase()
+  if (!isDaylight && (normalized.includes('clear') || normalized.includes('sunny'))) {
+    return <Moon size={size} className="text-secondary" />
+  }
+  return getWeatherIcon(condition, size)
 }
 
 // Renders a single wind barb: a staff pointing toward the direction the wind
@@ -325,7 +338,7 @@ function ChartTooltipMarker({ x, y, color }: { x: number; y: number; color: stri
 // at the pointer's X (clamped so it can't run off either edge of the chart)
 // right above the chart - never behind a touch point, never elsewhere on
 // the page.
-function ChartTooltipBubble({ pixelX, time, primary, secondary }: { pixelX: number; time: string; primary: string; secondary: string }) {
+function ChartTooltipBubble({ pixelX, time, primary, secondary, tertiary }: { pixelX: number; time: string; primary: string; secondary: string; tertiary?: string }) {
   return (
     <div
       className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-border/60 bg-card px-2.5 py-1.5 shadow-md"
@@ -334,6 +347,7 @@ function ChartTooltipBubble({ pixelX, time, primary, secondary }: { pixelX: numb
       <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{time}</p>
       <p className="font-display text-base leading-tight text-foreground">{primary}</p>
       <p className="text-[10px] text-muted-foreground">{secondary}</p>
+      {tertiary && <p className="text-[10px] text-muted-foreground">{tertiary}</p>}
     </div>
   )
 }
@@ -347,16 +361,6 @@ const UV_BAND_LABELS = [
   { value: 1, label: 'Low' },
 ]
 
-// Parses a "6:32AM"/"5:09PM"-style local time label into an hour-of-day
-// (0-23, possibly fractional), or null if unparseable.
-function parseHourFromTimeLabel(label: string | null): number | null {
-  const match = label?.match(/^(\d{1,2}):(\d{2})(AM|PM)$/)
-  if (!match) return null
-
-  let hour = parseInt(match[1], 10) % 12
-  if (match[3] === 'PM') hour += 12
-  return hour + parseInt(match[2], 10) / 60
-}
 
 export function formatRefreshAge(value: string | null | undefined, nowMs: number) {
   if (!value) {
@@ -402,7 +406,6 @@ export function ForecastDrawer({
 }: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
-  const uvAreaGradientId = useId()
   const uvLineGradientId = useId()
   const detailsCardRef = useRef<HTMLDivElement>(null)
   const dayTabsRowRef = useRef<HTMLDivElement>(null)
@@ -471,19 +474,30 @@ export function ForecastDrawer({
   const windHourly = selectedDay.hourlyWind ?? []
   const waveHourly = selectedDay.hourlyWave ?? []
   const precipHourly = selectedDay.hourlyPrecip ?? []
-  const uvHourlyFull = selectedDay.hourlyUV ?? []
-  const sunriseHour = parseHourFromTimeLabel(selectedDay.sunriseTime)
-  const sunsetHour = parseHourFromTimeLabel(selectedDay.sunsetTime)
-  const uvHourly = sunriseHour !== null && sunsetHour !== null
-    ? uvHourlyFull.filter((_entry, idx) => idx >= Math.floor(sunriseHour) && idx <= Math.ceil(sunsetHour))
-    : uvHourlyFull
+  const uvHourly = selectedDay.hourlyUV ?? []
+  const cloudHourly = selectedDay.hourlyCloud ?? []
+
+  // All the hourly chart cards below share the same rounded-md border
+  // bg-card/70 p-2 styling and the same parent width, so measuring just one
+  // of them (the Cloud & Temperature card, which always renders regardless
+  // of data availability) and reusing it for the rest is equivalent to
+  // measuring each independently. p-2 (16px) + border (2px) is the fixed
+  // inset between the card's outer width and its actual content/SVG width.
+  const [chartCardRef, chartCardWidth] = useMeasuredWidth()
+  const forecastChartWidth = chartCardWidth > 18 ? chartCardWidth - 18 : 1000
 
   const hourlyChartLeft = 30
-  const hourlyChartRight = 980
+  const hourlyChartRight = forecastChartWidth - 20
   const hourlyChartWidth = hourlyChartRight - hourlyChartLeft
 
   const hourlyXFor = (idx: number, count: number) =>
     count <= 1 ? hourlyChartLeft + hourlyChartWidth / 2 : hourlyChartLeft + (idx * hourlyChartWidth) / (count - 1)
+
+  // 6-hour-block ticks (12AM/6AM/12PM/6PM), used by every hourly chart below
+  // instead of spacing ticks dynamically by count.
+  function hourTicksFor<T extends { hourOfDay: number }>(hourly: T[]) {
+    return hourly.map((entry, idx) => ({ entry, idx })).filter(({ entry }) => entry.hourOfDay % 6 === 0)
+  }
 
   const windSpeeds = windHourly.map((entry) => Math.max(0, entry.windSpeed))
   const windGusts = windHourly.map((entry) => Math.max(0, entry.windGust))
@@ -493,7 +507,7 @@ export function ForecastDrawer({
   const windChartBottom = 125
   const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
   const windAxisTicks = Array.from({ length: windMax / 10 + 1 }, (_, idx) => idx * 10)
-  const windTickEvery = Math.max(1, Math.round(windHourly.length / 8))
+  const windHourTicks = hourTicksFor(windHourly)
   const windAreaPath = windHourly.length > 0
     ? `M ${hourlyXFor(0, windHourly.length)} ${windChartBottom} L ${windSpeeds.map((value, idx) => `${hourlyXFor(idx, windHourly.length)} ${windYFor(value)}`).join(' L ')} L ${hourlyXFor(windHourly.length - 1, windHourly.length)} ${windChartBottom} Z`
     : ''
@@ -509,7 +523,7 @@ export function ForecastDrawer({
   const waveChartBottom = 125
   const waveYFor = (value: number) => waveChartTop + (1 - value / waveMax) * (waveChartBottom - waveChartTop)
   const waveAxisTicks = Array.from({ length: waveMax / 0.5 + 1 }, (_, idx) => idx * 0.5)
-  const waveTickEvery = Math.max(1, Math.round(waveHourly.length / 8))
+  const waveHourTicks = hourTicksFor(waveHourly)
   const waveAreaPath = waveHourly.length > 0
     ? `M ${hourlyXFor(0, waveHourly.length)} ${waveChartBottom} L ${waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)} ${waveYFor(value)}`).join(' L ')} L ${hourlyXFor(waveHourly.length - 1, waveHourly.length)} ${waveChartBottom} Z`
     : ''
@@ -524,20 +538,44 @@ export function ForecastDrawer({
   const precipChartBottom = 125
   const precipBarYFor = (value: number) => precipChartTop + (1 - value / precipMax) * (precipChartBottom - precipChartTop)
   const precipChanceYFor = (value: number) => precipChartTop + (1 - value / 100) * (precipChartBottom - precipChartTop)
-  const precipTickEvery = Math.max(1, Math.round(precipHourly.length / 8))
+  const precipHourTicks = hourTicksFor(precipHourly)
   const precipBarWidth = precipHourly.length > 1 ? (hourlyChartWidth / (precipHourly.length - 1)) * 0.5 : 20
   const precipChancePoints = precipChances.map((value, idx) => `${hourlyXFor(idx, precipHourly.length)},${precipChanceYFor(value)}`).join(' ')
 
+  const cloudTemps = cloudHourly.map((entry) => displayTemp(entry.temperatureF))
+  const cloudTempMax = cloudTemps.length > 0 ? Math.max(...cloudTemps) : 0
+  const cloudTempMin = cloudTemps.length > 0 ? Math.min(...cloudTemps) : 0
+  const cloudTempRange = Math.max(1, cloudTempMax - cloudTempMin)
+  const cloudChartTop = 35
+  const cloudChartBottom = 125
+  const cloudYFor = (value: number) =>
+    cloudChartBottom - ((value - cloudTempMin) / cloudTempRange) * (cloudChartBottom - cloudChartTop)
+  const cloudAreaPath = cloudHourly.length > 0
+    ? `M ${hourlyXFor(0, cloudHourly.length)} ${cloudChartBottom} L ${cloudTemps.map((value, idx) => `${hourlyXFor(idx, cloudHourly.length)} ${cloudYFor(value)}`).join(' L ')} L ${hourlyXFor(cloudHourly.length - 1, cloudHourly.length)} ${cloudChartBottom} Z`
+    : ''
+  const cloudPoints = cloudTemps.map((value, idx) => `${hourlyXFor(idx, cloudHourly.length)},${cloudYFor(value)}`).join(' ')
+  // Index of the lowest/highest temperature in the visible window, for the
+  // L/H markers - matching indexOf's "first occurrence" tie-break is fine
+  // here since a flat run of identical extreme values is rare in practice.
+  const cloudMinIdx = cloudTemps.length > 0 ? cloudTemps.indexOf(cloudTempMin) : -1
+  const cloudMaxIdx = cloudTemps.length > 0 ? cloudTemps.indexOf(cloudTempMax) : -1
+  const cloudHourTicks = hourTicksFor(cloudHourly)
+  // A condition icon every 3 hours - dense enough to read at a glance like
+  // the reference screenshot, without crowding 24 separate icons together.
+  const cloudIconTicks = cloudHourly
+    .map((entry, idx) => ({ entry, idx }))
+    .filter(({ entry }) => entry.hourOfDay % 3 === 0)
+
+  // UV is plotted as a second series on the Cloud & Temperature chart rather
+  // than its own standalone chart, sharing that chart's x-axis and index
+  // alignment - both series come from the same WeatherKit hourly array for
+  // the day, so indices line up 1:1 without needing to filter by sunrise/
+  // sunset: at night UV is ~0 anyway, which already falls below the
+  // "protection needed" threshold below without clipping the array.
   const uvValues = uvHourly.map((entry) => Math.max(0, entry.uvIndex))
   const uvIndex = Math.round(Math.max(0, ...uvValues))
   const uvMax = Math.max(11, ...uvValues)
-  const uvChartTop = 35
-  const uvChartBottom = 125
-  const uvYFor = (value: number) => uvChartTop + (1 - value / uvMax) * (uvChartBottom - uvChartTop)
-  const uvTickEvery = Math.max(1, Math.round(uvHourly.length / 8))
-  const uvAreaPath = uvHourly.length > 0
-    ? `M ${hourlyXFor(0, uvHourly.length)} ${uvChartBottom} L ${uvValues.map((value, idx) => `${hourlyXFor(idx, uvHourly.length)} ${uvYFor(value)}`).join(' L ')} L ${hourlyXFor(uvHourly.length - 1, uvHourly.length)} ${uvChartBottom} Z`
-    : ''
+  const uvYFor = (value: number) => cloudChartTop + (1 - value / uvMax) * (cloudChartBottom - cloudChartTop)
   const uvPoints = uvValues.map((value, idx) => `${hourlyXFor(idx, uvHourly.length)},${uvYFor(value)}`).join(' ')
   const uvProtectionIndices = uvValues.reduce<number[]>((acc, value, idx) => {
     if (value >= 3) acc.push(idx)
@@ -549,12 +587,13 @@ export function ForecastDrawer({
   const windTooltip = useChartTooltip(windHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
   const waveTooltip = useChartTooltip(waveHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
   const precipTooltip = useChartTooltip(precipHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
-  const uvTooltip = useChartTooltip(uvHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
+  const cloudTooltip = useChartTooltip(cloudHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
 
   const windTooltipEntry = windTooltip.activeIndex === null ? null : windHourly[windTooltip.activeIndex] ?? null
   const waveTooltipEntry = waveTooltip.activeIndex === null ? null : waveHourly[waveTooltip.activeIndex] ?? null
   const precipTooltipEntry = precipTooltip.activeIndex === null ? null : precipHourly[precipTooltip.activeIndex] ?? null
-  const uvTooltipEntry = uvTooltip.activeIndex === null ? null : uvHourly[uvTooltip.activeIndex] ?? null
+  const cloudTooltipEntry = cloudTooltip.activeIndex === null ? null : cloudHourly[cloudTooltip.activeIndex] ?? null
+  const uvTooltipEntry = cloudTooltip.activeIndex === null ? null : uvHourly[cloudTooltip.activeIndex] ?? null
 
   return (
     <div className="space-y-4 pb-4">
@@ -686,6 +725,113 @@ export function ForecastDrawer({
               </div>
             </div>
 
+            <div ref={chartCardRef} className="rounded-md border bg-card/70 p-2">
+              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <Cloud size={13} className="text-secondary" /> Cloud & Temperature
+              </h4>
+              {cloudHourly.length > 0 ? (
+                <>
+                  <p className="mb-2 text-base text-foreground/80">
+                    {uvProtectionStart && uvProtectionEnd
+                      ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
+                      : 'No sun protection needed.'}
+                  </p>
+                  <div className="relative">
+                  {cloudTooltipEntry && (
+                    <ChartTooltipBubble
+                      pixelX={cloudTooltip.tooltipPixelX ?? 0}
+                      time={cloudTooltipEntry.label}
+                      primary={`${Math.round(displayTemp(cloudTooltipEntry.temperatureF))}${tempUnit}`}
+                      secondary={cloudTooltipEntry.condition}
+                      tertiary={uvTooltipEntry ? `UV ${Math.round(uvTooltipEntry.uvIndex)} · ${uvRiskLabel(uvTooltipEntry.uvIndex)}` : undefined}
+                    />
+                  )}
+                  <svg
+                    ref={cloudTooltip.svgRef}
+                    viewBox={`0 0 ${forecastChartWidth} 175`}
+                    preserveAspectRatio="none"
+                    data-testid="forecast-cloud-chart"
+                    className="h-[175px] w-full touch-none rounded bg-muted/15"
+                    onPointerDown={cloudTooltip.onPointerDown}
+                    onPointerMove={cloudTooltip.onPointerMove}
+                    onPointerLeave={cloudTooltip.onPointerLeave}
+                  >
+                    <defs>
+                      <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
+                        {UV_GRADIENT_STOPS.map((stop) => (
+                          <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
+                        ))}
+                      </linearGradient>
+                    </defs>
+
+                    <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMax)}{tempUnit}</text>
+                    <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMin)}{tempUnit}</text>
+                    {UV_BAND_LABELS.map((band) => (
+                      <text key={band.label} x={forecastChartWidth - 6} y={uvYFor(band.value)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
+                    ))}
+                    <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+
+                    <path d={cloudAreaPath} fill="rgba(217,119,6,0.12)" />
+                    <polyline points={cloudPoints} fill="none" stroke="rgba(217,119,6,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+                    <polyline points={uvPoints} fill="none" stroke={`url(#${uvLineGradientId})`} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+
+                    {cloudHourTicks.map(({ entry, idx }) => (
+                      <g key={idx}>
+                        <line x1={hourlyXFor(idx, cloudHourly.length)} y1={cloudChartTop} x2={hourlyXFor(idx, cloudHourly.length)} y2={cloudChartBottom} stroke="rgba(80,98,118,0.12)" strokeWidth="1" />
+                        <text x={hourlyXFor(idx, cloudHourly.length)} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
+                      </g>
+                    ))}
+
+                    {cloudMinIdx >= 0 && (
+                      <g>
+                        <circle cx={hourlyXFor(cloudMinIdx, cloudHourly.length)} cy={cloudYFor(cloudTempMin)} r="3" fill="rgba(217,119,6,0.95)" />
+                        <text x={hourlyXFor(cloudMinIdx, cloudHourly.length)} y={cloudYFor(cloudTempMin) + 14} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>L</text>
+                      </g>
+                    )}
+                    {cloudMaxIdx >= 0 && (
+                      <g>
+                        <circle cx={hourlyXFor(cloudMaxIdx, cloudHourly.length)} cy={cloudYFor(cloudTempMax)} r="3" fill="rgba(217,119,6,0.95)" />
+                        <text x={hourlyXFor(cloudMaxIdx, cloudHourly.length)} y={cloudYFor(cloudTempMax) - 8} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>H</text>
+                      </g>
+                    )}
+
+                    {cloudTooltipEntry && (
+                      <ChartTooltipMarker
+                        x={hourlyXFor(cloudTooltip.activeIndex ?? 0, cloudHourly.length)}
+                        y={cloudYFor(displayTemp(cloudTooltipEntry.temperatureF))}
+                        color="rgba(217,119,6,0.95)"
+                      />
+                    )}
+                    {uvTooltipEntry && (
+                      <ChartTooltipMarker
+                        x={hourlyXFor(cloudTooltip.activeIndex ?? 0, uvHourly.length)}
+                        y={uvYFor(Math.max(0, uvTooltipEntry.uvIndex))}
+                        color="rgb(249,115,22)"
+                      />
+                    )}
+                  </svg>
+
+                  <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[35px] items-center" style={{ left: `${(hourlyChartLeft / forecastChartWidth) * 100}%`, right: `${100 - (hourlyChartRight / forecastChartWidth) * 100}%` }}>
+                    {cloudIconTicks.map(({ entry, idx }) => (
+                      <div
+                        key={idx}
+                        className="absolute -translate-x-1/2"
+                        style={{ left: `${cloudHourly.length <= 1 ? 50 : (idx / (cloudHourly.length - 1)) * 100}%` }}
+                        title={entry.condition}
+                      >
+                        {getCloudChartIcon(entry.condition, entry.isDaylight, 16)}
+                      </div>
+                    ))}
+                  </div>
+                  </div>
+                </>
+              ) : (
+                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-cloud-unavailable">
+                  Cloud & temperature forecast unavailable for this day
+                </p>
+              )}
+            </div>
+
             <div className="rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 <Wind size={13} className="text-secondary" /> Wind
@@ -706,7 +852,8 @@ export function ForecastDrawer({
                     )}
                     <svg
                       ref={windTooltip.svgRef}
-                      viewBox="0 0 1000 175"
+                      viewBox={`0 0 ${forecastChartWidth} 175`}
+                      preserveAspectRatio="none"
                       data-testid="forecast-wind-chart"
                       className="h-[175px] w-full touch-none rounded bg-muted/15"
                       onPointerDown={windTooltip.onPointerDown}
@@ -724,8 +871,7 @@ export function ForecastDrawer({
                       <polyline points={windGustPoints} fill="none" stroke="rgba(245,158,11,0.75)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
                       <polyline points={windSpeedPoints} fill="none" stroke="rgba(37,99,235,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
-                      {windHourly.map((entry, idx) => {
-                        if (idx % windTickEvery !== 0 && idx !== windHourly.length - 1) return null
+                      {windHourTicks.map(({ entry, idx }) => {
                         const x = hourlyXFor(idx, windHourly.length)
                         return (
                           <g key={idx}>
@@ -775,7 +921,8 @@ export function ForecastDrawer({
                     )}
                     <svg
                       ref={waveTooltip.svgRef}
-                      viewBox="0 0 1000 170"
+                      viewBox={`0 0 ${forecastChartWidth} 170`}
+                      preserveAspectRatio="none"
                       data-testid="forecast-wave-chart"
                       className="h-[170px] w-full touch-none rounded bg-muted/15"
                       onPointerDown={waveTooltip.onPointerDown}
@@ -794,8 +941,7 @@ export function ForecastDrawer({
                       <polyline points={windWavePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
                       <polyline points={wavePoints} fill="none" stroke="rgba(20,184,166,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
-                      {waveHourly.map((entry, idx) => {
-                        if (idx % waveTickEvery !== 0 && idx !== waveHourly.length - 1) return null
+                      {waveHourTicks.map(({ entry, idx }) => {
                         const x = hourlyXFor(idx, waveHourly.length)
                         return (
                           <g key={idx}>
@@ -846,7 +992,8 @@ export function ForecastDrawer({
                     )}
                     <svg
                       ref={precipTooltip.svgRef}
-                      viewBox="0 0 1000 175"
+                      viewBox={`0 0 ${forecastChartWidth} 175`}
+                      preserveAspectRatio="none"
                       data-testid="forecast-precip-chart"
                       className="h-[175px] w-full touch-none rounded bg-muted/15"
                       onPointerDown={precipTooltip.onPointerDown}
@@ -855,8 +1002,8 @@ export function ForecastDrawer({
                     >
                       <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)} mm/hr</text>
                       <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
-                      <text x={994} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
-                      <text x={994} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
+                      <text x={forecastChartWidth - 6} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
+                      <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
                       <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
                       {precipHourly.map((_entry, idx) => {
@@ -879,8 +1026,7 @@ export function ForecastDrawer({
 
                       <polyline points={precipChancePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
-                      {precipHourly.map((entry, idx) => {
-                        if (idx % precipTickEvery !== 0 && idx !== precipHourly.length - 1) return null
+                      {precipHourTicks.map(({ entry, idx }) => {
                         const x = hourlyXFor(idx, precipHourly.length)
                         return (
                           <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
@@ -907,83 +1053,6 @@ export function ForecastDrawer({
               )}
             </div>
 
-            <div className="mt-3 rounded-md border bg-card/70 p-2">
-              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <Sun size={13} className="text-secondary" /> UV Index
-              </h4>
-              {uvHourly.length > 0 ? (
-                <>
-                  <p className="mb-2 text-base text-foreground/80">
-                    {uvProtectionStart && uvProtectionEnd
-                      ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
-                      : 'No sun protection needed.'}
-                  </p>
-                  <div className="relative">
-                    {uvTooltipEntry && (
-                      <ChartTooltipBubble
-                        pixelX={uvTooltip.tooltipPixelX ?? 0}
-                        time={uvTooltipEntry.label}
-                        primary={`UV ${Math.round(uvTooltipEntry.uvIndex)}`}
-                        secondary={uvRiskLabel(uvTooltipEntry.uvIndex)}
-                      />
-                    )}
-                    <svg
-                      ref={uvTooltip.svgRef}
-                      viewBox="0 0 1000 175"
-                      data-testid="forecast-uv-chart"
-                      className="h-[175px] w-full touch-none rounded bg-muted/15"
-                      onPointerDown={uvTooltip.onPointerDown}
-                      onPointerMove={uvTooltip.onPointerMove}
-                      onPointerLeave={uvTooltip.onPointerLeave}
-                    >
-                      <defs>
-                        <linearGradient id={uvAreaGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
-                          {UV_GRADIENT_STOPS.map((stop) => (
-                            <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.3" />
-                          ))}
-                        </linearGradient>
-                        <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
-                          {UV_GRADIENT_STOPS.map((stop) => (
-                            <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
-                          ))}
-                        </linearGradient>
-                      </defs>
-
-                      <text x={994} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(uvMax)}</text>
-                      <text x={994} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
-                      <line x1={hourlyChartLeft} y1={uvChartBottom} x2={hourlyChartRight} y2={uvChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
-
-                      {UV_BAND_LABELS.map((band) => (
-                        <text key={band.label} x={6} y={uvYFor(band.value)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
-                      ))}
-
-                      <path d={uvAreaPath} fill={`url(#${uvAreaGradientId})`} />
-                      <polyline points={uvPoints} fill="none" stroke={`url(#${uvLineGradientId})`} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-
-                      {uvHourly.map((entry, idx) => {
-                        if (idx % uvTickEvery !== 0 && idx !== uvHourly.length - 1) return null
-                        const x = hourlyXFor(idx, uvHourly.length)
-                        return (
-                          <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                        )
-                      })}
-
-                      {uvTooltipEntry && (
-                        <ChartTooltipMarker
-                          x={hourlyXFor(uvTooltip.activeIndex ?? 0, uvHourly.length)}
-                          y={uvYFor(Math.max(0, uvTooltipEntry.uvIndex))}
-                          color="rgb(249,115,22)"
-                        />
-                      )}
-                    </svg>
-                  </div>
-                </>
-              ) : (
-                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-uv-unavailable">
-                  UV index forecast unavailable for this day
-                </p>
-              )}
-            </div>
           </div>
         </div>
       </div>

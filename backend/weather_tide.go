@@ -241,6 +241,7 @@ type weatherForecastDayData struct {
 	HourlyWave           []weatherHourlyWaveData
 	HourlyPrecip         []weatherHourlyPrecipitationData
 	HourlyUV             []weatherHourlyUVData
+	HourlyCloud          []weatherHourlyCloudData
 }
 
 type weatherHourlyEntryData struct {
@@ -256,6 +257,7 @@ type weatherHourlyEntryData struct {
 
 type weatherHourlyWindData struct {
 	Label            string
+	HourOfDay        int
 	WindSpeedKts     float64
 	WindGustKts      float64
 	WindDirection    string
@@ -264,6 +266,7 @@ type weatherHourlyWindData struct {
 
 type weatherHourlyWaveData struct {
 	Label            string
+	HourOfDay        int
 	WaveHeightM      float64
 	WavePeriodS      float64
 	WaveDirectionDeg float64
@@ -273,6 +276,7 @@ type weatherHourlyWaveData struct {
 
 type weatherHourlyPrecipitationData struct {
 	Label                    string
+	HourOfDay                int
 	PrecipitationChancePct   float64
 	PrecipitationIntensityMm float64
 }
@@ -280,6 +284,14 @@ type weatherHourlyPrecipitationData struct {
 type weatherHourlyUVData struct {
 	Label   string
 	UVIndex float64
+}
+
+type weatherHourlyCloudData struct {
+	Label        string
+	HourOfDay    int
+	Condition    string
+	TemperatureF float64
+	IsDaylight   bool
 }
 
 type weatherForecastDataBundle struct {
@@ -343,6 +355,7 @@ type weatherForecastDayResponse struct {
 	HourlyWave           []weatherHourlyWaveResponse          `json:"hourly_wave"`
 	HourlyPrecip         []weatherHourlyPrecipitationResponse `json:"hourly_precip"`
 	HourlyUV             []weatherHourlyUVResponse            `json:"hourly_uv"`
+	HourlyCloud          []weatherHourlyCloudResponse         `json:"hourly_cloud"`
 }
 
 type weatherHourlyEntryResponse struct {
@@ -358,6 +371,7 @@ type weatherHourlyEntryResponse struct {
 
 type weatherHourlyWindResponse struct {
 	Label            string  `json:"label"`
+	HourOfDay        int     `json:"hour_of_day"`
 	WindSpeedKts     float64 `json:"wind_speed_kts"`
 	WindGustKts      float64 `json:"wind_gust_kts"`
 	WindDirection    string  `json:"wind_direction"`
@@ -366,6 +380,7 @@ type weatherHourlyWindResponse struct {
 
 type weatherHourlyWaveResponse struct {
 	Label            string  `json:"label"`
+	HourOfDay        int     `json:"hour_of_day"`
 	WaveHeightM      float64 `json:"wave_height_m"`
 	WavePeriodS      float64 `json:"wave_period_s"`
 	WaveDirectionDeg float64 `json:"wave_direction_deg"`
@@ -375,6 +390,7 @@ type weatherHourlyWaveResponse struct {
 
 type weatherHourlyPrecipitationResponse struct {
 	Label                    string  `json:"label"`
+	HourOfDay                int     `json:"hour_of_day"`
 	PrecipitationChancePct   float64 `json:"precipitation_chance_pct"`
 	PrecipitationIntensityMm float64 `json:"precipitation_intensity_mm"`
 }
@@ -382,6 +398,14 @@ type weatherHourlyPrecipitationResponse struct {
 type weatherHourlyUVResponse struct {
 	Label   string  `json:"label"`
 	UVIndex float64 `json:"uv_index"`
+}
+
+type weatherHourlyCloudResponse struct {
+	Label        string  `json:"label"`
+	HourOfDay    int     `json:"hour_of_day"`
+	Condition    string  `json:"condition"`
+	TemperatureF float64 `json:"temperature_f"`
+	IsDaylight   bool    `json:"is_daylight"`
 }
 
 type weatherForecastResponse struct {
@@ -778,6 +802,7 @@ func mapForecastResponse(state []weatherForecastDayData) []weatherForecastDayRes
 			HourlyWave:           mapHourlyWaveResponse(day.HourlyWave),
 			HourlyPrecip:         mapHourlyPrecipitationResponse(day.HourlyPrecip),
 			HourlyUV:             mapHourlyUVResponse(day.HourlyUV),
+			HourlyCloud:          mapHourlyCloudResponse(day.HourlyCloud),
 		})
 	}
 	return response
@@ -788,6 +813,7 @@ func mapHourlyWindResponse(entries []weatherHourlyWindData) []weatherHourlyWindR
 	for _, entry := range entries {
 		response = append(response, weatherHourlyWindResponse{
 			Label:            entry.Label,
+			HourOfDay:        entry.HourOfDay,
 			WindSpeedKts:     entry.WindSpeedKts,
 			WindGustKts:      entry.WindGustKts,
 			WindDirection:    entry.WindDirection,
@@ -802,6 +828,7 @@ func mapHourlyWaveResponse(entries []weatherHourlyWaveData) []weatherHourlyWaveR
 	for _, entry := range entries {
 		response = append(response, weatherHourlyWaveResponse{
 			Label:            entry.Label,
+			HourOfDay:        entry.HourOfDay,
 			WaveHeightM:      entry.WaveHeightM,
 			WavePeriodS:      entry.WavePeriodS,
 			WaveDirectionDeg: entry.WaveDirectionDeg,
@@ -817,6 +844,7 @@ func mapHourlyPrecipitationResponse(entries []weatherHourlyPrecipitationData) []
 	for _, entry := range entries {
 		response = append(response, weatherHourlyPrecipitationResponse{
 			Label:                    entry.Label,
+			HourOfDay:                entry.HourOfDay,
 			PrecipitationChancePct:   entry.PrecipitationChancePct,
 			PrecipitationIntensityMm: entry.PrecipitationIntensityMm,
 		})
@@ -830,6 +858,20 @@ func mapHourlyUVResponse(entries []weatherHourlyUVData) []weatherHourlyUVRespons
 		response = append(response, weatherHourlyUVResponse{
 			Label:   entry.Label,
 			UVIndex: entry.UVIndex,
+		})
+	}
+	return response
+}
+
+func mapHourlyCloudResponse(entries []weatherHourlyCloudData) []weatherHourlyCloudResponse {
+	response := make([]weatherHourlyCloudResponse, 0, len(entries))
+	for _, entry := range entries {
+		response = append(response, weatherHourlyCloudResponse{
+			Label:        entry.Label,
+			HourOfDay:    entry.HourOfDay,
+			Condition:    entry.Condition,
+			TemperatureF: entry.TemperatureF,
+			IsDaylight:   entry.IsDaylight,
 		})
 	}
 	return response
@@ -1099,6 +1141,7 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 	windSeriesByDay := buildDailyWindSeries(result, localLocation)
 	precipSeriesByDay := buildDailyPrecipitationSeries(result, localLocation)
 	uvSeriesByDay := buildDailyUVSeries(result, localLocation)
+	cloudSeriesByDay := buildDailyCloudSeries(result, localLocation)
 
 	waveSeriesByDay, waveErr := fetchOpenMeteoMarineForecast(latitude, longitude)
 	if waveErr != nil {
@@ -1227,6 +1270,7 @@ func fetchWeatherKitForecastBundleData(latitude, longitude float64, daysCount in
 			HourlyWave:           waveSeriesByDay[dayKey],
 			HourlyPrecip:         precipSeriesByDay[dayKey],
 			HourlyUV:             uvSeriesByDay[dayKey],
+			HourlyCloud:          cloudSeriesByDay[dayKey],
 		})
 	}
 
@@ -1294,6 +1338,7 @@ func buildDailyWindSeries(result map[string]any, localLocation *time.Location) m
 		dayKey := localTime.Format("2006-01-02")
 		series[dayKey] = append(series[dayKey], weatherHourlyWindData{
 			Label:            localTime.Format("3PM"),
+			HourOfDay:        localTime.Hour(),
 			WindSpeedKts:     windSpeedKts,
 			WindGustKts:      windGustKts,
 			WindDirection:    windDirection,
@@ -1348,6 +1393,7 @@ func buildDailyPrecipitationSeries(result map[string]any, localLocation *time.Lo
 		dayKey := localTime.Format("2006-01-02")
 		series[dayKey] = append(series[dayKey], weatherHourlyPrecipitationData{
 			Label:                    localTime.Format("3PM"),
+			HourOfDay:                localTime.Hour(),
 			PrecipitationChancePct:   chancePct,
 			PrecipitationIntensityMm: intensityMm,
 		})
@@ -1396,6 +1442,69 @@ func buildDailyUVSeries(result map[string]any, localLocation *time.Location) map
 		series[dayKey] = append(series[dayKey], weatherHourlyUVData{
 			Label:   localTime.Format("3PM"),
 			UVIndex: uvValue,
+		})
+	}
+
+	return series
+}
+
+// buildDailyCloudSeries buckets WeatherKit's hourly forecast into per-day
+// (local date) hourly cloud-condition/temperature series, keyed by
+// "2006-01-02". Condition and daylight come straight from WeatherKit's own
+// per-hour conditionCode/daylight fields rather than being re-derived
+// client-side, so the frontend can reuse the existing condition-to-icon
+// mapping unchanged.
+func buildDailyCloudSeries(result map[string]any, localLocation *time.Location) map[string][]weatherHourlyCloudData {
+	forecastHourly, ok := result["forecastHourly"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	rawHours, ok := forecastHourly["hours"].([]any)
+	if !ok {
+		return nil
+	}
+
+	series := make(map[string][]weatherHourlyCloudData)
+	for _, rawHour := range rawHours {
+		hourMap, ok := rawHour.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		forecastStart, ok := hourMap["forecastStart"].(string)
+		if !ok {
+			continue
+		}
+
+		parsed, err := time.Parse(time.RFC3339, forecastStart)
+		if err != nil {
+			continue
+		}
+		localTime := parsed.In(localLocation)
+
+		isDaylight := false
+		if daylight, ok := hourMap["daylight"].(bool); ok {
+			isDaylight = daylight
+		}
+
+		condition := "Unknown"
+		if code, ok := hourMap["conditionCode"].(string); ok {
+			condition = formatWeatherConditionAt(code, localTime, localLocation, false)
+		}
+
+		temperatureF := -1.0
+		if tempC, ok := hourMap["temperature"].(float64); ok {
+			temperatureF = (tempC * 9 / 5) + 32
+		}
+
+		dayKey := localTime.Format("2006-01-02")
+		series[dayKey] = append(series[dayKey], weatherHourlyCloudData{
+			Label:        localTime.Format("3PM"),
+			HourOfDay:    localTime.Hour(),
+			Condition:    condition,
+			TemperatureF: temperatureF,
+			IsDaylight:   isDaylight,
 		})
 	}
 
@@ -1731,7 +1840,7 @@ func parseOpenMeteoMarineResponse(result map[string]any) (map[string][]weatherHo
 			continue
 		}
 
-		point := weatherHourlyWaveData{Label: parsed.Format("3PM")}
+		point := weatherHourlyWaveData{Label: parsed.Format("3PM"), HourOfDay: parsed.Hour()}
 		if i < len(heights) {
 			if h, ok := heights[i].(float64); ok {
 				point.WaveHeightM = h

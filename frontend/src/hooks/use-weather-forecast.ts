@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface WeatherHourlyWindPoint {
   label: string;
+  hourOfDay: number;
   windSpeed: number;
   windGust: number;
   windDirection: string;
@@ -10,6 +11,7 @@ export interface WeatherHourlyWindPoint {
 
 export interface WeatherHourlyWavePoint {
   label: string;
+  hourOfDay: number;
   waveHeightM: number;
   wavePeriodS: number;
   waveDirectionDeg: number;
@@ -19,6 +21,7 @@ export interface WeatherHourlyWavePoint {
 
 export interface WeatherHourlyPrecipPoint {
   label: string;
+  hourOfDay: number;
   precipChancePct: number;
   precipIntensityMm: number;
 }
@@ -26,6 +29,14 @@ export interface WeatherHourlyPrecipPoint {
 export interface WeatherHourlyUVPoint {
   label: string;
   uvIndex: number;
+}
+
+export interface WeatherHourlyCloudPoint {
+  label: string;
+  hourOfDay: number;
+  condition: string;
+  temperatureF: number;
+  isDaylight: boolean;
 }
 
 export interface WeatherForecastDay {
@@ -48,6 +59,7 @@ export interface WeatherForecastDay {
   hourlyWave: WeatherHourlyWavePoint[];
   hourlyPrecip: WeatherHourlyPrecipPoint[];
   hourlyUV: WeatherHourlyUVPoint[];
+  hourlyCloud: WeatherHourlyCloudPoint[];
 }
 
 export interface WeatherHourlyEntry {
@@ -63,6 +75,7 @@ export interface WeatherHourlyEntry {
 
 interface WeatherHourlyWindApi {
   label?: string;
+  hour_of_day?: number;
   wind_speed_kts?: number;
   wind_gust_kts?: number;
   wind_direction?: string;
@@ -71,6 +84,7 @@ interface WeatherHourlyWindApi {
 
 interface WeatherHourlyWaveApi {
   label?: string;
+  hour_of_day?: number;
   wave_height_m?: number;
   wave_period_s?: number;
   wave_direction_deg?: number;
@@ -80,6 +94,7 @@ interface WeatherHourlyWaveApi {
 
 interface WeatherHourlyPrecipApi {
   label?: string;
+  hour_of_day?: number;
   precipitation_chance_pct?: number;
   precipitation_intensity_mm?: number;
 }
@@ -87,6 +102,14 @@ interface WeatherHourlyPrecipApi {
 interface WeatherHourlyUVApi {
   label?: string;
   uv_index?: number;
+}
+
+interface WeatherHourlyCloudApi {
+  label?: string;
+  hour_of_day?: number;
+  condition?: string;
+  temperature_f?: number;
+  is_daylight?: boolean;
 }
 
 interface WeatherForecastDayApi {
@@ -109,6 +132,7 @@ interface WeatherForecastDayApi {
   hourly_wave?: WeatherHourlyWaveApi[];
   hourly_precip?: WeatherHourlyPrecipApi[];
   hourly_uv?: WeatherHourlyUVApi[];
+  hourly_cloud?: WeatherHourlyCloudApi[];
 }
 
 interface WeatherForecastEnvelopeApi {
@@ -185,6 +209,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
               hourlyWind: Array.isArray(day.hourly_wind)
                 ? day.hourly_wind.map((entry) => ({
                     label: entry.label || '—',
+                    hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
                     windSpeed: typeof entry.wind_speed_kts === 'number' ? entry.wind_speed_kts : -1,
                     windGust: typeof entry.wind_gust_kts === 'number' ? entry.wind_gust_kts : -1,
                     windDirection: entry.wind_direction || '—',
@@ -194,6 +219,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
               hourlyWave: Array.isArray(day.hourly_wave)
                 ? day.hourly_wave.map((entry) => ({
                     label: entry.label || '—',
+                    hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
                     waveHeightM: typeof entry.wave_height_m === 'number' ? entry.wave_height_m : -1,
                     wavePeriodS: typeof entry.wave_period_s === 'number' ? entry.wave_period_s : -1,
                     waveDirectionDeg: typeof entry.wave_direction_deg === 'number' ? entry.wave_direction_deg : -1,
@@ -204,6 +230,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
               hourlyPrecip: Array.isArray(day.hourly_precip)
                 ? day.hourly_precip.map((entry) => ({
                     label: entry.label || '—',
+                    hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
                     precipChancePct: typeof entry.precipitation_chance_pct === 'number' ? entry.precipitation_chance_pct : 0,
                     precipIntensityMm: typeof entry.precipitation_intensity_mm === 'number' ? entry.precipitation_intensity_mm : 0,
                   }))
@@ -212,6 +239,15 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                 ? day.hourly_uv.map((entry) => ({
                     label: entry.label || '—',
                     uvIndex: typeof entry.uv_index === 'number' ? entry.uv_index : 0,
+                  }))
+                : [],
+              hourlyCloud: Array.isArray(day.hourly_cloud)
+                ? day.hourly_cloud.map((entry) => ({
+                    label: entry.label || '—',
+                    hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
+                    condition: entry.condition || 'Unknown',
+                    temperatureF: typeof entry.temperature_f === 'number' ? entry.temperature_f : -1,
+                    isDaylight: Boolean(entry.is_daylight),
                   }))
                 : [],
             };
