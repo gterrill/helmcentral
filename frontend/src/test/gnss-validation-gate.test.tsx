@@ -2,9 +2,14 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
 
-function Probe({ positionCritical }: { positionCritical: boolean }) {
-  const watch = useAnchorWatch(-25.2939, 152.9103, 'anchored', 1, positionCritical)
-  return <div data-testid="anchor-state">{watch.anchorState}</div>
+function Probe({ gnssCritical }: { gnssCritical: boolean }) {
+  const watch = useAnchorWatch(-25.2939, 152.9103, 'anchored', 1, gnssCritical)
+  return (
+    <div>
+      <div data-testid="anchor-state">{watch.anchorState}</div>
+      <div data-testid="gnss-critical">{String(watch.gnssCritical)}</div>
+    </div>
+  )
 }
 
 describe('GNSS validation gate', () => {
@@ -20,11 +25,16 @@ describe('GNSS validation gate', () => {
     }))
   })
 
-  it('forces anchor watch into critical mode when the GPS fix is corrupt', async () => {
-    render(<Probe positionCritical />)
+  it('surfaces a corrupt GPS fix as a diagnostic flag without forcing the drag alarm', async () => {
+    render(<Probe gnssCritical />)
 
     await waitFor(() => {
-      expect(screen.getByTestId('anchor-state')).toHaveTextContent('critical')
+      expect(screen.getByTestId('gnss-critical')).toHaveTextContent('true')
     })
+
+    // Vessel is within radius of the anchor point, so the alarm itself
+    // should stay 'set' - a corrupt GPS fix is surfaced separately rather
+    // than being conflated with "the boat has dragged."
+    expect(screen.getByTestId('anchor-state')).toHaveTextContent('set')
   })
 })

@@ -706,6 +706,7 @@ export function App() {
 
                 <RodeScopeTile
                   anchorState={anchorWatch.anchorState}
+                  gnssCritical={anchorWatch.gnssCritical}
                   rodeDeployedM={anchorWatch.rodeDeployedM}
                   seaState={anchorWatch.seaState}
                   seabedType={anchorWatch.seabedType}

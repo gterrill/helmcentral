@@ -10,7 +10,7 @@ interface UseAnchorAlarmResult {
 /**
  * Manages anchor watch alarm audio playback and screen wake lock.
  * 
- * - Plays a looping klaxon when anchorState transitions into 'dragging' or 'critical'
+ * - Plays a looping klaxon when anchorState transitions into 'dragging'
  * - Keeps alarm silent once user calls silence(), resets when state leaves alarm zone
  * - Requests screen wake lock when alarm is active (prevents tablet sleep)
  * - Handles browser autoplay policy by lazy-initializing AudioContext
@@ -190,8 +190,8 @@ export function useAnchorAlarm(anchorState: AnchorWatchState): UseAnchorAlarmRes
    * Main effect: monitor anchorState and control alarm playback
    */
   useEffect(() => {
-    const isInAlarmState = anchorState === 'dragging' || anchorState === 'critical'
-    const wasInAlarmState = prevStateRef.current === 'dragging' || prevStateRef.current === 'critical'
+    const isInAlarmState = anchorState === 'dragging'
+    const wasInAlarmState = prevStateRef.current === 'dragging'
 
     // State transition into alarm zone
     if (isInAlarmState && !wasInAlarmState) {

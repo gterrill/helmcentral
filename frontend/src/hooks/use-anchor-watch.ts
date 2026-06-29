@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 
-export type AnchorWatchState = 'none' | 'set' | 'dragging' | 'critical'
+export type AnchorWatchState = 'none' | 'set' | 'dragging'
 
 interface AnchorWatchServerState {
   active: boolean
@@ -17,6 +17,7 @@ interface AnchorWatchServerState {
 
 export interface AnchorWatchResult {
   anchorState: AnchorWatchState
+  gnssCritical: boolean
   anchorLat: number | null
   anchorLon: number | null
   radiusMeters: number
@@ -52,7 +53,7 @@ export function useAnchorWatch(
   currentLon: number | null,
   navigationState: string | null,
   refreshInterval: number,
-  positionCritical = false,
+  gnssCritical = false,
 ): AnchorWatchResult {
   const [serverState, setServerState] = useState<AnchorWatchServerState>({ active: false })
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -171,11 +172,13 @@ export function useAnchorWatch(
     bearingDeg = Math.round(bearingDegrees(anchorLat, anchorLon, currentLat, currentLon))
   }
 
+  // A corrupt/jammed GPS fix is surfaced via gnssCritical as a diagnostic,
+  // not folded into anchorState - a brief bad fix (e.g. GPS resettling after
+  // a laptop wakes from sleep) shouldn't sound the same alarm as an actual
+  // drag, which is determined purely by distance from the anchor point.
   let anchorState: AnchorWatchState = 'none'
   if (serverState.active) {
-    if (positionCritical) {
-      anchorState = 'critical'
-    } else if (distanceMeters !== null && distanceMeters > radiusMeters + DRAG_BUFFER_METERS) {
+    if (distanceMeters !== null && distanceMeters > radiusMeters + DRAG_BUFFER_METERS) {
       anchorState = 'dragging'
     } else {
       anchorState = 'set'
@@ -187,6 +190,7 @@ export function useAnchorWatch(
 
   return {
     anchorState,
+    gnssCritical,
     anchorLat,
     anchorLon,
     radiusMeters,

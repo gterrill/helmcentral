@@ -82,20 +82,6 @@ describe('useAnchorAlarm', () => {
     expect(result.current.isSilenced).toBe(false)
   })
 
-  it('should start alarm when transitioning to "critical"', () => {
-    const { rerender, result } = renderHook(
-      ({ state }: { state: AnchorWatchState }) => useAnchorAlarm(state),
-      { initialProps: { state: 'set' as AnchorWatchState } },
-    )
-
-    act(() => {
-      rerender({ state: 'critical' as AnchorWatchState })
-    })
-
-    expect(result.current.isAlarming).toBe(true)
-    expect(result.current.isSilenced).toBe(false)
-  })
-
   it('should silence alarm when silence() is called', () => {
     const { result } = renderHook(
       ({ state }: { state: AnchorWatchState }) => useAnchorAlarm(state),
@@ -132,7 +118,7 @@ describe('useAnchorAlarm', () => {
 
     // Re-enter alarm zone
     act(() => {
-      rerender({ state: 'critical' as AnchorWatchState })
+      rerender({ state: 'dragging' as AnchorWatchState })
     })
     expect(result.current.isAlarming).toBe(true)
     expect(result.current.isSilenced).toBe(false) // Should reset
@@ -153,20 +139,4 @@ describe('useAnchorAlarm', () => {
     expect(result.current.isAlarming).toBe(false)
   })
 
-  it('should handle state transitions between dragging and critical', () => {
-    const { rerender, result } = renderHook(
-      ({ state }: { state: AnchorWatchState }) => useAnchorAlarm(state),
-      { initialProps: { state: 'dragging' as AnchorWatchState } },
-    )
-
-    expect(result.current.isAlarming).toBe(true)
-
-    // Transition to critical (both are alarm states)
-    act(() => {
-      rerender({ state: 'critical' as AnchorWatchState })
-    })
-
-    expect(result.current.isAlarming).toBe(true)
-    expect(result.current.isSilenced).toBe(false) // Silence should reset
-  })
 })

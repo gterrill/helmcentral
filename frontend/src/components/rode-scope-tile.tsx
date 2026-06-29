@@ -9,6 +9,7 @@ const METERS_TO_FEET = 3.28084
 
 interface RodeScopeTileProps {
   anchorState: AnchorWatchState
+  gnssCritical: boolean
   rodeDeployedM: number
   seaState: SeaState
   seabedType: SeabedType
@@ -25,6 +26,7 @@ function toDisplayDistance(meters: number, isImperial: boolean): number {
 
 export function RodeScopeTile({
   anchorState,
+  gnssCritical,
   rodeDeployedM,
   seaState,
   seabedType,
@@ -117,7 +119,6 @@ export function RodeScopeTile({
     : '—'
 
   const isDragging = anchorState === 'dragging'
-  const isCritical = anchorState === 'critical'
   const isInactive = anchorState === 'none'
 
   const scopeBadgeClass = scopeStatus === 'ok'
@@ -138,9 +139,9 @@ export function RodeScopeTile({
 
   return (
     <Tile title="Rode & Scope" icon={<Anchor className="h-3.5 w-3.5" />}>
-      {isCritical && (
-        <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-          CRITICAL: GPS Signal Corrupt/Jammed
+      {gnssCritical && (
+        <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+          GPS signal degraded — position may be inaccurate
         </div>
       )}
       {isDragging && (
