@@ -259,17 +259,19 @@ export function AnchorWatchMap({
     if (canvas) canvas.style.cursor = cursor
   }, [])
 
+  const handleCancel = useCallback(() => {
+    if (editMode === 'radius') setLiveRadius(null)
+    setGhostAnchor(null)
+    setEditMode('none')
+    setCursor('grab')
+  }, [editMode, setCursor])
+
   // ── Keyboard handler ─────────────────────────────────────────────────────
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (editMode === 'none') return
       if (e.key === 'Escape') {
-        if (editMode === 'radius') {
-          setLiveRadius(null)
-        }
-        setEditMode('none')
-        setGhostAnchor(null)
-        setCursor('grab')
+        handleCancel()
         return
       }
       if (e.key === 'Enter') {
@@ -306,7 +308,7 @@ export function AnchorWatchMap({
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [editMode, ghostAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor])
+  }, [editMode, ghostAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor, handleCancel])
 
   // ── Map click handler ────────────────────────────────────────────────────
   const handleMapClick = useCallback(
@@ -407,9 +409,64 @@ export function AnchorWatchMap({
         setLiveRadius(radiusMeters)
         setEditMode('radius')
         setCursor('ew-resize')
+        // Imperatively disable drag pan so the ongoing touch/drag doesn't also pan the map
+        mapRef.current?.dragPan.disable()
       }
     },
     [editMode, anchorLat, anchorLon, displayRadius, radiusMeters, setCursor],
+  )
+
+  // ── Touch start: circle-edge detection for tablet radius adjustment ──────
+  const handleTouchStartEdge = useCallback(
+    (e: maplibregl.MapTouchEvent) => {
+      if (editMode === 'radius' && liveRadius !== null) {
+        suppressNextMapClickRef.current = true
+        onRadiusChange(liveRadius)
+        setLiveRadius(null)
+        setEditMode('none')
+        setCursor('grab')
+        return
+      }
+      if (editMode !== 'none') return
+      const map = mapRef.current
+      if (!map) return
+      const circleEdgePoint = map.project([anchorLon, anchorLat])
+      const touchPoint = e.point
+      const dx = touchPoint.x - circleEdgePoint.x
+      const dy = touchPoint.y - circleEdgePoint.y
+      const pixelDist = Math.sqrt(dx * dx + dy * dy)
+      const radiusEdge = map.project(
+        destinationPoint(anchorLat, anchorLon, 0, displayRadius).reverse() as [number, number],
+      )
+      const pixelRadius = Math.sqrt(
+        (radiusEdge.x - circleEdgePoint.x) ** 2 + (radiusEdge.y - circleEdgePoint.y) ** 2,
+      )
+      // Larger hit target for touch (25px vs 15px for mouse)
+      if (Math.abs(pixelDist - pixelRadius) < 25) {
+        suppressNextMapClickRef.current = true
+        originalRadiusRef.current = radiusMeters
+        setLiveRadius(radiusMeters)
+        setEditMode('radius')
+        setCursor('ew-resize')
+        mapRef.current?.dragPan.disable()
+      }
+    },
+    [editMode, liveRadius, anchorLat, anchorLon, displayRadius, radiusMeters, onRadiusChange, setCursor],
+  )
+
+  // ── Touch move: update ghost anchor or live radius on tablet ─────────────
+  const handleTouchMove = useCallback(
+    (e: maplibregl.MapTouchEvent) => {
+      if (editMode === 'radius') {
+        const { lat, lng } = e.lngLat
+        const newRadius = haversineMeters(anchorLat, anchorLon, lat, lng)
+        setLiveRadius(Math.max(5, newRadius))
+      } else if (editMode === 'reposition') {
+        const { lat, lng } = e.lngLat
+        setGhostAnchor({ lat, lon: lng })
+      }
+    },
+    [editMode, anchorLat, anchorLon],
   )
 
   // ── Double-click on map confirms radius edit ─────────────────────────────
@@ -510,9 +567,12 @@ export function AnchorWatchMap({
         onMouseMove={handleMouseMove}
         onDblClick={handleDblClick}
         onMouseDown={handleCircleEdgeClick}
+        onTouchStart={handleTouchStartEdge}
+        onTouchMove={handleTouchMove}
         attributionControl={false}
         dragRotate={false}
         touchPitch={false}
+        dragPan={editMode === 'none'}
       >
         {/* Alarm circle fill */}
         <Source id="alarm-circle" type="geojson" data={circleGeoJSON}>
@@ -792,9 +852,18 @@ export function AnchorWatchMap({
       </Map>
 
       {editMode !== 'none' && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-          <div className="rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/70 backdrop-blur">
-            Enter to confirm, Esc to cancel
+        <div className="pointer-events-auto absolute inset-x-0 bottom-4 flex justify-center">
+          <div className="flex items-center gap-2 rounded-full bg-black/65 py-2 pl-4 pr-2 backdrop-blur">
+            <span className="text-xs text-white/70">
+              {editMode === 'reposition' ? 'Tap map to place anchor' : 'Tap map to set radius'}
+            </span>
+            <button
+              onClick={handleCancel}
+              className="rounded-full bg-white/15 px-3 py-1 text-xs font-medium text-white hover:bg-white/25 active:scale-95"
+              style={{ transition: 'background-color 150ms ease-out' }}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
