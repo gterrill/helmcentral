@@ -98,6 +98,34 @@ func TestFindLastTideTurningPointIgnoresNoise(t *testing.T) {
 	}
 }
 
+// TestFindLastTideTurningPointNoFalsePositiveFromAnchorNoise checks that
+// sonar noise from a boat swinging at anchor (~0.2m variations) is NOT
+// mistaken for a real tide turning point.  With the original 0.05m threshold
+// the first ±0.12m swing would trigger a false IsHigh=true detection.
+func TestFindLastTideTurningPointNoFalsePositiveFromAnchorNoise(t *testing.T) {
+	points := []depthTrendPoint{
+		depthPoint(150, 2.10),
+		depthPoint(140, 2.22), // +0.12 from start
+		depthPoint(130, 2.05), // −0.17 from peak — false high-tide at 0.05m threshold
+		depthPoint(120, 2.18),
+		depthPoint(110, 2.30),
+		depthPoint(100, 2.08),
+		depthPoint(90, 2.25),
+		depthPoint(80, 2.15),
+		depthPoint(70, 2.20),
+		depthPoint(60, 2.10),
+		depthPoint(50, 2.18),
+		depthPoint(40, 2.05),
+		depthPoint(30, 2.22),
+		depthPoint(20, 2.12),
+		depthPoint(10, 2.18),
+		depthPoint(0, 2.20),
+	}
+	if _, ok := findLastTideTurningPoint(points); ok {
+		t.Fatalf("expected no turning point for anchor-swing noise; false positive detected")
+	}
+}
+
 func TestFindLastTideTurningPointNoReversal(t *testing.T) {
 	points := []depthTrendPoint{
 		depthPoint(40, 4.0),

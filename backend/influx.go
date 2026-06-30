@@ -153,8 +153,10 @@ func queryInfluxDepthTrendSince(start time.Time) []depthTrendPoint {
 }
 
 // tideTurnThresholdM is the minimum depth change required to confirm a
-// reversal in tide direction, filtering out sensor/wave noise.
-const tideTurnThresholdM = 0.05
+// reversal in tide direction.  0.3m filters out typical sonar noise from
+// boat swing at anchor (≤0.2m) while still detecting real tidal movements
+// (tidal ranges in these waters are 1m+).
+const tideTurnThresholdM = 0.3
 
 type tideTurningPoint struct {
 	Time   time.Time
