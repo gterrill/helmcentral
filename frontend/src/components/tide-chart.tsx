@@ -5,7 +5,7 @@ import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 
 const AXIS_LABEL_FONT_SIZE = '10'
-const AXIS_LABEL_COLOR = 'rgba(71,85,105,0.95)'
+const AXIS_LABEL_COLOR = 'hsl(var(--muted-foreground))'
 const METERS_TO_FEET = 3.28084
 
 const CHART_LEFT = 36
@@ -261,8 +261,8 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         })}
 
         <line x1={nowX} y1={CHART_TOP} x2={nowX} y2={CHART_BOTTOM} stroke="rgba(199,137,0,0.7)" strokeWidth="1.5" strokeDasharray="4 3" />
-        <circle cx={nowX} cy={nowY} r="3.5" fill="rgba(199,137,0,0.95)" />
-        <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="rgba(199,137,0,0.95)">Now</text>
+        <circle cx={nowX} cy={nowY} r="3.5" fill="hsl(var(--primary))" />
+        <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--primary))">Now</text>
 
         {tideTooltipEntry && (
           <TideChartTooltipMarker

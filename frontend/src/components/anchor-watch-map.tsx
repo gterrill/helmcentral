@@ -757,7 +757,7 @@ export function AnchorWatchMap({
                   <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
                     <div className="truncate">{vessel.name}</div>
                     {isSelected && transient && (
-                      <div className="whitespace-nowrap text-[8px] font-medium tracking-normal">
+                      <div className="whitespace-nowrap text-[9px] font-medium tracking-normal">
                         {formatTransientDistance(transient.distanceM)} · {Math.round(transient.bearing)}°
                       </div>
                     )}
@@ -931,7 +931,7 @@ export function AnchorWatchMap({
               live && 'bg-sky-500/10',
             )}
           >
-            <p className={cn('text-[9px] uppercase tracking-[0.16em] text-white/60', live && 'text-sky-200')}>
+            <p className={cn('text-[9px] uppercase tracking-[0.16em] text-white/80', live && 'text-sky-200')}>
               {label}
             </p>
             {label === 'Current' ? (
@@ -945,7 +945,7 @@ export function AnchorWatchMap({
                 )}
                 <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
                   {value}
-                  <span className="ml-0.5 text-[11px] text-white/50">{unit}</span>
+                  <span className="ml-0.5 text-[11px] text-white/80">{unit}</span>
                 </p>
               </div>
             ) : (
@@ -956,7 +956,7 @@ export function AnchorWatchMap({
                 style={{ fontSize: '1.1rem' }}
               >
                 {value}
-                <span className="ml-0.5 text-[11px] text-white/50">{unit}</span>
+                <span className="ml-0.5 text-[11px] text-white/80">{unit}</span>
               </p>
             )}
           </div>

@@ -127,10 +127,10 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
               <text
                 x={chartLeft - 4}
                 y={y + 4}
-                fontSize="13"
+                fontSize="10"
                 fontWeight="600"
                 textAnchor="end"
-                fill="rgba(71,85,105,0.95)"
+                fill="hsl(var(--muted-foreground))"
               >
                 {fmt(tick)}
               </text>
@@ -170,10 +170,10 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
               <text
                 x={x}
                 y={chartTop - 9}
-                fontSize="13"
+                fontSize="10"
                 fontWeight="600"
                 textAnchor={tickIdx === 0 ? 'start' : tickIdx === 2 ? 'end' : 'middle'}
-                fill="rgba(71,85,105,0.95)"
+                fill="hsl(var(--muted-foreground))"
               >
                 {fmtTime(points[idx].time)}
               </text>
