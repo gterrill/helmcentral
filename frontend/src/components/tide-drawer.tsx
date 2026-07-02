@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { formatRefreshAge } from '@/components/forecast-drawer'
-import { TideChart } from '@/components/tide-chart'
+import { TideChart, TidePhaseBadge } from '@/components/tide-chart'
 import { TideStationPicker } from '@/components/tide-station-picker'
 import { useTideChart } from '@/hooks/use-tide-chart'
 import { useTideSettings } from '@/hooks/use-tide-settings'
+import { classifyTidePhase } from '@/lib/tide-phase'
 
 const STORM_GLASS_STATION_ID = 'vessel-position'
 
@@ -90,6 +91,7 @@ export function TideDrawer({ isImperial }: TideDrawerProps) {
       ? (chart?.station.name || 'Current Vessel Position')
       : (tideStationName || chart?.station.name || '')
   const displayStationState = chart?.station.state
+  const tidePhase = chart ? classifyTidePhase(chart.extremes, new Date()) : null
 
   return (
     <div className="space-y-4 pb-4">
@@ -100,6 +102,7 @@ export function TideDrawer({ isImperial }: TideDrawerProps) {
             {displayStationName}
             {displayStationState && <span className="ml-1 text-sm text-muted-foreground">({displayStationState})</span>}
           </p>
+          {tidePhase && <TidePhaseBadge phase={tidePhase} className="mt-0.5" />}
         </div>
         {tideProvider === 'bom' && (
           <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowPicker((prev) => !prev)}>

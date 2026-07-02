@@ -3,6 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 
 import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
+import { classifyTidePhase } from '@/lib/tide-phase'
+import { cn } from '@/lib/utils'
 
 const AXIS_LABEL_FONT_SIZE = '10'
 const AXIS_LABEL_COLOR = 'hsl(var(--muted-foreground))'
@@ -76,6 +78,24 @@ function TideChartTooltipMarker({ x, y, color }: { x: number; y: number; color: 
   return <circle pointerEvents="none" cx={x} cy={y} r="5" fill={color} stroke="white" strokeWidth="2" />
 }
 
+// Amber for spring (bigger swings), teal for neap (calmer) - matching the
+// app's existing primary/secondary accent tokens. Renders nothing outside a
+// clear spring/neap window (see classifyTidePhase).
+export function TidePhaseBadge({ phase, className }: { phase: 'spring' | 'neap' | null; className?: string }) {
+  if (!phase) return null
+  return (
+    <span
+      className={cn(
+        'text-[10px] font-semibold uppercase tracking-[0.16em]',
+        phase === 'spring' ? 'text-primary' : 'text-secondary',
+        className,
+      )}
+    >
+      {phase === 'spring' ? 'Spring Tide' : 'Neap Tide'}
+    </span>
+  )
+}
+
 // The floating time / prominent-value / secondary-value bubble, positioned
 // at the pointer's X (clamped so it can't run off either edge of the chart)
 // right above the chart - never behind a touch point, never elsewhere on
@@ -121,6 +141,8 @@ export function TideChart({ chart, isImperial }: TideChartProps) {
   const sortedExtremes = [...chart.extremes].sort(
     (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
   )
+
+  const tidePhase = classifyTidePhase(chart.extremes, new Date(now))
 
   const visibleExtremes = sortedExtremes.filter((extreme) => {
     const t = new Date(extreme.time).getTime()
@@ -201,6 +223,9 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
 
   return (
     <div className="relative" ref={containerRef}>
+      {tidePhase && (
+        <TidePhaseBadge phase={tidePhase} className="absolute right-2 top-2 z-10" />
+      )}
       {tideTooltipEntry && tideTooltipTime && (
         <TideChartTooltipBubble
           pixelX={tideTooltip.tooltipPixelX ?? 0}
