@@ -1,14 +1,46 @@
-import { TriangleAlert } from 'lucide-react'
+import { useState } from 'react'
+
+import { TriangleAlert, X } from 'lucide-react'
 
 import type { MarineWarnings } from '@/hooks/use-marine-warnings'
 
-// A persistent, non-dismissing safety banner - not a toast. Renders nothing
-// when there is no active warning for the vessel's own zone (see
+const DISMISSED_SIGNATURE_STORAGE_KEY = 'helmcentral.marineWarningBanner.dismissedSignature'
+
+// A stable string representing the currently-active warning content, e.g.
+// "IDQ20085:Sunday 5 July:Strong Wind Warning|IDQ21285:Sunday 5 July:Hazardous Surf Warning".
+// Used to make dismissal content-aware: dismissing the banner only suppresses
+// it for this exact combination of warnings. If any warning changes (new
+// zone, new day, new type, or an entirely different product), the signature
+// changes and the banner reappears automatically, even though the user
+// already dismissed a previous, different warning.
+function buildWarningSignature(warnings: MarineWarnings): string {
+  const parts = warnings.bulletins.flatMap((bulletin) =>
+    bulletin.sections.map((section) => `${bulletin.productId}:${section.day}:${section.warningType}`),
+  )
+  return parts.sort().join('|')
+}
+
+function readStoredSignature(): string | null {
+  try {
+    return localStorage.getItem(DISMISSED_SIGNATURE_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+// A persistent safety banner - not a toast - that clears itself
+// automatically once the warning is no longer active for this zone (see
 // useMarineWarnings: bulletins are pre-filtered to has_active_warning_for_zone
 // and non-cancellation sections only, so a warning active elsewhere in the
-// same state never shows up here). Re-evaluated on every poll, so it clears
-// itself automatically once the warning is no longer active for this zone.
+// same state never shows up here). The only other way it disappears is a
+// manual dismiss click; nothing here is time-based. Dismissal is
+// content-aware and persisted in localStorage keyed by a signature of the
+// currently-active warnings, so a page reload mid-passage won't immediately
+// re-surface a warning already acknowledged this session - but a genuinely
+// new/different warning still shows regardless of any prior dismissal.
 export function MarineWarningBanner({ warnings }: { warnings: MarineWarnings | null }) {
+  const [dismissedSignature, setDismissedSignature] = useState<string | null>(() => readStoredSignature())
+
   if (!warnings || warnings.bulletins.length === 0) return null
 
   const groups = warnings.bulletins
@@ -26,11 +58,32 @@ export function MarineWarningBanner({ warnings }: { warnings: MarineWarnings | n
   const rowCount = groups.reduce((count, group) => count + group.rows.length, 0)
   if (rowCount === 0) return null
 
+  const signature = buildWarningSignature(warnings)
+  if (signature && signature === dismissedSignature) return null
+
+  const handleDismiss = () => {
+    setDismissedSignature(signature)
+    try {
+      localStorage.setItem(DISMISSED_SIGNATURE_STORAGE_KEY, signature)
+    } catch {
+      // Best-effort persistence only - dismissal still works for this
+      // session even if localStorage is unavailable (e.g. private mode).
+    }
+  }
+
   return (
     <div
       role="alert"
-      className="rounded-lg border border-destructive bg-destructive/10 px-4 py-3 text-destructive shadow-sm"
+      className="relative rounded-lg border border-destructive bg-destructive/10 px-4 py-3 pr-9 text-destructive shadow-sm"
     >
+      <button
+        type="button"
+        onClick={handleDismiss}
+        aria-label="Dismiss"
+        className="absolute right-2 top-2 rounded-full p-1 text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+      >
+        <X className="h-4 w-4" />
+      </button>
       <div className="flex items-start gap-3">
         <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" />
         <div className="min-w-0 flex-1 space-y-1.5">

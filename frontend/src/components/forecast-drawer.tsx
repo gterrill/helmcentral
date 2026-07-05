@@ -4,7 +4,9 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { WindWarningNotice } from '@/components/wind-warning-notice'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
+import type { MarineWarnings } from '@/hooks/use-marine-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 
 interface ForecastDay {
@@ -41,6 +43,7 @@ interface ForecastDrawerProps {
   ttlSeconds?: number | null
   onRetry?: () => void
   unit: 'imperial' | 'metric'
+  activeMarineWarning?: MarineWarnings | null
 }
 
 function fahrenheitToCelsius(tempF: number) {
@@ -403,6 +406,7 @@ export function ForecastDrawer({
   error = null,
   onRetry,
   unit,
+  activeMarineWarning = null,
 }: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
@@ -597,6 +601,7 @@ export function ForecastDrawer({
 
   return (
     <div className="space-y-4 pb-4">
+      <WindWarningNotice warnings={activeMarineWarning} />
       {hourlyEntries.length > 0 && (
     <div className="overflow-hidden rounded-[26px] border border-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]">
       <div className="border-b border-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">

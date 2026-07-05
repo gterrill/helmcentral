@@ -13,6 +13,7 @@ export interface MarineWarningBulletin {
   issuedAt: string | null
   sections: MarineWarningSection[]
   detailsUrl: string
+  category: string
 }
 
 export interface MarineWarnings {
@@ -34,6 +35,7 @@ interface MarineWarningsBulletinApi {
   issued_at?: string
   sections?: MarineWarningsSectionApi[]
   details_url?: string
+  category?: string
   has_active_warning?: boolean
   has_active_warning_for_zone?: boolean
 }
@@ -88,6 +90,7 @@ export function useMarineWarnings(refreshIntervalSeconds = 3600) {
                 issuedAtRaw: bulletin.issued_at_raw ?? '',
                 issuedAt: typeof bulletin.issued_at === 'string' ? bulletin.issued_at : null,
                 detailsUrl: bulletin.details_url ?? '',
+                category: bulletin.category ?? '',
                 sections: Array.isArray(bulletin.sections)
                   ? bulletin.sections
                       .filter(

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // Fixtures below were captured live from the BOM anonymous FTP mirror
 // (ftp://ftp.bom.gov.au/anon/gen/fwo/<PRODUCT_ID>.txt) during planning.
@@ -289,4 +292,93 @@ func containsZone(zones []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// TestBuildMarineWarningsResponse_CategorizesWindAndSurfBulletins verifies
+// that the wind vs. surf distinction the backend already tracks internally
+// (via bomMarineProductRef.Category, set from the product ID) is threaded
+// through into the JSON response, so the frontend doesn't have to guess by
+// parsing the bulletin title (which is fragile - e.g. NSW's title sometimes
+// carries an "Updated " prefix).
+func TestBuildMarineWarningsResponse_CategorizesWindAndSurfBulletins(t *testing.T) {
+	windBulletin := parseBomMarineWarningText(qldMarineWindWarningFixture)
+	windBulletin.ProductID = "IDQ20085"
+	windBulletin.DetailsURL = bomWarningDetailsURL(bomMarineWindWarningSlug, "IDQ20085")
+	windBulletin.Category = "wind"
+
+	surfBulletin := parseBomMarineWarningText(qldHazardousSurfWarningFixture)
+	surfBulletin.ProductID = "IDQ28522"
+	surfBulletin.DetailsURL = bomWarningDetailsURL(bomHazardousSurfWarningSlug, "IDQ28522")
+	surfBulletin.Category = "surf"
+
+	entry := bomMarineWarningsCacheEntry{
+		State: "QLD",
+		Zone:  "Capricornia Coast",
+		Bulletins: map[string]bomMarineWarningBulletin{
+			windBulletin.ProductID: windBulletin,
+			surfBulletin.ProductID: surfBulletin,
+		},
+		CachedAt: time.Now().UTC(),
+	}
+
+	response := buildMarineWarningsResponse(entry)
+
+	byProductID := make(map[string]bomMarineWarningBulletinResponse, len(response.Bulletins))
+	for _, b := range response.Bulletins {
+		byProductID[b.ProductID] = b
+	}
+
+	windResp, ok := byProductID["IDQ20085"]
+	if !ok {
+		t.Fatalf("expected a bulletin for IDQ20085, got %+v", response.Bulletins)
+	}
+	if windResp.Category != "wind" {
+		t.Fatalf("expected category %q for marine wind warning, got %q", "wind", windResp.Category)
+	}
+
+	surfResp, ok := byProductID["IDQ28522"]
+	if !ok {
+		t.Fatalf("expected a bulletin for IDQ28522, got %+v", response.Bulletins)
+	}
+	if surfResp.Category != "surf" {
+		t.Fatalf("expected category %q for hazardous surf warning, got %q", "surf", surfResp.Category)
+	}
+}
+
+// TestRefreshBomMarineWarningsForState_ProductRefsCarryCategory verifies the
+// productRefs table built inside refreshBomMarineWarningsForState assigns
+// "wind" to the marine wind warning product and "surf" to the hazardous surf
+// warning product, for every state that has both product IDs registered.
+func TestRefreshBomMarineWarningsForState_ProductRefsCarryCategory(t *testing.T) {
+	products, ok := bomMarineWarningProducts["QLD"]
+	if !ok {
+		t.Fatalf("expected QLD to be a registered state")
+	}
+
+	var productRefs []bomMarineProductRef
+	if products.MarineWindWarningID != "" {
+		productRefs = append(productRefs, bomMarineProductRef{ProductID: products.MarineWindWarningID, Slug: bomMarineWindWarningSlug, Category: "wind"})
+	}
+	if products.HazardousSurfWarningID != "" {
+		productRefs = append(productRefs, bomMarineProductRef{ProductID: products.HazardousSurfWarningID, Slug: bomHazardousSurfWarningSlug, Category: "surf"})
+	}
+
+	var gotWind, gotSurf bool
+	for _, ref := range productRefs {
+		if ref.ProductID == products.MarineWindWarningID {
+			if ref.Category != "wind" {
+				t.Fatalf("expected wind product ref category %q, got %q", "wind", ref.Category)
+			}
+			gotWind = true
+		}
+		if ref.ProductID == products.HazardousSurfWarningID {
+			if ref.Category != "surf" {
+				t.Fatalf("expected surf product ref category %q, got %q", "surf", ref.Category)
+			}
+			gotSurf = true
+		}
+	}
+	if !gotWind || !gotSurf {
+		t.Fatalf("expected both wind and surf product refs to be present, gotWind=%v gotSurf=%v", gotWind, gotSurf)
+	}
 }

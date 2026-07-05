@@ -37,10 +37,13 @@ type bomMarineWarningProductSet struct {
 }
 
 // bomMarineProductRef pairs a product ID with its warning-type slug for
-// downstream URL construction.
+// downstream URL construction, plus a Category ("wind"/"surf") so callers
+// (and the frontend, via the JSON response) can distinguish warning types
+// without fragile parsing of the bulletin title.
 type bomMarineProductRef struct {
 	ProductID string
 	Slug      string
+	Category  string
 }
 
 var bomMarineWarningProducts = map[string]bomMarineWarningProductSet{
@@ -70,6 +73,7 @@ type bomMarineWarningBulletin struct {
 	IssuedAt    time.Time                 `json:"issued_at,omitempty"`
 	Sections    []bomMarineWarningSection `json:"sections"`
 	DetailsURL  string                    `json:"details_url"`
+	Category    string                    `json:"category"`
 	RawText     string                    `json:"-"`
 }
 
@@ -376,10 +380,10 @@ func refreshBomMarineWarningsForState(state, zone string) {
 
 	var productRefs []bomMarineProductRef
 	if products.MarineWindWarningID != "" {
-		productRefs = append(productRefs, bomMarineProductRef{ProductID: products.MarineWindWarningID, Slug: bomMarineWindWarningSlug})
+		productRefs = append(productRefs, bomMarineProductRef{ProductID: products.MarineWindWarningID, Slug: bomMarineWindWarningSlug, Category: "wind"})
 	}
 	if products.HazardousSurfWarningID != "" {
-		productRefs = append(productRefs, bomMarineProductRef{ProductID: products.HazardousSurfWarningID, Slug: bomHazardousSurfWarningSlug})
+		productRefs = append(productRefs, bomMarineProductRef{ProductID: products.HazardousSurfWarningID, Slug: bomHazardousSurfWarningSlug, Category: "surf"})
 	}
 	if len(productRefs) == 0 {
 		return
@@ -395,6 +399,7 @@ func refreshBomMarineWarningsForState(state, zone string) {
 		bulletin := parseBomMarineWarningText(raw)
 		bulletin.ProductID = ref.ProductID
 		bulletin.DetailsURL = bomWarningDetailsURL(ref.Slug, ref.ProductID)
+		bulletin.Category = ref.Category
 		bulletins[ref.ProductID] = bulletin
 	}
 
@@ -473,6 +478,7 @@ type bomMarineWarningBulletinResponse struct {
 	IssuedAt         string                            `json:"issued_at,omitempty"`
 	Sections         []bomMarineWarningSectionResponse `json:"sections"`
 	DetailsURL       string                            `json:"details_url"`
+	Category         string                            `json:"category"`
 	HasActive        bool                              `json:"has_active_warning"`
 	HasActiveForZone bool                              `json:"has_active_warning_for_zone"`
 }
@@ -582,6 +588,7 @@ func buildMarineWarningsResponse(entry bomMarineWarningsCacheEntry) marineWarnin
 			IssuedAt:         issuedAt,
 			Sections:         sections,
 			DetailsURL:       bulletin.DetailsURL,
+			Category:         bulletin.Category,
 			HasActive:        hasActiveWarning(bulletin),
 			HasActiveForZone: activeForZone,
 		})

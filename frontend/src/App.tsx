@@ -886,6 +886,7 @@ export function App() {
               ttlSeconds={forecastTtlSeconds}
               onRetry={refetchForecast}
               unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
+              activeMarineWarning={activeMarineWarning}
             />
             </div>
           )}
