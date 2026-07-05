@@ -22,6 +22,13 @@ export interface MarineWarnings {
   bulletins: MarineWarningBulletin[]
 }
 
+// Shared by WindWarningNotice and the Forecast tab indicator so both agree
+// on what counts as an active wind warning without duplicating the check.
+export function findActiveWindBulletin(warnings: MarineWarnings | null): MarineWarningBulletin | undefined {
+  if (!warnings) return undefined
+  return warnings.bulletins.find((bulletin) => bulletin.category === 'wind' && bulletin.sections.length > 0)
+}
+
 interface MarineWarningsSectionApi {
   day?: string
   warning_type?: string

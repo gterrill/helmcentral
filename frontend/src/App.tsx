@@ -32,7 +32,7 @@ import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
-import { useMarineWarnings } from '@/hooks/use-marine-warnings'
+import { findActiveWindBulletin, useMarineWarnings } from '@/hooks/use-marine-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
@@ -858,7 +858,11 @@ export function App() {
           onOpen={() => setIsDrawerOpen(true)}
           onClose={() => setIsDrawerOpen(false)}
           tabs={[
-            { id: 'forecast', label: 'Forecast' },
+            {
+              id: 'forecast',
+              label: 'Forecast',
+              indicator: Boolean(findActiveWindBulletin(activeMarineWarning)),
+            },
             { id: 'tides', label: 'Tides' },
             { id: 'routes', label: 'Routes' },
             { id: 'charts', label: 'Charts' },

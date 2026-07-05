@@ -1,4 +1,4 @@
-import type { MarineWarnings } from '@/hooks/use-marine-warnings'
+import { findActiveWindBulletin, type MarineWarnings } from '@/hooks/use-marine-warnings'
 
 // An inline sentence appended to the forecast summary paragraph - not a
 // duplicate of MarineWarningBanner. Purely a function of props: no local
@@ -10,11 +10,7 @@ import type { MarineWarnings } from '@/hooks/use-marine-warnings'
 // re-deriving that filtering here. Returns a fragment (no block wrapper) so
 // it can sit inline within an existing paragraph of text.
 export function WindWarningNotice({ warnings }: { warnings: MarineWarnings | null }) {
-  if (!warnings) return null
-
-  const windBulletin = warnings.bulletins.find(
-    (bulletin) => bulletin.category === 'wind' && bulletin.sections.length > 0,
-  )
+  const windBulletin = findActiveWindBulletin(warnings)
   if (!windBulletin) return null
 
   return (
