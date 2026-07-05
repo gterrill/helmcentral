@@ -17,6 +17,8 @@
     --muted: 45 12% 84%;
     --muted-foreground: 209 15% 42%;
     --border: 42 15% 80%;
+    --destructive: 0 72% 42%;
+    --destructive-foreground: 44 25% 94%;
     --radius: 0.6rem;
     --font-display: 'Aldrich';
     --font-sans: 'Barlow';
@@ -34,6 +36,8 @@
     --muted: 220 20% 18%;
     --muted-foreground: 40 10% 60%;
     --border: 220 20% 22%;
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 220 30% 8%;
   }
 
   [data-theme='classic'] {
