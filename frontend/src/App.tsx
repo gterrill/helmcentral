@@ -6,6 +6,7 @@ import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import { AlternatorTile } from '@/components/alternator-tile'
 import { DepthSparkline } from '@/components/depth-sparkline'
 import { MarineHeader } from '@/components/marine-header'
+import { MarineWarningBanner } from '@/components/marine-warning-banner'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
@@ -31,6 +32,7 @@ import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
+import { useMarineWarnings } from '@/hooks/use-marine-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
@@ -379,6 +381,7 @@ export function App() {
   } = useElectricalState(5)
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
+  const { activeWarning: activeMarineWarning } = useMarineWarnings(uiConfig.forecastRefreshSeconds)
   const {
     forecast,
     hourlyToday: forecastHourlyToday,
@@ -517,6 +520,8 @@ export function App() {
       )}
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
         <MarineHeader isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />
+
+        <MarineWarningBanner warnings={activeMarineWarning} />
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
 

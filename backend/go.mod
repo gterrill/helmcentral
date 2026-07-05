@@ -6,6 +6,7 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/influxdata/influxdb-client-go/v2 v2.14.0
+	github.com/jlaffaye/ftp v0.2.0
 	github.com/labstack/echo/v4 v4.11.4
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.34.4
@@ -14,6 +15,8 @@ require (
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/hashicorp/errwrap v1.0.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/influxdata/line-protocol v0.0.0-20200327222509-2487e7298839 // indirect
 	github.com/labstack/gommon v0.4.2 // indirect

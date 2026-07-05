@@ -445,6 +445,7 @@ func init() {
 	loadWeatherForecastCacheFromDisk()
 	loadTideCacheFromDisk()
 	loadBomTideCacheFromDisk()
+	loadBomMarineWarningsCacheFromDisk()
 }
 
 func cacheFilePath(envKey, fallback string) string {
