@@ -601,12 +601,12 @@ export function ForecastDrawer({
 
   return (
     <div className="space-y-4 pb-4">
-      <WindWarningNotice warnings={activeMarineWarning} />
       {hourlyEntries.length > 0 && (
     <div className="overflow-hidden rounded-[26px] border border-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]">
       <div className="border-b border-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
         <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
           {summary ?? "Today's hourly forecast"}
+          <WindWarningNotice warnings={activeMarineWarning} />
         </p>
       </div>
       <div className="px-2.5 py-2.5">
