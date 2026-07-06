@@ -1,4 +1,22 @@
-import { Anchor, ArrowDown, ArrowUp, CloudSun, Compass, BatteryCharging, BatteryFull, BatteryMedium, BatteryLow, BatteryWarning } from 'lucide-react'
+import {
+  Anchor,
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  CloudSun,
+  Compass,
+  LayoutDashboard,
+  Map,
+  Radar as RadarIcon,
+  Route,
+  Settings,
+  Waves,
+  BatteryCharging,
+  BatteryFull,
+  BatteryMedium,
+  BatteryLow,
+  BatteryWarning,
+} from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
@@ -15,7 +33,6 @@ import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { GeneratorTile } from '@/components/generator-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { WindCompass } from '@/components/wind-compass'
-import { BottomDrawer } from '@/components/ui/bottom-drawer'
 import { ForecastDrawer } from '@/components/forecast-drawer'
 import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
 import { SatChartsDrawer } from '@/components/sat-charts-drawer'
@@ -44,6 +61,29 @@ import { useDarkMode } from '@/hooks/use-dark-mode'
 import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarProvider,
+  SidebarTrigger,
+} from '@/components/ui/sidebar'
+
+type PanelId = 'forecast' | 'tides' | 'routes' | 'charts' | 'radar' | 'anchor-watch' | 'settings'
+
+const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
+  { id: 'forecast', label: 'Forecast', icon: CloudSun },
+  { id: 'tides', label: 'Tides', icon: Waves },
+  { id: 'routes', label: 'Routes', icon: Route },
+  { id: 'charts', label: 'Charts', icon: Map },
+  { id: 'radar', label: 'Radar', icon: RadarIcon },
+  { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
+  { id: 'settings', label: 'Settings', icon: Settings },
+]
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const AUTO_CLOSE_ANCHOR_WATCH_KEY = 'anchorWatch.autoClose.enabled'
@@ -280,8 +320,7 @@ function WindGaugeCluster({
 }
 
 export function App() {
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
-  const [activeDrawerTab, setActiveDrawerTab] = useState('forecast')
+  const [activePanel, setActivePanel] = useState<PanelId | null>(null)
   const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)
     return raw === 'true'
@@ -511,18 +550,10 @@ export function App() {
     void anchorWatch.setAnchorHere(latitude, longitude)
   }
 
-  return (
-    <div className="min-h-screen p-4 pb-20 md:p-6 md:pb-24">
-      {toastMessage && (
-        <div className="fixed left-4 right-4 top-4 z-50 mx-auto max-w-md rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 shadow-lg md:left-auto md:right-4">
-          {toastMessage}
-        </div>
-      )}
-      <div className="mx-auto flex max-w-[1800px] flex-col gap-4">
-        <MarineHeader isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />
+  const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeMarineWarning))
+  const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
 
-        <MarineWarningBanner warnings={activeMarineWarning} />
-
+  const dashboardGrid = (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
 
           <aside className="space-y-4">
@@ -566,7 +597,7 @@ export function App() {
             </section>
 
             <div
-              onClick={() => { setActiveDrawerTab('tides'); setIsDrawerOpen(true) }}
+              onClick={() => setActivePanel('tides')}
               className="cursor-pointer transition-opacity hover:opacity-80"
             >
               <Tile title="Depth & Tide">
@@ -648,7 +679,7 @@ export function App() {
                 {placeName ?? '—'}
               </div>
             </Tile>
-            <div onClick={() => setIsDrawerOpen(true)} className="cursor-pointer transition-opacity hover:opacity-80">
+            <div onClick={() => setActivePanel('forecast')} className="cursor-pointer transition-opacity hover:opacity-80">
               <Tile title="Today & Now">
                 <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-3">
                   <div className="grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-amber-600">
@@ -706,7 +737,7 @@ export function App() {
                   isDarkTheme={isDarkTheme}
                   showImageryLayer={showAnchorImagery}
                   onImageryToggle={setShowAnchorImagery}
-                  onFullscreen={() => { setActiveDrawerTab('anchor-watch'); setIsDrawerOpen(true) }}
+                  onFullscreen={() => setActivePanel('anchor-watch')}
                 />
 
                 <RodeScopeTile
@@ -729,7 +760,7 @@ export function App() {
               speedKts={speedOverGroundKts ?? 0}
               routes={routes}
               dashboardRouteId={dashboardRouteId}
-              onOpen={() => { setActiveDrawerTab('routes'); setIsDrawerOpen(true) }}
+              onOpen={() => setActivePanel('routes')}
             />
             <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
           </aside>
@@ -851,152 +882,185 @@ export function App() {
             <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
           </aside>
         </div>
+  )
 
-        {/* Bottom Drawers */}
-        <BottomDrawer
-          isOpen={isDrawerOpen}
-          onOpen={() => setIsDrawerOpen(true)}
-          onClose={() => setIsDrawerOpen(false)}
-          tabs={[
-            {
-              id: 'forecast',
-              label: 'Forecast',
-              indicator: Boolean(findActiveWindBulletin(activeMarineWarning)),
-            },
-            { id: 'tides', label: 'Tides' },
-            { id: 'routes', label: 'Routes' },
-            { id: 'charts', label: 'Charts' },
-            { id: 'radar', label: 'Radar' },
-            {
-              id: 'anchor-watch',
-              label: 'Anchor Watch',
-              indicator: anchorWatch.anchorState !== 'none',
-            },
-            { id: 'settings', label: 'Settings' },
-          ]}
-          activeTab={activeDrawerTab}
-          onTabChange={setActiveDrawerTab}
-        >
-          {activeDrawerTab === 'forecast' && (
-            <div className="px-6 py-4">
-              <ForecastDrawer
-              forecast={forecast}
-              hourlyToday={forecastHourlyToday}
-              summary={forecastSummary}
-              loading={forecastLoading}
-              error={forecastError}
-              isCached={forecastIsCached}
-              updatedAt={forecastUpdatedAt}
-              ttlSeconds={forecastTtlSeconds}
-              onRetry={refetchForecast}
-              unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
-              activeMarineWarning={activeMarineWarning}
+  const activePanelContent = (() => {
+    switch (activePanel) {
+      case 'forecast':
+        return (
+          <ForecastDrawer
+            forecast={forecast}
+            hourlyToday={forecastHourlyToday}
+            summary={forecastSummary}
+            loading={forecastLoading}
+            error={forecastError}
+            isCached={forecastIsCached}
+            updatedAt={forecastUpdatedAt}
+            ttlSeconds={forecastTtlSeconds}
+            onRetry={refetchForecast}
+            unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
+            activeMarineWarning={activeMarineWarning}
+          />
+        )
+      case 'tides':
+        return <TideDrawer isImperial={isImperialDistance} />
+      case 'routes':
+        return (
+          <RoutePlannerDrawer
+            isDarkTheme={isDarkTheme}
+            currentSpeedKts={speedOverGroundKts}
+            vesselLat={latitude}
+            vesselLon={longitude}
+            routes={routes}
+            loading={routesLoading}
+            error={routesError}
+            createRoute={createRoute}
+            updateRoute={updateRoute}
+            deleteRoute={deleteRoute}
+            dashboardRouteId={dashboardRouteId}
+            onSetDashboardRouteId={setDashboardRouteId}
+            activationStatus={routeActivationStatus}
+            activating={routeActivating}
+            deactivating={routeDeactivating}
+            activateError={routeActivateError}
+            onActivate={activateRoute}
+            onDeactivate={deactivateRoute}
+            satCharts={satCharts}
+          />
+        )
+      case 'charts':
+        return (
+          <SatChartsDrawer
+            charts={satCharts}
+            loading={satChartsLoading}
+            error={satChartsError}
+            uploadChart={uploadChart}
+            deleteChart={deleteSatChart}
+          />
+        )
+      case 'radar':
+        return <RadarDrawer latitude={latitude} longitude={longitude} />
+      case 'settings':
+        return (
+          <SignalKSettingsPanel
+            autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
+            onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
+            theme={theme}
+            onThemeChange={(v) => setTheme(v as Theme)}
+          />
+        )
+      case 'anchor-watch':
+        return anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null
+          ? (
+            <AnchorWatchDrawer
+              vesselLat={latitude ?? anchorWatch.anchorLat}
+              vesselLon={longitude ?? anchorWatch.anchorLon}
+              vesselHeadingDeg={headingTrue}
+              anchorLat={anchorWatch.anchorLat}
+              anchorLon={anchorWatch.anchorLon}
+              radiusMeters={anchorWatch.radiusMeters}
+              depthMeters={depth}
+              currentDriftKts={currentDriftKts}
+              currentSetDeg={currentSetDeg}
+              distanceMeters={anchorWatch.distanceMeters}
+              bearingDeg={anchorWatch.bearingDeg}
+              vesselTrail={getSelfTrail}
+              aisVessels={nearbyVessels}
+              aisTrails={getAisTrails}
+              isDarkTheme={isDarkTheme}
+              showImageryLayer={showAnchorImagery}
+              onImageryToggle={setShowAnchorImagery}
+              onAnchorReposition={anchorWatch.updatePosition}
+              onRadiusChange={anchorWatch.updateRadius}
+              onClearAnchor={anchorWatch.clearAnchor}
+              isImperial={isImperialDistance}
+              isAutoCloseArmed={isAutoCloseArmed}
+              motoringSecondsElapsed={motoringSecondsElapsed}
             />
+          )
+          : (
+            <div className="px-6 py-8 text-center text-muted-foreground">
+              <div className="mb-4">Not monitoring</div>
+              <Button
+                className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
+                disabled={latitude === null || longitude === null}
+                onClick={handleDropAnchorHere}
+              >
+                <Anchor className="h-4 w-4" />
+                Drop
+              </Button>
             </div>
-          )}
-          {activeDrawerTab === 'tides' && (
-            <div className="px-6 py-4">
-              <TideDrawer isImperial={isImperialDistance} />
-            </div>
-          )}
-          {activeDrawerTab === 'routes' && (
-            <div className="px-6 py-4">
-              <RoutePlannerDrawer
-                isDarkTheme={isDarkTheme}
-                currentSpeedKts={speedOverGroundKts}
-                vesselLat={latitude}
-                vesselLon={longitude}
-                routes={routes}
-                loading={routesLoading}
-                error={routesError}
-                createRoute={createRoute}
-                updateRoute={updateRoute}
-                deleteRoute={deleteRoute}
-                dashboardRouteId={dashboardRouteId}
-                onSetDashboardRouteId={setDashboardRouteId}
-                activationStatus={routeActivationStatus}
-                activating={routeActivating}
-                deactivating={routeDeactivating}
-                activateError={routeActivateError}
-                onActivate={activateRoute}
-                onDeactivate={deactivateRoute}
-                satCharts={satCharts}
-              />
-            </div>
-          )}
-          {activeDrawerTab === 'charts' && (
-            <div className="px-6 py-4">
-              <SatChartsDrawer
-                charts={satCharts}
-                loading={satChartsLoading}
-                error={satChartsError}
-                uploadChart={uploadChart}
-                deleteChart={deleteSatChart}
-              />
-            </div>
-          )}
-          {activeDrawerTab === 'radar' && (
-            <div className="px-6 py-4">
-              <RadarDrawer latitude={latitude} longitude={longitude} />
-            </div>
-          )}
-          {activeDrawerTab === 'settings' && (
-            <div className="px-6 py-4">
-              <SignalKSettingsPanel
-                autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
-                onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
-                theme={theme}
-                onThemeChange={(v) => setTheme(v as Theme)}
-              />
-            </div>
-          )}
-          {activeDrawerTab === 'anchor-watch' && (
-            anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null
-              ? (
-                <div className="h-full">
-                  <AnchorWatchDrawer
-                    vesselLat={latitude ?? anchorWatch.anchorLat}
-                    vesselLon={longitude ?? anchorWatch.anchorLon}
-                    vesselHeadingDeg={headingTrue}
-                    anchorLat={anchorWatch.anchorLat}
-                    anchorLon={anchorWatch.anchorLon}
-                    radiusMeters={anchorWatch.radiusMeters}
-                    depthMeters={depth}
-                    currentDriftKts={currentDriftKts}
-                    currentSetDeg={currentSetDeg}
-                    distanceMeters={anchorWatch.distanceMeters}
-                    bearingDeg={anchorWatch.bearingDeg}
-                    vesselTrail={getSelfTrail}
-                    aisVessels={nearbyVessels}
-                    aisTrails={getAisTrails}
-                    isDarkTheme={isDarkTheme}
-                    showImageryLayer={showAnchorImagery}
-                    onImageryToggle={setShowAnchorImagery}
-                    onAnchorReposition={anchorWatch.updatePosition}
-                    onRadiusChange={anchorWatch.updateRadius}
-                    onClearAnchor={anchorWatch.clearAnchor}
-                    isImperial={isImperialDistance}
-                    isAutoCloseArmed={isAutoCloseArmed}
-                    motoringSecondsElapsed={motoringSecondsElapsed}
-                  />
+          )
+      default:
+        return null
+    }
+  })()
+
+  return (
+    <SidebarProvider>
+      {toastMessage && (
+        <div className="fixed left-4 right-4 top-4 z-50 mx-auto max-w-md rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 shadow-lg md:left-auto md:right-4">
+          {toastMessage}
+        </div>
+      )}
+
+      <Sidebar collapsible="offcanvas">
+        <SidebarHeader>
+          <p className="px-2 py-1 font-display text-sm tracking-[0.16em] text-muted-foreground">HelmCentral</p>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton isActive={activePanel === null} onClick={() => setActivePanel(null)}>
+                <LayoutDashboard />
+                <span>Dashboard</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            {PANEL_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+              <SidebarMenuItem key={id}>
+                <SidebarMenuButton isActive={activePanel === id} onClick={() => setActivePanel(id)}>
+                  <Icon />
+                  <span>{label}</span>
+                  {id === 'forecast' && hasActiveWindBulletin && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+                  )}
+                  {id === 'anchor-watch' && hasActiveAnchorWatch && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarContent>
+      </Sidebar>
+
+      <SidebarInset>
+        <div className="flex min-h-screen flex-col p-4 pb-4 md:p-6 md:pb-6">
+          <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
+            <MarineHeader isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} leading={<SidebarTrigger />} />
+
+            <MarineWarningBanner warnings={activeMarineWarning} />
+
+            <div className="min-h-0 flex-1">
+              {activePanel === null ? (
+                dashboardGrid
+              ) : (
+                <div className="flex h-full min-h-0 flex-col gap-2">
+                  <div>
+                    <Button variant="ghost" onClick={() => setActivePanel(null)}>
+                      <ArrowLeft className="h-4 w-4" />
+                      Dashboard
+                    </Button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border bg-card">
+                    {activePanelContent}
+                  </div>
                 </div>
-              )
-              : (
-                <div className="px-6 py-8 text-center text-muted-foreground">
-                  <div className="mb-4">Not monitoring</div>
-                  <Button
-                    className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
-                    disabled={latitude === null || longitude === null}
-                    onClick={handleDropAnchorHere}
-                  >
-                    <Anchor className="h-4 w-4" />
-                    Drop
-                  </Button>
-                </div>
-              )
-          )}
-        </BottomDrawer>
-      </div>
-    </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   )
 }

@@ -22,6 +22,14 @@
     --radius: 0.6rem;
     --font-display: 'Aldrich';
     --font-sans: 'Barlow';
+    --sidebar-background: var(--card);
+    --sidebar-foreground: var(--foreground);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: var(--muted);
+    --sidebar-accent-foreground: var(--foreground);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--secondary);
   }
 
   .dark {
@@ -38,6 +46,14 @@
     --border: 220 20% 22%;
     --destructive: 0 72% 58%;
     --destructive-foreground: 220 30% 8%;
+    --sidebar-background: var(--card);
+    --sidebar-foreground: var(--foreground);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: var(--muted);
+    --sidebar-accent-foreground: var(--foreground);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--secondary);
   }
 
   [data-theme='classic'] {

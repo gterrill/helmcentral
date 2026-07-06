@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Circle, Moon, Sun } from 'lucide-react'
 
 import { uiConfig } from '@/config/app-config'
@@ -27,9 +27,10 @@ function formatDate(date: Date) {
 interface MarineHeaderProps {
   isDark?: boolean
   onToggleDarkMode?: () => void
+  leading?: ReactNode
 }
 
-export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderProps) {
+export function MarineHeader({ isDark = false, onToggleDarkMode, leading }: MarineHeaderProps) {
   const [now, setNow] = useState(() => new Date())
   const [vesselStatus, setVesselStatus] = useState('At Anchor')
   const [boatName, setBoatName] = useState<string | null>(null)
@@ -128,8 +129,9 @@ export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderP
   return (
     <header className="rounded-xl border bg-card/90 shadow-sm backdrop-blur-sm">
       <div className="flex min-h-16 items-center gap-2 px-2 py-2 md:px-4">
+        {leading}
         <div className="flex min-w-0 shrink flex-col border-border/70 pr-0 md:border-r md:pr-4">
-          <p className="shrink-0 font-display text-[1.28rem] leading-none tracking-[0.12em] text-primary md:text-[1.45rem] lg:text-[1.7rem]">
+          <p className="truncate font-display text-[1.28rem] leading-none tracking-[0.12em] text-primary md:text-[1.45rem] lg:text-[1.7rem]">
             {vesselNameLabel}
           </p>
           <p className="truncate text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground md:text-[10px] lg:text-xs">
@@ -140,7 +142,7 @@ export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderP
         <div className="ml-auto flex shrink-0 items-center gap-1 border-border/70 pl-0 md:border-l md:pl-4">
           <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] md:text-[11px] ${signalkConnected === true ? 'border-border bg-background/70 text-muted-foreground' : signalkConnected === false ? 'border-red-300/60 bg-red-50/60 text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-400' : 'border-border bg-background/70 text-muted-foreground'}`}>
             <Circle className={`h-2.5 w-2.5 ${signalkConnected === true ? 'fill-secondary text-secondary' : signalkConnected === false ? 'fill-red-500 text-red-500' : 'fill-muted-foreground text-muted-foreground'}`} />
-            {signalkConnected === false ? 'No Signal' : 'Live'}
+            <span className="hidden sm:inline">{signalkConnected === false ? 'No Signal' : 'Live'}</span>
           </div>
           <button
             onClick={onToggleDarkMode}
@@ -148,7 +150,7 @@ export function MarineHeader({ isDark = false, onToggleDarkMode }: MarineHeaderP
             aria-label={isDark ? 'Switch to day mode' : 'Switch to night mode'}
           >
             {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
-            {isDark ? 'Night' : 'Day'}
+            <span className="hidden sm:inline">{isDark ? 'Night' : 'Day'}</span>
           </button>
         </div>
 
