@@ -11,11 +11,8 @@
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
+    "@base-ui/react": "^1.6.0",
     "@lucide/lab": "^0.1.2",
-    "@radix-ui/react-dialog": "^1.1.18",
-    "@radix-ui/react-separator": "^1.1.11",
-    "@radix-ui/react-slot": "^1.1.0",
-    "@radix-ui/react-tooltip": "^1.2.11",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",
