@@ -11,6 +11,7 @@
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
+    "@base-ui/react": "^1.6.0",
     "@lucide/lab": "^0.1.2",
     "@radix-ui/react-dialog": "^1.1.18",
     "@radix-ui/react-separator": "^1.1.11",
