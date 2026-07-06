@@ -72,7 +72,6 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuItem,
@@ -564,15 +563,16 @@ export function App() {
   const dashboardGrid = (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
 
-          <aside className="space-y-4">
-            <section className="rounded-lg border bg-card p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h1 className="font-display text-sm tracking-[0.24em] text-muted-foreground">Apparent Wind - Course Up</h1>
+          <div className="space-y-4">
+            <Tile
+              title="Apparent Wind - Course Up"
+              titleExtra={
                 <Button variant="outline" size="sm">
                   <Compass className="h-4 w-4" />
                   AWA {awaLabel}
                 </Button>
-              </div>
+              }
+            >
               <WindGaugeCluster
                 cfg={WIND_MOBILE_CFG}
                 masks={WIND_MOBILE_MASKS}
@@ -602,7 +602,7 @@ export function App() {
                 windAngleRelativeDeg={windAngleRelativeDeg}
                 windSpeedApparentKts={windSpeedApparentKts}
               />
-            </section>
+            </Tile>
 
             <div
               onClick={() => setActivePanel('tides')}
@@ -725,9 +725,9 @@ export function App() {
 
               </Tile>
             </div>
-          </aside>
+          </div>
 
-          <aside className="space-y-4">
+          <div className="space-y-4">
             {!isAlternatorTileVisible && (
               <>
                 <AnchorWatchTile
@@ -771,9 +771,9 @@ export function App() {
               onOpen={() => setActivePanel('routes')}
             />
             <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
-          </aside>
+          </div>
 
-          <aside className="space-y-4">
+          <div className="space-y-4">
             <Tile title="Battery & Power">
               <div className="mt-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2">
                 <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
@@ -888,7 +888,7 @@ export function App() {
               batteryRatePercentPerHour={batteryRatePercentPerHour}
             />
             <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
-          </aside>
+          </div>
         </div>
   )
 
@@ -1011,17 +1011,6 @@ export function App() {
       )}
 
       <Sidebar collapsible="icon">
-        <SidebarHeader>
-          <div className="flex items-center gap-2 rounded-md p-2">
-            <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <Anchor className="size-4" />
-            </div>
-            <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-              <span className="truncate font-display font-semibold text-sidebar-foreground">HelmCentral</span>
-              <span className="truncate text-xs text-sidebar-foreground/70">Marine Dashboard</span>
-            </div>
-          </div>
-        </SidebarHeader>
         <SidebarContent>
           <SidebarMenu>
             <SidebarMenuItem>
