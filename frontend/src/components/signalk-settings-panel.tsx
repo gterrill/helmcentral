@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { SettingsInput } from '@/components/ui/settings-input'
-import { SettingsSelect } from '@/components/ui/settings-select'
+import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { useTideProviders } from '@/hooks/use-tide-providers'
 
 type SettingsPayload = {
@@ -305,23 +313,29 @@ export function SignalKSettingsPanel({
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">SignalK Connection</h3>
+      <FieldSet>
+        <FieldLegend variant="label">SignalK Connection</FieldLegend>
 
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,180px)_auto]">
-          <SettingsInput
-            label="Address"
-            value={signalKAddress}
-            onChange={setSignalKAddress}
-            ariaLabel="SignalK address"
-          />
+          <Field>
+            <FieldLabel htmlFor="signalk-address">Address</FieldLabel>
+            <Input
+              id="signalk-address"
+              value={signalKAddress}
+              onChange={(e) => setSignalKAddress(e.target.value)}
+              aria-label="SignalK address"
+            />
+          </Field>
 
-          <SettingsInput
-            label="Port"
-            value={signalKPort}
-            onChange={setSignalKPort}
-            ariaLabel="SignalK port"
-          />
+          <Field>
+            <FieldLabel htmlFor="signalk-port">Port</FieldLabel>
+            <Input
+              id="signalk-port"
+              value={signalKPort}
+              onChange={(e) => setSignalKPort(e.target.value)}
+              aria-label="SignalK port"
+            />
+          </Field>
 
           <Button
             variant="outline"
@@ -332,182 +346,220 @@ export function SignalKSettingsPanel({
             {isConnecting ? 'Connecting' : 'Connect'}
           </Button>
 
-          <SettingsInput
-            label="Refresh Seconds"
-            value={vesselStateRefreshSeconds}
-            onChange={setVesselStateRefreshSeconds}
-            ariaLabel="Vessel state refresh seconds"
-            className="md:col-span-3"
-          />
+          <Field className="md:col-span-3">
+            <FieldLabel htmlFor="signalk-refresh-seconds">Refresh Seconds</FieldLabel>
+            <Input
+              id="signalk-refresh-seconds"
+              value={vesselStateRefreshSeconds}
+              onChange={(e) => setVesselStateRefreshSeconds(e.target.value)}
+              aria-label="Vessel state refresh seconds"
+            />
+          </Field>
 
-          <SettingsInput
-            label="Forecast Refresh Seconds"
-            value={forecastRefreshSeconds}
-            onChange={setForecastRefreshSeconds}
-            ariaLabel="Forecast refresh seconds"
-            className="md:col-span-3"
-          />
+          <Field className="md:col-span-3">
+            <FieldLabel htmlFor="forecast-refresh-seconds">Forecast Refresh Seconds</FieldLabel>
+            <Input
+              id="forecast-refresh-seconds"
+              value={forecastRefreshSeconds}
+              onChange={(e) => setForecastRefreshSeconds(e.target.value)}
+              aria-label="Forecast refresh seconds"
+            />
+          </Field>
         </div>
-      </div>
+      </FieldSet>
 
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Boat And UI</h3>
+      <FieldSet>
+        <FieldLegend variant="label">Boat And UI</FieldLegend>
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-          <SettingsInput
-            label="Vessel Prefix"
-            value={vesselPrefix}
-            onChange={setVesselPrefix}
-            ariaLabel="Vessel prefix"
-          />
+          <Field>
+            <FieldLabel htmlFor="vessel-prefix">Vessel Prefix</FieldLabel>
+            <Input
+              id="vessel-prefix"
+              value={vesselPrefix}
+              onChange={(e) => setVesselPrefix(e.target.value)}
+              aria-label="Vessel prefix"
+            />
+          </Field>
 
-          <SettingsInput
-            label="Boat Model"
-            value={boatModel}
-            onChange={setBoatModel}
-            ariaLabel="Boat model"
-          />
+          <Field>
+            <FieldLabel htmlFor="boat-model">Boat Model</FieldLabel>
+            <Input
+              id="boat-model"
+              value={boatModel}
+              onChange={(e) => setBoatModel(e.target.value)}
+              aria-label="Boat model"
+            />
+          </Field>
 
-          <SettingsInput
-            label="Battery Ah"
-            value={houseBatteryCapacityAh}
-            onChange={setHouseBatteryCapacityAh}
-            ariaLabel="House battery capacity"
-          />
+          <Field>
+            <FieldLabel htmlFor="battery-ah">Battery Ah</FieldLabel>
+            <Input
+              id="battery-ah"
+              value={houseBatteryCapacityAh}
+              onChange={(e) => setHouseBatteryCapacityAh(e.target.value)}
+              aria-label="House battery capacity"
+            />
+          </Field>
 
-          <SettingsSelect
-            label="Units"
-            value={distanceUnits}
-            onChange={setDistanceUnits}
-            options={[
-              { value: 'metric', label: 'Metric' },
-              { value: 'imperial', label: 'Imperial' },
-            ]}
-            ariaLabel="Distance units"
-          />
-
+          <Field>
+            <FieldLabel htmlFor="distance-units">Units</FieldLabel>
+            <Select
+              value={distanceUnits}
+              onValueChange={(value) => value && setDistanceUnits(value)}
+            >
+              <SelectTrigger id="distance-units" aria-label="Distance units">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="metric">Metric</SelectItem>
+                <SelectItem value="imperial">Imperial</SelectItem>
+              </SelectPopup>
+            </Select>
+          </Field>
         </div>
-      </div>
+      </FieldSet>
 
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Tide</h3>
+      <FieldSet>
+        <FieldLegend variant="label">Tide</FieldLegend>
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-          <SettingsSelect
-            label="Tide Provider"
-            value={tideProvider}
-            onChange={setTideProvider}
-            options={tideProviders.map((provider) => ({ value: provider.id, label: provider.name }))}
-            ariaLabel="Tide provider"
-          />
+          <Field>
+            <FieldLabel htmlFor="tide-provider">Tide Provider</FieldLabel>
+            <Select
+              value={tideProvider}
+              onValueChange={(value) => value && setTideProvider(value)}
+            >
+              <SelectTrigger id="tide-provider" aria-label="Tide provider">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {tideProviders.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </Field>
 
           {tideProvider === 'bom' && (
-            <label className="flex items-center gap-3 md:col-span-2">
-              <input
-                type="checkbox"
-                checked={tideAutoStation}
-                onChange={(e) => setTideAutoStation(e.target.checked)}
-                className="h-4 w-4 cursor-pointer rounded border-gray-300"
-              />
-              <span className="text-sm text-muted-foreground">Auto-update tide station as vessel moves</span>
-            </label>
+            <Field orientation="horizontal" className="md:col-span-2">
+              <Switch checked={tideAutoStation} onCheckedChange={setTideAutoStation} />
+              <FieldLabel>Auto-update tide station as vessel moves</FieldLabel>
+            </Field>
           )}
         </div>
-      </div>
+      </FieldSet>
 
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Labels</h3>
+      <FieldSet>
+        <FieldLegend variant="label">Labels</FieldLegend>
         <div className="mt-3 grid grid-cols-1 gap-2">
           {tankLabelIds.map((id) => (
-            <SettingsInput
-              key={id}
-              label={`Tank Label ${id}`}
-              value={tankLabels[id] ?? ''}
-              onChange={(val) => setTankLabel(id, val)}
-              ariaLabel={`Tank label ${id}`}
-            />
+            <Field key={id}>
+              <FieldLabel htmlFor={`tank-label-${id}`}>{`Tank Label ${id}`}</FieldLabel>
+              <Input
+                id={`tank-label-${id}`}
+                value={tankLabels[id] ?? ''}
+                onChange={(e) => setTankLabel(id, e.target.value)}
+                aria-label={`Tank label ${id}`}
+              />
+            </Field>
           ))}
         </div>
-      </div>
+      </FieldSet>
 
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Anchor</h3>
+      <FieldSet>
+        <FieldLegend variant="label">Anchor</FieldLegend>
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-          <SettingsInput
-            label="Bow Roller M"
-            value={bowRollerHeightM}
-            onChange={setBowRollerHeightM}
-            ariaLabel="Bow roller height"
-          />
-
-          <SettingsInput
-            label="Chain Size Mm"
-            value={chainSizeMm}
-            onChange={setChainSizeMm}
-            ariaLabel="Chain size"
-          />
-
-          <SettingsInput
-            label="Chain Onboard M"
-            value={chainOnboardM}
-            onChange={setChainOnboardM}
-            ariaLabel="Chain onboard length"
-          />
-
-          <SettingsInput
-            label="Windage M2"
-            value={windageAreaM2}
-            onChange={setWindageAreaM2}
-            ariaLabel="Windage area"
-          />
-
-          <SettingsSelect
-            label="Hull Type"
-            value={hullType}
-            onChange={setHullType}
-            options={[
-              { value: 'power_cat', label: 'power_cat' },
-              { value: 'sail_mono', label: 'sail_mono' },
-              { value: 'power_mono', label: 'power_mono' },
-              { value: 'sail_cat', label: 'sail_cat' },
-            ]}
-            ariaLabel="Hull type"
-            isMultiCol
-          />
-        </div>
-      </div>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Anchor Watch Options</h3>
-        <div className="mt-3 space-y-3">
-          <label className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={autoCloseAnchorWatchEnabled}
-              onChange={(e) => onAutoCloseAnchorWatchToggle?.(e.target.checked)}
-              className="h-4 w-4 cursor-pointer rounded border-gray-300"
+          <Field>
+            <FieldLabel htmlFor="bow-roller-height">Bow Roller M</FieldLabel>
+            <Input
+              id="bow-roller-height"
+              value={bowRollerHeightM}
+              onChange={(e) => setBowRollerHeightM(e.target.value)}
+              aria-label="Bow roller height"
             />
-            <span className="text-sm text-muted-foreground">
-              Auto-close anchor watch when engines start (if outside circle for 5+ seconds)
-            </span>
-          </label>
-        </div>
-      </div>
+          </Field>
 
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Appearance</h3>
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-          <SettingsSelect
-            label="Theme"
-            value={theme}
-            onChange={(v) => onThemeChange?.(v as string)}
-            options={[
-              { value: 'marine', label: 'Marine — Aldrich / Barlow' },
-              { value: 'classic', label: 'Classic — Playfair / Lato' },
-              { value: 'clean', label: 'Clean — Inter' },
-            ]}
-            ariaLabel="UI theme"
-          />
+          <Field>
+            <FieldLabel htmlFor="chain-size">Chain Size Mm</FieldLabel>
+            <Input
+              id="chain-size"
+              value={chainSizeMm}
+              onChange={(e) => setChainSizeMm(e.target.value)}
+              aria-label="Chain size"
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="chain-onboard">Chain Onboard M</FieldLabel>
+            <Input
+              id="chain-onboard"
+              value={chainOnboardM}
+              onChange={(e) => setChainOnboardM(e.target.value)}
+              aria-label="Chain onboard length"
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="windage-area">Windage M2</FieldLabel>
+            <Input
+              id="windage-area"
+              value={windageAreaM2}
+              onChange={(e) => setWindageAreaM2(e.target.value)}
+              aria-label="Windage area"
+            />
+          </Field>
+
+          <Field className="md:col-span-2">
+            <FieldLabel htmlFor="hull-type">Hull Type</FieldLabel>
+            <Select value={hullType} onValueChange={(value) => value && setHullType(value)}>
+              <SelectTrigger id="hull-type" aria-label="Hull type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="power_cat">power_cat</SelectItem>
+                <SelectItem value="sail_mono">sail_mono</SelectItem>
+                <SelectItem value="power_mono">power_mono</SelectItem>
+                <SelectItem value="sail_cat">sail_cat</SelectItem>
+              </SelectPopup>
+            </Select>
+          </Field>
         </div>
-      </div>
+      </FieldSet>
+
+      <FieldSet>
+        <FieldLegend variant="label">Anchor Watch Options</FieldLegend>
+        <div className="mt-3 space-y-3">
+          <Field orientation="horizontal">
+            <Switch
+              checked={autoCloseAnchorWatchEnabled}
+              onCheckedChange={(checked) => onAutoCloseAnchorWatchToggle?.(checked)}
+            />
+            <FieldLabel>
+              Auto-close anchor watch when engines start (if outside circle for 5+ seconds)
+            </FieldLabel>
+          </Field>
+        </div>
+      </FieldSet>
+
+      <FieldSet>
+        <FieldLegend variant="label">Appearance</FieldLegend>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="ui-theme">Theme</FieldLabel>
+            <Select value={theme} onValueChange={(v) => onThemeChange?.(v as string)}>
+              <SelectTrigger id="ui-theme" aria-label="UI theme">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="marine">Marine — Aldrich / Barlow</SelectItem>
+                <SelectItem value="classic">Classic — Playfair / Lato</SelectItem>
+                <SelectItem value="clean">Clean — Inter</SelectItem>
+              </SelectPopup>
+            </Select>
+          </Field>
+        </div>
+      </FieldSet>
 
       <div className="flex justify-end">
         <Button
