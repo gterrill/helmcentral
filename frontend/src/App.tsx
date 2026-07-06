@@ -1,7 +1,6 @@
 import {
   Anchor,
   ArrowDown,
-  ArrowLeft,
   ArrowUp,
   CloudSun,
   Compass,
@@ -24,6 +23,7 @@ import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import { AlternatorTile } from '@/components/alternator-tile'
 import { DepthSparkline } from '@/components/depth-sparkline'
 import { MarineHeader } from '@/components/marine-header'
+import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { MarineWarningBanner } from '@/components/marine-warning-banner'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
@@ -60,6 +60,15 @@ import { useDarkMode } from '@/hooks/use-dark-mode'
 import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
+import { Separator } from '@/components/ui/separator'
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb'
 import {
   Sidebar,
   SidebarContent,
@@ -69,6 +78,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarProvider,
+  SidebarRail,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 
@@ -1000,21 +1010,29 @@ export function App() {
         </div>
       )}
 
-      <Sidebar collapsible="offcanvas">
+      <Sidebar collapsible="icon">
         <SidebarHeader>
-          <p className="px-2 py-1 font-display text-sm tracking-[0.16em] text-muted-foreground">HelmCentral</p>
+          <div className="flex items-center gap-2 rounded-md p-2">
+            <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+              <Anchor className="size-4" />
+            </div>
+            <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+              <span className="truncate font-display font-semibold text-sidebar-foreground">HelmCentral</span>
+              <span className="truncate text-xs text-sidebar-foreground/70">Marine Dashboard</span>
+            </div>
+          </div>
         </SidebarHeader>
         <SidebarContent>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton isActive={activePanel === null} onClick={() => setActivePanel(null)}>
+              <SidebarMenuButton isActive={activePanel === null} onClick={() => setActivePanel(null)} tooltip="Dashboard">
                 <LayoutDashboard />
                 <span>Dashboard</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             {PANEL_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
               <SidebarMenuItem key={id}>
-                <SidebarMenuButton isActive={activePanel === id} onClick={() => setActivePanel(id)}>
+                <SidebarMenuButton isActive={activePanel === id} onClick={() => setActivePanel(id)} tooltip={label}>
                   <Icon />
                   <span>{label}</span>
                   {id === 'forecast' && hasActiveWindBulletin && (
@@ -1028,12 +1046,45 @@ export function App() {
             ))}
           </SidebarMenu>
         </SidebarContent>
+        <SidebarRail />
       </Sidebar>
 
       <SidebarInset>
-        <div className="flex min-h-screen flex-col p-4 pb-4 md:p-6 md:pb-6">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b">
+          <div className="flex items-center gap-2 px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                {activePanel === null ? (
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>Dashboard</BreadcrumbPage>
+                  </BreadcrumbItem>
+                ) : (
+                  <>
+                    <BreadcrumbItem>
+                      <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); setActivePanel(null) }}>
+                        Dashboard
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>
+                        {PANEL_NAV_ITEMS.find((item) => item.id === activePanel)?.label}
+                      </BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </>
+                )}
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+          <div className="ml-auto flex items-center px-4">
+            <VesselStatusBar isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />
+          </div>
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col p-4 pb-4 md:p-6 md:pb-6">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
-            <MarineHeader isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} leading={<SidebarTrigger />} />
+            {activePanel === null && <MarineHeader />}
 
             <MarineWarningBanner warnings={activeMarineWarning} />
 
@@ -1041,16 +1092,8 @@ export function App() {
               {activePanel === null ? (
                 dashboardGrid
               ) : (
-                <div className="flex h-full min-h-0 flex-col gap-2">
-                  <div>
-                    <Button variant="ghost" onClick={() => setActivePanel(null)}>
-                      <ArrowLeft className="h-4 w-4" />
-                      Dashboard
-                    </Button>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border bg-card">
-                    {activePanelContent}
-                  </div>
+                <div className="h-full min-h-0 overflow-y-auto rounded-lg border bg-card">
+                  {activePanelContent}
                 </div>
               )}
             </div>
