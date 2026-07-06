@@ -30,7 +30,7 @@ function formatRange(rangeFeet: number, distanceUnits: DistanceUnits) {
 
 export function NearbyVesselsTile({ vessels, loading, distanceUnits }: NearbyVesselsTileProps) {
   return (
-    <Tile title="Nearby Vessels" icon={<Ship className="h-3.5 w-3.5 text-secondary" />}>
+    <Tile title="Nearby Vessels" icon={<Ship className="h-3.5 w-3.5 text-gauge-secondary" />}>
       <div className="mt-3 space-y-2">
         {vessels.map((vessel) => (
           <div key={vessel.name} className="flex items-center justify-between gap-2 rounded-md border bg-muted/45 px-3 py-2">
@@ -39,8 +39,8 @@ export function NearbyVesselsTile({ vessels, loading, distanceUnits }: NearbyVes
               <p className="mt-1 text-xs text-muted-foreground">({formatAge(vessel.age_seconds)})</p>
             </div>
             <div className="shrink-0 text-right">
-              <p className="font-display text-3xl leading-none text-secondary">{formatRange(vessel.range_ft, distanceUnits)}</p>
-              {typeof vessel.sog_knots === 'number' ? <p className="mt-1 text-xs text-secondary">{vessel.sog_knots.toFixed(1)} kts</p> : null}
+              <p className="font-display text-3xl leading-none text-gauge-secondary">{formatRange(vessel.range_ft, distanceUnits)}</p>
+              {typeof vessel.sog_knots === 'number' ? <p className="mt-1 text-xs text-gauge-secondary">{vessel.sog_knots.toFixed(1)} kts</p> : null}
             </div>
           </div>
         ))}

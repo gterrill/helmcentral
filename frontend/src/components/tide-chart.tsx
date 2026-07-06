@@ -87,7 +87,7 @@ export function TidePhaseBadge({ phase, className }: { phase: 'spring' | 'neap' 
     <span
       className={cn(
         'text-[10px] font-semibold uppercase tracking-[0.16em]',
-        phase === 'spring' ? 'text-primary' : 'text-secondary',
+        phase === 'spring' ? 'text-gauge-primary' : 'text-gauge-secondary',
         className,
       )}
     >
@@ -286,8 +286,8 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         })}
 
         <line x1={nowX} y1={CHART_TOP} x2={nowX} y2={CHART_BOTTOM} stroke="rgba(199,137,0,0.7)" strokeWidth="1.5" strokeDasharray="4 3" />
-        <circle cx={nowX} cy={nowY} r="3.5" fill="hsl(var(--primary))" />
-        <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--primary))">Now</text>
+        <circle cx={nowX} cy={nowY} r="3.5" fill="hsl(var(--gauge-primary))" />
+        <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--gauge-primary))">Now</text>
 
         {tideTooltipEntry && (
           <TideChartTooltipMarker
@@ -299,7 +299,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
       </svg>
 
       <p className="mt-1 text-xs text-muted-foreground">
-        <span className="text-secondary">— Tide height ({unit})</span> · <span className="text-amber-600">●</span> low · <span className="text-secondary">●</span> high · <span style={{ color: 'rgba(199,137,0,0.95)' }}>┊</span> now
+        <span className="text-gauge-secondary">— Tide height ({unit})</span> · <span className="text-amber-600">●</span> low · <span className="text-gauge-secondary">●</span> high · <span style={{ color: 'rgba(199,137,0,0.95)' }}>┊</span> now
       </p>
 
     </div>

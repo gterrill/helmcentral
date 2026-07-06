@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
+    "@fontsource/geist-mono": "^5.2.8",
+    "@fontsource/geist-sans": "^5.2.5",
     "@lucide/lab": "^0.1.2",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",

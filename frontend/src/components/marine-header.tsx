@@ -158,7 +158,7 @@ export function MarineHeader({ isDark = false, onToggleDarkMode, leading }: Mari
           <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 md:text-[11px]">
             {currentDate}
           </span>
-          <time className="inline-flex items-baseline whitespace-nowrap font-display leading-[1.08] tracking-[0.02em] text-secondary">
+          <time className="inline-flex items-baseline whitespace-nowrap font-display leading-[1.08] tracking-[0.02em] text-gauge-secondary">
             <span className="inline-block w-[5ch] text-right tabular-nums text-[1.65rem] sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
               {hh}:{mm}
             </span>

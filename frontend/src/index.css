@@ -1,27 +1,33 @@
-@import url('https://fonts.googleapis.com/css2?family=Aldrich&family=Barlow:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Lato:wght@400;700&family=Playfair+Display:wght@400;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 40 21% 90%;
-    --foreground: 209 45% 27%;
-    --card: 44 25% 94%;
-    --card-foreground: 209 45% 27%;
-    --primary: 39 100% 39%;
-    --primary-foreground: 40 24% 95%;
-    --secondary: 175 42% 32%;
-    --secondary-foreground: 44 25% 94%;
-    --muted: 45 12% 84%;
-    --muted-foreground: 209 15% 42%;
-    --border: 42 15% 80%;
-    --destructive: 0 72% 42%;
-    --destructive-foreground: 44 25% 94%;
-    --radius: 0.6rem;
-    --font-display: 'Aldrich';
-    --font-sans: 'Barlow';
+    --background: 0 0% 98%;
+    --foreground: 0 0% 0%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9.5%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+    --primary: 226 52% 50%;
+    --primary-foreground: 214 96% 97%;
+    --secondary: 0 0% 92%;
+    --secondary-foreground: 0 0% 13%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 32%;
+    --accent: 216 60% 91%;
+    --accent-foreground: 237 64% 21%;
+    --destructive: 359 75% 50%;
+    --destructive-foreground: 214 96% 97%;
+    --border: 0 0% 90%;
+    --input: 0 0% 92%;
+    --ring: 226 52% 50%;
+    --radius: 0.5rem;
+    --gauge-primary: 39 100% 39%;
+    --gauge-secondary: 175 42% 32%;
+    --font-display: 'Geist Mono';
+    --font-sans: 'Geist Sans';
     --sidebar-background: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-primary: var(--primary);
@@ -33,19 +39,27 @@
   }
 
   .dark {
-    --background: 220 30% 10%;
-    --foreground: 40 15% 85%;
-    --card: 220 25% 14%;
-    --card-foreground: 40 15% 85%;
-    --primary: 39 90% 52%;
-    --primary-foreground: 220 30% 8%;
-    --secondary: 175 50% 45%;
-    --secondary-foreground: 220 30% 8%;
-    --muted: 220 20% 18%;
-    --muted-foreground: 40 10% 60%;
-    --border: 220 20% 22%;
-    --destructive: 0 72% 58%;
-    --destructive-foreground: 220 30% 8%;
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 9.5%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 9.5%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 225 72% 62%;
+    --primary-foreground: 214 96% 97%;
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 92%;
+    --muted: 0 0% 11%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 0 0% 20%;
+    --accent-foreground: 216 60% 91%;
+    --destructive: 359 100% 70%;
+    --destructive-foreground: 214 96% 97%;
+    --border: 0 0% 14%;
+    --input: 0 0% 20%;
+    --ring: 226 52% 50%;
+    --gauge-primary: 39 90% 52%;
+    --gauge-secondary: 175 50% 45%;
     --sidebar-background: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-primary: var(--primary);
@@ -56,16 +70,6 @@
     --sidebar-ring: var(--secondary);
   }
 
-  [data-theme='classic'] {
-    --font-display: 'Playfair Display';
-    --font-sans: 'Lato';
-  }
-
-  [data-theme='clean'] {
-    --font-display: 'Inter';
-    --font-sans: 'Inter';
-  }
-
   * {
     @apply border-border;
   }
@@ -74,12 +78,5 @@
     @apply bg-background text-foreground antialiased;
     margin: 0;
     min-height: 100vh;
-    background-image: radial-gradient(circle at 10% 10%, hsl(44 27% 96%) 0%, transparent 32%),
-      radial-gradient(circle at 90% 0%, hsl(176 24% 92%) 0%, transparent 28%);
-  }
-
-  .dark body {
-    background-image: radial-gradient(circle at 10% 10%, hsl(220 35% 14%) 0%, transparent 32%),
-      radial-gradient(circle at 90% 0%, hsl(175 25% 12%) 0%, transparent 28%);
   }
 }

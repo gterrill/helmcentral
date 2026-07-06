@@ -99,12 +99,12 @@ function moonPhaseEmoji(phase: string) {
 
 function getHourlyWeatherIcon(entry: WeatherHourlyEntry, isNight: boolean) {
   if (entry.kind === 'sunset') {
-		return <Sunset size={24} className="text-primary" />
+		return <Sunset size={24} className="text-gauge-primary" />
   }
 
   const normalized = entry.condition.toLowerCase()
   if (isNight && (normalized.includes('clear') || normalized.includes('sunny'))) {
-		return <Moon size={24} className="text-secondary" />
+		return <Moon size={24} className="text-gauge-secondary" />
   }
 
   return getWeatherIcon(entry.condition, 24)
@@ -116,7 +116,7 @@ function getHourlyWeatherIcon(entry: WeatherHourlyEntry, isNight: boolean) {
 function getCloudChartIcon(condition: string, isDaylight: boolean, size: number) {
   const normalized = condition.toLowerCase()
   if (!isDaylight && (normalized.includes('clear') || normalized.includes('sunny'))) {
-    return <Moon size={size} className="text-secondary" />
+    return <Moon size={size} className="text-gauge-secondary" />
   }
   return getWeatherIcon(condition, size)
 }
@@ -602,8 +602,8 @@ export function ForecastDrawer({
   return (
     <div className="space-y-4 pb-4">
       {hourlyEntries.length > 0 && (
-    <div className="overflow-hidden rounded-[26px] border border-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]">
-      <div className="border-b border-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
+    <div className="overflow-hidden rounded-[26px] border border-gauge-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]">
+      <div className="border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
         <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
           {summary ?? "Today's hourly forecast"}
           <WindWarningNotice warnings={activeMarineWarning} />
@@ -619,25 +619,25 @@ export function ForecastDrawer({
             return (
               <div
                 key={`${entry.kind}-${entry.label}-${idx}`}
-                className={`relative flex min-w-[84px] flex-col items-center rounded-[20px] border px-2.5 py-3.5 text-center ${entry.kind === 'sunset' ? 'border-primary/20 bg-primary/10' : nightMode ? 'border-secondary/20 bg-secondary/10' : 'border-border/70 bg-card/80'} ${isNowEntry ? 'shadow-[0_0_0_1px_rgba(199,137,0,0.22),0_10px_18px_rgba(199,137,0,0.10)]' : ''}`}
+                className={`relative flex min-w-[84px] flex-col items-center rounded-[20px] border px-2.5 py-3.5 text-center ${entry.kind === 'sunset' ? 'border-gauge-primary/20 bg-gauge-primary/10' : nightMode ? 'border-gauge-secondary/20 bg-gauge-secondary/10' : 'border-border/70 bg-card/80'} ${isNowEntry ? 'shadow-[0_0_0_1px_rgba(199,137,0,0.22),0_10px_18px_rgba(199,137,0,0.10)]' : ''}`}
               >
                 {isNowEntry && (
-                  <span className="absolute left-1/2 top-1.5 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-primary" />
+                  <span className="absolute left-1/2 top-1.5 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-gauge-primary" />
                 )}
-                <p className={`text-[15px] font-semibold tabular-nums ${isNowEntry ? 'text-primary' : nightMode ? 'text-secondary' : 'text-foreground/75'}`}>{entry.label}</p>
+                <p className={`text-[15px] font-semibold tabular-nums ${isNowEntry ? 'text-gauge-primary' : nightMode ? 'text-gauge-secondary' : 'text-foreground/75'}`}>{entry.label}</p>
                 <div className="mt-3.5 flex h-8 items-center justify-center">
                   {getHourlyWeatherIcon(entry, nightMode)}
                 </div>
-                <p className={`mt-4 ${entry.kind === 'sunset' ? 'text-[13px] font-semibold uppercase tracking-[0.08em] text-primary' : nightMode ? 'font-display text-[2rem] leading-none text-secondary' : 'font-display text-[2rem] leading-none text-foreground'}`}>
+                <p className={`mt-4 ${entry.kind === 'sunset' ? 'text-[13px] font-semibold uppercase tracking-[0.08em] text-gauge-primary' : nightMode ? 'font-display text-[2rem] leading-none text-gauge-secondary' : 'font-display text-[2rem] leading-none text-foreground'}`}>
                   {entry.kind === 'sunset' ? 'Sunset' : displayTemperature !== null ? `${displayTemperature}°` : '—'}
                 </p>
                 {entry.kind === 'forecast' && entry.windSpeedKts >= 0 && (
-                  <p className={`mt-1 whitespace-nowrap text-[11px] font-semibold ${nightMode ? 'text-secondary/80' : 'text-secondary'}`}>
+                  <p className={`mt-1 whitespace-nowrap text-[11px] font-semibold ${nightMode ? 'text-gauge-secondary/80' : 'text-gauge-secondary'}`}>
                     {Math.round(entry.windSpeedKts)}kts {entry.windDirection}
                   </p>
                 )}
                 {nightMode && entry.kind === 'forecast' && (
-                  <span className="mt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-secondary/80">Night</span>
+                  <span className="mt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-gauge-secondary/80">Night</span>
                 )}
               </div>
             )
@@ -677,7 +677,7 @@ export function ForecastDrawer({
 
                 <div className="mt-1.5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1">
-                    <span className="font-display text-lg leading-none text-primary">
+                    <span className="font-display text-lg leading-none text-gauge-primary">
                       {Math.round(displayTemp(day.high))}
                     </span>
                     <span className="text-[9px] text-muted-foreground">
@@ -689,7 +689,7 @@ export function ForecastDrawer({
                   <p className="text-[10px] text-muted-foreground">{Math.round(day.precipitation)}% precip</p>
                 </div>
 
-                <p className="mt-1 text-[10px] font-semibold text-secondary">{Math.round(day.windSpeed)}{windUnit} {day.windDirection}</p>
+                <p className="mt-1 text-[10px] font-semibold text-gauge-secondary">{Math.round(day.windSpeed)}{windUnit} {day.windDirection}</p>
               </button>
             ))}
           </div>
@@ -698,17 +698,17 @@ export function ForecastDrawer({
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <div className="flex items-end gap-1">
                 {getWeatherIcon(selectedDay.condition, 22)}
-                <span className="font-display text-4xl leading-none text-primary">{Math.round(displayTemp(selectedDay.high))}</span>
+                <span className="font-display text-4xl leading-none text-gauge-primary">{Math.round(displayTemp(selectedDay.high))}</span>
                 <span className="pb-1 text-lg text-muted-foreground">{tempUnit}</span>
               </div>
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{selectedDay.condition}</p>
               <div className="flex flex-wrap gap-2 text-[11px]">
-                <span className="rounded bg-muted/50 px-2 py-1">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-amber-600">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Precip <span className="font-semibold">{Math.round(selectedDay.precipitation)}%</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Humidity <span className="font-semibold">{humidityPct}%</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Visibility <span className="font-semibold">{visibilityNm.toFixed(1)} nm</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-secondary">{uvIndex}</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-gauge-secondary">{uvIndex}</span></span>
                 {selectedDay.sunriseTime && (
                   <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
                     <Sunrise size={13} className="text-amber-500" />
@@ -717,7 +717,7 @@ export function ForecastDrawer({
                 )}
                 {selectedDay.sunsetTime && (
                   <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
-                    <Sunset size={13} className="text-primary" />
+                    <Sunset size={13} className="text-gauge-primary" />
                     Sunset <span className="font-semibold">{selectedDay.sunsetTime}</span>
                   </span>
                 )}
@@ -732,7 +732,7 @@ export function ForecastDrawer({
 
             <div ref={chartCardRef} className="rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <Cloud size={13} className="text-secondary" /> Cloud & Temperature
+                <Cloud size={13} className="text-gauge-secondary" /> Cloud & Temperature
               </h4>
               {cloudHourly.length > 0 ? (
                 <>
@@ -839,7 +839,7 @@ export function ForecastDrawer({
 
             <div className="rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <Wind size={13} className="text-secondary" /> Wind
+                <Wind size={13} className="text-gauge-secondary" /> Wind
               </h4>
               {windHourly.length > 0 ? (
                 <>
@@ -908,7 +908,7 @@ export function ForecastDrawer({
 
             <div className="mt-3 rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <Waves size={13} className="text-secondary" /> Wave
+                <Waves size={13} className="text-gauge-secondary" /> Wave
               </h4>
               {waveHourly.length > 0 ? (
                 <>
@@ -967,7 +967,7 @@ export function ForecastDrawer({
                     </svg>
                   </div>
                   <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-secondary">— Total wave height (m)</span> · <span className="text-amber-600">- - Wind wave (chop)</span> · <span className="text-violet-600">·· Swell</span> · arrows show direction the swell is heading, with period (sec) below each
+                    <span className="text-gauge-secondary">— Total wave height (m)</span> · <span className="text-amber-600">- - Wind wave (chop)</span> · <span className="text-violet-600">·· Swell</span> · arrows show direction the swell is heading, with period (sec) below each
                   </p>
                 </>
               ) : (
@@ -979,7 +979,7 @@ export function ForecastDrawer({
 
             <div className="mt-3 rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <CloudRain size={13} className="text-secondary" /> Precipitation
+                <CloudRain size={13} className="text-gauge-secondary" /> Precipitation
               </h4>
               {precipHourly.length > 0 ? (
                 <>

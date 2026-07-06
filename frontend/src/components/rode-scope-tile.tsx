@@ -154,21 +154,21 @@ export function RodeScopeTile({
         <div className="mt-2 grid grid-cols-3 gap-2 text-center">
           <div className={`rounded-md border bg-background/60 px-2 py-2 ${isDragging ? 'border-red-500/30 bg-red-500/10' : ''}`}>
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Rode Deployed</p>
-            <p className="font-display text-2xl text-primary tabular-nums">
+            <p className="font-display text-2xl text-gauge-primary tabular-nums">
               {displayRode}
               <span className="ml-1 text-base text-muted-foreground">{unit}</span>
             </p>
           </div>
           <div className="rounded-md border bg-background/60 px-2 py-2">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Current Scope</p>
-            <p className="font-display text-2xl text-secondary tabular-nums">
+            <p className="font-display text-2xl text-gauge-secondary tabular-nums">
               {currentScope !== null && Number.isFinite(currentScope) ? currentScope.toFixed(1) : '—'}
               <span className="ml-1 text-base text-muted-foreground">:1</span>
             </p>
           </div>
           <div className="rounded-md border bg-background/60 px-2 py-2">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Recommended</p>
-            <p className="font-display text-2xl text-secondary tabular-nums">
+            <p className="font-display text-2xl text-gauge-secondary tabular-nums">
               {recommendedScope !== null ? recommendedScope.toFixed(1) : '—'}
               <span className="ml-1 text-base text-muted-foreground">:1</span>
             </p>
@@ -233,7 +233,7 @@ export function RodeScopeTile({
         <div className="mt-3 rounded-md border bg-background/60 px-3 py-2 text-sm">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Catenary Recommendation</p>
-            <p className="font-display text-xl leading-none text-secondary tabular-nums">
+            <p className="font-display text-xl leading-none text-gauge-secondary tabular-nums">
               {displayRecommendedRode}
               <span className="ml-1 text-base text-muted-foreground">{unit}</span>
             </p>

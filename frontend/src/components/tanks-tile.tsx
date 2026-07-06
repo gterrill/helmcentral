@@ -65,7 +65,7 @@ export function TanksTile({ tanks, loading }: TanksTileProps) {
   const visibleTanks = tanks.slice(0, 8)
 
   return (
-    <Tile title="Tanks" icon={<Droplets className="h-3.5 w-3.5 text-secondary" />}>
+    <Tile title="Tanks" icon={<Droplets className="h-3.5 w-3.5 text-gauge-secondary" />}>
       <div className="mt-3 space-y-2">
         {visibleTanks.map((tank) => {
           const percent = clampPercent(tank.level_percent)

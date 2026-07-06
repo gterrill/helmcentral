@@ -82,7 +82,7 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{trendLabel}</span>
         {trendUp && (
-          <span className="text-[10px] font-medium tabular-nums text-secondary">
+          <span className="text-[10px] font-medium tabular-nums text-gauge-secondary">
             ▲ +{fmt(Math.abs(delta))}{unit}
           </span>
         )}
@@ -106,8 +106,8 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--secondary))" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="hsl(var(--secondary))" stopOpacity="0.03" />
+            <stop offset="0%" stopColor="hsl(var(--gauge-secondary))" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="hsl(var(--gauge-secondary))" stopOpacity="0.03" />
           </linearGradient>
         </defs>
 
@@ -185,7 +185,7 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
         <polyline
           points={linePts}
           fill="none"
-          stroke="hsl(var(--secondary))"
+          stroke="hsl(var(--gauge-secondary))"
           strokeWidth="1.5"
           strokeLinejoin="round"
           strokeLinecap="round"

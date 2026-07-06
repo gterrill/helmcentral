@@ -12,7 +12,7 @@ type CZoneSwitchesTileProps = {
 
 export function CZoneSwitchesTile({ switches, loading, pending, onToggle }: CZoneSwitchesTileProps) {
   return (
-    <Tile title="CZone" icon={<Zap className="h-3.5 w-3.5 text-secondary" />}>
+    <Tile title="CZone" icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
       <div className="mt-3 space-y-1.5">
         {switches.map((sw) => {
           const isOn = sw.state === 1

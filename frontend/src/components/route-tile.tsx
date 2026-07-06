@@ -26,8 +26,8 @@ export function RouteTile({ speedKts, routes, dashboardRouteId, onOpen }: RouteT
       className={onOpen ? 'cursor-pointer transition-opacity hover:opacity-80' : undefined}
       data-testid="route-tile"
     >
-      <Tile title="Route" icon={<Navigation className="h-3.5 w-3.5 text-secondary" />}>
-        <p className="truncate font-display text-2xl leading-none text-primary">{route.name}</p>
+      <Tile title="Route" icon={<Navigation className="h-3.5 w-3.5 text-gauge-secondary" />}>
+        <p className="truncate font-display text-2xl leading-none text-gauge-primary">{route.name}</p>
         <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground">
           <span>{formatNm(totals.totalDistanceM)}</span>
           <span>ETA {formatEtaHours(totals.totalEtaHours)}</span>

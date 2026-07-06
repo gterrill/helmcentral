@@ -56,7 +56,6 @@ import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
-import { useTheme, type Theme } from '@/hooks/use-theme'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 import { anchorConfig, uiConfig } from '@/config/app-config'
 import { Button } from '@/components/ui/button'
@@ -168,7 +167,7 @@ type WindMetricCardProps = {
 function WindMetricCard({ title, value, align = 'left', className = '', style, valueFirst = false }: WindMetricCardProps) {
   const alignmentClass = align === 'right' ? 'items-end text-right' : 'items-start text-left'
   const label = <p key="label" className="text-[10px] leading-none uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
-  const reading = <p key="value" className="font-display text-2xl leading-[0.86] text-primary md:text-3xl">{value}</p>
+  const reading = <p key="value" className="font-display text-2xl leading-[0.86] text-gauge-primary md:text-3xl">{value}</p>
 
   return (
     <div
@@ -339,7 +338,6 @@ export function App() {
     globalThis.localStorage?.setItem(AUTO_CLOSE_ANCHOR_WATCH_KEY, String(autoCloseAnchorWatchEnabled))
   }, [autoCloseAnchorWatchEnabled])
 
-  const [theme, setTheme] = useTheme()
   const [isDarkTheme, toggleDarkMode] = useDarkMode()
   const { routes, loading: routesLoading, error: routesError, createRoute, updateRoute, deleteRoute } = useRoutes()
   const {
@@ -470,7 +468,7 @@ export function App() {
     ? 'text-red-600'
     : gnssValidationState === 'degraded'
       ? 'text-amber-600'
-      : 'text-secondary'
+      : 'text-gauge-secondary'
   const gnssDiagnosticLabel = [
     `Q${gnssQualityIndicator !== null ? gnssQualityIndicator : '—'}`,
     `HDOP ${gnssHdop !== null ? gnssHdop.toFixed(1) : '—'}`,
@@ -507,7 +505,7 @@ export function App() {
     ? `${chargingPowerW >= 0 ? '+' : '-'}${Math.abs(Math.round(chargingPowerW))}`
     : '—'
   const isDischarging = (chargingCurrentA !== null && chargingCurrentA < 0) || (chargingPowerW !== null && chargingPowerW < 0)
-  const chargingValueClass = isDischarging ? 'text-amber-600' : 'text-secondary'
+  const chargingValueClass = isDischarging ? 'text-amber-600' : 'text-gauge-secondary'
   const solarOutputLabel = solarOutputW !== null ? Math.round(solarOutputW).toString() : '—'
   const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
   const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
@@ -515,9 +513,9 @@ export function App() {
   const chargeRateLabel = batteryRatePercentPerHour !== null
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}`
     : '—'
-  const chargeRateClass = batteryRatePercentPerHour !== null && batteryRatePercentPerHour < 0 ? 'text-amber-600' : 'text-secondary'
+  const chargeRateClass = batteryRatePercentPerHour !== null && batteryRatePercentPerHour < 0 ? 'text-amber-600' : 'text-gauge-secondary'
   const timeToGoLabel = formatTimeToGo(timeToGoHours)
-  const timeToGoClass = timeToGoHours !== null && timeToGoHours < 0 ? 'text-amber-600' : 'text-secondary'
+  const timeToGoClass = timeToGoHours !== null && timeToGoHours < 0 ? 'text-amber-600' : 'text-gauge-secondary'
 
   let TimeToGoIcon = BatteryFull
   if (!isDischarging && batteryRatePercentPerHour !== null && batteryRatePercentPerHour > 0) {
@@ -542,7 +540,7 @@ export function App() {
         </span>
       </span>
     )
-    : <span className="font-display text-4xl tabular-nums leading-none text-primary">—</span>
+    : <span className="font-display text-4xl tabular-nums leading-none text-gauge-primary">—</span>
   const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
 
   const handleDropAnchorHere = () => {
@@ -604,7 +602,7 @@ export function App() {
                 <div className="mt-1 rounded-md border bg-background/60 px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
                   <div className="mt-1 flex items-center gap-4">
-                    <p className="shrink-0 font-display text-4xl text-secondary">
+                    <p className="shrink-0 font-display text-4xl text-gauge-secondary">
                       {depthValue}
                       <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
                     </p>
@@ -625,11 +623,11 @@ export function App() {
                     Tide{tide.station_name ? ` — ${tide.station_name}` : ''}
                   </p>
                   <div className="mt-1 flex items-baseline gap-2">
-                    <span className="font-display text-4xl leading-none text-secondary">
+                    <span className="font-display text-4xl leading-none text-gauge-secondary">
                       {tide.current_tide_height_ft >= 0 ? tideFtToDisplay(tide.current_tide_height_ft).toFixed(isImperialDistance ? 1 : 2) : '—'}
                     </span>
                     <span className="text-lg text-muted-foreground">{tideUnit}</span>
-                    <span className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-secondary">
+                    <span className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-gauge-secondary">
                       {tide.tide_direction === 'Falling' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />}
                       {tide.tide_direction}
                     </span>
@@ -638,7 +636,7 @@ export function App() {
                     {tideExtremes.map((extreme) => (
                       <p key={extreme.isHigh ? 'high' : 'low'} className="inline-flex items-center gap-1.5 text-xs text-foreground">
                         {extreme.isHigh ? (
-                          <ArrowUp className="h-3.5 w-3.5 text-secondary" />
+                          <ArrowUp className="h-3.5 w-3.5 text-gauge-secondary" />
                         ) : (
                           <ArrowDown className="h-3.5 w-3.5 text-amber-600" />
                         )}
@@ -675,7 +673,7 @@ export function App() {
                   )}
                 </div>
               </div>
-              <div className="mt-3 truncate rounded-md bg-secondary/10 px-3 py-2 font-display text-2xl text-secondary">
+              <div className="mt-3 truncate rounded-md bg-gauge-secondary/10 px-3 py-2 font-display text-2xl text-gauge-secondary">
                 {placeName ?? '—'}
               </div>
             </Tile>
@@ -700,7 +698,7 @@ export function App() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-display text-xl leading-none text-secondary">
+                    <p className="font-display text-xl leading-none text-gauge-secondary">
                       {weather.wind_speed_kts >= 0 ? `${Math.round(weather.wind_speed_kts)} kts` : '— kts'} {weather.wind_direction}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -770,14 +768,14 @@ export function App() {
               <div className="mt-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2">
                 <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
                   <div className="flex items-baseline gap-2">
-                    <span className="font-display text-6xl leading-none tabular-nums text-primary md:text-7xl">{socLabel}</span>
+                    <span className="font-display text-6xl leading-none tabular-nums text-gauge-primary md:text-7xl">{socLabel}</span>
                     <span className="shrink-0 text-2xl leading-none text-foreground md:text-3xl">%</span>
                   </div>
                   <div className="mt-3 flex items-center gap-2">
                     <div className="h-1.5 flex-1 rounded-full bg-muted/60">
-                      <div className="h-full rounded-full bg-primary" style={{ width: socBarWidth }} />
+                      <div className="h-full rounded-full bg-gauge-primary" style={{ width: socBarWidth }} />
                     </div>
-                    <span className="shrink-0 font-display text-sm tabular-nums leading-none text-secondary">
+                    <span className="shrink-0 font-display text-sm tabular-nums leading-none text-gauge-secondary">
                       {dc24vVoltageLabel}<span className="text-xs text-muted-foreground">V</span>
                     </span>
                   </div>
@@ -798,14 +796,14 @@ export function App() {
               <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Draw</p>
-                  <p className="font-display text-4xl leading-none text-primary">
+                  <p className="font-display text-4xl leading-none text-gauge-primary">
                     {acOutputLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
                   </p>
                 </div>
                 <div className="rounded-md border bg-background/60 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">DC Draw</p>
-                  <p className="font-display text-4xl leading-none text-primary">
+                  <p className="font-display text-4xl leading-none text-gauge-primary">
                     {dc12vPowerLabel}
                     <span className="ml-1 text-xl text-muted-foreground">W</span>
                   </p>
@@ -814,7 +812,7 @@ export function App() {
 
               <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
-                <p className="font-display text-4xl leading-none text-secondary">
+                <p className="font-display text-4xl leading-none text-gauge-secondary">
                   {solarOutputLabel}
                   <span className="ml-1 text-xl text-muted-foreground">W</span>
                 </p>
@@ -945,8 +943,6 @@ export function App() {
           <SignalKSettingsPanel
             autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
             onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
-            theme={theme}
-            onThemeChange={(v) => setTheme(v as Theme)}
           />
         )
       case 'anchor-watch':

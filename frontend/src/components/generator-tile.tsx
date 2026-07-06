@@ -112,16 +112,16 @@ export function GeneratorTile({
   return (
     <Tile title="Generator">
       <div className="mt-2 grid grid-cols-1 gap-2 text-center md:grid-cols-2">
-        <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-secondary/30' : ''}`}>
+        <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-gauge-secondary/30' : ''}`}>
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Power</p>
-          <p className={`font-display text-2xl tabular-nums ${isRunning ? 'text-secondary' : 'text-muted-foreground'}`}>
+          <p className={`font-display text-2xl tabular-nums ${isRunning ? 'text-gauge-secondary' : 'text-muted-foreground'}`}>
             {powerLabel}<span className="ml-1 text-base text-muted-foreground">W</span>
           </p>
         </div>
 
         <div className={`rounded-md border bg-background/60 px-2 py-2 ${isRunning ? 'border-muted/40' : ''}`}>
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Runtime</p>
-          <p className="font-display text-2xl tabular-nums text-secondary">
+          <p className="font-display text-2xl tabular-nums text-gauge-secondary">
             {formatRuntime(generatorRuntime)}
           </p>
         </div>
@@ -151,14 +151,14 @@ export function GeneratorTile({
         <div className={`mt-3 grid gap-2 ${projectedSocPercent !== null ? 'grid-cols-2' : 'grid-cols-1'}`}>
           <div className="rounded-md border bg-background/60 px-3 py-2">
             <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Timer Remaining</p>
-            <p className="mt-0.5 font-mono text-sm tabular-nums text-secondary">
+            <p className="mt-0.5 font-mono text-sm tabular-nums text-gauge-secondary">
               {formatRuntime(generatorManualStartTimer)}
             </p>
           </div>
           {projectedSocPercent !== null && (
             <div className="rounded-md border bg-background/60 px-3 py-2">
               <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Battery at Finish</p>
-              <p className="mt-0.5 font-mono text-sm tabular-nums text-secondary">
+              <p className="mt-0.5 font-mono text-sm tabular-nums text-gauge-secondary">
                 {Math.round(projectedSocPercent)}%
               </p>
             </div>
@@ -175,7 +175,7 @@ export function GeneratorTile({
               role="switch"
               aria-checked={timedRunEnabled}
               className="relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-              style={{ background: timedRunEnabled ? 'hsl(var(--secondary))' : 'hsl(var(--muted))' }}
+              style={{ background: timedRunEnabled ? 'hsl(var(--primary))' : 'hsl(var(--muted))' }}
               onClick={() => setTimedRunEnabled((v) => !v)}
             >
               <span

@@ -16,10 +16,10 @@ interface AlternatorTileProps {
 }
 
 function tempClass(tempC: number | null): string {
-  if (tempC === null) return 'text-secondary'
+  if (tempC === null) return 'text-gauge-secondary'
   if (tempC >= 100) return 'text-red-500'
   if (tempC >= 80) return 'text-amber-500'
-  return 'text-secondary'
+  return 'text-gauge-secondary'
 }
 
 function AlternatorColumn({ label, data }: { label: string; data: AlternatorData }) {
@@ -36,7 +36,7 @@ function AlternatorColumn({ label, data }: { label: string; data: AlternatorData
       <div className="rounded-md border bg-background/60 px-3 py-3">
         <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Output</p>
         <div className="flex items-baseline gap-1">
-          <span className="font-display text-4xl tabular-nums leading-none text-secondary">{powerLabel}</span>
+          <span className="font-display text-4xl tabular-nums leading-none text-gauge-secondary">{powerLabel}</span>
           <span className="text-xs leading-none text-muted-foreground">W</span>
         </div>
       </div>
@@ -75,7 +75,7 @@ function AlternatorColumn({ label, data }: { label: string; data: AlternatorData
 
 export function AlternatorTile({ port, starboard, enginesRunning }: AlternatorTileProps) {
   return (
-    <Tile title="Alternators" icon={<Zap className="h-3.5 w-3.5 text-secondary" />}>
+    <Tile title="Alternators" icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
       {enginesRunning ? (
         <div className="mt-1 grid grid-cols-2 gap-4">
           <AlternatorColumn label="Port" data={port} />
