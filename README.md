@@ -123,6 +123,12 @@ A saved route can also be Activated, which pushes it to the boat's SignalK serve
 
 See [docs/adr/0007-signalk-route-activation.md](docs/adr/0007-signalk-route-activation.md).
 
+### Configurable Dashboard Layout
+
+The dashboard's 13 widgets can be rearranged, resized, shown, or hidden by operators without a code deployment. In layout mode (toggle in the header), operators can drag widgets to new positions, resize them, or remove them from the display; unplaced widgets can be added back via an "Add Widget" picker. The layout is persisted server-side and restored on the next session.
+
+See [docs/adr/0012-configurable-bento-dashboard.md](docs/adr/0012-configurable-bento-dashboard.md).
+
 ## Next Steps
 
 1. Configure SignalK connection parameters

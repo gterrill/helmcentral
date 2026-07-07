@@ -88,3 +88,4 @@ The durable rationale for trail handling is documented in:
 - [../docs/adr/0005-signalk-tracks-backed-ais-trails.md](../docs/adr/0005-signalk-tracks-backed-ais-trails.md)
 - [../docs/adr/0006-manual-route-planning.md](../docs/adr/0006-manual-route-planning.md)
 - [../docs/adr/0007-signalk-route-activation.md](../docs/adr/0007-signalk-route-activation.md)
+- [../docs/adr/0012-configurable-bento-dashboard.md](../docs/adr/0012-configurable-bento-dashboard.md)

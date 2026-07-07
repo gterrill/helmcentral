@@ -133,6 +133,8 @@ func main() {
 	e.GET("/api/anchor-watch/trails/self", getSelfTrailHandler)
 	e.GET("/api/anchor-watch/trails/ais/:id", getAISTrailHandler)
 	e.GET("/api/anchor-watch/trails/ais", getAllAISTrailsHandler)
+	e.GET("/api/dashboard-layout", getDashboardLayoutHandler)
+	e.PUT("/api/dashboard-layout", putDashboardLayoutHandler)
 	e.GET("/api/routes", listRoutesHandler)
 	e.POST("/api/routes", createRouteHandler)
 	e.GET("/api/routes/:id", getRouteHandler)
@@ -159,6 +161,7 @@ func main() {
 
 	loadAnchorWatch()
 	loadRoutes()
+	loadDashboardLayout()
 	go seedMotoringTrailFromInflux()
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)

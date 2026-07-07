@@ -1,27 +1,24 @@
 import {
   Anchor,
-  ArrowDown,
-  ArrowUp,
   CloudSun,
-  Compass,
   LayoutDashboard,
   Map,
+  Plus,
   Radar as RadarIcon,
   Route,
   Settings,
   Waves,
-  BatteryCharging,
-  BatteryFull,
-  BatteryMedium,
-  BatteryLow,
-  BatteryWarning,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import { AlternatorTile } from '@/components/alternator-tile'
-import { DepthSparkline } from '@/components/depth-sparkline'
+import { BatteryPowerTile } from '@/components/battery-power-tile'
+import { DepthTideTile } from '@/components/depth-tide-tile'
+import { PositionTile } from '@/components/position-tile'
+import { TodayNowTile } from '@/components/today-now-tile'
+import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { MarineWarningBanner } from '@/components/marine-warning-banner'
@@ -32,14 +29,16 @@ import { SignalKSettingsPanel } from '@/components/signalk-settings-panel'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { GeneratorTile } from '@/components/generator-tile'
 import { TanksTile } from '@/components/tanks-tile'
-import { WindCompass } from '@/components/wind-compass'
 import { ForecastDrawer } from '@/components/forecast-drawer'
 import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
 import { SatChartsDrawer } from '@/components/sat-charts-drawer'
 import { RouteTile } from '@/components/route-tile'
+import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
+import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { useRoutes } from '@/hooks/use-routes'
 import { useSatCharts } from '@/hooks/use-sat-charts'
 import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
+import { useDashboardLayout } from '@/hooks/use-dashboard-layout'
 import { useRouteActivation } from '@/hooks/use-route-activation'
 import { TideDrawer } from '@/components/tide-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
@@ -58,9 +57,10 @@ import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 import { anchorConfig, uiConfig } from '@/config/app-config'
+import { DASHBOARD_WIDGET_IDS, DASHBOARD_WIDGET_LABELS, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 import { Button } from '@/components/ui/button'
-import { Tile } from '@/components/ui/tile'
 import { Separator } from '@/components/ui/separator'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -96,236 +96,24 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const AUTO_CLOSE_ANCHOR_WATCH_KEY = 'anchorWatch.autoClose.enabled'
 
-function formatCoordinate(value: number | null, latitude: boolean) {
-  if (value === null) {
-    return '—'
-  }
-
-  const absolute = Math.abs(value)
-  const degrees = Math.floor(absolute)
-  const minutesFloat = (absolute - degrees) * 60
-  const minutes = Math.floor(minutesFloat)
-  const seconds = (minutesFloat - minutes) * 60
-  const hemisphere = latitude ? (value >= 0 ? 'N' : 'S') : value >= 0 ? 'E' : 'W'
-
-  return `${degrees}° ${String(minutes).padStart(2, '0')}' ${seconds.toFixed(1).padStart(4, '0')}" ${hemisphere}`
-}
-
-function formatHeading(headingTrue: number | null) {
-  if (headingTrue === null) {
-    return '—'
-  }
-
-  const normalized = ((headingTrue % 360) + 360) % 360
-  const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
-  const direction = directions[Math.round(normalized / 22.5) % directions.length]
-
-  return `${Math.round(normalized)}° ${direction}`
-}
-
-function fahrenheitToCelsius(temp: number) {
-  return (temp - 32) * (5 / 9)
-}
-
-function formatTimeToGo(hours: number | null) {
-  if (hours === null || !Number.isFinite(hours)) {
-    return '—'
-  }
-
-  const absHours = Math.abs(hours)
-  const totalMinutes = Math.max(0, Math.round(absHours * 60))
-  if (totalMinutes === 0) {
-    return '—'
-  }
-
-  if (absHours >= 24 * 7) {
-    return `${Math.round(absHours / (24 * 7))}w`
-  }
-
-  if (absHours >= 24) {
-    const days = Math.floor(absHours / 24)
-    let remainingHours = Math.round(absHours - days * 24)
-    if (remainingHours === 24) {
-      remainingHours = 0
-    }
-    if (remainingHours === 0) {
-      return `${days}d`
-    }
-    return `${days}d ${remainingHours}h`
-  }
-
-  if (absHours >= 10) {
-    return `${Math.round(absHours)}h`
-  }
-
-  const hh = Math.floor(totalMinutes / 60)
-  const mm = totalMinutes % 60
-
-  return `${hh}h ${mm.toString().padStart(2, '0')}m`
-}
-
-type WindMetricCardProps = {
-  title: string
-  value: ReactNode
-  align?: 'left' | 'right'
-  className?: string
-  style?: CSSProperties
-  valueFirst?: boolean
-}
-
-function WindMetricCard({ title, value, align = 'left', className = '', style, valueFirst = false }: WindMetricCardProps) {
-  const alignmentClass = align === 'right' ? 'items-end text-right' : 'items-start text-left'
-  const label = <p key="label" className="text-[10px] leading-none uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
-  const reading = <p key="value" className="font-display text-2xl leading-[0.86] text-gauge-primary md:text-3xl">{value}</p>
-
-  return (
-    <div
-      className={`relative flex flex-col justify-start gap-0.5 rounded-2xl border bg-background/80 px-4 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ${alignmentClass} ${className}`.trim()}
-      style={style}
-    >
-      {valueFirst ? [reading, label] : [label, reading]}
-    </div>
-  )
-}
-
-// Wind-tile geometry: the 4 gauge cards + compass sit in a fixed-size canvas
-// (rather than stretching with their column) so each card's inner corner can
-// be cut with a radial-gradient mask that lines up with the compass ring.
-// Mobile and desktop each get their own canvas size (mobile has no competing
-// grid columns so it can afford a bigger compass than desktop's narrow lg
-// column). Each canvas scales down (via useFitScale) if its column ends up
-// narrower than its design width, e.g. a small phone, or the squeeze right
-// after the lg breakpoint's 3-column split kicks in.
-type WindCanvasConfig = {
-  width: number
-  height: number
-  compassBox: number
-  topCardW: number
-  bottomCardW: number
-  cardH: number
-  gap: number
-}
-
-const WIND_MOBILE_CFG: WindCanvasConfig = { width: 475, height: 363, compassBox: 295, topCardW: 195, bottomCardW: 224, cardH: 80, gap: 20 }
-const WIND_DESKTOP_CFG: WindCanvasConfig = { width: 440, height: 225, compassBox: 198, topCardW: 170, bottomCardW: 203, cardH: 72, gap: 20 }
-
-// Width of the card's straight-edge border (Tailwind's bare `border` utility), so the
-// drawn ring along the mask's cut edge reads as a continuous border, not just 3 sides.
-const WIND_BORDER_WIDTH = 1
-
-function computeWindMasks({ width, height, compassBox, topCardW, bottomCardW, cardH, gap }: WindCanvasConfig) {
-  // WindCompass draws its outer ring at radius 130 inside a 280-wide viewBox.
-  const compassRadius = (compassBox / 2) * (130 / 140)
-  const inner = compassRadius + gap - 1
-  const outer = compassRadius + gap + 1
-  const ringOuter = outer + WIND_BORDER_WIDTH
-  const centerX = width / 2
-  const centerY = height / 2
-
-  const mask = (cardLeft: number, cardTop: number): CSSProperties => {
-    const x = centerX - cardLeft
-    const y = centerY - cardTop
-    const maskImg = `radial-gradient(circle at ${x}px ${y}px, transparent ${inner}px, #000 ${outer}px)`
-    // A thin ring drawn just outside the mask's cut line, in the card's border color,
-    // so the curved edge gets a stroke to match the card's straight-edge border.
-    const ringImg = `radial-gradient(circle at ${x}px ${y}px, transparent ${outer}px, hsl(var(--border)) ${outer}px, hsl(var(--border)) ${ringOuter}px, transparent ${ringOuter}px)`
-    return { maskImage: maskImg, WebkitMaskImage: maskImg, backgroundImage: ringImg }
-  }
-
-  return {
-    tl: mask(0, 0),
-    tr: mask(width - topCardW, 0),
-    bl: mask(0, height - cardH),
-    br: mask(width - bottomCardW, height - cardH),
-  }
-}
-
-const WIND_MOBILE_MASKS = computeWindMasks(WIND_MOBILE_CFG)
-const WIND_DESKTOP_MASKS = computeWindMasks(WIND_DESKTOP_CFG)
-
-/** Scales a fixed-size design down (never up) to fit whatever width its column ends up with. */
-function useFitScale(designWidth: number) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(1)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const observer = new ResizeObserver(([entry]) => {
-      setScale(Math.min(1, entry.contentRect.width / designWidth))
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [designWidth])
-
-  return [ref, scale] as const
-}
-
-type WindGaugeClusterProps = {
-  cfg: WindCanvasConfig
-  masks: ReturnType<typeof computeWindMasks>
-  visibilityClassName: string
-  setValue: ReactNode
-  driftLabel: ReactNode
-  gust10mLabel: ReactNode
-  gust1hLabel: ReactNode
-  headingTrue: number | null
-  windAngleApparentDeg: number | null
-  windSide: 'port' | 'starboard' | null
-  windAngleRelativeDeg: number | null
-  windSpeedApparentKts: number | null
-}
-
-function WindGaugeCluster({
-  cfg, masks, visibilityClassName,
-  setValue, driftLabel, gust10mLabel, gust1hLabel,
-  headingTrue, windAngleApparentDeg, windSide, windAngleRelativeDeg, windSpeedApparentKts,
-}: WindGaugeClusterProps) {
-  const [fitRef, scale] = useFitScale(cfg.width)
-
-  return (
-    <div
-      ref={fitRef}
-      className={`relative mx-auto ${visibilityClassName}`}
-      style={{ maxWidth: cfg.width, height: cfg.height * scale }}
-    >
-      <div
-        className="absolute left-0 top-0 origin-top-left"
-        style={{ width: cfg.width, height: cfg.height, transform: `scale(${scale})` }}
-      >
-        <div className="grid h-full w-full grid-cols-2 grid-rows-2">
-          <div className="self-start justify-self-start">
-            <WindMetricCard title="SET" value={setValue} style={{ width: cfg.topCardW, height: cfg.cardH, ...masks.tl }} />
-          </div>
-
-          <div className="self-start justify-self-end">
-            <WindMetricCard title="DRIFT" value={driftLabel} align="right" style={{ width: cfg.topCardW, height: cfg.cardH, ...masks.tr }} />
-          </div>
-
-          <div className="self-end justify-self-start">
-            <WindMetricCard title="MAX GUST 10M" value={gust10mLabel} valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.bl }} />
-          </div>
-
-          <div className="self-end justify-self-end">
-            <WindMetricCard title="MAX GUST 1HR" value={gust1hLabel} align="right" valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.br }} />
-          </div>
-        </div>
-
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2" style={{ width: cfg.compassBox }}>
-          <div className="aspect-square w-full">
-            <WindCompass
-              headingTrue={headingTrue}
-              windAngleApparentDeg={windAngleApparentDeg}
-              windSide={windSide}
-              windAngleRelativeDeg={windAngleRelativeDeg}
-              windSpeedKts={windSpeedApparentKts}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
+// Recreates today's 3-column arrangement (cols=12, each column w=4) so a fresh
+// install with no saved layout looks identical to the pre-bento dashboard.
+const DEFAULT_DASHBOARD_LAYOUT: DashboardLayoutItem[] = [
+  { id: 'vessel', x: 0, y: 0, w: 12, h: 3 },
+  { id: 'wind', x: 0, y: 3, w: 4, h: 8 },
+  { id: 'depth-tide', x: 0, y: 11, w: 4, h: 7 },
+  { id: 'position', x: 0, y: 18, w: 4, h: 5 },
+  { id: 'today-now', x: 0, y: 23, w: 4, h: 5 },
+  { id: 'anchor-watch', x: 4, y: 3, w: 4, h: 8 },
+  { id: 'rode-scope', x: 4, y: 11, w: 4, h: 6 },
+  { id: 'tanks', x: 4, y: 17, w: 4, h: 4 },
+  { id: 'route', x: 4, y: 21, w: 4, h: 4 },
+  { id: 'nearby-vessels', x: 4, y: 25, w: 4, h: 5 },
+  { id: 'battery-power', x: 8, y: 3, w: 4, h: 14 },
+  { id: 'alternator', x: 8, y: 17, w: 4, h: 6 },
+  { id: 'generator', x: 8, y: 23, w: 4, h: 5 },
+  { id: 'czone-switches', x: 8, y: 28, w: 4, h: 6 },
+]
 
 export function App() {
   const [activePanel, setActivePanel] = useState<PanelId | null>(null)
@@ -338,6 +126,7 @@ export function App() {
     // Default to true if not set
     return raw !== 'false'
   })
+  const [layoutEditing, setLayoutEditing] = useState(false)
 
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
@@ -365,6 +154,11 @@ export function App() {
     activate: activateRoute,
     deactivate: deactivateRoute,
   } = useRouteActivation()
+  const {
+    widgets: savedWidgets,
+    error: dashboardLayoutError,
+    saveLayout,
+  } = useDashboardLayout()
 
   // Handle anchor watch auto-close notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -458,98 +252,6 @@ export function App() {
   const depthTrend = useDepthTrend('3h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
-  const tideUnit = isImperialDistance ? 'ft' : 'm'
-  const tideFtToDisplay = (ft: number) => (isImperialDistance ? ft : ft / 3.28084)
-  const tideExtremes = [
-    { isHigh: true, time: tide.high_tide_time, heightFt: tide.high_tide_height_ft },
-    { isHigh: false, time: tide.low_tide_time, heightFt: tide.low_tide_height_ft },
-  ].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
-  const depthValue =
-    depth !== null
-      ? isImperialDistance
-        ? (depth * 3.28084).toFixed(1)
-        : depth.toFixed(1)
-      : '—'
-  const depthUnitLabel = isImperialDistance ? 'feet' : 'm'
-  const awaLabel = windAngleApparentDeg !== null ? `${Math.round(windAngleApparentDeg).toString().padStart(3, '0')}°` : '---°'
-  const headingLabel = formatHeading(headingTrue)
-  const satellitesValueClass = gnssValidationState === 'critical'
-    ? 'text-red-600'
-    : gnssValidationState === 'degraded'
-      ? 'text-amber-600'
-      : 'text-gauge-secondary'
-  const gnssDiagnosticLabel = [
-    `Q${gnssQualityIndicator !== null ? gnssQualityIndicator : '—'}`,
-    `HDOP ${gnssHdop !== null ? gnssHdop.toFixed(1) : '—'}`,
-    gnssValidationState ?? '—',
-    gnssValidationReason ?? '',
-  ].filter(Boolean).join(' · ')
-  const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
-  const setDegreesLabel = currentSetDeg !== null ? `${Math.round(((currentSetDeg % 360) + 360) % 360)}°` : '—'
-  const setArrowRotation = currentSetDeg !== null ? ((currentSetDeg % 360) + 360) % 360 : 0
-  const driftLabel = currentDriftKts !== null ? (
-    <>
-      {currentDriftKts.toFixed(1)}
-      <span className="ml-1 text-xl text-muted-foreground">kts</span>
-    </>
-  ) : '—'
-  const gust10mLabel = maxGust10mKts !== null ? (
-    <>
-      {maxGust10mKts.toFixed(1)}
-      <span className="ml-1 text-xl text-muted-foreground">kts</span>
-    </>
-  ) : '—'
-  const gust1hLabel = maxGust1hKts !== null ? (
-    <>
-      {maxGust1hKts.toFixed(1)}
-      <span className="ml-1 text-xl text-muted-foreground">kts</span>
-    </>
-  ) : '—'
-  const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
-  const socBarWidth = `${Math.max(0, Math.min(100, batterySocPercent ?? 0))}%`
-  const chargingCurrentLabel = chargingCurrentA !== null
-    ? `${chargingCurrentA >= 0 ? '+' : '-'}${Math.abs(chargingCurrentA).toFixed(1)}`
-    : '—'
-  const chargingPowerLabel = chargingPowerW !== null
-    ? `${chargingPowerW >= 0 ? '+' : '-'}${Math.abs(Math.round(chargingPowerW))}`
-    : '—'
-  const isDischarging = (chargingCurrentA !== null && chargingCurrentA < 0) || (chargingPowerW !== null && chargingPowerW < 0)
-  const chargingValueClass = isDischarging ? 'text-amber-600' : 'text-gauge-secondary'
-  const solarOutputLabel = solarOutputW !== null ? Math.round(solarOutputW).toString() : '—'
-  const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
-  const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
-  const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
-  const chargeRateLabel = batteryRatePercentPerHour !== null
-    ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}`
-    : '—'
-  const chargeRateClass = batteryRatePercentPerHour !== null && batteryRatePercentPerHour < 0 ? 'text-amber-600' : 'text-gauge-secondary'
-  const timeToGoLabel = formatTimeToGo(timeToGoHours)
-  const timeToGoClass = timeToGoHours !== null && timeToGoHours < 0 ? 'text-amber-600' : 'text-gauge-secondary'
-
-  let TimeToGoIcon = BatteryFull
-  if (!isDischarging && batteryRatePercentPerHour !== null && batteryRatePercentPerHour > 0) {
-    TimeToGoIcon = BatteryCharging
-  } else {
-    const soc = batterySocPercent ?? 0
-    if (soc <= 20) TimeToGoIcon = BatteryWarning
-    else if (soc <= 33) TimeToGoIcon = BatteryLow
-    else if (soc <= 66) TimeToGoIcon = BatteryMedium
-    else TimeToGoIcon = BatteryFull
-  }
-
-  const setValue = currentSetDeg !== null && currentDriftKts !== 0
-    ? (
-      <span className="inline-flex items-center gap-2">
-        <span>{setDegreesLabel}</span>
-        <span
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 text-muted-foreground"
-          title={`Set direction ${setDirectionLabel}`}
-        >
-          <ArrowUp className="h-4 w-4" style={{ transform: `rotate(${setArrowRotation}deg)` }} />
-        </span>
-      </span>
-    )
-    : <span className="font-display text-4xl tabular-nums leading-none text-gauge-primary">—</span>
   const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
 
   const handleDropAnchorHere = () => {
@@ -560,336 +262,196 @@ export function App() {
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeMarineWarning))
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
 
+  const effectiveWidgets = savedWidgets !== null && savedWidgets.length > 0 ? savedWidgets : DEFAULT_DASHBOARD_LAYOUT
+  const unplacedWidgetIds = DASHBOARD_WIDGET_IDS.filter((id) => !effectiveWidgets.some((w) => w.id === id))
+
+  const handleLayoutSettle = (next: DashboardLayoutItem[]) => {
+    void saveLayout(next)
+  }
+
+  const handleRemoveWidget = (id: DashboardWidgetId) => {
+    void saveLayout(effectiveWidgets.filter((w) => w.id !== id))
+  }
+
+  const handleAddWidget = (id: DashboardWidgetId) => {
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    void saveLayout([...effectiveWidgets, { id, x: 0, y: maxY, w: 4, h: 6 }])
+  }
+
+  const renderWidget = (id: DashboardWidgetId): ReactNode => {
+    switch (id) {
+      case 'vessel':
+        return <MarineHeader />
+      case 'wind':
+        return (
+          <WindTile
+            headingTrue={headingTrue}
+            windAngleApparentDeg={windAngleApparentDeg}
+            windSide={windSide}
+            windAngleRelativeDeg={windAngleRelativeDeg}
+            windSpeedApparentKts={windSpeedApparentKts}
+            currentSetDeg={currentSetDeg}
+            currentDriftKts={currentDriftKts}
+            maxGust10mKts={maxGust10mKts}
+            maxGust1hKts={maxGust1hKts}
+          />
+        )
+      case 'depth-tide':
+        return (
+          <DepthTideTile
+            depth={depth}
+            isImperialDistance={isImperialDistance}
+            navigationState={navigationState}
+            depthTrend={depthTrend}
+            tide={tide}
+            onOpen={layoutEditing ? undefined : () => setActivePanel('tides')}
+          />
+        )
+      case 'position':
+        return (
+          <PositionTile
+            latitude={latitude}
+            longitude={longitude}
+            headingTrue={headingTrue}
+            gnssValidationState={gnssValidationState}
+            gnssQualityIndicator={gnssQualityIndicator}
+            gnssHdop={gnssHdop}
+            gnssValidationReason={gnssValidationReason}
+            gnssSatellites={gnssSatellites}
+            placeName={placeName}
+          />
+        )
+      case 'today-now':
+        return (
+          <TodayNowTile
+            weather={weather}
+            distanceUnits={uiConfig.distanceUnits}
+            onOpen={layoutEditing ? undefined : () => setActivePanel('forecast')}
+          />
+        )
+      case 'anchor-watch':
+        return (
+          <AnchorWatchTile
+            watch={anchorWatch}
+            lat={latitude}
+            lon={longitude}
+            depthMeters={depth}
+            currentDriftKts={currentDriftKts}
+            currentSetDeg={currentSetDeg}
+            isImperial={isImperialDistance}
+            vesselHeadingDeg={headingTrue}
+            vesselTrail={getSelfTrail}
+            aisVessels={nearbyVessels}
+            aisTrails={getAisTrails}
+            isDarkTheme={isDarkTheme}
+            showImageryLayer={showAnchorImagery}
+            onImageryToggle={setShowAnchorImagery}
+            onFullscreen={() => setActivePanel('anchor-watch')}
+          />
+        )
+      case 'rode-scope':
+        return (
+          <RodeScopeTile
+            anchorState={anchorWatch.anchorState}
+            gnssCritical={anchorWatch.gnssCritical}
+            rodeDeployedM={anchorWatch.rodeDeployedM}
+            seaState={anchorWatch.seaState}
+            seabedType={anchorWatch.seabedType}
+            depthM={depth}
+            windKts={windSpeedApparentKts}
+            isImperial={isImperialDistance}
+            anchorConfig={anchorConfig}
+            onUpdate={anchorWatch.updateRodeAndConditions}
+          />
+        )
+      case 'tanks':
+        return <TanksTile tanks={tanks} loading={tanksLoading} />
+      case 'route':
+        return (
+          <RouteTile
+            speedKts={speedOverGroundKts ?? 0}
+            routes={routes}
+            dashboardRouteId={dashboardRouteId}
+            onOpen={() => setActivePanel('routes')}
+          />
+        )
+      case 'nearby-vessels':
+        return <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
+      case 'battery-power':
+        return (
+          <BatteryPowerTile
+            batterySocPercent={batterySocPercent}
+            chargingCurrentA={chargingCurrentA}
+            chargingPowerW={chargingPowerW}
+            solarOutputW={solarOutputW}
+            acOutputW={acOutputW}
+            dc12vPowerW={dc12vPowerW}
+            dc24vVoltageV={dc24vVoltageV}
+            batteryRatePercentPerHour={batteryRatePercentPerHour}
+            timeToGoHours={timeToGoHours}
+          />
+        )
+      case 'alternator':
+        return <AlternatorTile port={alternator0} starboard={alternator1} enginesRunning={isAlternatorTileVisible} />
+      case 'generator':
+        return (
+          <GeneratorTile
+            generatorState={generatorState}
+            generatorManualStart={generatorManualStart}
+            generatorManualStartTimer={generatorManualStartTimer}
+            generatorRunningByCondition={generatorRunningByCondition}
+            generatorRuntime={generatorRuntime}
+            generatorRealPowerW={generatorRealPowerW}
+            batterySocPercent={batterySocPercent}
+            batteryRatePercentPerHour={batteryRatePercentPerHour}
+          />
+        )
+      case 'czone-switches':
+        return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
+      default:
+        return null
+    }
+  }
+
   const dashboardGrid = (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-
-          <div className="space-y-4">
-            <Tile
-              title="Apparent Wind - Course Up"
-              titleExtra={
-                <Button variant="outline" size="sm">
-                  <Compass className="h-4 w-4" />
-                  AWA {awaLabel}
-                </Button>
-              }
-            >
-              <WindGaugeCluster
-                cfg={WIND_MOBILE_CFG}
-                masks={WIND_MOBILE_MASKS}
-                visibilityClassName="md:hidden"
-                setValue={setValue}
-                driftLabel={driftLabel}
-                gust10mLabel={gust10mLabel}
-                gust1hLabel={gust1hLabel}
-                headingTrue={headingTrue}
-                windAngleApparentDeg={windAngleApparentDeg}
-                windSide={windSide}
-                windAngleRelativeDeg={windAngleRelativeDeg}
-                windSpeedApparentKts={windSpeedApparentKts}
-              />
-
-              <WindGaugeCluster
-                cfg={WIND_DESKTOP_CFG}
-                masks={WIND_DESKTOP_MASKS}
-                visibilityClassName="hidden md:block"
-                setValue={setValue}
-                driftLabel={driftLabel}
-                gust10mLabel={gust10mLabel}
-                gust1hLabel={gust1hLabel}
-                headingTrue={headingTrue}
-                windAngleApparentDeg={windAngleApparentDeg}
-                windSide={windSide}
-                windAngleRelativeDeg={windAngleRelativeDeg}
-                windSpeedApparentKts={windSpeedApparentKts}
-              />
-            </Tile>
-
-            <div
-              onClick={() => setActivePanel('tides')}
-              className="cursor-pointer transition-opacity hover:opacity-80"
-            >
-              <Tile title="Depth & Tide">
-                <div className="mt-1 rounded-md border bg-background/60 px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
-                  <div className="mt-1 flex items-center gap-4">
-                    <p className="shrink-0 font-display text-4xl text-gauge-secondary">
-                      {depthValue}
-                      <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
-                    </p>
-                    {(navigationState === 'anchored' || navigationState === 'moored') && (
-                      <DepthSparkline
-                        points={depthTrend.points}
-                        isImperial={isImperialDistance}
-                        since={depthTrend.since}
-                        tideType={depthTrend.tideType}
-                        tideDepthM={depthTrend.tideDepthM}
-                        className="min-w-0 flex-1"
-                      />
-                    )}
-                  </div>
-                </div>
-                <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                    Tide{tide.station_name ? ` — ${tide.station_name}` : ''}
-                  </p>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="font-display text-4xl leading-none text-gauge-secondary">
-                      {tide.current_tide_height_ft >= 0 ? tideFtToDisplay(tide.current_tide_height_ft).toFixed(isImperialDistance ? 1 : 2) : '—'}
-                    </span>
-                    <span className="text-lg text-muted-foreground">{tideUnit}</span>
-                    <span className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-gauge-secondary">
-                      {tide.tide_direction === 'Falling' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />}
-                      {tide.tide_direction}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex flex-row flex-wrap items-center gap-x-4 gap-y-1">
-                    {tideExtremes.map((extreme) => (
-                      <p key={extreme.isHigh ? 'high' : 'low'} className="inline-flex items-center gap-1.5 text-xs text-foreground">
-                        {extreme.isHigh ? (
-                          <ArrowUp className="h-3.5 w-3.5 text-gauge-secondary" />
-                        ) : (
-                          <ArrowDown className="h-3.5 w-3.5 text-amber-600" />
-                        )}
-                        {extreme.isHigh ? 'High' : 'Low'}
-                        {extreme.heightFt >= 0 && (
-                          <span className="text-muted-foreground">({tideFtToDisplay(extreme.heightFt).toFixed(isImperialDistance ? 1 : 2)} {tideUnit})</span>
-                        )}
-                        {' '}{new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              </Tile>
-            </div>
-            <Tile title="Position">
-              <div className="mt-2 flex items-start justify-between gap-4">
-                <div>
-                  <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>
-                  <p className="font-mono text-sm">{formatCoordinate(longitude, false)}</p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="font-mono text-sm text-muted-foreground">HDG {headingLabel}</p>
-                  {gnssValidationState === 'degraded' || gnssValidationState === 'critical' ? (
-                    <p
-                      className={`mt-1 max-w-[170px] truncate font-mono text-[10px] ${satellitesValueClass}`}
-                      title={gnssDiagnosticLabel}
-                    >
-                      {gnssDiagnosticLabel}
-                    </p>
-                  ) : (
-                    <p className="mt-1 font-mono text-sm text-muted-foreground">
-                      SATS <span className={satellitesValueClass}>{gnssSatellites !== null ? gnssSatellites : '—'}</span>
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="mt-3 truncate rounded-md bg-gauge-secondary/10 px-3 py-2 font-display text-2xl text-gauge-secondary">
-                {placeName ?? '—'}
-              </div>
-            </Tile>
-            <div onClick={() => setActivePanel('forecast')} className="cursor-pointer transition-opacity hover:opacity-80">
-              <Tile title="Today & Now">
-                <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-3">
-                  <div className="grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-amber-600">
-                    <CloudSun className="h-7 w-7" />
-                  </div>
-                  <div>
-                    <div className="flex items-end gap-1">
-                      <p className="font-display text-5xl leading-none text-amber-700">
-                        {weather.temperature_f >= 0 ? Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.temperature_f) : weather.temperature_f) : '—'}
-                      </p>
-                      <p className="pb-1 text-xl font-semibold text-amber-700">{uiConfig.distanceUnits === 'metric' ? '°C' : '°F'}</p>
-                    </div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.1em] text-foreground">
-                      {weather.condition}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {weather.high_temp_f >= 0 ? `↑${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.high_temp_f) : weather.high_temp_f)}°` : '↑—°'} {weather.low_temp_f >= 0 ? `↓${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.low_temp_f) : weather.low_temp_f)}°` : '↓—°'}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-display text-xl leading-none text-gauge-secondary">
-                      {weather.wind_speed_kts >= 0 ? `${Math.round(weather.wind_speed_kts)} kts` : '— kts'} {weather.wind_direction}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Gust {weather.wind_gust_kts >= 0 ? `${Math.round(weather.wind_gust_kts)} kts` : '— kts'}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {weather.precipitation_pct >= 0 ? `${Math.round(weather.precipitation_pct)}% precip` : '—% precip'}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Sea {weather.sea_temperature_f >= 0 ? `${Math.round(uiConfig.distanceUnits === 'metric' ? fahrenheitToCelsius(weather.sea_temperature_f) : weather.sea_temperature_f)}°` : '—°'}
-                    </p>
-                  </div>
-                </div>
-
-              </Tile>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {!isAlternatorTileVisible && (
-              <>
-                <AnchorWatchTile
-                  watch={anchorWatch}
-                  lat={latitude}
-                  lon={longitude}
-                  depthMeters={depth}
-                  currentDriftKts={currentDriftKts}
-                  currentSetDeg={currentSetDeg}
-                  isImperial={isImperialDistance}
-                  vesselHeadingDeg={headingTrue}
-                  vesselTrail={getSelfTrail}
-                  aisVessels={nearbyVessels}
-                  aisTrails={getAisTrails}
-                  isDarkTheme={isDarkTheme}
-                  showImageryLayer={showAnchorImagery}
-                  onImageryToggle={setShowAnchorImagery}
-                  onFullscreen={() => setActivePanel('anchor-watch')}
-                />
-
-                <RodeScopeTile
-                  anchorState={anchorWatch.anchorState}
-                  gnssCritical={anchorWatch.gnssCritical}
-                  rodeDeployedM={anchorWatch.rodeDeployedM}
-                  seaState={anchorWatch.seaState}
-                  seabedType={anchorWatch.seabedType}
-                  depthM={depth}
-                  windKts={windSpeedApparentKts}
-                  isImperial={isImperialDistance}
-                  anchorConfig={anchorConfig}
-                  onUpdate={anchorWatch.updateRodeAndConditions}
-                />
-              </>
-            )}
-
-            <TanksTile tanks={tanks} loading={tanksLoading} />
-            <RouteTile
-              speedKts={speedOverGroundKts ?? 0}
-              routes={routes}
-              dashboardRouteId={dashboardRouteId}
-              onOpen={() => setActivePanel('routes')}
-            />
-            <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
-          </div>
-
-          <div className="space-y-4">
-            <Tile title="Battery & Power">
-              <div className="mt-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2">
-                <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-display text-6xl leading-none tabular-nums text-gauge-primary md:text-7xl">{socLabel}</span>
-                    <span className="shrink-0 text-2xl leading-none text-foreground md:text-3xl">%</span>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <div className="h-1.5 flex-1 rounded-full bg-muted/60">
-                      <div className="h-full rounded-full bg-gauge-primary" style={{ width: socBarWidth }} />
-                    </div>
-                    <span className="shrink-0 font-display text-sm tabular-nums leading-none text-gauge-secondary">
-                      {dc24vVoltageLabel}<span className="text-xs text-muted-foreground">V</span>
-                    </span>
-                  </div>
-                </div>
-                <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Battery</p>
-                  <p className={`font-display text-3xl leading-none md:text-3xl ${chargingValueClass}`}>
-                    {chargingCurrentLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">A</span>
-                  </p>
-                  <p className={`mt-1 font-display text-3xl leading-none ${chargingValueClass}`}>
-                    {chargingPowerLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">W</span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Draw</p>
-                  <p className="font-display text-4xl leading-none text-gauge-primary">
-                    {acOutputLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">W</span>
-                  </p>
-                </div>
-                <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">DC Draw</p>
-                  <p className="font-display text-4xl leading-none text-gauge-primary">
-                    {dc12vPowerLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">W</span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
-                <p className="font-display text-4xl leading-none text-gauge-secondary">
-                  {solarOutputLabel}
-                  <span className="ml-1 text-xl text-muted-foreground">W</span>
-                </p>
-              </div>
-
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                    Time Remaining
-                    {timeToGoLabel !== '—' && <TimeToGoIcon className="h-3 w-3" />}
-                  </p>
-                  <p className={`mt-1 font-display text-3xl leading-none ${timeToGoClass}`}>
-                    {timeToGoLabel}
-                  </p>
-                </div>
-                <div className="rounded-md border bg-background/60 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charge Rate</p>
-                  <p className={`mt-1 font-display text-3xl leading-none ${chargeRateClass}`}>
-                    {chargeRateLabel}
-                    <span className="ml-1 text-xl text-muted-foreground">%/hr</span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-                <div className="flex items-center justify-between text-sm uppercase tracking-[0.16em] text-muted-foreground">
-                  <div className="inline-flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
-                    Hot Water
-                  </div>
-                  <span className="font-semibold">Off</span>
-                </div>
-                <div className="mt-2 grid grid-cols-4 gap-2">
-                  <Button variant="outline" size="sm" className="h-9 text-xs">
-                    1 HR
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-9 text-xs">
-                    1.5 HR
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-9 text-xs">
-                    2 HR
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-9 text-xs">
-                    ON
-                  </Button>
-                </div>
-              </div>
-            </Tile>
-
-            <AlternatorTile
-              port={alternator0}
-              starboard={alternator1}
-              enginesRunning={isAlternatorTileVisible}
-            />
-            <GeneratorTile
-              generatorState={generatorState}
-              generatorManualStart={generatorManualStart}
-              generatorManualStartTimer={generatorManualStartTimer}
-              generatorRunningByCondition={generatorRunningByCondition}
-              generatorRuntime={generatorRuntime}
-              generatorRealPowerW={generatorRealPowerW}
-              batterySocPercent={batterySocPercent}
-              batteryRatePercentPerHour={batteryRatePercentPerHour}
-            />
-            <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
-          </div>
+    <div className="flex flex-col gap-4">
+      {layoutEditing && (
+        <div className="inline-flex w-fit items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">
+          Layout Mode — Drag to rearrange
         </div>
+      )}
+
+      <DashboardBentoGrid
+        widgets={effectiveWidgets}
+        editing={layoutEditing}
+        renderWidget={renderWidget}
+        onRemoveWidget={handleRemoveWidget}
+        onLayoutSettle={handleLayoutSettle}
+      />
+
+      {layoutEditing && unplacedWidgetIds.length > 0 && (
+        <Popover>
+          <PopoverTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">
+            <Plus className="h-3.5 w-3.5" />
+            Add Widget
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-1">
+            <div className="flex flex-col">
+              {unplacedWidgetIds.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => handleAddWidget(id)}
+                  className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                >
+                  {DASHBOARD_WIDGET_LABELS[id]}
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
+    </div>
   )
 
   const activePanelContent = (() => {
@@ -1067,14 +629,15 @@ export function App() {
               </BreadcrumbList>
             </Breadcrumb>
           </div>
-          <div className="ml-auto flex items-center px-4">
+          <div className="ml-auto flex items-center gap-2 px-4">
+            {activePanel === null && !dashboardLayoutError && (
+              <LayoutModeToggle editing={layoutEditing} onToggle={() => setLayoutEditing((prev) => !prev)} />
+            )}
             <VesselStatusBar isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />
           </div>
         </header>
-        <div className="flex min-h-0 flex-1 flex-col p-4 pb-4 md:p-6 md:pb-6">
+        <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
-            {activePanel === null && <MarineHeader />}
-
             <MarineWarningBanner warnings={activeMarineWarning} />
 
             <div className="min-h-0 flex-1">
