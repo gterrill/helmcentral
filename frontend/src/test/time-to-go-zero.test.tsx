@@ -104,6 +104,72 @@ vi.mock('@/config/app-config', () => ({
   }),
 }))
 
+vi.mock('@/hooks/use-dashboard-pages', () => ({
+  useDashboardPages: () => ({
+    pages: [{
+      id: 'p1',
+      name: 'Anchored',
+      widgets: [
+        { id: 'vessel', x: 0, y: 0, w: 12, h: 3 },
+        { id: 'wind', x: 0, y: 3, w: 4, h: 8 },
+        { id: 'depth-tide', x: 0, y: 11, w: 4, h: 7 },
+        { id: 'position', x: 0, y: 18, w: 4, h: 5 },
+        { id: 'today-now', x: 0, y: 23, w: 4, h: 5 },
+        { id: 'anchor-watch', x: 4, y: 3, w: 4, h: 8 },
+        { id: 'rode-scope', x: 4, y: 11, w: 4, h: 6 },
+        { id: 'tanks', x: 4, y: 17, w: 4, h: 4 },
+        { id: 'route', x: 4, y: 21, w: 4, h: 4 },
+        { id: 'nearby-vessels', x: 4, y: 25, w: 4, h: 5 },
+        { id: 'battery-power', x: 8, y: 3, w: 4, h: 14 },
+        { id: 'alternator', x: 8, y: 17, w: 4, h: 6 },
+        { id: 'generator', x: 8, y: 23, w: 4, h: 5 },
+        { id: 'czone-switches', x: 8, y: 28, w: 4, h: 6 },
+      ],
+      created_at: '',
+      updated_at: '',
+    }],
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+    createPage: vi.fn(),
+    updatePage: vi.fn(),
+    deletePage: vi.fn(),
+  }),
+}))
+
+vi.mock('@/hooks/use-active-dashboard-page', () => ({
+  useActiveDashboardPageId: () => ['p1', vi.fn()],
+}))
+
+vi.mock('@/hooks/use-routes', () => ({
+  useRoutes: () => ({ routes: [], loading: false, error: null, refetch: vi.fn(), createRoute: vi.fn(), updateRoute: vi.fn(), deleteRoute: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-sat-charts', () => ({
+  useSatCharts: () => ({ charts: [], loading: false, error: null, uploadChart: vi.fn(), deleteChart: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-dashboard-route', () => ({
+  useDashboardRouteId: () => [null, vi.fn()],
+}))
+
+vi.mock('@/hooks/use-route-activation', () => ({
+  useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
+  useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
+}))
+
+vi.mock('@/hooks/use-marine-warnings', () => ({
+  useMarineWarnings: () => ({ activeWarning: null }),
+  findActiveWindBulletin: () => null,
+}))
+
+vi.mock('@/hooks/use-dark-mode', () => ({
+  useDarkMode: () => [false, vi.fn()],
+}))
+
 describe('Battery tile time to go', () => {
   it('shows an em dash when time to go computes to zero', () => {
     render(<App />)

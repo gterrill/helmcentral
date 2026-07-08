@@ -1,7 +1,7 @@
 # ADR 0012: Configurable Bento Dashboard with Drag-and-Drop Layout
 
 ## Status
-Accepted
+Accepted. The single-global-layout persistence described here (`dashboard-layout.json`, `GET`/`PUT /api/dashboard-layout`) was superseded by ADR 0013 (Multi-Page Dashboard), which replaces it with multiple named pages. The grid-rendering mechanics, widget catalog, and validation described below are unchanged and still apply per-page.
 
 ## Context
 

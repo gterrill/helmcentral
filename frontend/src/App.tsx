@@ -9,7 +9,7 @@ import {
   Settings,
   Waves,
 } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
@@ -38,7 +38,9 @@ import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { useRoutes } from '@/hooks/use-routes'
 import { useSatCharts } from '@/hooks/use-sat-charts'
 import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
-import { useDashboardLayout } from '@/hooks/use-dashboard-layout'
+import { useDashboardPages } from '@/hooks/use-dashboard-pages'
+import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
+import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
 import { TideDrawer } from '@/components/tide-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
@@ -76,6 +78,9 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
@@ -156,11 +161,16 @@ export function App() {
     activate: activateRoute,
     deactivate: deactivateRoute,
   } = useRouteActivation()
-  const {
-    widgets: savedWidgets,
-    error: dashboardLayoutError,
-    saveLayout,
-  } = useDashboardLayout()
+  const { pages, loading: pagesLoading, error: pagesError, createPage, updatePage, deletePage } = useDashboardPages()
+  const [activePageId, setActivePageId] = useActiveDashboardPageId()
+  const activePage = pages.find((p) => p.id === activePageId) ?? pages[0] ?? null
+  const bootstrappedRef = useRef(false)
+  useEffect(() => {
+    if (!pagesLoading && pages.length === 0 && !bootstrappedRef.current) {
+      bootstrappedRef.current = true
+      void createPage('Anchored', DEFAULT_DASHBOARD_LAYOUT).then((p) => { if (p) setActivePageId(p.id) })
+    }
+  }, [pagesLoading, pages.length, createPage, setActivePageId])
 
   // Handle anchor watch auto-close notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -264,20 +274,23 @@ export function App() {
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeMarineWarning))
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
 
-  const effectiveWidgets = savedWidgets !== null && savedWidgets.length > 0 ? savedWidgets : DEFAULT_DASHBOARD_LAYOUT
+  const effectiveWidgets = activePage?.widgets ?? []
   const unplacedWidgetIds = DASHBOARD_WIDGET_IDS.filter((id) => !effectiveWidgets.some((w) => w.id === id))
 
   const handleLayoutSettle = (next: DashboardLayoutItem[]) => {
-    void saveLayout(next)
+    if (!activePage) return
+    void updatePage(activePage.id, { widgets: next })
   }
 
   const handleRemoveWidget = (id: DashboardWidgetId) => {
-    void saveLayout(effectiveWidgets.filter((w) => w.id !== id))
+    if (!activePage) return
+    void updatePage(activePage.id, { widgets: effectiveWidgets.filter((w) => w.id !== id) })
   }
 
   const handleAddWidget = (id: DashboardWidgetId) => {
+    if (!activePage) return
     const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    void saveLayout([...effectiveWidgets, { id, x: 0, y: maxY, w: 4, h: 6 }])
+    void updatePage(activePage.id, { widgets: [...effectiveWidgets, { id, x: 0, y: maxY, w: 4, h: 6 }] })
   }
 
   const renderWidget = (id: DashboardWidgetId): ReactNode => {
@@ -583,6 +596,24 @@ export function App() {
                 <span>Dashboard</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
+            {pages.length > 0 && (
+              <SidebarMenuSub>
+                {pages.map((page) => (
+                  <SidebarMenuSubItem key={page.id}>
+                    <SidebarMenuSubButton
+                      render={<button type="button" />}
+                      isActive={activePanel === null && page.id === activePageId}
+                      onClick={() => {
+                        setActivePanel(null)
+                        setActivePageId(page.id)
+                      }}
+                    >
+                      <span>{page.name}</span>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                ))}
+              </SidebarMenuSub>
+            )}
             {PANEL_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
               <SidebarMenuItem key={id}>
                 <SidebarMenuButton isActive={activePanel === id} onClick={() => setActivePanel(id)} tooltip={label}>
@@ -632,8 +663,31 @@ export function App() {
             </Breadcrumb>
           </div>
           <div className="ml-auto flex items-center gap-2 px-4">
-            {activePanel === null && !dashboardLayoutError && (
-              <LayoutModeToggle editing={layoutEditing} onToggle={() => setLayoutEditing((prev) => !prev)} />
+            {activePanel === null && !pagesError && (
+              <>
+                <DashboardPageSwitcher
+                  pages={pages}
+                  activePageId={activePage?.id ?? null}
+                  onSelect={setActivePageId}
+                  onCreate={() => {
+                    void createPage(`Page ${pages.length + 1}`, []).then((p) => {
+                      if (p) {
+                        setActivePageId(p.id)
+                        setLayoutEditing(true)
+                      }
+                    })
+                  }}
+                  onRename={(id, name) => { void updatePage(id, { name }) }}
+                  onDelete={(id) => {
+                    void deletePage(id).then((ok) => {
+                      if (ok && id === activePageId) {
+                        setActivePageId(pages.find((p) => p.id !== id)?.id ?? null)
+                      }
+                    })
+                  }}
+                />
+                <LayoutModeToggle editing={layoutEditing} onToggle={() => setLayoutEditing((prev) => !prev)} />
+              </>
             )}
             <VesselStatusBar isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />
           </div>

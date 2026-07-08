@@ -99,6 +99,39 @@ vi.mock('@/config/app-config', () => ({
   }),
 }))
 
+vi.mock('@/hooks/use-routes', () => ({
+  useRoutes: () => ({ routes: [], loading: false, error: null, refetch: vi.fn(), createRoute: vi.fn(), updateRoute: vi.fn(), deleteRoute: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-sat-charts', () => ({
+  useSatCharts: () => ({ charts: [], loading: false, error: null, uploadChart: vi.fn(), deleteChart: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-dashboard-route', () => ({
+  useDashboardRouteId: () => [null, vi.fn()],
+}))
+
+vi.mock('@/hooks/use-route-activation', () => ({
+  useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
+  useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
+}))
+
+vi.mock('@/hooks/use-marine-warnings', () => ({
+  useMarineWarnings: () => ({ activeWarning: null }),
+  findActiveWindBulletin: () => null,
+}))
+
+vi.mock('@/hooks/use-server-trails', () => ({
+  useServerTrails: () => ({ getSelfTrail: vi.fn(), getAisTrails: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-dark-mode', () => ({
+  useDarkMode: () => [false, vi.fn()],
+}))
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('App smoke test', () => {

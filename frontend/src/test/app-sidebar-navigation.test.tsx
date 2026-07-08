@@ -100,6 +100,84 @@ vi.mock('@/config/app-config', () => ({
   }),
 }))
 
+vi.mock('@/hooks/use-dashboard-pages', () => ({
+  useDashboardPages: () => ({
+    pages: [{
+      id: 'p1',
+      name: 'Anchored',
+      widgets: [
+        { id: 'vessel', x: 0, y: 0, w: 12, h: 3 },
+        { id: 'wind', x: 0, y: 3, w: 4, h: 8 },
+        { id: 'depth-tide', x: 0, y: 11, w: 4, h: 7 },
+        { id: 'position', x: 0, y: 18, w: 4, h: 5 },
+        { id: 'today-now', x: 0, y: 23, w: 4, h: 5 },
+        { id: 'anchor-watch', x: 4, y: 3, w: 4, h: 8 },
+        { id: 'rode-scope', x: 4, y: 11, w: 4, h: 6 },
+        { id: 'tanks', x: 4, y: 17, w: 4, h: 4 },
+        { id: 'route', x: 4, y: 21, w: 4, h: 4 },
+        { id: 'nearby-vessels', x: 4, y: 25, w: 4, h: 5 },
+        { id: 'battery-power', x: 8, y: 3, w: 4, h: 14 },
+        { id: 'alternator', x: 8, y: 17, w: 4, h: 6 },
+        { id: 'generator', x: 8, y: 23, w: 4, h: 5 },
+        { id: 'czone-switches', x: 8, y: 28, w: 4, h: 6 },
+      ],
+      created_at: '',
+      updated_at: '',
+    }, {
+      id: 'p2',
+      name: 'Underway',
+      widgets: [],
+      created_at: '',
+      updated_at: '',
+    }],
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+    createPage: vi.fn(),
+    updatePage: vi.fn(),
+    deletePage: vi.fn(),
+  }),
+}))
+
+const mockSetActivePageId = vi.fn()
+
+vi.mock('@/hooks/use-active-dashboard-page', () => ({
+  useActiveDashboardPageId: () => ['p1', mockSetActivePageId],
+}))
+
+vi.mock('@/hooks/use-routes', () => ({
+  useRoutes: () => ({ routes: [], loading: false, error: null, refetch: vi.fn(), createRoute: vi.fn(), updateRoute: vi.fn(), deleteRoute: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-sat-charts', () => ({
+  useSatCharts: () => ({ charts: [], loading: false, error: null, uploadChart: vi.fn(), deleteChart: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-dashboard-route', () => ({
+  useDashboardRouteId: () => [null, vi.fn()],
+}))
+
+vi.mock('@/hooks/use-route-activation', () => ({
+  useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
+  useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
+}))
+
+vi.mock('@/hooks/use-marine-warnings', () => ({
+  useMarineWarnings: () => ({ activeWarning: null }),
+  findActiveWindBulletin: () => null,
+}))
+
+vi.mock('@/hooks/use-server-trails', () => ({
+  useServerTrails: () => ({ getSelfTrail: vi.fn(), getAisTrails: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-dark-mode', () => ({
+  useDarkMode: () => [false, vi.fn()],
+}))
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('App sidebar navigation', () => {
@@ -130,5 +208,23 @@ describe('App sidebar navigation', () => {
     // Navigate back to the dashboard via the sidebar nav item.
     fireEvent.click(screen.getAllByRole('button', { name: /dashboard/i })[0])
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
+  })
+
+  it('lists dashboard pages as sidebar sub-items and navigates between them', () => {
+    render(<App />)
+
+    // Both pages appear as sub-items under the "Dashboard" nav item.
+    const anchoredSubItem = screen.getByRole('button', { name: 'Anchored' })
+    const underwaySubItem = screen.getByRole('button', { name: 'Underway' })
+    expect(anchoredSubItem).toBeInTheDocument()
+    expect(underwaySubItem).toBeInTheDocument()
+
+    // The active page ('p1' / "Anchored") is reflected via active styling.
+    expect(anchoredSubItem).toHaveAttribute('data-active', 'true')
+    expect(underwaySubItem).toHaveAttribute('data-active', 'false')
+
+    // Clicking "Underway" sets the active page id to 'p2'.
+    fireEvent.click(underwaySubItem)
+    expect(mockSetActivePageId).toHaveBeenCalledWith('p2')
   })
 })
