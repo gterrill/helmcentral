@@ -646,7 +646,7 @@ export function App() {
               {activePanel === null ? (
                 dashboardGrid
               ) : (
-                <div className="h-full min-h-0 overflow-y-auto rounded-lg border bg-card">
+                <div className="h-full min-h-0 overflow-y-auto rounded-lg border bg-card p-4">
                   {activePanelContent}
                 </div>
               )}
