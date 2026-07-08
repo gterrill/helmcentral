@@ -341,6 +341,20 @@ describe('ForecastDrawer refresh age', () => {
     expect(within(chart).getByText('H')).toBeInTheDocument()
   })
 
+  it('does not throw when transitioning from loading (early return) to a loaded forecast', () => {
+    const { rerender } = render(
+      <ForecastDrawer forecast={[]} loading unit="metric" />,
+    )
+
+    expect(screen.getByText('Loading latest marine forecast...')).toBeInTheDocument()
+
+    expect(() => {
+      rerender(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+    }).not.toThrow()
+
+    expect(screen.getByTestId('forecast-wind-chart')).toBeInTheDocument()
+  })
+
   it('shows an unavailable message when a day has no cloud/temperature forecast', () => {
     render(
       <ForecastDrawer

@@ -337,7 +337,7 @@ export function AnchorWatchMap({
       const bearing = Math.round(bearingDeg(vesselLat, vesselLon, lat, lng))
       showTransient({ lat, lon: lng, distanceM: dist, bearing, label: 'pin' })
     },
-    [editMode, vesselLat, vesselLon, showTransient],
+    [editMode, ghostAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor, vesselLat, vesselLon, showTransient],
   )
 
   // ── Map mouse move handler (for radius drag) ─────────────────────────────
@@ -413,7 +413,7 @@ export function AnchorWatchMap({
         mapRef.current?.dragPan.disable()
       }
     },
-    [editMode, anchorLat, anchorLon, displayRadius, radiusMeters, setCursor],
+    [editMode, anchorLat, anchorLon, displayRadius, liveRadius, onRadiusChange, radiusMeters, setCursor],
   )
 
   // ── Touch start: circle-edge detection for tablet radius adjustment ──────

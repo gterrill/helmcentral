@@ -126,13 +126,7 @@ export function TideChart({ chart, isImperial }: TideChartProps) {
   const unit = isImperial ? 'ft' : 'm'
   const toDisplay = (meters: number) => (isImperial ? meters * METERS_TO_FEET : meters)
 
-  if (chart.extremes.length === 0) {
-    return (
-      <p className="py-6 text-center text-xs text-muted-foreground">
-        No tide data available for this station
-      </p>
-    )
-  }
+  const hasExtremes = chart.extremes.length > 0
 
   const now = Date.now()
   const chartStartMs = now
@@ -219,6 +213,14 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
   firstMidnight.setHours(24, 0, 0, 0)
   for (let t = firstMidnight.getTime(); t <= chartEndMs; t += 24 * 60 * 60 * 1000) {
     dayTicks.push({ x: xFor(t), label: new Date(t).toLocaleDateString('en-US', { weekday: 'short' }) })
+  }
+
+  if (!hasExtremes) {
+    return (
+      <p className="py-6 text-center text-xs text-muted-foreground">
+        No tide data available for this station
+      </p>
+    )
   }
 
   return (

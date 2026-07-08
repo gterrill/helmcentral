@@ -13,7 +13,7 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, value))
 }
 
-function useAmberColor(kind: TankLevel['kind'], percent: number) {
+function isAmberColor(kind: TankLevel['kind'], percent: number) {
   if (kind === 'water') {
     return percent > 10 && percent <= 20
   }
@@ -25,7 +25,7 @@ function useAmberColor(kind: TankLevel['kind'], percent: number) {
   return percent >= 10 && percent < 30
 }
 
-function useRedColor(kind: TankLevel['kind'], percent: number) {
+function isRedColor(kind: TankLevel['kind'], percent: number) {
   if (kind === 'water') {
     return percent <= 10
   }
@@ -38,11 +38,11 @@ function useRedColor(kind: TankLevel['kind'], percent: number) {
 }
 
 function toneColor(kind: TankLevel['kind'], percent: number) {
-  if (useRedColor(kind, percent)) {
+  if (isRedColor(kind, percent)) {
     return '#dc2626'
   }
 
-  if (useAmberColor(kind, percent)) {
+  if (isAmberColor(kind, percent)) {
     return '#d97706'
   }
 

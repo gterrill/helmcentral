@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export interface UseFetchOptions<T> {
   refreshIntervalSeconds: number
@@ -25,6 +25,15 @@ export function useFetch<T>(
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
+  // Latest-ref idiom: callers typically pass an inline `options` object
+  // literal (a new identity every render). Reading through this ref instead
+  // of closing over `options` directly lets the effect below stay keyed only
+  // on `endpoint`/`refreshIntervalSeconds`, so it doesn't re-fetch and reset
+  // the polling interval on every render while still calling the latest
+  // validator/onError.
+  const optionsRef = useRef(options)
+  optionsRef.current = options
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -37,8 +46,8 @@ export function useFetch<T>(
         const result = await response.json()
 
         // Use provided validator or just check if result is truthy
-        if (options.validator) {
-          if (options.validator(result)) {
+        if (optionsRef.current.validator) {
+          if (optionsRef.current.validator(result)) {
             setData(result)
           } else {
             throw new Error('Invalid response data')
@@ -49,8 +58,8 @@ export function useFetch<T>(
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
         setError(error)
-        if (options.onError) {
-          options.onError(error)
+        if (optionsRef.current.onError) {
+          optionsRef.current.onError(error)
         } else {
           console.error(`Error fetching from ${endpoint}:`, error)
         }

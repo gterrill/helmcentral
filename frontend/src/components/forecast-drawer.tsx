@@ -398,6 +398,33 @@ export function formatRefreshAge(value: string | null | undefined, nowMs: number
   return `${elapsedHours} hours ago`
 }
 
+// Fallback used to compute a "selected day" when the forecast list is empty
+// (loading/error/no-data states). These states render one of the early
+// returns below instead of the chart JSX, so the values derived from this
+// are never displayed - it only needs to be safe to compute, not accurate.
+const EMPTY_DAY: ForecastDay = {
+  date: '',
+  dayName: '',
+  condition: '',
+  high: 0,
+  low: 0,
+  windSpeed: 0,
+  windGust: 0,
+  windDirection: '',
+  windSummary: null,
+  waveSummary: null,
+  precipitationSummary: null,
+  precipitation: 0,
+  sunriseTime: null,
+  sunsetTime: null,
+  moonPhase: null,
+  hourlyWind: [],
+  hourlyWave: [],
+  hourlyPrecip: [],
+  hourlyUV: [],
+  hourlyCloud: [],
+}
+
 export function ForecastDrawer({
   forecast,
   hourlyToday = [],
@@ -413,35 +440,6 @@ export function ForecastDrawer({
   const uvLineGradientId = useId()
   const detailsCardRef = useRef<HTMLDivElement>(null)
   const dayTabsRowRef = useRef<HTMLDivElement>(null)
-
-  if (loading && !hasForecast) {
-    return (
-      <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
-        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Forecast</p>
-        <p className="mt-2 font-medium text-foreground">Loading latest marine forecast...</p>
-        <p className="mt-1 text-xs text-muted-foreground">Pulling weather and wind guidance for your position</p>
-      </div>
-    )
-  }
-
-  if (error && !hasForecast) {
-    return (
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-8 text-center">
-        <p className="text-xs uppercase tracking-[0.16em] text-amber-700">Forecast Offline</p>
-        <p className="mt-2 font-medium text-foreground">Unable to load forecast data right now</p>
-        <p className="mt-1 text-xs text-muted-foreground">{error}</p>
-        <div className="mt-4 flex justify-center">
-          <Button type="button" size="sm" variant="outline" className="h-9 min-w-24" onClick={onRetry}>
-            Retry
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
-  if (!hasForecast) {
-    return <div className="py-8 text-center text-muted-foreground">No forecast data available</div>
-  }
 
   const tempUnit = unit === 'metric' ? '°C' : '°F'
   const windUnit = 'kts'
@@ -470,7 +468,7 @@ export function ForecastDrawer({
     detailsCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  const selectedDay = days[selectedDayIndex] ?? days[0]
+  const selectedDay = days[selectedDayIndex] ?? days[0] ?? EMPTY_DAY
 
   const humidityPct = Math.max(35, Math.min(95, Math.round(45 + (selectedDay.precipitation * 0.4))))
   const visibilityNm = Math.max(1, 12 - (selectedDay.precipitation * 0.06))
@@ -598,6 +596,35 @@ export function ForecastDrawer({
   const precipTooltipEntry = precipTooltip.activeIndex === null ? null : precipHourly[precipTooltip.activeIndex] ?? null
   const cloudTooltipEntry = cloudTooltip.activeIndex === null ? null : cloudHourly[cloudTooltip.activeIndex] ?? null
   const uvTooltipEntry = cloudTooltip.activeIndex === null ? null : uvHourly[cloudTooltip.activeIndex] ?? null
+
+  if (loading && !hasForecast) {
+    return (
+      <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
+        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Forecast</p>
+        <p className="mt-2 font-medium text-foreground">Loading latest marine forecast...</p>
+        <p className="mt-1 text-xs text-muted-foreground">Pulling weather and wind guidance for your position</p>
+      </div>
+    )
+  }
+
+  if (error && !hasForecast) {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-8 text-center">
+        <p className="text-xs uppercase tracking-[0.16em] text-amber-700">Forecast Offline</p>
+        <p className="mt-2 font-medium text-foreground">Unable to load forecast data right now</p>
+        <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+        <div className="mt-4 flex justify-center">
+          <Button type="button" size="sm" variant="outline" className="h-9 min-w-24" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!hasForecast) {
+    return <div className="py-8 text-center text-muted-foreground">No forecast data available</div>
+  }
 
   return (
     <div className="space-y-4 pb-4">

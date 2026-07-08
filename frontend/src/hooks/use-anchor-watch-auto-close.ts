@@ -164,7 +164,7 @@ export function useAnchorWatchAutoClose(
         clearInterval(intervalIdRef.current)
       }
     }
-  }, [isEnabled, anchorWatchActive, isMotoring, isOutsideCircle, performAutoClose])
+  }, [isEnabled, anchorWatchActive, isMotoring, isOutsideCircle, performAutoClose, isAutoCloseArmed])
 
   return {
     isAutoCloseArmed,

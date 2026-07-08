@@ -60,6 +60,22 @@ export function useAnchorAlarm(anchorState: AnchorWatchState): UseAnchorAlarmRes
   }, [])
 
   /**
+   * Stop all active oscillators
+   */
+  const stopKlaxon = useCallback(() => {
+    oscillatorsRef.current.forEach((osc) => {
+      try {
+        osc.stop()
+      } catch {
+        // Already stopped, ignore
+      }
+    })
+    oscillatorsRef.current = []
+    gainsRef.current = []
+    isPlayingRef.current = false
+  }, [])
+
+  /**
    * Generate a ship's klaxon alarm: two square-wave tones alternating
    * ~500Hz primary, ~400Hz secondary, ~80 BPM double-beep pattern
    */
@@ -127,23 +143,7 @@ export function useAnchorAlarm(anchorState: AnchorWatchState): UseAnchorAlarmRes
     }
 
     isPlayingRef.current = true
-  }, [ensureAudioContext, resumeAudioContext])
-
-  /**
-   * Stop all active oscillators
-   */
-  const stopKlaxon = useCallback(() => {
-    oscillatorsRef.current.forEach((osc) => {
-      try {
-        osc.stop()
-      } catch {
-        // Already stopped, ignore
-      }
-    })
-    oscillatorsRef.current = []
-    gainsRef.current = []
-    isPlayingRef.current = false
-  }, [])
+  }, [ensureAudioContext, resumeAudioContext, stopKlaxon])
 
   /**
    * Request screen wake lock to prevent tablet sleep while alarm is active
