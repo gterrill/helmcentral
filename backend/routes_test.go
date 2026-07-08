@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -298,5 +299,53 @@ func TestRoutes_AtomicWriteReloadRoundTrip(t *testing.T) {
 	}
 	if _, ok := routesState[second.ID]; !ok {
 		t.Fatal("expected second route to survive reload")
+	}
+}
+
+func TestListRoutesHandler_OrdersNewestFirst(t *testing.T) {
+	setupRoutesTest(t)
+
+	// Create 3 routes
+	first := createTestRoute(t, "First", sampleWaypoints())
+	second := createTestRoute(t, "Second", sampleWaypoints())
+	third := createTestRoute(t, "Third", sampleWaypoints())
+
+	// Directly set their CreatedAt times to ensure deterministic ordering
+	// (older to newer: First, Second, Third)
+	routesMu.Lock()
+	routesState[first.ID].CreatedAt = time.Now().Add(-2 * time.Hour)
+	routesState[second.ID].CreatedAt = time.Now().Add(-1 * time.Hour)
+	routesState[third.ID].CreatedAt = time.Now()
+	routesMu.Unlock()
+
+	// Call listRoutesHandler and verify newest-first ordering
+	c, rec := newRoutesRequest(t, http.MethodGet, "/api/routes", nil)
+	if err := listRoutesHandler(c); err != nil {
+		t.Fatalf("listRoutesHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var payload struct {
+		Routes []routeData `json:"routes"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse list response: %v", err)
+	}
+
+	if len(payload.Routes) != 3 {
+		t.Fatalf("expected 3 routes, got %d", len(payload.Routes))
+	}
+
+	// Verify order is newest-first: Third, Second, First
+	if payload.Routes[0].Name != "Third" {
+		t.Fatalf("expected first route to be 'Third' (newest), got %q", payload.Routes[0].Name)
+	}
+	if payload.Routes[1].Name != "Second" {
+		t.Fatalf("expected second route to be 'Second', got %q", payload.Routes[1].Name)
+	}
+	if payload.Routes[2].Name != "First" {
+		t.Fatalf("expected third route to be 'First' (oldest), got %q", payload.Routes[2].Name)
 	}
 }

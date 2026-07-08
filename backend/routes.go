@@ -95,7 +95,7 @@ func listRoutesHandler(c echo.Context) error {
 		list = append(list, r)
 	}
 	sort.Slice(list, func(i, j int) bool {
-		return list[i].CreatedAt.Before(list[j].CreatedAt)
+		return list[i].CreatedAt.After(list[j].CreatedAt)
 	})
 
 	return c.JSON(http.StatusOK, map[string]any{"routes": list})
