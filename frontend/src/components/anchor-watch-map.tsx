@@ -939,7 +939,7 @@ export function AnchorWatchMap({
                 {value !== '0.0' && value !== '—' && (
                   <ArrowUp
                     className="h-4 w-4 shrink-0 text-white"
-                    style={{ transform: `rotate(${((setDeg ?? 0) + 180) % 360}deg)` }}
+                    style={{ transform: `rotate(${setDeg ?? 0}deg)` }}
                     aria-hidden="true"
                   />
                 )}

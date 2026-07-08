@@ -91,6 +91,18 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     vi.useRealTimers()
   })
 
+  it('rotates the Current arrow to point in the set direction, matching the Wind tile Set arrow', () => {
+    // currentSetDeg is the direction the current flows toward (SignalK
+    // setTrue), same convention the Wind tile's Set arrow uses with no
+    // offset — this arrow must not add a reciprocal 180° flip.
+    renderMap()
+
+    const metrics = screen.getByTestId('anchor-watch-metrics')
+    const arrow = metrics.querySelector('svg.lucide-arrow-up') as SVGElement | null
+    expect(arrow).not.toBeNull()
+    expect(arrow?.style.transform).toBe('rotate(120deg)')
+  })
+
   it('anchors the imagery and seamark raster layers below the alarm circle, regardless of mount order', () => {
     // react-map-gl's addLayer call has no awareness of JSX sibling order - a
     // layer added later (e.g. world-imagery toggled on mid-session, well
