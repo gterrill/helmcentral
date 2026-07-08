@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef, MarkerDragEvent } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Crosshair, Minus, Plus, Satellite } from 'lucide-react'
+import { Crosshair, Landmark, Minus, Plus, Satellite } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import { formatNm } from '@/lib/route-calc'
@@ -18,11 +18,18 @@ const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.
 const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
 const WORLD_IMAGERY_MAX_ZOOM = 18
+const OSM_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
 const IMAGERY_ENABLED_KEY = 'routePlanner.imagery.enabled'
+const OSM_ENABLED_KEY = 'routePlanner.osm.enabled'
 
 function readStoredImageryEnabled(): boolean {
   if (typeof window === 'undefined') return false
   return window.localStorage.getItem(IMAGERY_ENABLED_KEY) === 'true'
+}
+
+function readStoredOsmEnabled(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.localStorage.getItem(OSM_ENABLED_KEY) === 'true'
 }
 
 function routeToGeoJSON(waypoints: RouteWaypoint[]): GeoJSON.Feature<GeoJSON.LineString> {
@@ -75,6 +82,7 @@ export function RoutePlannerMap({
   const hasCenteredOnVesselRef = useRef(false)
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [showImageryLayer, setShowImageryLayer] = useState(readStoredImageryEnabled)
+  const [showOsmLayer, setShowOsmLayer] = useState(readStoredOsmEnabled)
   const [currentZoom, setCurrentZoom] = useState(waypoints.length > 0 ? 12 : vesselLat !== null && vesselLon !== null ? 11 : 2)
   const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
   const { data: coastlineData } = useGshhgCoastline()
@@ -95,6 +103,14 @@ export function RoutePlannerMap({
     setShowImageryLayer((prev) => {
       const next = !prev
       window.localStorage.setItem(IMAGERY_ENABLED_KEY, String(next))
+      return next
+    })
+  }, [])
+
+  const handleOsmToggle = useCallback(() => {
+    setShowOsmLayer((prev) => {
+      const next = !prev
+      window.localStorage.setItem(OSM_ENABLED_KEY, String(next))
       return next
     })
   }, [])
@@ -239,6 +255,12 @@ export function RoutePlannerMap({
           anything else has a chance to.
         */}
         <Layer id="raster-overlay-anchor" type="background" paint={{ 'background-opacity': 0 }} />
+
+        {showOsmLayer && (
+          <Source id="osm" type="raster" tiles={[OSM_TILES]} tileSize={256} attribution="© OpenStreetMap contributors">
+            <Layer id="osm-layer" type="raster" beforeId="raster-overlay-anchor" paint={{ 'raster-opacity': 0.9 }} />
+          </Source>
+        )}
 
         {showImageryLayer && worldImageryOpacity > 0 && (
           <Source
@@ -405,6 +427,17 @@ export function RoutePlannerMap({
           style={{ transition: 'background-color 150ms ease-out' }}
         >
           <Satellite className="h-4 w-4" />
+        </button>
+        <button
+          onClick={handleOsmToggle}
+          aria-label="Toggle street map"
+          className={cn(
+            'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+            showOsmLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+          )}
+          style={{ transition: 'background-color 150ms ease-out' }}
+        >
+          <Landmark className="h-4 w-4" />
         </button>
         <button
           onClick={handleFitBounds}

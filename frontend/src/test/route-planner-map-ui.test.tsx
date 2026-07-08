@@ -283,6 +283,50 @@ describe('RoutePlannerMap', () => {
     expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()
   })
 
+  it('does not show the OSM raster source until toggled on', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    expect(screen.queryByTestId('source-osm')).not.toBeInTheDocument()
+  })
+
+  it('shows the OSM raster layer once toggled on', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle street map' }))
+
+    const source = screen.getByTestId('source-osm')
+    expect(source).toBeInTheDocument()
+    expect(source.getAttribute('data-tiles')).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png')
+    expect(screen.getByTestId('layer-osm-layer')).toBeInTheDocument()
+  })
+
+  it('hides the OSM layer again when toggled off', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    const toggle = screen.getByRole('button', { name: 'Toggle street map' })
+    fireEvent.click(toggle)
+    expect(screen.getByTestId('source-osm')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(screen.queryByTestId('source-osm')).not.toBeInTheDocument()
+  })
+
+  it('persists the OSM toggle state via localStorage', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle street map' }))
+
+    expect(window.localStorage.getItem('routePlanner.osm.enabled')).toBe('true')
+  })
+
+  it('reads the initial OSM toggle state from localStorage', () => {
+    window.localStorage.setItem('routePlanner.osm.enabled', 'true')
+
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    expect(screen.getByTestId('source-osm')).toBeInTheDocument()
+  })
+
   it('shows the GSHHG coastline fallback when no chart is available', async () => {
     render(
       <RoutePlannerMap
@@ -416,11 +460,25 @@ describe('RoutePlannerMap', () => {
     expect(screen.getByTestId('layer-openseamap-layer').dataset.beforeId).toBe('raster-overlay-anchor')
     expect(screen.getByTestId('layer-sat-chart-abc-layer').dataset.beforeId).toBe('raster-overlay-anchor')
 
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle street map' }))
+    expect(screen.getByTestId('layer-osm-layer').dataset.beforeId).toBe('raster-overlay-anchor')
+
     fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
     mockZoom = 12
     act(() => {
       lastZoomHandler?.()
     })
     expect(screen.getByTestId('layer-world-imagery-layer').dataset.beforeId).toBe('raster-overlay-anchor')
+
+    // OSM must act as a base layer: it should mount earliest among the
+    // optional raster layers so imagery/seamarks/sat-charts stay on top.
+    const layerIds = Array.from(document.querySelectorAll('[data-testid^="layer-"]')).map(
+      (el) => el.getAttribute('data-testid'),
+    )
+    const osmIndex = layerIds.indexOf('layer-osm-layer')
+    const imageryIndex = layerIds.indexOf('layer-world-imagery-layer')
+    expect(osmIndex).toBeGreaterThanOrEqual(0)
+    expect(imageryIndex).toBeGreaterThanOrEqual(0)
+    expect(osmIndex).toBeLessThan(imageryIndex)
   })
 })
