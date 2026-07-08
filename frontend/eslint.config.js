@@ -43,7 +43,13 @@ export default [
     },
     rules: {
       ...tseslintPlugin.configs.recommended.rules,
-      ...reactHooksPlugin.configs.recommended.rules,
+      // react-hooks' "recommended" config also bundles the React Compiler
+      // rule family (refs, set-state-in-effect, purity, immutability, etc.)
+      // - those flag plenty of idiomatic code that's only a problem if this
+      // project adopts the compiler. Enable just the two classic hook-safety
+      // rules until that's actually on the roadmap.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
     },
   },
 ];
