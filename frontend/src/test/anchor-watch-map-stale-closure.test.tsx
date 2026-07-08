@@ -5,7 +5,22 @@ import { AnchorWatchMap } from '@/components/anchor-watch-map'
 // Captures the latest props passed to the mocked <Map> so tests can invoke
 // its event handlers (onClick, onMouseDown, onMouseMove) directly, exactly
 // as maplibre would when the user interacts with the real map.
-const mapState = vi.hoisted(() => ({ props: null as any }))
+interface MapProps {
+  onClick: (event: { lngLat: { lat: number; lng: number } }) => void
+  onMouseMove: (event: { lngLat: { lat: number; lng: number } }) => void
+  onMouseDown: (event: { preventDefault: () => void; point: { x: number; y: number } }) => void
+  children?: React.ReactNode
+}
+
+interface MapHandle {
+  getCanvas: () => { style: { cursor: string } }
+  getZoom: () => number
+  easeTo: () => undefined
+  project: () => { x: number; y: number }
+  dragPan: { disable: () => void; enable: () => void }
+}
+
+const mapState = vi.hoisted(() => ({ props: null as MapProps | null }))
 
 vi.mock('maplibre-gl', () => ({
   default: {},
@@ -14,7 +29,7 @@ vi.mock('maplibre-gl', () => ({
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
   return {
-    Map: React.forwardRef((props: any, ref: any) => {
+    Map: React.forwardRef((props: MapProps, ref: React.Ref<MapHandle>) => {
       mapState.props = props
       React.useImperativeHandle(ref, () => ({
         getCanvas: () => ({ style: { cursor: 'grab' } }),
@@ -77,12 +92,12 @@ describe('AnchorWatchMap stale-closure regressions (exhaustive-deps)', () => {
 
     // Drag the ghost anchor to a new location (mirrors onMouseMove while dragging).
     act(() => {
-      mapState.props.onMouseMove({ lngLat: { lat: -25.301, lng: 152.955 } })
+      mapState.props!.onMouseMove({ lngLat: { lat: -25.301, lng: 152.955 } })
     })
 
     // Click the map to commit the reposition using whatever handler is currently wired up.
     act(() => {
-      mapState.props.onClick({ lngLat: { lat: -25.301, lng: 152.955 } })
+      mapState.props!.onClick({ lngLat: { lat: -25.301, lng: 152.955 } })
     })
 
     expect(onAnchorReposition).toHaveBeenCalledTimes(1)
@@ -106,7 +121,7 @@ describe('AnchorWatchMap stale-closure regressions (exhaustive-deps)', () => {
     // Enter radius-edit mode via the circle-edge mousedown hit-test (project()
     // is mocked to always report a hit).
     act(() => {
-      mapState.props.onMouseDown({ preventDefault: vi.fn(), point: { x: 50, y: 50 } })
+      mapState.props!.onMouseDown({ preventDefault: vi.fn(), point: { x: 50, y: 50 } })
     })
 
     // Parent rerenders with a new onRadiusChange identity (e.g. a non-memoized
@@ -121,7 +136,7 @@ describe('AnchorWatchMap stale-closure regressions (exhaustive-deps)', () => {
 
     // Commit the radius change via the same circle-edge handler.
     act(() => {
-      mapState.props.onMouseDown({ preventDefault: vi.fn(), point: { x: 50, y: 50 } })
+      mapState.props!.onMouseDown({ preventDefault: vi.fn(), point: { x: 50, y: 50 } })
     })
 
     expect(onRadiusChangeStale).not.toHaveBeenCalled()

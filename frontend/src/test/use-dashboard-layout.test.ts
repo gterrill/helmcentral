@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useDashboardLayout } from '@/hooks/use-dashboard-layout'
+import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 
 describe('useDashboardLayout', () => {
   beforeEach(() => {
@@ -61,10 +62,10 @@ describe('useDashboardLayout', () => {
     const { result } = renderHook(() => useDashboardLayout())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    const newLayout = [{ id: 'tanks', x: 0, y: 0, w: 4, h: 4 }] as const
+    const newLayout: DashboardLayoutItem[] = [{ id: 'tanks', x: 0, y: 0, w: 4, h: 4 }]
 
     await act(async () => {
-      await result.current.saveLayout(newLayout as any)
+      await result.current.saveLayout(newLayout)
     })
 
     expect(fetchMock).toHaveBeenCalledWith('/api/dashboard-layout', expect.objectContaining({ method: 'PUT' }))
@@ -84,10 +85,10 @@ describe('useDashboardLayout', () => {
     const { result } = renderHook(() => useDashboardLayout())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    const newLayout = [{ id: 'tanks', x: 0, y: 0, w: 4, h: 4 }] as const
+    const newLayout: DashboardLayoutItem[] = [{ id: 'tanks', x: 0, y: 0, w: 4, h: 4 }]
 
     await act(async () => {
-      await result.current.saveLayout(newLayout as any)
+      await result.current.saveLayout(newLayout)
     })
 
     expect(result.current.saveError).toBeTruthy()

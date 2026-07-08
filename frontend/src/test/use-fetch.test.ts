@@ -22,7 +22,7 @@ describe('useFetch', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const validator = (data: unknown): data is { value: number } =>
-      typeof data === 'object' && data !== null && typeof (data as any).value === 'number'
+      typeof data === 'object' && data !== null && typeof (data as { value?: unknown }).value === 'number'
 
     const { result } = renderHook(() =>
       useFetch('/api/thing', { value: 0 }, { refreshIntervalSeconds: 60, validator }),

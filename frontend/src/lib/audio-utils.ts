@@ -5,7 +5,7 @@
  */
 export async function primeAudioContextForAlarm(): Promise<void> {
   try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)()
     if (ctx.state === 'suspended') {
       await ctx.resume()
       console.log('[audio-utils] AudioContext primed and resumed')

@@ -4,17 +4,39 @@ import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 
 describe('useAnchorAlarm', () => {
-  let mockAudioContext: any
-  let mockOscillator: any
-  let mockGain: any
-  let originalAudioContext: any
+  interface MockOscillator {
+    type: string
+    frequency: { setValueAtTime: ReturnType<typeof vi.fn> }
+    connect: ReturnType<typeof vi.fn>
+    start: ReturnType<typeof vi.fn>
+    stop: ReturnType<typeof vi.fn>
+  }
+
+  interface MockGain {
+    gain: { setValueAtTime: ReturnType<typeof vi.fn> }
+    connect: ReturnType<typeof vi.fn>
+  }
+
+  interface MockAudioContext {
+    state: string
+    currentTime: number
+    createOscillator: ReturnType<typeof vi.fn>
+    createGain: ReturnType<typeof vi.fn>
+    destination: object
+    resume: ReturnType<typeof vi.fn>
+  }
+
+  let mockAudioContext: MockAudioContext
+  let mockOscillator: MockOscillator
+  let mockGain: MockGain
+  let originalAudioContext: typeof AudioContext | undefined
 
   beforeEach(() => {
     // Mock Web Audio API
     mockOscillator = {
       type: 'square',
       frequency: { setValueAtTime: vi.fn() },
-      connect: vi.fn(function (this: any) {
+      connect: vi.fn(function (this: MockOscillator) {
         return this
       }),
       start: vi.fn(),
@@ -23,7 +45,7 @@ describe('useAnchorAlarm', () => {
 
     mockGain = {
       gain: { setValueAtTime: vi.fn() },
-      connect: vi.fn(function (this: any) {
+      connect: vi.fn(function (this: MockGain) {
         return this
       }),
     }
@@ -39,9 +61,9 @@ describe('useAnchorAlarm', () => {
 
     // Store original and replace with mock - use vi.fn with implementation
     originalAudioContext = window.AudioContext
-    ;(window as any).AudioContext = vi.fn(function () {
+    ;(window as unknown as { AudioContext: typeof AudioContext }).AudioContext = vi.fn(function () {
       return mockAudioContext
-    })
+    }) as unknown as typeof AudioContext
   })
 
   afterEach(() => {
@@ -49,7 +71,7 @@ describe('useAnchorAlarm', () => {
     if (originalAudioContext) {
       window.AudioContext = originalAudioContext
     } else {
-      delete (window as any).AudioContext
+      delete (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext
     }
     vi.clearAllMocks()
   })

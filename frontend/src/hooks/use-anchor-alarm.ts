@@ -33,7 +33,7 @@ export function useAnchorAlarm(anchorState: AnchorWatchState): UseAnchorAlarmRes
     if (audioContextRef.current) return
 
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)()
       audioContextRef.current = ctx
 
       // If context is suspended (browser policy), log but don't throw
