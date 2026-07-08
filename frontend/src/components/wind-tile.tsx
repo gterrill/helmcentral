@@ -1,7 +1,6 @@
-import { Compass, ArrowUp } from 'lucide-react'
+import { ArrowUp } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
-import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { WindCompass } from '@/components/wind-compass'
 import { formatHeading } from '@/lib/format'
@@ -192,7 +191,6 @@ export function WindTile({
   maxGust10mKts,
   maxGust1hKts,
 }: WindTileProps) {
-  const awaLabel = windAngleApparentDeg !== null ? `${Math.round(windAngleApparentDeg).toString().padStart(3, '0')}°` : '---°'
   const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
   const setDegreesLabel = currentSetDeg !== null ? `${Math.round(((currentSetDeg % 360) + 360) % 360)}°` : '—'
   const setArrowRotation = currentSetDeg !== null ? ((currentSetDeg % 360) + 360) % 360 : 0
@@ -230,15 +228,7 @@ export function WindTile({
     : <span className="font-display text-4xl tabular-nums leading-none text-gauge-primary">—</span>
 
   return (
-    <Tile
-      title="Apparent Wind - Course Up"
-      titleExtra={
-        <Button variant="outline" size="sm">
-          <Compass className="h-4 w-4" />
-          AWA {awaLabel}
-        </Button>
-      }
-    >
+    <Tile title="Apparent Wind - Course Up">
       <WindGaugeCluster
         cfg={WIND_MOBILE_CFG}
         masks={WIND_MOBILE_MASKS}

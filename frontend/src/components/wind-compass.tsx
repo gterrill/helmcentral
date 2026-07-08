@@ -59,7 +59,7 @@ export function WindCompass({
   const arrowGradientId = useId()
 
   const hdg = headingTrue ?? 0
-  const sideLabel  = windSide ? windSide.toUpperCase() : '—'
+  const sideLabel  = windSide === 'starboard' ? 'S' : windSide === 'port' ? 'P' : '—'
   const angleLabel = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : '—'
   const speedLabel = windSpeedKts !== null ? String(Math.round(windSpeedKts)) : '—'
 
@@ -182,11 +182,11 @@ export function WindCompass({
         x={CX} y={CY - 22}
         textAnchor="middle" dominantBaseline="central"
         fontSize="12" fontWeight="700"
-        fill="#2563eb"
+        fill="#d97706"
         fontFamily="ui-sans-serif, system-ui, sans-serif"
         letterSpacing="1.5"
       >
-        {sideLabel} {angleLabel}
+        {sideLabel}{angleLabel}
       </text>
 
       <text
