@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { uiConfig } from '@/config/app-config'
+import { getUiConfig } from '@/config/app-config'
 
 export function formatClock(date: Date) {
   const value = new Intl.DateTimeFormat('en-US', {
@@ -104,7 +104,7 @@ export function useVesselIdentity() {
     const syncTimer = window.setInterval(() => {
       void fetchVesselState()
       void fetchSettings()
-    }, uiConfig.vesselStateRefreshSeconds * 1000)
+    }, getUiConfig().vesselStateRefreshSeconds * 1000)
 
     return () => {
       window.clearInterval(clockTimer)

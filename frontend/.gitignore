@@ -6,3 +6,10 @@ dist/
 *~
 .env.local
 .env.*.local
+
+# design-sync (see .design-sync/config.json, NOTES.md, previews/, overrides/ for the durable set)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

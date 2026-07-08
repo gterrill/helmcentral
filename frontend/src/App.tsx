@@ -56,7 +56,7 @@ import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
-import { anchorConfig, uiConfig } from '@/config/app-config'
+import { getAnchorConfig, getUiConfig } from '@/config/app-config'
 import { DASHBOARD_WIDGET_IDS, DASHBOARD_WIDGET_LABELS, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -116,6 +116,8 @@ const DEFAULT_DASHBOARD_LAYOUT: DashboardLayoutItem[] = [
 ]
 
 export function App() {
+  const uiConfig = getUiConfig()
+  const anchorConfig = getAnchorConfig()
   const [activePanel, setActivePanel] = useState<PanelId | null>(null)
   const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)

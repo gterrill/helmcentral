@@ -1,12 +1,23 @@
 import YAML from 'yaml'
 
-const settingsRaw = Object.values(
-  import.meta.glob<string>('../../../settings.yaml', {
-    query: '?raw',
-    import: 'default',
-    eager: true,
-  }),
-)[0] ?? ''
+let settingsRawCache: string | undefined
+
+// Deferred behind a function (not a top-level const) so importing this module
+// never triggers the glob read — non-Vite consumers (e.g. the design-sync
+// converter's plain esbuild bundle) can import types/values from here without
+// import.meta.glob throwing at module-eval time.
+function getSettingsRaw(): string {
+  if (settingsRawCache === undefined) {
+    settingsRawCache = Object.values(
+      import.meta.glob<string>('../../../settings.yaml', {
+        query: '?raw',
+        import: 'default',
+        eager: true,
+      }),
+    )[0] ?? ''
+  }
+  return settingsRawCache
+}
 
 export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 
@@ -61,7 +72,7 @@ function parseUiConfig(): {
   }
 
   try {
-    const parsed = YAML.parse(settingsRaw) as UiConfig | null
+    const parsed = YAML.parse(getSettingsRaw()) as UiConfig | null
     const configuredSeconds = parsed?.ui?.vessel_state_refresh_seconds
     const configuredForecastSeconds = parsed?.ui?.forecast_refresh_seconds
     const configuredUnits = parsed?.units
@@ -92,7 +103,7 @@ function parseAnchorConfig(): AnchorConfig {
   }
 
   try {
-    const parsed = YAML.parse(settingsRaw) as UiConfig | null
+    const parsed = YAML.parse(getSettingsRaw()) as UiConfig | null
     const anchor = parsed?.anchor
 
     if (typeof anchor?.bow_roller_height_m === 'number' && anchor.bow_roller_height_m > 0) {
@@ -125,5 +136,14 @@ function parseAnchorConfig(): AnchorConfig {
   return parsedConfig
 }
 
-export const uiConfig = parseUiConfig()
-export const anchorConfig = parseAnchorConfig()
+let uiConfigCache: ReturnType<typeof parseUiConfig> | undefined
+export function getUiConfig() {
+  if (!uiConfigCache) uiConfigCache = parseUiConfig()
+  return uiConfigCache
+}
+
+let anchorConfigCache: AnchorConfig | undefined
+export function getAnchorConfig(): AnchorConfig {
+  if (!anchorConfigCache) anchorConfigCache = parseAnchorConfig()
+  return anchorConfigCache
+}
