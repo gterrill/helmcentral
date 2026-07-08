@@ -181,7 +181,7 @@ export function WindCompass({
       <text
         x={CX} y={CY - 22}
         textAnchor="middle" dominantBaseline="central"
-        fontSize="12" fontWeight="700"
+        fontSize="16" fontWeight="700"
         fill="#d97706"
         fontFamily="ui-sans-serif, system-ui, sans-serif"
         letterSpacing="1.5"
