@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef, MarkerDragEvent } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Crosshair, Landmark, Minus, Plus, Satellite } from 'lucide-react'
+import { Crosshair, Minus, Plus, Satellite } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import { formatNm } from '@/lib/route-calc'
@@ -18,18 +18,60 @@ const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.
 const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
 const WORLD_IMAGERY_MAX_ZOOM = 18
-const OSM_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
 const IMAGERY_ENABLED_KEY = 'routePlanner.imagery.enabled'
-const OSM_ENABLED_KEY = 'routePlanner.osm.enabled'
+
+/**
+ * Fill/background layer ids to hide from the already-loaded Carto base
+ * style (Positron/Dark Matter) when hybrid satellite mode is on, so
+ * satellite imagery can show through in their place while roads, paths,
+ * and labels (not in this list) stay legible on top. Identical in both
+ * light and dark base styles.
+ */
+export const HYBRID_HIDDEN_LAYER_IDS = [
+  'background', 'landcover', 'park_national_park', 'park_nature_reserve',
+  'landuse_residential', 'landuse', 'water', 'water_shadow',
+  'building', 'building-top',
+] as const
+
+// Both STYLE_LIGHT and STYLE_DARK declare "background" as their first
+// layer (confirmed directly against both style documents) - a stable
+// constant rather than a value computed from the loaded style and stored
+// in state, since a state-driven beforeId raced with react-map-gl's
+// internal re-add-managed-layers handling on style reload (switching
+// STYLE_LIGHT/STYLE_DARK), intermittently dropping world-imagery entirely.
+const BASE_STYLE_FIRST_LAYER_ID = 'background'
+
+/**
+ * All text-label layers (place names, road names, water names, POI) in the
+ * base style. Both STYLE_LIGHT and STYLE_DARK style these for a plain
+ * basemap background - muted colors with a thin, often semi-transparent
+ * halo (e.g. Positron's place labels use `rgba(255,255,255,0.5)`, a halo
+ * meant to soften edges against an already-near-white background). Over
+ * photographic satellite imagery of varying brightness, that gives almost
+ * no contrast. When hybrid satellite mode is on, these get a strong
+ * white-text/dark-halo override instead (the same convention real hybrid
+ * map styles use, e.g. Google/Mapbox/Apple satellite-hybrid views),
+ * applied regardless of the app's own light/dark theme since satellite
+ * brightness at a given location has nothing to do with that setting.
+ */
+export const HYBRID_LABEL_LAYER_IDS = [
+  'watername_ocean', 'watername_sea', 'watername_lake', 'watername_lake_line',
+  'place_hamlet', 'place_suburbs', 'place_villages', 'place_town',
+  'place_country_2', 'place_country_1', 'place_state', 'place_continent',
+  'place_city_r6', 'place_city_r5', 'place_city_dot_r7', 'place_city_dot_r4',
+  'place_city_dot_r2', 'place_city_dot_z7', 'place_capital_dot_z7',
+  'poi_stadium', 'poi_park',
+  'roadname_minor', 'roadname_sec', 'roadname_pri', 'roadname_major',
+] as const
+
+const HYBRID_LABEL_PAINT_PROPS = ['text-color', 'text-halo-color', 'text-halo-width'] as const
+const HYBRID_LABEL_TEXT_COLOR = '#ffffff'
+const HYBRID_LABEL_HALO_COLOR = '#000000'
+const HYBRID_LABEL_HALO_WIDTH = 1.5
 
 function readStoredImageryEnabled(): boolean {
   if (typeof window === 'undefined') return false
   return window.localStorage.getItem(IMAGERY_ENABLED_KEY) === 'true'
-}
-
-function readStoredOsmEnabled(): boolean {
-  if (typeof window === 'undefined') return false
-  return window.localStorage.getItem(OSM_ENABLED_KEY) === 'true'
 }
 
 function routeToGeoJSON(waypoints: RouteWaypoint[]): GeoJSON.Feature<GeoJSON.LineString> {
@@ -81,10 +123,9 @@ export function RoutePlannerMap({
   const suppressNextMapClickRef = useRef(false)
   const hasCenteredOnVesselRef = useRef(false)
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
-  const [showImageryLayer, setShowImageryLayer] = useState(readStoredImageryEnabled)
-  const [showOsmLayer, setShowOsmLayer] = useState(readStoredOsmEnabled)
+  const [showHybridSatellite, setShowHybridSatellite] = useState(readStoredImageryEnabled)
   const [currentZoom, setCurrentZoom] = useState(waypoints.length > 0 ? 12 : vesselLat !== null && vesselLon !== null ? 11 : 2)
-  const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
+  const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showHybridSatellite)
   const { data: coastlineData } = useGshhgCoastline()
   const showCoastlineFallback = !chartAvailable && coastlineData !== null
 
@@ -99,21 +140,85 @@ export function RoutePlannerMap({
     if (z !== undefined) setCurrentZoom(z)
   }, [])
 
-  const handleImageryToggle = useCallback(() => {
-    setShowImageryLayer((prev) => {
+  const handleHybridToggle = useCallback(() => {
+    setShowHybridSatellite((prev) => {
       const next = !prev
       window.localStorage.setItem(IMAGERY_ENABLED_KEY, String(next))
       return next
     })
   }, [])
 
-  const handleOsmToggle = useCallback(() => {
-    setShowOsmLayer((prev) => {
-      const next = !prev
-      window.localStorage.setItem(OSM_ENABLED_KEY, String(next))
-      return next
-    })
-  }, [])
+  // Captures each label layer's own theme-native paint values (text-color/
+  // text-halo-color/text-halo-width) the first time it's seen after a style
+  // load, before any hybrid override is ever applied - setPaintProperty(id,
+  // name, undefined) does NOT restore a layer's stylesheet-defined value,
+  // it resets to MapLibre's generic spec default (confirmed by reading
+  // maplibre-gl's source: an undefined value falls through to
+  // `property.specification.default`, e.g. plain black text with no halo),
+  // so reverting requires explicitly stored original values. Cleared on
+  // every theme switch (see the isDarkTheme effect below) so it re-captures
+  // fresh from whichever style just loaded, rather than reapplying stale
+  // values from the previous theme.
+  const originalLabelPaintRef = useRef<Record<string, Partial<Record<typeof HYBRID_LABEL_PAINT_PROPS[number], unknown>>>>({})
+
+  const applyHybridVisibility = useCallback(() => {
+    const map = mapRef.current?.getMap()
+    if (!map || !map.isStyleLoaded()) return
+    const visibility = showHybridSatellite ? 'none' : 'visible'
+    for (const id of HYBRID_HIDDEN_LAYER_IDS) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility)
+    }
+    for (const id of HYBRID_LABEL_LAYER_IDS) {
+      if (!map.getLayer(id)) continue
+      if (!originalLabelPaintRef.current[id]) {
+        const original: Partial<Record<typeof HYBRID_LABEL_PAINT_PROPS[number], unknown>> = {}
+        for (const prop of HYBRID_LABEL_PAINT_PROPS) {
+          original[prop] = map.getPaintProperty(id, prop)
+        }
+        originalLabelPaintRef.current[id] = original
+      }
+      if (showHybridSatellite) {
+        map.setPaintProperty(id, 'text-color', HYBRID_LABEL_TEXT_COLOR)
+        map.setPaintProperty(id, 'text-halo-color', HYBRID_LABEL_HALO_COLOR)
+        map.setPaintProperty(id, 'text-halo-width', HYBRID_LABEL_HALO_WIDTH)
+      } else {
+        const original = originalLabelPaintRef.current[id]
+        for (const prop of HYBRID_LABEL_PAINT_PROPS) {
+          map.setPaintProperty(id, prop, original[prop])
+        }
+      }
+    }
+  }, [showHybridSatellite])
+
+  useEffect(() => {
+    applyHybridVisibility()
+  }, [applyHybridVisibility])
+
+  // Switching STYLE_LIGHT/STYLE_DARK is a full MapLibre style reload
+  // (setStyle), and satellite imagery reliably fails to redraw afterward
+  // even though the layer/source end up correctly configured (confirmed via
+  // direct inspection: correct z-order, opacity, visibility, tiles fetched
+  // successfully) - a MapLibre-level rendering quirk after a full style
+  // swap, not a bug in this component's own logic, and not fixable from
+  // here with a repaint/resize nudge or a forced remount (both tried,
+  // neither reliably worked). Turning hybrid mode off on theme change
+  // avoids ever showing that broken state; the user just re-toggles it.
+  const isDarkThemeRef = useRef(isDarkTheme)
+  useEffect(() => {
+    if (isDarkThemeRef.current !== isDarkTheme) {
+      isDarkThemeRef.current = isDarkTheme
+      // The new style's label layers have their own native paint values,
+      // distinct from the previous theme's - forget what was captured so
+      // applyHybridVisibility re-captures fresh instead of reapplying the
+      // old theme's colors onto the new one.
+      originalLabelPaintRef.current = {}
+      setShowHybridSatellite((prev) => {
+        if (!prev) return prev
+        window.localStorage.setItem(IMAGERY_ENABLED_KEY, 'false')
+        return false
+      })
+    }
+  }, [isDarkTheme])
 
   const routeGeoJSON = useMemo(() => routeToGeoJSON(waypoints), [waypoints])
 
@@ -236,6 +341,8 @@ export function RoutePlannerMap({
         mapStyle={mapStyle}
         onClick={handleMapClick}
         onZoom={handleZoomChange}
+        onLoad={applyHybridVisibility}
+        onStyleData={applyHybridVisibility}
         attributionControl={false}
         dragRotate={false}
         touchPitch={false}
@@ -256,13 +363,7 @@ export function RoutePlannerMap({
         */}
         <Layer id="raster-overlay-anchor" type="background" paint={{ 'background-opacity': 0 }} />
 
-        {showOsmLayer && (
-          <Source id="osm" type="raster" tiles={[OSM_TILES]} tileSize={256} attribution="© OpenStreetMap contributors">
-            <Layer id="osm-layer" type="raster" beforeId="raster-overlay-anchor" paint={{ 'raster-opacity': 0.9 }} />
-          </Source>
-        )}
-
-        {showImageryLayer && worldImageryOpacity > 0 && (
+        {showHybridSatellite && worldImageryOpacity > 0 && (
           <Source
             id="world-imagery"
             type="raster"
@@ -274,7 +375,7 @@ export function RoutePlannerMap({
             <Layer
               id="world-imagery-layer"
               type="raster"
-              beforeId="raster-overlay-anchor"
+              beforeId={BASE_STYLE_FIRST_LAYER_ID}
               paint={{
                 'raster-opacity': worldImageryOpacity,
                 'raster-fade-duration': 250,
@@ -418,26 +519,15 @@ export function RoutePlannerMap({
           <Minus className="h-4 w-4" />
         </button>
         <button
-          onClick={handleImageryToggle}
+          onClick={handleHybridToggle}
           aria-label="Toggle satellite imagery"
           className={cn(
             'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
-            showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+            showHybridSatellite ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
           )}
           style={{ transition: 'background-color 150ms ease-out' }}
         >
           <Satellite className="h-4 w-4" />
-        </button>
-        <button
-          onClick={handleOsmToggle}
-          aria-label="Toggle street map"
-          className={cn(
-            'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
-            showOsmLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-          )}
-          style={{ transition: 'background-color 150ms ease-out' }}
-        >
-          <Landmark className="h-4 w-4" />
         </button>
         <button
           onClick={handleFitBounds}

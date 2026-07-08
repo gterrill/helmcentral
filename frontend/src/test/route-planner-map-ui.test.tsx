@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { RoutePlannerMap } from '@/components/route-planner-map'
+import { RoutePlannerMap, HYBRID_HIDDEN_LAYER_IDS, HYBRID_LABEL_LAYER_IDS } from '@/components/route-planner-map'
 import type { SatChart } from '@/hooks/use-sat-charts'
 
 vi.mock('maplibre-gl', () => ({
@@ -9,8 +9,12 @@ vi.mock('maplibre-gl', () => ({
 
 let lastMapClickHandler: ((e: { lngLat: { lat: number; lng: number } }) => void) | null = null
 let lastZoomHandler: (() => void) | null = null
+let lastStyleDataHandler: (() => void) | null = null
 let lastInitialViewState: { latitude: number; longitude: number; zoom: number } | null = null
 const easeToMock = vi.fn()
+const setLayoutPropertyMock = vi.fn()
+const setPaintPropertyMock = vi.fn()
+const getPaintPropertyMock = vi.fn((_id: string, prop: string) => `original-${prop}`)
 let mockZoom = 12
 
 vi.mock('react-map-gl/maplibre', async () => {
@@ -22,23 +26,35 @@ vi.mock('react-map-gl/maplibre', async () => {
           children,
           onClick,
           onZoom,
+          onStyleData,
           initialViewState,
         }: {
           children?: React.ReactNode
           onClick?: (e: { lngLat: { lat: number; lng: number } }) => void
           onZoom?: () => void
+          onLoad?: () => void
+          onStyleData?: () => void
           initialViewState?: { latitude: number; longitude: number; zoom: number }
         },
         ref: React.Ref<unknown>,
       ) => {
         lastMapClickHandler = onClick ?? null
         lastZoomHandler = onZoom ?? null
+        lastStyleDataHandler = onStyleData ?? null
         lastInitialViewState = initialViewState ?? null
         React.useImperativeHandle(ref, () => ({
           getCanvas: () => ({ style: { cursor: 'grab' } }),
           getZoom: () => mockZoom,
           easeTo: easeToMock,
           fitBounds: () => undefined,
+          getMap: () => ({
+            isStyleLoaded: () => true,
+            getLayer: () => ({}),
+            setLayoutProperty: setLayoutPropertyMock,
+            setPaintProperty: setPaintPropertyMock,
+            getPaintProperty: getPaintPropertyMock,
+            getStyle: () => ({ layers: [{ id: 'background' }] }),
+          }),
         }))
         return <div data-testid="map-root">{children}</div>
       },
@@ -85,6 +101,9 @@ function clickMap(lat: number, lng: number) {
 describe('RoutePlannerMap', () => {
   beforeEach(() => {
     easeToMock.mockClear()
+    setLayoutPropertyMock.mockClear()
+    setPaintPropertyMock.mockClear()
+    getPaintPropertyMock.mockClear()
     localStorage.clear()
     mockZoom = 12
     vi.stubGlobal(
@@ -283,48 +302,21 @@ describe('RoutePlannerMap', () => {
     expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()
   })
 
-  it('does not show the OSM raster source until toggled on', () => {
-    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+  it('turns hybrid satellite off when the app theme changes (avoids a real MapLibre reload rendering bug)', () => {
+    const { rerender } = render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
 
-    expect(screen.queryByTestId('source-osm')).not.toBeInTheDocument()
-  })
-
-  it('shows the OSM raster layer once toggled on', () => {
-    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle street map' }))
-
-    const source = screen.getByTestId('source-osm')
-    expect(source).toBeInTheDocument()
-    expect(source.getAttribute('data-tiles')).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png')
-    expect(screen.getByTestId('layer-osm-layer')).toBeInTheDocument()
-  })
-
-  it('hides the OSM layer again when toggled off', () => {
-    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
-
-    const toggle = screen.getByRole('button', { name: 'Toggle street map' })
+    const toggle = screen.getByRole('button', { name: 'Toggle satellite imagery' })
     fireEvent.click(toggle)
-    expect(screen.getByTestId('source-osm')).toBeInTheDocument()
+    mockZoom = 12
+    act(() => {
+      lastZoomHandler?.()
+    })
+    expect(screen.getByTestId('source-world-imagery')).toBeInTheDocument()
 
-    fireEvent.click(toggle)
-    expect(screen.queryByTestId('source-osm')).not.toBeInTheDocument()
-  })
+    rerender(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={true} />)
 
-  it('persists the OSM toggle state via localStorage', () => {
-    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle street map' }))
-
-    expect(window.localStorage.getItem('routePlanner.osm.enabled')).toBe('true')
-  })
-
-  it('reads the initial OSM toggle state from localStorage', () => {
-    window.localStorage.setItem('routePlanner.osm.enabled', 'true')
-
-    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
-
-    expect(screen.getByTestId('source-osm')).toBeInTheDocument()
+    expect(screen.queryByTestId('source-world-imagery')).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('routePlanner.imagery.enabled')).toBe('false')
   })
 
   it('shows the GSHHG coastline fallback when no chart is available', async () => {
@@ -460,25 +452,87 @@ describe('RoutePlannerMap', () => {
     expect(screen.getByTestId('layer-openseamap-layer').dataset.beforeId).toBe('raster-overlay-anchor')
     expect(screen.getByTestId('layer-sat-chart-abc-layer').dataset.beforeId).toBe('raster-overlay-anchor')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle street map' }))
-    expect(screen.getByTestId('layer-osm-layer').dataset.beforeId).toBe('raster-overlay-anchor')
-
     fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
     mockZoom = 12
     act(() => {
       lastZoomHandler?.()
     })
-    expect(screen.getByTestId('layer-world-imagery-layer').dataset.beforeId).toBe('raster-overlay-anchor')
+    // World imagery now slots in below the base style's first layer id
+    // (computed dynamically from the loaded style, 'background' per the
+    // mocked getStyle()), not the raster-overlay-anchor used by the other
+    // raster overlays.
+    expect(screen.getByTestId('layer-world-imagery-layer').dataset.beforeId).toBe('background')
+  })
 
-    // OSM must act as a base layer: it should mount earliest among the
-    // optional raster layers so imagery/seamarks/sat-charts stay on top.
-    const layerIds = Array.from(document.querySelectorAll('[data-testid^="layer-"]')).map(
-      (el) => el.getAttribute('data-testid'),
-    )
-    const osmIndex = layerIds.indexOf('layer-osm-layer')
-    const imageryIndex = layerIds.indexOf('layer-world-imagery-layer')
-    expect(osmIndex).toBeGreaterThanOrEqual(0)
-    expect(imageryIndex).toBeGreaterThanOrEqual(0)
-    expect(osmIndex).toBeLessThan(imageryIndex)
+  it('calls setLayoutProperty with visibility "none" for every hidden layer id when hybrid satellite is toggled on', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    setLayoutPropertyMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
+
+    for (const id of HYBRID_HIDDEN_LAYER_IDS) {
+      expect(setLayoutPropertyMock).toHaveBeenCalledWith(id, 'visibility', 'none')
+    }
+  })
+
+  it('calls setLayoutProperty with visibility "visible" for every hidden layer id when hybrid satellite is toggled back off', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    const toggle = screen.getByRole('button', { name: 'Toggle satellite imagery' })
+    fireEvent.click(toggle)
+    setLayoutPropertyMock.mockClear()
+    fireEvent.click(toggle)
+
+    for (const id of HYBRID_HIDDEN_LAYER_IDS) {
+      expect(setLayoutPropertyMock).toHaveBeenCalledWith(id, 'visibility', 'visible')
+    }
+  })
+
+  it('reapplies hidden-layer visibility when onStyleData fires again while hybrid satellite is on (theme reload regression)', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
+    setLayoutPropertyMock.mockClear()
+
+    act(() => {
+      lastStyleDataHandler?.()
+    })
+
+    for (const id of HYBRID_HIDDEN_LAYER_IDS) {
+      expect(setLayoutPropertyMock).toHaveBeenCalledWith(id, 'visibility', 'none')
+    }
+  })
+
+  it('overrides label text/halo styling for stronger contrast when hybrid satellite is toggled on', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    setPaintPropertyMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
+
+    for (const id of HYBRID_LABEL_LAYER_IDS) {
+      expect(setPaintPropertyMock).toHaveBeenCalledWith(id, 'text-color', '#ffffff')
+      expect(setPaintPropertyMock).toHaveBeenCalledWith(id, 'text-halo-color', '#000000')
+      expect(setPaintPropertyMock).toHaveBeenCalledWith(id, 'text-halo-width', 1.5)
+    }
+  })
+
+  it('restores each label layer\'s own original paint values (not just the generic default) when toggled back off', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    const toggle = screen.getByRole('button', { name: 'Toggle satellite imagery' })
+    fireEvent.click(toggle)
+    // getPaintPropertyMock is stubbed to return `original-${prop}` for any id/prop,
+    // simulating "whatever the theme's own stylesheet defines" - the fix under test
+    // is that these captured originals get reapplied, not the library's generic
+    // spec defaults (which setPaintProperty(id, prop, undefined) would produce).
+    setPaintPropertyMock.mockClear()
+
+    fireEvent.click(toggle)
+
+    for (const id of HYBRID_LABEL_LAYER_IDS) {
+      expect(setPaintPropertyMock).toHaveBeenCalledWith(id, 'text-color', 'original-text-color')
+      expect(setPaintPropertyMock).toHaveBeenCalledWith(id, 'text-halo-color', 'original-text-halo-color')
+      expect(setPaintPropertyMock).toHaveBeenCalledWith(id, 'text-halo-width', 'original-text-halo-width')
+    }
   })
 })
