@@ -1,0 +1,49 @@
+import tseslintPlugin from '@typescript-eslint/eslint-plugin';
+import tseslintParser from '@typescript-eslint/parser';
+import reactHooksPlugin from 'eslint-plugin-react-hooks';
+
+export default [
+  {
+    ignores: [
+      'dist',
+      'node_modules',
+      'ds-bundle',
+      '.migration',
+      '.design-sync',
+      '.ds-sync',
+      'wind-compass-mockup',
+    ],
+  },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    languageOptions: {
+      parser: tseslintParser,
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+        sourceType: 'module',
+        ecmaVersion: 2021,
+      },
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        navigator: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        localStorage: 'readonly',
+        sessionStorage: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': tseslintPlugin,
+      'react-hooks': reactHooksPlugin,
+    },
+    rules: {
+      ...tseslintPlugin.configs.recommended.rules,
+      ...reactHooksPlugin.configs.recommended.rules,
+    },
+  },
+];
