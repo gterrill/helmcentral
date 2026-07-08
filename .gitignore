@@ -8,6 +8,7 @@ backend/tmp/
 backend/helmcentral
 backend/data/routes.json
 backend/data/dashboard-layout.json
+backend/data/dashboard-pages.json
 backend/data/sat-charts/
 # Allow the embed placeholder while ignoring real build output
 !backend/dist/
