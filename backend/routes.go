@@ -20,11 +20,12 @@ type routeWaypoint struct {
 }
 
 type routeData struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Waypoints []routeWaypoint `json:"waypoints"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Waypoints        []routeWaypoint `json:"waypoints"`
+	PlanningSpeedKts float64         `json:"planning_speed_kts"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 type routesFile struct {
@@ -104,8 +105,9 @@ func listRoutesHandler(c echo.Context) error {
 // POST /api/routes
 func createRouteHandler(c echo.Context) error {
 	var body struct {
-		Name      string          `json:"name"`
-		Waypoints []routeWaypoint `json:"waypoints"`
+		Name             string          `json:"name"`
+		Waypoints        []routeWaypoint `json:"waypoints"`
+		PlanningSpeedKts float64         `json:"planning_speed_kts"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -118,14 +120,18 @@ func createRouteHandler(c echo.Context) error {
 	if msg := validateWaypoints(body.Waypoints); msg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
+	if body.PlanningSpeedKts <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning speed must be greater than zero"})
+	}
 
 	now := time.Now().UTC()
 	route := &routeData{
-		ID:        uuid.NewString(),
-		Name:      name,
-		Waypoints: body.Waypoints,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:               uuid.NewString(),
+		Name:             name,
+		Waypoints:        body.Waypoints,
+		PlanningSpeedKts: body.PlanningSpeedKts,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 
 	routesMu.Lock()
@@ -159,13 +165,14 @@ func patchRouteHandler(c echo.Context) error {
 	id := c.Param("id")
 
 	var body struct {
-		Name      *string          `json:"name"`
-		Waypoints *[]routeWaypoint `json:"waypoints"`
+		Name             *string          `json:"name"`
+		Waypoints        *[]routeWaypoint `json:"waypoints"`
+		PlanningSpeedKts *float64         `json:"planning_speed_kts"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if body.Name == nil && body.Waypoints == nil {
+	if body.Name == nil && body.Waypoints == nil && body.PlanningSpeedKts == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
@@ -175,6 +182,9 @@ func patchRouteHandler(c echo.Context) error {
 		if msg := validateWaypoints(*body.Waypoints); msg != "" {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 		}
+	}
+	if body.PlanningSpeedKts != nil && *body.PlanningSpeedKts <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning speed must be greater than zero"})
 	}
 
 	routesMu.Lock()
@@ -186,17 +196,21 @@ func patchRouteHandler(c echo.Context) error {
 	}
 
 	updated := &routeData{
-		ID:        current.ID,
-		Name:      current.Name,
-		Waypoints: current.Waypoints,
-		CreatedAt: current.CreatedAt,
-		UpdatedAt: time.Now().UTC(),
+		ID:               current.ID,
+		Name:             current.Name,
+		Waypoints:        current.Waypoints,
+		PlanningSpeedKts: current.PlanningSpeedKts,
+		CreatedAt:        current.CreatedAt,
+		UpdatedAt:        time.Now().UTC(),
 	}
 	if body.Name != nil {
 		updated.Name = strings.TrimSpace(*body.Name)
 	}
 	if body.Waypoints != nil {
 		updated.Waypoints = *body.Waypoints
+	}
+	if body.PlanningSpeedKts != nil {
+		updated.PlanningSpeedKts = *body.PlanningSpeedKts
 	}
 
 	routesState[id] = updated

@@ -10,6 +10,7 @@ export interface Route {
   id: string
   name: string
   waypoints: RouteWaypoint[]
+  planning_speed_kts: number
   created_at: string
   updated_at: string
 }
@@ -44,11 +45,15 @@ export function useRoutes() {
     void fetchRoutes()
   }, [fetchRoutes])
 
-  const createRoute = useCallback(async (name: string, waypoints: RouteWaypoint[]): Promise<Route | null> => {
+  const createRoute = useCallback(async (
+    name: string,
+    waypoints: RouteWaypoint[],
+    planningSpeedKts: number,
+  ): Promise<Route | null> => {
     const res = await fetch('/api/routes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, waypoints }),
+      body: JSON.stringify({ name, waypoints, planning_speed_kts: planningSpeedKts }),
     })
     if (!res.ok) return null
     const route = (await res.json()) as Route
@@ -58,7 +63,7 @@ export function useRoutes() {
 
   const updateRoute = useCallback(async (
     id: string,
-    patch: Partial<Pick<Route, 'name' | 'waypoints'>>,
+    patch: Partial<Pick<Route, 'name' | 'waypoints' | 'planning_speed_kts'>>,
   ): Promise<Route | null> => {
     const res = await fetch(`/api/routes/${id}`, {
       method: 'PATCH',

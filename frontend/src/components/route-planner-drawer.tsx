@@ -16,8 +16,8 @@ interface RoutePlannerDrawerProps {
   routes: Route[]
   loading: boolean
   error: string | null
-  createRoute: (name: string, waypoints: RouteWaypoint[]) => Promise<Route | null>
-  updateRoute: (id: string, patch: Partial<Pick<Route, 'name' | 'waypoints'>>) => Promise<Route | null>
+  createRoute: (name: string, waypoints: RouteWaypoint[], planningSpeedKts: number) => Promise<Route | null>
+  updateRoute: (id: string, patch: Partial<Pick<Route, 'name' | 'waypoints' | 'planning_speed_kts'>>) => Promise<Route | null>
   deleteRoute: (id: string) => Promise<boolean>
   dashboardRouteId: string | null
   onSetDashboardRouteId: (id: string | null) => void
@@ -69,12 +69,14 @@ export function RoutePlannerDrawer({
     setEditingId('new')
     setDraftName('')
     setDraftWaypoints([])
+    setSpeedKts(currentSpeedKts !== null && currentSpeedKts > 0 ? currentSpeedKts : DEFAULT_PLANNING_SPEED_KTS)
   }
 
   function startEditRoute(route: Route) {
     setEditingId(route.id)
     setDraftName(route.name)
     setDraftWaypoints(route.waypoints)
+    setSpeedKts(route.planning_speed_kts > 0 ? route.planning_speed_kts : DEFAULT_PLANNING_SPEED_KTS)
   }
 
   function cancelEdit() {
@@ -89,9 +91,9 @@ export function RoutePlannerDrawer({
     setIsSaving(true)
     try {
       if (editingId === 'new') {
-        await createRoute(name, draftWaypoints)
+        await createRoute(name, draftWaypoints, speedKts)
       } else if (editingId) {
-        await updateRoute(editingId, { name, waypoints: draftWaypoints })
+        await updateRoute(editingId, { name, waypoints: draftWaypoints, planning_speed_kts: speedKts })
       }
       cancelEdit()
     } finally {
@@ -229,7 +231,10 @@ export function RoutePlannerDrawer({
 
       <ul className="space-y-2">
         {routes.map((route) => {
-          const routeLegs = calculateLegs(route.waypoints, speedKts)
+          const routeLegs = calculateLegs(
+            route.waypoints,
+            route.planning_speed_kts > 0 ? route.planning_speed_kts : DEFAULT_PLANNING_SPEED_KTS,
+          )
           const routeTotals = calculateRouteTotals(routeLegs)
           const isOnDashboard = dashboardRouteId === route.id
           const isActive = activationStatus.state === 'active' && activationStatus.routeId === route.id

@@ -148,7 +148,7 @@ func TestActivateRouteHandler_Success(t *testing.T) {
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 
-	route := createTestRoute(t, "Marina to Anchorage", sampleWaypoints())
+	route := createTestRoute(t, "Marina to Anchorage", sampleWaypoints(), 8)
 	rs.on(http.MethodPut, resourcePathPrefix+route.ID, http.StatusOK, "{}")
 	rs.on(http.MethodPut, coursePutPath, http.StatusOK, "{}")
 
@@ -210,7 +210,7 @@ func TestActivateRouteHandler_PropagatesSignalKErrorBody(t *testing.T) {
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 
-	route := createTestRoute(t, "Test Route", sampleWaypoints())
+	route := createTestRoute(t, "Test Route", sampleWaypoints(), 8)
 	rs.on(http.MethodPut, resourcePathPrefix+route.ID, http.StatusBadRequest, `{"message":"bad geometry"}`)
 
 	settingsPath := settingsFileForServer(t, srv.URL)
@@ -235,7 +235,7 @@ func TestActivateRouteHandler_ResourcePutSucceedsButCoursePutFails(t *testing.T)
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 
-	route := createTestRoute(t, "Test Route", sampleWaypoints())
+	route := createTestRoute(t, "Test Route", sampleWaypoints(), 8)
 	rs.on(http.MethodPut, resourcePathPrefix+route.ID, http.StatusOK, "{}")
 	rs.on(http.MethodPut, coursePutPath, http.StatusInternalServerError, `{"message":"course rejected"}`)
 
@@ -333,7 +333,7 @@ func TestGetActiveRouteHandler_ActiveMatchesLocalRoute(t *testing.T) {
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 
-	route := createTestRoute(t, "Known Route", sampleWaypoints())
+	route := createTestRoute(t, "Known Route", sampleWaypoints(), 8)
 	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
 		`{"activeRoute":{"href":"`+signalkRouteHref(route.ID)+`","pointIndex":1,"reverse":false}}`)
 

@@ -40,20 +40,44 @@ describe('useRoutes', () => {
   it('createRoute POSTs and refetches the list', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ routes: [] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '2', name: 'New Route', waypoints: [], created_at: '', updated_at: '' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ routes: [{ id: '2', name: 'New Route', waypoints: [], created_at: '', updated_at: '' }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '2', name: 'New Route', waypoints: [], planning_speed_kts: 10, created_at: '', updated_at: '' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ routes: [{ id: '2', name: 'New Route', waypoints: [], planning_speed_kts: 10, created_at: '', updated_at: '' }] }) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useRoutes())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     await act(async () => {
-      await result.current.createRoute('New Route', [{ lat: 1, lon: 2 }])
+      await result.current.createRoute('New Route', [{ lat: 1, lon: 2 }], 10)
     })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/routes', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenCalledWith('/api/routes', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ name: 'New Route', waypoints: [{ lat: 1, lon: 2 }], planning_speed_kts: 10 }),
+    }))
     expect(result.current.routes).toHaveLength(1)
     expect(result.current.routes[0].name).toBe('New Route')
+  })
+
+  it('updateRoute PATCHes a planning_speed_kts change and refetches the list', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ routes: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '1', name: 'Route A', waypoints: [], planning_speed_kts: 12, created_at: '', updated_at: '' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ routes: [{ id: '1', name: 'Route A', waypoints: [], planning_speed_kts: 12, created_at: '', updated_at: '' }] }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useRoutes())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.updateRoute('1', { planning_speed_kts: 12 })
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/routes/1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ planning_speed_kts: 12 }),
+    }))
+    expect(result.current.routes[0].planning_speed_kts).toBe(12)
   })
 
   it('deleteRoute issues a DELETE request and refetches', async () => {

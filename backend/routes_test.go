@@ -38,11 +38,12 @@ func newRoutesRequest(t *testing.T, method, path string, body any) (echo.Context
 	return e.NewContext(req, rec), rec
 }
 
-func createTestRoute(t *testing.T, name string, waypoints []routeWaypoint) routeData {
+func createTestRoute(t *testing.T, name string, waypoints []routeWaypoint, planningSpeedKts float64) routeData {
 	t.Helper()
 	c, rec := newRoutesRequest(t, http.MethodPost, "/api/routes", map[string]any{
-		"name":      name,
-		"waypoints": waypoints,
+		"name":               name,
+		"waypoints":          waypoints,
+		"planning_speed_kts": planningSpeedKts,
 	})
 	if err := createRouteHandler(c); err != nil {
 		t.Fatalf("createRouteHandler returned error: %v", err)
@@ -90,7 +91,7 @@ func TestListRoutesHandler_EmptyInitially(t *testing.T) {
 func TestCreateRouteHandler_ValidBody(t *testing.T) {
 	setupRoutesTest(t)
 
-	route := createTestRoute(t, "Marina to Anchorage", sampleWaypoints())
+	route := createTestRoute(t, "Marina to Anchorage", sampleWaypoints(), 8)
 
 	if route.ID == "" {
 		t.Fatal("expected route to have a generated ID")
@@ -103,6 +104,9 @@ func TestCreateRouteHandler_ValidBody(t *testing.T) {
 	}
 	if route.CreatedAt.IsZero() || route.UpdatedAt.IsZero() {
 		t.Fatal("expected created_at/updated_at to be set")
+	}
+	if route.PlanningSpeedKts != 8 {
+		t.Fatalf("expected planning speed to round-trip as 8, got %v", route.PlanningSpeedKts)
 	}
 }
 
@@ -151,9 +155,37 @@ func TestCreateRouteHandler_RejectsOutOfRangeCoordinates(t *testing.T) {
 	}
 }
 
+func TestCreateRouteHandler_RejectsInvalidPlanningSpeed(t *testing.T) {
+	setupRoutesTest(t)
+
+	c, rec := newRoutesRequest(t, http.MethodPost, "/api/routes", map[string]any{
+		"name":               "Bad speed",
+		"waypoints":          sampleWaypoints(),
+		"planning_speed_kts": 0,
+	})
+	if err := createRouteHandler(c); err != nil {
+		t.Fatalf("createRouteHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+
+	c2, rec2 := newRoutesRequest(t, http.MethodPost, "/api/routes", map[string]any{
+		"name":               "Negative speed",
+		"waypoints":          sampleWaypoints(),
+		"planning_speed_kts": -5,
+	})
+	if err := createRouteHandler(c2); err != nil {
+		t.Fatalf("createRouteHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec2.Code)
+	}
+}
+
 func TestGetRouteHandler_FoundAndNotFound(t *testing.T) {
 	setupRoutesTest(t)
-	route := createTestRoute(t, "Test Route", sampleWaypoints())
+	route := createTestRoute(t, "Test Route", sampleWaypoints(), 8)
 
 	c, rec := newRoutesRequest(t, http.MethodGet, "/api/routes/"+route.ID, nil)
 	c.SetParamNames("id")
@@ -178,7 +210,7 @@ func TestGetRouteHandler_FoundAndNotFound(t *testing.T) {
 
 func TestPatchRouteHandler_UpdatesNameAndWaypoints(t *testing.T) {
 	setupRoutesTest(t)
-	route := createTestRoute(t, "Original Name", sampleWaypoints())
+	route := createTestRoute(t, "Original Name", sampleWaypoints(), 8)
 
 	newWaypoints := []routeWaypoint{{Lat: 1, Lon: 2, Name: "Only Stop"}}
 	c, rec := newRoutesRequest(t, http.MethodPatch, "/api/routes/"+route.ID, map[string]any{
@@ -212,9 +244,82 @@ func TestPatchRouteHandler_UpdatesNameAndWaypoints(t *testing.T) {
 	}
 }
 
+func TestPatchRouteHandler_UpdatesPlanningSpeedIndependently(t *testing.T) {
+	setupRoutesTest(t)
+	route := createTestRoute(t, "Original Name", sampleWaypoints(), 8)
+
+	c, rec := newRoutesRequest(t, http.MethodPatch, "/api/routes/"+route.ID, map[string]any{
+		"planning_speed_kts": 12,
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(route.ID)
+	if err := patchRouteHandler(c); err != nil {
+		t.Fatalf("patchRouteHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var updated routeData
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.PlanningSpeedKts != 12 {
+		t.Fatalf("expected planning speed to update to 12, got %v", updated.PlanningSpeedKts)
+	}
+	if updated.Name != route.Name {
+		t.Fatalf("expected name to remain unchanged, got %q", updated.Name)
+	}
+	if len(updated.Waypoints) != len(route.Waypoints) {
+		t.Fatalf("expected waypoints to remain unchanged, got %d", len(updated.Waypoints))
+	}
+}
+
+func TestPatchRouteHandler_RejectsInvalidPlanningSpeed(t *testing.T) {
+	setupRoutesTest(t)
+	route := createTestRoute(t, "Original Name", sampleWaypoints(), 8)
+
+	c, rec := newRoutesRequest(t, http.MethodPatch, "/api/routes/"+route.ID, map[string]any{
+		"planning_speed_kts": 0,
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(route.ID)
+	if err := patchRouteHandler(c); err != nil {
+		t.Fatalf("patchRouteHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestPatchRouteHandler_PreservesPlanningSpeedWhenAbsent(t *testing.T) {
+	setupRoutesTest(t)
+	route := createTestRoute(t, "Original Name", sampleWaypoints(), 8)
+
+	c, rec := newRoutesRequest(t, http.MethodPatch, "/api/routes/"+route.ID, map[string]any{
+		"name": "Renamed Only",
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(route.ID)
+	if err := patchRouteHandler(c); err != nil {
+		t.Fatalf("patchRouteHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var updated routeData
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.PlanningSpeedKts != route.PlanningSpeedKts {
+		t.Fatalf("expected planning speed to remain %v, got %v", route.PlanningSpeedKts, updated.PlanningSpeedKts)
+	}
+}
+
 func TestPatchRouteHandler_RequiresAtLeastOneField(t *testing.T) {
 	setupRoutesTest(t)
-	route := createTestRoute(t, "Test Route", sampleWaypoints())
+	route := createTestRoute(t, "Test Route", sampleWaypoints(), 8)
 
 	c, rec := newRoutesRequest(t, http.MethodPatch, "/api/routes/"+route.ID, map[string]any{})
 	c.SetParamNames("id")
@@ -243,7 +348,7 @@ func TestPatchRouteHandler_NotFound(t *testing.T) {
 
 func TestDeleteRouteHandler_DeletesAndReports404Afterward(t *testing.T) {
 	setupRoutesTest(t)
-	route := createTestRoute(t, "Test Route", sampleWaypoints())
+	route := createTestRoute(t, "Test Route", sampleWaypoints(), 8)
 
 	c, rec := newRoutesRequest(t, http.MethodDelete, "/api/routes/"+route.ID, nil)
 	c.SetParamNames("id")
@@ -283,8 +388,8 @@ func TestDeleteRouteHandler_NotFound(t *testing.T) {
 func TestRoutes_AtomicWriteReloadRoundTrip(t *testing.T) {
 	setupRoutesTest(t)
 
-	first := createTestRoute(t, "Route One", sampleWaypoints())
-	second := createTestRoute(t, "Route Two", sampleWaypoints())
+	first := createTestRoute(t, "Route One", sampleWaypoints(), 8)
+	second := createTestRoute(t, "Route Two", sampleWaypoints(), 8)
 
 	// Simulate a process restart: reload state from disk.
 	loadRoutes()
@@ -306,9 +411,9 @@ func TestListRoutesHandler_OrdersNewestFirst(t *testing.T) {
 	setupRoutesTest(t)
 
 	// Create 3 routes
-	first := createTestRoute(t, "First", sampleWaypoints())
-	second := createTestRoute(t, "Second", sampleWaypoints())
-	third := createTestRoute(t, "Third", sampleWaypoints())
+	first := createTestRoute(t, "First", sampleWaypoints(), 8)
+	second := createTestRoute(t, "Second", sampleWaypoints(), 8)
+	third := createTestRoute(t, "Third", sampleWaypoints(), 8)
 
 	// Directly set their CreatedAt times to ensure deterministic ordering
 	// (older to newer: First, Second, Third)

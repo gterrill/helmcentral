@@ -4,10 +4,19 @@ import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
 import type { Route } from '@/hooks/use-routes'
 import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
 
+vi.mock('@/components/route-planner-map', () => ({
+  RoutePlannerMap: ({ onWaypointsChange }: { onWaypointsChange: (wps: { lat: number; lon: number }[]) => void }) => (
+    <button type="button" onClick={() => onWaypointsChange([{ lat: 1, lon: 2 }])}>
+      mock-add-waypoint
+    </button>
+  ),
+}))
+
 const routeA: Route = {
   id: 'a',
   name: 'Route A',
   waypoints: [{ lat: 0, lon: 0 }, { lat: 1, lon: 0 }],
+  planning_speed_kts: 15,
   created_at: '',
   updated_at: '',
 }
@@ -16,6 +25,7 @@ const routeB: Route = {
   id: 'b',
   name: 'Route B',
   waypoints: [{ lat: 2, lon: 0 }, { lat: 3, lon: 0 }],
+  planning_speed_kts: 7,
   created_at: '',
   updated_at: '',
 }
@@ -114,5 +124,65 @@ describe('RoutePlannerDrawer activation controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show Route A on dashboard' }))
 
     expect(onSetDashboardRouteId).toHaveBeenCalledWith('a')
+  })
+})
+
+describe('RoutePlannerDrawer planning speed', () => {
+  it('populates the speed input with the route\'s own saved planning speed when reopening it', () => {
+    renderDrawer({ currentSpeedKts: 9 })
+
+    fireEvent.click(screen.getByText('Route A').closest('button')!)
+
+    expect(screen.getByLabelText('Planning speed in knots')).toHaveValue(15)
+  })
+
+  it('uses a legacy route\'s default speed when its saved planning_speed_kts is 0', () => {
+    const legacyRoute: Route = { ...routeA, id: 'legacy', name: 'Legacy Route', planning_speed_kts: 0 }
+    renderDrawer({ routes: [legacyRoute], currentSpeedKts: 9 })
+
+    fireEvent.click(screen.getByText('Legacy Route').closest('button')!)
+
+    expect(screen.getByLabelText('Planning speed in knots')).toHaveValue(6)
+  })
+
+  it('sends the current speed value when saving an edited route', async () => {
+    const updateRoute = vi.fn().mockResolvedValue(routeA)
+    renderDrawer({ updateRoute })
+
+    fireEvent.click(screen.getByText('Route A').closest('button')!)
+    fireEvent.change(screen.getByLabelText('Planning speed in knots'), { target: { value: '20' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Route' }))
+
+    expect(updateRoute).toHaveBeenCalledWith('a', expect.objectContaining({ planning_speed_kts: 20 }))
+  })
+
+  it('sends the current speed value when saving a new route', async () => {
+    const createRoute = vi.fn().mockResolvedValue(routeA)
+    renderDrawer({ createRoute, currentSpeedKts: 11 })
+
+    fireEvent.click(screen.getByRole('button', { name: /New Route/ }))
+    expect(screen.getByLabelText('Planning speed in knots')).toHaveValue(11)
+
+    fireEvent.click(screen.getByText('mock-add-waypoint'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Route' }))
+
+    expect(createRoute).toHaveBeenCalledWith(
+      'Untitled Route',
+      [{ lat: 1, lon: 2 }],
+      11,
+    )
+  })
+
+  it('recomputes the smart default speed for a new route instead of carrying over a previously-edited route\'s speed', () => {
+    renderDrawer({ currentSpeedKts: 9 })
+
+    // Edit Route A (planning speed 15), then go back and start a brand new route.
+    fireEvent.click(screen.getByText('Route A').closest('button')!)
+    expect(screen.getByLabelText('Planning speed in knots')).toHaveValue(15)
+
+    fireEvent.click(screen.getByLabelText('Back to route list'))
+    fireEvent.click(screen.getByRole('button', { name: /New Route/ }))
+
+    expect(screen.getByLabelText('Planning speed in knots')).toHaveValue(9)
   })
 })

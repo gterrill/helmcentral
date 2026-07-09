@@ -7,6 +7,7 @@ const route: Route = {
   id: 'r1',
   name: 'Marina to Anchorage',
   waypoints: [{ lat: 0, lon: 0 }, { lat: 1, lon: 0 }],
+  planning_speed_kts: 6,
   created_at: '',
   updated_at: '',
 }
