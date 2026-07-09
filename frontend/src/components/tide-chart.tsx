@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 
+import { Area, ComposedChart, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
+
 import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { classifyTidePhase } from '@/lib/tide-phase'
@@ -181,10 +183,16 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
     }
   }
 
-  const linePoints = curvePoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
-  const areaPath = curvePoints.length > 0
-    ? `M ${curvePoints[0].x.toFixed(1)} ${CHART_BOTTOM} L ${linePoints} L ${curvePoints[curvePoints.length - 1].x.toFixed(1)} ${CHART_BOTTOM} Z`
-    : ''
+  // curvePoints/extreme markers are already in literal SVG pixel space (not
+  // a real data domain), so recharts is handed an identity mapping instead
+  // of doing its own data-to-pixel scaling: zero margin on a chart sized to
+  // exactly viewportWidth x 175, X domain [0, viewportWidth] (recharts' default
+  // orientation already maps pixel-left-to-right, needing no flip), and Y
+  // domain [0, 175] with `reversed` (SVG y grows downward - same as our
+  // pixel space - but recharts' un-reversed Y axis treats domain-max as "up",
+  // the opposite of what a plain top-down pixel value means). Given that,
+  // a data value of (x, y) renders at the literal SVG pixel (x, y).
+  const tideChartMargin = { left: 0, right: 0, top: 0, bottom: 0 }
 
   const zeroInRange = yMin < 0 && yMax > 0
   const nowX = xFor(nowMs)
@@ -251,67 +259,126 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           })}
         />
       )}
-      <svg
-        viewBox={`0 0 ${viewportWidth} 175`}
-        preserveAspectRatio="none"
-        className="h-[175px] w-full rounded bg-muted/15 touch-none"
-        ref={tideTooltip.svgRef}
-        onPointerDown={tideTooltip.onPointerDown}
-        onPointerMove={tideTooltip.onPointerMove}
-        onPointerLeave={tideTooltip.onPointerLeave}
-      >
-        <text x={6} y={CHART_TOP + 4} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMax.toFixed(1)} {unit}</text>
-        <text x={6} y={CHART_BOTTOM} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMin.toFixed(1)} {unit}</text>
-
-        <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
-
-        {zeroInRange && (
-          <line x1={CHART_LEFT} y1={yFor(0)} x2={CHART_RIGHT} y2={yFor(0)} stroke="rgba(80,98,118,0.2)" strokeWidth="1" strokeDasharray="3 3" />
-        )}
-
-        {dayTicks.map((tick) => (
-          <g key={tick.label + tick.x}>
-            <line x1={tick.x} y1={CHART_TOP} x2={tick.x} y2={CHART_BOTTOM} stroke="rgba(80,98,118,0.12)" strokeWidth="1" />
-            <text x={tick.x} y={CHART_BOTTOM + 28} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{tick.label}</text>
-          </g>
-        ))}
-
-        <path d={areaPath} fill="rgba(20,184,166,0.12)" />
-        <polyline points={linePoints} fill="none" stroke="rgba(20,184,166,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-
-        {visibleExtremes.map((extreme) => {
-          const t = new Date(extreme.time).getTime()
-          const x = xFor(t)
-          const y = yFor(toDisplay(extreme.heightM))
-          const label = new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-          const aboveLine = y > CHART_TOP + 16
-          return (
-            <g key={extreme.time}>
-              <circle cx={x} cy={y} r="3" fill={extreme.high ? 'rgba(20,184,166,0.95)' : 'rgba(245,158,11,0.95)'} />
-              <text x={x} y={aboveLine ? y - 8 : y + 14} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                {toDisplay(extreme.heightM).toFixed(1)}{unit}
-              </text>
-              <text x={x} y={CHART_BOTTOM + 15} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{label}</text>
-            </g>
-          )
-        })}
-
-        {showNowMarker && (
-          <>
-            <line x1={nowX} y1={CHART_TOP} x2={nowX} y2={CHART_BOTTOM} stroke="rgba(199,137,0,0.7)" strokeWidth="1.5" strokeDasharray="4 3" />
-            <circle cx={nowX} cy={nowY} r="3.5" fill="hsl(var(--gauge-primary))" />
-            <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--gauge-primary))">Now</text>
-          </>
-        )}
-
-        {tideTooltipEntry && (
-          <TideChartTooltipMarker
-            x={tideTooltipEntry.x}
-            y={tideTooltipEntry.y}
-            color="rgba(20,184,166,0.9)"
+      <div className="relative h-[175px] w-full touch-none overflow-hidden rounded bg-muted/15">
+        <ComposedChart width={viewportWidth} height={175} margin={tideChartMargin} data={curvePoints}>
+          {/* allowDataOverflow is required here: curvePoints intentionally
+              includes samples slightly past [0, viewportWidth]/[0, 175] (a
+              curve segment's raised-cosine interpolation can extend past the
+              window edges for a smooth day-boundary, exactly as the original
+              hand-rolled <svg> did, relying on the SVG's own viewBox clipping
+              to hide the overflow). Without allowDataOverflow, recharts
+              silently *expands* the domain to fit that overflow (see
+              parseSpecifiedDomain in recharts' ChartUtils.js) while the pixel
+              range stays fixed at [0, viewportWidth]/[0, 175] - compressing
+              the whole identity mapping this chart depends on. */}
+          <XAxis dataKey="x" type="number" domain={[0, viewportWidth]} allowDataOverflow hide />
+          <YAxis dataKey="y" type="number" domain={[0, 175]} reversed allowDataOverflow hide />
+          <Area
+            dataKey="y"
+            type="linear"
+            isAnimationActive={false}
+            dot={false}
+            stroke="none"
+            fill="rgba(20,184,166,0.12)"
           />
-        )}
-      </svg>
+          <Line
+            dataKey="y"
+            type="linear"
+            isAnimationActive={false}
+            dot={false}
+            stroke="rgba(20,184,166,0.9)"
+            strokeWidth={2.4}
+          />
+
+          {zeroInRange && (
+            <ReferenceLine
+              segment={[{ x: CHART_LEFT, y: yFor(0) }, { x: CHART_RIGHT, y: yFor(0) }]}
+              stroke="rgba(80,98,118,0.2)"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+            />
+          )}
+
+          {visibleExtremes.map((extreme) => {
+            const t = new Date(extreme.time).getTime()
+            const x = xFor(t)
+            const y = yFor(toDisplay(extreme.heightM))
+            return (
+              <ReferenceDot
+                key={extreme.time}
+                x={x}
+                y={y}
+                r={3}
+                fill={extreme.high ? 'rgba(20,184,166,0.95)' : 'rgba(245,158,11,0.95)'}
+                stroke="none"
+                isFront
+              />
+            )
+          })}
+
+          {showNowMarker && (
+            <>
+              <ReferenceLine
+                segment={[{ x: nowX, y: CHART_TOP }, { x: nowX, y: CHART_BOTTOM }]}
+                stroke="rgba(199,137,0,0.7)"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+              />
+              <ReferenceDot x={nowX} y={nowY} r={3.5} fill="hsl(var(--gauge-primary))" stroke="none" isFront />
+            </>
+          )}
+        </ComposedChart>
+
+        <svg
+          viewBox={`0 0 ${viewportWidth} 175`}
+          preserveAspectRatio="none"
+          className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+          ref={tideTooltip.svgRef}
+          onPointerDown={tideTooltip.onPointerDown}
+          onPointerMove={tideTooltip.onPointerMove}
+          onPointerLeave={tideTooltip.onPointerLeave}
+        >
+          <text x={6} y={CHART_TOP + 4} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMax.toFixed(1)} {unit}</text>
+          <text x={6} y={CHART_BOTTOM} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMin.toFixed(1)} {unit}</text>
+
+          <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+
+          {dayTicks.map((tick) => (
+            <g key={tick.label + tick.x}>
+              <line x1={tick.x} y1={CHART_TOP} x2={tick.x} y2={CHART_BOTTOM} stroke="rgba(80,98,118,0.12)" strokeWidth="1" />
+              <text x={tick.x} y={CHART_BOTTOM + 28} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{tick.label}</text>
+            </g>
+          ))}
+
+          {visibleExtremes.map((extreme) => {
+            const t = new Date(extreme.time).getTime()
+            const x = xFor(t)
+            const y = yFor(toDisplay(extreme.heightM))
+            const label = new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+            const aboveLine = y > CHART_TOP + 16
+            return (
+              <g key={extreme.time}>
+                <text x={x} y={aboveLine ? y - 8 : y + 14} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                  {toDisplay(extreme.heightM).toFixed(1)}{unit}
+                </text>
+                <text x={x} y={CHART_BOTTOM + 15} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{label}</text>
+              </g>
+            )
+          })}
+
+          {showNowMarker && (
+            <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--gauge-primary))">Now</text>
+          )}
+
+          {tideTooltipEntry && (
+            <TideChartTooltipMarker
+              x={tideTooltipEntry.x}
+              y={tideTooltipEntry.y}
+              color="rgba(20,184,166,0.9)"
+            />
+          )}
+        </svg>
+      </div>
 
       <p className="mt-1 text-xs text-muted-foreground">
         <span className="text-gauge-secondary">— Tide height ({unit})</span> · <span className="text-amber-600">●</span> low · <span className="text-gauge-secondary">●</span> high · <span style={{ color: 'rgba(199,137,0,0.95)' }}>┊</span> now

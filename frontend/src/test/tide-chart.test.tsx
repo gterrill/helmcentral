@@ -173,4 +173,117 @@ describe('TideChart', () => {
     expect(screen.getByText('12PM')).toBeInTheDocument()
     expect(screen.getByText('6PM')).toBeInTheDocument()
   })
+
+  // Pins the migration's trickiest piece: curvePoints/extreme markers are
+  // precomputed in PIXEL space (not a real data domain) and handed to
+  // recharts on an identity domain, so a recharts-rendered <ReferenceDot>
+  // must land at the exact same literal pixel position this test computes
+  // via the component's own xFor/yFor formulas - not some recharts-rescaled
+  // position.
+  it('places a high-tide ReferenceDot at its exact precomputed pixel position', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const highTime = new Date(2026, 5, 14, 5, 0, 0)
+    const extremes = [
+      { time: highTime.toISOString(), heightM: 1.8, high: true },
+      { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false },
+    ]
+
+    const { container } = render(
+      <TideChart
+        chart={buildChart({ extremes })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    // Reproduces the component's own xFor/yFor math exactly (same formula,
+    // same inputs) so this compares against the true expected pixel, not a
+    // hand-rounded approximation. jsdom's ResizeObserver stub never fires,
+    // so viewportWidth falls back to DEFAULT_VIEWPORT_WIDTH (1000).
+    const CHART_LEFT = 36
+    const CHART_RIGHT = 1000 - 20
+    const CHART_TOP = 16
+    const CHART_BOTTOM = 125
+    const chartStartMs = windowStart.getTime()
+    const chartEndMs = windowEnd.getTime()
+    const xFor = (t: number) => CHART_LEFT + ((t - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
+    const heights = [1.8, 0.3, 0.9] // extremes' heights + buildChart's default currentHeightM
+    const minHeight = Math.min(...heights)
+    const maxHeight = Math.max(...heights)
+    const padding = Math.max((maxHeight - minHeight) * 0.1, 0.1)
+    const yMin = minHeight - padding
+    const yMax = maxHeight + padding
+    const yRange = yMax - yMin || 1
+    const yFor = (v: number) => CHART_TOP + (1 - (v - yMin) / yRange) * (CHART_BOTTOM - CHART_TOP)
+
+    const expectedX = xFor(highTime.getTime())
+    const expectedY = yFor(1.8)
+
+    const dots = Array.from(container.querySelectorAll('.recharts-reference-dot circle'))
+    expect(dots.length).toBeGreaterThan(0)
+    const highDot = dots.find((dot) => Math.abs(Number(dot.getAttribute('cx')) - expectedX) < 0.5)
+    expect(highDot).toBeTruthy()
+    expect(Number(highDot!.getAttribute('cy'))).toBeCloseTo(expectedY, 1)
+  })
+
+  // Regression test for a real bug found via browser-level verification:
+  // curvePoints intentionally includes samples slightly outside
+  // [0, viewportWidth]/[0, 175] whenever a curve segment spans a window
+  // boundary (a raised-cosine segment between an out-of-window extreme and
+  // an in-window one), for a smooth day-boundary - exactly like the original
+  // hand-rolled <svg> did. Without `allowDataOverflow` on the identity-domain
+  // XAxis/YAxis, recharts silently *expands* its domain to fit that overflow
+  // (see parseSpecifiedDomain in recharts' ChartUtils.js) while the pixel
+  // range stays fixed, compressing the scale for EVERY point - including
+  // ones that were always safely inside the window. The previous test above
+  // doesn't exercise this: both its extremes sit inside the window, so no
+  // overflow ever occurs and it would pass even without the fix. This one
+  // adds an extreme before the window and one after it specifically to
+  // trigger the overflow, then checks the same in-window high tide still
+  // lands at the exact same pixel as it would without those extra points.
+  it('keeps an in-window ReferenceDot pixel-accurate even when other extremes fall outside the window', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const highTime = new Date(2026, 5, 14, 5, 0, 0)
+    const extremes = [
+      { time: new Date(2026, 5, 13, 22, 0, 0).toISOString(), heightM: 1.0, high: false }, // before window
+      { time: highTime.toISOString(), heightM: 1.8, high: true }, // inside window - the one we check
+      { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false }, // inside window
+      { time: new Date(2026, 5, 15, 2, 0, 0).toISOString(), heightM: 1.2, high: true }, // after window
+    ]
+
+    const { container } = render(
+      <TideChart
+        chart={buildChart({ extremes })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    const CHART_LEFT = 36
+    const CHART_RIGHT = 1000 - 20
+    const CHART_TOP = 16
+    const CHART_BOTTOM = 125
+    const chartStartMs = windowStart.getTime()
+    const chartEndMs = windowEnd.getTime()
+    const xFor = (t: number) => CHART_LEFT + ((t - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
+    const heights = [1.0, 1.8, 0.3, 1.2, 0.9] // all 4 extremes' heights + buildChart's default currentHeightM
+    const minHeight = Math.min(...heights)
+    const maxHeight = Math.max(...heights)
+    const padding = Math.max((maxHeight - minHeight) * 0.1, 0.1)
+    const yMin = minHeight - padding
+    const yMax = maxHeight + padding
+    const yRange = yMax - yMin || 1
+    const yFor = (v: number) => CHART_TOP + (1 - (v - yMin) / yRange) * (CHART_BOTTOM - CHART_TOP)
+
+    const expectedX = xFor(highTime.getTime())
+    const expectedY = yFor(1.8)
+
+    const dots = Array.from(container.querySelectorAll('.recharts-reference-dot circle'))
+    expect(dots.length).toBeGreaterThan(0)
+    const highDot = dots.find((dot) => Math.abs(Number(dot.getAttribute('cx')) - expectedX) < 0.5)
+    expect(highDot).toBeTruthy()
+    expect(Number(highDot!.getAttribute('cy'))).toBeCloseTo(expectedY, 1)
+  })
 })

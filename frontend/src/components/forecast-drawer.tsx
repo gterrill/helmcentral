@@ -1,11 +1,14 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 
+import { Area, Bar, CartesianGrid, Cell, ComposedChart, Customized, Line, ReferenceDot, XAxis, YAxis } from 'recharts'
+
 import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { ForecastTideSection } from '@/components/forecast-tide-section'
 import { WindWarningNotice } from '@/components/wind-warning-notice'
+import type { ChartConfig } from '@/components/ui/chart'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
 import type { MarineWarnings } from '@/hooks/use-marine-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
@@ -252,6 +255,21 @@ const UV_GRADIENT_STOPS = [
 // Wind, Wave, Precipitation and UV charts so they read consistently.
 const AXIS_LABEL_FONT_SIZE = '10'
 const AXIS_LABEL_COLOR = 'rgba(71,85,105,0.95)'
+
+// recharts' <XAxis> reserves its own `height` (default 30) via its internal
+// offset calculation IN ADDITION TO whatever `margin.bottom` a <ComposedChart>
+// is given, for any axis that isn't `hide`-den (calculateOffset in
+// generateCategoricalChart.js only skips this for hidden/mirrored axes) - so
+// the chart's true rendered plot-rectangle bottom edge sits this many pixels
+// higher than `margin.bottom` alone would suggest. Every hourly chart below
+// needs its visible tick-label XAxis to actually render ticks (which recharts
+// refuses to do at all when given `height={0}` - CartesianAxis.render() bails
+// out early), so each chart's `margin.bottom` is deliberately reduced by this
+// same amount to compensate, keeping the ACTUAL plot rectangle aligned with
+// the existing yFor-family pixel math (and, in turn, with the tooltip marker
+// and every ReferenceDot, which are positioned by that same pixel math, not
+// by recharts' own scale).
+const RECHARTS_XAXIS_HEIGHT = 30
 
 // Computes a y position for a left-axis tick label, nudging the top and
 // bottom ticks inward so the text isn't clipped by the chart edges.
@@ -511,11 +529,13 @@ export function ForecastDrawer({
   const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
   const windAxisTicks = Array.from({ length: windMax / 10 + 1 }, (_, idx) => idx * 10)
   const windHourTicks = hourTicksFor(windHourly)
-  const windAreaPath = windHourly.length > 0
-    ? `M ${hourlyXFor(0, windHourly.length)} ${windChartBottom} L ${windSpeeds.map((value, idx) => `${hourlyXFor(idx, windHourly.length)} ${windYFor(value)}`).join(' L ')} L ${hourlyXFor(windHourly.length - 1, windHourly.length)} ${windChartBottom} Z`
-    : ''
-  const windSpeedPoints = windSpeeds.map((value, idx) => `${hourlyXFor(idx, windHourly.length)},${windYFor(value)}`).join(' ')
-  const windGustPoints = windGusts.map((value, idx) => `${hourlyXFor(idx, windHourly.length)},${windYFor(value)}`).join(' ')
+  const windChartData = windHourly.map((entry, idx) => ({
+    hourOfDay: entry.hourOfDay,
+    windSpeed: windSpeeds[idx],
+    windGust: windGusts[idx],
+  }))
+  const windLabelByHour = new Map(windHourly.map((entry) => [entry.hourOfDay, entry.label]))
+  const windChartMargin = { left: hourlyChartLeft, right: forecastChartWidth - hourlyChartRight, top: windChartTop, bottom: 175 - windChartBottom - RECHARTS_XAXIS_HEIGHT }
 
   const waveHeights = waveHourly.map((entry) => Math.max(0, entry.waveHeightM))
   const windWaveHeights = waveHourly.map((entry) => Math.max(0, entry.windWaveHeightM))
@@ -527,23 +547,48 @@ export function ForecastDrawer({
   const waveYFor = (value: number) => waveChartTop + (1 - value / waveMax) * (waveChartBottom - waveChartTop)
   const waveAxisTicks = Array.from({ length: waveMax / 0.5 + 1 }, (_, idx) => idx * 0.5)
   const waveHourTicks = hourTicksFor(waveHourly)
-  const waveAreaPath = waveHourly.length > 0
-    ? `M ${hourlyXFor(0, waveHourly.length)} ${waveChartBottom} L ${waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)} ${waveYFor(value)}`).join(' L ')} L ${hourlyXFor(waveHourly.length - 1, waveHourly.length)} ${waveChartBottom} Z`
-    : ''
-  const wavePoints = waveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
-  const windWavePoints = windWaveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
-  const swellWavePoints = swellWaveHeights.map((value, idx) => `${hourlyXFor(idx, waveHourly.length)},${waveYFor(value)}`).join(' ')
+  const waveChartData = waveHourly.map((entry, idx) => ({
+    hourOfDay: entry.hourOfDay,
+    waveHeightM: waveHeights[idx],
+    windWaveHeightM: windWaveHeights[idx],
+    swellWaveHeightM: swellWaveHeights[idx],
+  }))
+  const waveLabelByHour = new Map(waveHourly.map((entry) => [entry.hourOfDay, entry.label]))
+  // Wave's viewBox is 170 tall (not the 175 the other hourly charts use), so
+  // its bottom margin is derived from that height, not a hardcoded 175.
+  const waveChartMargin = { left: hourlyChartLeft, right: forecastChartWidth - hourlyChartRight, top: waveChartTop, bottom: 170 - waveChartBottom - RECHARTS_XAXIS_HEIGHT }
 
   const precipIntensities = precipHourly.map((entry) => Math.max(0, entry.precipIntensityMm))
   const precipChances = precipHourly.map((entry) => Math.max(0, Math.min(100, entry.precipChancePct)))
   const precipMax = Math.max(1, ...precipIntensities)
   const precipChartTop = 35
   const precipChartBottom = 125
-  const precipBarYFor = (value: number) => precipChartTop + (1 - value / precipMax) * (precipChartBottom - precipChartTop)
   const precipChanceYFor = (value: number) => precipChartTop + (1 - value / 100) * (precipChartBottom - precipChartTop)
-  const precipHourTicks = hourTicksFor(precipHourly)
+  // Recharts render data: hourOfDay drives the shared numeric x-axis, and the
+  // intensity/chance values reuse the same clamped arrays the tooltip/corner
+  // labels already use, so the Bar/Line series and the manual overlay stay
+  // in perfect sync.
+  const precipChartData = precipHourly.map((entry, idx) => ({
+    hourOfDay: entry.hourOfDay,
+    precipIntensityMm: precipIntensities[idx],
+    precipChancePct: precipChances[idx],
+  }))
+  // Recharts' XAxis tickFormatter only receives the raw hourOfDay value, not
+  // the hourly entry - look the real API-provided `.label` text up by hour
+  // rather than re-deriving a 12-hour-clock string, so the tick text is
+  // guaranteed to match whatever the backend sends.
+  const precipLabelByHour = new Map(precipHourly.map((entry) => [entry.hourOfDay, entry.label]))
+  // Margin numbers are derived from the exact same constants the tooltip
+  // hook and manual overlay already use, so recharts' internal plot
+  // rectangle lands on precisely (hourlyChartLeft, precipChartTop) -
+  // (hourlyChartRight, precipChartBottom) in the shared 0..forecastChartWidth
+  // x 0..175 coordinate space.
+  const precipChartMargin = { left: hourlyChartLeft, right: forecastChartWidth - hourlyChartRight, top: precipChartTop, bottom: 175 - precipChartBottom - RECHARTS_XAXIS_HEIGHT }
   const precipBarWidth = precipHourly.length > 1 ? (hourlyChartWidth / (precipHourly.length - 1)) * 0.5 : 20
-  const precipChancePoints = precipChances.map((value, idx) => `${hourlyXFor(idx, precipHourly.length)},${precipChanceYFor(value)}`).join(' ')
+  const precipChartConfig: ChartConfig = {
+    precipIntensityMm: { label: 'Intensity (mm/hr)', color: 'rgba(59,130,246,0.85)' },
+    precipChancePct: { label: 'Chance of precip (%)', color: 'rgba(245,158,11,0.85)' },
+  }
 
   const cloudTemps = cloudHourly.map((entry) => displayTemp(entry.temperatureF))
   const cloudTempMax = cloudTemps.length > 0 ? Math.max(...cloudTemps) : 0
@@ -553,16 +598,11 @@ export function ForecastDrawer({
   const cloudChartBottom = 125
   const cloudYFor = (value: number) =>
     cloudChartBottom - ((value - cloudTempMin) / cloudTempRange) * (cloudChartBottom - cloudChartTop)
-  const cloudAreaPath = cloudHourly.length > 0
-    ? `M ${hourlyXFor(0, cloudHourly.length)} ${cloudChartBottom} L ${cloudTemps.map((value, idx) => `${hourlyXFor(idx, cloudHourly.length)} ${cloudYFor(value)}`).join(' L ')} L ${hourlyXFor(cloudHourly.length - 1, cloudHourly.length)} ${cloudChartBottom} Z`
-    : ''
-  const cloudPoints = cloudTemps.map((value, idx) => `${hourlyXFor(idx, cloudHourly.length)},${cloudYFor(value)}`).join(' ')
   // Index of the lowest/highest temperature in the visible window, for the
   // L/H markers - matching indexOf's "first occurrence" tie-break is fine
   // here since a flat run of identical extreme values is rare in practice.
   const cloudMinIdx = cloudTemps.length > 0 ? cloudTemps.indexOf(cloudTempMin) : -1
   const cloudMaxIdx = cloudTemps.length > 0 ? cloudTemps.indexOf(cloudTempMax) : -1
-  const cloudHourTicks = hourTicksFor(cloudHourly)
   // A condition icon every 3 hours - dense enough to read at a glance like
   // the reference screenshot, without crowding 24 separate icons together.
   const cloudIconTicks = cloudHourly
@@ -579,13 +619,34 @@ export function ForecastDrawer({
   const uvIndex = Math.round(Math.max(0, ...uvValues))
   const uvMax = Math.max(11, ...uvValues)
   const uvYFor = (value: number) => cloudChartTop + (1 - value / uvMax) * (cloudChartBottom - cloudChartTop)
-  const uvPoints = uvValues.map((value, idx) => `${hourlyXFor(idx, uvHourly.length)},${uvYFor(value)}`).join(' ')
   const uvProtectionIndices = uvValues.reduce<number[]>((acc, value, idx) => {
     if (value >= 3) acc.push(idx)
     return acc
   }, [])
   const uvProtectionStart = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[0]].label : null
   const uvProtectionEnd = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[uvProtectionIndices.length - 1]].label : null
+
+  // Recharts render data for the temperature Area - displayTemp-converted
+  // (metric/imperial) so the plotted values match cloudTemps/cloudYFor
+  // exactly, since recharts can't perform that unit conversion itself.
+  const cloudChartData = cloudHourly.map((entry, idx) => ({
+    hourOfDay: entry.hourOfDay,
+    displayTemperature: cloudTemps[idx],
+  }))
+  // UV points have no hourOfDay of their own (WeatherHourlyUVPoint only
+  // carries label/uvIndex) - they're aligned to the cloud chart's hourly
+  // array purely by array position, same as the hourlyXFor(idx, ...) index
+  // alignment the manual polyline used, so idx doubles as hourOfDay here.
+  const uvChartData = uvValues.map((value, idx) => ({ hourOfDay: idx, uvIndex: value }))
+  // Recharts' XAxis tickFormatter only receives the raw hourOfDay value, not
+  // the hourly entry - look the real API-provided `.label` text up by hour
+  // rather than re-deriving a 12-hour-clock string.
+  const cloudLabelByHour = new Map(cloudHourly.map((entry) => [entry.hourOfDay, entry.label]))
+  const cloudChartMargin = { left: hourlyChartLeft, right: forecastChartWidth - hourlyChartRight, top: cloudChartTop, bottom: 175 - cloudChartBottom - RECHARTS_XAXIS_HEIGHT }
+  const cloudChartConfig: ChartConfig = {
+    displayTemperature: { label: `Temperature (${tempUnit})`, color: 'rgba(217,119,6,0.9)' },
+    uvIndex: { label: 'UV Index', color: 'rgb(249,115,22)' },
+  }
 
   const windTooltip = useChartTooltip(windHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
   const waveTooltip = useChartTooltip(waveHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
@@ -779,70 +840,112 @@ export function ForecastDrawer({
                       tertiary={uvTooltipEntry ? `UV ${Math.round(uvTooltipEntry.uvIndex)} · ${uvRiskLabel(uvTooltipEntry.uvIndex)}` : undefined}
                     />
                   )}
-                  <svg
-                    ref={cloudTooltip.svgRef}
-                    viewBox={`0 0 ${forecastChartWidth} 175`}
-                    preserveAspectRatio="none"
+                  <div
                     data-testid="forecast-cloud-chart"
-                    className="h-[175px] w-full touch-none rounded bg-muted/15"
-                    onPointerDown={cloudTooltip.onPointerDown}
-                    onPointerMove={cloudTooltip.onPointerMove}
-                    onPointerLeave={cloudTooltip.onPointerLeave}
+                    className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+                    style={{ width: forecastChartWidth }}
                   >
-                    <defs>
-                      <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
-                        {UV_GRADIENT_STOPS.map((stop) => (
-                          <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
-                        ))}
-                      </linearGradient>
-                    </defs>
-
-                    <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMax)}{tempUnit}</text>
-                    <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMin)}{tempUnit}</text>
-                    {UV_BAND_LABELS.map((band) => (
-                      <text key={band.label} x={forecastChartWidth - 6} y={uvYFor(band.value)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
-                    ))}
-                    <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
-
-                    <path d={cloudAreaPath} fill="rgba(217,119,6,0.12)" />
-                    <polyline points={cloudPoints} fill="none" stroke="rgba(217,119,6,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-                    <polyline points={uvPoints} fill="none" stroke={`url(#${uvLineGradientId})`} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-
-                    {cloudHourTicks.map(({ entry, idx }) => (
-                      <g key={idx}>
-                        <line x1={hourlyXFor(idx, cloudHourly.length)} y1={cloudChartTop} x2={hourlyXFor(idx, cloudHourly.length)} y2={cloudChartBottom} stroke="rgba(80,98,118,0.12)" strokeWidth="1" />
-                        <text x={hourlyXFor(idx, cloudHourly.length)} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                      </g>
-                    ))}
-
-                    {cloudMinIdx >= 0 && (
-                      <g>
-                        <circle cx={hourlyXFor(cloudMinIdx, cloudHourly.length)} cy={cloudYFor(cloudTempMin)} r="3" fill="rgba(217,119,6,0.95)" />
-                        <text x={hourlyXFor(cloudMinIdx, cloudHourly.length)} y={cloudYFor(cloudTempMin) + 14} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>L</text>
-                      </g>
-                    )}
-                    {cloudMaxIdx >= 0 && (
-                      <g>
-                        <circle cx={hourlyXFor(cloudMaxIdx, cloudHourly.length)} cy={cloudYFor(cloudTempMax)} r="3" fill="rgba(217,119,6,0.95)" />
-                        <text x={hourlyXFor(cloudMaxIdx, cloudHourly.length)} y={cloudYFor(cloudTempMax) - 8} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>H</text>
-                      </g>
-                    )}
-
-                    {cloudTooltipEntry && (
-                      <ChartTooltipMarker
-                        x={hourlyXFor(cloudTooltip.activeIndex ?? 0, cloudHourly.length)}
-                        y={cloudYFor(displayTemp(cloudTooltipEntry.temperatureF))}
-                        color="rgba(217,119,6,0.95)"
+                    <ComposedChart width={forecastChartWidth} height={175} margin={cloudChartMargin}>
+                      <XAxis
+                        dataKey="hourOfDay"
+                        type="number"
+                        domain={[0, 23]}
+                        allowDataOverflow
+                        ticks={[0, 6, 12, 18]}
+                        tickFormatter={(value: number) => cloudLabelByHour.get(value) ?? ''}
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: Number(AXIS_LABEL_FONT_SIZE), fill: AXIS_LABEL_COLOR }}
+                        allowDuplicatedCategory={false}
+                        height={RECHARTS_XAXIS_HEIGHT}
                       />
-                    )}
-                    {uvTooltipEntry && (
-                      <ChartTooltipMarker
-                        x={hourlyXFor(cloudTooltip.activeIndex ?? 0, uvHourly.length)}
-                        y={uvYFor(Math.max(0, uvTooltipEntry.uvIndex))}
-                        color="rgb(249,115,22)"
+                      <CartesianGrid vertical horizontal={false} stroke="rgba(80,98,118,0.12)" />
+                      <YAxis domain={[cloudTempMin, cloudTempMin + cloudTempRange]} hide />
+                      <YAxis yAxisId="uv" domain={[0, uvMax]} hide />
+                      <Area
+                        data={cloudChartData}
+                        dataKey="displayTemperature"
+                        type="linear"
+                        isAnimationActive={false}
+                        dot={false}
+                        stroke={cloudChartConfig.displayTemperature.color}
+                        strokeWidth={2.4}
+                        fill="rgba(217,119,6,0.12)"
                       />
-                    )}
-                  </svg>
+                      <Line
+                        data={uvChartData}
+                        dataKey="uvIndex"
+                        yAxisId="uv"
+                        type="linear"
+                        isAnimationActive={false}
+                        dot={false}
+                        stroke={`url(#${uvLineGradientId})`}
+                        strokeWidth={2}
+                      />
+                      {cloudMinIdx >= 0 && (
+                        <ReferenceDot
+                          x={cloudHourly[cloudMinIdx].hourOfDay}
+                          y={cloudTempMin}
+                          r={3}
+                          fill="rgba(217,119,6,0.95)"
+                          stroke="none"
+                          isFront
+                          label={{ value: 'L', position: 'bottom', fill: AXIS_LABEL_COLOR, fontSize: Number(AXIS_LABEL_FONT_SIZE) }}
+                        />
+                      )}
+                      {cloudMaxIdx >= 0 && (
+                        <ReferenceDot
+                          x={cloudHourly[cloudMaxIdx].hourOfDay}
+                          y={cloudTempMax}
+                          r={3}
+                          fill="rgba(217,119,6,0.95)"
+                          stroke="none"
+                          isFront
+                          label={{ value: 'H', position: 'top', fill: AXIS_LABEL_COLOR, fontSize: Number(AXIS_LABEL_FONT_SIZE) }}
+                        />
+                      )}
+                    </ComposedChart>
+
+                    <svg
+                      ref={cloudTooltip.svgRef}
+                      viewBox={`0 0 ${forecastChartWidth} 175`}
+                      preserveAspectRatio="none"
+                      className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                      onPointerDown={cloudTooltip.onPointerDown}
+                      onPointerMove={cloudTooltip.onPointerMove}
+                      onPointerLeave={cloudTooltip.onPointerLeave}
+                    >
+                      <defs>
+                        <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
+                          {UV_GRADIENT_STOPS.map((stop) => (
+                            <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
+                          ))}
+                        </linearGradient>
+                      </defs>
+
+                      <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMax)}{tempUnit}</text>
+                      <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMin)}{tempUnit}</text>
+                      {UV_BAND_LABELS.map((band) => (
+                        <text key={band.label} x={forecastChartWidth - 6} y={uvYFor(band.value)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
+                      ))}
+                      <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+
+                      {cloudTooltipEntry && (
+                        <ChartTooltipMarker
+                          x={hourlyXFor(cloudTooltip.activeIndex ?? 0, cloudHourly.length)}
+                          y={cloudYFor(displayTemp(cloudTooltipEntry.temperatureF))}
+                          color="rgba(217,119,6,0.95)"
+                        />
+                      )}
+                      {uvTooltipEntry && (
+                        <ChartTooltipMarker
+                          x={hourlyXFor(cloudTooltip.activeIndex ?? 0, uvHourly.length)}
+                          y={uvYFor(Math.max(0, uvTooltipEntry.uvIndex))}
+                          color="rgb(249,115,22)"
+                        />
+                      )}
+                    </svg>
+                  </div>
 
                   <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[35px] items-center" style={{ left: `${(hourlyChartLeft / forecastChartWidth) * 100}%`, right: `${100 - (hourlyChartRight / forecastChartWidth) * 100}%` }}>
                     {cloudIconTicks.map(({ entry, idx }) => (
@@ -883,45 +986,95 @@ export function ForecastDrawer({
                         secondary={`Gusts: ${Math.round(windTooltipEntry.windGust)} ${windUnit}`}
                       />
                     )}
-                    <svg
-                      ref={windTooltip.svgRef}
-                      viewBox={`0 0 ${forecastChartWidth} 175`}
-                      preserveAspectRatio="none"
+                    <div
                       data-testid="forecast-wind-chart"
-                      className="h-[175px] w-full touch-none rounded bg-muted/15"
-                      onPointerDown={windTooltip.onPointerDown}
-                      onPointerMove={windTooltip.onPointerMove}
-                      onPointerLeave={windTooltip.onPointerLeave}
+                      className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+                      style={{ width: forecastChartWidth }}
                     >
-                      {windAxisTicks.map((tick) => (
-                        <text key={tick} x={6} y={axisTickLabelY(windYFor, tick, windChartTop, windChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                          {tick}{tick === windMax ? ` ${windUnit}` : ''}
-                        </text>
-                      ))}
-                      <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
-
-                      <path d={windAreaPath} fill="rgba(37,99,235,0.12)" />
-                      <polyline points={windGustPoints} fill="none" stroke="rgba(245,158,11,0.75)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
-                      <polyline points={windSpeedPoints} fill="none" stroke="rgba(37,99,235,0.95)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-
-                      {windHourTicks.map(({ entry, idx }) => {
-                        const x = hourlyXFor(idx, windHourly.length)
-                        return (
-                          <g key={idx}>
-                            <WindBarb cx={x} cy={16} speedKts={entry.windSpeed} directionDeg={entry.windDirectionDeg} />
-                            <text x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                          </g>
-                        )
-                      })}
-
-                      {windTooltipEntry && (
-                        <ChartTooltipMarker
-                          x={hourlyXFor(windTooltip.activeIndex ?? 0, windHourly.length)}
-                          y={windYFor(Math.max(0, windTooltipEntry.windSpeed))}
-                          color="rgba(37,99,235,0.95)"
+                      <ComposedChart width={forecastChartWidth} height={175} margin={windChartMargin}>
+                        <XAxis
+                          dataKey="hourOfDay"
+                          type="number"
+                          domain={[0, 23]}
+                          allowDataOverflow
+                          ticks={[0, 6, 12, 18]}
+                          tickFormatter={(value: number) => windLabelByHour.get(value) ?? ''}
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fontSize: Number(AXIS_LABEL_FONT_SIZE), fill: AXIS_LABEL_COLOR }}
+                          height={RECHARTS_XAXIS_HEIGHT}
                         />
-                      )}
-                    </svg>
+                        <YAxis domain={[0, windMax]} hide />
+                        <Area
+                          data={windChartData}
+                          dataKey="windSpeed"
+                          type="linear"
+                          isAnimationActive={false}
+                          dot={false}
+                          stroke="none"
+                          fill="rgba(37,99,235,0.12)"
+                        />
+                        <Line
+                          data={windChartData}
+                          dataKey="windGust"
+                          type="linear"
+                          isAnimationActive={false}
+                          dot={false}
+                          stroke="rgba(245,158,11,0.75)"
+                          strokeWidth={1.5}
+                          strokeDasharray="4 3"
+                        />
+                        <Line
+                          data={windChartData}
+                          dataKey="windSpeed"
+                          type="linear"
+                          isAnimationActive={false}
+                          dot={false}
+                          stroke="rgba(37,99,235,0.95)"
+                          strokeWidth={2.4}
+                        />
+                        <Customized
+                          component={() => (
+                            <>
+                              {windHourTicks.map(({ entry, idx }) => (
+                                <WindBarb
+                                  key={idx}
+                                  cx={hourlyXFor(idx, windHourly.length)}
+                                  cy={16}
+                                  speedKts={entry.windSpeed}
+                                  directionDeg={entry.windDirectionDeg}
+                                />
+                              ))}
+                            </>
+                          )}
+                        />
+                      </ComposedChart>
+
+                      <svg
+                        ref={windTooltip.svgRef}
+                        viewBox={`0 0 ${forecastChartWidth} 175`}
+                        preserveAspectRatio="none"
+                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                        onPointerDown={windTooltip.onPointerDown}
+                        onPointerMove={windTooltip.onPointerMove}
+                        onPointerLeave={windTooltip.onPointerLeave}
+                      >
+                        {windAxisTicks.map((tick) => (
+                          <text key={tick} x={6} y={axisTickLabelY(windYFor, tick, windChartTop, windChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                            {tick}{tick === windMax ? ` ${windUnit}` : ''}
+                          </text>
+                        ))}
+                        <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+
+                        {windTooltipEntry && (
+                          <ChartTooltipMarker
+                            x={hourlyXFor(windTooltip.activeIndex ?? 0, windHourly.length)}
+                            y={windYFor(Math.max(0, windTooltipEntry.windSpeed))}
+                            color="rgba(37,99,235,0.95)"
+                          />
+                        )}
+                      </svg>
+                    </div>
                   </div>
                   <p className="mt-1 text-[10px] text-muted-foreground">
                     <span className="text-blue-600">— Wind</span> · <span className="text-amber-600">- - Gusts</span> ({windUnit}) · barbs show direction the wind is coming from (full feather = 10kt, half = 5kt)
@@ -952,47 +1105,105 @@ export function ForecastDrawer({
                         secondary={`Swell ${waveTooltipEntry.swellWaveHeightM.toFixed(1)}m from ${compassLabel(waveTooltipEntry.waveDirectionDeg)} · Chop ${waveTooltipEntry.windWaveHeightM.toFixed(1)}m`}
                       />
                     )}
-                    <svg
-                      ref={waveTooltip.svgRef}
-                      viewBox={`0 0 ${forecastChartWidth} 170`}
-                      preserveAspectRatio="none"
+                    <div
                       data-testid="forecast-wave-chart"
-                      className="h-[170px] w-full touch-none rounded bg-muted/15"
-                      onPointerDown={waveTooltip.onPointerDown}
-                      onPointerMove={waveTooltip.onPointerMove}
-                      onPointerLeave={waveTooltip.onPointerLeave}
+                      className="relative h-[170px] touch-none overflow-hidden rounded bg-muted/15"
+                      style={{ width: forecastChartWidth }}
                     >
-                      {waveAxisTicks.filter((tick) => Number.isInteger(tick)).map((tick) => (
-                        <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                          {tick}{tick === waveMax ? ' m' : ''}
-                        </text>
-                      ))}
-                      <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
-
-                      <path d={waveAreaPath} fill="rgba(20,184,166,0.12)" />
-                      <polyline points={swellWavePoints} fill="none" stroke="rgba(139,92,246,0.85)" strokeWidth="1.5" strokeDasharray="2 3" strokeLinejoin="round" strokeLinecap="round" />
-                      <polyline points={windWavePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" />
-                      <polyline points={wavePoints} fill="none" stroke="rgba(20,184,166,0.9)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-
-                      {waveHourTicks.map(({ entry, idx }) => {
-                        const x = hourlyXFor(idx, waveHourly.length)
-                        return (
-                          <g key={idx}>
-                            <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
-                            <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.wavePeriodS.toFixed(1)}s</text>
-                            <text x={x} y={140} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                          </g>
-                        )
-                      })}
-
-                      {waveTooltipEntry && (
-                        <ChartTooltipMarker
-                          x={hourlyXFor(waveTooltip.activeIndex ?? 0, waveHourly.length)}
-                          y={waveYFor(Math.max(0, waveTooltipEntry.waveHeightM))}
-                          color="rgba(20,184,166,0.9)"
+                      <ComposedChart width={forecastChartWidth} height={170} margin={waveChartMargin}>
+                        <XAxis
+                          dataKey="hourOfDay"
+                          type="number"
+                          domain={[0, 23]}
+                          allowDataOverflow
+                          ticks={[0, 6, 12, 18]}
+                          tickFormatter={(value: number) => waveLabelByHour.get(value) ?? ''}
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fontSize: Number(AXIS_LABEL_FONT_SIZE), fill: AXIS_LABEL_COLOR }}
+                          height={RECHARTS_XAXIS_HEIGHT}
                         />
-                      )}
-                    </svg>
+                        <YAxis domain={[0, waveMax]} hide />
+                        <Area
+                          data={waveChartData}
+                          dataKey="waveHeightM"
+                          type="linear"
+                          isAnimationActive={false}
+                          dot={false}
+                          stroke="none"
+                          fill="rgba(20,184,166,0.12)"
+                        />
+                        <Line
+                          data={waveChartData}
+                          dataKey="swellWaveHeightM"
+                          type="linear"
+                          isAnimationActive={false}
+                          dot={false}
+                          stroke="rgba(139,92,246,0.85)"
+                          strokeWidth={1.5}
+                          strokeDasharray="2 3"
+                        />
+                        <Line
+                          data={waveChartData}
+                          dataKey="windWaveHeightM"
+                          type="linear"
+                          isAnimationActive={false}
+                          dot={false}
+                          stroke="rgba(245,158,11,0.85)"
+                          strokeWidth={1.5}
+                          strokeDasharray="4 3"
+                        />
+                        <Line
+                          data={waveChartData}
+                          dataKey="waveHeightM"
+                          type="linear"
+                          isAnimationActive={false}
+                          dot={false}
+                          stroke="rgba(20,184,166,0.9)"
+                          strokeWidth={2.4}
+                        />
+                        <Customized
+                          component={() => (
+                            <>
+                              {waveHourTicks.map(({ entry, idx }) => {
+                                const x = hourlyXFor(idx, waveHourly.length)
+                                return (
+                                  <g key={idx}>
+                                    <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
+                                    <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.wavePeriodS.toFixed(1)}s</text>
+                                  </g>
+                                )
+                              })}
+                            </>
+                          )}
+                        />
+                      </ComposedChart>
+
+                      <svg
+                        ref={waveTooltip.svgRef}
+                        viewBox={`0 0 ${forecastChartWidth} 170`}
+                        preserveAspectRatio="none"
+                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                        onPointerDown={waveTooltip.onPointerDown}
+                        onPointerMove={waveTooltip.onPointerMove}
+                        onPointerLeave={waveTooltip.onPointerLeave}
+                      >
+                        {waveAxisTicks.filter((tick) => Number.isInteger(tick)).map((tick) => (
+                          <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                            {tick}{tick === waveMax ? ' m' : ''}
+                          </text>
+                        ))}
+                        <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+
+                        {waveTooltipEntry && (
+                          <ChartTooltipMarker
+                            x={hourlyXFor(waveTooltip.activeIndex ?? 0, waveHourly.length)}
+                            y={waveYFor(Math.max(0, waveTooltipEntry.waveHeightM))}
+                            color="rgba(20,184,166,0.9)"
+                          />
+                        )}
+                      </svg>
+                    </div>
                   </div>
                   <p className="mt-1 text-[10px] text-muted-foreground">
                     <span className="text-gauge-secondary">— Total wave height (m)</span> · <span className="text-amber-600">- - Wind wave (chop)</span> · <span className="text-violet-600">·· Swell</span> · arrows show direction the swell is heading, with period (sec) below each
@@ -1023,57 +1234,66 @@ export function ForecastDrawer({
                         secondary={`${precipTooltipEntry.precipIntensityMm.toFixed(1)} mm/hr`}
                       />
                     )}
-                    <svg
-                      ref={precipTooltip.svgRef}
-                      viewBox={`0 0 ${forecastChartWidth} 175`}
-                      preserveAspectRatio="none"
+                    <div
                       data-testid="forecast-precip-chart"
-                      className="h-[175px] w-full touch-none rounded bg-muted/15"
-                      onPointerDown={precipTooltip.onPointerDown}
-                      onPointerMove={precipTooltip.onPointerMove}
-                      onPointerLeave={precipTooltip.onPointerLeave}
+                      className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+                      style={{ width: forecastChartWidth }}
                     >
-                      <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)} mm/hr</text>
-                      <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
-                      <text x={forecastChartWidth - 6} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
-                      <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
-                      <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
-
-                      {precipHourly.map((_entry, idx) => {
-                        const intensity = precipIntensities[idx]
-                        if (intensity <= 0) return null
-                        const x = hourlyXFor(idx, precipHourly.length)
-                        const y = precipBarYFor(intensity)
-                        return (
-                          <rect
-                            key={idx}
-                            data-testid="forecast-precip-bar"
-                            x={x - precipBarWidth / 2}
-                            y={y}
-                            width={precipBarWidth}
-                            height={precipChartBottom - y}
-                            fill={precipBarColor(intensity)}
-                          />
-                        )
-                      })}
-
-                      <polyline points={precipChancePoints} fill="none" stroke="rgba(245,158,11,0.85)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-
-                      {precipHourTicks.map(({ entry, idx }) => {
-                        const x = hourlyXFor(idx, precipHourly.length)
-                        return (
-                          <text key={idx} x={x} y={142} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.label}</text>
-                        )
-                      })}
-
-                      {precipTooltipEntry && (
-                        <ChartTooltipMarker
-                          x={hourlyXFor(precipTooltip.activeIndex ?? 0, precipHourly.length)}
-                          y={precipChanceYFor(Math.max(0, Math.min(100, precipTooltipEntry.precipChancePct)))}
-                          color="rgba(245,158,11,0.9)"
+                      <ComposedChart width={forecastChartWidth} height={175} data={precipChartData} margin={precipChartMargin}>
+                        <XAxis
+                          dataKey="hourOfDay"
+                          type="number"
+                          domain={[0, 23]}
+                          allowDataOverflow
+                          ticks={[0, 6, 12, 18]}
+                          tickFormatter={(value: number) => precipLabelByHour.get(value) ?? ''}
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fontSize: Number(AXIS_LABEL_FONT_SIZE), fill: AXIS_LABEL_COLOR }}
+                          height={RECHARTS_XAXIS_HEIGHT}
                         />
-                      )}
-                    </svg>
+                        <YAxis domain={[0, precipMax]} hide />
+                        <YAxis yAxisId="chance" domain={[0, 100]} orientation="right" hide />
+                        <Bar dataKey="precipIntensityMm" barSize={precipBarWidth} isAnimationActive={false}>
+                          {precipChartData.map((entry, idx) => (
+                            <Cell key={idx} data-testid="forecast-precip-bar" fill={precipBarColor(entry.precipIntensityMm)} />
+                          ))}
+                        </Bar>
+                        <Line
+                          dataKey="precipChancePct"
+                          yAxisId="chance"
+                          type="linear"
+                          dot={false}
+                          isAnimationActive={false}
+                          stroke={precipChartConfig.precipChancePct.color}
+                          strokeWidth={2.4}
+                        />
+                      </ComposedChart>
+
+                      <svg
+                        ref={precipTooltip.svgRef}
+                        viewBox={`0 0 ${forecastChartWidth} 175`}
+                        preserveAspectRatio="none"
+                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                        onPointerDown={precipTooltip.onPointerDown}
+                        onPointerMove={precipTooltip.onPointerMove}
+                        onPointerLeave={precipTooltip.onPointerLeave}
+                      >
+                        <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)} mm/hr</text>
+                        <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
+                        <text x={forecastChartWidth - 6} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
+                        <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
+                        <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+
+                        {precipTooltipEntry && (
+                          <ChartTooltipMarker
+                            x={hourlyXFor(precipTooltip.activeIndex ?? 0, precipHourly.length)}
+                            y={precipChanceYFor(Math.max(0, Math.min(100, precipTooltipEntry.precipChancePct)))}
+                            color="rgba(245,158,11,0.9)"
+                          />
+                        )}
+                      </svg>
+                    </div>
                   </div>
                   <p className="mt-1 text-[10px] text-muted-foreground">
                     <span className="text-blue-500">▮ Intensity (mm/hr)</span> · <span className="text-amber-600">— Chance of precip (%)</span>

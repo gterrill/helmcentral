@@ -206,6 +206,58 @@ describe('ForecastDrawer refresh age', () => {
     expect(within(chart).getByText('6PM')).toBeInTheDocument()
   })
 
+  // Pins the recharts-backed wind series to the same solid-speed /
+  // dashed-gust visual distinction the hand-rolled <polyline> pair had -
+  // both are now <path class="recharts-curve"> elements (recharts never
+  // renders <polyline>), distinguished by stroke color and dasharray.
+  it('draws the wind speed line solid and the gust line dashed, in their existing colors', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wind-chart')
+    const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
+    const speedLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(37,99,235,0.95)')
+    const gustLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(245,158,11,0.75)')
+    expect(speedLine).toBeTruthy()
+    expect(gustLine).toBeTruthy()
+    expect(gustLine).toHaveAttribute('stroke-dasharray', '4 3')
+  })
+
+  // Regression test for a real bug found via browser-level verification: the
+  // visible tick-label <XAxis> on every hourly chart reserves its own
+  // default `height` (30px) via recharts' offset calculation IN ADDITION TO
+  // the chart's own `margin.bottom` - shrinking the actual plot rectangle
+  // below what windYFor (and therefore the tooltip marker and every other
+  // manually-positioned overlay element) assumes, unless that reserved
+  // height is subtracted back out of the margin. This can't be caught by
+  // checking recharts' outer <svg> width/height (unaffected) - it has to
+  // check the actual rendered curve geometry, parsed straight out of its
+  // `d` attribute, against the same pixel math the manual overlay uses.
+  it('renders the windSpeed curve at the exact pixel windYFor computes for the first hour', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wind-chart')
+    const curve = chart.querySelector('path.recharts-curve[stroke="rgba(37,99,235,0.95)"]')
+    expect(curve).toBeTruthy()
+    const d = curve!.getAttribute('d') ?? ''
+    const firstPoint = /^M(-?[\d.]+),(-?[\d.]+)/.exec(d)
+    expect(firstPoint).toBeTruthy()
+    const [, xStr, yStr] = firstPoint!
+
+    // Reproduces forecast-drawer.tsx's own margin-matching math: jsdom's
+    // ResizeObserver stub never fires, so forecastChartWidth falls back to
+    // 1000, giving hourlyChartLeft=30. buildHourlyWind(24) gives windSpeed
+    // 10+idx (10 at idx 0) and windGust 15+idx (max 38 at idx 23), so
+    // windDataMax=38 > 30, meaning windMax rounds up to 40.
+    const hourlyChartLeft = 30
+    const windChartTop = 35
+    const windChartBottom = 125
+    const windMax = 40
+    const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
+
+    expect(Number(xStr)).toBeCloseTo(hourlyChartLeft, 0)
+    expect(Number(yStr)).toBeCloseTo(windYFor(10), 0)
+  })
+
   it('shows the wave summary sentence, direction arrows and period for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
@@ -222,6 +274,24 @@ describe('ForecastDrawer refresh age', () => {
     expect(within(chart).getByText('6AM')).toBeInTheDocument()
     expect(within(chart).getByText('12PM')).toBeInTheDocument()
     expect(within(chart).getByText('6PM')).toBeInTheDocument()
+  })
+
+  // Pins the recharts-backed wave series (total/wind-wave/swell) to the same
+  // three-way solid/dashed/dotted-dash visual distinction the hand-rolled
+  // <polyline> trio had, now as <path class="recharts-curve"> elements.
+  it('draws the total wave height solid and the wind-wave/swell lines dashed, in their existing colors', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wave-chart')
+    const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
+    const waveLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(20,184,166,0.9)')
+    const windWaveLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(245,158,11,0.85)')
+    const swellLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(139,92,246,0.85)')
+    expect(waveLine).toBeTruthy()
+    expect(windWaveLine).toBeTruthy()
+    expect(swellLine).toBeTruthy()
+    expect(windWaveLine).toHaveAttribute('stroke-dasharray', '4 3')
+    expect(swellLine).toHaveAttribute('stroke-dasharray', '2 3')
   })
 
   it('shows sunrise, sunset and moon phase for the selected day', () => {
@@ -283,6 +353,31 @@ describe('ForecastDrawer refresh age', () => {
     expect(within(chart).getByText('6PM')).toBeInTheDocument()
   })
 
+  // Pins the recharts-backed bar rendering to the exact same visual output as
+  // the hand-rolled <rect> loop it replaces: one bar per hour with a
+  // non-zero intensity (zero-intensity hours render nothing, same as
+  // today), each colored independently by precipBarColor's Light/Moderate/
+  // Heavy bands - not a single shared fill for the whole series.
+  it('renders one precipitation bar per non-zero hourly reading, each colored by its own intensity band', () => {
+    const hourlyPrecip = buildHourlyPrecip().map((entry, idx) => (idx === 18 ? { ...entry, precipIntensityMm: 8.2 } : entry))
+
+    render(
+      <ForecastDrawer
+        forecast={[buildDay({ hourlyPrecip })]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const bars = screen.getAllByTestId('forecast-precip-bar')
+    // buildHourlyPrecip only gives non-zero intensity every 6th hour (4 of 24).
+    expect(bars).toHaveLength(4)
+    // idx 0 -> 1.5mm/hr (Light band), idx 18 -> overridden to 8.2mm/hr (Heavy band).
+    expect(bars[0]).toHaveAttribute('fill', 'rgba(147,197,253,0.85)')
+    expect(bars[3]).toHaveAttribute('fill', 'rgba(29,78,216,0.9)')
+  })
+
   it('shows an unavailable message when a day has no precipitation forecast', () => {
     render(
       <ForecastDrawer
@@ -302,10 +397,21 @@ describe('ForecastDrawer refresh age', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
     const chart = screen.getByTestId('forecast-cloud-chart')
-    // Temperature + UV polylines share the same chart now, instead of UV
-    // having its own standalone chart.
-    expect(chart.querySelectorAll('polyline').length).toBeGreaterThanOrEqual(2)
+    // Temperature + UV curves share the same chart now, instead of UV having
+    // its own standalone chart. Both are recharts <Area>/<Line> series, which
+    // (unlike the hand-rolled <polyline> this replaces) always render as SVG
+    // <path> elements - see recharts' shared Curve component.
+    expect(chart.querySelectorAll('path.recharts-curve').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Sun protection recommended from 7AM to 5PM.')).toBeInTheDocument()
+  })
+
+  it('strokes the UV series with the multi-stop UV gradient', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-cloud-chart')
+    const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
+    const gradientStroked = curves.some((path) => (path.getAttribute('stroke') ?? '').startsWith('url(#'))
+    expect(gradientStroked).toBe(true)
   })
 
   it('still renders the cloud & temperature chart when a day has no UV forecast', () => {
