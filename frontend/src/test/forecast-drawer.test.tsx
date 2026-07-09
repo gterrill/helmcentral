@@ -1,6 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 
+// Kept 100% fetch-free per this file's existing convention: ForecastTideSection
+// owns its own data-fetching (tide settings + tide chart), so it's stubbed here
+// rather than exercised end-to-end - that's covered by forecast-tide-section.test.tsx.
+vi.mock('@/components/forecast-tide-section', () => ({
+  ForecastTideSection: ({ dayOffset }: { isImperial: boolean; dayOffset: number }) => (
+    <div data-testid="mock-forecast-tide-section" data-day-offset={dayOffset} />
+  ),
+}))
+
 import { ForecastDrawer, formatRefreshAge } from '@/components/forecast-drawer'
 
 const HOUR_LABELS = [
@@ -368,5 +377,22 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByTestId('forecast-wind-chart')).toBeInTheDocument()
     expect(screen.queryByTestId('forecast-cloud-chart')).not.toBeInTheDocument()
     expect(screen.getByTestId('forecast-cloud-unavailable')).toBeInTheDocument()
+  })
+
+  it('renders the tide section as the last card, passing the currently selected day index', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay(), buildDay({ date: 'Jun 15', dayName: 'Monday' })]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('mock-forecast-tide-section')).toHaveAttribute('data-day-offset', '0')
+
+    fireEvent.click(screen.getByRole('button', { name: /Select forecast day Monday Jun 15/i }))
+
+    expect(screen.getByTestId('mock-forecast-tide-section')).toHaveAttribute('data-day-offset', '1')
   })
 })

@@ -3,7 +3,9 @@
  * as App.smoke.test.tsx) and asserts that the shadcn Sidebar drives panel
  * navigation in place of the old BottomDrawer:
  *  - the dashboard grid is visible by default (Sidebar's "Dashboard" nav item present)
- *  - clicking the "Tides" sidebar nav button swaps the content region to the tide panel
+ *  - clicking the "Forecast" sidebar nav button swaps the content region to the
+ *    forecast panel (which now also hosts the Tide card, since the standalone
+ *    "Tides" panel was folded into Forecast)
  *  - clicking "Dashboard" again returns to the grid view
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -82,7 +84,62 @@ vi.mock('@/hooks/use-weather-today', () => ({
 }))
 
 vi.mock('@/hooks/use-weather-forecast', () => ({
-  useWeatherForecast: () => ({ forecast: [], loading: false, error: null, refetch: vi.fn() }),
+  useWeatherForecast: () => ({
+    forecast: [{
+      date: 'Jul 9',
+      dayName: 'Thursday',
+      condition: 'Clear',
+      high: 76,
+      low: 62,
+      windSpeed: 10,
+      windGust: 14,
+      windDirection: 'NE',
+      windSummary: null,
+      waveSummary: null,
+      precipitationSummary: null,
+      precipitation: 5,
+      sunriseTime: null,
+      sunsetTime: null,
+      moonPhase: null,
+      hourlyWind: [],
+      hourlyWave: [],
+      hourlyPrecip: [],
+      hourlyUV: [],
+      hourlyCloud: [],
+    }],
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}))
+
+// ForecastTideSection (rendered as the last card in Forecast) owns its own
+// data-fetching via these hooks - mocked here (rather than mocking the
+// component itself, since this suite is testing App's real sidebar/panel
+// wiring) so the "Forecast" panel is reachable without hitting real fetches.
+vi.mock('@/hooks/use-tide-settings', () => ({
+  useTideSettings: () => ({
+    tideProvider: 'bom',
+    tideStationId: 'station-1',
+    tideStationName: 'Test Harbor',
+    loading: false,
+    saving: false,
+    error: null,
+    refetch: vi.fn(),
+    saveStation: vi.fn(),
+  }),
+}))
+
+vi.mock('@/hooks/use-tide-chart', () => ({
+  useTideChart: () => ({
+    chart: null,
+    loading: false,
+    error: null,
+    isCached: false,
+    updatedAt: null,
+    ttlSeconds: null,
+    refetch: vi.fn(),
+  }),
 }))
 
 vi.mock('@/hooks/use-czone-switches', () => ({
@@ -197,17 +254,33 @@ describe('App sidebar navigation', () => {
     const dashboardNavButton = screen.getAllByRole('button', { name: /dashboard/i })[0]
     expect(dashboardNavButton).toBeInTheDocument()
 
-    // Click "Tides" in the sidebar nav.
-    const tidesNavButton = screen.getByRole('button', { name: /tides/i })
-    fireEvent.click(tidesNavButton)
+    // The standalone "Tides" panel/nav entry was removed — the tide chart
+    // now lives inside Forecast instead.
+    expect(screen.queryByRole('button', { name: /^tides$/i })).not.toBeInTheDocument()
 
-    // The dashboard grid tile content should no longer be present; tide panel content should be.
+    // Click "Forecast" in the sidebar nav — the Tide chart now lives inside
+    // this panel (as its last card) rather than in its own standalone panel.
+    const forecastNavButton = screen.getByRole('button', { name: /forecast/i })
+    fireEvent.click(forecastNavButton)
+
+    // The dashboard grid tile content should no longer be present; the
+    // forecast panel's Tide card should be.
     expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
-    expect(screen.getAllByText(/tides/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
 
     // Navigate back to the dashboard via the sidebar nav item.
     fireEvent.click(screen.getAllByRole('button', { name: /dashboard/i })[0])
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
+  })
+
+  it('opens the Forecast panel when the "Depth & Tide" dashboard tile is clicked', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByText('Depth & Tide'))
+
+    // DepthTideTile's onOpen now routes to 'forecast', not the removed 'tides' panel.
+    expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
   })
 
   it('lists dashboard pages as sidebar sub-items and navigates between them', () => {

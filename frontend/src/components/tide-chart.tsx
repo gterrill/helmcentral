@@ -14,7 +14,6 @@ const CHART_LEFT = 36
 const CHART_RIGHT_MARGIN = 20
 const CHART_TOP = 16
 const CHART_BOTTOM = 125
-const WINDOW_HOURS = 96
 const CURVE_STEPS = 12
 // Fallback viewBox width used only before the container's actual pixel width
 // has been measured (ResizeObserver hasn't fired yet, or in tests where it's
@@ -116,9 +115,11 @@ function TideChartTooltipBubble({ pixelX, time, primary, secondary }: { pixelX: 
 interface TideChartProps {
   chart: TideChartData
   isImperial: boolean
+  windowStart: Date // start of the day to display
+  windowEnd: Date // windowStart + 24h
 }
 
-export function TideChart({ chart, isImperial }: TideChartProps) {
+export function TideChart({ chart, isImperial, windowStart, windowEnd }: TideChartProps) {
   const [containerRef, measuredWidth] = useMeasuredWidth()
   const viewportWidth = measuredWidth > 0 ? measuredWidth : DEFAULT_VIEWPORT_WIDTH
   const CHART_RIGHT = viewportWidth - CHART_RIGHT_MARGIN
@@ -126,17 +127,22 @@ export function TideChart({ chart, isImperial }: TideChartProps) {
   const unit = isImperial ? 'ft' : 'm'
   const toDisplay = (meters: number) => (isImperial ? meters * METERS_TO_FEET : meters)
 
-  const hasExtremes = chart.extremes.length > 0
-
-  const now = Date.now()
-  const chartStartMs = now
-  const chartEndMs = now + WINDOW_HOURS * 60 * 60 * 1000
+  const chartStartMs = windowStart.getTime()
+  const chartEndMs = windowEnd.getTime()
 
   const sortedExtremes = [...chart.extremes].sort(
     (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
   )
 
-  const tidePhase = classifyTidePhase(chart.extremes, new Date(now))
+  const hasExtremesInWindow = sortedExtremes.some((extreme) => {
+    const t = new Date(extreme.time).getTime()
+    return t >= chartStartMs && t < chartEndMs
+  })
+
+  const nowMs = Date.now()
+  const showNowMarker = nowMs >= chartStartMs && nowMs < chartEndMs
+  const tidePhaseReferenceMs = showNowMarker ? nowMs : (chartStartMs + chartEndMs) / 2
+  const tidePhase = classifyTidePhase(chart.extremes, new Date(tidePhaseReferenceMs))
 
   const visibleExtremes = sortedExtremes.filter((extreme) => {
     const t = new Date(extreme.time).getTime()
@@ -181,7 +187,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
     : ''
 
   const zeroInRange = yMin < 0 && yMax > 0
-  const nowX = xFor(now)
+  const nowX = xFor(nowMs)
   const nowY = yFor(currentDisplayHeight)
 
   const tideTooltip = useChartTooltip(
@@ -207,18 +213,21 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
       yMin + (1 - (tideTooltipEntry.y - CHART_TOP) / (CHART_BOTTOM - CHART_TOP)) * yRange
   }
 
-  // Day-boundary gridlines so the 4-day window has some date context.
-  const dayTicks: { x: number; label: string }[] = []
-  const firstMidnight = new Date(chartStartMs)
-  firstMidnight.setHours(24, 0, 0, 0)
-  for (let t = firstMidnight.getTime(); t <= chartEndMs; t += 24 * 60 * 60 * 1000) {
-    dayTicks.push({ x: xFor(t), label: new Date(t).toLocaleDateString('en-US', { weekday: 'short' }) })
-  }
+  // Hour ticks at 0/6/12/18/24h offsets from the window start, matching the
+  // "12AM/6AM/12PM/6PM" convention used by the sibling Wind/Wave/Precip/Cloud
+  // charts in forecast-drawer.tsx now that this chart sits directly among them.
+  const dayTicks: { x: number; label: string }[] = [0, 6, 12, 18, 24].map((hourOffset) => {
+    const t = chartStartMs + hourOffset * 60 * 60 * 1000
+    return {
+      x: xFor(t),
+      label: new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true }).replace(' ', ''),
+    }
+  })
 
-  if (!hasExtremes) {
+  if (!hasExtremesInWindow) {
     return (
-      <p className="py-6 text-center text-xs text-muted-foreground">
-        No tide data available for this station
+      <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-tide-unavailable">
+        Tide forecast unavailable for this day
       </p>
     )
   }
@@ -287,9 +296,13 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           )
         })}
 
-        <line x1={nowX} y1={CHART_TOP} x2={nowX} y2={CHART_BOTTOM} stroke="rgba(199,137,0,0.7)" strokeWidth="1.5" strokeDasharray="4 3" />
-        <circle cx={nowX} cy={nowY} r="3.5" fill="hsl(var(--gauge-primary))" />
-        <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--gauge-primary))">Now</text>
+        {showNowMarker && (
+          <>
+            <line x1={nowX} y1={CHART_TOP} x2={nowX} y2={CHART_BOTTOM} stroke="rgba(199,137,0,0.7)" strokeWidth="1.5" strokeDasharray="4 3" />
+            <circle cx={nowX} cy={nowY} r="3.5" fill="hsl(var(--gauge-primary))" />
+            <text x={Math.min(nowX + 4, CHART_RIGHT - 24)} y={CHART_TOP + 10} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--gauge-primary))">Now</text>
+          </>
+        )}
 
         {tideTooltipEntry && (
           <TideChartTooltipMarker

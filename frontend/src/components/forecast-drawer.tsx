@@ -4,6 +4,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { ForecastTideSection } from '@/components/forecast-tide-section'
 import { WindWarningNotice } from '@/components/wind-warning-notice'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
 import type { MarineWarnings } from '@/hooks/use-marine-warnings'
@@ -1084,6 +1085,8 @@ export function ForecastDrawer({
                 </p>
               )}
             </div>
+
+            <ForecastTideSection isImperial={unit === 'imperial'} dayOffset={selectedDayIndex} />
 
           </div>
         </div>

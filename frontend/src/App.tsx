@@ -7,7 +7,6 @@ import {
   Radar as RadarIcon,
   Route,
   Settings,
-  Waves,
 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -42,7 +41,6 @@ import { useDashboardPages } from '@/hooks/use-dashboard-pages'
 import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
-import { TideDrawer } from '@/components/tide-drawer'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
@@ -86,11 +84,10 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 
-type PanelId = 'forecast' | 'tides' | 'routes' | 'charts' | 'radar' | 'anchor-watch' | 'settings'
+type PanelId = 'forecast' | 'routes' | 'charts' | 'radar' | 'anchor-watch' | 'settings'
 
 const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
-  { id: 'tides', label: 'Tides', icon: Waves },
   { id: 'routes', label: 'Routes', icon: Route },
   { id: 'charts', label: 'Charts', icon: Map },
   { id: 'radar', label: 'Radar', icon: RadarIcon },
@@ -319,7 +316,7 @@ export function App() {
             navigationState={navigationState}
             depthTrend={depthTrend}
             tide={tide}
-            onOpen={layoutEditing ? undefined : () => setActivePanel('tides')}
+            onOpen={layoutEditing ? undefined : () => setActivePanel('forecast')}
           />
         )
       case 'position':
@@ -487,8 +484,6 @@ export function App() {
             activeMarineWarning={activeMarineWarning}
           />
         )
-      case 'tides':
-        return <TideDrawer isImperial={isImperialDistance} />
       case 'routes':
         return (
           <RoutePlannerDrawer
