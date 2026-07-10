@@ -105,6 +105,18 @@ func main() {
 	registerTideProvider(newStormGlassTideProvider())
 	registerTideProvider(newBomTideProvider())
 
+	// Tile cache (backs the Esri World Imagery proxy + area prefetch).
+	// Fail fast if it can't be opened rather than silently running with a
+	// nil/broken cache.
+	tc, err := newTileCache(tileCachePath())
+	if err != nil {
+		log.Fatalf("failed to open tile cache: %v", err)
+	}
+	globalTileCache = tc
+
+	// World imagery HTTP client for tile fetches (with timeout to prevent hangs).
+	worldImageryClient := newWorldImageryHTTPClient()
+
 	// Routes
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
@@ -153,7 +165,10 @@ func main() {
 	e.PUT("/api/czone/switches/:id/state", putCZoneSwitchStateHandler)
 	e.POST("/api/generator/start", postGeneratorStartHandler)
 	e.POST("/api/generator/stop", postGeneratorStopHandler)
-	e.GET("/api/world-imagery/:z/:x/:y", proxyWorldImageryTileHandler)
+	e.GET("/api/world-imagery/:z/:x/:y", proxyWorldImageryTileHandler(globalTileCache, worldImageryClient))
+	e.POST("/api/world-imagery/prefetch", prefetchWorldImageryHandler(globalTileCache, worldImageryClient))
+	e.GET("/api/world-imagery/prefetch/:jobId", prefetchStatusHandler())
+	e.DELETE("/api/world-imagery/cache", deleteWorldImageryCacheHandler(globalTileCache))
 	e.GET("/api/gshhg-coastline", gshhgCoastlineHandler)
 	e.POST("/api/sat-charts", uploadSatChartHandler)
 	e.GET("/api/sat-charts", listSatChartsHandler)

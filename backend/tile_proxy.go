@@ -2,22 +2,25 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	"image/color"
 	"image/png"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
 var transparentPNG1x1 = buildTransparentPNG1x1()
 
-const worldImageryMaxZoom = 18
+// worldImageryMaxZoom is the deepest zoom level this proxy will ever ask
+// Esri for. Esri's World Imagery layer resolves well past 18 in many
+// coastal/populated areas via Maxar Vivid updates; areas without that
+// depth now gracefully degrade to the nearest coarser cached/available
+// zoom (see resolveWorldImageryTile in tile_cache.go) instead of being
+// capped from ever asking.
+const worldImageryMaxZoom = 20
 
 func buildTransparentPNG1x1() []byte {
 	img := image.NewNRGBA(image.Rect(0, 0, 1, 1))
@@ -31,60 +34,36 @@ func buildTransparentPNG1x1() []byte {
 	return buffer.Bytes()
 }
 
-func proxyWorldImageryTileHandler(c echo.Context) error {
-	z := strings.TrimSpace(c.Param("z"))
-	x := strings.TrimSpace(c.Param("x"))
-	y := strings.TrimSpace(c.Param("y"))
-	if z == "" || y == "" || x == "" {
-		return c.NoContent(http.StatusBadRequest)
-	}
+// proxyWorldImageryTileHandler is a handler factory (rather than a plain
+// echo.HandlerFunc) so tests can inject a *tileCache pointed at a temp-dir
+// sqlite file and a fake tileFetcher instead of a real cache/Esri network
+// call. main.go registers it as
+// proxyWorldImageryTileHandler(globalTileCache, http.DefaultClient).
+func proxyWorldImageryTileHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		z := strings.TrimSpace(c.Param("z"))
+		x := strings.TrimSpace(c.Param("x"))
+		y := strings.TrimSpace(c.Param("y"))
+		if z == "" || y == "" || x == "" {
+			return c.NoContent(http.StatusBadRequest)
+		}
 
-	zInt, zErr := strconv.Atoi(z)
-	xInt, xErr := strconv.Atoi(x)
-	yInt, yErr := strconv.Atoi(y)
-	if zErr == nil && xErr == nil && yErr == nil {
+		zInt, zErr := strconv.Atoi(z)
+		xInt, xErr := strconv.Atoi(x)
+		yInt, yErr := strconv.Atoi(y)
+		if zErr != nil || xErr != nil || yErr != nil {
+			return c.NoContent(http.StatusBadRequest)
+		}
 		zInt, xInt, yInt = clampTileCoords(zInt, xInt, yInt, worldImageryMaxZoom)
-		z = strconv.Itoa(zInt)
-		x = strconv.Itoa(xInt)
-		y = strconv.Itoa(yInt)
+
+		data, contentType, err := resolveWorldImageryTile(cache, fetcher, worldImagerySource, zInt, xInt, yInt)
+		if err != nil {
+			return err
+		}
+
+		c.Response().Header().Set("Cache-Control", "public, max-age=1800")
+		return c.Blob(http.StatusOK, contentType, data)
 	}
-
-	tileURL := fmt.Sprintf(
-		"https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%s/%s/%s",
-		z,
-		y,
-		x,
-	)
-
-	client := &http.Client{Timeout: 6 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, tileURL, nil)
-	if err != nil {
-		return c.Blob(http.StatusOK, "image/png", transparentPNG1x1)
-	}
-	req.Header.Set("User-Agent", "helmcentral/1.0")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return c.Blob(http.StatusOK, "image/png", transparentPNG1x1)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return c.Blob(http.StatusOK, "image/png", transparentPNG1x1)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return c.Blob(http.StatusOK, "image/png", transparentPNG1x1)
-	}
-
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "image/jpeg"
-	}
-
-	c.Response().Header().Set("Cache-Control", "public, max-age=1800")
-	return c.Blob(http.StatusOK, contentType, body)
 }
 
 func clampTileCoords(z, x, y, maxZoom int) (int, int, int) {

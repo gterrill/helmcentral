@@ -7,6 +7,22 @@ vi.mock('maplibre-gl', () => ({
   default: {},
 }))
 
+const startPrefetchMock = vi.fn().mockResolvedValue('job-1')
+let mockPrefetching = false
+let mockProgress: { done: number; total: number } | null = null
+let mockPrefetchError: string | null = null
+
+vi.mock('@/hooks/use-imagery-prefetch', () => ({
+  useImageryPrefetch: () => ({
+    prefetching: mockPrefetching,
+    progress: mockProgress,
+    error: mockPrefetchError,
+    startPrefetch: startPrefetchMock,
+  }),
+}))
+
+let mockBounds = { west: -1, south: -1, east: 1, north: 1 }
+
 let lastMapClickHandler: ((e: { lngLat: { lat: number; lng: number } }) => void) | null = null
 let lastZoomHandler: (() => void) | null = null
 let lastStyleDataHandler: (() => void) | null = null
@@ -47,6 +63,12 @@ vi.mock('react-map-gl/maplibre', async () => {
           getZoom: () => mockZoom,
           easeTo: easeToMock,
           fitBounds: () => undefined,
+          getBounds: () => ({
+            getWest: () => mockBounds.west,
+            getSouth: () => mockBounds.south,
+            getEast: () => mockBounds.east,
+            getNorth: () => mockBounds.north,
+          }),
           getMap: () => ({
             isStyleLoaded: () => true,
             getLayer: () => ({}),
@@ -104,6 +126,12 @@ describe('RoutePlannerMap', () => {
     setLayoutPropertyMock.mockClear()
     setPaintPropertyMock.mockClear()
     getPaintPropertyMock.mockClear()
+    startPrefetchMock.mockClear()
+    startPrefetchMock.mockResolvedValue('job-1')
+    mockPrefetching = false
+    mockProgress = null
+    mockPrefetchError = null
+    mockBounds = { west: -1, south: -1, east: 1, north: 1 }
     localStorage.clear()
     mockZoom = 12
     vi.stubGlobal(
@@ -534,5 +562,71 @@ describe('RoutePlannerMap', () => {
       expect(setPaintPropertyMock).toHaveBeenCalledWith(id, 'text-halo-color', 'original-text-halo-color')
       expect(setPaintPropertyMock).toHaveBeenCalledWith(id, 'text-halo-width', 'original-text-halo-width')
     }
+  })
+
+  it('disables the cache-this-area button until satellite imagery is toggled on', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    const cacheButton = screen.getByRole('button', { name: 'Cache this area' })
+    expect(cacheButton).toBeDisabled()
+
+    fireEvent.click(cacheButton)
+    expect(startPrefetchMock).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
+    expect(cacheButton).toBeEnabled()
+  })
+
+  it('reads the map\'s real bounds and zoom into the prefetch call when the cache-this-area button is clicked', () => {
+    mockBounds = { west: 150.1, south: -25.4, east: 150.6, north: -24.9 }
+    mockZoom = 13
+
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
+    act(() => {
+      lastZoomHandler?.()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cache this area' }))
+
+    expect(startPrefetchMock).toHaveBeenCalledWith(
+      { west: 150.1, south: -25.4, east: 150.6, north: -24.9 },
+      13,
+      20,
+    )
+  })
+
+  it('shows a progress pill while a prefetch is in progress', () => {
+    mockPrefetching = true
+    mockProgress = { done: 340, total: 1200 }
+
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    expect(screen.getByText('Caching… 340/1200')).toBeInTheDocument()
+  })
+
+  it('shows a brief "Cached" pill on completion, then self-dismisses', async () => {
+    vi.useFakeTimers()
+    mockPrefetching = true
+    mockProgress = { done: 99, total: 100 }
+
+    const { rerender } = render(
+      <RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />,
+    )
+    expect(screen.getByText('Caching… 99/100')).toBeInTheDocument()
+
+    mockPrefetching = false
+    mockProgress = { done: 100, total: 100 }
+    rerender(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+    expect(screen.getByText('Cached')).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+
+    expect(screen.queryByText('Cached')).not.toBeInTheDocument()
+    vi.useRealTimers()
   })
 })

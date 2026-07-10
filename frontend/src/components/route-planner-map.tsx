@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef, MarkerDragEvent } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Crosshair, Minus, Plus, Satellite } from 'lucide-react'
+import { Crosshair, Download, Minus, Plus, Satellite } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import { formatNm } from '@/lib/route-calc'
@@ -12,13 +12,17 @@ import type { RouteWaypoint } from '@/hooks/use-routes'
 import { useGshhgCoastline } from '@/hooks/use-gshhg-coastline'
 import { isChartAvailable } from '@/lib/chart-availability'
 import type { SatChart } from '@/hooks/use-sat-charts'
+import { useImageryPrefetch } from '@/hooks/use-imagery-prefetch'
 
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
-const WORLD_IMAGERY_MAX_ZOOM = 18
+const WORLD_IMAGERY_MAX_ZOOM = 20
 const IMAGERY_ENABLED_KEY = 'routePlanner.imagery.enabled'
+// How long the "Cached" completion pill stays visible before it
+// self-dismisses.
+const CACHED_PILL_DISMISS_MS = 2000
 
 /**
  * Fill/background layer ids to hide from the already-loaded Carto base
@@ -128,6 +132,18 @@ export function RoutePlannerMap({
   const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showHybridSatellite)
   const { data: coastlineData } = useGshhgCoastline()
   const showCoastlineFallback = !chartAvailable && coastlineData !== null
+  const { prefetching, progress, startPrefetch } = useImageryPrefetch()
+  const [showCachedPill, setShowCachedPill] = useState(false)
+
+  // Show a brief "Cached" confirmation once a prefetch job completes
+  // (prefetching flips back to false with a fully-done progress), then
+  // self-dismiss - no need to keep it around once the user has seen it.
+  useEffect(() => {
+    if (prefetching || !progress || progress.total === 0 || progress.done !== progress.total) return
+    setShowCachedPill(true)
+    const timer = window.setTimeout(() => setShowCachedPill(false), CACHED_PILL_DISMISS_MS)
+    return () => window.clearTimeout(timer)
+  }, [prefetching, progress])
 
   useEffect(() => {
     if (showCoastlineFallback) {
@@ -306,6 +322,21 @@ export function RoutePlannerMap({
       { padding: 60, duration: 400 },
     )
   }, [waypoints, vesselLat, vesselLon])
+
+  const handleCacheThisArea = useCallback(() => {
+    const bounds = mapRef.current?.getBounds()
+    if (!bounds) return
+    void startPrefetch(
+      {
+        west: bounds.getWest(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        north: bounds.getNorth(),
+      },
+      currentZoom,
+      WORLD_IMAGERY_MAX_ZOOM,
+    )
+  }, [startPrefetch, currentZoom])
 
   const initialViewState = useMemo(
     () => ({
@@ -503,39 +534,55 @@ export function RoutePlannerMap({
         </div>
       )}
 
-      <div className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1" style={{ zIndex: 2100 }} data-testid="route-planner-controls">
-        <button
-          onClick={handleZoomIn}
-          aria-label="Zoom in"
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        <button
-          onClick={handleZoomOut}
-          aria-label="Zoom out"
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
-        >
-          <Minus className="h-4 w-4" />
-        </button>
-        <button
-          onClick={handleHybridToggle}
-          aria-label="Toggle satellite imagery"
-          className={cn(
-            'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
-            showHybridSatellite ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-          )}
-          style={{ transition: 'background-color 150ms ease-out' }}
-        >
-          <Satellite className="h-4 w-4" />
-        </button>
-        <button
-          onClick={handleFitBounds}
-          aria-label={waypoints.length > 0 ? 'Fit route in view' : 'Center on current position'}
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
-        >
-          <Crosshair className="h-4 w-4" />
-        </button>
+      <div className="pointer-events-auto absolute right-3 top-3 flex flex-col items-end gap-2" style={{ zIndex: 2100 }}>
+        <div className="flex flex-col gap-1" data-testid="route-planner-controls">
+          <button
+            onClick={handleZoomIn}
+            aria-label="Zoom in"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <button
+            onClick={handleZoomOut}
+            aria-label="Zoom out"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+          >
+            <Minus className="h-4 w-4" />
+          </button>
+          <button
+            onClick={handleHybridToggle}
+            aria-label="Toggle satellite imagery"
+            className={cn(
+              'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+              showHybridSatellite ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+            )}
+            style={{ transition: 'background-color 150ms ease-out' }}
+          >
+            <Satellite className="h-4 w-4" />
+          </button>
+          <button
+            onClick={handleCacheThisArea}
+            disabled={!showHybridSatellite}
+            aria-label="Cache this area"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95 disabled:opacity-30 disabled:hover:bg-black/65"
+          >
+            <Download className="h-4 w-4" />
+          </button>
+          <button
+            onClick={handleFitBounds}
+            aria-label={waypoints.length > 0 ? 'Fit route in view' : 'Center on current position'}
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+          >
+            <Crosshair className="h-4 w-4" />
+          </button>
+        </div>
+
+        {(prefetching || showCachedPill) && progress && (
+          <div className="pointer-events-none rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur">
+            {prefetching ? `Caching… ${progress.done}/${progress.total}` : 'Cached'}
+          </div>
+        )}
       </div>
 
       {waypoints.length === 0 && (
