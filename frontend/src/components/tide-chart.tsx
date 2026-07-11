@@ -1,16 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import { useMemo } from 'react'
 
 import { Area, ComposedChart, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
 
+import { ChartTooltipBubble, ChartTooltipMarker, ChartUnavailableMessage } from '@/components/chart-tooltip'
+import { useChartTooltip } from '@/hooks/use-chart-tooltip'
 import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { classifyTidePhase } from '@/lib/tide-phase'
+import { metersToFeet } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 const AXIS_LABEL_FONT_SIZE = '10'
 const AXIS_LABEL_COLOR = 'hsl(var(--muted-foreground))'
-const METERS_TO_FEET = 3.28084
 
 const CHART_LEFT = 36
 const CHART_RIGHT_MARGIN = 20
@@ -21,63 +22,6 @@ const CURVE_STEPS = 12
 // has been measured (ResizeObserver hasn't fired yet, or in tests where it's
 // stubbed as a no-op) - chosen to match the chart's previous fixed size.
 const DEFAULT_VIEWPORT_WIDTH = 1000
-
-// Shows a tooltip for the nearest hourly entry on mouse hover (desktop/
-// tablet) or touch (mobile) - both go through the same pointer events, since
-// `pointermove` only fires for a mouse on hover (no button needed) and only
-// fires for touch while a finger is actually down and moving. Positioned at
-// the pointer's own X so it never requires looking elsewhere.
-//
-// Clearing is pointer-type-aware: a mouse hides the tooltip as soon as it
-// leaves the chart (normal hover behavior), but touch does NOT hide on
-// pointerup/pointerleave - those fire the instant a finger lifts, which
-// would otherwise make a quick tap flash the tooltip for a single frame
-// instead of actually showing it. A touch tooltip stays until the next tap
-// (anywhere) replaces or clears it.
-function useChartTooltip(count: number, resetKey: string, chartLeft: number, chartRight: number) {
-  const [point, setPoint] = useState<{ index: number; pixelX: number } | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-
-  // Switching days/stations swaps in a different hourly array (different length,
-  // different times) - drop any tooltip from the previous chart.
-  useEffect(() => {
-    setPoint(null)
-  }, [resetKey])
-
-  const updateFromClientX = (clientX: number) => {
-    const svg = svgRef.current
-    if (!svg || count <= 0) return
-    const rect = svg.getBoundingClientRect()
-    if (rect.width <= 0) return
-    const pixelX = Math.max(0, Math.min(rect.width, clientX - rect.left))
-    const viewBoxWidth = svg.viewBox.baseVal.width || chartRight
-    const xInViewBox = (pixelX / rect.width) * viewBoxWidth
-    const fraction = count <= 1 ? 0 : (xInViewBox - chartLeft) / (chartRight - chartLeft)
-    const idx = Math.max(0, Math.min(count - 1, Math.round(fraction * (count - 1))))
-    setPoint({ index: idx, pixelX })
-  }
-
-  // Only a mouse leaving the chart should hide the tooltip - for touch,
-  // "leave" fires the moment a finger lifts, which isn't a meaningful signal
-  // that the user is done looking at the value.
-  const clearForMouse = (event: ReactPointerEvent<SVGSVGElement>) => {
-    if (event.pointerType === 'mouse') setPoint(null)
-  }
-
-  return {
-    svgRef,
-    activeIndex: point === null ? null : Math.min(point.index, Math.max(0, count - 1)),
-    tooltipPixelX: point?.pixelX ?? null,
-    onPointerDown: (event: ReactPointerEvent<SVGSVGElement>) => updateFromClientX(event.clientX),
-    onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => updateFromClientX(event.clientX),
-    onPointerLeave: clearForMouse,
-  }
-}
-
-// A small marker dot on the chart's primary series at the hovered/touched index.
-function TideChartTooltipMarker({ x, y, color }: { x: number; y: number; color: string }) {
-  return <circle pointerEvents="none" cx={x} cy={y} r="5" fill={color} stroke="white" strokeWidth="2" />
-}
 
 // Amber for spring (bigger swings), teal for neap (calmer) - matching the
 // app's existing primary/secondary accent tokens. Renders nothing outside a
@@ -97,23 +41,6 @@ export function TidePhaseBadge({ phase, className }: { phase: 'spring' | 'neap' 
   )
 }
 
-// The floating time / prominent-value / secondary-value bubble, positioned
-// at the pointer's X (clamped so it can't run off either edge of the chart)
-// right above the chart - never behind a touch point, never elsewhere on
-// the page.
-function TideChartTooltipBubble({ pixelX, time, primary, secondary }: { pixelX: number; time: string; primary: string; secondary: string }) {
-  return (
-    <div
-      className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-border/60 bg-card px-2.5 py-1.5 shadow-md"
-      style={{ left: `clamp(58px, ${pixelX}px, calc(100% - 58px))` }}
-    >
-      <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{time}</p>
-      <p className="font-display text-base leading-tight text-foreground">{primary}</p>
-      <p className="text-[10px] text-muted-foreground">{secondary}</p>
-    </div>
-  )
-}
-
 interface TideChartProps {
   chart: TideChartData
   isImperial: boolean
@@ -127,13 +54,14 @@ export function TideChart({ chart, isImperial, windowStart, windowEnd }: TideCha
   const CHART_RIGHT = viewportWidth - CHART_RIGHT_MARGIN
 
   const unit = isImperial ? 'ft' : 'm'
-  const toDisplay = (meters: number) => (isImperial ? meters * METERS_TO_FEET : meters)
+  const toDisplay = (meters: number) => (isImperial ? metersToFeet(meters) : meters)
 
   const chartStartMs = windowStart.getTime()
   const chartEndMs = windowEnd.getTime()
 
-  const sortedExtremes = [...chart.extremes].sort(
-    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
+  const sortedExtremes = useMemo(
+    () => [...chart.extremes].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()),
+    [chart.extremes],
   )
 
   const hasExtremesInWindow = sortedExtremes.some((extreme) => {
@@ -164,24 +92,40 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
     CHART_LEFT + ((timeMs - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
   const yFor = (value: number) => CHART_TOP + (1 - (value - yMin) / yRange) * (CHART_BOTTOM - CHART_TOP)
 
-  const curvePoints: { x: number; y: number }[] = []
-  for (let i = 0; i < sortedExtremes.length - 1; i++) {
-    const a = sortedExtremes[i]
-    const b = sortedExtremes[i + 1]
-    const tA = new Date(a.time).getTime()
-    const tB = new Date(b.time).getTime()
-    if (tB < chartStartMs || tA > chartEndMs) continue
+  // curvePoints is memoized on the primitive values it actually reads
+  // (sortedExtremes, isImperial, chartStartMs/chartEndMs, CHART_RIGHT, yMin,
+  // yRange) rather than by calling the xFor/yFor/toDisplay closures below —
+  // those closures are recreated every render, so depending on them would
+  // defeat the memoization (it would "change" every render even when nothing
+  // it actually reads changed). The formulas are inlined here instead,
+  // matching xFor/yFor/toDisplay exactly. yMin/yRange (numbers) are safe to
+  // use directly as deps: since they're recomputed fresh each render from
+  // stable inputs, their *value* only changes when something real (extremes,
+  // unit, current height) changes, even though the memo can't see those
+  // inputs directly.
+  const curvePoints = useMemo(() => {
+    const points: { x: number; y: number }[] = []
+    for (let i = 0; i < sortedExtremes.length - 1; i++) {
+      const a = sortedExtremes[i]
+      const b = sortedExtremes[i + 1]
+      const tA = new Date(a.time).getTime()
+      const tB = new Date(b.time).getTime()
+      if (tB < chartStartMs || tA > chartEndMs) continue
 
-    const hA = toDisplay(a.heightM)
-    const hB = toDisplay(b.heightM)
+      const hA = isImperial ? metersToFeet(a.heightM) : a.heightM
+      const hB = isImperial ? metersToFeet(b.heightM) : b.heightM
 
-    for (let s = 0; s <= CURVE_STEPS; s++) {
-      const progress = s / CURVE_STEPS
-      const t = tA + (tB - tA) * progress
-      const h = (hA + hB) / 2 + ((hA - hB) / 2) * Math.cos(Math.PI * progress)
-      curvePoints.push({ x: xFor(t), y: yFor(h) })
+      for (let s = 0; s <= CURVE_STEPS; s++) {
+        const progress = s / CURVE_STEPS
+        const t = tA + (tB - tA) * progress
+        const h = (hA + hB) / 2 + ((hA - hB) / 2) * Math.cos(Math.PI * progress)
+        const x = CHART_LEFT + ((t - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
+        const y = CHART_TOP + (1 - (h - yMin) / yRange) * (CHART_BOTTOM - CHART_TOP)
+        points.push({ x, y })
+      }
     }
-  }
+    return points
+  }, [sortedExtremes, isImperial, chartStartMs, chartEndMs, CHART_RIGHT, yMin, yRange])
 
   // curvePoints/extreme markers are already in literal SVG pixel space (not
   // a real data domain), so recharts is handed an identity mapping instead
@@ -224,20 +168,24 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
   // Hour ticks at 0/6/12/18/24h offsets from the window start, matching the
   // "12AM/6AM/12PM/6PM" convention used by the sibling Wind/Wave/Precip/Cloud
   // charts in forecast-drawer.tsx now that this chart sits directly among them.
-  const dayTicks: { x: number; label: string }[] = [0, 6, 12, 18, 24].map((hourOffset) => {
-    const t = chartStartMs + hourOffset * 60 * 60 * 1000
-    return {
-      x: xFor(t),
-      label: new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true }).replace(' ', ''),
-    }
-  })
+  // Memoized on the primitives xFor actually reads (chartStartMs, chartEndMs,
+  // CHART_RIGHT) rather than by calling xFor itself, for the same reason as
+  // curvePoints above — xFor is a new closure every render.
+  const dayTicks = useMemo(
+    () =>
+      [0, 6, 12, 18, 24].map((hourOffset) => {
+        const t = chartStartMs + hourOffset * 60 * 60 * 1000
+        const x = CHART_LEFT + ((t - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
+        return {
+          x,
+          label: new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true }).replace(' ', ''),
+        }
+      }),
+    [chartStartMs, chartEndMs, CHART_RIGHT],
+  )
 
   if (!hasExtremesInWindow) {
-    return (
-      <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-tide-unavailable">
-        Tide forecast unavailable for this day
-      </p>
-    )
+    return <ChartUnavailableMessage testId="forecast-tide-unavailable" message="Tide forecast unavailable for this day" />
   }
 
   return (
@@ -246,7 +194,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         <TidePhaseBadge phase={tidePhase} className="absolute right-2 top-2 z-10" />
       )}
       {tideTooltipEntry && tideTooltipTime && (
-        <TideChartTooltipBubble
+        <ChartTooltipBubble
           pixelX={tideTooltip.tooltipPixelX ?? 0}
           time={tideTooltipTime.toLocaleDateString('en-US', {
             month: 'short',
@@ -371,7 +319,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           )}
 
           {tideTooltipEntry && (
-            <TideChartTooltipMarker
+            <ChartTooltipMarker
               x={tideTooltipEntry.x}
               y={tideTooltipEntry.y}
               color="rgba(20,184,166,0.9)"

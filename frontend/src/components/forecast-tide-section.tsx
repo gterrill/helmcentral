@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 
 import { Waves } from 'lucide-react'
 
@@ -17,7 +17,7 @@ interface ForecastTideSectionProps {
   dayOffset: number // 0 = today, matches ForecastDrawer's selectedDayIndex
 }
 
-export function ForecastTideSection({ isImperial, dayOffset }: ForecastTideSectionProps) {
+export const ForecastTideSection = memo(function ForecastTideSection({ isImperial, dayOffset }: ForecastTideSectionProps) {
   const {
     tideProvider,
     tideStationId,
@@ -51,11 +51,14 @@ export function ForecastTideSection({ isImperial, dayOffset }: ForecastTideSecti
     settingsLoading ? '' : effectiveStationId,
   )
 
-  const windowStart = new Date()
-  windowStart.setHours(0, 0, 0, 0)
-  windowStart.setDate(windowStart.getDate() + dayOffset)
-  const windowEnd = new Date(windowStart)
-  windowEnd.setDate(windowEnd.getDate() + 1)
+  const { windowStart, windowEnd } = useMemo(() => {
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    start.setDate(start.getDate() + dayOffset)
+    const end = new Date(start)
+    end.setDate(end.getDate() + 1)
+    return { windowStart: start, windowEnd: end }
+  }, [dayOffset])
 
   return (
     <div className="mt-3 rounded-md border bg-card/70 p-2">
@@ -151,4 +154,4 @@ export function ForecastTideSection({ isImperial, dayOffset }: ForecastTideSecti
       )}
     </div>
   )
-}
+})

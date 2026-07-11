@@ -1,17 +1,21 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { Area, Bar, CartesianGrid, Cell, ComposedChart, Customized, Line, ReferenceDot, XAxis, YAxis } from 'recharts'
 
 import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { ChartTooltipBubble, ChartTooltipMarker, ChartUnavailableMessage } from '@/components/chart-tooltip'
 import { ForecastTideSection } from '@/components/forecast-tide-section'
 import { WindWarningNotice } from '@/components/wind-warning-notice'
 import type { ChartConfig } from '@/components/ui/chart'
+import { useChartTooltip } from '@/hooks/use-chart-tooltip'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
 import type { MarineWarnings } from '@/hooks/use-marine-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
+import { compassPointFor } from '@/lib/format'
+import { fahrenheitToCelsius } from '@/lib/units'
 
 interface ForecastDay {
   date: string
@@ -48,10 +52,6 @@ interface ForecastDrawerProps {
   onRetry?: () => void
   unit: 'imperial' | 'metric'
   activeMarineWarning?: MarineWarnings | null
-}
-
-function fahrenheitToCelsius(tempF: number) {
-  return (tempF - 32) * (5 / 9)
 }
 
 // Simple weather icon selector
@@ -271,6 +271,29 @@ const AXIS_LABEL_COLOR = 'rgba(71,85,105,0.95)'
 // by recharts' own scale).
 const RECHARTS_XAXIS_HEIGHT = 30
 
+// Shared top/bottom pixel bounds for every hourly chart's plot rectangle -
+// Wind, Wave, Precipitation and Cloud & Temperature all use the identical
+// 35..125 band before each chart's own per-value Y scaling is applied.
+const HOURLY_CHART_TOP = 35
+const HOURLY_CHART_BOTTOM = 125
+
+// 6-hour-block ticks (12AM/6AM/12PM/6PM), used by every hourly chart below
+// instead of spacing ticks dynamically by count. Hoisted to module scope
+// (rather than declared inside ForecastDrawer) since it's a pure function of
+// its argument, which lets call sites safely memoize on it.
+function hourTicksFor<T extends { hourOfDay: number }>(hourly: T[]) {
+  return hourly.map((entry, idx) => ({ entry, idx })).filter(({ entry }) => entry.hourOfDay % 6 === 0)
+}
+
+// Recharts' XAxis tickFormatter only receives the raw hourOfDay value, not
+// the hourly entry - this looks the real API-provided `.label` text up by
+// hour rather than re-deriving a 12-hour-clock string, so the tick text is
+// guaranteed to match whatever the backend sends. Shared by every hourly
+// chart below.
+function buildLabelByHour<T extends { hourOfDay: number; label: string }>(hourly: T[]): Map<number, string> {
+  return new Map(hourly.map((entry) => [entry.hourOfDay, entry.label]))
+}
+
 // Computes a y position for a left-axis tick label, nudging the top and
 // bottom ticks inward so the text isn't clipped by the chart edges.
 function axisTickLabelY(yFor: (value: number) => number, value: number, top: number, bottom: number) {
@@ -280,13 +303,16 @@ function axisTickLabelY(yFor: (value: number) => number, value: number, top: num
   return y + 3
 }
 
-// Converts a 0-360 bearing to a 16-point compass label, for the wave/swell
-// direction shown in the scrub tooltip (wind already gets this as a string
-// straight from the API).
-const COMPASS_POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+// Converts a 0-360 bearing to a 16-point compass label (just the direction,
+// e.g. "ESE"), for the wave/swell direction shown in the scrub tooltip (wind
+// already gets this as a string straight from the API). Returns '' for the
+// negative sentinel meaning "no data". Shares its bucketing lookup with
+// format.ts's formatHeading via compassPointFor, but keeps this shorter
+// output format (no degree number) — do not replace this with formatHeading,
+// that would change the displayed tooltip text.
 function compassLabel(directionDeg: number): string {
   if (directionDeg < 0) return ''
-  return COMPASS_POINTS[Math.round((directionDeg % 360) / 22.5) % 16]
+  return compassPointFor(directionDeg % 360)
 }
 
 // WHO UV Index risk bands, matching the thresholds already used for the UV
@@ -297,81 +323,6 @@ function uvRiskLabel(value: number): string {
   if (value >= 6) return 'High'
   if (value >= 3) return 'Moderate'
   return 'Low'
-}
-
-// Shows a tooltip for the nearest hourly entry on mouse hover (desktop/
-// tablet) or touch (mobile) - both go through the same pointer events, since
-// `pointermove` only fires for a mouse on hover (no button needed) and only
-// fires for touch while a finger is actually down and moving. Positioned at
-// the pointer's own X so it never requires looking elsewhere.
-//
-// Clearing is pointer-type-aware: a mouse hides the tooltip as soon as it
-// leaves the chart (normal hover behavior), but touch does NOT hide on
-// pointerup/pointerleave - those fire the instant a finger lifts, which
-// would otherwise make a quick tap flash the tooltip for a single frame
-// instead of actually showing it. A touch tooltip stays until the next tap
-// (anywhere) replaces or clears it.
-function useChartTooltip(count: number, resetKey: number, chartLeft: number, chartRight: number) {
-  const [point, setPoint] = useState<{ index: number; pixelX: number } | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-
-  // Switching days swaps in a different hourly array (different length,
-  // different times) - drop any tooltip from the previous day's chart.
-  useEffect(() => {
-    setPoint(null)
-  }, [resetKey])
-
-  const updateFromClientX = (clientX: number) => {
-    const svg = svgRef.current
-    if (!svg || count <= 0) return
-    const rect = svg.getBoundingClientRect()
-    if (rect.width <= 0) return
-    const pixelX = Math.max(0, Math.min(rect.width, clientX - rect.left))
-    const viewBoxWidth = svg.viewBox.baseVal.width || chartRight
-    const xInViewBox = (pixelX / rect.width) * viewBoxWidth
-    const fraction = count <= 1 ? 0 : (xInViewBox - chartLeft) / (chartRight - chartLeft)
-    const idx = Math.max(0, Math.min(count - 1, Math.round(fraction * (count - 1))))
-    setPoint({ index: idx, pixelX })
-  }
-
-  // Only a mouse leaving the chart should hide the tooltip - for touch,
-  // "leave" fires the moment a finger lifts, which isn't a meaningful signal
-  // that the user is done looking at the value.
-  const clearForMouse = (event: ReactPointerEvent<SVGSVGElement>) => {
-    if (event.pointerType === 'mouse') setPoint(null)
-  }
-
-  return {
-    svgRef,
-    activeIndex: point === null ? null : Math.min(point.index, Math.max(0, count - 1)),
-    tooltipPixelX: point?.pixelX ?? null,
-    onPointerDown: (event: ReactPointerEvent<SVGSVGElement>) => updateFromClientX(event.clientX),
-    onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => updateFromClientX(event.clientX),
-    onPointerLeave: clearForMouse,
-  }
-}
-
-// A small marker dot on the chart's primary series at the hovered/touched index.
-function ChartTooltipMarker({ x, y, color }: { x: number; y: number; color: string }) {
-  return <circle pointerEvents="none" cx={x} cy={y} r="5" fill={color} stroke="white" strokeWidth="2" />
-}
-
-// The floating time / prominent-value / secondary-value bubble, positioned
-// at the pointer's X (clamped so it can't run off either edge of the chart)
-// right above the chart - never behind a touch point, never elsewhere on
-// the page.
-function ChartTooltipBubble({ pixelX, time, primary, secondary, tertiary }: { pixelX: number; time: string; primary: string; secondary: string; tertiary?: string }) {
-  return (
-    <div
-      className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-border/60 bg-card px-2.5 py-1.5 shadow-md"
-      style={{ left: `clamp(58px, ${pixelX}px, calc(100% - 58px))` }}
-    >
-      <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{time}</p>
-      <p className="font-display text-base leading-tight text-foreground">{primary}</p>
-      <p className="text-[10px] text-muted-foreground">{secondary}</p>
-      {tertiary && <p className="text-[10px] text-muted-foreground">{tertiary}</p>}
-    </div>
-  )
 }
 
 // Left-axis band labels for the UV chart, positioned at each band's center value.
@@ -514,76 +465,94 @@ export function ForecastDrawer({
   const hourlyXFor = (idx: number, count: number) =>
     count <= 1 ? hourlyChartLeft + hourlyChartWidth / 2 : hourlyChartLeft + (idx * hourlyChartWidth) / (count - 1)
 
-  // 6-hour-block ticks (12AM/6AM/12PM/6PM), used by every hourly chart below
-  // instead of spacing ticks dynamically by count.
-  function hourTicksFor<T extends { hourOfDay: number }>(hourly: T[]) {
-    return hourly.map((entry, idx) => ({ entry, idx })).filter(({ entry }) => entry.hourOfDay % 6 === 0)
+  // Shared margin formula for every hourly chart below: same left/right/top,
+  // and a bottom derived from the chart's own SVG viewBox height (170 for
+  // Wave, 175 for the rest) so recharts' plot rectangle lands exactly where
+  // the yFor-family pixel math and tooltip overlay already expect it.
+  function hourlyChartMargin(viewboxHeight: number) {
+    return {
+      left: hourlyChartLeft,
+      right: forecastChartWidth - hourlyChartRight,
+      top: HOURLY_CHART_TOP,
+      bottom: viewboxHeight - HOURLY_CHART_BOTTOM - RECHARTS_XAXIS_HEIGHT,
+    }
   }
 
   const windSpeeds = windHourly.map((entry) => Math.max(0, entry.windSpeed))
   const windGusts = windHourly.map((entry) => Math.max(0, entry.windGust))
   const windDataMax = Math.max(0, ...windSpeeds, ...windGusts)
   const windMax = windDataMax <= 30 ? 30 : Math.ceil(windDataMax / 10) * 10
-  const windChartTop = 35
-  const windChartBottom = 125
+  const windChartTop = HOURLY_CHART_TOP
+  const windChartBottom = HOURLY_CHART_BOTTOM
   const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
   const windAxisTicks = Array.from({ length: windMax / 10 + 1 }, (_, idx) => idx * 10)
-  const windHourTicks = hourTicksFor(windHourly)
-  const windChartData = windHourly.map((entry, idx) => ({
-    hourOfDay: entry.hourOfDay,
-    windSpeed: windSpeeds[idx],
-    windGust: windGusts[idx],
-  }))
-  const windLabelByHour = new Map(windHourly.map((entry) => [entry.hourOfDay, entry.label]))
-  const windChartMargin = { left: hourlyChartLeft, right: forecastChartWidth - hourlyChartRight, top: windChartTop, bottom: 175 - windChartBottom - RECHARTS_XAXIS_HEIGHT }
+  const windHourTicks = useMemo(() => hourTicksFor(windHourly), [windHourly])
+  const windChartData = useMemo(
+    () =>
+      windHourly.map((entry) => ({
+        hourOfDay: entry.hourOfDay,
+        windSpeed: Math.max(0, entry.windSpeed),
+        windGust: Math.max(0, entry.windGust),
+      })),
+    [windHourly],
+  )
+  const windLabelByHour = useMemo(() => buildLabelByHour(windHourly), [windHourly])
+  const windChartMargin = hourlyChartMargin(175)
 
   const waveHeights = waveHourly.map((entry) => Math.max(0, entry.waveHeightM))
   const windWaveHeights = waveHourly.map((entry) => Math.max(0, entry.windWaveHeightM))
   const swellWaveHeights = waveHourly.map((entry) => Math.max(0, entry.swellWaveHeightM))
   const waveDataMax = Math.max(0, ...waveHeights, ...windWaveHeights, ...swellWaveHeights)
   const waveMax = waveDataMax <= 3 ? 3 : Math.ceil(waveDataMax)
-  const waveChartTop = 35
-  const waveChartBottom = 125
+  const waveChartTop = HOURLY_CHART_TOP
+  const waveChartBottom = HOURLY_CHART_BOTTOM
   const waveYFor = (value: number) => waveChartTop + (1 - value / waveMax) * (waveChartBottom - waveChartTop)
   const waveAxisTicks = Array.from({ length: waveMax / 0.5 + 1 }, (_, idx) => idx * 0.5)
-  const waveHourTicks = hourTicksFor(waveHourly)
-  const waveChartData = waveHourly.map((entry, idx) => ({
-    hourOfDay: entry.hourOfDay,
-    waveHeightM: waveHeights[idx],
-    windWaveHeightM: windWaveHeights[idx],
-    swellWaveHeightM: swellWaveHeights[idx],
-  }))
-  const waveLabelByHour = new Map(waveHourly.map((entry) => [entry.hourOfDay, entry.label]))
+  const waveHourTicks = useMemo(() => hourTicksFor(waveHourly), [waveHourly])
+  const waveChartData = useMemo(
+    () =>
+      waveHourly.map((entry) => ({
+        hourOfDay: entry.hourOfDay,
+        waveHeightM: Math.max(0, entry.waveHeightM),
+        windWaveHeightM: Math.max(0, entry.windWaveHeightM),
+        swellWaveHeightM: Math.max(0, entry.swellWaveHeightM),
+      })),
+    [waveHourly],
+  )
+  const waveLabelByHour = useMemo(() => buildLabelByHour(waveHourly), [waveHourly])
   // Wave's viewBox is 170 tall (not the 175 the other hourly charts use), so
   // its bottom margin is derived from that height, not a hardcoded 175.
-  const waveChartMargin = { left: hourlyChartLeft, right: forecastChartWidth - hourlyChartRight, top: waveChartTop, bottom: 170 - waveChartBottom - RECHARTS_XAXIS_HEIGHT }
+  const waveChartMargin = hourlyChartMargin(170)
 
   const precipIntensities = precipHourly.map((entry) => Math.max(0, entry.precipIntensityMm))
-  const precipChances = precipHourly.map((entry) => Math.max(0, Math.min(100, entry.precipChancePct)))
   const precipMax = Math.max(1, ...precipIntensities)
-  const precipChartTop = 35
-  const precipChartBottom = 125
+  const precipChartTop = HOURLY_CHART_TOP
+  const precipChartBottom = HOURLY_CHART_BOTTOM
   const precipChanceYFor = (value: number) => precipChartTop + (1 - value / 100) * (precipChartBottom - precipChartTop)
   // Recharts render data: hourOfDay drives the shared numeric x-axis, and the
   // intensity/chance values reuse the same clamped arrays the tooltip/corner
   // labels already use, so the Bar/Line series and the manual overlay stay
   // in perfect sync.
-  const precipChartData = precipHourly.map((entry, idx) => ({
-    hourOfDay: entry.hourOfDay,
-    precipIntensityMm: precipIntensities[idx],
-    precipChancePct: precipChances[idx],
-  }))
+  const precipChartData = useMemo(
+    () =>
+      precipHourly.map((entry) => ({
+        hourOfDay: entry.hourOfDay,
+        precipIntensityMm: Math.max(0, entry.precipIntensityMm),
+        precipChancePct: Math.max(0, Math.min(100, entry.precipChancePct)),
+      })),
+    [precipHourly],
+  )
   // Recharts' XAxis tickFormatter only receives the raw hourOfDay value, not
   // the hourly entry - look the real API-provided `.label` text up by hour
   // rather than re-deriving a 12-hour-clock string, so the tick text is
   // guaranteed to match whatever the backend sends.
-  const precipLabelByHour = new Map(precipHourly.map((entry) => [entry.hourOfDay, entry.label]))
+  const precipLabelByHour = useMemo(() => buildLabelByHour(precipHourly), [precipHourly])
   // Margin numbers are derived from the exact same constants the tooltip
   // hook and manual overlay already use, so recharts' internal plot
   // rectangle lands on precisely (hourlyChartLeft, precipChartTop) -
   // (hourlyChartRight, precipChartBottom) in the shared 0..forecastChartWidth
   // x 0..175 coordinate space.
-  const precipChartMargin = { left: hourlyChartLeft, right: forecastChartWidth - hourlyChartRight, top: precipChartTop, bottom: 175 - precipChartBottom - RECHARTS_XAXIS_HEIGHT }
+  const precipChartMargin = hourlyChartMargin(175)
   const precipBarWidth = precipHourly.length > 1 ? (hourlyChartWidth / (precipHourly.length - 1)) * 0.5 : 20
   const precipChartConfig: ChartConfig = {
     precipIntensityMm: { label: 'Intensity (mm/hr)', color: 'rgba(59,130,246,0.85)' },
@@ -594,8 +563,8 @@ export function ForecastDrawer({
   const cloudTempMax = cloudTemps.length > 0 ? Math.max(...cloudTemps) : 0
   const cloudTempMin = cloudTemps.length > 0 ? Math.min(...cloudTemps) : 0
   const cloudTempRange = Math.max(1, cloudTempMax - cloudTempMin)
-  const cloudChartTop = 35
-  const cloudChartBottom = 125
+  const cloudChartTop = HOURLY_CHART_TOP
+  const cloudChartBottom = HOURLY_CHART_BOTTOM
   const cloudYFor = (value: number) =>
     cloudChartBottom - ((value - cloudTempMin) / cloudTempRange) * (cloudChartBottom - cloudChartTop)
   // Index of the lowest/highest temperature in the visible window, for the
@@ -605,9 +574,10 @@ export function ForecastDrawer({
   const cloudMaxIdx = cloudTemps.length > 0 ? cloudTemps.indexOf(cloudTempMax) : -1
   // A condition icon every 3 hours - dense enough to read at a glance like
   // the reference screenshot, without crowding 24 separate icons together.
-  const cloudIconTicks = cloudHourly
-    .map((entry, idx) => ({ entry, idx }))
-    .filter(({ entry }) => entry.hourOfDay % 3 === 0)
+  const cloudIconTicks = useMemo(
+    () => cloudHourly.map((entry, idx) => ({ entry, idx })).filter(({ entry }) => entry.hourOfDay % 3 === 0),
+    [cloudHourly],
+  )
 
   // UV is plotted as a second series on the Cloud & Temperature chart rather
   // than its own standalone chart, sharing that chart's x-axis and index
@@ -619,30 +589,41 @@ export function ForecastDrawer({
   const uvIndex = Math.round(Math.max(0, ...uvValues))
   const uvMax = Math.max(11, ...uvValues)
   const uvYFor = (value: number) => cloudChartTop + (1 - value / uvMax) * (cloudChartBottom - cloudChartTop)
-  const uvProtectionIndices = uvValues.reduce<number[]>((acc, value, idx) => {
-    if (value >= 3) acc.push(idx)
-    return acc
-  }, [])
+  const uvProtectionIndices = useMemo(
+    () =>
+      uvHourly.reduce<number[]>((acc, entry, idx) => {
+        if (Math.max(0, entry.uvIndex) >= 3) acc.push(idx)
+        return acc
+      }, []),
+    [uvHourly],
+  )
   const uvProtectionStart = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[0]].label : null
   const uvProtectionEnd = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[uvProtectionIndices.length - 1]].label : null
 
   // Recharts render data for the temperature Area - displayTemp-converted
   // (metric/imperial) so the plotted values match cloudTemps/cloudYFor
   // exactly, since recharts can't perform that unit conversion itself.
-  const cloudChartData = cloudHourly.map((entry, idx) => ({
-    hourOfDay: entry.hourOfDay,
-    displayTemperature: cloudTemps[idx],
-  }))
+  const cloudChartData = useMemo(
+    () =>
+      cloudHourly.map((entry) => ({
+        hourOfDay: entry.hourOfDay,
+        displayTemperature: unit === 'metric' ? fahrenheitToCelsius(entry.temperatureF) : entry.temperatureF,
+      })),
+    [cloudHourly, unit],
+  )
   // UV points have no hourOfDay of their own (WeatherHourlyUVPoint only
   // carries label/uvIndex) - they're aligned to the cloud chart's hourly
   // array purely by array position, same as the hourlyXFor(idx, ...) index
   // alignment the manual polyline used, so idx doubles as hourOfDay here.
-  const uvChartData = uvValues.map((value, idx) => ({ hourOfDay: idx, uvIndex: value }))
+  const uvChartData = useMemo(
+    () => uvHourly.map((entry, idx) => ({ hourOfDay: idx, uvIndex: Math.max(0, entry.uvIndex) })),
+    [uvHourly],
+  )
   // Recharts' XAxis tickFormatter only receives the raw hourOfDay value, not
   // the hourly entry - look the real API-provided `.label` text up by hour
   // rather than re-deriving a 12-hour-clock string.
-  const cloudLabelByHour = new Map(cloudHourly.map((entry) => [entry.hourOfDay, entry.label]))
-  const cloudChartMargin = { left: hourlyChartLeft, right: forecastChartWidth - hourlyChartRight, top: cloudChartTop, bottom: 175 - cloudChartBottom - RECHARTS_XAXIS_HEIGHT }
+  const cloudLabelByHour = useMemo(() => buildLabelByHour(cloudHourly), [cloudHourly])
+  const cloudChartMargin = hourlyChartMargin(175)
   const cloudChartConfig: ChartConfig = {
     displayTemperature: { label: `Temperature (${tempUnit})`, color: 'rgba(217,119,6,0.9)' },
     uvIndex: { label: 'UV Index', color: 'rgb(249,115,22)' },
@@ -962,9 +943,7 @@ export function ForecastDrawer({
                   </div>
                 </>
               ) : (
-                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-cloud-unavailable">
-                  Cloud & temperature forecast unavailable for this day
-                </p>
+                <ChartUnavailableMessage testId="forecast-cloud-unavailable" message="Cloud & temperature forecast unavailable for this day" />
               )}
             </div>
 
@@ -1081,9 +1060,7 @@ export function ForecastDrawer({
                   </p>
                 </>
               ) : (
-                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wind-unavailable">
-                  Wind forecast unavailable for this day
-                </p>
+                <ChartUnavailableMessage testId="forecast-wind-unavailable" message="Wind forecast unavailable for this day" />
               )}
             </div>
 
@@ -1210,9 +1187,7 @@ export function ForecastDrawer({
                   </p>
                 </>
               ) : (
-                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-unavailable">
-                  Wave forecast unavailable for this day
-                </p>
+                <ChartUnavailableMessage testId="forecast-wave-unavailable" message="Wave forecast unavailable for this day" />
               )}
             </div>
 
@@ -1300,9 +1275,7 @@ export function ForecastDrawer({
                   </p>
                 </>
               ) : (
-                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-precip-unavailable">
-                  Precipitation forecast unavailable for this day
-                </p>
+                <ChartUnavailableMessage testId="forecast-precip-unavailable" message="Precipitation forecast unavailable for this day" />
               )}
             </div>
 

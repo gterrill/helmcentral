@@ -13,14 +13,23 @@ export function formatCoordinate(value: number | null, latitude: boolean) {
   return `${degrees}° ${String(minutes).padStart(2, '0')}' ${seconds.toFixed(1).padStart(4, '0')}" ${hemisphere}`
 }
 
+const COMPASS_POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+
+// Converts an already-normalized 0-360 bearing to its nearest 16-point
+// compass label (e.g. 0 -> 'N', 100 -> 'ESE'). Shared by formatHeading below
+// and forecast-drawer.tsx's compassLabel, which use it for two different
+// output formats (one includes the degree number, one doesn't).
+export function compassPointFor(normalizedDegrees: number): string {
+  return COMPASS_POINTS[Math.round(normalizedDegrees / 22.5) % COMPASS_POINTS.length]
+}
+
 export function formatHeading(headingTrue: number | null) {
   if (headingTrue === null) {
     return '—'
   }
 
   const normalized = ((headingTrue % 360) + 360) % 360
-  const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
-  const direction = directions[Math.round(normalized / 22.5) % directions.length]
+  const direction = compassPointFor(normalized)
 
   return `${Math.round(normalized)}° ${direction}`
 }
