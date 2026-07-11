@@ -254,7 +254,7 @@ const UV_GRADIENT_STOPS = [
 // Shared axis label styling, used for every value/tick/band label across the
 // Wind, Wave, Precipitation and UV charts so they read consistently.
 const AXIS_LABEL_FONT_SIZE = '10'
-const AXIS_LABEL_COLOR = 'rgba(71,85,105,0.95)'
+const AXIS_LABEL_COLOR = 'hsl(var(--muted-foreground))'
 
 // recharts' <XAxis> reserves its own `height` (default 30) via its internal
 // offset calculation IN ADDITION TO whatever `margin.bottom` a <ComposedChart>
@@ -462,8 +462,12 @@ export function ForecastDrawer({
   const hourlyChartRight = forecastChartWidth - 20
   const hourlyChartWidth = hourlyChartRight - hourlyChartLeft
 
-  const hourlyXFor = (idx: number, count: number) =>
-    count <= 1 ? hourlyChartLeft + hourlyChartWidth / 2 : hourlyChartLeft + (idx * hourlyChartWidth) / (count - 1)
+  // Matches the XAxis's own domain={[0, 23]} continuous number scale exactly
+  // (not a band scale), so a series entry renders at the same pixel recharts
+  // itself computes for that entry's real hourOfDay - unlike the old
+  // index/count-based formula, this stays correct even if the hourly array is
+  // ever shorter or non-uniformly spaced than a full 24-hour sequence.
+  const hourlyXForHour = (hourOfDay: number) => hourlyChartLeft + (hourOfDay / 23) * hourlyChartWidth
 
   // Shared margin formula for every hourly chart below: same left/right/top,
   // and a bottom derived from the chart's own SVG viewBox height (170 for
@@ -613,8 +617,9 @@ export function ForecastDrawer({
   )
   // UV points have no hourOfDay of their own (WeatherHourlyUVPoint only
   // carries label/uvIndex) - they're aligned to the cloud chart's hourly
-  // array purely by array position, same as the hourlyXFor(idx, ...) index
-  // alignment the manual polyline used, so idx doubles as hourOfDay here.
+  // array purely by array position, so idx doubles as hourOfDay here (see
+  // the UV tooltip marker below, which is the one hourlyXForHour call site
+  // that deliberately keeps using activeIndex instead of a real hourOfDay).
   const uvChartData = useMemo(
     () => uvHourly.map((entry, idx) => ({ hourOfDay: idx, uvIndex: Math.max(0, entry.uvIndex) })),
     [uvHourly],
@@ -911,16 +916,20 @@ export function ForecastDrawer({
                       ))}
                       <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                      {cloudTooltipEntry && (
+                      {cloudTooltipEntry && cloudTooltipEntry.hourOfDay >= 0 && (
                         <ChartTooltipMarker
-                          x={hourlyXFor(cloudTooltip.activeIndex ?? 0, cloudHourly.length)}
+                          x={hourlyXForHour(cloudTooltipEntry.hourOfDay)}
                           y={cloudYFor(displayTemp(cloudTooltipEntry.temperatureF))}
                           color="rgba(217,119,6,0.95)"
                         />
                       )}
                       {uvTooltipEntry && (
                         <ChartTooltipMarker
-                          x={hourlyXFor(cloudTooltip.activeIndex ?? 0, uvHourly.length)}
+                          // UV has no real per-entry hourOfDay (see uvChartData above) -
+                          // its own series is keyed on array index, so activeIndex IS
+                          // the real domain value here, unlike the other 4 marker call
+                          // sites above which look up a genuine hourOfDay.
+                          x={hourlyXForHour(cloudTooltip.activeIndex ?? 0)}
                           y={uvYFor(Math.max(0, uvTooltipEntry.uvIndex))}
                           color="rgb(249,115,22)"
                         />
@@ -1018,7 +1027,7 @@ export function ForecastDrawer({
                               {windHourTicks.map(({ entry, idx }) => (
                                 <WindBarb
                                   key={idx}
-                                  cx={hourlyXFor(idx, windHourly.length)}
+                                  cx={hourlyXForHour(entry.hourOfDay)}
                                   cy={16}
                                   speedKts={entry.windSpeed}
                                   directionDeg={entry.windDirectionDeg}
@@ -1045,9 +1054,9 @@ export function ForecastDrawer({
                         ))}
                         <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                        {windTooltipEntry && (
+                        {windTooltipEntry && windTooltipEntry.hourOfDay >= 0 && (
                           <ChartTooltipMarker
-                            x={hourlyXFor(windTooltip.activeIndex ?? 0, windHourly.length)}
+                            x={hourlyXForHour(windTooltipEntry.hourOfDay)}
                             y={windYFor(Math.max(0, windTooltipEntry.windSpeed))}
                             color="rgba(37,99,235,0.95)"
                           />
@@ -1143,7 +1152,7 @@ export function ForecastDrawer({
                           component={() => (
                             <>
                               {waveHourTicks.map(({ entry, idx }) => {
-                                const x = hourlyXFor(idx, waveHourly.length)
+                                const x = hourlyXForHour(entry.hourOfDay)
                                 return (
                                   <g key={idx}>
                                     <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
@@ -1172,9 +1181,9 @@ export function ForecastDrawer({
                         ))}
                         <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                        {waveTooltipEntry && (
+                        {waveTooltipEntry && waveTooltipEntry.hourOfDay >= 0 && (
                           <ChartTooltipMarker
-                            x={hourlyXFor(waveTooltip.activeIndex ?? 0, waveHourly.length)}
+                            x={hourlyXForHour(waveTooltipEntry.hourOfDay)}
                             y={waveYFor(Math.max(0, waveTooltipEntry.waveHeightM))}
                             color="rgba(20,184,166,0.9)"
                           />
@@ -1260,9 +1269,9 @@ export function ForecastDrawer({
                         <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
                         <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                        {precipTooltipEntry && (
+                        {precipTooltipEntry && precipTooltipEntry.hourOfDay >= 0 && (
                           <ChartTooltipMarker
-                            x={hourlyXFor(precipTooltip.activeIndex ?? 0, precipHourly.length)}
+                            x={hourlyXForHour(precipTooltipEntry.hourOfDay)}
                             y={precipChanceYFor(Math.max(0, Math.min(100, precipTooltipEntry.precipChancePct)))}
                             color="rgba(245,158,11,0.9)"
                           />

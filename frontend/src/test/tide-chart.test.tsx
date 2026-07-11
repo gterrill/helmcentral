@@ -286,4 +286,41 @@ describe('TideChart', () => {
     expect(highDot).toBeTruthy()
     expect(Number(highDot!.getAttribute('cy'))).toBeCloseTo(expectedY, 1)
   })
+
+  // New assertion enabled by the real-data-domain refactor (previously the
+  // curve was pre-baked entirely in pixel space, so there was no independent
+  // "domain" to reason about at all): confirms the curve actually renders a
+  // substantial, non-degenerate set of points across the window even when
+  // extremes span both before AND after it (the boundary-straddling segment
+  // scenario from the test above) - regardless of whether allowDataOverflow
+  // ended up being needed for the boundary segments' out-of-domain samples.
+  it('renders a continuous, non-degenerate tide curve when extremes span both before and after the window', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const extremes = [
+      { time: new Date(2026, 5, 13, 22, 0, 0).toISOString(), heightM: 1.0, high: false }, // before window
+      { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true }, // inside window
+      { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false }, // inside window
+      { time: new Date(2026, 5, 15, 2, 0, 0).toISOString(), heightM: 1.2, high: true }, // after window
+    ]
+
+    const { container } = render(
+      <TideChart
+        chart={buildChart({ extremes })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    const curve = container.querySelector('path.recharts-curve[stroke="rgba(20,184,166,0.9)"]')
+    expect(curve).toBeTruthy()
+    const d = curve!.getAttribute('d') ?? ''
+    expect(d).not.toBe('')
+    expect(d).not.toMatch(/NaN/)
+    const numbers = d.match(/-?\d+(\.\d+)?/g)?.map(Number) ?? []
+    // 3 curve segments each producing up to CURVE_STEPS+1=13 points (the two
+    // boundary segments get partially clipped by the chartStartMs/chartEndMs
+    // guard) - well over 20 numbers confirms this is a real, non-empty path.
+    expect(numbers.length).toBeGreaterThan(20)
+  })
 })

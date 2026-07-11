@@ -258,6 +258,47 @@ describe('ForecastDrawer refresh age', () => {
     expect(Number(yStr)).toBeCloseTo(windYFor(10), 0)
   })
 
+  // Regression test for hourlyXFor's index/count-based bug: it computed pixel-x
+  // from array INDEX and LENGTH, silently assuming the hourly array is always an
+  // evenly-spaced 24-entry 0..23 sequence. But the chart's XAxis plots by the
+  // entry's real hourOfDay value on a continuous domain={[0,23]} scale, not by
+  // index/count — these only coincide today because the API always returns a
+  // full 24-entry array. A deliberately non-uniform (3-entry, non-contiguous
+  // hourOfDay) array exposes the bug: the old formula placed hourOfDay=12 (the
+  // 3rd of 3 entries) at index 2 of 3 -> hourlyChartLeft + hourlyChartWidth (the
+  // chart's far right edge), a clearly different pixel from the correct
+  // hourOfDay-based position.
+  it('positions a WindBarb by its real hourOfDay, not its array index, when the hourly array is non-uniform', () => {
+    const sparseWind = [
+      { label: '12AM', hourOfDay: 0, windSpeed: 1, windGust: 2, windDirection: 'NE', windDirectionDeg: 45 },
+      { label: '6AM', hourOfDay: 6, windSpeed: 1, windGust: 2, windDirection: 'NE', windDirectionDeg: 45 },
+      { label: '12PM', hourOfDay: 12, windSpeed: 1, windGust: 2, windDirection: 'NE', windDirectionDeg: 45 },
+    ]
+
+    render(<ForecastDrawer forecast={[buildDay({ hourlyWind: sparseWind })]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wind-chart')
+    const barbs = within(chart).getAllByTestId('forecast-wind-barb')
+    expect(barbs).toHaveLength(3)
+
+    // hourlyChartLeft=30; jsdom's ResizeObserver stub never fires so
+    // forecastChartWidth falls back to 1000, giving hourlyChartRight=980 and
+    // hourlyChartWidth=950 (matches this file's existing windYFor test above).
+    const hourlyChartLeft = 30
+    const hourlyChartWidth = 950
+    const expectedX = hourlyChartLeft + (12 / 23) * hourlyChartWidth
+    // The old index-based hourlyXFor(idx, count) formula would have placed
+    // hourOfDay=12 (the 3rd of 3 array entries) at idx=2, count=3 ->
+    // hourlyChartLeft + (2*950)/(3-1) = hourlyChartLeft + hourlyChartWidth = 980,
+    // the chart's far right edge - a clearly different pixel.
+    const buggyIndexBasedX = hourlyChartLeft + hourlyChartWidth
+
+    const thirdBarb = barbs[2]
+    const actualX = Number(thirdBarb.getAttribute('cx'))
+    expect(actualX).toBeCloseTo(expectedX, 0)
+    expect(Math.abs(actualX - buggyIndexBasedX)).toBeGreaterThan(50)
+  })
+
   it('shows the wave summary sentence, direction arrows and period for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 

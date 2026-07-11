@@ -92,19 +92,18 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
     CHART_LEFT + ((timeMs - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
   const yFor = (value: number) => CHART_TOP + (1 - (value - yMin) / yRange) * (CHART_BOTTOM - CHART_TOP)
 
-  // curvePoints is memoized on the primitive values it actually reads
-  // (sortedExtremes, isImperial, chartStartMs/chartEndMs, CHART_RIGHT, yMin,
-  // yRange) rather than by calling the xFor/yFor/toDisplay closures below —
-  // those closures are recreated every render, so depending on them would
-  // defeat the memoization (it would "change" every render even when nothing
-  // it actually reads changed). The formulas are inlined here instead,
-  // matching xFor/yFor/toDisplay exactly. yMin/yRange (numbers) are safe to
-  // use directly as deps: since they're recomputed fresh each render from
-  // stable inputs, their *value* only changes when something real (extremes,
-  // unit, current height) changes, even though the memo can't see those
-  // inputs directly.
+  // curvePoints stores real epoch-ms time and real display-unit height (not
+  // pixel values) - recharts computes the data-to-pixel scaling itself now
+  // (see tideChartMargin/XAxis/YAxis below), rather than being handed an
+  // identity pixel-space mapping. Memoized on the primitive values it
+  // actually reads (sortedExtremes, isImperial, chartStartMs/chartEndMs)
+  // rather than by calling the xFor/yFor/toDisplay closures below - those
+  // closures are recreated every render, so depending on them would defeat
+  // the memoization (it would "change" every render even when nothing it
+  // actually reads changed). The formulas are inlined here instead, matching
+  // xFor/yFor/toDisplay exactly.
   const curvePoints = useMemo(() => {
-    const points: { x: number; y: number }[] = []
+    const points: { t: number; h: number }[] = []
     for (let i = 0; i < sortedExtremes.length - 1; i++) {
       const a = sortedExtremes[i]
       const b = sortedExtremes[i + 1]
@@ -119,28 +118,29 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         const progress = s / CURVE_STEPS
         const t = tA + (tB - tA) * progress
         const h = (hA + hB) / 2 + ((hA - hB) / 2) * Math.cos(Math.PI * progress)
-        const x = CHART_LEFT + ((t - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
-        const y = CHART_TOP + (1 - (h - yMin) / yRange) * (CHART_BOTTOM - CHART_TOP)
-        points.push({ x, y })
+        points.push({ t, h })
       }
     }
     return points
-  }, [sortedExtremes, isImperial, chartStartMs, chartEndMs, CHART_RIGHT, yMin, yRange])
+  }, [sortedExtremes, isImperial, chartStartMs, chartEndMs])
 
-  // curvePoints/extreme markers are already in literal SVG pixel space (not
-  // a real data domain), so recharts is handed an identity mapping instead
-  // of doing its own data-to-pixel scaling: zero margin on a chart sized to
-  // exactly viewportWidth x 175, X domain [0, viewportWidth] (recharts' default
-  // orientation already maps pixel-left-to-right, needing no flip), and Y
-  // domain [0, 175] with `reversed` (SVG y grows downward - same as our
-  // pixel space - but recharts' un-reversed Y axis treats domain-max as "up",
-  // the opposite of what a plain top-down pixel value means). Given that,
-  // a data value of (x, y) renders at the literal SVG pixel (x, y).
-  const tideChartMargin = { left: 0, right: 0, top: 0, bottom: 0 }
+  // A real margin, unlike the old identity-pixel-space trick: this gives
+  // recharts' own data-to-pixel scaling a plot rectangle spanning
+  // (CHART_LEFT, CHART_TOP)-(viewportWidth - CHART_RIGHT_MARGIN, CHART_BOTTOM),
+  // matching xFor/yFor's own pixel bounds exactly. No RECHARTS_XAXIS_HEIGHT-
+  // style compensation is needed here (unlike the 4 hourly charts in
+  // forecast-drawer.tsx) because Tide's day-ticks stay a manual overlay (the
+  // XAxis below stays `hide`), and a hidden axis reserves no extra height in
+  // recharts' offset calculation.
+  const tideChartMargin = { left: CHART_LEFT, right: CHART_RIGHT_MARGIN, top: CHART_TOP, bottom: 175 - CHART_BOTTOM }
 
   const zeroInRange = yMin < 0 && yMax > 0
+  // Only nowX (not nowY) is still needed - the manual overlay's "Now" <text>
+  // below is positioned at a fixed CHART_TOP + 10, not by height; the
+  // recharts-rendered ReferenceDot's y is now the real currentDisplayHeight
+  // value directly (see the ReferenceDot in ComposedChart above), not this
+  // closure.
   const nowX = xFor(nowMs)
-  const nowY = yFor(currentDisplayHeight)
 
   const tideTooltip = useChartTooltip(
     curvePoints.length,
@@ -151,19 +151,8 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
 
   const tideTooltipEntry =
     tideTooltip.activeIndex === null ? null : curvePoints[tideTooltip.activeIndex] ?? null
-  let tideTooltipTime: Date | null = null
-  let tideTooltipHeight = 0
-
-  if (tideTooltipEntry) {
-    // Reverse xFor to get timeMs from pixel x
-    const timeFraction =
-      (tideTooltipEntry.x - CHART_LEFT) / (CHART_RIGHT - CHART_LEFT)
-    tideTooltipTime = new Date(
-      chartStartMs + timeFraction * (chartEndMs - chartStartMs),
-    )
-    tideTooltipHeight =
-      yMin + (1 - (tideTooltipEntry.y - CHART_TOP) / (CHART_BOTTOM - CHART_TOP)) * yRange
-  }
+  const tideTooltipTime = tideTooltipEntry ? new Date(tideTooltipEntry.t) : null
+  const tideTooltipHeight = tideTooltipEntry ? tideTooltipEntry.h : 0
 
   // Hour ticks at 0/6/12/18/24h offsets from the window start, matching the
   // "12AM/6AM/12PM/6PM" convention used by the sibling Wind/Wave/Precip/Cloud
@@ -210,19 +199,28 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
       <div className="relative h-[175px] w-full touch-none overflow-hidden rounded bg-muted/15">
         <ComposedChart width={viewportWidth} height={175} margin={tideChartMargin} data={curvePoints}>
           {/* allowDataOverflow is required here: curvePoints intentionally
-              includes samples slightly past [0, viewportWidth]/[0, 175] (a
-              curve segment's raised-cosine interpolation can extend past the
-              window edges for a smooth day-boundary, exactly as the original
-              hand-rolled <svg> did, relying on the SVG's own viewBox clipping
-              to hide the overflow). Without allowDataOverflow, recharts
-              silently *expands* the domain to fit that overflow (see
-              parseSpecifiedDomain in recharts' ChartUtils.js) while the pixel
-              range stays fixed at [0, viewportWidth]/[0, 175] - compressing
-              the whole identity mapping this chart depends on. */}
-          <XAxis dataKey="x" type="number" domain={[0, viewportWidth]} allowDataOverflow hide />
-          <YAxis dataKey="y" type="number" domain={[0, 175]} reversed allowDataOverflow hide />
+              includes samples with t (and, for boundary-straddling segments,
+              h) slightly outside [chartStartMs, chartEndMs]/[yMin, yMax] - the
+              segment-skip guard above (`if (tB < chartStartMs || tA >
+              chartEndMs) continue`) only skips a whole segment when BOTH its
+              endpoints are outside the window on the same side; it does not
+              stop a segment straddling the boundary (one extreme just outside
+              the window, one just inside) from producing individual
+              interpolated samples that land outside the domain, for a smooth
+              day-boundary curve - exactly like the original hand-rolled <svg>
+              relied on its own viewBox clipping to hide. Without
+              allowDataOverflow, recharts silently *widens* the domain to fit
+              that overflow (see parseSpecifiedDomain in recharts'
+              ChartUtils.js) while the pixel range stays fixed at
+              [CHART_LEFT, CHART_RIGHT] - compressing the scale for every
+              point, not just the overflowing ones. Confirmed empirically: the
+              'keeps an in-window ReferenceDot pixel-accurate...' test below
+              fails without this (expected cx ~232.7, actual ~272/710/508 -
+              off by 30-500px) and passes once this is added. */}
+          <XAxis dataKey="t" type="number" domain={[chartStartMs, chartEndMs]} allowDataOverflow hide />
+          <YAxis dataKey="h" type="number" domain={[yMin, yMax]} hide />
           <Area
-            dataKey="y"
+            dataKey="h"
             type="linear"
             isAnimationActive={false}
             dot={false}
@@ -230,7 +228,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
             fill="rgba(20,184,166,0.12)"
           />
           <Line
-            dataKey="y"
+            dataKey="h"
             type="linear"
             isAnimationActive={false}
             dot={false}
@@ -240,7 +238,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
 
           {zeroInRange && (
             <ReferenceLine
-              segment={[{ x: CHART_LEFT, y: yFor(0) }, { x: CHART_RIGHT, y: yFor(0) }]}
+              segment={[{ x: chartStartMs, y: 0 }, { x: chartEndMs, y: 0 }]}
               stroke="rgba(80,98,118,0.2)"
               strokeWidth={1}
               strokeDasharray="3 3"
@@ -249,13 +247,11 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
 
           {visibleExtremes.map((extreme) => {
             const t = new Date(extreme.time).getTime()
-            const x = xFor(t)
-            const y = yFor(toDisplay(extreme.heightM))
             return (
               <ReferenceDot
                 key={extreme.time}
-                x={x}
-                y={y}
+                x={t}
+                y={toDisplay(extreme.heightM)}
                 r={3}
                 fill={extreme.high ? 'rgba(20,184,166,0.95)' : 'rgba(245,158,11,0.95)'}
                 stroke="none"
@@ -267,12 +263,12 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           {showNowMarker && (
             <>
               <ReferenceLine
-                segment={[{ x: nowX, y: CHART_TOP }, { x: nowX, y: CHART_BOTTOM }]}
+                segment={[{ x: nowMs, y: yMin }, { x: nowMs, y: yMax }]}
                 stroke="rgba(199,137,0,0.7)"
                 strokeWidth={1.5}
                 strokeDasharray="4 3"
               />
-              <ReferenceDot x={nowX} y={nowY} r={3.5} fill="hsl(var(--gauge-primary))" stroke="none" isFront />
+              <ReferenceDot x={nowMs} y={currentDisplayHeight} r={3.5} fill="hsl(var(--gauge-primary))" stroke="none" isFront />
             </>
           )}
         </ComposedChart>
@@ -320,8 +316,8 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
 
           {tideTooltipEntry && (
             <ChartTooltipMarker
-              x={tideTooltipEntry.x}
-              y={tideTooltipEntry.y}
+              x={xFor(tideTooltipEntry.t)}
+              y={yFor(tideTooltipEntry.h)}
               color="rgba(20,184,166,0.9)"
             />
           )}
