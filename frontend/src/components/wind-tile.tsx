@@ -1,5 +1,5 @@
 import { ArrowUp } from 'lucide-react'
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import { WindCompass } from '@/components/wind-compass'
@@ -136,19 +136,19 @@ function WindGaugeCluster({
       >
         <div className="grid h-full w-full grid-cols-2 grid-rows-2">
           <div className="self-start justify-self-start">
-            <WindMetricCard title="SET" value={setValue} style={{ width: cfg.topCardW, height: cfg.cardH, ...masks.tl }} />
+            <WindMetricCard title="MAX GUST 10M" value={gust10mLabel} style={{ width: cfg.topCardW, height: cfg.cardH, ...masks.tl }} />
           </div>
 
           <div className="self-start justify-self-end">
-            <WindMetricCard title="DRIFT" value={driftLabel} align="right" style={{ width: cfg.topCardW, height: cfg.cardH, ...masks.tr }} />
+            <WindMetricCard title="MAX GUST 1HR" value={gust1hLabel} align="right" style={{ width: cfg.topCardW, height: cfg.cardH, ...masks.tr }} />
           </div>
 
           <div className="self-end justify-self-start">
-            <WindMetricCard title="MAX GUST 10M" value={gust10mLabel} valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.bl }} />
+            <WindMetricCard title="SET" value={setValue} valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.bl }} />
           </div>
 
           <div className="self-end justify-self-end">
-            <WindMetricCard title="MAX GUST 1HR" value={gust1hLabel} align="right" valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.br }} />
+            <WindMetricCard title="DRIFT" value={driftLabel} align="right" valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.br }} />
           </div>
         </div>
 
@@ -180,7 +180,7 @@ export interface WindTileProps {
   maxGust1hKts: number | null
 }
 
-export function WindTile({
+export const WindTile = memo(function WindTile({
   headingTrue,
   windAngleApparentDeg,
   windSide,
@@ -260,4 +260,4 @@ export function WindTile({
       />
     </Tile>
   )
-}
+})
