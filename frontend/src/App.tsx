@@ -8,7 +8,7 @@ import {
   Route,
   Settings,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
@@ -98,25 +98,6 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const AUTO_CLOSE_ANCHOR_WATCH_KEY = 'anchorWatch.autoClose.enabled'
 
-// Recreates today's 3-column arrangement (cols=12, each column w=4) so a fresh
-// install with no saved layout looks identical to the pre-bento dashboard.
-const DEFAULT_DASHBOARD_LAYOUT: DashboardLayoutItem[] = [
-  { id: 'vessel', x: 0, y: 0, w: 12, h: 3 },
-  { id: 'wind', x: 0, y: 3, w: 4, h: 8 },
-  { id: 'depth-tide', x: 0, y: 11, w: 4, h: 7 },
-  { id: 'position', x: 0, y: 18, w: 4, h: 5 },
-  { id: 'today-now', x: 0, y: 23, w: 4, h: 5 },
-  { id: 'anchor-watch', x: 4, y: 3, w: 4, h: 8 },
-  { id: 'rode-scope', x: 4, y: 11, w: 4, h: 6 },
-  { id: 'tanks', x: 4, y: 17, w: 4, h: 4 },
-  { id: 'route', x: 4, y: 21, w: 4, h: 4 },
-  { id: 'nearby-vessels', x: 4, y: 25, w: 4, h: 5 },
-  { id: 'battery-power', x: 8, y: 3, w: 4, h: 14 },
-  { id: 'alternator', x: 8, y: 17, w: 4, h: 6 },
-  { id: 'generator', x: 8, y: 23, w: 4, h: 5 },
-  { id: 'czone-switches', x: 8, y: 28, w: 4, h: 6 },
-]
-
 export function App() {
   const uiConfig = getUiConfig()
   const anchorConfig = getAnchorConfig()
@@ -158,16 +139,9 @@ export function App() {
     activate: activateRoute,
     deactivate: deactivateRoute,
   } = useRouteActivation()
-  const { pages, loading: pagesLoading, error: pagesError, createPage, updatePage, deletePage } = useDashboardPages()
-  const [activePageId, setActivePageId] = useActiveDashboardPageId()
-  const activePage = pages.find((p) => p.id === activePageId) ?? pages[0] ?? null
-  const bootstrappedRef = useRef(false)
-  useEffect(() => {
-    if (!pagesLoading && pages.length === 0 && !bootstrappedRef.current) {
-      bootstrappedRef.current = true
-      void createPage('Anchored', DEFAULT_DASHBOARD_LAYOUT).then((p) => { if (p) setActivePageId(p.id) })
-    }
-  }, [pagesLoading, pages.length, createPage, setActivePageId])
+  const { pages, error: pagesError, createPage, updatePage, deletePage } = useDashboardPages()
+  const [activePageId, setActivePageId] = useActiveDashboardPageId(pages)
+  const activePage = pages.find((p) => p.id === activePageId) ?? null
 
   // Handle anchor watch auto-close notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -271,25 +245,32 @@ export function App() {
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeMarineWarning))
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
 
-  const effectiveWidgets = activePage?.widgets ?? []
+  const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
   const unplacedWidgetIds = DASHBOARD_WIDGET_IDS.filter((id) => !effectiveWidgets.some((w) => w.id === id))
 
-  const handleLayoutSettle = (next: DashboardLayoutItem[]) => {
+  const handleLayoutSettle = useCallback((next: DashboardLayoutItem[]) => {
     if (!activePage) return
     void updatePage(activePage.id, { widgets: next })
-  }
+  }, [activePage, updatePage])
 
-  const handleRemoveWidget = (id: DashboardWidgetId) => {
+  const handleRemoveWidget = useCallback((id: DashboardWidgetId) => {
     if (!activePage) return
     void updatePage(activePage.id, { widgets: effectiveWidgets.filter((w) => w.id !== id) })
-  }
+  }, [activePage, effectiveWidgets, updatePage])
 
-  const handleAddWidget = (id: DashboardWidgetId) => {
+  const handleAddWidget = useCallback((id: DashboardWidgetId) => {
     if (!activePage) return
     const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
     void updatePage(activePage.id, { widgets: [...effectiveWidgets, { id, x: 0, y: maxY, w: 4, h: 6 }] })
-  }
+  }, [activePage, effectiveWidgets, updatePage])
 
+  // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
+  // (essentially the entire polled-data surface of the component — vessel,
+  // electrical, tanks, nearby-vessels, anchor watch, wind, etc.), several of
+  // which change every few seconds independently. Memoizing would just
+  // recreate the reference on nearly every render anyway, so it buys no real
+  // stabilization — left as a plain function per the task's own guidance for
+  // this case.
   const renderWidget = (id: DashboardWidgetId): ReactNode => {
     switch (id) {
       case 'vessel':
@@ -662,7 +643,7 @@ export function App() {
               <>
                 <DashboardPageSwitcher
                   pages={pages}
-                  activePageId={activePage?.id ?? null}
+                  activePageId={activePageId}
                   onSelect={setActivePageId}
                   onCreate={() => {
                     void createPage(`Page ${pages.length + 1}`, []).then((p) => {

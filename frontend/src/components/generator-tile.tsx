@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
@@ -37,7 +37,7 @@ function formatRunReason(condition: string | null): string | null {
   return labels[condition] ?? condition
 }
 
-export function GeneratorTile({
+export const GeneratorTile = memo(function GeneratorTile({
   generatorState,
   generatorManualStart,
   generatorManualStartTimer,
@@ -222,4 +222,4 @@ export function GeneratorTile({
       )}
     </Tile>
   )
-}
+})

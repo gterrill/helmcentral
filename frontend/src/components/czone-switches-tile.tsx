@@ -1,4 +1,5 @@
 import { Zap } from 'lucide-react'
+import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import type { CZoneSwitch } from '@/hooks/use-czone-switches'
@@ -10,7 +11,7 @@ type CZoneSwitchesTileProps = {
   onToggle: (id: string, newState: 0 | 1) => void
 }
 
-export function CZoneSwitchesTile({ switches, loading, pending, onToggle }: CZoneSwitchesTileProps) {
+export const CZoneSwitchesTile = memo(function CZoneSwitchesTile({ switches, loading, pending, onToggle }: CZoneSwitchesTileProps) {
   return (
     <Tile title="CZone" icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
       <div className="mt-3 space-y-1.5">
@@ -72,4 +73,4 @@ export function CZoneSwitchesTile({ switches, loading, pending, onToggle }: CZon
       </div>
     </Tile>
   )
-}
+})

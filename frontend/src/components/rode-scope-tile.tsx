@@ -1,5 +1,5 @@
 import { Anchor } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { AnchorConfig } from '@/config/app-config'
 import { calculateCatenary, type SeabedType, type SeaState } from '@/lib/catenary'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
@@ -24,7 +24,7 @@ function toDisplayDistance(meters: number, isImperial: boolean): number {
   return isImperial ? meters * METERS_TO_FEET : meters
 }
 
-export function RodeScopeTile({
+export const RodeScopeTile = memo(function RodeScopeTile({
   anchorState,
   gnssCritical,
   rodeDeployedM,
@@ -249,4 +249,4 @@ export function RodeScopeTile({
       )}
     </Tile>
   )
-}
+})

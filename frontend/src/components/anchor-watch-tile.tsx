@@ -1,5 +1,5 @@
 import { Anchor, Volume2 } from 'lucide-react'
-import { useCallback } from 'react'
+import { memo, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
@@ -27,7 +27,7 @@ interface AnchorWatchTileProps {
   onFullscreen: () => void
 }
 
-export function AnchorWatchTile({
+export const AnchorWatchTile = memo(function AnchorWatchTile({
   watch,
   lat,
   lon,
@@ -148,4 +148,4 @@ export function AnchorWatchTile({
       </div>
     </Tile>
   )
-}
+})

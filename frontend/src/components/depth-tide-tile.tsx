@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp } from 'lucide-react'
+import { memo } from 'react'
 import type { DepthTrendData } from '@/hooks/use-depth-trend'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { DepthSparkline } from '@/components/depth-sparkline'
@@ -13,7 +14,7 @@ export interface DepthTideTileProps {
   onOpen?: () => void
 }
 
-export function DepthTideTile({
+export const DepthTideTile = memo(function DepthTideTile({
   depth,
   isImperialDistance,
   navigationState,
@@ -91,4 +92,4 @@ export function DepthTideTile({
       </Tile>
     </div>
   )
-}
+})

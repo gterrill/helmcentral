@@ -21,29 +21,25 @@ export function DashboardPageSwitcher({
   onDelete,
 }: DashboardPageSwitcherProps) {
   const [open, setOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [draftName, setDraftName] = useState('')
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
 
   const activePage = pages.find((p) => p.id === activePageId)
   const displayName = activePage?.name ?? 'Dashboard'
 
   const handleEditStart = (page: DashboardPage) => {
-    setEditingId(page.id)
-    setDraftName(page.name)
+    setEditing({ id: page.id, name: page.name })
   }
 
   const handleEditCancel = () => {
-    setEditingId(null)
-    setDraftName('')
+    setEditing(null)
   }
 
   const handleEditConfirm = (pageId: string, currentName: string) => {
-    const trimmed = draftName.trim()
+    const trimmed = (editing?.name ?? '').trim()
     if (trimmed && trimmed !== currentName) {
       onRename(pageId, trimmed)
     }
-    setEditingId(null)
-    setDraftName('')
+    setEditing(null)
   }
 
   // Enter-specific: the input selects all its text on focus (so typing
@@ -54,7 +50,7 @@ export function DashboardPageSwitcher({
   // no indication why - so on Enter specifically, an empty name stays in
   // edit mode instead of closing, making the no-op visible.
   const handleEditSubmit = (pageId: string, currentName: string) => {
-    if (!draftName.trim()) return
+    if (!(editing?.name ?? '').trim()) return
     handleEditConfirm(pageId, currentName)
   }
 
@@ -94,11 +90,11 @@ export function DashboardPageSwitcher({
               key={page.id}
               className="flex items-center justify-between rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
             >
-              {editingId === page.id ? (
+              {editing?.id === page.id ? (
                 <input
                   type="text"
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
+                  value={editing.name}
+                  onChange={(e) => setEditing({ id: page.id, name: e.target.value })}
                   onKeyDown={(e) => handleKeyDown(e, page.id, page.name)}
                   onBlur={() => handleEditConfirm(page.id, page.name)}
                   autoFocus

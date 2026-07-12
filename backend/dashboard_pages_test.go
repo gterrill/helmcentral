@@ -18,6 +18,15 @@ func setupDashboardPagesTest(t *testing.T) {
 	t.Setenv("DASHBOARD_PAGES_FILE", filepath.Join(t.TempDir(), "dashboard-pages.json"))
 	t.Setenv("DASHBOARD_LAYOUT_FILE", filepath.Join(t.TempDir(), "dashboard-layout.json"))
 	loadDashboardPages()
+
+	// loadDashboardPages now synthesizes a default "Anchored" page when
+	// neither file exists (see TestDashboardPages_MigrationHandlesNeitherFile).
+	// Tests using this helper exercise the handlers against a blank slate, so
+	// clear that default out here rather than accounting for it in every
+	// unrelated handler test.
+	dashboardPagesMu.Lock()
+	dashboardPagesState = make(map[string]*dashboardPageData)
+	dashboardPagesMu.Unlock()
 }
 
 func newDashboardPagesRequest(t *testing.T, method, path string, body any) (echo.Context, *httptest.ResponseRecorder) {
@@ -578,10 +587,39 @@ func TestDashboardPages_MigrationHandlesNeitherFile(t *testing.T) {
 	t.Setenv("DASHBOARD_LAYOUT_FILE", layoutPath)
 	loadDashboardPages()
 
-	// Verify empty state (no panic, no error)
+	// Verify a single default "Anchored" page was synthesized from
+	// defaultDashboardLayout (no panic, no error) — a genuinely fresh
+	// install now gets its first page from the backend directly.
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
-	if len(dashboardPagesState) != 0 {
-		t.Fatalf("expected 0 pages when no files exist, got %d", len(dashboardPagesState))
+	if len(dashboardPagesState) != 1 {
+		t.Fatalf("expected 1 default page when no files exist, got %d", len(dashboardPagesState))
+	}
+	var page *dashboardPageData
+	for _, p := range dashboardPagesState {
+		page = p
+		break
+	}
+	if page.Name != "Anchored" {
+		t.Fatalf("expected default page name 'Anchored', got %q", page.Name)
+	}
+	if len(page.Widgets) != len(defaultDashboardLayout) {
+		t.Fatalf("expected %d widgets in default page, got %d", len(defaultDashboardLayout), len(page.Widgets))
+	}
+	for i, w := range defaultDashboardLayout {
+		if page.Widgets[i] != w {
+			t.Fatalf("expected widget %d to be %+v, got %+v", i, w, page.Widgets[i])
+		}
+	}
+	if page.Widgets[0].ID != "vessel" {
+		t.Fatalf("expected first widget to be 'vessel', got %q", page.Widgets[0].ID)
+	}
+	if page.CreatedAt.IsZero() || page.UpdatedAt.IsZero() {
+		t.Fatal("expected created_at/updated_at to be set on default page")
+	}
+
+	// Verify the pages file now exists, persisting the default page.
+	if _, err := os.Stat(pagesPath); os.IsNotExist(err) {
+		t.Fatal("expected pages file to be created for the default page")
 	}
 }

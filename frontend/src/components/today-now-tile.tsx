@@ -1,4 +1,5 @@
 import { CloudSun } from 'lucide-react'
+import { memo } from 'react'
 import type { WeatherToday } from '@/hooks/use-weather-today'
 import type { DistanceUnits } from '@/config/app-config'
 import { Tile } from '@/components/ui/tile'
@@ -13,7 +14,7 @@ function fahrenheitToCelsius(temp: number) {
   return (temp - 32) * (5 / 9)
 }
 
-export function TodayNowTile({ weather, distanceUnits, onOpen }: TodayNowTileProps) {
+export const TodayNowTile = memo(function TodayNowTile({ weather, distanceUnits, onOpen }: TodayNowTileProps) {
   return (
     <div onClick={onOpen} className={onOpen ? 'cursor-pointer transition-opacity hover:opacity-80' : undefined}>
       <Tile title="Today & Now">
@@ -54,4 +55,4 @@ export function TodayNowTile({ weather, distanceUnits, onOpen }: TodayNowTilePro
       </Tile>
     </div>
   )
-}
+})

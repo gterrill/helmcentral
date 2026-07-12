@@ -1,4 +1,5 @@
 import { Zap } from 'lucide-react'
+import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 
@@ -73,7 +74,7 @@ function AlternatorColumn({ label, data }: { label: string; data: AlternatorData
   )
 }
 
-export function AlternatorTile({ port, starboard, enginesRunning }: AlternatorTileProps) {
+export const AlternatorTile = memo(function AlternatorTile({ port, starboard, enginesRunning }: AlternatorTileProps) {
   return (
     <Tile title="Alternators" icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
       {enginesRunning ? (
@@ -88,4 +89,4 @@ export function AlternatorTile({ port, starboard, enginesRunning }: AlternatorTi
       )}
     </Tile>
   )
-}
+})

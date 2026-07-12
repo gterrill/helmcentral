@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { formatCoordinate, formatHeading } from '@/lib/format'
 import { Tile } from '@/components/ui/tile'
 
@@ -13,7 +14,7 @@ export interface PositionTileProps {
   placeName: string | null
 }
 
-export function PositionTile({
+export const PositionTile = memo(function PositionTile({
   latitude,
   longitude,
   headingTrue,
@@ -65,4 +66,4 @@ export function PositionTile({
       </div>
     </Tile>
   )
-}
+})

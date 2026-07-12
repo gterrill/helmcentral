@@ -1,5 +1,6 @@
 import { faucet } from '@lucide/lab'
 import { Droplet, Droplets, Fuel, Icon } from 'lucide-react'
+import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import type { TankLevel } from '@/hooks/use-tanks-state'
@@ -61,7 +62,7 @@ function tankKindIcon(kind: TankLevel['kind']) {
   return <Icon iconNode={faucet} className="h-4 w-4 text-emerald-700" aria-hidden="true" />
 }
 
-export function TanksTile({ tanks, loading }: TanksTileProps) {
+export const TanksTile = memo(function TanksTile({ tanks, loading }: TanksTileProps) {
   const visibleTanks = tanks.slice(0, 8)
 
   return (
@@ -97,4 +98,4 @@ export function TanksTile({ tanks, loading }: TanksTileProps) {
       </div>
     </Tile>
   )
-}
+})

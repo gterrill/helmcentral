@@ -37,11 +37,10 @@ describe('useDashboardPages', () => {
     expect(result.current.pages).toHaveLength(0)
   })
 
-  it('createPage POSTs and refetches the list', async () => {
+  it('createPage POSTs and appends the new page', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '2', name: 'New Page', widgets: [], created_at: '', updated_at: '' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '2', name: 'New Page', widgets: [], created_at: '', updated_at: '' }] }) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDashboardPages())
@@ -56,11 +55,10 @@ describe('useDashboardPages', () => {
     expect(result.current.pages[0].name).toBe('New Page')
   })
 
-  it('updatePage PATCHes and refetches the list', async () => {
+  it('updatePage PATCHes and patches the page in place', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '1', name: 'Page A', widgets: [], created_at: '', updated_at: '' }] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '1', name: 'Renamed', widgets: [], created_at: '', updated_at: '' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '1', name: 'Renamed', widgets: [], created_at: '', updated_at: '' }] }) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDashboardPages())
@@ -74,11 +72,10 @@ describe('useDashboardPages', () => {
     expect(result.current.pages[0].name).toBe('Renamed')
   })
 
-  it('deletePage issues a DELETE request and refetches', async () => {
+  it('deletePage issues a DELETE request and removes the page locally', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '1', name: 'Page A', widgets: [], created_at: '', updated_at: '' }] }) })
       .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [] }) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDashboardPages())

@@ -1,4 +1,5 @@
 import { Navigation } from 'lucide-react'
+import { memo } from 'react'
 import { Tile } from '@/components/ui/tile'
 import type { Route } from '@/hooks/use-routes'
 import { calculateLegs, calculateRouteTotals, formatNm, formatEtaHours } from '@/lib/route-calc'
@@ -12,7 +13,7 @@ interface RouteTileProps {
 
 const DEFAULT_PLANNING_SPEED_KTS = 6
 
-export function RouteTile({ speedKts, routes, dashboardRouteId, onOpen }: RouteTileProps) {
+export const RouteTile = memo(function RouteTile({ speedKts, routes, dashboardRouteId, onOpen }: RouteTileProps) {
   const route = dashboardRouteId ? routes.find((r) => r.id === dashboardRouteId) : undefined
   if (!route) return null
 
@@ -35,4 +36,4 @@ export function RouteTile({ speedKts, routes, dashboardRouteId, onOpen }: RouteT
       </Tile>
     </div>
   )
-}
+})

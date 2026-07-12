@@ -47,9 +47,12 @@ export function useDashboardPages() {
     })
     if (!res.ok) return null
     const page = (await res.json()) as DashboardPage
-    await fetchPages()
+    // Append rather than refetch: the list is sorted oldest-created-first
+    // server-side, and a newly created page has the newest created_at, so
+    // appending preserves that order without a round trip.
+    setPages((prev) => [...prev, page])
     return page
-  }, [fetchPages])
+  }, [])
 
   const updatePage = useCallback(async (
     id: string,
@@ -62,16 +65,16 @@ export function useDashboardPages() {
     })
     if (!res.ok) return null
     const page = (await res.json()) as DashboardPage
-    await fetchPages()
+    setPages((prev) => prev.map((p) => (p.id === id ? page : p)))
     return page
-  }, [fetchPages])
+  }, [])
 
   const deletePage = useCallback(async (id: string): Promise<boolean> => {
     const res = await fetch(`/api/dashboard-pages/${id}`, { method: 'DELETE' })
     if (!res.ok) return false
-    await fetchPages()
+    setPages((prev) => prev.filter((p) => p.id !== id))
     return true
-  }, [fetchPages])
+  }, [])
 
   return { pages, loading, error, refetch: fetchPages, createPage, updatePage, deletePage }
 }

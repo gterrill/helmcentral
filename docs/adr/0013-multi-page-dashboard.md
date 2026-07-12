@@ -25,7 +25,7 @@ The old singleton (`data/dashboard-layout.json`) held a real, hand-tuned 11-widg
 
 Naming the migrated page "Anchored" is a judgment call, not a hard requirement — it reflects that the layout being migrated was tuned for at-anchor use, and renaming a page is a first-class supported action if that guess doesn't fit.
 
-A separate, smaller case — zero pages ever having existed (a fresh install, no legacy file either) — is handled in the frontend, not the backend: `App.tsx` auto-creates a page named "Anchored" seeded from the existing `DEFAULT_DASHBOARD_LAYOUT` constant the first time it observes an empty page list. That constant's role shifts from "fallback rendered when nothing is saved" (ADR 0012) to "seed data for the auto-created first page" — its content is unchanged.
+A separate, smaller case — zero pages ever having existed (a fresh install, no legacy file either) — is handled in the backend, in `loadDashboardPages()` itself: it synthesizes one page named "Anchored" from a `defaultDashboardLayout` constant (the same 3-column arrangement `DEFAULT_DASHBOARD_LAYOUT` held in `App.tsx` under ADR 0012) and persists it before the server answers its first request. That constant's role shifts from "fallback rendered when nothing is saved" (ADR 0012) to "seed data for the synthesized first page" — its content is unchanged, only its owner moves. An earlier version of this decision had `App.tsx` auto-create the first page client-side, in a `useEffect` guarded against React StrictMode's double-invocation by a bootstrapped-ref; moving the synthesis server-side removes that guard entirely, since `pages` is now never observably empty on a fresh install — there's no client-visible "loaded but empty" gap left to bootstrap against.
 
 ### Manual switching only, in the dashboard header
 
@@ -39,21 +39,30 @@ Layout edit mode (`layoutEditing`) remains a single global toggle, unaffected by
 
 `App.tsx`'s `renderWidget` switch (mapping a widget id to its rendered tile, closing over the same ~15 already-fetched data hooks) needed zero changes. Pages only change *which* widget ids are in the active page's `widgets` array — every widget still renders against the same live vessel data regardless of which page is showing, so switching pages is instant and doesn't re-fetch anything.
 
-### Mutation pattern change: refetch, not optimistic update
+### Mutation pattern: local patch, not refetch
 
-`useDashboardPages()` mirrors `useRoutes()`'s shape rather than the old `useDashboardLayout()`'s: every `createPage`/`updatePage`/`deletePage` call refetches the full page list afterward instead of patching local state optimistically. This means every widget drag/resize now round-trips a `GET` of all pages, not just a `PUT` of one layout — a deliberate, acceptable cost given this app's low page count, chosen for consistency with the routes precedent over introducing a second, different hook shape.
+`useDashboardPages()` initially mirrored `useRoutes()`'s shape — every `createPage`/`updatePage`/`deletePage` call refetched the full page list afterward. In practice this meant every widget drag/resize round-tripped a `GET` of all pages just to learn back the one page it already had the full contents of (`updatePage`'s response body *is* the updated page). That was replaced with patching local state directly from each mutation's own response: `createPage` appends the returned page (the pages list is sorted oldest-first server-side, and a new page is always the newest, so appending preserves order without a refetch); `updatePage` replaces the matching entry by id; `deletePage` filters it out. `refetch` (the initial-load fetcher) is still exposed and still used for the mount-time `GET`, only the post-mutation refetch calls were removed. This is a straightforward optimization once the round-trip was recognized as pure waste, not a rejection of the routes.go precedent for its own sake.
+
+### Render-cost cleanup: memoized tiles, deduped localStorage hook, stale active-page reconciliation
+
+Three follow-on cleanups, made once the page-switching machinery above was in place and its actual cost became visible:
+
+- Every dashboard tile component (`AlternatorTile`, `BatteryPowerTile`, `RodeScopeTile`, etc.) is now wrapped in `React.memo`. `App.tsx` re-renders on every polled-data tick (vessel, electrical, tanks, wind, ...), and before memoization every mounted tile re-rendered on each of those ticks regardless of whether its own props changed — switching dashboard pages made this worse by mounting a fresh set of tiles whose props were otherwise stable. `WindTile` already had this from an earlier pass; this extends the same treatment to the rest of the catalog.
+- `useActiveDashboardPageId`, `useDashboardRouteId`, and the (now-removed) inline duplicate in each shared the identical "read/write a single id to `localStorage`, mirrored in `useState`" body. This is factored into one `useLocalStorageId(key)` hook that both now call.
+- `useActiveDashboardPageId` now takes `pages` and reconciles the stored id against it: if the stored id doesn't match any current page (e.g. it pointed at a page that's since been deleted), it resolves to `pages[0]` and writes that back, rather than leaving `App.tsx` to fall back to `pages[0]` itself on every render via `pages.find(...) ?? pages[0]`. While `pages` hasn't loaded yet (empty array), the raw stored id passes through unresolved and no write-back happens, so an empty list during initial load isn't mistaken for "every page was deleted."
 
 ## Consequences
 
 Positive:
 - Operators can define as many named tile arrangements as they want (Anchored, Underway, or anything else), each independently laid out, without one layout being a compromise across activities.
 - The existing hand-tuned layout is preserved automatically on upgrade, not lost or reset.
-- No new widget types, no new data-fetching, no changes to how any individual tile renders — this is purely a change to how widget-placement configuration is organized and switched.
+- No new widget types, no new data-fetching — this is purely a change to how widget-placement configuration is organized and switched (individual tiles gained `React.memo` as a render-cost cleanup, but render *inputs* are unchanged).
 - The last-page-delete guard means the dashboard can never be driven into a zero-page, empty-shell state through normal use.
+- Layout-editing actions (drag, resize, add, remove widget) patch local state directly from each mutation's response, matching the old single-layout hook's cost rather than the full-refetch cost initially incurred by mirroring `useRoutes()`.
+- Fresh installs get their first page synthesized server-side before the first request is answered, so the frontend never has to distinguish "still loading" from "genuinely empty" for bootstrap purposes.
 
 Negative / explicitly deferred:
 - No automatic or suggested page switching based on vessel state, even though the signal (`navigationState`) already exists — purely manual, by design.
-- Every layout-editing action (drag, resize, add, remove widget) now costs a full page-list refetch rather than an optimistic local update, unlike the old single-layout hook.
 - The frontend's `DASHBOARD_WIDGET_IDS` and the backend's `validDashboardWidgetIDs` remain two independently hand-maintained lists of valid widget ids (a pre-existing issue from ADR 0012, not introduced or fixed here).
 - No reordering of pages beyond creation order, and no per-page icon/color — pages are name + widgets only, matching the minimal scope of what was requested.
 

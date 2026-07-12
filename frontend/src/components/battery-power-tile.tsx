@@ -1,4 +1,5 @@
 import { BatteryCharging, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning } from 'lucide-react'
+import { memo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 
@@ -51,7 +52,7 @@ function formatTimeToGo(hours: number | null) {
   return `${hh}h ${mm.toString().padStart(2, '0')}m`
 }
 
-export function BatteryPowerTile({
+export const BatteryPowerTile = memo(function BatteryPowerTile({
   batterySocPercent,
   chargingCurrentA,
   chargingPowerW,
@@ -193,4 +194,4 @@ export function BatteryPowerTile({
       </div>
     </Tile>
   )
-}
+})
