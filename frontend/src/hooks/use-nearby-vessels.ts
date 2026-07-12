@@ -7,6 +7,8 @@ export type NearbyVessel = {
   sog_knots?: number
   lat?: number
   lon?: number
+  seen_count?: number
+  last_seen_at?: string
 }
 
 type NearbyVesselsResponse = {
@@ -39,6 +41,8 @@ export function useNearbyVessels(refreshInterval: number) {
             ...item,
             lat: typeof item.lat === 'number' && Number.isFinite(item.lat) ? item.lat : undefined,
             lon: typeof item.lon === 'number' && Number.isFinite(item.lon) ? item.lon : undefined,
+            seen_count: typeof item.seen_count === 'number' && Number.isFinite(item.seen_count) ? Math.max(0, Math.floor(item.seen_count)) : 0,
+            last_seen_at: typeof item.last_seen_at === 'string' ? item.last_seen_at : undefined,
           })),
         )
       } catch (err) {

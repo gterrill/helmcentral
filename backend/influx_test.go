@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+func ts(base time.Time, offsetHours int) time.Time {
+	return base.Add(time.Duration(offsetHours) * time.Hour)
+}
+
 func depthPoint(minutesAgo int, depthM float64) depthTrendPoint {
 	return depthTrendPoint{
 		Time:   time.Now().Add(-time.Duration(minutesAgo) * time.Minute),
@@ -148,5 +152,54 @@ func TestFindLastTideTurningPointTooFewPoints(t *testing.T) {
 
 	if _, ok := findLastTideTurningPoint(points); ok {
 		t.Fatalf("expected no turning point with fewer than 3 points")
+	}
+}
+
+func TestSummarizeEncounterSessions_ExcludesCurrentSessionFromSeenCount(t *testing.T) {
+	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	timestamps := []time.Time{
+		ts(now, -120),
+		ts(now, -119),
+		ts(now, -24),
+		ts(now, -23),
+		ts(now, -1),
+	}
+
+	summary := summarizeEncounterSessions(timestamps, now, 6*time.Hour, 2*time.Hour)
+	if summary.SeenCount != 2 {
+		t.Fatalf("expected 2 previous encounters, got %d", summary.SeenCount)
+	}
+	expectedLastSeen := ts(now, -23)
+	if !summary.LastSeenAt.Equal(expectedLastSeen) {
+		t.Fatalf("expected last seen at %s, got %s", expectedLastSeen, summary.LastSeenAt)
+	}
+}
+
+func TestSummarizeEncounterSessions_NoActiveSessionCountsLatest(t *testing.T) {
+	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	timestamps := []time.Time{
+		ts(now, -72),
+		ts(now, -48),
+		ts(now, -24),
+	}
+
+	summary := summarizeEncounterSessions(timestamps, now, 6*time.Hour, 2*time.Hour)
+	if summary.SeenCount != 3 {
+		t.Fatalf("expected 3 prior encounters, got %d", summary.SeenCount)
+	}
+	expectedLastSeen := ts(now, -24)
+	if !summary.LastSeenAt.Equal(expectedLastSeen) {
+		t.Fatalf("expected last seen at %s, got %s", expectedLastSeen, summary.LastSeenAt)
+	}
+}
+
+func TestSummarizeEncounterSessions_EmptyInput(t *testing.T) {
+	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	summary := summarizeEncounterSessions(nil, now, 6*time.Hour, 2*time.Hour)
+	if summary.SeenCount != 0 {
+		t.Fatalf("expected 0 seen count, got %d", summary.SeenCount)
+	}
+	if !summary.LastSeenAt.IsZero() {
+		t.Fatalf("expected zero last seen timestamp")
 	}
 }

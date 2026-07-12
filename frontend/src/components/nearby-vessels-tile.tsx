@@ -1,4 +1,5 @@
 import { Ship } from 'lucide-react'
+import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import type { DistanceUnits } from '@/config/app-config'
@@ -11,6 +12,31 @@ function formatAge(ageSeconds: number) {
 
   const minutes = Math.floor(ageSeconds / 60)
   return `${minutes}m ago`
+}
+
+function formatLastSeen(lastSeenAt: string, nowMs = Date.now()) {
+  const parsedMs = Date.parse(lastSeenAt)
+  if (!Number.isFinite(parsedMs)) {
+    return 'unknown'
+  }
+
+  const deltaSeconds = Math.max(0, Math.floor((nowMs - parsedMs) / 1000))
+  if (deltaSeconds < 60) {
+    return `${deltaSeconds}s ago`
+  }
+
+  const minutes = Math.floor(deltaSeconds / 60)
+  if (minutes < 60) {
+    return `${minutes}m ago`
+  }
+
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    return `${hours}h ago`
+  }
+
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
 }
 
 type NearbyVesselsTileProps = {
@@ -28,7 +54,7 @@ function formatRange(rangeFeet: number, distanceUnits: DistanceUnits) {
   return `${Math.round(meters)} m`
 }
 
-export function NearbyVesselsTile({ vessels, loading, distanceUnits }: NearbyVesselsTileProps) {
+export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits }: NearbyVesselsTileProps) {
   return (
     <Tile title="Nearby Vessels" icon={<Ship className="h-3.5 w-3.5 text-gauge-secondary" />}>
       <div className="mt-3 space-y-2">
@@ -37,6 +63,12 @@ export function NearbyVesselsTile({ vessels, loading, distanceUnits }: NearbyVes
             <div className="min-w-0">
               <p className="truncate font-display text-lg uppercase leading-none text-foreground">{vessel.name}</p>
               <p className="mt-1 text-xs text-muted-foreground">({formatAge(vessel.age_seconds)})</p>
+              {typeof vessel.seen_count === 'number' && vessel.seen_count > 0 ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Seen {vessel.seen_count}x before
+                  {typeof vessel.last_seen_at === 'string' && vessel.last_seen_at.trim() !== '' ? `, last ${formatLastSeen(vessel.last_seen_at)}` : ''}
+                </p>
+              ) : null}
             </div>
             <div className="shrink-0 text-right">
               <p className="font-display text-3xl leading-none text-gauge-secondary">{formatRange(vessel.range_ft, distanceUnits)}</p>
@@ -55,4 +87,4 @@ export function NearbyVesselsTile({ vessels, loading, distanceUnits }: NearbyVes
       </div>
     </Tile>
   )
-}
+})

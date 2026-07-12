@@ -479,6 +479,8 @@ type nearbyVessel struct {
 	SogKnots   *float64 `json:"sog_knots,omitempty"`
 	Lat        float64  `json:"lat"`
 	Lon        float64  `json:"lon"`
+	SeenCount  int      `json:"seen_count"`
+	LastSeenAt string   `json:"last_seen_at,omitempty"`
 }
 
 func nearbyVessels(c echo.Context) error {
@@ -505,6 +507,21 @@ func nearbyVessels(c echo.Context) error {
 		if selfErr == nil && state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
 			nearby, nearbyErr := fetchSignalKNearbyVessels(signalkURL, vesselsPath, state.Latitude, state.Longitude, now, excludedNames)
 			if nearbyErr == nil {
+				names := make([]string, 0, len(nearby))
+				for _, v := range nearby {
+					names = append(names, v.Name)
+				}
+
+				history := queryInfluxNearbyVesselHistory(names, now)
+				for i := range nearby {
+					if summary, ok := history[nearby[i].Name]; ok {
+						nearby[i].SeenCount = summary.SeenCount
+						if !summary.LastSeenAt.IsZero() {
+							nearby[i].LastSeenAt = summary.LastSeenAt.UTC().Format(time.RFC3339)
+						}
+					}
+				}
+
 				vessels = nearby
 				source = "signalk"
 			}
