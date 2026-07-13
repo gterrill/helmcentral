@@ -413,9 +413,10 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 		state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer")
 	}
 
-	currentDriftKts, currentSetDeg := parseSignalKCurrent(payload)
+	currentDriftKts, currentSetDeg, currentDriftImpactKts := parseSignalKCurrent(payload)
 	state.CurrentDriftKts = currentDriftKts
 	state.CurrentSetDeg = currentSetDeg
+	state.CurrentDriftImpactKts = currentDriftImpactKts
 
 	rawLatitude := lookupNumber(payload, "navigation", "position", "value", "latitude")
 	if rawLatitude == -1 {
@@ -575,10 +576,10 @@ func readEngineRPM(payload map[string]any, aliases []string) float64 {
 	return -1
 }
 
-func parseSignalKCurrent(payload map[string]any) (float64, float64) {
+func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 	current := lookupAnyMap(payload, "environment", "current")
 	if current == nil {
-		return -1, -1
+		return -1, -1, nil
 	}
 
 	drift := lookupNumber(current, "drift", "value")
@@ -627,7 +628,15 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64) {
 		setDeg = normalizeDegrees(setDeg)
 	}
 
-	return drift, setDeg
+	var driftImpactKts *float64
+	if lookupAnyMap(current, "driftImpact") != nil {
+		if value, ok := current["driftImpact"].(map[string]any)["value"].(float64); ok {
+			knots := roundTo1(value * metersPerSecondToKnots)
+			driftImpactKts = &knots
+		}
+	}
+
+	return drift, setDeg, driftImpactKts
 }
 
 func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electricalStateData, error) {

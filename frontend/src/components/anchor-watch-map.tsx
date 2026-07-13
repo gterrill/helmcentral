@@ -19,6 +19,8 @@ const SAT_HANDOFF_END_ZOOM = 10
 const WORLD_IMAGERY_MAX_ZOOM = 18
 const ANCHOR_WATCH_ZOOM_STORAGE_KEY = 'anchor-watch-map-zoom'
 const AIS_TRAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
+// Threshold above which the current is judged strong enough to visually call out.
+const HIGH_DRIFT_IMPACT_KTS = 1.5
 
 // World Imagery (Esri/Maxar aerial photography) fades in between zoom 9-10
 // rather than appearing abruptly, since its low-zoom tiles are lower quality.
@@ -99,6 +101,7 @@ export interface AnchorWatchMapProps {
   depthMeters: number | null
   currentDriftKts: number | null
   currentSetDeg: number | null
+  currentDriftImpactKts?: number | null
   distanceMeters: number | null
   bearingDeg: number | null
   isImperial: boolean
@@ -125,6 +128,7 @@ export function AnchorWatchMap({
   depthMeters,
   currentDriftKts,
   currentSetDeg,
+  currentDriftImpactKts = null,
   distanceMeters,
   bearingDeg: bearingDegProp,
   isImperial,
@@ -187,6 +191,9 @@ export function AnchorWatchMap({
     ? Math.round(bearingDeg(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon))
     : bearingDegProp
   const showRepositionBreadcrumbs = editMode === 'reposition'
+  const currentFavorable = currentDriftImpactKts !== null ? currentDriftImpactKts >= 0 : null
+  const currentColorClass = currentFavorable === null ? 'text-white' : currentFavorable ? 'text-teal-400' : 'text-amber-500'
+  const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
   const formatTransientDistance = useCallback(
     (distanceM: number) => {
       if (isImperial) {
@@ -938,12 +945,13 @@ export function AnchorWatchMap({
               <div className="flex items-center justify-end gap-2">
                 {value !== '0.0' && value !== '—' && (
                   <ArrowUp
-                    className="h-4 w-4 shrink-0 text-white"
+                    className={cn('shrink-0', currentColorClass, highDriftImpact ? 'h-5 w-5' : 'h-4 w-4')}
+                    strokeWidth={highDriftImpact ? 2.75 : 2}
                     style={{ transform: `rotate(${setDeg ?? 0}deg)` }}
                     aria-hidden="true"
                   />
                 )}
-                <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
+                <p className={cn('font-display tabular-nums leading-tight', currentColorClass)} style={{ fontSize: '1.1rem' }}>
                   {value}
                   <span className="ml-0.5 text-[11px] text-white/80">{unit}</span>
                 </p>

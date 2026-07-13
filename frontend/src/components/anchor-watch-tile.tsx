@@ -16,6 +16,7 @@ interface AnchorWatchTileProps {
   depthMeters: number | null
   currentDriftKts: number | null
   currentSetDeg: number | null
+  currentDriftImpactKts?: number | null
   isImperial: boolean
   vesselHeadingDeg: number | null
   vesselTrail: () => TrailPoint[]
@@ -34,6 +35,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   depthMeters,
   currentDriftKts,
   currentSetDeg,
+  currentDriftImpactKts = null,
   isImperial,
   vesselHeadingDeg,
   vesselTrail,
@@ -130,6 +132,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
           depthMeters={depthMeters}
           currentDriftKts={currentDriftKts}
           currentSetDeg={currentSetDeg}
+          currentDriftImpactKts={currentDriftImpactKts}
           distanceMeters={distanceMeters}
           bearingDeg={bearingDeg}
           isImperial={isImperial}

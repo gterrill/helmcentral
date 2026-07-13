@@ -34,6 +34,7 @@ type vesselStateData struct {
 	Depth                       float64
 	CurrentDriftKts             float64
 	CurrentSetDeg               float64
+	CurrentDriftImpactKts       *float64
 	Latitude                    float64
 	Longitude                   float64
 	GNSSQualityIndicator        int
@@ -349,6 +350,7 @@ func vesselState(c echo.Context) error {
 		"depth":                          state.Depth,
 		"current_drift_kts":              state.CurrentDriftKts,
 		"current_set_deg":                state.CurrentSetDeg,
+		"current_drift_impact_kts":       state.CurrentDriftImpactKts,
 		"latitude":                       state.Latitude,
 		"longitude":                      state.Longitude,
 		"gnss_quality_indicator":         state.GNSSQualityIndicator,

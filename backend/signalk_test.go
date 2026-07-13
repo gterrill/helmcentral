@@ -47,7 +47,7 @@ func TestParseSignalKCurrent_ReadsSetTrueAndDrift(t *testing.T) {
 		},
 	}
 
-	drift, setDeg := parseSignalKCurrent(payload)
+	drift, setDeg, _ := parseSignalKCurrent(payload)
 	if !approxEqual(drift, 1.2, 0.05) {
 		t.Fatalf("expected drift ~1.2 kt, got %v", drift)
 	}
@@ -66,9 +66,43 @@ func TestParseSignalKCurrent_DoesNotTreatSetMagneticAsTrue(t *testing.T) {
 		},
 	}
 
-	_, setDeg := parseSignalKCurrent(payload)
+	_, setDeg, _ := parseSignalKCurrent(payload)
 	if setDeg != -1 {
 		t.Fatalf("expected -1 (no reliable true bearing) when only setMagnetic is present, got %v", setDeg)
+	}
+}
+
+func TestParseSignalKCurrent_ReadsDriftImpact(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"drift":       map[string]any{"value": 0.5},
+				"driftImpact": map[string]any{"value": -0.643}, // m/s -> ~-1.2 kt
+			},
+		},
+	}
+
+	_, _, driftImpactKts := parseSignalKCurrent(payload)
+	if driftImpactKts == nil {
+		t.Fatalf("expected driftImpactKts to be present")
+	}
+	if !approxEqual(*driftImpactKts, -1.2, 0.05) {
+		t.Fatalf("expected driftImpactKts ~-1.2 kt, got %v", *driftImpactKts)
+	}
+}
+
+func TestParseSignalKCurrent_NilDriftImpactWhenMissing(t *testing.T) {
+	payload := map[string]any{
+		"environment": map[string]any{
+			"current": map[string]any{
+				"drift": map[string]any{"value": 0.5},
+			},
+		},
+	}
+
+	_, _, driftImpactKts := parseSignalKCurrent(payload)
+	if driftImpactKts != nil {
+		t.Fatalf("expected nil driftImpactKts when driftImpact is absent, got %v", *driftImpactKts)
 	}
 }
 

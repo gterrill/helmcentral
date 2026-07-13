@@ -12,6 +12,7 @@ interface AnchorWatchDrawerProps {
   depthMeters: number | null
   currentDriftKts: number | null
   currentSetDeg: number | null
+  currentDriftImpactKts?: number | null
   distanceMeters: number | null
   bearingDeg: number | null
   anchorSetAt?: never  // removed — motoring track fetched by map on reposition
@@ -39,6 +40,7 @@ export function AnchorWatchDrawer({
   depthMeters,
   currentDriftKts,
   currentSetDeg,
+  currentDriftImpactKts = null,
   distanceMeters,
   bearingDeg,
   vesselTrail,
@@ -76,6 +78,7 @@ export function AnchorWatchDrawer({
           depthMeters={depthMeters}
           currentDriftKts={currentDriftKts}
           currentSetDeg={currentSetDeg}
+          currentDriftImpactKts={currentDriftImpactKts}
           distanceMeters={distanceMeters}
           bearingDeg={bearingDeg}
           isImperial={isImperial}

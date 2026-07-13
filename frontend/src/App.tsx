@@ -162,6 +162,7 @@ export function App() {
     depth,
     currentDriftKts,
     currentSetDeg,
+    currentDriftImpactKts,
     navigationState,
     latitude,
     longitude,
@@ -286,6 +287,7 @@ export function App() {
             windSpeedApparentKts={windSpeedApparentKts}
             currentSetDeg={currentSetDeg}
             currentDriftKts={currentDriftKts}
+            currentDriftImpactKts={currentDriftImpactKts}
             maxGust10mKts={maxGust10mKts}
             maxGust1hKts={maxGust1hKts}
           />
@@ -332,6 +334,7 @@ export function App() {
             depthMeters={depth}
             currentDriftKts={currentDriftKts}
             currentSetDeg={currentSetDeg}
+            currentDriftImpactKts={currentDriftImpactKts}
             isImperial={isImperialDistance}
             vesselHeadingDeg={headingTrue}
             vesselTrail={getSelfTrail}
@@ -524,6 +527,7 @@ export function App() {
               depthMeters={depth}
               currentDriftKts={currentDriftKts}
               currentSetDeg={currentSetDeg}
+              currentDriftImpactKts={currentDriftImpactKts}
               distanceMeters={anchorWatch.distanceMeters}
               bearingDeg={anchorWatch.bearingDeg}
               vesselTrail={getSelfTrail}

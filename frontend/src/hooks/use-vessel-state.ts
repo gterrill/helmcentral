@@ -6,6 +6,7 @@ interface VesselState {
   depth: number
   current_drift_kts: number
   current_set_deg: number
+  current_drift_impact_kts: number | null
   latitude: number
   longitude: number
   gnss_quality_indicator: number
@@ -36,6 +37,7 @@ export function useVesselState(refreshInterval: number) {
   const [depth, setDepth] = useState<number | null>(null)
   const [currentDriftKts, setCurrentDriftKts] = useState<number | null>(null)
   const [currentSetDeg, setCurrentSetDeg] = useState<number | null>(null)
+  const [currentDriftImpactKts, setCurrentDriftImpactKts] = useState<number | null>(null)
   const [navigationState, setNavigationState] = useState<string | null>(null)
   const [latitude, setLatitude] = useState<number | null>(null)
   const [longitude, setLongitude] = useState<number | null>(null)
@@ -80,6 +82,7 @@ export function useVesselState(refreshInterval: number) {
 
         setCurrentDriftKts(typeof data.current_drift_kts === 'number' && data.current_drift_kts >= 0 ? data.current_drift_kts : null)
         setCurrentSetDeg(typeof data.current_set_deg === 'number' && data.current_set_deg >= 0 ? data.current_set_deg : null)
+        setCurrentDriftImpactKts(typeof data.current_drift_impact_kts === 'number' ? data.current_drift_impact_kts : null)
 
         setNavigationState(typeof data.status === 'string' && data.status !== '' ? data.status : null)
 
@@ -126,6 +129,7 @@ export function useVesselState(refreshInterval: number) {
     depth,
     currentDriftKts,
     currentSetDeg,
+    currentDriftImpactKts,
     navigationState,
     latitude,
     longitude,

@@ -4,20 +4,22 @@ import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode }
 import { Tile } from '@/components/ui/tile'
 import { WindCompass } from '@/components/wind-compass'
 import { formatHeading } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 type WindMetricCardProps = {
   title: string
   value: ReactNode
   align?: 'left' | 'right'
   className?: string
+  valueClassName?: string
   style?: CSSProperties
   valueFirst?: boolean
 }
 
-function WindMetricCard({ title, value, align = 'left', className = '', style, valueFirst = false }: WindMetricCardProps) {
+function WindMetricCard({ title, value, align = 'left', className = '', valueClassName, style, valueFirst = false }: WindMetricCardProps) {
   const alignmentClass = align === 'right' ? 'items-end text-right' : 'items-start text-left'
   const label = <p key="label" className="text-[10px] leading-none uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
-  const reading = <p key="value" className="font-display text-2xl leading-[0.86] text-gauge-primary md:text-3xl">{value}</p>
+  const reading = <p key="value" className={cn('font-display text-2xl leading-[0.86] text-gauge-primary md:text-3xl', valueClassName)}>{value}</p>
 
   return (
     <div
@@ -84,6 +86,9 @@ function computeWindMasks({ width, height, compassBox, topCardW, bottomCardW, ca
 const WIND_MOBILE_MASKS = computeWindMasks(WIND_MOBILE_CFG)
 const WIND_DESKTOP_MASKS = computeWindMasks(WIND_DESKTOP_CFG)
 
+// Threshold above which the current is judged strong enough to visually call out.
+const HIGH_DRIFT_IMPACT_KTS = 1.5
+
 /** Scales a fixed-size design down (never up) to fit whatever width its column ends up with. */
 function useFitScale(designWidth: number) {
   const ref = useRef<HTMLDivElement>(null)
@@ -110,6 +115,7 @@ type WindGaugeClusterProps = {
   driftLabel: ReactNode
   gust10mLabel: ReactNode
   gust1hLabel: ReactNode
+  currentColorClass: string
   headingTrue: number | null
   windAngleApparentDeg: number | null
   windSide: 'port' | 'starboard' | null
@@ -119,7 +125,7 @@ type WindGaugeClusterProps = {
 
 function WindGaugeCluster({
   cfg, masks, visibilityClassName,
-  setValue, driftLabel, gust10mLabel, gust1hLabel,
+  setValue, driftLabel, gust10mLabel, gust1hLabel, currentColorClass,
   headingTrue, windAngleApparentDeg, windSide, windAngleRelativeDeg, windSpeedApparentKts,
 }: WindGaugeClusterProps) {
   const [fitRef, scale] = useFitScale(cfg.width)
@@ -144,11 +150,11 @@ function WindGaugeCluster({
           </div>
 
           <div className="self-end justify-self-start">
-            <WindMetricCard title="SET" value={setValue} valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.bl }} />
+            <WindMetricCard title="SET" value={setValue} valueClassName={currentColorClass} valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.bl }} />
           </div>
 
           <div className="self-end justify-self-end">
-            <WindMetricCard title="DRIFT" value={driftLabel} align="right" valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.br }} />
+            <WindMetricCard title="DRIFT" value={driftLabel} valueClassName={currentColorClass} align="right" valueFirst style={{ width: cfg.bottomCardW, height: cfg.cardH, ...masks.br }} />
           </div>
         </div>
 
@@ -176,6 +182,7 @@ export interface WindTileProps {
   windSpeedApparentKts: number | null
   currentSetDeg: number | null
   currentDriftKts: number | null
+  currentDriftImpactKts: number | null
   maxGust10mKts: number | null
   maxGust1hKts: number | null
 }
@@ -188,12 +195,16 @@ export const WindTile = memo(function WindTile({
   windSpeedApparentKts,
   currentSetDeg,
   currentDriftKts,
+  currentDriftImpactKts,
   maxGust10mKts,
   maxGust1hKts,
 }: WindTileProps) {
   const setDirectionLabel = currentSetDeg !== null ? formatHeading(currentSetDeg).split(' ').slice(1).join(' ') : '—'
   const setDegreesLabel = currentSetDeg !== null ? `${Math.round(((currentSetDeg % 360) + 360) % 360)}°` : '—'
   const setArrowRotation = currentSetDeg !== null ? ((currentSetDeg % 360) + 360) % 360 : 0
+  const currentFavorable = currentDriftImpactKts !== null ? currentDriftImpactKts >= 0 : null
+  const currentColorClass = currentFavorable === null ? '' : currentFavorable ? 'text-gauge-secondary' : 'text-amber-600'
+  const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
   const driftLabel = currentDriftKts !== null ? (
     <>
       {currentDriftKts.toFixed(1)}
@@ -218,10 +229,14 @@ export const WindTile = memo(function WindTile({
       <span className="inline-flex items-center gap-2">
         <span>{setDegreesLabel}</span>
         <span
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 text-muted-foreground"
+          className={cn('inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70', currentColorClass || 'text-muted-foreground')}
           title={`Set direction ${setDirectionLabel}`}
         >
-          <ArrowUp className="h-4 w-4" style={{ transform: `rotate(${setArrowRotation}deg)` }} />
+          <ArrowUp
+            className={highDriftImpact ? 'h-5 w-5' : 'h-4 w-4'}
+            strokeWidth={highDriftImpact ? 2.75 : 2}
+            style={{ transform: `rotate(${setArrowRotation}deg)` }}
+          />
         </span>
       </span>
     )
@@ -237,6 +252,7 @@ export const WindTile = memo(function WindTile({
         driftLabel={driftLabel}
         gust10mLabel={gust10mLabel}
         gust1hLabel={gust1hLabel}
+        currentColorClass={currentColorClass}
         headingTrue={headingTrue}
         windAngleApparentDeg={windAngleApparentDeg}
         windSide={windSide}
@@ -252,6 +268,7 @@ export const WindTile = memo(function WindTile({
         driftLabel={driftLabel}
         gust10mLabel={gust10mLabel}
         gust1hLabel={gust1hLabel}
+        currentColorClass={currentColorClass}
         headingTrue={headingTrue}
         windAngleApparentDeg={windAngleApparentDeg}
         windSide={windSide}
