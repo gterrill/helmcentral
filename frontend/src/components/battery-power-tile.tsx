@@ -1,6 +1,5 @@
 import { BatteryCharging, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning } from 'lucide-react'
 import { memo } from 'react'
-import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 
 export interface BatteryPowerTileProps {
@@ -166,30 +165,6 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
             {chargeRateLabel}
             <span className="ml-1 text-xl text-muted-foreground">%/hr</span>
           </p>
-        </div>
-      </div>
-
-      <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-        <div className="flex items-center justify-between text-sm uppercase tracking-[0.16em] text-muted-foreground">
-          <div className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
-            Hot Water
-          </div>
-          <span className="font-semibold">Off</span>
-        </div>
-        <div className="mt-2 grid grid-cols-4 gap-2">
-          <Button variant="outline" size="sm" className="h-9 text-xs">
-            1 HR
-          </Button>
-          <Button variant="outline" size="sm" className="h-9 text-xs">
-            1.5 HR
-          </Button>
-          <Button variant="outline" size="sm" className="h-9 text-xs">
-            2 HR
-          </Button>
-          <Button variant="outline" size="sm" className="h-9 text-xs">
-            ON
-          </Button>
         </div>
       </div>
     </Tile>

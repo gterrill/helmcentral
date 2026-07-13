@@ -14,6 +14,7 @@ import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import { AlternatorTile } from '@/components/alternator-tile'
 import { BatteryPowerTile } from '@/components/battery-power-tile'
+import { HotWaterTile } from '@/components/hot-water-tile'
 import { DepthTideTile } from '@/components/depth-tide-tile'
 import { PositionTile } from '@/components/position-tile'
 import { TodayNowTile } from '@/components/today-now-tile'
@@ -401,6 +402,8 @@ export function App() {
         )
       case 'czone-switches':
         return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
+      case 'hot-water':
+        return <HotWaterTile />
       default:
         return null
     }

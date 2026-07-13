@@ -13,6 +13,7 @@ export const DASHBOARD_WIDGET_IDS = [
   'alternator',
   'generator',
   'czone-switches',
+  'hot-water',
 ] as const
 
 export type DashboardWidgetId = typeof DASHBOARD_WIDGET_IDS[number]
@@ -32,6 +33,7 @@ export const DASHBOARD_WIDGET_LABELS: Record<DashboardWidgetId, string> = {
   'alternator': 'Alternator',
   'generator': 'Generator',
   'czone-switches': 'Switches',
+  'hot-water': 'Hot Water',
 }
 
 export interface DashboardLayoutItem {
