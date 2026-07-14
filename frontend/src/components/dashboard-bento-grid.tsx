@@ -96,6 +96,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       cols={12}
       rowHeight={32}
       margin={[16, 16]}
+      containerPadding={[0, 0]}
       isDraggable={editing}
       isResizable={editing}
       draggableHandle=".bento-drag-handle"
