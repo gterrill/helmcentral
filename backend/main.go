@@ -115,6 +115,15 @@ func main() {
 	}
 	globalTileCache = tc
 
+	// Nearby-vessel contact store (backs the "seen before" history on the
+	// Nearby Vessels tile). Fail fast on open error, same reasoning as the
+	// tile cache above.
+	ncs, err := newNearbyContactStore(nearbyContactsDBPath())
+	if err != nil {
+		log.Fatalf("failed to open nearby contacts store: %v", err)
+	}
+	globalNearbyContactStore = ncs
+
 	// World imagery HTTP client for tile fetches (with timeout to prevent hangs).
 	worldImageryClient := newWorldImageryHTTPClient()
 
@@ -124,6 +133,7 @@ func main() {
 	e.GET("/api/electrical-state", electricalState)
 	e.GET("/api/tanks-state", tanksState)
 	e.GET("/api/nearby-vessels", nearbyVessels)
+	e.GET("/api/nearby-vessels/:key/sightings", getNearbyVesselSightingsHandler(globalNearbyContactStore))
 	e.GET("/api/weather-today", weatherToday)
 	e.GET("/api/weather-forecast", weatherForecast)
 	e.GET("/api/tide-today", tideToday)
@@ -476,6 +486,7 @@ func tanksState(c echo.Context) error {
 
 type nearbyVessel struct {
 	Name       string   `json:"name"`
+	Mmsi       string   `json:"mmsi,omitempty"`
 	RangeFt    int      `json:"range_ft"`
 	AgeSeconds int      `json:"age_seconds"`
 	SogKnots   *float64 `json:"sog_knots,omitempty"`
@@ -509,17 +520,17 @@ func nearbyVessels(c echo.Context) error {
 		if selfErr == nil && state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
 			nearby, nearbyErr := fetchSignalKNearbyVessels(signalkURL, vesselsPath, state.Latitude, state.Longitude, now, excludedNames)
 			if nearbyErr == nil {
-				names := make([]string, 0, len(nearby))
-				for _, v := range nearby {
-					names = append(names, v.Name)
-				}
-
-				history := queryInfluxNearbyVesselHistory(names, now)
-				for i := range nearby {
-					if summary, ok := history[nearby[i].Name]; ok {
-						nearby[i].SeenCount = summary.SeenCount
-						if !summary.LastSeenAt.IsZero() {
-							nearby[i].LastSeenAt = summary.LastSeenAt.UTC().Format(time.RFC3339)
+				if globalNearbyContactStore != nil {
+					for i := range nearby {
+						key := vesselContactKey(nearby[i].Mmsi, nearby[i].Name)
+						seenCount, lastSeenAt, summaryErr := globalNearbyContactStore.summary(key)
+						if summaryErr != nil {
+							log.Printf("Failed to read nearby vessel contact summary for %s: %v", key, summaryErr)
+							continue
+						}
+						nearby[i].SeenCount = seenCount
+						if !lastSeenAt.IsZero() {
+							nearby[i].LastSeenAt = lastSeenAt.Format(time.RFC3339)
 						}
 					}
 				}

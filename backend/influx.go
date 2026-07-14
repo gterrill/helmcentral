@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"math"
-	"sort"
 	"strings"
 	"time"
 
@@ -15,11 +13,6 @@ import (
 type depthTrendPoint struct {
 	Time   time.Time `json:"time"`
 	DepthM float64   `json:"depth_m"`
-}
-
-type nearbyVesselEncounterSummary struct {
-	SeenCount  int
-	LastSeenAt time.Time
 }
 
 func newInfluxClient() (influxdb2.Client, string, string, bool) {
@@ -513,168 +506,6 @@ func trimEnvValue(value string) string {
 	trimmed := strings.TrimSpace(value)
 	trimmed = strings.Trim(trimmed, `"`)
 	return strings.TrimSpace(trimmed)
-}
-
-func parseDurationEnv(key string, fallback time.Duration) time.Duration {
-	value := trimEnvValue(getEnv(key, ""))
-	if value == "" {
-		return fallback
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	return parsed
-}
-
-func splitCSVEnv(key string, fallback []string) []string {
-	value := trimEnvValue(getEnv(key, ""))
-	if value == "" {
-		return fallback
-	}
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	if len(result) == 0 {
-		return fallback
-	}
-	return result
-}
-
-func summarizeEncounterSessions(timestamps []time.Time, now time.Time, sessionGap, activeWindow time.Duration) nearbyVesselEncounterSummary {
-	if len(timestamps) == 0 {
-		return nearbyVesselEncounterSummary{}
-	}
-
-	copyTimes := make([]time.Time, 0, len(timestamps))
-	seen := make(map[time.Time]struct{}, len(timestamps))
-	for _, ts := range timestamps {
-		if ts.IsZero() {
-			continue
-		}
-		t := ts.UTC().Truncate(time.Second)
-		if _, ok := seen[t]; ok {
-			continue
-		}
-		seen[t] = struct{}{}
-		copyTimes = append(copyTimes, t)
-	}
-	if len(copyTimes) == 0 {
-		return nearbyVesselEncounterSummary{}
-	}
-
-	sort.Slice(copyTimes, func(i, j int) bool {
-		return copyTimes[i].Before(copyTimes[j])
-	})
-
-	type span struct {
-		start time.Time
-		end   time.Time
-	}
-	sessions := []span{{start: copyTimes[0], end: copyTimes[0]}}
-	for i := 1; i < len(copyTimes); i++ {
-		last := &sessions[len(sessions)-1]
-		if copyTimes[i].Sub(last.end) > sessionGap {
-			sessions = append(sessions, span{start: copyTimes[i], end: copyTimes[i]})
-			continue
-		}
-		last.end = copyTimes[i]
-	}
-
-	summary := nearbyVesselEncounterSummary{}
-	if len(sessions) == 0 {
-		return summary
-	}
-
-	latest := sessions[len(sessions)-1]
-	currentActive := latest.end.After(now.Add(-activeWindow))
-	if currentActive {
-		summary.SeenCount = len(sessions) - 1
-		if len(sessions) >= 2 {
-			summary.LastSeenAt = sessions[len(sessions)-2].end
-		}
-		return summary
-	}
-
-	summary.SeenCount = len(sessions)
-	summary.LastSeenAt = latest.end
-	return summary
-}
-
-func queryInfluxNearbyVesselHistory(vesselNames []string, now time.Time) map[string]nearbyVesselEncounterSummary {
-	out := make(map[string]nearbyVesselEncounterSummary)
-	if len(vesselNames) == 0 {
-		return out
-	}
-
-	client, org, bucket, ok := newInfluxClient()
-	if !ok {
-		return out
-	}
-	defer client.Close()
-
-	measurement := trimEnvValue(getEnv("INFLUX_NEARBY_HISTORY_MEASUREMENT", "navigation.position"))
-	lookback := trimEnvValue(getEnv("INFLUX_NEARBY_HISTORY_LOOKBACK", "365d"))
-	nameTags := splitCSVEnv("INFLUX_NEARBY_HISTORY_NAME_TAGS", []string{"name", "vessel_name", "design_name", "context"})
-	sessionGap := parseDurationEnv("INFLUX_NEARBY_HISTORY_SESSION_GAP", 6*time.Hour)
-	activeWindow := parseDurationEnv("INFLUX_NEARBY_HISTORY_ACTIVE_WINDOW", 2*time.Hour)
-
-	queryAPI := client.QueryAPI(org)
-	loggedInfluxError := false
-
-	for _, vesselName := range vesselNames {
-		normalizedName := strings.TrimSpace(strings.ToUpper(vesselName))
-		if normalizedName == "" {
-			continue
-		}
-
-		var timestamps []time.Time
-		for _, nameTag := range nameTags {
-			flux := fmt.Sprintf(
-				`from(bucket: %q) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %q and (r._field == "lat" or r._field == "lon" or r._field == "latitude" or r._field == "longitude")) |> filter(fn: (r) => strings.toUpper(v: string(v: r[%q])) == %q) |> keep(columns: ["_time"]) |> sort(columns: ["_time"], desc: false)`,
-				bucket, lookback, measurement, nameTag, normalizedName,
-			)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-			result, err := queryAPI.Query(ctx, `import "strings" `+flux)
-			if err != nil {
-				cancel()
-				if !loggedInfluxError {
-					log.Printf("nearby-vessels history: influx query unavailable, assuming zero prior contacts: %v", err)
-					loggedInfluxError = true
-				}
-				break
-			}
-
-			var found []time.Time
-			for result.Next() {
-				found = append(found, result.Record().Time())
-			}
-			result.Close()
-			cancel()
-			if result.Err() != nil {
-				if !loggedInfluxError {
-					log.Printf("nearby-vessels history: influx result error, assuming zero prior contacts: %v", result.Err())
-					loggedInfluxError = true
-				}
-				break
-			}
-
-			if len(found) > 0 {
-				timestamps = found
-				break
-			}
-		}
-
-		out[vesselName] = summarizeEncounterSessions(timestamps, now, sessionGap, activeWindow)
-	}
-
-	return out
 }
 
 func isRecentTimestamp(value string, maxAge time.Duration) bool {

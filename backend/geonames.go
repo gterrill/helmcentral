@@ -27,6 +27,26 @@ type placeNameCacheEntry struct {
 
 var placeNameCache = &placeNameCacheStore{data: make(map[string]placeNameCacheEntry)}
 
+// cachedPlaceName returns the cached place name nearest (lat, lon) at the
+// same 0.5-degree rounding precision the /api/place-name handler already
+// uses, or "" on a cache miss. It never makes a GeoNames HTTP call itself -
+// callers that need a "best effort, never block" geoname (like the nearby-
+// vessel contact recorder) use this instead of placeName's live lookup,
+// relying on the frontend's regular /api/place-name polling to keep the
+// cache warm.
+func cachedPlaceName(lat, lon float64) string {
+	roundedLat := math.Round(lat*2) / 2
+	roundedLng := math.Round(lon*2) / 2
+	cacheKey := fmt.Sprintf("%.1f,%.1f", roundedLat, roundedLng)
+
+	placeNameCache.mu.RLock()
+	defer placeNameCache.mu.RUnlock()
+	if cached, ok := placeNameCache.data[cacheKey]; ok && time.Since(cached.cachedAt) < placeNameCacheTTL {
+		return cached.name
+	}
+	return ""
+}
+
 type geoNamesResponse struct {
 	Geonames []struct {
 		Name        string `json:"name"`

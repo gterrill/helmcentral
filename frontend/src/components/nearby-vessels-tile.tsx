@@ -1,9 +1,12 @@
 import { Ship } from 'lucide-react'
-import { memo } from 'react'
+import { memo, useState } from 'react'
 
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tile } from '@/components/ui/tile'
 import type { DistanceUnits } from '@/config/app-config'
+import { useVesselSightings, type VesselSighting } from '@/hooks/use-vessel-sightings'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
+import { formatCoordinate } from '@/lib/format'
 
 function formatAge(ageSeconds: number) {
   if (ageSeconds < 60) {
@@ -39,6 +42,78 @@ function formatLastSeen(lastSeenAt: string, nowMs = Date.now()) {
   return `${days}d ago`
 }
 
+// vesselContactKey mirrors the backend's vesselContactKey resolution
+// (backend/nearby_contacts.go): MMSI when known, else a "name:<UPPER NAME>"
+// fallback. vessel.name already arrives upper-cased from the backend.
+function vesselContactKey(vessel: NearbyVessel): string {
+  return vessel.mmsi && vessel.mmsi.trim() !== '' ? vessel.mmsi : `name:${vessel.name}`
+}
+
+function formatSightingTime(seenAt: string) {
+  const parsedMs = Date.parse(seenAt)
+  if (!Number.isFinite(parsedMs)) {
+    return seenAt
+  }
+  return new Date(parsedMs).toLocaleString()
+}
+
+function navContextLabel(navContext: string) {
+  const normalized = navContext.trim().toLowerCase()
+  if (normalized === 'anchored' || normalized === 'moored') {
+    return 'At Anchor'
+  }
+  if (normalized === 'motoring' || normalized === 'underway' || normalized === 'under way using engine') {
+    return 'On Passage'
+  }
+  if (normalized === '') {
+    return ''
+  }
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
+function SightingRow({ sighting }: { sighting: VesselSighting }) {
+  const label = navContextLabel(sighting.nav_context)
+  return (
+    <div className="border-b border-border/60 py-1.5 last:border-b-0">
+      <p className="text-xs font-medium text-foreground">{formatSightingTime(sighting.seen_at)}</p>
+      <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+        {formatCoordinate(sighting.lat, true)} {formatCoordinate(sighting.lon, false)}
+      </p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">
+        {sighting.geoname ? <span>{sighting.geoname}</span> : null}
+        {sighting.geoname && label ? ' • ' : ''}
+        {label ? <span>{label}</span> : null}
+      </p>
+    </div>
+  )
+}
+
+function VesselHistoryPopover({ vessel, children }: { vessel: NearbyVessel; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const key = vesselContactKey(vessel)
+  const { sightings, loading } = useVesselSightings(open ? key : null)
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger className="text-left" aria-label={`View sighting history for ${vessel.name}`}>
+        {children}
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-2" align="start">
+        <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Sighting History</p>
+        {loading ? <p className="px-1 py-2 text-xs text-muted-foreground">Loading…</p> : null}
+        {!loading && sightings.length === 0 ? <p className="px-1 py-2 text-xs text-muted-foreground">No recorded sightings yet</p> : null}
+        {!loading && sightings.length > 0 ? (
+          <div className="max-h-64 overflow-y-auto px-1">
+            {sightings.map((sighting) => (
+              <SightingRow key={sighting.seen_at} sighting={sighting} />
+            ))}
+          </div>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 type NearbyVesselsTileProps = {
   vessels: NearbyVessel[]
   loading: boolean
@@ -64,10 +139,12 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
               <p className="truncate font-display text-lg uppercase leading-none text-foreground">{vessel.name}</p>
               <p className="mt-1 text-xs text-muted-foreground">({formatAge(vessel.age_seconds)})</p>
               {typeof vessel.seen_count === 'number' && vessel.seen_count > 0 ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Seen {vessel.seen_count}x before
-                  {typeof vessel.last_seen_at === 'string' && vessel.last_seen_at.trim() !== '' ? `, last ${formatLastSeen(vessel.last_seen_at)}` : ''}
-                </p>
+                <VesselHistoryPopover vessel={vessel}>
+                  <p className="mt-1 text-xs text-muted-foreground underline decoration-dotted underline-offset-2">
+                    Seen {vessel.seen_count}x before
+                    {typeof vessel.last_seen_at === 'string' && vessel.last_seen_at.trim() !== '' ? `, last ${formatLastSeen(vessel.last_seen_at)}` : ''}
+                  </p>
+                </VesselHistoryPopover>
               ) : null}
             </div>
             <div className="shrink-0 text-right">

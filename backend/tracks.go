@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -68,6 +69,7 @@ func sampleTracks(settingsPath string) {
 
 	signalkURL := buildSignalKURL(address, port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
+	vesselsPath := getEnv("SIGNALK_VESSELS_PATH", "/signalk/v1/api/vessels")
 
 	if signalkURL == "" {
 		return
@@ -83,6 +85,38 @@ func sampleTracks(settingsPath string) {
 		recordSelfTrailPoint(state.Latitude, state.Longitude)
 		if isMotoring(state.Status) {
 			recordMotoringPoint(state.Latitude, state.Longitude)
+		}
+
+		recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath, state)
+	}
+}
+
+// recordNearbyVesselContacts fetches the current set of nearby AIS vessels
+// and records a contact for each in globalNearbyContactStore. This runs
+// once per server-owned 5-second poll tick (ADR 0001: the server owns
+// sampling, independent of client polling), not from the /api/nearby-
+// vessels HTTP handler, which can be hit far more often by several open
+// browser tabs - recording from the handler would defeat "record once per
+// encounter."
+func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, state vesselStateData) {
+	if globalNearbyContactStore == nil {
+		return
+	}
+
+	signalkSelfName := fetchSignalKSelfName(signalkURL, vesselPath)
+	excludedNames := []string{signalkSelfName}
+
+	now := time.Now().UTC()
+	nearby, err := fetchSignalKNearbyVessels(signalkURL, vesselsPath, state.Latitude, state.Longitude, now, excludedNames)
+	if err != nil {
+		return
+	}
+
+	geoname := cachedPlaceName(state.Latitude, state.Longitude)
+	for _, v := range nearby {
+		key := vesselContactKey(v.Mmsi, v.Name)
+		if err := globalNearbyContactStore.recordContactIfNew(key, v.Name, v.Lat, v.Lon, geoname, state.Status, now); err != nil {
+			log.Printf("Failed to record nearby vessel contact for %s: %v", key, err)
 		}
 	}
 }

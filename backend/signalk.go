@@ -946,6 +946,17 @@ func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitu
 			continue
 		}
 
+		// SignalK servers are inconsistent about whether "mmsi" is a JSON
+		// string or a bare JSON number - this app's actual live server
+		// sends it as a string (confirmed live), so try that first and
+		// fall back to numeric for servers that don't.
+		mmsi := strings.TrimSpace(lookupString(vesselMap, "mmsi"))
+		if mmsi == "" {
+			if rawMmsi := lookupNumber(vesselMap, "mmsi"); rawMmsi >= 0 {
+				mmsi = fmt.Sprintf("%.0f", rawMmsi)
+			}
+		}
+
 		rangeFeet := int(math.Round(haversineMeters(selfLatitude, selfLongitude, latitude, longitude) * 3.28084))
 		if rangeFeet < 30 || rangeFeet > 16404 { // ignore <30ft (self) and >5km
 			continue
@@ -970,7 +981,7 @@ func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitu
 			sogKnots = &knots
 		}
 
-		vessels = append(vessels, nearbyVessel{Name: strings.ToUpper(name), RangeFt: rangeFeet, AgeSeconds: ageSeconds, SogKnots: sogKnots, Lat: latitude, Lon: longitude})
+		vessels = append(vessels, nearbyVessel{Name: strings.ToUpper(name), Mmsi: mmsi, RangeFt: rangeFeet, AgeSeconds: ageSeconds, SogKnots: sogKnots, Lat: latitude, Lon: longitude})
 	}
 
 	sort.Slice(vessels, func(i int, j int) bool { return vessels[i].RangeFt < vessels[j].RangeFt })

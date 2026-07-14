@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 export type NearbyVessel = {
   name: string
+  mmsi?: string
   range_ft: number
   age_seconds: number
   sog_knots?: number
@@ -39,6 +40,7 @@ export function useNearbyVessels(refreshInterval: number) {
               Number.isFinite(item.age_seconds),
           ).map((item) => ({
             ...item,
+            mmsi: typeof item.mmsi === 'string' && item.mmsi.trim() !== '' ? item.mmsi : undefined,
             lat: typeof item.lat === 'number' && Number.isFinite(item.lat) ? item.lat : undefined,
             lon: typeof item.lon === 'number' && Number.isFinite(item.lon) ? item.lon : undefined,
             seen_count: typeof item.seen_count === 'number' && Number.isFinite(item.seen_count) ? Math.max(0, Math.floor(item.seen_count)) : 0,

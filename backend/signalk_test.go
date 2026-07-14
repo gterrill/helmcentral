@@ -184,3 +184,77 @@ func TestFetchSignalKVesselState_FreezesLastTrustedPositionWhenConnectionLost(t 
 		t.Fatalf("expected position frozen at last trusted fix, got %.4f %.4f", state.Latitude, state.Longitude)
 	}
 }
+
+// TestFetchSignalKNearbyVessels_ParsesStringMMSI is a regression test for a
+// real bug found via live verification against this app's actual SignalK
+// server: it encodes "mmsi" as a JSON string (e.g. "316042555"), not a JSON
+// number. lookupNumber only handles float64/int, so it silently returned -1
+// for every real-world vessel and Mmsi was always "" - contact tracking was
+// unknowingly running entirely on the name-based fallback key. The fix must
+// read mmsi as a string first, since that's the real-world format.
+func TestFetchSignalKNearbyVessels_ParsesStringMMSI(t *testing.T) {
+	body := []byte(`{
+		"self": {
+			"mmsi": "518999323",
+			"name": "Pikorua",
+			"navigation": {"position": {"value": {"latitude": -21.595297, "longitude": 149.796444}}}
+		},
+		"urn:mrn:imo:mmsi:316042555": {
+			"mmsi": "316042555",
+			"name": "TAKU X",
+			"navigation": {"position": {"value": {"latitude": -21.592353, "longitude": 149.780485}}}
+		}
+	}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	vessels, err := fetchSignalKNearbyVessels(srv.URL, "/vessels", -21.595297, 149.796444, time.Now().UTC(), nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 1 {
+		t.Fatalf("expected 1 nearby vessel, got %d", len(vessels))
+	}
+	if vessels[0].Mmsi != "316042555" {
+		t.Fatalf("expected MMSI '316042555' parsed from a JSON string field, got %q", vessels[0].Mmsi)
+	}
+}
+
+// TestFetchSignalKNearbyVessels_ParsesNumericMMSI covers the other valid
+// SignalK encoding (a bare JSON number), so the fix doesn't regress a
+// server that sends mmsi that way instead.
+func TestFetchSignalKNearbyVessels_ParsesNumericMMSI(t *testing.T) {
+	body := []byte(`{
+		"self": {
+			"mmsi": 518999323,
+			"name": "Pikorua",
+			"navigation": {"position": {"value": {"latitude": -21.595297, "longitude": 149.796444}}}
+		},
+		"urn:mrn:imo:mmsi:316042555": {
+			"mmsi": 316042555,
+			"name": "TAKU X",
+			"navigation": {"position": {"value": {"latitude": -21.592353, "longitude": 149.780485}}}
+		}
+	}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	vessels, err := fetchSignalKNearbyVessels(srv.URL, "/vessels", -21.595297, 149.796444, time.Now().UTC(), nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 1 {
+		t.Fatalf("expected 1 nearby vessel, got %d", len(vessels))
+	}
+	if vessels[0].Mmsi != "316042555" {
+		t.Fatalf("expected MMSI '316042555' parsed from a JSON number field, got %q", vessels[0].Mmsi)
+	}
+}
