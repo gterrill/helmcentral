@@ -56,7 +56,15 @@ func zoneForPosition(state string, lat, lon float64) (zone string, ok bool) {
 
 // qldZoneForPosition uses verified real BOM marine zone names for
 // Queensland's east coast, north to south, plus a Gulf of Carpentaria
-// check on the west side.
+// check on the west side. Boundaries are the actual landmarks BOM's own
+// coastal waters forecasts name as each zone's extent (e.g. "Mackay
+// Coastal Waters Forecast: Bowen to St Lawrence", "Capricornia Coastal
+// Waters Forecast: St Lawrence to Burnett Heads" - bom.gov.au), not
+// round-number approximations - a vessel sitting between the old
+// approximate boundary and the real one would get warnings for the
+// wrong zone. Sharp Point (Peninsula Coast's northern extent) is the one
+// landmark left unverified; -10 (the state bounding box edge) stands in
+// for it since no vessel position here has depended on that edge yet.
 func qldZoneForPosition(lat, lon float64) (string, bool) {
 	// Gulf of Carpentaria (west side of Cape York Peninsula).
 	if lon < 142 && lat >= -17 && lat <= -11 {
@@ -69,15 +77,15 @@ func qldZoneForPosition(lat, lon float64) (string, bool) {
 	}
 
 	bands := []band{
-		{"Peninsula Coast", -12.5, -10},
-		{"Cooktown Coast", -15.5, -12.5},
-		{"Cairns Coast", -17.5, -15.5},
-		{"Townsville Coast", -19.5, -17.5},
-		{"Mackay Coast", -21.5, -19.5},
-		{"Capricornia Coast", -24.5, -21.5},
-		{"K'gari Coast", -26.0, -24.5},
-		{"Sunshine Coast Waters", -27.0, -26.0},
-		{"Gold Coast Waters", -28.0, -27.0},
+		{"Peninsula Coast", -14.17, -10},          // Sharp Point (unverified) to Cape Melville
+		{"Cooktown Coast", -16.09, -14.17},        // Cape Melville to Cape Tribulation
+		{"Cairns Coast", -18.27, -16.09},          // Cape Tribulation to Cardwell
+		{"Townsville Coast", -20.01, -18.27},      // Cardwell to Bowen
+		{"Mackay Coast", -22.35, -20.01},          // Bowen to St Lawrence
+		{"Capricornia Coast", -24.75, -22.35},     // St Lawrence to Burnett Heads/Sandy Cape
+		{"K'gari Coast", -25.93, -24.75},          // Burnett Heads/Sandy Cape to Double Island Point
+		{"Sunshine Coast Waters", -27.03, -25.93}, // Double Island Point to Cape Moreton
+		{"Gold Coast Waters", -28.17, -27.03},     // Cape Moreton to Point Danger
 	}
 
 	for _, b := range bands {
