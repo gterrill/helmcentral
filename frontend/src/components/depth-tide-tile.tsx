@@ -35,6 +35,10 @@ export const DepthTideTile = memo(function DepthTideTile({
     { isHigh: true, time: tide.high_tide_time, heightFt: tide.high_tide_height_ft },
     { isHigh: false, time: tide.low_tide_time, heightFt: tide.low_tide_height_ft },
   ].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+  const estimatedLowDepth =
+    depth !== null && tide.current_tide_height_ft >= 0 && tide.low_tide_height_ft >= 0
+      ? depth - (tide.current_tide_height_ft - tide.low_tide_height_ft) / 3.28084
+      : null
 
   return (
     <div onClick={onOpen} className={onOpen ? 'cursor-pointer transition-opacity hover:opacity-80' : undefined}>
@@ -42,10 +46,20 @@ export const DepthTideTile = memo(function DepthTideTile({
         <div className="mt-1 rounded-md border bg-background/60 px-3 py-3">
           <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
           <div className="mt-1 flex items-center gap-4">
-            <p className="shrink-0 font-display text-4xl text-gauge-secondary">
-              {depthValue}
-              <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
-            </p>
+            <div className="shrink-0">
+              <p className="font-display text-4xl text-gauge-secondary">
+                {depthValue}
+                <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
+              </p>
+              {estimatedLowDepth !== null && (
+                <p className="mt-1 text-xs text-foreground">
+                  <span className="text-muted-foreground">Est. low</span>{' '}
+                  <span className="font-semibold text-gauge-secondary">
+                    {(isImperialDistance ? estimatedLowDepth * 3.28084 : estimatedLowDepth).toFixed(1)} {tideUnit}
+                  </span>
+                </p>
+              )}
+            </div>
             {(navigationState === 'anchored' || navigationState === 'moored') && (
               <DepthSparkline
                 points={depthTrend.points}
