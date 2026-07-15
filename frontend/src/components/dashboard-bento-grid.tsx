@@ -108,7 +108,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
           key={w.id}
           className={cn('relative rounded-xl', editing && 'select-none outline-dashed outline-2 outline-primary/30')}
         >
-          {renderWidget(w.id)}
+          <div className="h-full [&>*]:h-full">{renderWidget(w.id)}</div>
           {editing && (
             <>
               <button

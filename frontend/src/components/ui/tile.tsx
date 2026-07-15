@@ -14,7 +14,7 @@ interface TileProps {
 
 export function Tile({ title, icon, className, titleClassName, titleExtra, children }: TileProps) {
   return (
-    <Card className={cn('gap-0 py-4', className)}>
+    <Card className={cn('h-full gap-0 py-4', className)}>
       <CardHeader className="flex-row items-center gap-2 space-y-0 px-4 pb-3">
         <CardTitle
           className={cn(
@@ -29,7 +29,7 @@ export function Tile({ title, icon, className, titleClassName, titleExtra, child
         {titleExtra && <CardAction className="static shrink-0">{titleExtra}</CardAction>}
       </CardHeader>
 
-      <CardContent className="px-4">{children}</CardContent>
+      <CardContent className="flex-1 px-4">{children}</CardContent>
     </Card>
   )
 }
