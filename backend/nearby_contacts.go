@@ -106,10 +106,30 @@ func (s *nearbyContactStore) close() error {
 // the gap timer resets on every tick the vessel stays in range - this is
 // what makes "record once per encounter" work, not a DB uniqueness
 // constraint.
+//
+// lastSeen is process-lifetime only, so on a cold cache (first tick after
+// process start for this vesselKey) it falls back to querying the database
+// for the vessel's actual most-recently-recorded seen_at via
+// lastRecordedSeenAt, rather than assuming "not in the map" means "never
+// seen." Without this, every backend restart would cause every
+// currently-visible vessel to look brand new to the in-memory map and get
+// falsely re-recorded as a new encounter, even if it had been continuously
+// in range for weeks.
 func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon float64, geoname, navContext string, now time.Time) error {
 	s.mu.Lock()
 	last, ok := s.lastSeen[vesselKey]
+	s.mu.Unlock()
+
+	if !ok {
+		dbLast, dbOk, err := s.lastRecordedSeenAt(vesselKey)
+		if err != nil {
+			return err
+		}
+		last, ok = dbLast, dbOk
+	}
 	isNewEncounter := !ok || now.Sub(last) > contactSessionGap
+
+	s.mu.Lock()
 	s.lastSeen[vesselKey] = now
 	s.mu.Unlock()
 
@@ -126,24 +146,83 @@ func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon
 	return nil
 }
 
-// summary returns the total number of recorded encounters and the most
-// recent seen_at for vesselKey. Replaces the old Influx-backed
-// queryInfluxNearbyVesselHistory + summarizeEncounterSessions path - no
-// session-gap aggregation is needed at read time, since sessions are now
-// discrete rows written once at contact time by recordContactIfNew.
-func (s *nearbyContactStore) summary(vesselKey string) (seenCount int, lastSeenAt time.Time, err error) {
+// lastRecordedSeenAt returns the most recent seen_at recorded for vesselKey
+// across all encounters (rows), or ok=false if there is no row at all for
+// it. Used by recordContactIfNew to recover the "was this vessel already
+// known" answer from the database on a cold in-memory cache (e.g. right
+// after a process restart), since the map alone can't distinguish "never
+// seen" from "seen before this process started."
+func (s *nearbyContactStore) lastRecordedSeenAt(vesselKey string) (time.Time, bool, error) {
 	var lastSeenUnix sql.NullInt64
 	row := s.db.QueryRow(
-		`SELECT COUNT(*), MAX(seen_at) FROM nearby_vessel_contacts WHERE vessel_key = ?`,
+		`SELECT MAX(seen_at) FROM nearby_vessel_contacts WHERE vessel_key = ?`,
 		vesselKey,
 	)
-	if err := row.Scan(&seenCount, &lastSeenUnix); err != nil {
+	if err := row.Scan(&lastSeenUnix); err != nil {
+		return time.Time{}, false, fmt.Errorf("read last recorded seen_at: %w", err)
+	}
+	if !lastSeenUnix.Valid {
+		return time.Time{}, false, nil
+	}
+	return time.Unix(lastSeenUnix.Int64, 0).UTC(), true, nil
+}
+
+// summary returns the number of encounters recorded for vesselKey prior to
+// the current, still-ongoing one, and the most recent seen_at among those
+// prior encounters (zero value if there are none).
+//
+// Contract: this assumes vesselKey is currently visible, i.e. the caller
+// already knows the vessel is present right now (today, the only caller is
+// the /api/nearby-vessels handler, iterating vessels it just received from
+// SignalK). Under that assumption, the single most-recently-recorded row
+// for this vessel is always the current, ongoing encounter - either
+// recordContactIfNew inserted it moments ago, or it's an older encounter
+// being silently continued (lastSeen resets but no new row is written) - so
+// it's excluded from both the count and lastSeenAt. A still-ongoing
+// encounter must never count as a sighting "before itself"; without this
+// exclusion, a vessel's very first-ever sighting would report seenCount=1
+// (its own just-inserted row) instead of 0.
+//
+// Deliberately NOT time-based (e.g. "is the latest row within some recent
+// window of now"): a boat docked continuously at a marina for 28 days has a
+// single row whose seen_at is the encounter's *start* time, which can be
+// weeks in the past. A recency check would incorrectly treat that
+// old-looking row as a distinct past encounter and start counting the
+// still-ongoing presence as a real prior sighting. Unconditionally dropping
+// the most-recent row - not based on its age - is what's correct given the
+// "vesselKey is currently visible" guarantee above. If that guarantee ever
+// stops holding for some future caller, this function's result for that
+// caller would be meaningless and it should not reuse this method as-is.
+func (s *nearbyContactStore) summary(vesselKey string) (seenCount int, lastSeenAt time.Time, err error) {
+	rows, err := s.db.Query(
+		`SELECT seen_at FROM nearby_vessel_contacts WHERE vessel_key = ? ORDER BY seen_at DESC`,
+		vesselKey,
+	)
+	if err != nil {
 		return 0, time.Time{}, fmt.Errorf("read nearby vessel contact summary: %w", err)
 	}
-	if lastSeenUnix.Valid {
-		lastSeenAt = time.Unix(lastSeenUnix.Int64, 0).UTC()
+	defer rows.Close()
+
+	var seenAts []int64
+	for rows.Next() {
+		var seenAtUnix int64
+		if err := rows.Scan(&seenAtUnix); err != nil {
+			return 0, time.Time{}, fmt.Errorf("scan nearby vessel contact summary row: %w", err)
+		}
+		seenAts = append(seenAts, seenAtUnix)
 	}
-	return seenCount, lastSeenAt, nil
+	if err := rows.Err(); err != nil {
+		return 0, time.Time{}, fmt.Errorf("iterate nearby vessel contact summary rows: %w", err)
+	}
+
+	if len(seenAts) == 0 {
+		return 0, time.Time{}, nil
+	}
+	prior := seenAts[1:]
+	if len(prior) == 0 {
+		return 0, time.Time{}, nil
+	}
+	return len(prior), time.Unix(prior[0], 0).UTC(), nil
 }
 
 // listSightings returns every recorded contact for vesselKey, newest first,

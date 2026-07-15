@@ -22,6 +22,19 @@ func newTestNearbyContactStore(t *testing.T) *nearbyContactStore {
 	return store
 }
 
+// countRows returns the raw row count for vesselKey, bypassing summary()'s
+// "exclude the current ongoing encounter" contract - used by tests that
+// want to assert how many rows recordContactIfNew actually inserted, as
+// opposed to summary()'s prior-encounters count.
+func countRows(t *testing.T, store *nearbyContactStore, vesselKey string) int {
+	t.Helper()
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM nearby_vessel_contacts WHERE vessel_key = ?`, vesselKey).Scan(&count); err != nil {
+		t.Fatalf("count rows for %s: %v", vesselKey, err)
+	}
+	return count
+}
+
 func TestRecordContactIfNew_SameVesselWithinSessionGapInsertsOnlyOneRow(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
@@ -38,12 +51,8 @@ func TestRecordContactIfNew_SameVesselWithinSessionGapInsertsOnlyOneRow(t *testi
 		t.Fatalf("recordContactIfNew (3rd tick): %v", err)
 	}
 
-	seenCount, _, err := store.summary("316042555")
-	if err != nil {
-		t.Fatalf("summary: %v", err)
-	}
-	if seenCount != 1 {
-		t.Fatalf("expected 1 row for a single encounter, got %d", seenCount)
+	if got := countRows(t, store, "316042555"); got != 1 {
+		t.Fatalf("expected 1 row for a single encounter, got %d", got)
 	}
 }
 
@@ -60,22 +69,84 @@ func TestRecordContactIfNew_AfterGapElapsedInsertsSecondRow(t *testing.T) {
 		t.Fatalf("recordContactIfNew (encounter 2): %v", err)
 	}
 
+	if got := countRows(t, store, "316042555"); got != 2 {
+		t.Fatalf("expected 2 rows for two distinct encounters, got %d", got)
+	}
+	// summary() reports the prior encounter (the first one), not the
+	// current ongoing one (the second), per its "exclude current" contract.
 	seenCount, lastSeenAt, err := store.summary("316042555")
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
-	if seenCount != 2 {
-		t.Fatalf("expected 2 rows for two distinct encounters, got %d", seenCount)
+	if seenCount != 1 {
+		t.Fatalf("expected seenCount 1 (the first encounter, prior to the current ongoing one), got %d", seenCount)
 	}
-	if !lastSeenAt.Equal(second) {
-		t.Fatalf("expected last seen at %s, got %s", second, lastSeenAt)
+	if !lastSeenAt.Equal(base) {
+		t.Fatalf("expected last seen at %s (the first, prior encounter), got %s", base, lastSeenAt)
 	}
 }
 
-func TestSummary_ReturnsCorrectCountAndLastSeen(t *testing.T) {
+// TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount is the
+// regression test for Bug 2: summary() must report encounters *prior to*
+// the current, still-ongoing one, not the raw total row count. With 3
+// distinct encounters recorded, the most recent one is the "current"
+// encounter and must be excluded, leaving 2 prior encounters with
+// lastSeenAt equal to the second-most-recent row's timestamp.
+// TestRecordContactIfNew_SurvivesProcessRestart is the regression test for
+// Bug 1: the in-memory lastSeen map is process-lifetime only, so a real
+// backend restart wipes it. Without falling back to the database on a cold
+// cache, the first poll tick after a restart would treat every
+// currently-visible vessel as brand new and insert a duplicate row, even
+// though the vessel has been continuously in range. This test simulates a
+// restart by closing the store and reopening a *new* store instance
+// pointed at the same DB file (so lastSeen starts genuinely empty, just
+// like after a real process restart) and recording the same vessel again
+// shortly after, well within contactSessionGap.
+func TestRecordContactIfNew_SurvivesProcessRestart(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.sqlite")
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	store1, err := newNearbyContactStore(dbPath)
+	if err != nil {
+		t.Fatalf("newNearbyContactStore (1st process): %v", err)
+	}
+	if err := store1.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+		t.Fatalf("recordContactIfNew (before restart): %v", err)
+	}
+	if err := store1.close(); err != nil {
+		t.Fatalf("close store1: %v", err)
+	}
+
+	// Simulate a restart: a brand new store instance means a genuinely
+	// empty in-memory lastSeen map, exactly like a real process restart.
+	store2, err := newNearbyContactStore(dbPath)
+	if err != nil {
+		t.Fatalf("newNearbyContactStore (2nd process): %v", err)
+	}
+	t.Cleanup(func() { _ = store2.close() })
+
+	// 5 seconds later, well within contactSessionGap - a real continuation
+	// of the same encounter, not a new one.
+	if err := store2.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(5*time.Second)); err != nil {
+		t.Fatalf("recordContactIfNew (after restart): %v", err)
+	}
+
+	var rowCount int
+	if err := store2.db.QueryRow(`SELECT COUNT(*) FROM nearby_vessel_contacts WHERE vessel_key = ?`, "316042555").Scan(&rowCount); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("expected 1 row to survive a restart within the session gap, got %d (restart falsely started a new encounter)", rowCount)
+	}
+}
+
+func TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
 
+	// Each recording is spaced more than contactSessionGap apart so each
+	// one lands as a distinct encounter (distinct row).
 	times := []time.Time{
 		base,
 		base.Add(1 * time.Hour),
@@ -91,12 +162,37 @@ func TestSummary_ReturnsCorrectCountAndLastSeen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
-	if seenCount != 3 {
-		t.Fatalf("expected seenCount 3, got %d", seenCount)
+	if seenCount != 2 {
+		t.Fatalf("expected seenCount 2 (3 total rows minus the current ongoing encounter), got %d", seenCount)
 	}
-	want := times[len(times)-1]
+	want := times[1] // second-most-recent row, i.e. the most recent *prior* encounter
 	if !lastSeenAt.Equal(want) {
 		t.Fatalf("expected lastSeenAt %s, got %s", want, lastSeenAt)
+	}
+}
+
+// TestSummary_SingleRowReturnsZeroPriorSightings is the regression test for
+// Bug 2's core symptom: a vessel's very first-ever sighting has exactly one
+// recorded row (its own current, ongoing encounter, inserted by the poller
+// moments ago) and no priors, so summary() must report 0/zero-time rather
+// than counting that row as a sighting of itself.
+func TestSummary_SingleRowReturnsZeroPriorSightings(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
+
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+		t.Fatalf("recordContactIfNew: %v", err)
+	}
+
+	seenCount, lastSeenAt, err := store.summary("316042555")
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if seenCount != 0 {
+		t.Fatalf("expected seenCount 0 for a vessel's first-ever (and only) sighting, got %d", seenCount)
+	}
+	if !lastSeenAt.IsZero() {
+		t.Fatalf("expected zero-value lastSeenAt for a vessel's first-ever sighting, got %s", lastSeenAt)
 	}
 }
 
