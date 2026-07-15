@@ -51,6 +51,41 @@ test('shows estimated depth at the next low tide, in imperial units', () => {
   expect(screen.getByText('11.1 ft')).toBeInTheDocument()
 })
 
+const risingTide: TideToday = { ...baseTide, tide_direction: 'Rising' }
+
+test('shows estimated depth at the next high tide when rising, in metric units', () => {
+  render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance={false}
+      navigationState="anchored"
+      depthTrend={emptyTrend}
+      tide={risingTide}
+    />,
+  )
+
+  // rise from current (3 ft) to high (5 ft) = 2 ft = 0.6096 m; 4 + 0.6096 = 4.6096 m
+  expect(screen.getByText('Est. high')).toBeInTheDocument()
+  expect(screen.getByText('4.6 m')).toBeInTheDocument()
+  expect(screen.queryByText('Est. low')).not.toBeInTheDocument()
+})
+
+test('shows estimated depth at the next high tide when rising, in imperial units', () => {
+  render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance
+      navigationState="anchored"
+      depthTrend={emptyTrend}
+      tide={risingTide}
+    />,
+  )
+
+  // depth 13.1 ft + (5 ft - 3 ft) rise = 15.1 ft
+  expect(screen.getByText('Est. high')).toBeInTheDocument()
+  expect(screen.getByText('15.1 ft')).toBeInTheDocument()
+})
+
 test('hides the estimate when depth or tide data is unavailable', () => {
   render(
     <DepthTideTile

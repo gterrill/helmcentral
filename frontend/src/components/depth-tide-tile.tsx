@@ -35,10 +35,15 @@ export const DepthTideTile = memo(function DepthTideTile({
     { isHigh: true, time: tide.high_tide_time, heightFt: tide.high_tide_height_ft },
     { isHigh: false, time: tide.low_tide_time, heightFt: tide.low_tide_height_ft },
   ].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
-  const estimatedLowDepth =
-    depth !== null && tide.current_tide_height_ft >= 0 && tide.low_tide_height_ft >= 0
+  const isRising = tide.tide_direction === 'Rising'
+  const estimatedExtremeDepth = isRising
+    ? depth !== null && tide.current_tide_height_ft >= 0 && tide.high_tide_height_ft >= 0
+      ? depth + (tide.high_tide_height_ft - tide.current_tide_height_ft) / 3.28084
+      : null
+    : depth !== null && tide.current_tide_height_ft >= 0 && tide.low_tide_height_ft >= 0
       ? depth - (tide.current_tide_height_ft - tide.low_tide_height_ft) / 3.28084
       : null
+  const estimatedExtremeLabel = isRising ? 'Est. high' : 'Est. low'
 
   return (
     <div onClick={onOpen} className={onOpen ? 'cursor-pointer transition-opacity hover:opacity-80' : undefined}>
@@ -51,11 +56,11 @@ export const DepthTideTile = memo(function DepthTideTile({
                 {depthValue}
                 <span className="ml-2 align-baseline text-xl text-muted-foreground">{depth !== null ? depthUnitLabel : 'unavailable'}</span>
               </p>
-              {estimatedLowDepth !== null && (
+              {estimatedExtremeDepth !== null && (
                 <p className="mt-1 text-xs text-foreground">
-                  <span className="text-muted-foreground">Est. low</span>{' '}
+                  <span className="text-muted-foreground">{estimatedExtremeLabel}</span>{' '}
                   <span className="font-semibold text-gauge-secondary">
-                    {(isImperialDistance ? estimatedLowDepth * 3.28084 : estimatedLowDepth).toFixed(1)} {tideUnit}
+                    {(isImperialDistance ? estimatedExtremeDepth * 3.28084 : estimatedExtremeDepth).toFixed(1)} {tideUnit}
                   </span>
                 </p>
               )}
@@ -86,9 +91,9 @@ export const DepthTideTile = memo(function DepthTideTile({
               {tide.tide_direction}
             </span>
           </div>
-          <div className="mt-2 flex flex-row flex-wrap items-center gap-x-4 gap-y-1">
+          <div className="mt-2 flex flex-row items-center justify-between gap-x-2">
             {tideExtremes.map((extreme) => (
-              <p key={extreme.isHigh ? 'high' : 'low'} className="inline-flex items-center gap-1.5 text-xs text-foreground">
+              <p key={extreme.isHigh ? 'high' : 'low'} className="inline-flex shrink-0 items-center gap-1.5 text-xs text-foreground">
                 {extreme.isHigh ? (
                   <ArrowUp className="h-3.5 w-3.5 text-gauge-secondary" />
                 ) : (
