@@ -22,6 +22,25 @@ import (
 // every 5 seconds instead of once per encounter.
 const contactSessionGap = 1 * time.Hour
 
+// contactSessionMoveThresholdMeters is the "hasn't relocated" distance
+// tolerance applied once contactSessionGap has already been exceeded: if
+// the vessel's current position is within this many meters of where it was
+// last seen, the gap is still treated as a continuation of the same
+// encounter rather than a new sighting. This absorbs ordinary positional
+// noise for a vessel that hasn't actually moved - anchor swing, GPS drift,
+// marina berth positioning - so a routine AIS dropout while stationary
+// doesn't fragment one encounter into several.
+const contactSessionMoveThresholdMeters = 100.0
+
+// contactSessionMaxGapForPositionOverride bounds how long the position
+// override above can be trusted: beyond this gap, a contact is always a new
+// encounter regardless of how close its position is to where it was last
+// seen. A boat silent for a week that reappears in the same slip more
+// plausibly left and came back than stayed continuously the whole time;
+// without this cap, a boat's home berth would generate exactly one sighting
+// forever.
+const contactSessionMaxGapForPositionOverride = 24 * time.Hour
+
 // globalNearbyContactStore is the process-wide nearby-vessel contact store,
 // opened once in main() and shared by the track poller (writes) and the
 // /api/nearby-vessels + sightings handlers (reads).
@@ -31,17 +50,30 @@ func nearbyContactsDBPath() string {
 	return cacheFilePath("NEARBY_CONTACTS_DB_PATH", "data/nearby-contacts.sqlite")
 }
 
+// lastContact is the most recent seen-at time and position recorded for a
+// vessel, tracked in memory by nearbyContactStore.lastSeen and, on a cold
+// cache, recovered from the database by lastRecordedContact.
+// recordContactIfNew uses both fields together to decide whether a gap past
+// contactSessionGap should still count as the same encounter, per its
+// position-override rule.
+type lastContact struct {
+	seenAt time.Time
+	lat    float64
+	lon    float64
+}
+
 // nearbyContactStore is a SQLite-backed store of nearby-vessel contact
 // history, mirroring tile_cache.go's pattern for this app's other SQLite
 // usage. lastSeen tracks, in memory and for the process lifetime only, the
-// most recent tick at which each vessel was recorded - it's what lets
-// recordContactIfNew tell "still the same encounter" apart from "a new one
-// has started" without a database round trip on every poll tick.
+// most recent tick at which each vessel was recorded and where it was seen
+// - it's what lets recordContactIfNew tell "still the same encounter" apart
+// from "a new one has started" without a database round trip on every poll
+// tick.
 type nearbyContactStore struct {
 	db *sql.DB
 
 	mu       sync.Mutex
-	lastSeen map[string]time.Time
+	lastSeen map[string]lastContact
 }
 
 // nearbyContactRecord is a single row read back from listSightings, backing
@@ -92,7 +124,7 @@ func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
 		return nil, fmt.Errorf("create nearby_vessel_contacts vessel_key index: %w", err)
 	}
 
-	return &nearbyContactStore{db: db, lastSeen: make(map[string]time.Time)}, nil
+	return &nearbyContactStore{db: db, lastSeen: make(map[string]lastContact)}, nil
 }
 
 func (s *nearbyContactStore) close() error {
@@ -100,17 +132,30 @@ func (s *nearbyContactStore) close() error {
 }
 
 // recordContactIfNew records a contact for vesselKey at now, but only
-// inserts a new row if this is a new encounter: either the vessel hasn't
-// been seen before, or more than contactSessionGap has elapsed since it was
-// last seen. lastSeen[vesselKey] is always updated to now regardless, so
-// the gap timer resets on every tick the vessel stays in range - this is
-// what makes "record once per encounter" work, not a DB uniqueness
-// constraint.
+// inserts a new row if this is a new encounter. A contact is treated as a
+// continuation of the current encounter (no new row) if either:
+//   - it's within contactSessionGap of the last time this vessel was seen,
+//     regardless of position; or
+//   - the gap exceeds contactSessionGap but is still within
+//     contactSessionMaxGapForPositionOverride, and the vessel's current
+//     position is within contactSessionMoveThresholdMeters of where it was
+//     last seen - e.g. an AIS dropout while the vessel sits at anchor or a
+//     dock. Past contactSessionMaxGapForPositionOverride, a contact is
+//     always a new encounter regardless of position: a long enough silence
+//     is presumed to mean the vessel actually left and came back, not that
+//     it stayed continuously.
+//
+// Anything else - the vessel hasn't been seen before, or the gap exceeds
+// both thresholds above - is a new encounter. lastSeen[vesselKey] is always
+// updated to now and to the current position regardless, so the gap timer
+// (and the reference position for the move check) resets on every tick the
+// vessel stays in range - this is what makes "record once per encounter"
+// work, not a DB uniqueness constraint.
 //
 // lastSeen is process-lifetime only, so on a cold cache (first tick after
 // process start for this vesselKey) it falls back to querying the database
-// for the vessel's actual most-recently-recorded seen_at via
-// lastRecordedSeenAt, rather than assuming "not in the map" means "never
+// for the vessel's actual most-recently-recorded seen_at and position via
+// lastRecordedContact, rather than assuming "not in the map" means "never
 // seen." Without this, every backend restart would cause every
 // currently-visible vessel to look brand new to the in-memory map and get
 // falsely re-recorded as a new encounter, even if it had been continuously
@@ -121,16 +166,22 @@ func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon
 	s.mu.Unlock()
 
 	if !ok {
-		dbLast, dbOk, err := s.lastRecordedSeenAt(vesselKey)
+		dbLast, dbOk, err := s.lastRecordedContact(vesselKey)
 		if err != nil {
 			return err
 		}
 		last, ok = dbLast, dbOk
 	}
-	isNewEncounter := !ok || now.Sub(last) > contactSessionGap
+
+	gap := now.Sub(last.seenAt)
+	withinSessionGap := ok && gap <= contactSessionGap
+	withinMoveOverride := ok &&
+		gap <= contactSessionMaxGapForPositionOverride &&
+		haversineMeters(last.lat, last.lon, lat, lon) <= contactSessionMoveThresholdMeters
+	isNewEncounter := !withinSessionGap && !withinMoveOverride
 
 	s.mu.Lock()
-	s.lastSeen[vesselKey] = now
+	s.lastSeen[vesselKey] = lastContact{seenAt: now, lat: lat, lon: lon}
 	s.mu.Unlock()
 
 	if !isNewEncounter {
@@ -146,25 +197,29 @@ func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon
 	return nil
 }
 
-// lastRecordedSeenAt returns the most recent seen_at recorded for vesselKey
-// across all encounters (rows), or ok=false if there is no row at all for
-// it. Used by recordContactIfNew to recover the "was this vessel already
-// known" answer from the database on a cold in-memory cache (e.g. right
+// lastRecordedContact returns the most recently recorded seen_at and
+// position for vesselKey across all encounters (rows), i.e. the vessel's
+// single newest row, or ok=false if there is no row at all for it. Used by
+// recordContactIfNew to recover the "was this vessel already known, and
+// where" answer from the database on a cold in-memory cache (e.g. right
 // after a process restart), since the map alone can't distinguish "never
-// seen" from "seen before this process started."
-func (s *nearbyContactStore) lastRecordedSeenAt(vesselKey string) (time.Time, bool, error) {
-	var lastSeenUnix sql.NullInt64
+// seen" from "seen before this process started" - and the position is
+// needed too, for the session-gap-exceeded position override described on
+// recordContactIfNew.
+func (s *nearbyContactStore) lastRecordedContact(vesselKey string) (lastContact, bool, error) {
+	var seenAtUnix int64
+	var lat, lon float64
 	row := s.db.QueryRow(
-		`SELECT MAX(seen_at) FROM nearby_vessel_contacts WHERE vessel_key = ?`,
+		`SELECT seen_at, lat, lon FROM nearby_vessel_contacts WHERE vessel_key = ? ORDER BY seen_at DESC LIMIT 1`,
 		vesselKey,
 	)
-	if err := row.Scan(&lastSeenUnix); err != nil {
-		return time.Time{}, false, fmt.Errorf("read last recorded seen_at: %w", err)
+	if err := row.Scan(&seenAtUnix, &lat, &lon); err != nil {
+		if err == sql.ErrNoRows {
+			return lastContact{}, false, nil
+		}
+		return lastContact{}, false, fmt.Errorf("read last recorded contact: %w", err)
 	}
-	if !lastSeenUnix.Valid {
-		return time.Time{}, false, nil
-	}
-	return time.Unix(lastSeenUnix.Int64, 0).UTC(), true, nil
+	return lastContact{seenAt: time.Unix(seenAtUnix, 0).UTC(), lat: lat, lon: lon}, true, nil
 }
 
 // summary returns the number of encounters recorded for vesselKey prior to

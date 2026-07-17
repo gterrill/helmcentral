@@ -168,19 +168,205 @@ func TestRecordContactIfNew_SurvivesProcessRestart(t *testing.T) {
 	}
 }
 
+// TestRecordContactIfNew_GapExceedsSessionGapButPositionUnchangedStaysSameEncounter
+// is the core position-override case: a 90-minute gap exceeds
+// contactSessionGap (1 hour) but the vessel's position hasn't moved, so this
+// must still collapse into a single row - e.g. an AIS dropout while the
+// vessel sits at anchor or a dock.
+func TestRecordContactIfNew_GapExceedsSessionGapButPositionUnchangedStaysSameEncounter(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+		t.Fatalf("recordContactIfNew (1st tick): %v", err)
+	}
+	// 90 minutes later, same position: past contactSessionGap but within
+	// contactSessionMaxGapForPositionOverride and unmoved.
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(90*time.Minute)); err != nil {
+		t.Fatalf("recordContactIfNew (2nd tick, 90 min later, same position): %v", err)
+	}
+
+	if got := countRows(t, store, "316042555"); got != 1 {
+		t.Fatalf("expected 1 row: a 90-minute gap with unchanged position should stay within the same encounter via the position override, got %d", got)
+	}
+}
+
+// TestRecordContactIfNew_GapExceedsSessionGapAndPositionMovedInsertsSecondRow
+// confirms the position override does NOT apply when the vessel has
+// actually relocated: same 90-minute gap as the "unchanged position" case
+// above, but this time the position has moved well past
+// contactSessionMoveThresholdMeters (~556m via a 0.005 degree latitude
+// shift), so this must still count as a new encounter.
+func TestRecordContactIfNew_GapExceedsSessionGapAndPositionMovedInsertsSecondRow(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+		t.Fatalf("recordContactIfNew (1st tick): %v", err)
+	}
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.585, 149.79, "Airlie Beach", "motoring", base.Add(90*time.Minute)); err != nil {
+		t.Fatalf("recordContactIfNew (2nd tick, 90 min later, moved ~556m): %v", err)
+	}
+
+	if got := countRows(t, store, "316042555"); got != 2 {
+		t.Fatalf("expected 2 rows: a 90-minute gap combined with a >100m relocation should not trigger the position override, got %d", got)
+	}
+}
+
+// TestRecordContactIfNew_GapExceeds24HourCapInsertsNewEncounterDespiteUnchangedPosition
+// confirms the outer cap: even with the position completely unchanged, a
+// 25-hour gap exceeds contactSessionMaxGapForPositionOverride and must
+// always be recorded as a new encounter. A vessel silent for over a day
+// that reappears in the same spot more plausibly left and came back than
+// stayed continuously.
+func TestRecordContactIfNew_GapExceeds24HourCapInsertsNewEncounterDespiteUnchangedPosition(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+		t.Fatalf("recordContactIfNew (1st tick): %v", err)
+	}
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(25*time.Hour)); err != nil {
+		t.Fatalf("recordContactIfNew (2nd tick, 25h later, same position): %v", err)
+	}
+
+	if got := countRows(t, store, "316042555"); got != 2 {
+		t.Fatalf("expected 2 rows: a 25-hour gap must always be a new encounter, regardless of unchanged position, got %d", got)
+	}
+}
+
+// TestRecordContactIfNew_GapJustUnder24HourCapStaysSameEncounterWhenPositionUnchanged
+// is the cap boundary sanity check: a 23-hour gap is still within
+// contactSessionMaxGapForPositionOverride, so an unchanged position must
+// still collapse into a single row.
+func TestRecordContactIfNew_GapJustUnder24HourCapStaysSameEncounterWhenPositionUnchanged(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+		t.Fatalf("recordContactIfNew (1st tick): %v", err)
+	}
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(23*time.Hour)); err != nil {
+		t.Fatalf("recordContactIfNew (2nd tick, 23h later, same position): %v", err)
+	}
+
+	if got := countRows(t, store, "316042555"); got != 1 {
+		t.Fatalf("expected 1 row: a 23-hour gap is still within the 24-hour position-override cap, got %d", got)
+	}
+}
+
+// TestRecordContactIfNew_PositionOverrideBoundaryAt100Meters checks both
+// sides of the contactSessionMoveThresholdMeters boundary with a fixed
+// 90-minute gap (past contactSessionGap, within the 24h cap) and a fixed
+// longitude, varying only latitude - latitude degrees are a constant
+// ~111,195m (per haversineMeters's earth radius) regardless of longitude,
+// unlike longitude degrees which shrink away from the equator, so varying
+// latitude keeps the math simple. A ~0.0008 degree shift is ~89m (within
+// the threshold, no new row); a ~0.0010 degree shift is ~111m (outside it,
+// new row).
+func TestRecordContactIfNew_PositionOverrideBoundaryAt100Meters(t *testing.T) {
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	const baseLat = -21.59
+	const baseLon = 149.79
+
+	t.Run("within 100m stays same encounter", func(t *testing.T) {
+		store := newTestNearbyContactStore(t)
+		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat, baseLon, "Airlie Beach", "anchored", base); err != nil {
+			t.Fatalf("recordContactIfNew (1st tick): %v", err)
+		}
+		// ~89m offset: within the 100m threshold.
+		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat+0.0008, baseLon, "Airlie Beach", "anchored", base.Add(90*time.Minute)); err != nil {
+			t.Fatalf("recordContactIfNew (2nd tick, ~89m away): %v", err)
+		}
+		if got := countRows(t, store, "316042555"); got != 1 {
+			t.Fatalf("expected 1 row: a ~89m shift is within contactSessionMoveThresholdMeters, got %d", got)
+		}
+	})
+
+	t.Run("beyond 100m starts new encounter", func(t *testing.T) {
+		store := newTestNearbyContactStore(t)
+		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat, baseLon, "Airlie Beach", "anchored", base); err != nil {
+			t.Fatalf("recordContactIfNew (1st tick): %v", err)
+		}
+		// ~111m offset: outside the 100m threshold.
+		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat+0.0010, baseLon, "Airlie Beach", "anchored", base.Add(90*time.Minute)); err != nil {
+			t.Fatalf("recordContactIfNew (2nd tick, ~111m away): %v", err)
+		}
+		if got := countRows(t, store, "316042555"); got != 2 {
+			t.Fatalf("expected 2 rows: a ~111m shift exceeds contactSessionMoveThresholdMeters, got %d", got)
+		}
+	})
+}
+
+// TestRecordContactIfNew_SurvivesProcessRestartWithPositionOverride is a
+// sibling of TestRecordContactIfNew_SurvivesProcessRestart: it confirms the
+// position override also applies via the cold-cache database fallback
+// (lastRecordedContact), not just the hot in-memory path. The simulated
+// restart happens after a 90-minute gap (past contactSessionGap, within the
+// 24h cap) with the position unchanged, so the post-restart tick must still
+// be treated as the same encounter.
+func TestRecordContactIfNew_SurvivesProcessRestartWithPositionOverride(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.sqlite")
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	store1, err := newNearbyContactStore(dbPath)
+	if err != nil {
+		t.Fatalf("newNearbyContactStore (1st process): %v", err)
+	}
+	if err := store1.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+		t.Fatalf("recordContactIfNew (before restart): %v", err)
+	}
+	if err := store1.close(); err != nil {
+		t.Fatalf("close store1: %v", err)
+	}
+
+	// Simulate a restart: a brand new store instance means a genuinely
+	// empty in-memory lastSeen map, exactly like a real process restart.
+	store2, err := newNearbyContactStore(dbPath)
+	if err != nil {
+		t.Fatalf("newNearbyContactStore (2nd process): %v", err)
+	}
+	t.Cleanup(func() { _ = store2.close() })
+
+	// 90 minutes later, same position: past contactSessionGap but within
+	// the position-override cap and unmoved. The in-memory map is cold
+	// (post-restart), so this exercises the DB fallback's lastRecordedContact
+	// lookup rather than the in-memory lastSeen map.
+	if err := store2.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(90*time.Minute)); err != nil {
+		t.Fatalf("recordContactIfNew (after restart): %v", err)
+	}
+
+	if got := countRows(t, store2, "316042555"); got != 1 {
+		t.Fatalf("expected 1 row: the position override must apply across the cold-cache DB fallback too, got %d (restart falsely started a new encounter)", got)
+	}
+}
+
 func TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
 
-	// Each recording is spaced more than contactSessionGap apart so each
-	// one lands as a distinct encounter (distinct row).
+	// Each recording is spaced more than contactSessionGap apart AND more
+	// than contactSessionMoveThresholdMeters apart, so each one lands as a
+	// distinct encounter (distinct row): a time gap alone is no longer
+	// sufficient to force a new encounter (see the position override in
+	// recordContactIfNew), so this test also moves the position each time
+	// by ~1.5km, well past the 100m threshold, to keep testing genuinely
+	// distinct encounters rather than accidentally exercising the
+	// position-override continuation path.
 	times := []time.Time{
 		base,
 		base.Add(2 * time.Hour),
 		base.Add(4 * time.Hour),
 	}
-	for _, ts := range times {
-		if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", ts); err != nil {
+	positions := [][2]float64{
+		{-21.59, 149.79},
+		{-21.60, 149.80},
+		{-21.61, 149.81},
+	}
+	for i, ts := range times {
+		lat, lon := positions[i][0], positions[i][1]
+		if err := store.recordContactIfNew("316042555", "TAKU X", lat, lon, "Airlie Beach", "anchored", ts); err != nil {
 			t.Fatalf("recordContactIfNew: %v", err)
 		}
 	}
