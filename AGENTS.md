@@ -32,6 +32,10 @@ This file mirrors AGENTS.md. AGENTS.md is the canonical repo instruction file.
 - Do not keep durable feature-spec or architecture notes in backend/README.md or other component READMEs.
 - When adding or changing behavior that affects architecture or feature contracts, create or update an ADR in docs/adr and link it from relevant README files.
 
+## Modern Web Guidance
+
+This project's Baseline target is Baseline 2024.
+
 ## High-Density Tailwind UI/UX Specification
 
 Build an inclusive, quietly dense, highly glanceable dashboard interface using Tailwind CSS. Treat the design as a mature, mission-critical cockpit, not a generic web app.

@@ -1,5 +1,13 @@
 import '@testing-library/jest-dom'
 
+// jsdom doesn't implement the Popover API. The real @oddbird/popover-polyfill
+// (used in production) depends on document.adoptedStyleSheets, which jsdom
+// doesn't support either, so stub the two methods components actually call.
+if (typeof HTMLElement.prototype.showPopover !== 'function') {
+  HTMLElement.prototype.showPopover = function () {}
+  HTMLElement.prototype.hidePopover = function () {}
+}
+
 // jsdom doesn't implement ResizeObserver; stub it so components that use it
 // (e.g. for responsive scaling) can mount in tests.
 if (typeof globalThis.ResizeObserver === 'undefined') {

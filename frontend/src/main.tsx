@@ -13,10 +13,21 @@ import '@fontsource/geist-mono/600.css'
 import '@fontsource/geist-mono/700.css'
 import '@/index.css'
 
-const isAdminPage = window.location.pathname === '/admin'
+// This project's Baseline target is Baseline 2024 (see AGENTS.md); the
+// Popover API only reached Baseline "newly available" on 2025-01-27, so
+// browsers within the target window (e.g. Safari 16/17) need this polyfill.
+async function renderApp() {
+  if (!HTMLElement.prototype.hasOwnProperty('popover')) {
+    await import('@oddbird/popover-polyfill')
+  }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    {isAdminPage ? <AdminPage /> : <App />}
-  </React.StrictMode>,
-)
+  const isAdminPage = window.location.pathname === '/admin'
+
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      {isAdminPage ? <AdminPage /> : <App />}
+    </React.StrictMode>,
+  )
+}
+
+void renderApp()

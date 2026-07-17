@@ -80,3 +80,41 @@
     min-height: 100vh;
   }
 }
+
+@layer components {
+  /* Native top-layer toast (popover="manual"): base state is the exit/closed
+     look, :popover-open is the visible look, and @starting-style is what it
+     transitions *from* when shown - see the [popover] entry/exit pattern at
+     https://developer.chrome.com/blog/entry-exit-animations */
+  .anchor-watch-toast {
+    position: fixed;
+    bottom: auto;
+    width: auto;
+    height: auto;
+    opacity: 0;
+    transform: translateY(-0.5rem);
+    transition-property: opacity, transform, display, overlay;
+    transition-duration: 200ms;
+    transition-timing-function: ease-out;
+    transition-behavior: allow-discrete;
+  }
+
+  .anchor-watch-toast:popover-open {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @starting-style {
+    .anchor-watch-toast:popover-open {
+      opacity: 0;
+      transform: translateY(-0.5rem);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .anchor-watch-toast {
+      transform: none;
+      transition-duration: 100ms;
+    }
+  }
+}

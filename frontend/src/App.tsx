@@ -8,7 +8,7 @@ import {
   Route,
   Settings,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
@@ -146,17 +146,31 @@ export function App() {
 
   // Handle anchor watch auto-close notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const toastRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const handleAutoClose = () => {
       setToastMessage('Anchor watch cleared — engines running, position outside zone')
-      // Auto-dismiss after 5 seconds
-      const timer = setTimeout(() => setToastMessage(null), 5000)
-      return () => clearTimeout(timer)
     }
 
     window.addEventListener('anchor-watch-auto-closed', handleAutoClose)
     return () => window.removeEventListener('anchor-watch-auto-closed', handleAutoClose)
   }, [])
+
+  // Drives the toast's top-layer visibility from state, and owns its
+  // auto-dismiss timer so the timer is reliably cleared (previously this
+  // cleanup was returned from the window event handler above, where
+  // `addEventListener` silently discards it).
+  useEffect(() => {
+    const toast = toastRef.current
+    if (!toast) return
+    if (toastMessage === null) {
+      toast.hidePopover()
+      return
+    }
+    toast.showPopover()
+    const timer = setTimeout(() => setToastMessage(null), 5000)
+    return () => clearTimeout(timer)
+  }, [toastMessage])
 
   const {
     depth,
@@ -564,11 +578,17 @@ export function App() {
 
   return (
     <SidebarProvider>
-      {toastMessage && (
-        <div className="fixed left-4 right-4 top-4 z-50 mx-auto max-w-md rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 shadow-lg md:left-auto md:right-4">
-          {toastMessage}
-        </div>
-      )}
+      <div
+        ref={toastRef}
+        role="status"
+        aria-live="polite"
+        className="anchor-watch-toast left-4 right-4 top-4 m-0 mx-auto max-w-md rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 shadow-lg md:left-auto md:right-4"
+        // @types/react 18 predates the Popover API attribute.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        {...({ popover: 'manual' } as any)}
+      >
+        {toastMessage}
+      </div>
 
       <Sidebar collapsible="icon">
         <SidebarContent>
