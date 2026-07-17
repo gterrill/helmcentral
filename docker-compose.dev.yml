@@ -36,6 +36,7 @@ services:
     volumes:
       - ./backend:/app
       - ./settings.yaml:/app/settings.yaml
+      - ./plugins:/app/plugins
     dns:
       - 8.8.8.8
       - 1.1.1.1

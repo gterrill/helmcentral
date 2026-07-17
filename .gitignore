@@ -18,3 +18,4 @@ backend/data/nearby-contacts.sqlite
 settings.yaml
 .claude/settings.json
 /backend-data/
+/plugins/

@@ -18,3 +18,4 @@ services:
     volumes:
       - ./settings.yaml:/app/settings.yaml:ro
       - ./backend-data:/app/data
+      - ./plugins:/app/plugins:ro
