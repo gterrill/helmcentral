@@ -43,10 +43,12 @@ function formatLastSeen(lastSeenAt: string, nowMs = Date.now()) {
 }
 
 // vesselContactKey mirrors the backend's vesselContactKey resolution
-// (backend/nearby_contacts.go): MMSI when known, else a "name:<UPPER NAME>"
-// fallback. vessel.name already arrives upper-cased from the backend.
+// (backend/nearby_contacts.go): the vessel's MMSI. The backend only ever
+// increments seen_count for MMSI-keyed vessels, and this is only called from
+// VesselHistoryPopover, which is only rendered when seen_count > 0 (see
+// below), so vessel.mmsi is guaranteed present by the time this runs.
 function vesselContactKey(vessel: NearbyVessel): string {
-  return vessel.mmsi && vessel.mmsi.trim() !== '' ? vessel.mmsi : `name:${vessel.name}`
+  return vessel.mmsi ?? ''
 }
 
 function formatSightingTime(seenAt: string) {

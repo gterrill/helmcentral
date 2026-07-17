@@ -42,7 +42,7 @@ func TestRecordContactIfNew_SameVesselWithinSessionGapInsertsOnlyOneRow(t *testi
 	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
 		t.Fatalf("recordContactIfNew (1st tick): %v", err)
 	}
-	// Second tick 5 seconds later, well within the 30-minute session gap.
+	// Second tick 5 seconds later, well within the 1-hour session gap.
 	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(5*time.Second)); err != nil {
 		t.Fatalf("recordContactIfNew (2nd tick): %v", err)
 	}
@@ -63,8 +63,8 @@ func TestRecordContactIfNew_AfterGapElapsedInsertsSecondRow(t *testing.T) {
 	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
 		t.Fatalf("recordContactIfNew (encounter 1): %v", err)
 	}
-	// Gap of 31 minutes (> the 30-minute contactSessionGap) is a new encounter.
-	second := base.Add(31 * time.Minute)
+	// Gap of 61 minutes (> the 1-hour contactSessionGap) is a new encounter.
+	second := base.Add(61 * time.Minute)
 	if err := store.recordContactIfNew("316042555", "TAKU X", -21.60, 149.80, "Airlie Beach", "motoring", second); err != nil {
 		t.Fatalf("recordContactIfNew (encounter 2): %v", err)
 	}
@@ -86,12 +86,39 @@ func TestRecordContactIfNew_AfterGapElapsedInsertsSecondRow(t *testing.T) {
 	}
 }
 
+// TestRecordContactIfNew_FortyFiveMinuteGapStaysSameEncounter demonstrates
+// the behavior enabled by widening contactSessionGap from 30 minutes to 1
+// hour: a 45-minute quiet period used to exceed the old 30-minute gap and
+// start a new encounter, but must now collapse into the same encounter
+// (single row) since it's under the new 1-hour threshold.
+func TestRecordContactIfNew_FortyFiveMinuteGapStaysSameEncounter(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+		t.Fatalf("recordContactIfNew (1st tick): %v", err)
+	}
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(45*time.Minute)); err != nil {
+		t.Fatalf("recordContactIfNew (2nd tick, 45 min later): %v", err)
+	}
+
+	if got := countRows(t, store, "316042555"); got != 1 {
+		t.Fatalf("expected 1 row: a 45-minute gap should stay within the same encounter under the 1-hour contactSessionGap, got %d", got)
+	}
+}
+
 // TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount is the
 // regression test for Bug 2: summary() must report encounters *prior to*
 // the current, still-ongoing one, not the raw total row count. With 3
 // distinct encounters recorded, the most recent one is the "current"
 // encounter and must be excluded, leaving 2 prior encounters with
 // lastSeenAt equal to the second-most-recent row's timestamp.
+//
+// Spacing is 2 hours (> the 1-hour contactSessionGap) rather than exactly
+// 1 hour: recordContactIfNew's comparison is strictly
+// "now.Sub(last) > contactSessionGap", so a gap exactly equal to the
+// threshold would not count as a new encounter and this test would collapse
+// to a single row instead of exercising 3 distinct ones.
 // TestRecordContactIfNew_SurvivesProcessRestart is the regression test for
 // Bug 1: the in-memory lastSeen map is process-lifetime only, so a real
 // backend restart wipes it. Without falling back to the database on a cold
@@ -149,8 +176,8 @@ func TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount(t *testing.T) {
 	// one lands as a distinct encounter (distinct row).
 	times := []time.Time{
 		base,
-		base.Add(1 * time.Hour),
 		base.Add(2 * time.Hour),
+		base.Add(4 * time.Hour),
 	}
 	for _, ts := range times {
 		if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", ts); err != nil {
@@ -283,14 +310,21 @@ func TestGetNearbyVesselSightingsHandler_DecodesURLEncodedKeyParam(t *testing.T)
 	}
 }
 
-func TestVesselContactKey_PrefersMMSIOverName(t *testing.T) {
-	if got := vesselContactKey("316042555", "Taku X"); got != "316042555" {
-		t.Fatalf("expected MMSI key, got %q", got)
+func TestVesselContactKey_ReturnsMMSI(t *testing.T) {
+	key, ok := vesselContactKey("316042555")
+	if !ok {
+		t.Fatalf("expected ok=true for a non-empty MMSI")
+	}
+	if key != "316042555" {
+		t.Fatalf("expected MMSI key, got %q", key)
 	}
 }
 
-func TestVesselContactKey_FallsBackToNormalizedNameWhenMMSIEmpty(t *testing.T) {
-	if got := vesselContactKey("", "Taku X"); got != "name:TAKU X" {
-		t.Fatalf("expected name-based fallback key, got %q", got)
+func TestVesselContactKey_NotOkWhenMMSIEmpty(t *testing.T) {
+	if _, ok := vesselContactKey(""); ok {
+		t.Fatalf("expected ok=false for empty MMSI")
+	}
+	if _, ok := vesselContactKey("   "); ok {
+		t.Fatalf("expected ok=false for whitespace-only MMSI")
 	}
 }

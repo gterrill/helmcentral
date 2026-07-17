@@ -20,7 +20,7 @@ import (
 // current one. The 5-second server poller (tracks.go) sees a vessel that
 // stays in range on every tick; without this gap that would insert a row
 // every 5 seconds instead of once per encounter.
-const contactSessionGap = 30 * time.Minute
+const contactSessionGap = 1 * time.Hour
 
 // globalNearbyContactStore is the process-wide nearby-vessel contact store,
 // opened once in main() and shared by the track poller (writes) and the
@@ -254,17 +254,19 @@ func (s *nearbyContactStore) listSightings(vesselKey string) ([]nearbyContactRec
 }
 
 // vesselContactKey resolves the stable identity key used to record and look
-// up nearby-vessel contact history: the vessel's MMSI when known, or a
-// name-based fallback ("name:<UPPER NAME>") when it isn't. Kept as the one
-// place this MMSI-or-name resolution happens, so the poller (writing
-// contacts), the /api/nearby-vessels handler (reading summaries), and the
-// sightings endpoint all agree on the same identity for a given vessel.
-func vesselContactKey(mmsi, name string) string {
+// up nearby-vessel contact history: the vessel's MMSI. Vessels are assumed
+// to always report MMSI; when one doesn't, ok is false and the caller must
+// skip recording/enriching contact history for it rather than substituting
+// a synthetic identity. Kept as the one place this resolution happens, so
+// the poller (writing contacts), the /api/nearby-vessels handler (reading
+// summaries), and the sightings endpoint all agree on the same identity for
+// a given vessel.
+func vesselContactKey(mmsi string) (key string, ok bool) {
 	mmsi = strings.TrimSpace(mmsi)
-	if mmsi != "" {
-		return mmsi
+	if mmsi == "" {
+		return "", false
 	}
-	return "name:" + strings.ToUpper(strings.TrimSpace(name))
+	return mmsi, true
 }
 
 // nearbyVesselSightingWire is the wire format for a single sighting in the
@@ -278,18 +280,15 @@ type nearbyVesselSightingWire struct {
 }
 
 // getNearbyVesselSightingsHandler is the GET /api/nearby-vessels/:key/sightings
-// handler factory. :key is the same vesselKey (MMSI, or "name:..." fallback)
-// used everywhere else in this file, so the frontend passes
-// vessel.mmsi || "name:" + vessel.name.
+// handler factory. :key is the same vesselKey (the vessel's MMSI) used
+// everywhere else in this file, so the frontend passes vessel.mmsi.
 func getNearbyVesselSightingsHandler(store *nearbyContactStore) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		// Echo's router matches on the request's escaped path and does not
 		// url-decode route params for you, so a key containing reserved
-		// characters (":" in the "name:<UPPER NAME>" fallback, or a space
-		// in the name itself) arrives here still percent-encoded, e.g.
-		// "name%3ATAKU%20X". Decode it before it's used to look up a
-		// vessel_key, which is always stored decoded (see tracks.go's
-		// recordNearbyVesselContacts).
+		// characters arrives here still percent-encoded. Decode it before
+		// it's used to look up a vessel_key, which is always stored decoded
+		// (see tracks.go's recordNearbyVesselContacts).
 		rawKey := c.Param("key")
 		key, err := url.PathUnescape(rawKey)
 		if err != nil || key == "" {

@@ -13,8 +13,8 @@ type VesselSightingsResponse = {
 }
 
 // useVesselSightings lazily fetches the sighting history for a single
-// vessel identity key (MMSI, or "name:..." fallback - see backend
-// vesselContactKey). It only fetches when key is non-null, so the popover
+// vessel identity key (the vessel's MMSI - see backend vesselContactKey).
+// It only fetches when key is non-null, so the popover
 // in nearby-vessels-tile.tsx can pass null while closed and the actual key
 // only once opened, instead of fetching on every poll tick.
 export function useVesselSightings(key: string | null) {

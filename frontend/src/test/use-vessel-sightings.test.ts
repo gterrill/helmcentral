@@ -32,13 +32,15 @@ describe('useVesselSightings', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    renderHook(() => useVesselSightings('name:TAKU X'))
+    // Any key containing reserved characters exercises the encoding - this
+    // isn't tied to a particular key format, just generic URL-safety.
+    renderHook(() => useVesselSightings('abc:123 xyz'))
 
     await act(async () => {
       await Promise.resolve()
     })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/nearby-vessels/name%3ATAKU%20X/sightings')
+    expect(fetchMock).toHaveBeenCalledWith('/api/nearby-vessels/abc%3A123%20xyz/sightings')
   })
 
   it('returns parsed sightings and flips loading to false once resolved', async () => {

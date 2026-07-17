@@ -523,7 +523,11 @@ func nearbyVessels(c echo.Context) error {
 			if nearbyErr == nil {
 				if globalNearbyContactStore != nil {
 					for i := range nearby {
-						key := vesselContactKey(nearby[i].Mmsi, nearby[i].Name)
+						key, ok := vesselContactKey(nearby[i].Mmsi)
+						if !ok {
+							log.Printf("Skipping sighting-history enrichment for %q: no MMSI reported", nearby[i].Name)
+							continue
+						}
 						seenCount, lastSeenAt, summaryErr := globalNearbyContactStore.summary(key)
 						if summaryErr != nil {
 							log.Printf("Failed to read nearby vessel contact summary for %s: %v", key, summaryErr)

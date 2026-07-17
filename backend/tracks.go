@@ -114,7 +114,11 @@ func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, stat
 
 	geoname := cachedPlaceName(state.Latitude, state.Longitude)
 	for _, v := range nearby {
-		key := vesselContactKey(v.Mmsi, v.Name)
+		key, ok := vesselContactKey(v.Mmsi)
+		if !ok {
+			log.Printf("Skipping nearby vessel contact for %q: no MMSI reported", v.Name)
+			continue
+		}
 		if err := globalNearbyContactStore.recordContactIfNew(key, v.Name, v.Lat, v.Lon, geoname, state.Status, now); err != nil {
 			log.Printf("Failed to record nearby vessel contact for %s: %v", key, err)
 		}
