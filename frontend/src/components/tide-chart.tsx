@@ -23,6 +23,19 @@ const CURVE_STEPS = 12
 // stubbed as a no-op) - chosen to match the chart's previous fixed size.
 const DEFAULT_VIEWPORT_WIDTH = 1000
 
+// Maps the backend's richer tidal_phase string ("springs", "springs+2",
+// "neaps-1", ...) down to the badge's coarser spring/neap/null shape. Prefer
+// this over the local classifyTidePhase() heuristic whenever the backend
+// field is present - see tidePhaseFor below - falling back to the heuristic
+// only when it's absent, so behavior is unchanged for any response that
+// never went through the shared backend classifier.
+function derivePhaseFromTidalPhase(tidalPhase: string | undefined): 'spring' | 'neap' | null {
+  if (!tidalPhase) return null
+  if (tidalPhase.startsWith('springs')) return 'spring'
+  if (tidalPhase.startsWith('neaps')) return 'neap'
+  return null
+}
+
 // Amber for spring (bigger swings), teal for neap (calmer) - matching the
 // app's existing primary/secondary accent tokens. Renders nothing outside a
 // clear spring/neap window (see classifyTidePhase).
@@ -72,7 +85,13 @@ export function TideChart({ chart, isImperial, windowStart, windowEnd }: TideCha
   const nowMs = Date.now()
   const showNowMarker = nowMs >= chartStartMs && nowMs < chartEndMs
   const tidePhaseReferenceMs = showNowMarker ? nowMs : (chartStartMs + chartEndMs) / 2
-  const tidePhase = classifyTidePhase(chart.extremes, new Date(tidePhaseReferenceMs))
+  // Prefer the backend's tidal_phase field (richer - can express a
+  // day-offset) when present; fall back to the local heuristic only when
+  // it's absent, so this stays fully backward compatible.
+  const tidePhase =
+    chart.tidalPhase !== undefined
+      ? derivePhaseFromTidalPhase(chart.tidalPhase)
+      : classifyTidePhase(chart.extremes, new Date(tidePhaseReferenceMs))
 
   const visibleExtremes = sortedExtremes.filter((extreme) => {
     const t = new Date(extreme.time).getTime()

@@ -323,4 +323,62 @@ describe('TideChart', () => {
     // guard) - well over 20 numbers confirms this is a real, non-empty path.
     expect(numbers.length).toBeGreaterThan(20)
   })
+
+  // Only 2 extremes -> a single consecutive-pair -> the local
+  // classifyTidePhase() heuristic always bails out to null (max range ==
+  // min range with just one pair), so no badge would render from the
+  // heuristic alone. Setting chart.tidalPhase proves it's preferred instead.
+  it('prefers the backend tidal_phase field over the local heuristic when present', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const extremes = [
+      { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
+      { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false },
+    ]
+
+    const { rerender } = render(
+      <TideChart
+        chart={buildChart({ extremes })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+    // Without tidalPhase, the heuristic bails out - no badge.
+    expect(screen.queryByText('Spring Tide')).not.toBeInTheDocument()
+    expect(screen.queryByText('Neap Tide')).not.toBeInTheDocument()
+
+    rerender(
+      <TideChart
+        chart={buildChart({ extremes, tidalPhase: 'springs+2' })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+    expect(screen.getByText('Spring Tide')).toBeInTheDocument()
+  })
+
+  // Extremes chosen so the local classifyTidePhase() heuristic (see
+  // frontend/src/test/tide-phase.test.ts for the same math) resolves 'now'
+  // (fixed to 2026-06-14T12:00:00 by beforeEach) into the widest-range pair
+  // (t1 -> t2, range 1.9) relative to the narrowest (t0 -> t1, range 0.1).
+  it('falls back to the local heuristic when tidal_phase is absent', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const extremes = [
+      { time: new Date(2026, 5, 14, 0, 0, 0).toISOString(), heightM: 1.0, high: false },
+      { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.1, high: true },
+      { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 3.0, high: false },
+    ]
+
+    render(
+      <TideChart
+        chart={buildChart({ extremes })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    expect(screen.getByText('Spring Tide')).toBeInTheDocument()
+  })
 })

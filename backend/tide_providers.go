@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"sort"
@@ -38,6 +40,14 @@ type tideChartResult struct {
 	Direction      string             `json:"direction"`
 	Cached         bool               `json:"cached"`
 	CachedAt       time.Time          `json:"cached_at"`
+	// TidalPhase, DoubleHighToday, and DoubleLowToday are computed centrally
+	// by classifyTidalPhase/hasDoubleTide from the two HTTP handlers
+	// (tideChartHandler, tideToday) - never by individual providers - so
+	// every provider (native or WASM plugin) gets identical behavior with
+	// zero risk of drift. See classifyTidalPhase/hasDoubleTide below.
+	TidalPhase      string `json:"tidal_phase,omitempty"`
+	DoubleHighToday bool   `json:"double_high_today,omitempty"`
+	DoubleLowToday  bool   `json:"double_low_today,omitempty"`
 }
 
 // tideProvider is the interface implemented by each pluggable tide data
@@ -119,6 +129,142 @@ func interpolateTideNow(extremes []tideExtremePoint, now time.Time) (heightM flo
 	return heightM, direction
 }
 
+// minExtremesForTidalPhase is the smallest extremes count classifyTidalPhase
+// will attempt to classify from. A tidal "phase" is inherently a comparison
+// between two consecutive-extreme pairs (the widest range vs. the narrowest
+// range) - with fewer than 4 extremes there are fewer than 3 pairs, too
+// little resolution to distinguish a meaningful spring/neap swing from
+// nearest-neighbor noise. This mirrors the bail-out spirit of the frontend
+// heuristic (frontend/src/lib/tide-phase.ts, which requires at least 2
+// extremes to have any pair at all), but sets a higher floor here because
+// this function also has to resolve a day offset, not just a within-window
+// position.
+const minExtremesForTidalPhase = 4
+
+// classifyTidalPhase labels the local spring/neap tide phase nearest to now,
+// shared by all tide providers (native and WASM plugin alike) and invoked
+// only from the two HTTP handlers (tideChartHandler, tideToday) - see
+// tideChartResult's TidalPhase field doc comment.
+//
+// It finds the consecutive-extreme pair with the largest height range
+// (nearest local springs) and the pair with the smallest range (nearest
+// local neaps) within the given extremes, then labels whichever pair's
+// midpoint time is temporally closer to now: "springs"/"neaps" if that
+// midpoint falls on the same calendar day as now (in now's own location),
+// otherwise "springs+N"/"springs-N"/"neaps+N"/"neaps-N" for N whole days
+// offset (future is positive, past is negative).
+//
+// This is an approximation - "days from the nearest locally-observed range
+// extremum" - not true astronomical spring/neap phase (which tracks lunar
+// synodic position; coastal/amphidromic effects can distort locally observed
+// range at some sites). Same simplification the frontend heuristic already
+// makes.
+//
+// Returns "" when there isn't enough data to resolve a meaningful local
+// extremum (fewer than minExtremesForTidalPhase extremes, or no range
+// variation between any pairs).
+func classifyTidalPhase(extremes []tideExtremePoint, now time.Time) string {
+	if len(extremes) < minExtremesForTidalPhase {
+		return ""
+	}
+
+	sorted := make([]tideExtremePoint, len(extremes))
+	copy(sorted, extremes)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
+
+	type extremePair struct {
+		rangeM  float64
+		midTime time.Time
+	}
+
+	pairs := make([]extremePair, 0, len(sorted)-1)
+	for i := 0; i < len(sorted)-1; i++ {
+		a, b := sorted[i], sorted[i+1]
+		pairs = append(pairs, extremePair{
+			rangeM:  math.Abs(b.HeightM - a.HeightM),
+			midTime: a.Time.Add(b.Time.Sub(a.Time) / 2),
+		})
+	}
+
+	maxIdx, minIdx := 0, 0
+	for i, p := range pairs {
+		if p.rangeM > pairs[maxIdx].rangeM {
+			maxIdx = i
+		}
+		if p.rangeM < pairs[minIdx].rangeM {
+			minIdx = i
+		}
+	}
+
+	if pairs[maxIdx].rangeM == pairs[minIdx].rangeM {
+		return "" // no range variation to distinguish springs from neaps
+	}
+
+	springsPair := pairs[maxIdx]
+	neapsPair := pairs[minIdx]
+
+	absDuration := func(d time.Duration) time.Duration {
+		if d < 0 {
+			return -d
+		}
+		return d
+	}
+
+	base := "springs"
+	repTime := springsPair.midTime
+	if absDuration(now.Sub(neapsPair.midTime)) < absDuration(now.Sub(springsPair.midTime)) {
+		base = "neaps"
+		repTime = neapsPair.midTime
+	}
+
+	repTime = repTime.In(now.Location())
+	nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	repDate := time.Date(repTime.Year(), repTime.Month(), repTime.Day(), 0, 0, 0, 0, now.Location())
+	daysDiff := int(math.Round(repDate.Sub(nowDate).Hours() / 24))
+
+	if daysDiff == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s%+d", base, daysDiff)
+}
+
+// hasDoubleTide reports whether the local calendar day containing now (per
+// station.Timezone, falling back to UTC with a logged warning if the
+// timezone is empty or fails to load) has two or more predicted high tides
+// and/or two or more predicted low tides. Shared by all tide providers and
+// invoked only from the two HTTP handlers, same as classifyTidalPhase.
+func hasDoubleTide(extremes []tideExtremePoint, station tideStation, now time.Time) (doubleHigh, doubleLow bool) {
+	loc := time.UTC
+	switch {
+	case station.Timezone == "":
+		log.Printf("hasDoubleTide: station %q has no timezone configured, falling back to UTC", station.StationID)
+	default:
+		l, err := time.LoadLocation(station.Timezone)
+		if err != nil {
+			log.Printf("hasDoubleTide: failed to load timezone %q for station %q: %v, falling back to UTC", station.Timezone, station.StationID, err)
+		} else {
+			loc = l
+		}
+	}
+
+	year, month, day := now.In(loc).Date()
+
+	var highCount, lowCount int
+	for _, e := range extremes {
+		ey, em, ed := e.Time.In(loc).Date()
+		if ey != year || em != month || ed != day {
+			continue
+		}
+		if e.High {
+			highCount++
+		} else {
+			lowCount++
+		}
+	}
+
+	return highCount >= 2, lowCount >= 2
+}
+
 type tideProviderInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -152,13 +298,16 @@ type tideExtremePointResponse struct {
 }
 
 type tideChartResponse struct {
-	Station        tideStation                `json:"station"`
-	Extremes       []tideExtremePointResponse `json:"extremes"`
-	CurrentHeightM float64                    `json:"current_height_m"`
-	Direction      string                     `json:"direction"`
-	Cached         bool                       `json:"cached"`
-	UpdatedAt      string                     `json:"updated_at"`
-	TTLSeconds     int64                      `json:"ttl_seconds"`
+	Station         tideStation                `json:"station"`
+	Extremes        []tideExtremePointResponse `json:"extremes"`
+	CurrentHeightM  float64                    `json:"current_height_m"`
+	Direction       string                     `json:"direction"`
+	Cached          bool                       `json:"cached"`
+	UpdatedAt       string                     `json:"updated_at"`
+	TTLSeconds      int64                      `json:"ttl_seconds"`
+	TidalPhase      string                     `json:"tidal_phase,omitempty"`
+	DoubleHighToday bool                       `json:"double_high_today,omitempty"`
+	DoubleLowToday  bool                       `json:"double_low_today,omitempty"`
 }
 
 func tideNearestHandler(c echo.Context) error {
@@ -217,13 +366,20 @@ func tideChartHandler(c echo.Context) error {
 		})
 	}
 
+	now := time.Now().UTC()
+	tidalPhase := classifyTidalPhase(result.Extremes, now)
+	doubleHigh, doubleLow := hasDoubleTide(result.Extremes, result.Station, now)
+
 	return c.JSON(http.StatusOK, tideChartResponse{
-		Station:        result.Station,
-		Extremes:       extremes,
-		CurrentHeightM: result.CurrentHeightM,
-		Direction:      result.Direction,
-		Cached:         result.Cached,
-		UpdatedAt:      result.CachedAt.UTC().Format(time.RFC3339),
-		TTLSeconds:     provider.TTLSeconds(),
+		Station:         result.Station,
+		Extremes:        extremes,
+		CurrentHeightM:  result.CurrentHeightM,
+		Direction:       result.Direction,
+		Cached:          result.Cached,
+		UpdatedAt:       result.CachedAt.UTC().Format(time.RFC3339),
+		TTLSeconds:      provider.TTLSeconds(),
+		TidalPhase:      tidalPhase,
+		DoubleHighToday: doubleHigh,
+		DoubleLowToday:  doubleLow,
 	})
 }

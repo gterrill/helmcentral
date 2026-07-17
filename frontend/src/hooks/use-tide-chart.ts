@@ -13,6 +13,14 @@ export interface TideChart {
   extremes: TideExtremePoint[]
   currentHeightM: number
   direction: string
+  // Optional: populated by the backend's centralized classifyTidalPhase/
+  // hasDoubleTide (see backend/tide_providers.go), so every provider gets
+  // identical values. Absent/empty when the backend can't resolve a phase
+  // (e.g. too few extremes) - callers should fall back to the local
+  // classifyTidePhase() heuristic (frontend/src/lib/tide-phase.ts) in that case.
+  tidalPhase?: string
+  doubleHighToday?: boolean
+  doubleLowToday?: boolean
 }
 
 interface TideChartApi {
@@ -34,6 +42,9 @@ interface TideChartApi {
   cached?: boolean
   updated_at?: string
   ttl_seconds?: number
+  tidal_phase?: string
+  double_high_today?: boolean
+  double_low_today?: boolean
 }
 
 export function useTideChart(provider: string, stationId: string, refreshIntervalSeconds = 3600) {
@@ -84,6 +95,9 @@ export function useTideChart(provider: string, stationId: string, refreshInterva
           : [],
         currentHeightM: typeof data.current_height_m === 'number' ? data.current_height_m : 0,
         direction: data.direction || '—',
+        tidalPhase: typeof data.tidal_phase === 'string' && data.tidal_phase !== '' ? data.tidal_phase : undefined,
+        doubleHighToday: typeof data.double_high_today === 'boolean' ? data.double_high_today : undefined,
+        doubleLowToday: typeof data.double_low_today === 'boolean' ? data.double_low_today : undefined,
       }
 
       hasLoadedDataRef.current = true

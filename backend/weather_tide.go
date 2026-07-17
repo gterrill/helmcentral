@@ -308,6 +308,9 @@ type tideTodayData struct {
 	HighTideHeightFt    float64
 	LowTideTime         time.Time
 	LowTideHeightFt     float64
+	TidalPhase          string
+	DoubleHighToday     bool
+	DoubleLowToday      bool
 }
 
 type weatherTodayResponse struct {
@@ -427,6 +430,9 @@ type tideTodayResponse struct {
 	LowTideHeightFt     float64 `json:"low_tide_height_ft"`
 	StationName         string  `json:"station_name,omitempty"`
 	Provider            string  `json:"provider,omitempty"`
+	TidalPhase          string  `json:"tidal_phase,omitempty"`
+	DoubleHighToday     bool    `json:"double_high_today,omitempty"`
+	DoubleLowToday      bool    `json:"double_low_today,omitempty"`
 }
 
 type tideTodayETagData struct {
@@ -438,6 +444,9 @@ type tideTodayETagData struct {
 	LowTideHeightFt     float64   `json:"low_tide_height_ft"`
 	StationName         string    `json:"station_name,omitempty"`
 	Provider            string    `json:"provider,omitempty"`
+	TidalPhase          string    `json:"tidal_phase,omitempty"`
+	DoubleHighToday     bool      `json:"double_high_today,omitempty"`
+	DoubleLowToday      bool      `json:"double_low_today,omitempty"`
 }
 
 func init() {
@@ -925,12 +934,17 @@ func tideToday(c echo.Context) error {
 	}
 
 	now := time.Now().UTC()
+	tidalPhase := classifyTidalPhase(result.Extremes, now)
+	doubleHigh, doubleLow := hasDoubleTide(result.Extremes, result.Station, now)
 	state := tideTodayData{
 		Datetime:            now,
 		CurrentTideHeightFt: result.CurrentHeightM * metersToFeet,
 		TideDirection:       result.Direction,
 		HighTideTime:        now,
 		LowTideTime:         now.Add(24 * time.Hour),
+		TidalPhase:          tidalPhase,
+		DoubleHighToday:     doubleHigh,
+		DoubleLowToday:      doubleLow,
 	}
 
 	for _, extreme := range result.Extremes {
@@ -949,8 +963,8 @@ func tideToday(c echo.Context) error {
 		}
 	}
 
-	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime.Format(time.RFC3339), HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime.Format(time.RFC3339), LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider}
-	etag, err := weakETagForJSON(tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider})
+	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime.Format(time.RFC3339), HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime.Format(time.RFC3339), LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
+	etag, err := weakETagForJSON(tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday})
 	if err != nil {
 		log.Printf("Failed to build tide ETag: %v", err)
 	}
