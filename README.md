@@ -26,6 +26,8 @@ helmcentral/
   - Real-time data visualization
   - Responsive design
 
+- **Pluggable tide providers**: drop a sandboxed WASM plugin into `plugins/tides/` to add support for another region's government tide API, with no fork or rebuild required
+
 ## How To Run
 
 ### Prerequisites
@@ -128,6 +130,24 @@ See [docs/adr/0007-signalk-route-activation.md](docs/adr/0007-signalk-route-acti
 The dashboard's 13 widgets can be rearranged, resized, shown, or hidden by operators without a code deployment. In layout mode (toggle in the header), operators can drag widgets to new positions, resize them, or remove them from the display; unplaced widgets can be added back via an "Add Widget" picker. The layout is persisted server-side and restored on the next session.
 
 See [docs/adr/0012-configurable-bento-dashboard.md](docs/adr/0012-configurable-bento-dashboard.md).
+
+### Tide Provider Plugins
+
+Tide data comes from a pluggable `tideProvider` registry (`backend/tide_providers.go`), with two built-in providers (BOM for Australia, Storm Glass globally). A developer wanting to add another region's government tide API doesn't need to fork Helmcentral or touch Go at all: drop a compiled WASM plugin into `plugins/tides/` and it's picked up as a new provider in the existing Settings tide-provider dropdown on the next restart — zero frontend changes.
+
+A plugin is a small guest module exporting five functions (`id`, `name`, `ttl_seconds`, `search_stations`, `fetch_tide_chart`) — the host does the interpolation, caching, and spring/neap classification, so a plugin only ever returns raw station and tide-extreme data. Plugins run sandboxed via [Extism](https://extism.org/)/[wazero](https://wazero.io/) (WASM linear-memory isolation, no filesystem or process access), and can only reach the network hosts explicitly declared in a companion `<name>.allowed_hosts.json` file — no file means no network access at all.
+
+Plugins can be authored in any language with an Extism PDK (TinyGo, Rust, Zig, C, AssemblyScript, C++, Haskell). [docs/examples/tide-plugins/noaa/](docs/examples/tide-plugins/noaa/) is a complete, working TinyGo reference — a real integration against NOAA's CO-OPS API, not BOM ported to WASM. To build it:
+
+```bash
+docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
+  cd docs/examples/tide-plugins/noaa &&
+  go mod tidy &&
+  tinygo build -o noaa.wasm -target wasip1 -buildmode c-shared main.go
+"
+```
+
+See [docs/examples/tide-plugins/noaa/README.md](docs/examples/tide-plugins/noaa/README.md) for installing a built plugin, and [docs/adr/0017-wasm-plugin-tide-providers.md](docs/adr/0017-wasm-plugin-tide-providers.md) for why WASM was chosen over alternatives (including Lua) and the full plugin contract.
 
 ## Next Steps
 
