@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,14 +13,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// ensureTideProvidersRegistered registers the real tide providers if they
-// aren't already — registerTideProvider is normally only called from main(),
-// which never runs under `go test`, so the registry is empty by default.
 func ensureTideProvidersRegistered(t *testing.T) {
 	t.Helper()
-	if _, ok := getTideProvider("bom"); !ok {
-		registerTideProvider(newBomTideProvider())
-	}
 	if _, ok := getTideProvider("stormglass"); !ok {
 		registerTideProvider(newStormGlassTideProvider())
 	}
@@ -36,7 +31,10 @@ func writeTideTodaySettings(t *testing.T, provider, stationID string) string {
 }
 
 func TestTideToday_ReturnsBadGatewayWhenProviderFetchFails(t *testing.T) {
+	withCleanTideProviderRegistry(t)
 	ensureTideProvidersRegistered(t)
+	registerTideProvider(&stubTideProvider{id: "bom", fetchErr: errors.New("simulated fetch failure")})
+
 	settingsPath := writeTideTodaySettings(t, "bom", "DOES_NOT_EXIST_12345")
 	t.Setenv("SETTINGS_FILE", settingsPath)
 
@@ -63,17 +61,10 @@ func TestTideToday_ReturnsBadGatewayWhenProviderFetchFails(t *testing.T) {
 }
 
 func TestTideToday_ReturnsOKWithProviderData(t *testing.T) {
+	withCleanTideProviderRegistry(t)
 	ensureTideProvidersRegistered(t)
-	provider, ok := getTideProvider("bom")
-	if !ok {
-		t.Fatalf("expected bom provider to be registered")
-	}
-	bom, ok := provider.(*bomTideProvider)
-	if !ok || len(bom.stations) == 0 {
-		t.Fatalf("expected bom provider to have embedded stations")
-	}
-	station := bom.stations[0]
 
+	station := tideStation{StationID: "TEST_STATION", Name: "Test Harbour"}
 	now := time.Now().UTC()
 	fakeResult := tideChartResult{
 		Station: station,
@@ -85,20 +76,7 @@ func TestTideToday_ReturnsOKWithProviderData(t *testing.T) {
 		Direction:      "Rising",
 		CachedAt:       now,
 	}
-
-	bomTideCacheStore.mu.Lock()
-	original, hadOriginal := bomTideCacheStore.data[station.StationID]
-	bomTideCacheStore.data[station.StationID] = fakeResult
-	bomTideCacheStore.mu.Unlock()
-	t.Cleanup(func() {
-		bomTideCacheStore.mu.Lock()
-		if hadOriginal {
-			bomTideCacheStore.data[station.StationID] = original
-		} else {
-			delete(bomTideCacheStore.data, station.StationID)
-		}
-		bomTideCacheStore.mu.Unlock()
-	})
+	registerTideProvider(&stubTideProvider{id: "bom", result: fakeResult})
 
 	settingsPath := writeTideTodaySettings(t, "bom", station.StationID)
 	t.Setenv("SETTINGS_FILE", settingsPath)
@@ -128,6 +106,7 @@ func TestTideToday_ReturnsOKWithProviderData(t *testing.T) {
 }
 
 func TestTideToday_ReturnsBadGatewayForUnknownProvider(t *testing.T) {
+	withCleanTideProviderRegistry(t)
 	ensureTideProvidersRegistered(t)
 	settingsPath := writeTideTodaySettings(t, "not-a-real-provider", "ANY")
 	t.Setenv("SETTINGS_FILE", settingsPath)

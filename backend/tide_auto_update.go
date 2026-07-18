@@ -23,15 +23,11 @@ func updateNearestTideStation() {
 	}
 
 	payload := buildSettingsPayload(settings)
-	if payload.UI.TideProvider != "bom" || !payload.UI.TideAutoStation {
+	if !payload.UI.TideAutoStation {
 		return
 	}
 
-	p, ok := getTideProvider("bom")
-	if !ok {
-		return
-	}
-	bom, ok := p.(*bomTideProvider)
+	provider, ok := getTideProvider(payload.UI.TideProvider)
 	if !ok {
 		return
 	}
@@ -48,7 +44,7 @@ func updateNearestTideStation() {
 		return
 	}
 
-	station, ok := bom.NearestStation(vesselState.Latitude, vesselState.Longitude)
+	station, ok := nearestStation(provider, vesselState.Latitude, vesselState.Longitude)
 	if !ok || station.StationID == payload.UI.TideStationID {
 		return
 	}

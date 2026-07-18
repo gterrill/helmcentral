@@ -5,49 +5,12 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
-
-func TestParseBomTidesTable(t *testing.T) {
-	html, err := os.ReadFile("testdata/bom_tides_table_sample.html")
-	if err != nil {
-		t.Fatalf("failed to read fixture: %v", err)
-	}
-
-	extremes, err := parseBomTidesTable(string(html))
-	if err != nil {
-		t.Fatalf("parseBomTidesTable returned error: %v", err)
-	}
-
-	if len(extremes) != 31 {
-		t.Fatalf("expected 31 extremes, got %d", len(extremes))
-	}
-
-	first := extremes[0]
-	wantTime, err := time.Parse(time.RFC3339, "2026-06-15T17:12:00Z")
-	if err != nil {
-		t.Fatalf("failed to parse expected time: %v", err)
-	}
-	if !first.Time.Equal(wantTime) {
-		t.Errorf("expected first extreme time %v, got %v", wantTime, first.Time)
-	}
-	if first.High {
-		t.Errorf("expected first extreme to be a low tide")
-	}
-	if first.HeightM != 0.22 {
-		t.Errorf("expected first extreme height 0.22, got %v", first.HeightM)
-	}
-
-	for i := 1; i < len(extremes); i++ {
-		if extremes[i].Time.Before(extremes[i-1].Time) {
-			t.Errorf("extremes not sorted by time at index %d", i)
-		}
-	}
-}
 
 func TestInterpolateTideNowBetweenExtremes(t *testing.T) {
 	base := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)
@@ -229,14 +192,95 @@ type stubTideProvider struct {
 	id       string
 	result   tideChartResult
 	fetchErr error
+	stations []tideStation
 }
 
 func (s *stubTideProvider) ID() string        { return s.id }
 func (s *stubTideProvider) Name() string      { return "Stub " + s.id }
 func (s *stubTideProvider) TTLSeconds() int64 { return 3600 }
-func (s *stubTideProvider) SearchStations(query string, limit int) []tideStation { return nil }
+func (s *stubTideProvider) SearchStations(query string, limit int) []tideStation {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if limit <= 0 {
+		limit = 20
+	}
+
+	results := make([]tideStation, 0, limit)
+	for _, station := range s.stations {
+		if query != "" &&
+			!strings.Contains(strings.ToLower(station.Name), query) &&
+			!strings.Contains(strings.ToLower(station.StationID), query) &&
+			!strings.Contains(strings.ToLower(station.State), query) {
+			continue
+		}
+		results = append(results, station)
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	return results
+}
 func (s *stubTideProvider) FetchTideChart(stationID string) (tideChartResult, error) {
 	return s.result, s.fetchErr
+}
+
+func TestNearestStation_ReturnsClosestStation(t *testing.T) {
+	sydney := tideStation{StationID: "SYD", Name: "Sydney", Lat: -33.8688, Lon: 151.2093}
+	perth := tideStation{StationID: "PER", Name: "Perth", Lat: -31.9505, Lon: 115.8605}
+	adelaide := tideStation{StationID: "ADL", Name: "Adelaide", Lat: -34.9285, Lon: 138.6007}
+	provider := &stubTideProvider{id: "fake", stations: []tideStation{sydney, perth, adelaide}}
+
+	// A point close to Adelaide should resolve to Adelaide, not Sydney or Perth.
+	got, ok := nearestStation(provider, -34.9, 138.5)
+	if !ok {
+		t.Fatalf("expected ok=true, got false")
+	}
+	if got.StationID != adelaide.StationID {
+		t.Errorf("expected nearest station %q, got %q", adelaide.StationID, got.StationID)
+	}
+}
+
+func TestNearestStation_ReturnsFalseWhenProviderHasNoStations(t *testing.T) {
+	provider := &stubTideProvider{id: "empty", stations: nil}
+
+	_, ok := nearestStation(provider, -34.9, 138.5)
+	if ok {
+		t.Errorf("expected ok=false for a provider with no stations, got true")
+	}
+}
+
+func TestTideNearestHandler(t *testing.T) {
+	origRegistry := tideProviderRegistry
+	origOrder := tideProviderOrder
+	tideProviderRegistry = map[string]tideProvider{}
+	tideProviderOrder = nil
+	t.Cleanup(func() {
+		tideProviderRegistry = origRegistry
+		tideProviderOrder = origOrder
+	})
+
+	registerTideProvider(&stubTideProvider{
+		id: "fake",
+		stations: []tideStation{
+			{StationID: "SYD", Name: "Sydney", Lat: -33.8688, Lon: 151.2093},
+			{StationID: "PER", Name: "Perth", Lat: -31.9505, Lon: 115.8605},
+		},
+	})
+
+	e := echo.New()
+
+	t.Run("unknown provider returns 400", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/tide-nearest?provider=nope", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		if err := tideNearestHandler(c); err != nil {
+			t.Fatalf("tideNearestHandler returned error: %v", err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d (body: %s)", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 func TestTideChartHandler_IncludesTidalPhaseAndDoubleTideFields(t *testing.T) {

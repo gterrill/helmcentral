@@ -32,11 +32,11 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
   const [autoDetectFailed, setAutoDetectFailed] = useState(false)
 
   useEffect(() => {
-    if (settingsLoading || tideProvider !== 'bom' || tideStationId) {
+    if (settingsLoading || tideProvider === 'stormglass' || tideStationId) {
       setAutoDetecting(false)
       return
     }
-    fetch('/api/tide-nearest')
+    fetch(`/api/tide-nearest?provider=${tideProvider}`)
       .then((r) => r.ok ? r.json() : Promise.reject(new Error('unavailable')))
       .then((s: { station_id: string; name: string }) => saveStation(s.station_id, s.name))
       .catch(() => setAutoDetectFailed(true))

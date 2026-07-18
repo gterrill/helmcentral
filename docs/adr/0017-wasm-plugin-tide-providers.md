@@ -96,6 +96,24 @@ Negative / explicitly deferred:
 - No shared cache utility yet — each WASM provider hand-rolls its own disk cache (copied from `bomTideCache`'s shape), rather than a factored-out helper all providers (native and WASM) could share.
 - No plugin hot-reload — `plugins/tides/` is scanned once at startup; adding, removing, or updating a plugin requires a container restart.
 
+## Update
+
+Nearest-station geo lookup is now generalized host-side. A new `nearestStation(p tideProvider, lat, lon float64)` function in `backend/tide_providers.go` calls `p.SearchStations("", maxStationsForNearestLookup)` and runs the existing shared `haversineMeters` over the results, relying on the "empty query → full catalog with real `Lat`/`Lon`" convention that `SearchStations` implementations already followed — now stated explicitly in the `tideProvider` interface's doc comment as part of the plugin contract. No interface method was added; every current and future provider (native or WASM plugin) gets nearest-station support for free as long as it honors that convention.
+
+This closes reason #1 from the "Reference example, not a BOM port" section above: the `p.(*bomTideProvider)` Go concrete-type assertion in `tideNearestHandler` (and in `tide_auto_update.go`'s `updateNearestTideStation`) is gone; both now resolve any registered provider generically via `getTideProvider` and call `nearestStation`.
+
+BOM's other reason for staying native — fragile HTML scraping (`parseBomTidesTable`) — is untouched by this change. BOM still stays native for that reason alone.
+
+## Update: BOM ported to WASM
+
+Blocker #1 from "Reference example, not a BOM port" above (`tideNearestHandler`'s `p.(*bomTideProvider)` concrete-type assertion) was already resolved by the "Update" section directly above this one — `nearestStation` now works generically off the `tideProvider` interface for any registered provider.
+
+Blocker #2 (BOM's HTML-scraping fragility) has now been evaluated in practice, not just in theory, and found technically sound: TinyGo 0.41.1 — already the pinned version for this repo's own WASM test fixtures (see `backend/wasm_tide_provider_test.go`'s regeneration comment) — compiles Go's `regexp` and `//go:embed` without issue for BOM's two specific regexes (`bomTideTimeRegex`, `bomTideHeightRegex` — both simple, no pathological bounded-repetition quantifiers) and its ~361KB embedded station file. The Extism Go PDK's `pdk.NewHTTPRequest(...).SetHeader(...)` also supports the custom `User-Agent` header BOM's scraper requires, confirmed by porting it directly.
+
+This does not make the original concern disappear. The real, accepted cost is debuggability: diagnosing a future BOM markup change (a broken regex match, a changed HTML class name) is genuinely harder inside a sandboxed WASM guest — no attached debugger, no easy print-and-rerun loop, just redeploy-and-observe — than it would be in native Go with normal tooling. That tradeoff is deliberate and accepted, not a risk that was resolved away.
+
+Given both blockers are now addressed (#1 structurally, #2 as an accepted tradeoff), `backend/tide_provider_bom.go` and `backend/data/bom_tide_sites.json` have been deleted. `docs/examples/tide-plugins/bom/` is now the source of truth for BOM tide data, built the same way as the NOAA reference plugin. Unlike NOAA (which a fresh install ships inactive, requiring the operator to build and install it manually), both the BOM and NOAA plugins are now built and installed automatically as part of Docker Compose startup — see the compose-file changes tracked separately from this document for the exact mechanism.
+
 ## Related
 - ADR-0011: In-App MBTiles Satellite Chart Upload-and-Serve — the `sat_charts.go` "drop a self-describing file in, validate at read time, skip-and-log corrupt entries rather than failing everything" precedent this partially mirrors, extended here from inert uploaded data to actually-executed sandboxed code.
 - `signalk/signalk#213` (GitHub discussion) — external prior art for the spring/neap and double-tide-day gap this ADR closes.

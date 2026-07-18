@@ -4,9 +4,11 @@
 // noaa is a reference tide-provider WASM plugin for Helmcentral, backed by
 // NOAA's public CO-OPS (Center for Operational Oceanographic Products and
 // Services) Tides & Currents API. It exists to show what wiring up a real
-// government tide API into the plugin contract looks like - it is NOT BOM
-// (backend/tide_provider_bom.go) ported to WASM; see
-// docs/adr/0017-wasm-plugin-tide-providers.md for why BOM stays native Go.
+// government tide API into the plugin contract looks like, as a teaching
+// example. It is a different plugin from ../bom (the real, only "bom"
+// provider, ported from the formerly-native backend/tide_provider_bom.go)
+// - see docs/adr/0017-wasm-plugin-tide-providers.md's "Update: BOM ported
+// to WASM" section for why that port was made.
 //
 // NOAA endpoints used (shapes confirmed by querying NOAA's own live API
 // directly on 2026-07-17, cross-checked against

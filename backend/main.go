@@ -104,7 +104,6 @@ func main() {
 
 	// Tide providers
 	registerTideProvider(newStormGlassTideProvider())
-	registerTideProvider(newBomTideProvider())
 	loadWasmTideProviders(pluginsTidesDir())
 
 	// Tile cache (backs the Esri World Imagery proxy + area prefetch).

@@ -27,7 +27,19 @@ import (
 	"time"
 
 	extism "github.com/extism/go-sdk"
+	"github.com/tetratelabs/wazero"
 )
+
+// wasmModuleConfig gives every guest instance real wall-clock time via WASI.
+// Without WithSysWalltime(), wazero's default WASI clock is a fixed fake time
+// (observed: 2022-01-01T00:00:00Z) rather than the host's actual clock - fine
+// for deterministic testing, but silently broken for any plugin (native BOM's
+// WASM port, NOAA's reference plugin, ...) that computes a date range via
+// time.Now(), since every such request ends up asking the upstream tide API
+// for a fixed historical/invalid date instead of "today".
+func wasmModuleConfig() wazero.ModuleConfig {
+	return wazero.NewModuleConfig().WithSysWalltime()
+}
 
 const (
 	defaultWasmPluginTimeoutMS  = 15000 // ms, overridable via WASM_PLUGIN_TIMEOUT_MS
@@ -238,7 +250,7 @@ func newWasmTideProviderWithManifest(manifest extism.Manifest) (provider *wasmTi
 		return nil, fmt.Errorf("failed to compile plugin %s: %w", path, cerr)
 	}
 
-	instance, ierr := compiled.Instance(ctx, extism.PluginInstanceConfig{})
+	instance, ierr := compiled.Instance(ctx, extism.PluginInstanceConfig{ModuleConfig: wasmModuleConfig()})
 	if ierr != nil {
 		compiled.Close(ctx)
 		return nil, fmt.Errorf("failed to instantiate plugin %s: %w", path, ierr)
@@ -325,7 +337,7 @@ func (p *wasmTideProvider) call(name string, input []byte) (out []byte, err erro
 	}()
 
 	ctx := context.Background()
-	instance, ierr := p.compiled.Instance(ctx, extism.PluginInstanceConfig{})
+	instance, ierr := p.compiled.Instance(ctx, extism.PluginInstanceConfig{ModuleConfig: wasmModuleConfig()})
 	if ierr != nil {
 		return nil, fmt.Errorf("plugin %q: failed to create instance: %w", p.id, ierr)
 	}
@@ -388,7 +400,8 @@ type wasmFetchTideChartOutput struct {
 // reimplemented per-plugin. Unlike SearchStations, this DOES return an
 // error (per the interface), so failures are surfaced rather than swallowed
 // into an empty result - except when a stale cache entry lets us degrade
-// gracefully instead, mirroring bomTideProvider.FetchTideChart exactly.
+// gracefully instead, the same behavior the formerly-native BOM tide
+// provider had before it was ported to WASM (docs/examples/tide-plugins/bom).
 func (p *wasmTideProvider) FetchTideChart(stationID string) (result tideChartResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {

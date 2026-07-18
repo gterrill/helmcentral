@@ -8,10 +8,11 @@ like, end to end — clone this, change the URLs/field mappings, and you
 have a starting point for your own region's tide source.
 
 It is **not** a production-hardened client (no pagination, no
-retry/backoff — see the comments at the top of `main.go`), and it is not
-BOM (`backend/tide_provider_bom.go`) ported to WASM — see
-[docs/adr/0017-wasm-plugin-tide-providers.md](../../adr/0017-wasm-plugin-tide-providers.md)
-for why BOM stays native Go.
+retry/backoff — see the comments at the top of `main.go`), and it is a
+different plugin from [../bom](../bom) (the real, only "bom" provider,
+ported from the formerly-native `backend/tide_provider_bom.go`) — see
+[docs/adr/0017-wasm-plugin-tide-providers.md](../../adr/0017-wasm-plugin-tide-providers.md)'s
+"Update: BOM ported to WASM" section for why that port was made.
 
 Written in TinyGo — the most approachable option given Helmcentral's own
 Go backend. The Extism plugin contract isn't TinyGo-specific: Rust, Zig,

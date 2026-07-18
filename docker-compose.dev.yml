@@ -4,6 +4,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    depends_on:
+      tide-plugins-builder:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     env_file:
@@ -26,6 +29,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
+    depends_on:
+      tide-plugins-builder:
+        condition: service_completed_successfully
     working_dir: /app
     env_file:
       - ./backend/.env
@@ -55,6 +61,27 @@ services:
     volumes:
       - ./:/workspace
       - frontend_node_modules:/workspace/frontend/node_modules
+
+  # One-shot builder: compiles the bundled reference tide plugins (bom, noaa)
+  # from docs/examples/tide-plugins/ with TinyGo and drops the resulting
+  # <name>.wasm + <name>.allowed_hosts.json pair into ./plugins/tides, the
+  # same host directory bind-mounted into backend/backend-dev above. No
+  # `profiles:` key here on purpose: a profile-less service is always part
+  # of the resolved graph, so it's pulled in as a dependency whether the
+  # "prod" or "dev" profile is activated, without needing to be listed under
+  # both. Pinned to 0.41.1 (not :latest) to match this repo's other TinyGo
+  # WASM fixtures and avoid version drift.
+  tide-plugins-builder:
+    image: tinygo/tinygo:0.41.1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        set -e &&
+        cd /src/bom && go mod download && tinygo build -o /out/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/bom.allowed_hosts.json &&
+        cd /src/noaa && go mod download && tinygo build -o /out/noaa.wasm -target wasip1 -buildmode c-shared . && cp noaa.allowed_hosts.json /out/noaa.allowed_hosts.json
+    volumes:
+      - ./docs/examples/tide-plugins:/src:ro
+      - ./plugins/tides:/out
 
 volumes:
   frontend_node_modules:

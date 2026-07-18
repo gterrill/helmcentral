@@ -52,6 +52,14 @@ type tideChartResult struct {
 
 // tideProvider is the interface implemented by each pluggable tide data
 // source (BOM, Storm Glass, ...).
+//
+// Convention: SearchStations("", limit) must return up to limit stations
+// from the provider's full catalog, with real Lat/Lon populated on each
+// station. This isn't just a typeahead-search nicety - nearestStation below
+// relies on it generically to do geo lookup (nearest-station) for any
+// provider, not only BOM. Every provider already follows it:
+// tide_provider_stormglass.go, and the BOM and NOAA WASM plugins
+// (docs/examples/tide-plugins/bom/bom.go, docs/examples/tide-plugins/noaa/main.go).
 type tideProvider interface {
 	ID() string
 	Name() string
@@ -71,6 +79,32 @@ func registerTideProvider(p tideProvider) {
 func getTideProvider(id string) (tideProvider, bool) {
 	p, ok := tideProviderRegistry[id]
 	return p, ok
+}
+
+// maxStationsForNearestLookup bounds the catalog fetch nearestStation makes
+// via SearchStations("", limit) - comfortably covers NOAA's ~3500 stations
+// and BOM's smaller list.
+const maxStationsForNearestLookup = 5000
+
+// nearestStation finds the station in p's full catalog closest to (lat, lon)
+// by great-circle distance, using the existing shared haversineMeters
+// (backend/signalk.go). Relies on the tideProvider interface's documented
+// convention that SearchStations("", limit) returns up to limit stations
+// from the provider's full catalog with real Lat/Lon populated. Returns
+// ok=false if the provider has no stations at all.
+func nearestStation(p tideProvider, lat, lon float64) (tideStation, bool) {
+	stations := p.SearchStations("", maxStationsForNearestLookup)
+	if len(stations) == 0 {
+		return tideStation{}, false
+	}
+	best := stations[0]
+	bestDist := haversineMeters(lat, lon, best.Lat, best.Lon)
+	for _, s := range stations[1:] {
+		if d := haversineMeters(lat, lon, s.Lat, s.Lon); d < bestDist {
+			bestDist, best = d, s
+		}
+	}
+	return best, true
 }
 
 // interpolateTideNow cosine-interpolates the current tide height and
@@ -311,13 +345,10 @@ type tideChartResponse struct {
 }
 
 func tideNearestHandler(c echo.Context) error {
-	p, ok := getTideProvider("bom")
+	providerID := strings.TrimSpace(c.QueryParam("provider"))
+	provider, ok := getTideProvider(providerID)
 	if !ok {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "bom provider not available"})
-	}
-	bom, ok := p.(*bomTideProvider)
-	if !ok {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "bom provider not available"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown tide provider"})
 	}
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
@@ -333,7 +364,7 @@ func tideNearestHandler(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "vessel position unavailable"})
 	}
 
-	station, ok := bom.NearestStation(vesselState.Latitude, vesselState.Longitude)
+	station, ok := nearestStation(provider, vesselState.Latitude, vesselState.Longitude)
 	if !ok {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no stations available"})
 	}

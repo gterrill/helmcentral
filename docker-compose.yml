@@ -3,6 +3,9 @@ services:
     image: ghcr.io/gterrill/helmcentral:latest
     container_name: helmcentral
     restart: unless-stopped
+    depends_on:
+      tide-plugins-builder:
+        condition: service_completed_successfully
     ports:
       - "9091:8080"
     dns:
@@ -19,3 +22,23 @@ services:
       - ./settings.yaml:/app/settings.yaml:ro
       - ./backend-data:/app/data
       - ./plugins:/app/plugins:ro
+
+  # One-shot builder: compiles the bundled reference tide plugins (bom, noaa)
+  # from docs/examples/tide-plugins/ with TinyGo and drops the resulting
+  # <name>.wasm + <name>.allowed_hosts.json pair into ./plugins/tides, the
+  # same host directory bind-mounted into the app above. Re-running this is
+  # idempotent (rebuilds and overwrites); it never bakes plugins into an
+  # image, preserving ADR-0017's "drop a plugin in without an image rebuild"
+  # model. Pinned to 0.41.1 (not :latest) to match this repo's other TinyGo
+  # WASM fixtures and avoid version drift.
+  tide-plugins-builder:
+    image: tinygo/tinygo:0.41.1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        set -e &&
+        cd /src/bom && go mod download && tinygo build -o /out/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/bom.allowed_hosts.json &&
+        cd /src/noaa && go mod download && tinygo build -o /out/noaa.wasm -target wasip1 -buildmode c-shared . && cp noaa.allowed_hosts.json /out/noaa.allowed_hosts.json
+    volumes:
+      - ./docs/examples/tide-plugins:/src:ro
+      - ./plugins/tides:/out

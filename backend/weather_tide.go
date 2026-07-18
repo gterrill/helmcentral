@@ -95,7 +95,6 @@ var jsonCacheDescriptors = []jsonCacheDescriptor{
 	{Name: "weather_today", EnvKey: "WEATHER_TODAY_CACHE_FILE", Fallback: defaultWeatherCacheFile, TTL: weatherTodayCacheTTL},
 	{Name: "weather_forecast", EnvKey: "WEATHER_FORECAST_CACHE_FILE", Fallback: defaultForecastCacheFile, TTL: weatherForecastCacheTTL},
 	{Name: "tide", EnvKey: "TIDE_CACHE_FILE", Fallback: defaultTideCacheFile, TTL: stormGlassTideCacheTTL},
-	{Name: "tide_bom", EnvKey: "TIDE_BOM_CACHE_FILE", Fallback: defaultBomTideCacheFile, TTL: bomTideCacheTTL},
 }
 
 func listCaches(c echo.Context) error {
@@ -138,10 +137,6 @@ func listCaches(c echo.Context) error {
 			tideCacheStore.mu.RUnlock()
 			cacheHits = atomic.LoadUint64(&tideCacheHits)
 			cacheMisses = atomic.LoadUint64(&tideCacheMisses)
-		case "tide_bom":
-			bomTideCacheStore.mu.RLock()
-			inMemoryEntries = len(bomTideCacheStore.data)
-			bomTideCacheStore.mu.RUnlock()
 		}
 
 		result = append(result, cacheInfoResponse{
@@ -191,10 +186,6 @@ func invalidateCache(c echo.Context) error {
 		tideCacheStore.mu.Lock()
 		tideCacheStore.data = make(map[string]tideChartResult)
 		tideCacheStore.mu.Unlock()
-	case "tide_bom":
-		bomTideCacheStore.mu.Lock()
-		bomTideCacheStore.data = make(map[string]tideChartResult)
-		bomTideCacheStore.mu.Unlock()
 	}
 
 	filePath := cacheFilePath(descriptor.EnvKey, descriptor.Fallback)
@@ -453,7 +444,6 @@ func init() {
 	loadWeatherTodayCacheFromDisk()
 	loadWeatherForecastCacheFromDisk()
 	loadTideCacheFromDisk()
-	loadBomTideCacheFromDisk()
 	loadBomMarineWarningsCacheFromDisk()
 }
 
