@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { useForecastWarningsProviders } from '@/hooks/use-forecast-warnings-providers'
 import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useWeatherProviders } from '@/hooks/use-weather-providers'
 import { useWaveProviders } from '@/hooks/use-wave-providers'
@@ -35,6 +36,7 @@ type SettingsPayload = {
     tide_auto_station?: boolean
     weather_provider?: string
     wave_provider?: string
+    forecast_warnings_provider?: string
   }
   anchor?: {
     bow_roller_height_m?: number
@@ -87,6 +89,8 @@ export function SignalKSettingsPanel({
   const [waveProvider, setWaveProvider] = useState('open-meteo-marine')
   const { providers: weatherProviders } = useWeatherProviders()
   const { providers: waveProviders } = useWaveProviders()
+  const [forecastWarningsProvider, setForecastWarningsProvider] = useState('bom')
+  const { providers: forecastWarningsProviders } = useForecastWarningsProviders()
 
   const [bowRollerHeightM, setBowRollerHeightM] = useState('1.5')
   const [chainSizeMm, setChainSizeMm] = useState('12')
@@ -153,6 +157,9 @@ export function SignalKSettingsPanel({
     }
     if (typeof data.ui?.wave_provider === 'string' && data.ui.wave_provider !== '') {
       setWaveProvider(data.ui.wave_provider)
+    }
+    if (typeof data.ui?.forecast_warnings_provider === 'string' && data.ui.forecast_warnings_provider !== '') {
+      setForecastWarningsProvider(data.ui.forecast_warnings_provider)
     }
 
     if (typeof data.anchor?.bow_roller_height_m === 'number') {
@@ -280,6 +287,7 @@ export function SignalKSettingsPanel({
         tide_auto_station: tideAutoStation,
         weather_provider: weatherProvider,
         wave_provider: waveProvider,
+        forecast_warnings_provider: forecastWarningsProvider,
       },
       anchor: {
         bow_roller_height_m: parseNumber(bowRollerHeightM, 1.5),
@@ -495,6 +503,30 @@ export function SignalKSettingsPanel({
               </SelectTrigger>
               <SelectPopup>
                 {waveProviders.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </Field>
+        </div>
+      </FieldSet>
+
+      <FieldSet>
+        <FieldLegend variant="label">Forecast Warnings</FieldLegend>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="forecast-warnings-provider">Forecast Warnings Provider</FieldLabel>
+            <Select
+              value={forecastWarningsProvider}
+              onValueChange={(value) => value && setForecastWarningsProvider(value)}
+            >
+              <SelectTrigger id="forecast-warnings-provider" aria-label="Forecast warnings provider">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {forecastWarningsProviders.map((provider) => (
                   <SelectItem key={provider.id} value={provider.id}>
                     {provider.name}
                   </SelectItem>

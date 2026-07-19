@@ -161,8 +161,8 @@ vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
   useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
 }))
 
-vi.mock('@/hooks/use-marine-warnings', () => ({
-  useMarineWarnings: () => ({ activeWarning: null }),
+vi.mock('@/hooks/use-forecast-warnings', () => ({
+  useForecastWarnings: () => ({ activeWarning: null }),
   findActiveWindBulletin: () => null,
 }))
 

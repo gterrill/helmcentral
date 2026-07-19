@@ -47,6 +47,9 @@ type settingsPayload struct {
 		TideStationID             string            `json:"tide_station_id"`
 		TideStationName           string            `json:"tide_station_name"`
 		TideAutoStation           bool              `json:"tide_auto_station"`
+		WeatherProvider           string            `json:"weather_provider"`
+		WaveProvider              string            `json:"wave_provider"`
+		ForecastWarningsProvider  string            `json:"forecast_warnings_provider"`
 	} `json:"ui"`
 	Anchor struct {
 		BowRollerHeightM float64 `json:"bow_roller_height_m"`
@@ -107,6 +110,9 @@ func updateSettingsHandler(c echo.Context) error {
 	uiMap["tide_station_id"] = normalized.UI.TideStationID
 	uiMap["tide_station_name"] = normalized.UI.TideStationName
 	uiMap["tide_auto_station"] = normalized.UI.TideAutoStation
+	uiMap["weather_provider"] = normalized.UI.WeatherProvider
+	uiMap["wave_provider"] = normalized.UI.WaveProvider
+	uiMap["forecast_warnings_provider"] = normalized.UI.ForecastWarningsProvider
 	settings["ui"] = uiMap
 
 	settings["anchor"] = map[string]any{
@@ -180,6 +186,9 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if v, ok := uiMap["tide_auto_station"].(bool); ok {
 			payload.UI.TideAutoStation = v
 		}
+		payload.UI.WeatherProvider = strings.TrimSpace(coerceString(uiMap["weather_provider"]))
+		payload.UI.WaveProvider = strings.TrimSpace(coerceString(uiMap["wave_provider"]))
+		payload.UI.ForecastWarningsProvider = strings.TrimSpace(coerceString(uiMap["forecast_warnings_provider"]))
 	}
 
 	if anchorMap, ok := settings["anchor"].(map[string]any); ok {
@@ -254,6 +263,9 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.UI.TideStationID = strings.TrimSpace(req.UI.TideStationID)
 	normalized.UI.TideStationName = strings.TrimSpace(req.UI.TideStationName)
 	normalized.UI.TideAutoStation = req.UI.TideAutoStation
+	normalized.UI.WeatherProvider = strings.TrimSpace(req.UI.WeatherProvider)
+	normalized.UI.WaveProvider = strings.TrimSpace(req.UI.WaveProvider)
+	normalized.UI.ForecastWarningsProvider = strings.TrimSpace(req.UI.ForecastWarningsProvider)
 
 	normalized.Anchor.BowRollerHeightM = req.Anchor.BowRollerHeightM
 	if normalized.Anchor.BowRollerHeightM <= 0 {

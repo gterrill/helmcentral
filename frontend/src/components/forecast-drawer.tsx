@@ -13,7 +13,7 @@ import type { ChartConfig } from '@/components/ui/chart'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
 import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
-import type { MarineWarnings } from '@/hooks/use-marine-warnings'
+import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { compassPointFor } from '@/lib/format'
 import { fahrenheitToCelsius } from '@/lib/units'
@@ -51,7 +51,7 @@ interface ForecastDrawerProps {
   ttlSeconds?: number | null
   onRetry?: () => void
   unit: 'imperial' | 'metric'
-  activeMarineWarning?: MarineWarnings | null
+  activeForecastWarning?: ForecastWarnings | null
   waveDays?: WaveForecastDay[]
   waveSeaTemperatureF?: number | null
   waveLoading?: boolean
@@ -406,7 +406,7 @@ export function ForecastDrawer({
   error = null,
   onRetry,
   unit,
-  activeMarineWarning = null,
+  activeForecastWarning = null,
   waveDays = [],
   waveSeaTemperatureF = null,
   waveLoading = false,
@@ -695,7 +695,7 @@ export function ForecastDrawer({
       <div className="border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
         <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
           {summary ?? "Today's hourly forecast"}
-          <WindWarningNotice warnings={activeMarineWarning} />
+          <WindWarningNotice warnings={activeForecastWarning} />
         </p>
       </div>
       <div className="px-2.5 py-2.5">

@@ -243,7 +243,6 @@ type tideTodayETagData struct {
 
 func init() {
 	loadTideCacheFromDisk()
-	loadBomMarineWarningsCacheFromDisk()
 }
 
 func cacheFilePath(envKey, fallback string) string {

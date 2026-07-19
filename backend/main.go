@@ -117,6 +117,12 @@ func main() {
 	// until plugins/waves/*.wasm exists.
 	loadWasmWaveProviders(pluginsWavesDir())
 
+	// Forecast warnings providers - WASM-plugin-only (no native built-in),
+	// same reasoning as weather/wave above; registry stays empty
+	// (forecastWarningsHandler correctly 502s) until
+	// plugins/forecast-warnings/*.wasm exists.
+	loadWasmForecastWarningsProviders(pluginsForecastWarningsDir())
+
 	// Tile cache (backs the Esri World Imagery proxy + area prefetch).
 	// Fail fast if it can't be opened rather than silently running with a
 	// nil/broken cache.
@@ -150,11 +156,12 @@ func main() {
 	e.GET("/api/weather-providers", weatherProvidersHandler)
 	e.GET("/api/wave-forecast", waveForecast)
 	e.GET("/api/wave-providers", waveProvidersHandler)
+	e.GET("/api/forecast-warnings", forecastWarningsHandler)
+	e.GET("/api/forecast-warnings-providers", forecastWarningsProvidersHandler)
 	e.GET("/api/tide-today", tideToday)
 	e.GET("/api/tide-providers", tideProvidersHandler)
 	e.GET("/api/tide-stations", tideStationsHandler)
 	e.GET("/api/tide-chart", tideChartHandler)
-	e.GET("/api/marine-warnings", marineWarningsHandler)
 	e.GET("/api/tide-nearest", tideNearestHandler)
 	e.GET("/api/place-name", placeName)
 	e.GET("/api/caches", listCaches)
@@ -208,7 +215,6 @@ func main() {
 	go seedMotoringTrailFromInflux()
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)
-	go startBomMarineWarningsPoller(1 * time.Hour)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("Starting server on %s", addr)

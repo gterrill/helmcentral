@@ -21,7 +21,7 @@ import { TodayNowTile } from '@/components/today-now-tile'
 import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
-import { MarineWarningBanner } from '@/components/marine-warning-banner'
+import { ForecastWarningsBanner } from '@/components/forecast-warnings-banner'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
@@ -49,7 +49,7 @@ import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
-import { findActiveWindBulletin, useMarineWarnings } from '@/hooks/use-marine-warnings'
+import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
@@ -221,7 +221,7 @@ export function App() {
   } = useElectricalState(5)
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
-  const { activeWarning: activeMarineWarning } = useMarineWarnings(uiConfig.forecastRefreshSeconds)
+  const { activeWarning: activeForecastWarning } = useForecastWarnings(uiConfig.forecastRefreshSeconds)
   const {
     forecast,
     hourlyToday: forecastHourlyToday,
@@ -265,7 +265,7 @@ export function App() {
     void anchorWatch.setAnchorHere(latitude, longitude)
   }
 
-  const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeMarineWarning))
+  const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
 
   const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
@@ -492,7 +492,7 @@ export function App() {
             ttlSeconds={forecastTtlSeconds}
             onRetry={refetchForecast}
             unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
-            activeMarineWarning={activeMarineWarning}
+            activeForecastWarning={activeForecastWarning}
             waveDays={waveForecastDays}
             waveSeaTemperatureF={waveSeaTemperatureF}
             waveLoading={waveForecastLoading}
@@ -711,7 +711,7 @@ export function App() {
         </header>
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
-            <MarineWarningBanner warnings={activeMarineWarning} />
+            <ForecastWarningsBanner warnings={activeForecastWarning} />
 
             <div className="min-h-0 flex-1">
               {activePanel === null ? (

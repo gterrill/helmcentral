@@ -70,11 +70,13 @@ services:
       - ./:/workspace
       - frontend_node_modules:/workspace/frontend/node_modules
 
-  # One-shot builder: compiles the bundled reference tide, weather and wave
-  # plugins (bom/noaa, open-meteo/weatherkit, open-meteo-marine) from
-  # docs/examples/{tide,weather,wave}-plugins/ with TinyGo and drops each
-  # <name>.wasm + <name>.allowed_hosts.json (+ <name>.config.json, for
-  # weatherkit) into ./plugins/{tides,weather,waves}, the same host
+  # One-shot builder: compiles the bundled reference tide, weather, wave and
+  # forecast-warnings plugins (bom/noaa, open-meteo/weatherkit,
+  # open-meteo-marine, bom/nws) from
+  # docs/examples/{tide,weather,wave,forecast-warnings}-plugins/ with TinyGo
+  # and drops each <name>.wasm + <name>.allowed_hosts.json (+
+  # <name>.config.json, for weatherkit) into
+  # ./plugins/{tides,weather,waves,forecast-warnings}, the same host
   # directory bind-mounted into backend/backend-dev above. No `profiles:`
   # key here on purpose: a profile-less service is always part of the
   # resolved graph, so it's pulled in as a dependency whether the "prod" or
@@ -87,12 +89,14 @@ services:
     command:
       - >
         set -e &&
-        mkdir -p /out/tides /out/weather /out/waves &&
+        mkdir -p /out/tides /out/weather /out/waves /out/forecast-warnings &&
         cd /src/tide-plugins/bom && go mod download && tinygo build -o /out/tides/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/tides/bom.allowed_hosts.json &&
         cd /src/tide-plugins/noaa && go mod download && tinygo build -o /out/tides/noaa.wasm -target wasip1 -buildmode c-shared . && cp noaa.allowed_hosts.json /out/tides/noaa.allowed_hosts.json &&
         cd /src/weather-plugins/open-meteo && go mod download && tinygo build -o /out/weather/open-meteo.wasm -target wasip1 -buildmode c-shared . && cp open-meteo.allowed_hosts.json /out/weather/open-meteo.allowed_hosts.json &&
         cd /src/weather-plugins/weatherkit && go mod download && tinygo build -o /out/weather/weatherkit.wasm -target wasip1 -buildmode c-shared . && cp weatherkit.allowed_hosts.json /out/weather/weatherkit.allowed_hosts.json && cp weatherkit.config.json /out/weather/weatherkit.config.json &&
-        cd /src/wave-plugins/open-meteo-marine && go mod download && tinygo build -o /out/waves/open-meteo-marine.wasm -target wasip1 -buildmode c-shared . && cp open-meteo-marine.allowed_hosts.json /out/waves/open-meteo-marine.allowed_hosts.json
+        cd /src/wave-plugins/open-meteo-marine && go mod download && tinygo build -o /out/waves/open-meteo-marine.wasm -target wasip1 -buildmode c-shared . && cp open-meteo-marine.allowed_hosts.json /out/waves/open-meteo-marine.allowed_hosts.json &&
+        cd /src/forecast-warnings-plugins/bom && go mod download && tinygo build -o /out/forecast-warnings/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/forecast-warnings/bom.allowed_hosts.json &&
+        cd /src/forecast-warnings-plugins/nws && go mod download && tinygo build -o /out/forecast-warnings/nws.wasm -target wasip1 -buildmode c-shared . && cp nws.allowed_hosts.json /out/forecast-warnings/nws.allowed_hosts.json
     volumes:
       - ./docs/examples:/src:ro
       - ./plugins:/out

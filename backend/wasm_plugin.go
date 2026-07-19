@@ -9,6 +9,13 @@
 // later weather/wave adapters) embed wasmPluginBase and wrap
 // wasmPluginCache[T] with their own result type.
 //
+// Every WASM plugin also gets Extism's built-in HTTP host function (via
+// manifest.AllowedHosts, enforced internally by go-sdk) plus a custom
+// "ftp_fetch" host function (wasm_ftp_fetch.go), gated by that same
+// AllowedHosts list, so a guest that needs FTP (e.g. the planned Forecast
+// Warnings plugin's BOM default, which can only reliably fetch bulletins
+// over anonymous FTP) can get it without any type-specific wiring.
+//
 // NOTE on this file's name: like wasm_tide_provider.go, it is deliberately
 // NOT named anything ending in "_wasm.go" (or "_wasm_test.go" for the test
 // file) - such a name is treated by the Go toolchain as an implicit
@@ -221,7 +228,12 @@ func manifestForWasmPlugin(path string) (extism.Manifest, error) {
 // contract (id()/name() required and callable and non-empty; ttl_seconds()
 // optional, defaulting to defaultWasmPluginTTLSeconds on absence or error).
 // logPrefix is used in log.Printf lines only (e.g. "plugins/tides",
-// "plugins/weather").
+// "plugins/weather"). The compiled plugin is given a generic "ftp_fetch"
+// custom host function (wasm_ftp_fetch.go), gated by manifest.AllowedHosts -
+// the same allowlist Extism's own built-in HTTP host function already
+// enforces - so every plugin type gets FTP access for free without any
+// type-specific wiring; a plugin that never imports ftp_fetch is completely
+// unaffected by its presence.
 func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPluginBase, err error) {
 	path := wasmManifestLabel(manifest)
 
@@ -232,7 +244,7 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 	}()
 
 	ctx := context.Background()
-	compiled, cerr := extism.NewCompiledPlugin(ctx, manifest, extism.PluginConfig{EnableWasi: true}, []extism.HostFunction{})
+	compiled, cerr := extism.NewCompiledPlugin(ctx, manifest, extism.PluginConfig{EnableWasi: true}, []extism.HostFunction{newFTPFetchHostFunction(manifest.AllowedHosts)})
 	if cerr != nil {
 		return nil, fmt.Errorf("failed to compile plugin %s: %w", path, cerr)
 	}

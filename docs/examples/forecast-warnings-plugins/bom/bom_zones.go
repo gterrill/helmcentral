@@ -1,10 +1,28 @@
+// bom_zones.go is a verbatim port of the formerly-hardcoded
+// backend/bom_marine_zones.go: lat/lon -> Australian state -> BOM marine
+// forecast zone resolution. Ported as-is, including its existing
+// gaps/approximations - these are documented upstream limitations to carry
+// forward, not bugs for this port to fix:
+//
+//   - SA and NT have no zone table at all (zoneForPosition's default case) -
+//     BOM marine wind/surf warning product IDs haven't been found for those
+//     states yet, so there is nothing to resolve a zone against.
+//   - tasZoneForPosition and waZoneForPosition are stubs that always return
+//     ("", false) - no zone names have been confirmed live for TAS or WA.
+//     Both states DO have a registered wind-warning product ID
+//     (bomMarineWarningProducts in bom.go), so this plugin still fetches
+//     their bulletins, but can never match a section to a specific zone,
+//     so fetch_warnings never returns a bulletin for a TAS/WA vessel today.
+//
+// No dependency on "github.com/extism/go-pdk" - see main.go's doc comment
+// for why that split matters for host-testability.
 package main
 
 // stateForPosition maps a lat/lon position to an Australian state/territory
 // code using a simple bounding-box table.
 //
 // State borders are not rectangular, so these boxes deliberately overlap
-// slightly. This is a coastal approximation, not exact — that's acceptable
+// slightly. This is a coastal approximation, not exact - that's acceptable
 // for a marine app since vessels are near the coast, not sitting on
 // ambiguous inland borders. Order matters: check more specific/eastern
 // states first and return on the first match.
@@ -98,7 +116,7 @@ func qldZoneForPosition(lat, lon float64) (string, bool) {
 }
 
 // nswZoneForPosition uses verified real BOM marine zone names for the NSW
-// coast, north to south. "Sydney Enclosed Waters" is intentionally omitted —
+// coast, north to south. "Sydney Enclosed Waters" is intentionally omitted -
 // open-water positions near Sydney match "Sydney Coast".
 func nswZoneForPosition(lat, lon float64) (string, bool) {
 	type band struct {
@@ -126,7 +144,7 @@ func nswZoneForPosition(lat, lon float64) (string, bool) {
 	return "", false
 }
 
-// APPROXIMATE — not verified against BOM's official marine zone maps, only
+// APPROXIMATE - not verified against BOM's official marine zone maps, only
 // "East Gippsland Coast" (VIC) was confirmed live during research. Verify
 // before relying on these boundaries.
 func vicZoneForPosition(lat, lon float64) (string, bool) {
@@ -148,14 +166,14 @@ func vicZoneForPosition(lat, lon float64) (string, bool) {
 	return "", false
 }
 
-// APPROXIMATE — not verified against BOM's official marine zone maps.
+// APPROXIMATE - not verified against BOM's official marine zone maps.
 // No zone names have been confirmed live for TAS yet. Verify before relying
 // on these boundaries.
 func tasZoneForPosition(lat, lon float64) (string, bool) {
 	return "", false
 }
 
-// APPROXIMATE — not verified against BOM's official marine zone maps.
+// APPROXIMATE - not verified against BOM's official marine zone maps.
 // No zone names have been confirmed live for WA yet. Verify before relying
 // on these boundaries.
 func waZoneForPosition(lat, lon float64) (string, bool) {

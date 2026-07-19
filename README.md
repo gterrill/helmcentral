@@ -169,9 +169,29 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 "
 ```
 
-(swap the directory for `docs/examples/weather-plugins/weatherkit` or `docs/examples/wave-plugins/open-meteo-marine` — note both are multi-file packages, so the build target is `.`, not a single `main.go`). The bundled `plugins-builder` Compose service (see `docker-compose.yml`/`docker-compose.dev.yml`) already builds and installs all five reference plugins (two tide, two weather, one wave) automatically on every `make dev`/deploy — see each plugin's own README for details and installation notes if building/installing manually.
+(swap the directory for `docs/examples/weather-plugins/weatherkit` or `docs/examples/wave-plugins/open-meteo-marine` — note both are multi-file packages, so the build target is `.`, not a single `main.go`). The bundled `plugins-builder` Compose service (see `docker-compose.yml`/`docker-compose.dev.yml`) already builds and installs all seven reference plugins (two tide, two weather, one wave, two forecast warnings) automatically on every `make dev`/deploy — see each plugin's own README for details and installation notes if building/installing manually.
 
 **Upgrading an existing install:** if you previously ran a version of Helmcentral with the old hardcoded WeatherKit/Open-Meteo-marine integration, delete the now-orphaned `cache/weather_today_cache.json` and `cache/weather_forecast_cache.json` files (weather/wave caching moved to per-plugin files under `cache/weather_wasm_*_cache.json`/`cache/wave_wasm_*_cache.json`). If you were relying on WeatherKit, set the four `WEATHERKIT_*` environment variables on the backend (see the commented-out examples in `docker-compose.yml`) and select "Apple WeatherKit" under Settings → Weather — the default provider on upgrade is Open-Meteo (keyless) unless you explicitly configure otherwise.
+
+### Forecast Warnings Provider Plugins
+
+Marine/weather warnings are pluggable the same way tides/weather/waves are, via `backend/forecast_warnings_providers.go` on the same generic WASM host layer. Like weather and waves, there's no native built-in — both reference plugins ship as WASM, discovered from `plugins/forecast-warnings/` (`PLUGINS_FORECAST_WARNINGS_DIR` to override). **BOM** (Australia's Bureau of Meteorology) is the default (`ui.forecast_warnings_provider`, default `"bom"`); **NWS** (the US National Weather Service) ships as the second reference plugin, giving genuine non-Australian coverage.
+
+A plugin exports `id`, `name`, `ttl_seconds`, and `fetch_warnings(lat, lon)`. Unlike tide/weather/wave, the host does **no** derivation here — no zone-matching, no active/cancelled filtering: each plugin resolves its own zone(s) for the given position and returns only bulletins/sections that are already current and relevant. This is a deliberate departure, not an oversight — BOM's zone taxonomy (named coastal zones from state bounding boxes) and NWS's (UGC marine zone codes) are incompatible namespaces, and "is this warning still active" is determined differently by each (BOM: free-text section parsing; NWS: structured CAP alert status fields) — there's nothing universal to factor out host-side. See [docs/adr/0019-ftp-host-function-and-forecast-warnings-provider.md](docs/adr/0019-ftp-host-function-and-forecast-warnings-provider.md) for the full contract.
+
+BOM's warnings data is only reliably available over anonymous FTP (`ftp.bom.gov.au`) — BOM's website actively bot-blocks HTTP scraping of the same content. Since a WASM guest can't open raw sockets, this repo gained a new, generic **custom Extism host function** (`ftp_fetch`, in `backend/wasm_ftp_fetch.go`) that every plugin type can use, gated by the same `<name>.allowed_hosts.json` allowlist already used for HTTP. This is the first (and so far only) custom host function in this codebase — see the ADR for the full mechanism and why it was built instead of keeping BOM native.
+
+Build either reference plugin the same way as the others (target `.`, both are multi-file packages):
+
+```bash
+docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
+  cd docs/examples/forecast-warnings-plugins/bom &&
+  go mod tidy &&
+  tinygo build -o bom.wasm -target wasip1 -buildmode c-shared .
+"
+```
+
+**Upgrading an existing install:** the old `GET /api/marine-warnings` endpoint and `cache/bom_marine_warnings_cache.json` file are gone — warnings now live at `GET /api/forecast-warnings`, cached per-plugin under `cache/forecast_warnings_wasm_*_cache.json`. No environment variables are needed for the default BOM plugin (it's keyless, using BOM's own public anonymous FTP mirror).
 
 ## Next Steps
 
