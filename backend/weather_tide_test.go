@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +123,110 @@ func TestTideToday_ReturnsBadGatewayForUnknownProvider(t *testing.T) {
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected status %d for an unknown configured provider, got %d (body: %s)", http.StatusBadGateway, rec.Code, rec.Body.String())
+	}
+}
+
+// TestTideToday_ReturnsBadGatewayWhenProviderEmpty guards the fix for the
+// bug where an empty ui.tide_provider silently defaulted to "stormglass" -
+// which then 502'd anyway on any install without STORMGLASS_API_KEY set,
+// with no indication of what to actually configure. Empty is now treated
+// the same as "not configured", with an actionable error.
+func TestTideToday_ReturnsBadGatewayWhenProviderEmpty(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	ensureTideProvidersRegistered(t)
+
+	path := filepath.Join(t.TempDir(), "settings.yaml")
+	if err := os.WriteFile(path, []byte("ui:\n  tide_station_id: ANY\n"), 0o644); err != nil {
+		t.Fatalf("failed to write test settings file: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", path)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/tide-today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := tideToday(c); err != nil {
+		t.Fatalf("tideToday returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected status %d when no tide provider is configured, got %d (body: %s)", http.StatusBadGateway, rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if payload["error"] == "" {
+		t.Fatalf("expected a non-empty, actionable error message, got %+v", payload)
+	}
+}
+
+// TestTideToday_ReturnsBadGatewayWhenStationEmptyForNonStormglassProvider
+// guards the fix for a live bug: ui.tide_station_id defaulted to Storm
+// Glass's "vessel-position" pseudo-station regardless of which provider was
+// actually configured, so a BOM/NOAA user who hadn't picked a real station
+// got a confusing "unknown BOM tide station: vessel-position" error instead
+// of a clear "you haven't picked a station yet" message.
+func TestTideToday_ReturnsBadGatewayWhenStationEmptyForNonStormglassProvider(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	ensureTideProvidersRegistered(t)
+	registerTideProvider(&stubTideProvider{id: "bom"})
+
+	settingsPath := writeTideTodaySettings(t, "bom", "")
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/tide-today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := tideToday(c); err != nil {
+		t.Fatalf("tideToday returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected status %d when no tide station is configured for a non-stormglass provider, got %d (body: %s)", http.StatusBadGateway, rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if payload["error"] == "" {
+		t.Fatalf("expected a non-empty, actionable error message, got %+v", payload)
+	}
+}
+
+// TestTideToday_StormglassDefaultsEmptyStationToVesselPosition is a
+// regression guard: Storm Glass is the one provider where an empty station
+// ID is meaningful (it has exactly one pseudo-station, the vessel's live
+// position) - that auto-fill behavior must survive the fix above, which
+// only removes the auto-fill for every OTHER provider.
+func TestTideToday_StormglassDefaultsEmptyStationToVesselPosition(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	ensureTideProvidersRegistered(t)
+
+	settingsPath := writeTideTodaySettings(t, "stormglass", "")
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/tide-today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := tideToday(c); err != nil {
+		t.Fatalf("tideToday returned error: %v", err)
+	}
+	// Storm Glass has no credentials configured in this test environment,
+	// so the request still fails - but it must fail at the *fetch* step
+	// (proving the empty station was auto-filled and provider resolution
+	// succeeded), not at the provider/station-configuration step.
+	var payload map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if strings.Contains(payload["error"], "no tide provider configured") || strings.Contains(payload["error"], "no tide station configured") {
+		t.Fatalf("expected the stormglass vessel-position station auto-fill to still apply, got configuration error: %q", payload["error"])
 	}
 }
 

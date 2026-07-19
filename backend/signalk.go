@@ -174,11 +174,7 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 			}
 		}
 
-		if tideProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"])); tideProvider != "" {
-			if _, ok := getTideProvider(tideProvider); ok {
-				payload.UI.TideProvider = tideProvider
-			}
-		}
+		payload.UI.TideProvider = strings.TrimSpace(coerceString(uiMap["tide_provider"]))
 		payload.UI.TideStationID = strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
 		payload.UI.TideStationName = strings.TrimSpace(coerceString(uiMap["tide_station_name"]))
 		if v, ok := uiMap["tide_auto_station"].(bool); ok {
@@ -255,9 +251,6 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	}
 
 	normalized.UI.TideProvider = strings.TrimSpace(req.UI.TideProvider)
-	if _, ok := getTideProvider(normalized.UI.TideProvider); !ok {
-		normalized.UI.TideProvider = "stormglass"
-	}
 	normalized.UI.TideStationID = strings.TrimSpace(req.UI.TideStationID)
 	normalized.UI.TideStationName = strings.TrimSpace(req.UI.TideStationName)
 	normalized.UI.TideAutoStation = req.UI.TideAutoStation

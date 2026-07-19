@@ -149,6 +149,8 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 
 See [docs/examples/tide-plugins/noaa/README.md](docs/examples/tide-plugins/noaa/README.md) for installing a built plugin, and [docs/adr/0017-wasm-plugin-tide-providers.md](docs/adr/0017-wasm-plugin-tide-providers.md) for why WASM was chosen over alternatives (including Lua) and the full plugin contract.
 
+Unlike weather and waves (below), tides have **no universal keyless default** — tide data is tied to real physical station networks rather than a global forecast model, so there's no free API with genuinely worldwide coverage to hardcode. BOM and NOAA are both built automatically by the `plugins-builder` Compose service, but only cover Australia and the US respectively; Storm Glass has true global reach (it queries the vessel's live position rather than a fixed station list) but requires a paid `STORMGLASS_API_KEY`. An operator must explicitly pick `ui.tide_provider` in Settings to match their region or budget — nothing is silently assumed on their behalf, and `/api/tide-today` returns a clear error naming what's missing until they do.
+
 ### Weather & Wave Forecast Provider Plugins
 
 Weather and wave/swell forecasting are pluggable the same way tides are, via two sibling registries (`backend/weather_providers.go`, `backend/wave_providers.go`) sharing the same generic WASM host layer (`backend/wasm_plugin.go`) as tides. They're deliberately kept as **separate plugin types** — a weather source and a wave/marine source are usually different upstream APIs entirely, so a location can mix, e.g., Apple WeatherKit for point weather with Open-Meteo Marine for swell.

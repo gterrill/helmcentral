@@ -78,7 +78,7 @@ export function SignalKSettingsPanel({
   const [tankLabels, setTankLabels] = useState<Record<string, string>>(
     Object.fromEntries(defaultTankLabelIds.map((id) => [id, ''])),
   )
-  const [tideProvider, setTideProvider] = useState('stormglass')
+  const [tideProvider, setTideProvider] = useState('')
   const [tideStationId, setTideStationId] = useState('')
   const [tideStationName, setTideStationName] = useState('')
   const [tideAutoStation, setTideAutoStation] = useState(false)
@@ -441,7 +441,7 @@ export function SignalKSettingsPanel({
               onValueChange={(value) => value && setTideProvider(value)}
             >
               <SelectTrigger id="tide-provider" aria-label="Tide provider">
-                <SelectValue />
+                <SelectValue placeholder="Select a tide provider…" />
               </SelectTrigger>
               <SelectPopup>
                 {tideProviders.map((provider) => (

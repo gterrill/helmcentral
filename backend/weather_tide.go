@@ -324,16 +324,21 @@ func tideToday(c echo.Context) error {
 
 	configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
 	if configuredProvider == "" {
-		configuredProvider = "stormglass"
-	}
-	configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
-	if configuredStation == "" {
-		configuredStation = stormGlassVesselStationID
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "no tide provider configured — set ui.tide_provider in Settings (e.g. \"stormglass\" with STORMGLASS_API_KEY set, \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)"})
 	}
 
 	provider, ok := getTideProvider(configuredProvider)
 	if !ok {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("unknown tide provider configured: %q", configuredProvider)})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("unknown tide provider configured: %q (is the plugin installed in plugins/tides?)", configuredProvider)})
+	}
+
+	configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
+	if configuredStation == "" {
+		if configuredProvider == "stormglass" {
+			configuredStation = stormGlassVesselStationID
+		} else {
+			return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)})
+		}
 	}
 
 	result, fetchErr := provider.FetchTideChart(configuredStation)
