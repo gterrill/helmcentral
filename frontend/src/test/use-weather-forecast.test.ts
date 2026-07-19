@@ -68,8 +68,10 @@ describe('useWeatherForecast', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
+        provider: 'open-meteo',
         days: [
           {
+            day_key: '2026-06-14',
             date: 'Jun 14',
             day_name: 'Sunday',
             condition: 'Clear',
@@ -110,11 +112,39 @@ describe('useWeatherForecast', () => {
     })
 
     expect(result.current.forecast).toHaveLength(1)
+    expect(result.current.forecast[0].dayKey).toBe('2026-06-14')
     expect(result.current.hourlyToday).toHaveLength(2)
     expect(result.current.hourlyToday[1].kind).toBe('sunset')
     expect(result.current.summary).toBe('Mostly Sunny conditions will continue through today.')
+    expect(result.current.provider).toBe('open-meteo')
     expect(result.current.isCached).toBe(true)
     expect(result.current.updatedAt).toBe('2026-06-14T12:30:00Z')
     expect(result.current.ttlSeconds).toBe(3600)
+  })
+
+  it('falls back to an ISO date-derived dayKey when day_key is missing', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          date: 'Jun 14',
+          day_name: 'Sunday',
+          condition: 'Clear',
+          high_temp_f: 76,
+          low_temp_f: 62,
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.forecast).toHaveLength(1)
+    expect(result.current.forecast[0].dayKey).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(result.current.provider).toBeNull()
   })
 })

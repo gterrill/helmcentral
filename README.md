@@ -133,7 +133,7 @@ See [docs/adr/0012-configurable-bento-dashboard.md](docs/adr/0012-configurable-b
 
 ### Tide Provider Plugins
 
-Tide data comes from a pluggable `tideProvider` registry (`backend/tide_providers.go`), with two built-in providers (BOM for Australia, Storm Glass globally). A developer wanting to add another region's government tide API doesn't need to fork Helmcentral or touch Go at all: drop a compiled WASM plugin into `plugins/tides/` and it's picked up as a new provider in the existing Settings tide-provider dropdown on the next restart — zero frontend changes.
+Tide data comes from a pluggable `tideProvider` registry (`backend/tide_providers.go`), with one built-in provider (Storm Glass, using the vessel's current position). Every regional tide source — including BOM for Australia — ships as a WASM plugin instead, so a developer wanting to add another region's government tide API doesn't need to fork Helmcentral or touch Go at all: drop a compiled WASM plugin into `plugins/tides/` and it's picked up as a new provider in the existing Settings tide-provider dropdown on the next restart — zero frontend changes.
 
 A plugin is a small guest module exporting five functions (`id`, `name`, `ttl_seconds`, `search_stations`, `fetch_tide_chart`) — the host does the interpolation, caching, and spring/neap classification, so a plugin only ever returns raw station and tide-extreme data. Plugins run sandboxed via [Extism](https://extism.org/)/[wazero](https://wazero.io/) (WASM linear-memory isolation, no filesystem or process access), and can only reach the network hosts explicitly declared in a companion `<name>.allowed_hosts.json` file — no file means no network access at all.
 
@@ -148,6 +148,28 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 ```
 
 See [docs/examples/tide-plugins/noaa/README.md](docs/examples/tide-plugins/noaa/README.md) for installing a built plugin, and [docs/adr/0017-wasm-plugin-tide-providers.md](docs/adr/0017-wasm-plugin-tide-providers.md) for why WASM was chosen over alternatives (including Lua) and the full plugin contract.
+
+### Weather & Wave Forecast Provider Plugins
+
+Weather and wave/swell forecasting are pluggable the same way tides are, via two sibling registries (`backend/weather_providers.go`, `backend/wave_providers.go`) sharing the same generic WASM host layer (`backend/wasm_plugin.go`) as tides. They're deliberately kept as **separate plugin types** — a weather source and a wave/marine source are usually different upstream APIs entirely, so a location can mix, e.g., Apple WeatherKit for point weather with Open-Meteo Marine for swell.
+
+Unlike tides, neither registry has a native built-in provider — both ship exclusively as WASM plugins, discovered from `plugins/weather/` and `plugins/waves/` respectively (`PLUGINS_WEATHER_DIR`/`PLUGINS_WAVES_DIR` to override). **Open-Meteo** (weather) and **Open-Meteo Marine** (waves) are the defaults, specifically because both are free and keyless — a fresh install gets a fully working forecast dashboard with zero configuration. **Apple WeatherKit** ships as a second reference weather plugin for anyone who prefers Apple's data and already has (or is willing to get) a paid Apple Developer account — see [docs/examples/weather-plugins/weatherkit/README.md](docs/examples/weather-plugins/weatherkit/README.md) for how to obtain WeatherKit credentials.
+
+A weather plugin exports `id`, `name`, `ttl_seconds`, and `fetch_forecast` (current conditions + multi-day + hourly, all SI units); a wave plugin exports the same first three plus `fetch_waves` (hourly wave/swell series + optional sea-surface temperature). As with tides, the host owns all derived data — unit conversion, day-bucketing into the vessel's local timezone, wind/wave/precipitation summary sentences, and moon phase — so a plugin only ever returns raw, provider-native numbers. The same sandboxing rules apply (Extism/wazero isolation, `<name>.allowed_hosts.json` default-deny network allowlist). A plugin needing operator-supplied secrets (WeatherKit's signing key, in this codebase's only example so far) reads them via a companion `<name>.config.json` file whose values are `${ENV_VAR}`-expanded from the backend's environment at load time — see [docs/adr/0018-wasm-plugin-weather-and-wave-providers.md](docs/adr/0018-wasm-plugin-weather-and-wave-providers.md) for the full contract and config-file format.
+
+Build any of the three reference plugins the same way as the tide plugins:
+
+```bash
+docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
+  cd docs/examples/weather-plugins/open-meteo &&
+  go mod tidy &&
+  tinygo build -o open-meteo.wasm -target wasip1 -buildmode c-shared .
+"
+```
+
+(swap the directory for `docs/examples/weather-plugins/weatherkit` or `docs/examples/wave-plugins/open-meteo-marine` — note both are multi-file packages, so the build target is `.`, not a single `main.go`). The bundled `plugins-builder` Compose service (see `docker-compose.yml`/`docker-compose.dev.yml`) already builds and installs all five reference plugins (two tide, two weather, one wave) automatically on every `make dev`/deploy — see each plugin's own README for details and installation notes if building/installing manually.
+
+**Upgrading an existing install:** if you previously ran a version of Helmcentral with the old hardcoded WeatherKit/Open-Meteo-marine integration, delete the now-orphaned `cache/weather_today_cache.json` and `cache/weather_forecast_cache.json` files (weather/wave caching moved to per-plugin files under `cache/weather_wasm_*_cache.json`/`cache/wave_wasm_*_cache.json`). If you were relying on WeatherKit, set the four `WEATHERKIT_*` environment variables on the backend (see the commented-out examples in `docker-compose.yml`) and select "Apple WeatherKit" under Settings → Weather — the default provider on upgrade is Open-Meteo (keyless) unless you explicitly configure otherwise.
 
 ## Next Steps
 

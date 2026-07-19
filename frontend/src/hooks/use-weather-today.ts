@@ -4,26 +4,28 @@ export interface WeatherToday {
   datetime: string;
   temperature_f: number;
   condition: string;
-  high_temp_f: number;
-  low_temp_f: number;
   wind_speed_kts: number;
   wind_gust_kts: number;
   wind_direction: string;
   precipitation_pct: number;
-  sea_temperature_f: number;
+  provider: string;
+  cached: boolean;
+  updated_at: string;
+  ttl_seconds: number;
 }
 
 const defaultWeather: WeatherToday = {
   datetime: new Date().toISOString(),
   temperature_f: -1,
   condition: 'Loading...',
-  high_temp_f: -1,
-  low_temp_f: -1,
   wind_speed_kts: -1,
   wind_gust_kts: -1,
   wind_direction: '—',
   precipitation_pct: -1,
-  sea_temperature_f: -1,
+  provider: '',
+  cached: false,
+  updated_at: '',
+  ttl_seconds: 0,
 };
 
 export function useWeatherToday(refreshIntervalSeconds = 600) {
@@ -48,14 +50,6 @@ export function useWeatherToday(refreshIntervalSeconds = 600) {
               ? data.temperature_f
               : -1,
           condition: data.condition || 'Unknown',
-          high_temp_f:
-            typeof data.high_temp_f === 'number' && data.high_temp_f >= -1
-              ? data.high_temp_f
-              : -1,
-          low_temp_f:
-            typeof data.low_temp_f === 'number' && data.low_temp_f >= -1
-              ? data.low_temp_f
-              : -1,
           wind_speed_kts:
             typeof data.wind_speed_kts === 'number' && data.wind_speed_kts >= -1
               ? data.wind_speed_kts
@@ -69,10 +63,10 @@ export function useWeatherToday(refreshIntervalSeconds = 600) {
             typeof data.precipitation_pct === 'number' && data.precipitation_pct >= -1
               ? data.precipitation_pct
               : -1,
-          sea_temperature_f:
-            typeof data.sea_temperature_f === 'number' && data.sea_temperature_f >= -1
-              ? data.sea_temperature_f
-              : -1,
+          provider: typeof data.provider === 'string' ? data.provider : '',
+          cached: Boolean(data.cached),
+          updated_at: typeof data.updated_at === 'string' ? data.updated_at : '',
+          ttl_seconds: typeof data.ttl_seconds === 'number' ? data.ttl_seconds : 0,
         };
 
         setWeather(validWeather);

@@ -1,0 +1,6 @@
+{
+  "key_id": "${WEATHERKIT_KEY_ID}",
+  "team_id": "${WEATHERKIT_TEAM_ID}",
+  "service_id": "${WEATHERKIT_SERVICE_ID}",
+  "private_key": "${WEATHERKIT_PRIVATE_KEY}"
+}

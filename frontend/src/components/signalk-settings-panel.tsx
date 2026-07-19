@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useTideProviders } from '@/hooks/use-tide-providers'
+import { useWeatherProviders } from '@/hooks/use-weather-providers'
+import { useWaveProviders } from '@/hooks/use-wave-providers'
 
 type SettingsPayload = {
   signalk?: {
@@ -31,6 +33,8 @@ type SettingsPayload = {
     tide_station_id?: string
     tide_station_name?: string
     tide_auto_station?: boolean
+    weather_provider?: string
+    wave_provider?: string
   }
   anchor?: {
     bow_roller_height_m?: number
@@ -79,6 +83,10 @@ export function SignalKSettingsPanel({
   const [tideStationName, setTideStationName] = useState('')
   const [tideAutoStation, setTideAutoStation] = useState(false)
   const { providers: tideProviders } = useTideProviders()
+  const [weatherProvider, setWeatherProvider] = useState('open-meteo')
+  const [waveProvider, setWaveProvider] = useState('open-meteo-marine')
+  const { providers: weatherProviders } = useWeatherProviders()
+  const { providers: waveProviders } = useWaveProviders()
 
   const [bowRollerHeightM, setBowRollerHeightM] = useState('1.5')
   const [chainSizeMm, setChainSizeMm] = useState('12')
@@ -139,6 +147,12 @@ export function SignalKSettingsPanel({
     }
     if (typeof data.ui?.tide_auto_station === 'boolean') {
       setTideAutoStation(data.ui.tide_auto_station)
+    }
+    if (typeof data.ui?.weather_provider === 'string' && data.ui.weather_provider !== '') {
+      setWeatherProvider(data.ui.weather_provider)
+    }
+    if (typeof data.ui?.wave_provider === 'string' && data.ui.wave_provider !== '') {
+      setWaveProvider(data.ui.wave_provider)
     }
 
     if (typeof data.anchor?.bow_roller_height_m === 'number') {
@@ -264,6 +278,8 @@ export function SignalKSettingsPanel({
         tide_station_id: tideStationId,
         tide_station_name: tideStationName,
         tide_auto_station: tideAutoStation,
+        weather_provider: weatherProvider,
+        wave_provider: waveProvider,
       },
       anchor: {
         bow_roller_height_m: parseNumber(bowRollerHeightM, 1.5),
@@ -443,6 +459,49 @@ export function SignalKSettingsPanel({
               <FieldLabel>Auto-update tide station as vessel moves</FieldLabel>
             </Field>
           )}
+        </div>
+      </FieldSet>
+
+      <FieldSet>
+        <FieldLegend variant="label">Weather</FieldLegend>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="weather-provider">Weather Provider</FieldLabel>
+            <Select
+              value={weatherProvider}
+              onValueChange={(value) => value && setWeatherProvider(value)}
+            >
+              <SelectTrigger id="weather-provider" aria-label="Weather provider">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {weatherProviders.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="wave-provider">Wave Provider</FieldLabel>
+            <Select
+              value={waveProvider}
+              onValueChange={(value) => value && setWaveProvider(value)}
+            >
+              <SelectTrigger id="wave-provider" aria-label="Wave provider">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {waveProviders.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </Field>
         </div>
       </FieldSet>
 

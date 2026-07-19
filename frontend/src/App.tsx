@@ -53,6 +53,7 @@ import { findActiveWindBulletin, useMarineWarnings } from '@/hooks/use-marine-wa
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
+import { useWaveForecast } from '@/hooks/use-wave-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
@@ -232,6 +233,12 @@ export function App() {
     ttlSeconds: forecastTtlSeconds,
     refetch: refetchForecast,
   } = useWeatherForecast(uiConfig.forecastRefreshSeconds)
+  const {
+    days: waveForecastDays,
+    seaTemperatureF: waveSeaTemperatureF,
+    loading: waveForecastLoading,
+    error: waveForecastError,
+  } = useWaveForecast(uiConfig.forecastRefreshSeconds)
   const anchorWatch = useAnchorWatch(
     latitude,
     longitude,
@@ -335,6 +342,9 @@ export function App() {
         return (
           <TodayNowTile
             weather={weather}
+            highTempF={forecast[0]?.high ?? -1}
+            lowTempF={forecast[0]?.low ?? -1}
+            seaTemperatureF={waveSeaTemperatureF ?? null}
             distanceUnits={uiConfig.distanceUnits}
             onOpen={layoutEditing ? undefined : () => setActivePanel('forecast')}
           />
@@ -483,6 +493,10 @@ export function App() {
             onRetry={refetchForecast}
             unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
             activeMarineWarning={activeMarineWarning}
+            waveDays={waveForecastDays}
+            waveSeaTemperatureF={waveSeaTemperatureF}
+            waveLoading={waveForecastLoading}
+            waveError={waveForecastError}
           />
         )
       case 'routes':

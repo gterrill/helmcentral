@@ -11,13 +11,15 @@ import { ForecastTideSection } from '@/components/forecast-tide-section'
 import { WindWarningNotice } from '@/components/wind-warning-notice'
 import type { ChartConfig } from '@/components/ui/chart'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
-import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWavePoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
+import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
+import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
 import type { MarineWarnings } from '@/hooks/use-marine-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { compassPointFor } from '@/lib/format'
 import { fahrenheitToCelsius } from '@/lib/units'
 
 interface ForecastDay {
+  dayKey: string
   date: string
   dayName: string
   condition: string
@@ -27,14 +29,12 @@ interface ForecastDay {
   windGust: number
   windDirection: string
   windSummary: string | null
-  waveSummary: string | null
   precipitationSummary: string | null
   precipitation: number
   sunriseTime: string | null
   sunsetTime: string | null
   moonPhase: string | null
   hourlyWind: WeatherHourlyWindPoint[]
-  hourlyWave: WeatherHourlyWavePoint[]
   hourlyPrecip: WeatherHourlyPrecipPoint[]
   hourlyUV: WeatherHourlyUVPoint[]
   hourlyCloud: WeatherHourlyCloudPoint[]
@@ -52,6 +52,10 @@ interface ForecastDrawerProps {
   onRetry?: () => void
   unit: 'imperial' | 'metric'
   activeMarineWarning?: MarineWarnings | null
+  waveDays?: WaveForecastDay[]
+  waveSeaTemperatureF?: number | null
+  waveLoading?: boolean
+  waveError?: string | null
 }
 
 // Simple weather icon selector
@@ -373,6 +377,7 @@ export function formatRefreshAge(value: string | null | undefined, nowMs: number
 // returns below instead of the chart JSX, so the values derived from this
 // are never displayed - it only needs to be safe to compute, not accurate.
 const EMPTY_DAY: ForecastDay = {
+  dayKey: '',
   date: '',
   dayName: '',
   condition: '',
@@ -382,14 +387,12 @@ const EMPTY_DAY: ForecastDay = {
   windGust: 0,
   windDirection: '',
   windSummary: null,
-  waveSummary: null,
   precipitationSummary: null,
   precipitation: 0,
   sunriseTime: null,
   sunsetTime: null,
   moonPhase: null,
   hourlyWind: [],
-  hourlyWave: [],
   hourlyPrecip: [],
   hourlyUV: [],
   hourlyCloud: [],
@@ -404,6 +407,10 @@ export function ForecastDrawer({
   onRetry,
   unit,
   activeMarineWarning = null,
+  waveDays = [],
+  waveSeaTemperatureF = null,
+  waveLoading = false,
+  waveError = null,
 }: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
@@ -439,12 +446,19 @@ export function ForecastDrawer({
   }
 
   const selectedDay = days[selectedDayIndex] ?? days[0] ?? EMPTY_DAY
+  const selectedWaveDay = waveDays.find((d) => d.dayKey === selectedDay.dayKey) ?? null
+  // A wave-provider outage must read as visibly different from "this
+  // location just has no wave data" - if the whole wave fetch failed AND we
+  // have no matching day for the selected forecast day, that's the outage
+  // case (rendered via ChartUnavailableMessage further below); an empty
+  // hourlyWave array with no error is the legitimate "no data" case.
+  const waveUnavailableDueToError = Boolean(waveError) && selectedWaveDay === null
 
   const humidityPct = Math.max(35, Math.min(95, Math.round(45 + (selectedDay.precipitation * 0.4))))
   const visibilityNm = Math.max(1, 12 - (selectedDay.precipitation * 0.06))
 
   const windHourly = selectedDay.hourlyWind ?? []
-  const waveHourly = selectedDay.hourlyWave ?? []
+  const waveHourly = selectedWaveDay?.hourlyWave ?? []
   const precipHourly = selectedDay.hourlyPrecip ?? []
   const uvHourly = selectedDay.hourlyUV ?? []
   const cloudHourly = selectedDay.hourlyCloud ?? []
@@ -1074,13 +1088,26 @@ export function ForecastDrawer({
             </div>
 
             <div className="mt-3 rounded-md border bg-card/70 p-2">
-              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <Waves size={13} className="text-gauge-secondary" /> Wave
+              <h4 className="mb-2 flex items-center justify-between gap-1.5">
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <Waves size={13} className="text-gauge-secondary" /> Wave
+                </span>
+                {waveSeaTemperatureF !== null && (
+                  <span className="text-[11px] text-muted-foreground">
+                    Sea {Math.round(displayTemp(waveSeaTemperatureF))}{tempUnit}
+                  </span>
+                )}
               </h4>
-              {waveHourly.length > 0 ? (
+              {waveLoading ? (
+                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-loading">
+                  Loading wave forecast...
+                </p>
+              ) : waveUnavailableDueToError ? (
+                <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
+              ) : waveHourly.length > 0 ? (
                 <>
-                  {selectedDay.waveSummary && (
-                    <p className="mb-2 text-base text-foreground/80">{selectedDay.waveSummary}</p>
+                  {selectedWaveDay?.waveSummary && (
+                    <p className="mb-2 text-base text-foreground/80">{selectedWaveDay.waveSummary}</p>
                   )}
                   <div className="relative">
                     {waveTooltipEntry && (

@@ -70,6 +70,7 @@ function buildHourlyCloud(count = 24) {
 
 function buildDay(overrides: Record<string, unknown> = {}) {
   return {
+    dayKey: '2026-06-14',
     date: 'Jun 14',
     dayName: 'Sunday',
     condition: 'Clear',
@@ -79,17 +80,26 @@ function buildDay(overrides: Record<string, unknown> = {}) {
     windGust: 14,
     windDirection: 'NE',
     windSummary: 'Winds 10 to 19 kts, with gusts up to 24 kts.',
-    waveSummary: 'Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.',
     precipitationSummary: 'Slight chance of rain after 5PM.',
     precipitation: 5,
     sunriseTime: '6:32AM',
     sunsetTime: '5:47PM',
     moonPhase: 'waningCrescent',
     hourlyWind: buildHourlyWind(),
-    hourlyWave: buildHourlyWave(),
     hourlyPrecip: buildHourlyPrecip(),
     hourlyUV: buildHourlyUV(),
     hourlyCloud: buildHourlyCloud(),
+    ...overrides,
+  }
+}
+
+function buildWaveDay(overrides: Record<string, unknown> = {}) {
+  return {
+    dayKey: '2026-06-14',
+    date: 'Jun 14',
+    dayName: 'Sunday',
+    waveSummary: 'Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.',
+    hourlyWave: buildHourlyWave(),
     ...overrides,
   }
 }
@@ -182,7 +192,7 @@ describe('ForecastDrawer refresh age', () => {
   })
 
   it('renders wind and wave graphs for the selected day', () => {
-    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
     expect(screen.getByTestId('forecast-wind-chart')).toBeInTheDocument()
     expect(screen.getByTestId('forecast-wave-chart')).toBeInTheDocument()
@@ -300,7 +310,7 @@ describe('ForecastDrawer refresh age', () => {
   })
 
   it('shows the wave summary sentence, direction arrows and period for the selected day', () => {
-    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
     expect(screen.getByText('Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.')).toBeInTheDocument()
     expect(screen.getAllByTestId('forecast-wave-arrow').length).toBeGreaterThan(0)
@@ -308,7 +318,7 @@ describe('ForecastDrawer refresh age', () => {
   })
 
   it('uses 6-hour-block labels on the wave chart', () => {
-    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
     const chart = screen.getByTestId('forecast-wave-chart')
     expect(within(chart).getByText('12AM')).toBeInTheDocument()
@@ -321,7 +331,7 @@ describe('ForecastDrawer refresh age', () => {
   // three-way solid/dashed/dotted-dash visual distinction the hand-rolled
   // <polyline> trio had, now as <path class="recharts-curve"> elements.
   it('draws the total wave height solid and the wind-wave/swell lines dashed, in their existing colors', () => {
-    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
     const chart = screen.getByTestId('forecast-wave-chart')
     const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
@@ -356,12 +366,15 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.queryByText(/winds will be/)).not.toBeInTheDocument()
   })
 
-  it('shows an unavailable message when a day has no wave forecast', () => {
+  it('shows an unavailable message when a day has no wave forecast (real no-data state, not an error)', () => {
     render(
       <ForecastDrawer
-        forecast={[buildDay({ hourlyWave: [] })]}
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay({ hourlyWave: [] })]}
         loading={false}
         error={null}
+        waveLoading={false}
+        waveError={null}
         unit="metric"
       />,
     )
@@ -369,6 +382,62 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByTestId('forecast-wind-chart')).toBeInTheDocument()
     expect(screen.queryByTestId('forecast-wave-chart')).not.toBeInTheDocument()
     expect(screen.getByTestId('forecast-wave-unavailable')).toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-wave-error')).not.toBeInTheDocument()
+  })
+
+  it('shows a loading indicator in the wave section while waves are still loading', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[]}
+        loading={false}
+        error={null}
+        waveLoading
+        waveError={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-wave-loading')).toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-wave-chart')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-wave-unavailable')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-wave-error')).not.toBeInTheDocument()
+  })
+
+  it('shows a visible "Wave data unavailable" message when the wave fetch fails outright, distinct from the no-data state', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[]}
+        loading={false}
+        error={null}
+        waveLoading={false}
+        waveError="HTTP error! status: 502"
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-wave-error')).toBeInTheDocument()
+    expect(screen.getByText('Wave data unavailable')).toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-wave-chart')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-wave-unavailable')).not.toBeInTheDocument()
+  })
+
+  it('still renders real wave data for the selected day even when waveError is set, as long as a matching day was found (stale-but-present data)', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay()]}
+        loading={false}
+        error={null}
+        waveLoading={false}
+        waveError="HTTP error! status: 502"
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-wave-chart')).toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-wave-error')).not.toBeInTheDocument()
   })
 
   it('renders the precipitation graph with bars for the selected day', () => {

@@ -4,7 +4,7 @@ services:
     container_name: helmcentral
     restart: unless-stopped
     depends_on:
-      tide-plugins-builder:
+      plugins-builder:
         condition: service_completed_successfully
     ports:
       - "9091:8080"
@@ -18,27 +18,37 @@ services:
       # INFLUXDB_URL: "http://192.168.50.240:8086"
       # INFLUXDB_ORG: "Pikorua"
       # INFLUXDB_BUCKET: "SignalK_Data"
+      # WEATHERKIT_KEY_ID: your_key_id
+      # WEATHERKIT_TEAM_ID: your_team_id
+      # WEATHERKIT_SERVICE_ID: your_service_id
+      # WEATHERKIT_PRIVATE_KEY: your_pem_contents
     volumes:
       - ./settings.yaml:/app/settings.yaml:ro
       - ./backend-data:/app/data
       - ./plugins:/app/plugins:ro
 
-  # One-shot builder: compiles the bundled reference tide plugins (bom, noaa)
-  # from docs/examples/tide-plugins/ with TinyGo and drops the resulting
-  # <name>.wasm + <name>.allowed_hosts.json pair into ./plugins/tides, the
-  # same host directory bind-mounted into the app above. Re-running this is
+  # One-shot builder: compiles the bundled reference tide, weather and wave
+  # plugins (bom/noaa, open-meteo/weatherkit, open-meteo-marine) from
+  # docs/examples/{tide,weather,wave}-plugins/ with TinyGo and drops each
+  # <name>.wasm + <name>.allowed_hosts.json (+ <name>.config.json, for
+  # weatherkit) into ./plugins/{tides,weather,waves}, the same host
+  # directory bind-mounted into the app above. Re-running this is
   # idempotent (rebuilds and overwrites); it never bakes plugins into an
   # image, preserving ADR-0017's "drop a plugin in without an image rebuild"
   # model. Pinned to 0.41.1 (not :latest) to match this repo's other TinyGo
   # WASM fixtures and avoid version drift.
-  tide-plugins-builder:
+  plugins-builder:
     image: tinygo/tinygo:0.41.1
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >
         set -e &&
-        cd /src/bom && go mod download && tinygo build -o /out/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/bom.allowed_hosts.json &&
-        cd /src/noaa && go mod download && tinygo build -o /out/noaa.wasm -target wasip1 -buildmode c-shared . && cp noaa.allowed_hosts.json /out/noaa.allowed_hosts.json
+        mkdir -p /out/tides /out/weather /out/waves &&
+        cd /src/tide-plugins/bom && go mod download && tinygo build -o /out/tides/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/tides/bom.allowed_hosts.json &&
+        cd /src/tide-plugins/noaa && go mod download && tinygo build -o /out/tides/noaa.wasm -target wasip1 -buildmode c-shared . && cp noaa.allowed_hosts.json /out/tides/noaa.allowed_hosts.json &&
+        cd /src/weather-plugins/open-meteo && go mod download && tinygo build -o /out/weather/open-meteo.wasm -target wasip1 -buildmode c-shared . && cp open-meteo.allowed_hosts.json /out/weather/open-meteo.allowed_hosts.json &&
+        cd /src/weather-plugins/weatherkit && go mod download && tinygo build -o /out/weather/weatherkit.wasm -target wasip1 -buildmode c-shared . && cp weatherkit.allowed_hosts.json /out/weather/weatherkit.allowed_hosts.json && cp weatherkit.config.json /out/weather/weatherkit.config.json &&
+        cd /src/wave-plugins/open-meteo-marine && go mod download && tinygo build -o /out/waves/open-meteo-marine.wasm -target wasip1 -buildmode c-shared . && cp open-meteo-marine.allowed_hosts.json /out/waves/open-meteo-marine.allowed_hosts.json
     volumes:
-      - ./docs/examples/tide-plugins:/src:ro
-      - ./plugins/tides:/out
+      - ./docs/examples:/src:ro
+      - ./plugins:/out

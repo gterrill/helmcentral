@@ -6,6 +6,9 @@ import { Tile } from '@/components/ui/tile'
 
 export interface TodayNowTileProps {
   weather: WeatherToday
+  highTempF: number
+  lowTempF: number
+  seaTemperatureF: number | null
   distanceUnits: DistanceUnits
   onOpen?: () => void
 }
@@ -14,7 +17,7 @@ function fahrenheitToCelsius(temp: number) {
   return (temp - 32) * (5 / 9)
 }
 
-export const TodayNowTile = memo(function TodayNowTile({ weather, distanceUnits, onOpen }: TodayNowTileProps) {
+export const TodayNowTile = memo(function TodayNowTile({ weather, highTempF, lowTempF, seaTemperatureF, distanceUnits, onOpen }: TodayNowTileProps) {
   return (
     <div onClick={onOpen} className={onOpen ? 'cursor-pointer transition-opacity hover:opacity-80' : undefined}>
       <Tile title="Today & Now">
@@ -33,7 +36,7 @@ export const TodayNowTile = memo(function TodayNowTile({ weather, distanceUnits,
               {weather.condition}
             </p>
             <p className="text-xs text-muted-foreground">
-              {weather.high_temp_f >= 0 ? `↑${Math.round(distanceUnits === 'metric' ? fahrenheitToCelsius(weather.high_temp_f) : weather.high_temp_f)}°` : '↑—°'} {weather.low_temp_f >= 0 ? `↓${Math.round(distanceUnits === 'metric' ? fahrenheitToCelsius(weather.low_temp_f) : weather.low_temp_f)}°` : '↓—°'}
+              {highTempF >= 0 ? `↑${Math.round(distanceUnits === 'metric' ? fahrenheitToCelsius(highTempF) : highTempF)}°` : '↑—°'} {lowTempF >= 0 ? `↓${Math.round(distanceUnits === 'metric' ? fahrenheitToCelsius(lowTempF) : lowTempF)}°` : '↓—°'}
             </p>
           </div>
           <div className="text-right">
@@ -47,7 +50,7 @@ export const TodayNowTile = memo(function TodayNowTile({ weather, distanceUnits,
               {weather.precipitation_pct >= 0 ? `${Math.round(weather.precipitation_pct)}% precip` : '—% precip'}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Sea {weather.sea_temperature_f >= 0 ? `${Math.round(distanceUnits === 'metric' ? fahrenheitToCelsius(weather.sea_temperature_f) : weather.sea_temperature_f)}°` : '—°'}
+              Sea {seaTemperatureF !== null ? `${Math.round(distanceUnits === 'metric' ? fahrenheitToCelsius(seaTemperatureF) : seaTemperatureF)}°` : '—°'}
             </p>
           </div>
         </div>

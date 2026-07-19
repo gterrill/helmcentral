@@ -106,6 +106,17 @@ func main() {
 	registerTideProvider(newStormGlassTideProvider())
 	loadWasmTideProviders(pluginsTidesDir())
 
+	// Weather providers - WASM-plugin-only (no native built-in); registry
+	// stays empty (weatherToday/weatherForecast correctly 502) until
+	// plugins/weather/*.wasm exists, which a later phase's Docker build step
+	// creates.
+	loadWasmWeatherProviders(pluginsWeatherDir())
+
+	// Wave providers - WASM-plugin-only (no native built-in), same reasoning
+	// as weather above; registry stays empty (waveForecast correctly 502s)
+	// until plugins/waves/*.wasm exists.
+	loadWasmWaveProviders(pluginsWavesDir())
+
 	// Tile cache (backs the Esri World Imagery proxy + area prefetch).
 	// Fail fast if it can't be opened rather than silently running with a
 	// nil/broken cache.
@@ -136,6 +147,9 @@ func main() {
 	e.GET("/api/nearby-vessels/:key/sightings", getNearbyVesselSightingsHandler(globalNearbyContactStore))
 	e.GET("/api/weather-today", weatherToday)
 	e.GET("/api/weather-forecast", weatherForecast)
+	e.GET("/api/weather-providers", weatherProvidersHandler)
+	e.GET("/api/wave-forecast", waveForecast)
+	e.GET("/api/wave-providers", waveProvidersHandler)
 	e.GET("/api/tide-today", tideToday)
 	e.GET("/api/tide-providers", tideProvidersHandler)
 	e.GET("/api/tide-stations", tideStationsHandler)

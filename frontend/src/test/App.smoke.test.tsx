@@ -74,14 +74,21 @@ vi.mock('@/hooks/use-tide-today', () => ({
 vi.mock('@/hooks/use-weather-today', () => ({
   useWeatherToday: () => ({
     weather: {
-      temperature_f: -1, condition: '—', high_temp_f: -1, low_temp_f: -1,
+      temperature_f: -1, condition: '—',
       wind_speed_kts: -1, wind_direction: '—', wind_gust_kts: -1, precipitation_pct: -1,
+      provider: '', cached: false, updated_at: '', ttl_seconds: 0,
     },
   }),
 }))
 
 vi.mock('@/hooks/use-weather-forecast', () => ({
-  useWeatherForecast: () => ({ forecast: [], loading: false, error: null, refetch: vi.fn() }),
+  useWeatherForecast: () => ({ forecast: [], loading: false, error: null, provider: null, refetch: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-wave-forecast', () => ({
+  useWaveForecast: () => ({
+    days: [], seaTemperatureF: null, provider: null, loading: false, error: null, refetch: vi.fn(),
+  }),
 }))
 
 vi.mock('@/hooks/use-czone-switches', () => ({

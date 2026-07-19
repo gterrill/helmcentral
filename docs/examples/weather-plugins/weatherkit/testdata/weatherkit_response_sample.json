@@ -1,0 +1,73 @@
+{
+  "currentWeather": {
+    "asOf": "2026-07-19T10:00:00Z",
+    "temperature": 18.5,
+    "conditionCode": "Clear",
+    "windSpeed": 18,
+    "windGust": 36,
+    "windDirection": 270,
+    "precipitationChance": 0.25
+  },
+  "forecastDaily": {
+    "days": [
+      {
+        "forecastStart": "2026-07-19T00:00:00Z",
+        "conditionCode": "MostlyClear",
+        "temperatureMax": 22.0,
+        "temperatureMin": 14.0,
+        "precipitationChance": 0.1,
+        "windSpeed": 21.6,
+        "windGustSpeedMax": 39.6,
+        "windDirection": 190,
+        "daytimeForecast": {
+          "windSpeed": 25.2,
+          "windGustSpeedMax": 43.2,
+          "windDirection": 180
+        },
+        "sunrise": "2026-07-19T06:00:00Z",
+        "sunset": "2026-07-19T20:00:00Z"
+      },
+      {
+        "forecastStart": "2026-07-20T00:00:00Z",
+        "conditionCode": "Rain",
+        "temperatureMax": 19.0,
+        "temperatureMin": 13.0,
+        "precipitationChance": 0.8,
+        "daytimeForecast": {
+          "windSpeed": 14.4,
+          "windGustSpeedMax": 28.8,
+          "windDirection": 90
+        },
+        "sunrise": "2026-07-20T06:01:00Z",
+        "sunset": "2026-07-20T19:59:00Z"
+      }
+    ]
+  },
+  "forecastHourly": {
+    "hours": [
+      {
+        "forecastStart": "2026-07-19T11:00:00Z",
+        "conditionCode": "PartlyCloudy",
+        "temperature": 19.0,
+        "windSpeed": 10.8,
+        "windGust": 21.6,
+        "windDirection": 200,
+        "precipitationChance": 0.05,
+        "precipitationIntensity": 0.2,
+        "uvIndex": 6,
+        "daylight": true
+      },
+      {
+        "forecastStart": "2026-07-19T12:00:00Z",
+        "conditionCode": "PartlyCloudy",
+        "temperature": 19.5,
+        "windSpeed": 12.0,
+        "windDirection": 205,
+        "precipitationChance": 0.05,
+        "precipitationIntensity": 0.0,
+        "uvIndex": 6.5,
+        "daylight": true
+      }
+    ]
+  }
+}
