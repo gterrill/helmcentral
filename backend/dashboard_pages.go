@@ -26,6 +26,7 @@ var validDashboardWidgetIDs = map[string]bool{
 	"route":          true,
 	"nearby-vessels": true,
 	"battery-power":  true,
+	"solar":          true,
 	"alternator":     true,
 	"generator":      true,
 	"czone-switches": true,
@@ -57,10 +58,11 @@ var defaultDashboardLayout = []dashboardLayoutItem{
 	{ID: "route", X: 4, Y: 21, W: 4, H: 4},
 	{ID: "nearby-vessels", X: 4, Y: 25, W: 4, H: 5},
 	{ID: "battery-power", X: 8, Y: 3, W: 4, H: 12},
-	{ID: "alternator", X: 8, Y: 15, W: 4, H: 6},
-	{ID: "generator", X: 8, Y: 21, W: 4, H: 5},
-	{ID: "czone-switches", X: 8, Y: 26, W: 4, H: 6},
-	{ID: "hot-water", X: 8, Y: 32, W: 4, H: 6},
+	{ID: "solar", X: 8, Y: 15, W: 4, H: 6},
+	{ID: "alternator", X: 8, Y: 21, W: 4, H: 6},
+	{ID: "generator", X: 8, Y: 27, W: 4, H: 5},
+	{ID: "czone-switches", X: 8, Y: 32, W: 4, H: 6},
+	{ID: "hot-water", X: 8, Y: 38, W: 4, H: 6},
 }
 
 type dashboardPageData struct {

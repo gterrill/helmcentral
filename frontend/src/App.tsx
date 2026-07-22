@@ -28,6 +28,7 @@ import { RadarDrawer } from '@/components/radar-drawer'
 import { SignalKSettingsPanel } from '@/components/signalk-settings-panel'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { GeneratorTile } from '@/components/generator-tile'
+import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { ForecastDrawer } from '@/components/forecast-drawer'
 import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
@@ -43,6 +44,7 @@ import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
 import { useElectricalState } from '@/hooks/use-electrical-state'
+import { useSolarState } from '@/hooks/use-solar-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
@@ -223,6 +225,13 @@ export function App() {
     batteryRatePercentPerHour,
     timeToGoHours,
   } = useElectricalState(5)
+  const {
+    currentW: solarCurrentW,
+    todayKWh: solarTodayKWh,
+    yesterdayKWh: solarYesterdayKWh,
+    peakTodayW: solarPeakTodayW,
+    controllers: solarControllers,
+  } = useSolarState(10)
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
   const { activeWarning: activeForecastWarning } = useForecastWarnings(uiConfig.forecastRefreshSeconds)
@@ -418,6 +427,16 @@ export function App() {
             charger0Error={charger0Error}
             batteryRatePercentPerHour={batteryRatePercentPerHour}
             timeToGoHours={timeToGoHours}
+          />
+        )
+      case 'solar':
+        return (
+          <SolarTile
+            currentW={solarCurrentW}
+            todayKWh={solarTodayKWh}
+            yesterdayKWh={solarYesterdayKWh}
+            peakTodayW={solarPeakTodayW}
+            controllers={solarControllers}
           />
         )
       case 'alternator':

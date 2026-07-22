@@ -880,6 +880,251 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 	return state, nil
 }
 
+func fetchSignalKSolarState(signalkURL string, vesselPath string) (solarStateData, error) {
+	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
+
+	state := solarStateData{
+		Datetime:      time.Now().UTC(),
+		CurrentW:      -1,
+		TodayKWh:      -1,
+		YesterdayKWh:  -1,
+		PeakTodayW:    -1,
+		Controllers:   []solarControllerData{},
+		Trend24hTotal: []solarTrendPoint{},
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(url)
+	if err != nil {
+		return state, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return state, fmt.Errorf("signalk returned status %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return state, err
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return state, err
+	}
+
+	datetimeString := firstNonEmptyString(lookupString(payload, "timestamp"), lookupString(payload, "navigation", "datetime", "value"), lookupString(payload, "navigation", "datetime"))
+	if datetimeString != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, datetimeString)
+		if parseErr == nil {
+			state.Datetime = parsed.UTC()
+		}
+	}
+
+	solarMap := lookupAnyMap(payload, "electrical", "solar")
+	if solarMap != nil {
+		ids := make([]string, 0, len(solarMap))
+		for id := range solarMap {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+
+		sumCurrentW := 0.0
+		foundCurrent := false
+		sumTodayKWh := 0.0
+		foundToday := false
+		sumYesterdayKWh := 0.0
+		foundYesterday := false
+
+		for i, id := range ids {
+			entry, ok := solarMap[id].(map[string]any)
+			if !ok {
+				continue
+			}
+
+			controller := readSolarController(entry, id, i, state.Datetime)
+			state.Controllers = append(state.Controllers, controller)
+
+			if controller.CurrentW >= 0 {
+				sumCurrentW += controller.CurrentW
+				foundCurrent = true
+			}
+			if controller.TodayKWh >= 0 {
+				sumTodayKWh += controller.TodayKWh
+				foundToday = true
+			}
+			if controller.YesterdayKWh >= 0 {
+				sumYesterdayKWh += controller.YesterdayKWh
+				foundYesterday = true
+			}
+		}
+
+		if foundCurrent {
+			state.CurrentW = roundTo1(sumCurrentW)
+		}
+		if foundToday {
+			state.TodayKWh = roundTo3(sumTodayKWh)
+		}
+		if foundYesterday {
+			state.YesterdayKWh = roundTo3(sumYesterdayKWh)
+		}
+	}
+
+	venusCurrent := lookupFirstNumber(payload,
+		[]string{"electrical", "venus", "totalPanelPower", "value"},
+		[]string{"electrical", "venus", "totalPanelPower"},
+	)
+	if venusCurrent >= 0 {
+		state.CurrentW = roundTo1(venusCurrent)
+	}
+
+	venusTodayKWh := normalizeYieldToKWh(lookupFirstNumber(payload,
+		[]string{"electrical", "venus", "yieldToday", "value"},
+		[]string{"electrical", "venus", "yieldToday"},
+		[]string{"electrical", "venus", "dailyYield", "value"},
+		[]string{"electrical", "venus", "dailyYield"},
+	))
+	if venusTodayKWh >= 0 {
+		state.TodayKWh = roundTo3(venusTodayKWh)
+	}
+
+	venusYesterdayKWh := normalizeYieldToKWh(lookupFirstNumber(payload,
+		[]string{"electrical", "venus", "yieldYesterday", "value"},
+		[]string{"electrical", "venus", "yieldYesterday"},
+		[]string{"electrical", "venus", "dailyYieldYesterday", "value"},
+		[]string{"electrical", "venus", "dailyYieldYesterday"},
+	))
+	if venusYesterdayKWh >= 0 {
+		state.YesterdayKWh = roundTo3(venusYesterdayKWh)
+	}
+
+	venusPeakW := lookupFirstNumber(payload,
+		[]string{"electrical", "venus", "maxPanelPowerToday", "value"},
+		[]string{"electrical", "venus", "maxPanelPowerToday"},
+	)
+	if venusPeakW >= 0 {
+		state.PeakTodayW = roundTo1(venusPeakW)
+	}
+
+	if state.CurrentW > 0 {
+		for i := range state.Controllers {
+			if state.Controllers[i].CurrentW >= 0 {
+				state.Controllers[i].Contribution = roundTo1((state.Controllers[i].CurrentW / state.CurrentW) * 100)
+			}
+		}
+	}
+
+	return state, nil
+}
+
+func readSolarController(entry map[string]any, id string, index int, sampleTime time.Time) solarControllerData {
+	controller := solarControllerData{
+		ID:            id,
+		Label:         defaultSolarControllerLabel(index, id),
+		CurrentW:      -1,
+		TodayKWh:      -1,
+		YesterdayKWh:  -1,
+		LastUpdateAge: -1,
+		Contribution:  -1,
+	}
+
+	powerW := lookupFirstNumber(entry,
+		[]string{"panelPower", "value"},
+		[]string{"panelPower"},
+		[]string{"power", "value"},
+		[]string{"power"},
+	)
+	if powerW >= 0 {
+		controller.CurrentW = roundTo1(powerW)
+	}
+
+	todayKWh := normalizeYieldToKWh(lookupFirstNumber(entry,
+		[]string{"yieldToday", "value"},
+		[]string{"yieldToday"},
+		[]string{"dailyYield", "value"},
+		[]string{"dailyYield"},
+	))
+	if todayKWh >= 0 {
+		controller.TodayKWh = roundTo3(todayKWh)
+	}
+
+	yesterdayKWh := normalizeYieldToKWh(lookupFirstNumber(entry,
+		[]string{"yieldYesterday", "value"},
+		[]string{"yieldYesterday"},
+		[]string{"dailyYieldYesterday", "value"},
+		[]string{"dailyYieldYesterday"},
+	))
+	if yesterdayKWh >= 0 {
+		controller.YesterdayKWh = roundTo3(yesterdayKWh)
+	}
+
+	controller.Mode = strings.TrimSpace(firstNonEmptyString(
+		lookupString(entry, "chargingMode", "value"),
+		lookupString(entry, "chargingMode"),
+		lookupString(entry, "state", "value"),
+		lookupString(entry, "state"),
+		lookupString(entry, "mode", "value"),
+		lookupString(entry, "mode"),
+	))
+
+	controller.Error = strings.TrimSpace(firstNonEmptyString(
+		lookupString(entry, "error", "value"),
+		lookupString(entry, "error"),
+		lookupString(entry, "alarm", "value"),
+		lookupString(entry, "alarm"),
+	))
+
+	timestamp := firstNonEmptyString(
+		lookupString(entry, "panelPower", "timestamp"),
+		lookupString(entry, "yieldToday", "timestamp"),
+		lookupString(entry, "timestamp"),
+	)
+	if timestamp != "" {
+		parsed, err := time.Parse(time.RFC3339, timestamp)
+		if err == nil {
+			age := sampleTime.Sub(parsed.UTC()).Seconds()
+			if age >= 0 {
+				controller.LastUpdateAge = roundTo1(age)
+			}
+		}
+	}
+
+	return controller
+}
+
+func defaultSolarControllerLabel(index int, id string) string {
+	switch index {
+	case 0:
+		return "Port"
+	case 1:
+		return "Starboard"
+	case 2:
+		return "Salon"
+	default:
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			return fmt.Sprintf("Array %d", index+1)
+		}
+		return "Array " + strings.ToUpper(trimmed)
+	}
+}
+
+func normalizeYieldToKWh(raw float64) float64 {
+	if raw < 0 {
+		return -1
+	}
+	// Some integrations emit daily yield in Wh; convert to kWh heuristically.
+	if raw > 200 {
+		return raw / 1000
+	}
+	return raw
+}
+
+func roundTo3(value float64) float64 {
+	return math.Round(value*1000) / 1000
+}
+
 func readAlternatorInstance(payload map[string]any, index string) alternatorInstanceData {
 	inst := alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1}
 

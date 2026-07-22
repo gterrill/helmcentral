@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -72,6 +73,33 @@ type chargerInstanceData struct {
 	Error         string
 }
 
+type solarControllerData struct {
+	ID            string
+	Label         string
+	CurrentW      float64
+	TodayKWh      float64
+	YesterdayKWh  float64
+	Mode          string
+	Error         string
+	LastUpdateAge float64
+	Contribution  float64
+}
+
+type solarStateData struct {
+	Datetime      time.Time
+	CurrentW      float64
+	TodayKWh      float64
+	YesterdayKWh  float64
+	PeakTodayW    float64
+	Controllers   []solarControllerData
+	Trend24hTotal []solarTrendPoint
+}
+
+type solarTrendPoint struct {
+	Time   time.Time `json:"time"`
+	TotalW float64   `json:"total_w"`
+}
+
 type electricalStateData struct {
 	Datetime            time.Time
 	BatterySocPercent   float64
@@ -89,6 +117,12 @@ type electricalStateData struct {
 	Alternator1         alternatorInstanceData
 	Charger0            chargerInstanceData
 }
+
+var (
+	solarPeakMu     sync.Mutex
+	solarPeakDay    string
+	solarPeakTodayW float64 = -1
+)
 
 type tankLevelData struct {
 	ID           string  `json:"id"`
@@ -156,6 +190,7 @@ func main() {
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
 	e.GET("/api/electrical-state", electricalState)
+	e.GET("/api/solar-state", solarState)
 	e.GET("/api/tanks-state", tanksState)
 	e.GET("/api/nearby-vessels", nearbyVessels)
 	e.GET("/api/nearby-vessels/:key/sightings", getNearbyVesselSightingsHandler(globalNearbyContactStore))
@@ -484,6 +519,158 @@ func electricalState(c echo.Context) error {
 		"charger_0_error":            state.Charger0.Error,
 		"source":                     source,
 	})
+}
+
+func solarState(c echo.Context) error {
+	state := solarStateData{
+		Datetime:      time.Now().UTC(),
+		CurrentW:      -1,
+		TodayKWh:      -1,
+		YesterdayKWh:  -1,
+		PeakTodayW:    -1,
+		Controllers:   []solarControllerData{},
+		Trend24hTotal: []solarTrendPoint{},
+	}
+	source := "backend-fallback"
+
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	address, port, err := loadSignalKSettings(settingsPath)
+	if err != nil {
+		address = defaultSignalKAddress
+		port = defaultSignalKPort
+	}
+
+	signalkURL := buildSignalKURL(address, port)
+	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
+
+	if signalkURL != "" {
+		solar, fetchErr := fetchSignalKSolarState(signalkURL, vesselPath)
+		if fetchErr == nil {
+			state = solar
+			source = "signalk"
+		}
+	}
+
+	state, source = applySolarInfluxFallback(
+		state,
+		source,
+		influxTelemetryConfigured(),
+		queryInfluxSolarTodayKWh,
+		queryInfluxSolarYesterdayKWh,
+		queryInfluxSolarPeakTodayW,
+		queryInfluxSolarTrend24h,
+	)
+
+	state.PeakTodayW = updateSolarPeakToday(state.Datetime, state.CurrentW, state.PeakTodayW)
+
+	controllers := make([]map[string]any, 0, len(state.Controllers))
+	for _, controller := range state.Controllers {
+		controllers = append(controllers, map[string]any{
+			"id":                controller.ID,
+			"label":             controller.Label,
+			"current_w":         controller.CurrentW,
+			"today_kwh":         controller.TodayKWh,
+			"yesterday_kwh":     controller.YesterdayKWh,
+			"mode":              controller.Mode,
+			"error":             controller.Error,
+			"last_update_age_s": controller.LastUpdateAge,
+			"contribution_pct":  controller.Contribution,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"datetime":        state.Datetime.Format(time.RFC3339),
+		"source":          source,
+		"current_w":       state.CurrentW,
+		"today_kwh":       state.TodayKWh,
+		"yesterday_kwh":   state.YesterdayKWh,
+		"peak_today_w":    state.PeakTodayW,
+		"controllers":     controllers,
+		"trend_24h_total": state.Trend24hTotal,
+	})
+}
+
+func applySolarInfluxFallback(
+	state solarStateData,
+	source string,
+	influxEnabled bool,
+	queryToday func(time.Time) float64,
+	queryYesterday func(time.Time) float64,
+	queryPeak func(time.Time) float64,
+	queryTrend func(time.Time) []solarTrendPoint,
+) (solarStateData, string) {
+	if !influxEnabled {
+		return state, source
+	}
+
+	usedInfluxFallback := false
+	now := state.Datetime
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	if state.TodayKWh < 0 {
+		if today := queryToday(now); today >= 0 {
+			state.TodayKWh = today
+			usedInfluxFallback = true
+		}
+	}
+
+	if state.YesterdayKWh < 0 {
+		if yesterday := queryYesterday(now); yesterday >= 0 {
+			state.YesterdayKWh = yesterday
+			usedInfluxFallback = true
+		}
+	}
+
+	if state.PeakTodayW < 0 {
+		if peak := queryPeak(now); peak >= 0 {
+			state.PeakTodayW = peak
+			usedInfluxFallback = true
+		}
+	}
+
+	if len(state.Trend24hTotal) == 0 {
+		trend := queryTrend(now)
+		if len(trend) > 0 {
+			state.Trend24hTotal = trend
+			usedInfluxFallback = true
+		}
+	}
+
+	if usedInfluxFallback {
+		if source == "signalk" {
+			return state, "signalk+influx-fallback"
+		}
+		return state, "influx"
+	}
+
+	return state, source
+}
+
+func updateSolarPeakToday(sampleTime time.Time, currentW float64, candidatePeakW float64) float64 {
+	if sampleTime.IsZero() {
+		sampleTime = time.Now().UTC()
+	}
+
+	day := sampleTime.UTC().Format("2006-01-02")
+
+	solarPeakMu.Lock()
+	defer solarPeakMu.Unlock()
+
+	if solarPeakDay != day {
+		solarPeakDay = day
+		solarPeakTodayW = -1
+	}
+
+	if candidatePeakW >= 0 && candidatePeakW > solarPeakTodayW {
+		solarPeakTodayW = candidatePeakW
+	}
+	if currentW >= 0 && currentW > solarPeakTodayW {
+		solarPeakTodayW = currentW
+	}
+
+	return solarPeakTodayW
 }
 
 func tanksState(c echo.Context) error {

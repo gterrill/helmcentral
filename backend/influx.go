@@ -141,6 +141,139 @@ func queryInfluxDepthTrend(window string) []depthTrendPoint {
 	return points
 }
 
+func queryInfluxSolarTodayKWh(now time.Time) float64 {
+	start := now.UTC().Truncate(24 * time.Hour)
+	return queryInfluxSolarEnergyKWhRange(start, now.UTC())
+}
+
+func queryInfluxSolarYesterdayKWh(now time.Time) float64 {
+	stop := now.UTC().Truncate(24 * time.Hour)
+	start := stop.Add(-24 * time.Hour)
+	return queryInfluxSolarEnergyKWhRange(start, stop)
+}
+
+func queryInfluxSolarPeakTodayW(now time.Time) float64 {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return -1
+	}
+	defer client.Close()
+
+	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
+	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
+	start := now.UTC().Truncate(24 * time.Hour)
+
+	flux := fmt.Sprintf(
+		`from(bucket: %q) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> max(column: "_value") |> keep(columns: ["_value"])`,
+		bucket, start.Format(time.RFC3339), now.UTC().Format(time.RFC3339), measurement, field,
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return -1
+	}
+	defer result.Close()
+
+	peakW := -1.0
+	for result.Next() {
+		if v, ok := result.Record().Value().(float64); ok {
+			peakW = v
+		}
+	}
+
+	if result.Err() != nil || peakW < 0 {
+		return -1
+	}
+
+	return math.Round(peakW*10) / 10
+}
+
+func queryInfluxSolarEnergyKWhRange(start time.Time, stop time.Time) float64 {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return -1
+	}
+	defer client.Close()
+
+	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
+	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
+
+	flux := fmt.Sprintf(
+		`from(bucket: %q) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> integral(unit: 1h) |> group() |> sum(column: "_value") |> keep(columns: ["_value"])`,
+		bucket, start.Format(time.RFC3339), stop.Format(time.RFC3339), measurement, field,
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return -1
+	}
+	defer result.Close()
+
+	wh := -1.0
+	for result.Next() {
+		if v, ok := result.Record().Value().(float64); ok {
+			wh = v
+		}
+	}
+
+	if result.Err() != nil || wh < 0 {
+		return -1
+	}
+
+	return math.Round((wh/1000)*1000) / 1000
+}
+
+func queryInfluxSolarTrend24h(now time.Time) []solarTrendPoint {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return nil
+	}
+	defer client.Close()
+
+	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
+	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
+	start := now.UTC().Add(-24 * time.Hour)
+
+	flux := fmt.Sprintf(
+		`from(bucket: %q) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> aggregateWindow(every: 15m, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucket, start.Format(time.RFC3339), now.UTC().Format(time.RFC3339), measurement, field,
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return nil
+	}
+	defer result.Close()
+
+	points := make([]solarTrendPoint, 0)
+	for result.Next() {
+		rec := result.Record()
+		v, ok := rec.Value().(float64)
+		if !ok || v < 0 {
+			continue
+		}
+		points = append(points, solarTrendPoint{
+			Time:   rec.Time(),
+			TotalW: math.Round(v*10) / 10,
+		})
+	}
+
+	if result.Err() != nil {
+		return nil
+	}
+
+	return points
+}
+
 // tideTurnThresholdM is the minimum depth change required to confirm a
 // reversal in tide direction.  0.3m filters out typical sonar noise from
 // boat swing at anchor (≤0.2m) while still detecting real tidal movements

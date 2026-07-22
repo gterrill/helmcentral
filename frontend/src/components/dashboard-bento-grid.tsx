@@ -37,6 +37,7 @@ const WIDGET_CONSTRAINTS: Partial<Record<DashboardWidgetId, { minW?: number; min
   'wind': { minW: 3, minH: 6 },
   'anchor-watch': { minW: 3, minH: 6 },
   'battery-power': { minW: 3, minH: 6 },
+  'solar': { minW: 3, minH: 6 },
   'depth-tide': { minW: 2, minH: 4 },
   'position': { minW: 2, minH: 3 },
   'today-now': { minW: 2, minH: 4 },

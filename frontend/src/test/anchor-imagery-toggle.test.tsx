@@ -73,6 +73,16 @@ vi.mock('@/hooks/use-electrical-state', () => ({
   }),
 }))
 
+vi.mock('@/hooks/use-solar-state', () => ({
+  useSolarState: () => ({
+    currentW: 300,
+    todayKWh: 2.4,
+    yesterdayKWh: 2.1,
+    peakTodayW: 520,
+    controllers: [],
+  }),
+}))
+
 vi.mock('@/hooks/use-nearby-vessels', () => ({
   useNearbyVessels: () => ({ vessels: [], loading: false }),
 }))

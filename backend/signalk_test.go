@@ -438,3 +438,93 @@ func TestFetchSignalKElectricalState_ReadsCharger0MixedShapes(t *testing.T) {
 		t.Fatalf("expected empty error string when absent, got %q", state.Charger0.Error)
 	}
 }
+
+func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
+	body := []byte(`{
+		"timestamp": "2026-07-22T00:00:00Z",
+		"electrical": {
+			"venus": {
+				"totalPanelPower": {"value": 1120.4}
+			},
+			"solar": {
+				"0": {
+					"panelPower": {"value": 410.3},
+					"yieldToday": {"value": 1.7},
+					"yieldYesterday": {"value": 1.6},
+					"chargingMode": {"value": "bulk"},
+					"error": {"value": "none"}
+				},
+				"1": {
+					"panelPower": {"value": 370.7},
+					"yieldToday": {"value": 1.4},
+					"yieldYesterday": {"value": 1.5},
+					"mode": {"value": "absorption"},
+					"error": {"value": ""}
+				}
+			}
+		}
+	}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	state, err := fetchSignalKSolarState(srv.URL, "/signalk/v1/api/vessels/self")
+	if err != nil {
+		t.Fatalf("fetchSignalKSolarState: %v", err)
+	}
+
+	if !approxEqual(state.CurrentW, 1120.4, 0.01) {
+		t.Fatalf("expected aggregate current from venus 1120.4, got %v", state.CurrentW)
+	}
+	if !approxEqual(state.TodayKWh, 3.1, 0.01) {
+		t.Fatalf("expected today_kwh 3.1, got %v", state.TodayKWh)
+	}
+	if !approxEqual(state.YesterdayKWh, 3.1, 0.01) {
+		t.Fatalf("expected yesterday_kwh 3.1, got %v", state.YesterdayKWh)
+	}
+	if len(state.Controllers) != 2 {
+		t.Fatalf("expected 2 controllers, got %d", len(state.Controllers))
+	}
+	if state.Controllers[0].Label != "Port" {
+		t.Fatalf("expected first controller label Port, got %q", state.Controllers[0].Label)
+	}
+	if state.Controllers[1].Mode != "absorption" {
+		t.Fatalf("expected second controller mode absorption, got %q", state.Controllers[1].Mode)
+	}
+}
+
+func TestFetchSignalKSolarState_NormalizesWhYieldToKWh(t *testing.T) {
+	body := []byte(`{
+		"timestamp": "2026-07-22T00:00:00Z",
+		"electrical": {
+			"solar": {
+				"0": {
+					"panelPower": 250,
+					"yieldToday": 1450,
+					"yieldYesterday": 1300
+				}
+			}
+		}
+	}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	state, err := fetchSignalKSolarState(srv.URL, "/signalk/v1/api/vessels/self")
+	if err != nil {
+		t.Fatalf("fetchSignalKSolarState: %v", err)
+	}
+
+	if !approxEqual(state.TodayKWh, 1.45, 0.001) {
+		t.Fatalf("expected yieldToday converted to 1.45 kWh, got %v", state.TodayKWh)
+	}
+	if !approxEqual(state.YesterdayKWh, 1.3, 0.001) {
+		t.Fatalf("expected yieldYesterday converted to 1.3 kWh, got %v", state.YesterdayKWh)
+	}
+}
