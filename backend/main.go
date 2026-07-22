@@ -7,7 +7,6 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -117,12 +116,6 @@ type electricalStateData struct {
 	Alternator1         alternatorInstanceData
 	Charger0            chargerInstanceData
 }
-
-var (
-	solarPeakMu     sync.Mutex
-	solarPeakDay    string
-	solarPeakTodayW float64 = -1
-)
 
 type tankLevelData struct {
 	ID           string  `json:"id"`
@@ -551,17 +544,13 @@ func solarState(c echo.Context) error {
 		}
 	}
 
-	state, source = applySolarInfluxFallback(
-		state,
-		source,
-		influxTelemetryConfigured(),
-		queryInfluxSolarTodayKWh,
-		queryInfluxSolarYesterdayKWh,
-		queryInfluxSolarPeakTodayW,
-		queryInfluxSolarTrend24h,
-	)
-
-	state.PeakTodayW = updateSolarPeakToday(state.Datetime, state.CurrentW, state.PeakTodayW)
+	state = applyInMemorySolarDefaults(state)
+	if influxTelemetryConfigured() {
+		state = applyInfluxSolarOverride(state)
+	}
+	if state.Trend24hTotal == nil {
+		state.Trend24hTotal = []solarTrendPoint{}
+	}
 
 	controllers := make([]map[string]any, 0, len(state.Controllers))
 	for _, controller := range state.Controllers {
@@ -590,87 +579,42 @@ func solarState(c echo.Context) error {
 	})
 }
 
-func applySolarInfluxFallback(
-	state solarStateData,
-	source string,
-	influxEnabled bool,
-	queryToday func(time.Time) float64,
-	queryYesterday func(time.Time) float64,
-	queryPeak func(time.Time) float64,
-	queryTrend func(time.Time) []solarTrendPoint,
-) (solarStateData, string) {
-	if !influxEnabled {
-		return state, source
+// applyInMemorySolarDefaults fills any field SignalK didn't report, from the
+// in-memory accumulator/buffer fed by sampleTracks. Always safe to call —
+// sentinels pass through unchanged if nothing has been recorded yet.
+func applyInMemorySolarDefaults(state solarStateData) solarStateData {
+	if state.TodayKWh < 0 {
+		state.TodayKWh = inMemorySolarTodayKWh()
 	}
+	if state.YesterdayKWh < 0 {
+		state.YesterdayKWh = inMemorySolarYesterdayKWh()
+	}
+	if state.PeakTodayW < 0 {
+		state.PeakTodayW = inMemorySolarPeakTodayW()
+	}
+	if len(state.Trend24hTotal) == 0 {
+		state.Trend24hTotal = inMemorySolarTrend24h()
+	}
+	return state
+}
 
-	usedInfluxFallback := false
+// applyInfluxSolarOverride wholesale-replaces the four Influx-backed fields,
+// matching queryInfluxMaxWindGustKts/queryInfluxDepthTrend's override
+// pattern in vesselState()/depthTrend() — called only when
+// influxTelemetryConfigured(), and does not fall back to the in-memory
+// value if the Influx query itself fails (same Fallback Policy reasoning as
+// ADR-0020: once Influx is enabled, its failures should be visible, not
+// silently patched over).
+func applyInfluxSolarOverride(state solarStateData) solarStateData {
 	now := state.Datetime
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-
-	if state.TodayKWh < 0 {
-		if today := queryToday(now); today >= 0 {
-			state.TodayKWh = today
-			usedInfluxFallback = true
-		}
-	}
-
-	if state.YesterdayKWh < 0 {
-		if yesterday := queryYesterday(now); yesterday >= 0 {
-			state.YesterdayKWh = yesterday
-			usedInfluxFallback = true
-		}
-	}
-
-	if state.PeakTodayW < 0 {
-		if peak := queryPeak(now); peak >= 0 {
-			state.PeakTodayW = peak
-			usedInfluxFallback = true
-		}
-	}
-
-	if len(state.Trend24hTotal) == 0 {
-		trend := queryTrend(now)
-		if len(trend) > 0 {
-			state.Trend24hTotal = trend
-			usedInfluxFallback = true
-		}
-	}
-
-	if usedInfluxFallback {
-		if source == "signalk" {
-			return state, "signalk+influx-fallback"
-		}
-		return state, "influx"
-	}
-
-	return state, source
-}
-
-func updateSolarPeakToday(sampleTime time.Time, currentW float64, candidatePeakW float64) float64 {
-	if sampleTime.IsZero() {
-		sampleTime = time.Now().UTC()
-	}
-
-	day := sampleTime.UTC().Format("2006-01-02")
-
-	solarPeakMu.Lock()
-	defer solarPeakMu.Unlock()
-
-	if solarPeakDay != day {
-		solarPeakDay = day
-		solarPeakTodayW = -1
-	}
-
-	if candidatePeakW >= 0 && candidatePeakW > solarPeakTodayW {
-		solarPeakTodayW = candidatePeakW
-	}
-	if currentW >= 0 && currentW > solarPeakTodayW {
-		solarPeakTodayW = currentW
-	}
-
-	return solarPeakTodayW
+	state.TodayKWh = queryInfluxSolarTodayKWh(now)
+	state.YesterdayKWh = queryInfluxSolarYesterdayKWh(now)
+	state.PeakTodayW = queryInfluxSolarPeakTodayW(now)
+	state.Trend24hTotal = queryInfluxSolarTrend24h(now)
+	return state
 }
 
 func tanksState(c echo.Context) error {

@@ -75,10 +75,11 @@ func sampleTracks(settingsPath string) {
 		return
 	}
 
+	now := time.Now().UTC() // shared by wind/depth/solar recording this tick
+
 	// Sample self vessel
 	state, err := fetchSignalKVesselState(signalkURL, vesselPath)
 	if err == nil {
-		now := time.Now().UTC()
 		if state.WindSpeedApparentKts >= 0 {
 			windGustHistory.record(state.WindSpeedApparentKts, now)
 		}
@@ -86,6 +87,13 @@ func sampleTracks(settingsPath string) {
 			depthHistory.record(state.Depth, now)
 		}
 	}
+
+	solar, solarErr := fetchSignalKSolarState(signalkURL, vesselPath)
+	if solarErr == nil && solar.CurrentW >= 0 {
+		solarStats.record(solar.CurrentW, now)
+		solarPowerHistory.record(solar.CurrentW, now)
+	}
+
 	if err == nil && state.Latitude >= -90 && state.Latitude <= 90 &&
 		state.Longitude >= -180 && state.Longitude <= 180 {
 		recordTrackSelf(state.Latitude, state.Longitude)

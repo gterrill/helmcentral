@@ -236,3 +236,76 @@ func TestSampleTracks_RecordsWindAndDepthHistoryEvenWithoutValidPosition(t *test
 		t.Fatalf("expected 1 depth sample recorded despite missing position, got %d", len(depthPts))
 	}
 }
+
+func TestSampleTracks_RecordsSolarHistoryOnEachTick(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
+	solarPowerHistory = newTelemetryRingBuffer(solarTrendHistoryCapacity)
+
+	body := []byte(`{
+		"navigation": {
+			"datetime": {"value": "` + time.Now().UTC().Format(time.RFC3339) + `"},
+			"state": {"value": "anchored"}
+		},
+		"electrical": {
+			"venus": {
+				"totalPanelPower": {"value": 654.3}
+			}
+		}
+	}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	sampleTracks(settingsPath)
+
+	solarPts := solarPowerHistory.since(time.Time{})
+	if len(solarPts) != 1 {
+		t.Fatalf("expected 1 solar sample recorded, got %d", len(solarPts))
+	}
+	if solarPts[0].Value != 654.3 {
+		t.Fatalf("expected solar sample value 654.3, got %v", solarPts[0].Value)
+	}
+
+	if got := inMemorySolarPeakTodayW(); got != 654.3 {
+		t.Fatalf("expected peak_today_w 654.3 fed from the same tick, got %v", got)
+	}
+}
+
+func TestSampleTracks_SkipsSolarRecordingWhenCurrentWMissing(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
+	solarPowerHistory = newTelemetryRingBuffer(solarTrendHistoryCapacity)
+
+	body := []byte(`{
+		"navigation": {
+			"datetime": {"value": "` + time.Now().UTC().Format(time.RFC3339) + `"},
+			"state": {"value": "anchored"}
+		}
+	}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	sampleTracks(settingsPath)
+
+	solarPts := solarPowerHistory.since(time.Time{})
+	if len(solarPts) != 0 {
+		t.Fatalf("expected no solar sample recorded when current_w is missing, got %d", len(solarPts))
+	}
+	if got := inMemorySolarTodayKWh(); got != -1 {
+		t.Fatalf("expected today_kwh sentinel -1 when nothing was recorded, got %v", got)
+	}
+}

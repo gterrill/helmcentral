@@ -1,7 +1,13 @@
 # ADR 0021: Solar State Source Priority And Influx Fallback
 
 ## Status
-Accepted
+Superseded by ADR-0022
+
+The per-field fill-gap cascade and four-value `source` tag this ADR
+describes have been replaced by a plain wholesale in-memory-default /
+Influx-override dispatch, matching ADR-0020's wind-gust/depth-trend
+pattern (see ADR-0022). This document is retained for historical context
+only.
 
 ## Context
 Solar V2 introduces a dedicated `/api/solar-state` endpoint with aggregate and per-controller metrics. SignalK payloads vary by plugin and vessel setup: some installations expose only real-time panel power, while others also expose daily yield and peak values.

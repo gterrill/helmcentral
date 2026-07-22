@@ -83,48 +83,57 @@ func TestFormatWeatherConditionAt_PrefersDaytimeForForecastCards(t *testing.T) {
 	}
 }
 
-func TestApplySolarInfluxFallback_FillsMissingFieldsAndSetsSourceTag(t *testing.T) {
-	baseTime := time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC)
+func TestApplyInMemorySolarDefaults_FillsOnlyMissingFields(t *testing.T) {
+	solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
+	solarPowerHistory = newTelemetryRingBuffer(solarTrendHistoryCapacity)
+	t.Cleanup(func() {
+		solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
+		solarPowerHistory = newTelemetryRingBuffer(solarTrendHistoryCapacity)
+	})
+
+	base := time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC)
+	solarStats.record(500, base)
+	solarStats.record(800, base.Add(5*time.Second))
+	solarPowerHistory.record(800, base.Add(5*time.Second))
+
 	state := solarStateData{
-		Datetime:     baseTime,
-		CurrentW:     850,
+		Datetime:     base,
+		CurrentW:     900,
 		TodayKWh:     -1,
-		YesterdayKWh: -1,
+		YesterdayKWh: 4.7,
 		PeakTodayW:   -1,
 		Controllers:  []solarControllerData{},
-	}
-
-	next, source := applySolarInfluxFallback(
-		state,
-		"signalk",
-		true,
-		func(time.Time) float64 { return 4.2 },
-		func(time.Time) float64 { return 3.8 },
-		func(time.Time) float64 { return 1120 },
-		func(time.Time) []solarTrendPoint {
-			return []solarTrendPoint{{Time: baseTime.Add(-time.Hour), TotalW: 700}}
+		Trend24hTotal: []solarTrendPoint{
+			{Time: base.Add(-time.Hour), TotalW: 760},
 		},
-	)
+	}
 
-	if next.TodayKWh != 4.2 {
-		t.Fatalf("expected today_kwh from influx fallback, got %v", next.TodayKWh)
+	next := applyInMemorySolarDefaults(state)
+
+	if next.TodayKWh < 0 {
+		t.Fatalf("expected today_kwh filled from in-memory accumulator, got %v", next.TodayKWh)
 	}
-	if next.YesterdayKWh != 3.8 {
-		t.Fatalf("expected yesterday_kwh from influx fallback, got %v", next.YesterdayKWh)
+	if next.YesterdayKWh != 4.7 {
+		t.Fatalf("expected yesterday_kwh to remain the pre-populated 4.7, got %v", next.YesterdayKWh)
 	}
-	if next.PeakTodayW != 1120 {
-		t.Fatalf("expected peak_today_w from influx fallback, got %v", next.PeakTodayW)
+	if next.PeakTodayW != 800 {
+		t.Fatalf("expected peak_today_w filled from in-memory accumulator, got %v", next.PeakTodayW)
 	}
-	if len(next.Trend24hTotal) != 1 {
-		t.Fatalf("expected trend points from influx fallback, got %d", len(next.Trend24hTotal))
-	}
-	if source != "signalk+influx-fallback" {
-		t.Fatalf("expected source signalk+influx-fallback, got %q", source)
+	if len(next.Trend24hTotal) != 1 || next.Trend24hTotal[0].TotalW != 760 {
+		t.Fatalf("expected existing trend to be preserved, got %+v", next.Trend24hTotal)
 	}
 }
 
-func TestApplySolarInfluxFallback_PreservesExistingFieldsAndSourceWhenUnused(t *testing.T) {
+func TestApplyInfluxSolarOverride_ReplacesAllFourFieldsWholesale(t *testing.T) {
+	t.Setenv("SETTINGS_FILE", filepath.Join(t.TempDir(), "missing-settings.yaml"))
+
 	baseTime := time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC)
+
+	// All four fields already populated (e.g. from SignalK/in-memory) to
+	// prove this is a real override, not a merge: with Influx unreachable
+	// (no settings configured, so newInfluxClient's ok is false),
+	// applyInfluxSolarOverride still replaces every field with Influx's own
+	// sentinel rather than leaving the pre-existing good values in place.
 	state := solarStateData{
 		Datetime:     baseTime,
 		CurrentW:     900,
@@ -137,29 +146,26 @@ func TestApplySolarInfluxFallback_PreservesExistingFieldsAndSourceWhenUnused(t *
 		},
 	}
 
-	next, source := applySolarInfluxFallback(
-		state,
-		"signalk",
-		true,
-		func(time.Time) float64 { return 1.1 },
-		func(time.Time) float64 { return 1.2 },
-		func(time.Time) float64 { return 111 },
-		func(time.Time) []solarTrendPoint { return []solarTrendPoint{{Time: baseTime, TotalW: 1}} },
-	)
+	next := applyInfluxSolarOverride(state)
 
-	if next.TodayKWh != 5.1 || next.YesterdayKWh != 4.7 || next.PeakTodayW != 1240 {
-		t.Fatalf("expected existing values to be preserved, got today=%v yesterday=%v peak=%v", next.TodayKWh, next.YesterdayKWh, next.PeakTodayW)
+	if next.TodayKWh != -1 {
+		t.Fatalf("expected today_kwh overridden to influx sentinel -1, got %v", next.TodayKWh)
 	}
-	if len(next.Trend24hTotal) != 1 || next.Trend24hTotal[0].TotalW != 760 {
-		t.Fatalf("expected existing trend to be preserved, got %+v", next.Trend24hTotal)
+	if next.YesterdayKWh != -1 {
+		t.Fatalf("expected yesterday_kwh overridden to influx sentinel -1, got %v", next.YesterdayKWh)
 	}
-	if source != "signalk" {
-		t.Fatalf("expected source to remain signalk when no fallback applied, got %q", source)
+	if next.PeakTodayW != -1 {
+		t.Fatalf("expected peak_today_w overridden to influx sentinel -1, got %v", next.PeakTodayW)
+	}
+	if next.Trend24hTotal != nil {
+		t.Fatalf("expected trend_24h_total overridden to nil, got %+v", next.Trend24hTotal)
 	}
 }
 
 func TestSolarStateHandler_BackendFallbackContract(t *testing.T) {
 	t.Setenv("SETTINGS_FILE", filepath.Join(t.TempDir(), "missing-settings.yaml"))
+	solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
+	solarPowerHistory = newTelemetryRingBuffer(solarTrendHistoryCapacity)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/solar-state", nil)
@@ -193,6 +199,9 @@ func TestSolarStateHandler_BackendFallbackContract(t *testing.T) {
 }
 
 func TestSolarStateHandler_UsesSignalKPayload(t *testing.T) {
+	solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
+	solarPowerHistory = newTelemetryRingBuffer(solarTrendHistoryCapacity)
+
 	body := []byte(`{
 		"timestamp": "2026-07-22T00:00:00Z",
 		"electrical": {
