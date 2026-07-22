@@ -16,6 +16,10 @@ const electricalStateMock = vi.hoisted(() => ({
   generatorRealPowerW: 0,
   alternator0: { currentA: null, voltageV: null, powerW: null, temperatureC: null },
   alternator1: { currentA: null, voltageV: null, powerW: null, temperatureC: null },
+  charger0CurrentA: null,
+  charger0AcIn1CurrentA: null,
+  charger0ChargingMode: null,
+  charger0Error: null,
   batteryRatePercentPerHour: -0.2,
   timeToGoHours: 0,
 }))

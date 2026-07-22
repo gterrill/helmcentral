@@ -38,6 +38,8 @@ vi.mock('@/hooks/use-electrical-state', () => ({
     chargingPowerW: null, solarOutputW: null, acOutputW: null, dc12vPowerW: null,
     dc12vCurrentA: null, dc24vVoltageV: null, acLoadsW: null,
     generatorRealPowerW: null, batteryRatePercentPerHour: null, timeToGoHours: null,
+    charger0CurrentA: null, charger0AcIn1CurrentA: null,
+    charger0ChargingMode: null, charger0Error: null,
   }),
 }))
 

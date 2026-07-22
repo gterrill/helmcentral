@@ -10,8 +10,20 @@ export interface BatteryPowerTileProps {
   acOutputW: number | null
   dc12vPowerW: number | null
   dc24vVoltageV: number | null
+  charger0CurrentA: number | null
+  charger0AcIn1CurrentA: number | null
+  charger0ChargingMode: string | null
+  charger0Error: string | null
   batteryRatePercentPerHour: number | null
   timeToGoHours: number | null
+}
+
+function hasChargerError(errorValue: string | null): boolean {
+  if (errorValue === null) {
+    return false
+  }
+  const normalized = errorValue.trim().toLowerCase()
+  return normalized !== '' && normalized !== 'none' && normalized !== '0' && normalized !== 'ok'
 }
 
 function formatTimeToGo(hours: number | null) {
@@ -59,6 +71,10 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
   acOutputW,
   dc12vPowerW,
   dc24vVoltageV,
+  charger0CurrentA,
+  charger0AcIn1CurrentA,
+  charger0ChargingMode,
+  charger0Error,
   batteryRatePercentPerHour,
   timeToGoHours,
 }: BatteryPowerTileProps) {
@@ -76,6 +92,11 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
   const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
   const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
   const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
+  const charger0CurrentLabel = typeof charger0CurrentA === 'number' ? charger0CurrentA.toFixed(1) : '—'
+  const charger0AcIn1CurrentLabel = typeof charger0AcIn1CurrentA === 'number' ? charger0AcIn1CurrentA.toFixed(1) : '—'
+  const charger0ChargingModeLabel = typeof charger0ChargingMode === 'string' && charger0ChargingMode.length > 0 ? charger0ChargingMode : '—'
+  const charger0ErrorLabel = typeof charger0Error === 'string' && charger0Error.length > 0 ? charger0Error : '—'
+  const charger0ErrorClass = hasChargerError(charger0Error) ? 'text-red-500' : 'text-muted-foreground'
   const chargeRateLabel = batteryRatePercentPerHour !== null
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}`
     : '—'
@@ -147,6 +168,32 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
           {solarOutputLabel}
           <span className="ml-1 text-xl text-muted-foreground">W</span>
         </p>
+      </div>
+
+      <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charger</p>
+        <div className="mt-1 grid grid-cols-2 gap-2">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">AC In</p>
+            <p className="font-display text-2xl leading-none text-gauge-primary tabular-nums">
+              {charger0AcIn1CurrentLabel}
+              <span className="ml-1 text-base text-muted-foreground">A</span>
+            </p>
+            <p className={`mt-2 truncate text-[10px] uppercase tracking-[0.16em] ${charger0ErrorClass}`}>
+              Error: <span className="text-foreground">{charger0ErrorLabel}</span>
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Output</p>
+            <p className="font-display text-2xl leading-none text-gauge-secondary tabular-nums">
+              {charger0CurrentLabel}
+              <span className="ml-1 text-base text-muted-foreground">A</span>
+            </p>
+            <p className="mt-2 truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              Mode: <span className="text-foreground">{charger0ChargingModeLabel}</span>
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-2">

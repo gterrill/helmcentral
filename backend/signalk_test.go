@@ -350,3 +350,91 @@ func TestFetchSignalKNearbyVessels_ParsesNumericMMSI(t *testing.T) {
 		t.Fatalf("expected MMSI '316042555' parsed from a JSON number field, got %q", vessels[0].Mmsi)
 	}
 }
+
+func TestFetchSignalKElectricalState_ReadsCharger0Fields(t *testing.T) {
+	body := []byte(`{
+		"timestamp": "2026-07-22T00:00:00Z",
+		"electrical": {
+			"chargers": {
+				"0": {
+					"current": {"value": 42.39},
+					"acin": {
+						"1": {
+							"current": {"value": 8.14}
+						}
+					},
+					"chargingMode": {"value": "bulk"},
+					"error": {"value": "none"}
+				}
+			}
+		}
+	}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	state, err := fetchSignalKElectricalState(srv.URL, "/signalk/v1/api/vessels/self")
+	if err != nil {
+		t.Fatalf("fetchSignalKElectricalState: %v", err)
+	}
+
+	if !approxEqual(state.Charger0.CurrentA, 42.4, 0.01) {
+		t.Fatalf("expected charger_0_current_a 42.4, got %v", state.Charger0.CurrentA)
+	}
+	if !approxEqual(state.Charger0.ACIn1CurrentA, 8.1, 0.01) {
+		t.Fatalf("expected charger_0_acin_1_current_a 8.1, got %v", state.Charger0.ACIn1CurrentA)
+	}
+	if state.Charger0.ChargingMode != "bulk" {
+		t.Fatalf("expected charging mode 'bulk', got %q", state.Charger0.ChargingMode)
+	}
+	if state.Charger0.Error != "none" {
+		t.Fatalf("expected error 'none', got %q", state.Charger0.Error)
+	}
+}
+
+func TestFetchSignalKElectricalState_ReadsCharger0MixedShapes(t *testing.T) {
+	body := []byte(`{
+		"timestamp": "2026-07-22T00:00:00Z",
+		"electrical": {
+			"chargers": {
+				"0": {
+					"current": 17.76,
+					"acin": {
+						"1": {
+							"current": 5.26
+						}
+					},
+					"chargingMode": "float",
+					"error": ""
+				}
+			}
+		}
+	}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	state, err := fetchSignalKElectricalState(srv.URL, "/signalk/v1/api/vessels/self")
+	if err != nil {
+		t.Fatalf("fetchSignalKElectricalState: %v", err)
+	}
+
+	if !approxEqual(state.Charger0.CurrentA, 17.8, 0.01) {
+		t.Fatalf("expected charger_0_current_a 17.8, got %v", state.Charger0.CurrentA)
+	}
+	if !approxEqual(state.Charger0.ACIn1CurrentA, 5.3, 0.01) {
+		t.Fatalf("expected charger_0_acin_1_current_a 5.3, got %v", state.Charger0.ACIn1CurrentA)
+	}
+	if state.Charger0.ChargingMode != "float" {
+		t.Fatalf("expected charging mode 'float', got %q", state.Charger0.ChargingMode)
+	}
+	if state.Charger0.Error != "" {
+		t.Fatalf("expected empty error string when absent, got %q", state.Charger0.Error)
+	}
+}

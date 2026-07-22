@@ -65,6 +65,13 @@ type alternatorInstanceData struct {
 	TempC    float64
 }
 
+type chargerInstanceData struct {
+	CurrentA      float64
+	ACIn1CurrentA float64
+	ChargingMode  string
+	Error         string
+}
+
 type electricalStateData struct {
 	Datetime            time.Time
 	BatterySocPercent   float64
@@ -80,6 +87,7 @@ type electricalStateData struct {
 	GeneratorRealPowerW float64
 	Alternator0         alternatorInstanceData
 	Alternator1         alternatorInstanceData
+	Charger0            chargerInstanceData
 }
 
 type tankLevelData struct {
@@ -425,6 +433,7 @@ func electricalState(c echo.Context) error {
 		GeneratorRealPowerW: -1,
 		Alternator0:         alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1},
 		Alternator1:         alternatorInstanceData{CurrentA: -1, VoltageV: -1, PowerW: -1, TempC: -1},
+		Charger0:            chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1, ChargingMode: "", Error: ""},
 	}
 	source := "backend-fallback"
 
@@ -469,6 +478,10 @@ func electricalState(c echo.Context) error {
 		"alternator_1_voltage_v":     state.Alternator1.VoltageV,
 		"alternator_1_power_w":       state.Alternator1.PowerW,
 		"alternator_1_temperature_c": state.Alternator1.TempC,
+		"charger_0_current_a":        state.Charger0.CurrentA,
+		"charger_0_acin_1_current_a": state.Charger0.ACIn1CurrentA,
+		"charger_0_charging_mode":    state.Charger0.ChargingMode,
+		"charger_0_error":            state.Charger0.Error,
 		"source":                     source,
 	})
 }

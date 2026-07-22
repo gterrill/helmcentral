@@ -28,6 +28,10 @@ interface ElectricalState {
   alternator_1_voltage_v: number
   alternator_1_power_w: number
   alternator_1_temperature_c: number
+  charger_0_current_a: number
+  charger_0_acin_1_current_a: number
+  charger_0_charging_mode: string
+  charger_0_error: string
   source: string
 }
 
@@ -48,6 +52,10 @@ export function useElectricalState(refreshInterval: number) {
   const [generatorRealPowerW, setGeneratorRealPowerW] = useState<number | null>(null)
   const [alternator0, setAlternator0] = useState<AlternatorInstance>({ currentA: null, voltageV: null, powerW: null, temperatureC: null })
   const [alternator1, setAlternator1] = useState<AlternatorInstance>({ currentA: null, voltageV: null, powerW: null, temperatureC: null })
+  const [charger0CurrentA, setCharger0CurrentA] = useState<number | null>(null)
+  const [charger0AcIn1CurrentA, setCharger0AcIn1CurrentA] = useState<number | null>(null)
+  const [charger0ChargingMode, setCharger0ChargingMode] = useState<string | null>(null)
+  const [charger0Error, setCharger0Error] = useState<string | null>(null)
   const [batteryRatePercentPerHour, setBatteryRatePercentPerHour] = useState<number | null>(null)
   const [timeToGoHours, setTimeToGoHours] = useState<number | null>(null)
 
@@ -80,6 +88,10 @@ export function useElectricalState(refreshInterval: number) {
         setGeneratorRealPowerW(typeof data.generator_real_power_w === 'number' && data.generator_real_power_w >= 0 ? data.generator_real_power_w : null)
         setAlternator0({ currentA: parseAlt(data.alternator_0_current_a), voltageV: parseAlt(data.alternator_0_voltage_v), powerW: parseAlt(data.alternator_0_power_w), temperatureC: parseAlt(data.alternator_0_temperature_c) })
         setAlternator1({ currentA: parseAlt(data.alternator_1_current_a), voltageV: parseAlt(data.alternator_1_voltage_v), powerW: parseAlt(data.alternator_1_power_w), temperatureC: parseAlt(data.alternator_1_temperature_c) })
+        setCharger0CurrentA(typeof data.charger_0_current_a === 'number' && data.charger_0_current_a >= 0 ? data.charger_0_current_a : null)
+        setCharger0AcIn1CurrentA(typeof data.charger_0_acin_1_current_a === 'number' && data.charger_0_acin_1_current_a >= 0 ? data.charger_0_acin_1_current_a : null)
+        setCharger0ChargingMode(typeof data.charger_0_charging_mode === 'string' && data.charger_0_charging_mode.trim().length > 0 ? data.charger_0_charging_mode.trim() : null)
+        setCharger0Error(typeof data.charger_0_error === 'string' && data.charger_0_error.trim().length > 0 ? data.charger_0_error.trim() : null)
 
         const batteryCapacityAh =
           typeof data.battery_capacity_ah === 'number' && data.battery_capacity_ah > 0 ? data.battery_capacity_ah : null
@@ -161,6 +173,10 @@ export function useElectricalState(refreshInterval: number) {
     generatorRealPowerW,
     alternator0,
     alternator1,
+    charger0CurrentA,
+    charger0AcIn1CurrentA,
+    charger0ChargingMode,
+    charger0Error,
     batteryRatePercentPerHour,
     timeToGoHours,
   }

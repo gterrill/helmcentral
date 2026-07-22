@@ -673,7 +673,7 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electricalStateData, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
 
-	state := electricalStateData{Datetime: time.Now().UTC(), BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1}
+	state := electricalStateData{Datetime: time.Now().UTC(), BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get(url)
@@ -875,6 +875,7 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 	// Alternators — read port (index 0) and starboard (index 1) separately.
 	state.Alternator0 = readAlternatorInstance(payload, "0")
 	state.Alternator1 = readAlternatorInstance(payload, "1")
+	state.Charger0 = readChargerInstance(payload, "0")
 
 	return state, nil
 }
@@ -915,6 +916,44 @@ func readAlternatorInstance(payload map[string]any, index string) alternatorInst
 	)
 	if tempK >= 0 {
 		inst.TempC = roundTo1(tempK - 273.15)
+	}
+
+	return inst
+}
+
+func readChargerInstance(payload map[string]any, index string) chargerInstanceData {
+	inst := chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}
+
+	current := lookupFirstNumber(payload,
+		[]string{"electrical", "chargers", index, "current", "value"},
+		[]string{"electrical", "chargers", index, "current"},
+	)
+	if current >= 0 {
+		inst.CurrentA = roundTo1(current)
+	}
+
+	acIn1Current := lookupFirstNumber(payload,
+		[]string{"electrical", "chargers", index, "acin", "1", "current", "value"},
+		[]string{"electrical", "chargers", index, "acin", "1", "current"},
+	)
+	if acIn1Current >= 0 {
+		inst.ACIn1CurrentA = roundTo1(acIn1Current)
+	}
+
+	chargingMode := strings.TrimSpace(firstNonEmptyString(
+		lookupString(payload, "electrical", "chargers", index, "chargingMode", "value"),
+		lookupString(payload, "electrical", "chargers", index, "chargingMode"),
+	))
+	if chargingMode != "" {
+		inst.ChargingMode = chargingMode
+	}
+
+	errorValue := strings.TrimSpace(firstNonEmptyString(
+		lookupString(payload, "electrical", "chargers", index, "error", "value"),
+		lookupString(payload, "electrical", "chargers", index, "error"),
+	))
+	if errorValue != "" {
+		inst.Error = errorValue
 	}
 
 	return inst

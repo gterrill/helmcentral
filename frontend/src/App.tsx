@@ -216,6 +216,10 @@ export function App() {
     generatorRealPowerW,
     alternator0,
     alternator1,
+    charger0CurrentA,
+    charger0AcIn1CurrentA,
+    charger0ChargingMode,
+    charger0Error,
     batteryRatePercentPerHour,
     timeToGoHours,
   } = useElectricalState(5)
@@ -408,6 +412,10 @@ export function App() {
             acOutputW={acOutputW}
             dc12vPowerW={dc12vPowerW}
             dc24vVoltageV={dc24vVoltageV}
+            charger0CurrentA={charger0CurrentA}
+            charger0AcIn1CurrentA={charger0AcIn1CurrentA}
+            charger0ChargingMode={charger0ChargingMode}
+            charger0Error={charger0Error}
             batteryRatePercentPerHour={batteryRatePercentPerHour}
             timeToGoHours={timeToGoHours}
           />
