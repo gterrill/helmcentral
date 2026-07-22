@@ -22,8 +22,8 @@ var (
 	selfTrack = newVesselTrail()
 )
 
-// motoringTrail is kept separately: only records motoring state fixes
-// and is pre-seeded from Influx on startup so reposition mode has history.
+// motoringTrail is kept separately: only records motoring state fixes,
+// starting empty and filling purely from live sampling.
 var (
 	motoringTrailMu sync.RWMutex
 	motoringTrail   = newVesselTrail()
@@ -77,6 +77,15 @@ func sampleTracks(settingsPath string) {
 
 	// Sample self vessel
 	state, err := fetchSignalKVesselState(signalkURL, vesselPath)
+	if err == nil {
+		now := time.Now().UTC()
+		if state.WindSpeedApparentKts >= 0 {
+			windGustHistory.record(state.WindSpeedApparentKts, now)
+		}
+		if state.Depth >= 0 {
+			depthHistory.record(state.Depth, now)
+		}
+	}
 	if err == nil && state.Latitude >= -90 && state.Latitude <= 90 &&
 		state.Longitude >= -180 && state.Longitude <= 180 {
 		recordTrackSelf(state.Latitude, state.Longitude)
@@ -130,32 +139,6 @@ func isMotoring(status string) bool {
 	return s == "motoring" ||
 		s == "under way using engine" ||
 		s == "under_way_using_engine"
-}
-
-// ── Influx seed ───────────────────────────────────────────────────────────────
-
-func seedMotoringTrailFromInflux() {
-	transitionAt := queryInfluxLastMotoringToStationaryTransition()
-
-	var start, end time.Time
-	if !transitionAt.IsZero() {
-		start = transitionAt.Add(-2 * time.Hour)
-		end = transitionAt
-	} else {
-		end = time.Now().UTC()
-		start = end.Add(-2 * time.Hour)
-	}
-
-	points := queryInfluxMotoringTrailDownsampled(start, end, 5)
-	if len(points) == 0 {
-		return
-	}
-
-	motoringTrailMu.Lock()
-	defer motoringTrailMu.Unlock()
-	for _, p := range points {
-		motoringTrail.addPointWithTimestamp(p.Lat, p.Lon, p.Timestamp)
-	}
 }
 
 // ── HTTP handlers ─────────────────────────────────────────────────────────────
@@ -312,9 +295,9 @@ func getTracksHandler(c echo.Context) error {
 }
 
 // GET /api/tracks/motoring
-// Returns the full motoring approach track, seeded from Influx at startup
-// and appended to by live polling while motoring.
-// Fetched once by the client when entering anchor reposition mode.
+// Returns the full motoring approach track, built purely from live polling
+// while motoring. Fetched once by the client when entering anchor
+// reposition mode.
 func getMotoringTrackHandler(c echo.Context) error {
 	motoringTrailMu.RLock()
 	pts := motoringTrail.pointsSince(time.Time{})

@@ -21,7 +21,7 @@ Specifically:
 - The frontend `useServerTrails` hook now treats the AIS payload as a full replacement snapshot per poll rather than appending incrementally, since history management is delegated to the plugin.
 - The legacy client-side `useAisTrails` hook (which appended trail points from live nearby-vessel polling) is now dead code with no callers; the `useServerTrails` hook is the sole AIS trail consumer.
 
-The motoring approach trail and the self post-anchor ring-buffer remain on the existing Helmcentral-owned paths (Influx-seeded + live sampling), because those serve a distinct purpose (anchor reposition context) that is unrelated to AIS history.
+The motoring approach trail and the self post-anchor ring-buffer remain on the existing Helmcentral-owned paths (purely live-sampled, per ADR-0020 — Influx startup seeding has since been removed), because those serve a distinct purpose (anchor reposition context) that is unrelated to AIS history.
 
 ## Consequences
 Positive:

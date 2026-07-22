@@ -14,10 +14,7 @@ services:
     environment:
       SETTINGS_FILE: /app/settings.yaml
       # GEONAMES_USERNAME: your_username
-      # INFLUXDB_TOKEN: your_token
-      # INFLUXDB_URL: "http://192.168.50.240:8086"
-      # INFLUXDB_ORG: "Pikorua"
-      # INFLUXDB_BUCKET: "SignalK_Data"
+      # INFLUXDB_TOKEN: your_token  # optional - only needed if InfluxDB is enabled via Settings/settings.yaml's "influxdb" section (url/org/bucket)
       # WEATHERKIT_KEY_ID: your_key_id
       # WEATHERKIT_TEAM_ID: your_team_id
       # WEATHERKIT_SERVICE_ID: your_service_id

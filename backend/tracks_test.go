@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -164,5 +165,74 @@ func TestFetchSignalKAISTrails_SkipsInvalidCoordinates(t *testing.T) {
 	trails := fetchSignalKAISTrails(settingsPath)
 	if len(trails) != 0 {
 		t.Fatalf("expected invalid coordinates skipped, got %d trails", len(trails))
+	}
+}
+
+// TestMotoringTrail_StartsEmptyAndFillsOnlyViaRecordMotoringPoint guards the
+// removal of Influx startup seeding: the motoring trail must start empty and
+// only ever gain points through recordMotoringPoint (live sampling), with no
+// seed call populating it from history.
+func TestMotoringTrail_StartsEmptyAndFillsOnlyViaRecordMotoringPoint(t *testing.T) {
+	motoringTrailMu.Lock()
+	motoringTrail = newVesselTrail()
+	motoringTrailMu.Unlock()
+
+	motoringTrailMu.RLock()
+	pts := motoringTrail.pointsSince(time.Time{})
+	motoringTrailMu.RUnlock()
+	if len(pts) != 0 {
+		t.Fatalf("expected motoring trail to start empty, got %d points", len(pts))
+	}
+
+	recordMotoringPoint(-25.29, 152.91)
+
+	motoringTrailMu.RLock()
+	pts = motoringTrail.pointsSince(time.Time{})
+	motoringTrailMu.RUnlock()
+	if len(pts) != 1 {
+		t.Fatalf("expected 1 point after recordMotoringPoint, got %d", len(pts))
+	}
+}
+
+// TestSampleTracks_RecordsWindAndDepthHistoryEvenWithoutValidPosition is a
+// regression guard for the in-memory telemetry history buffers: wind gust
+// and depth are not position-dependent, so sampleTracks must record them
+// even when the vessel has no GPS fix (e.g. dockside), unlike the
+// position-gated trail recording a few lines below it.
+func TestSampleTracks_RecordsWindAndDepthHistoryEvenWithoutValidPosition(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	windGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+	depthHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+
+	body := []byte(`{
+		"navigation": {
+			"datetime": {"value": "` + time.Now().UTC().Format(time.RFC3339) + `"},
+			"state": {"value": "anchored"}
+		},
+		"environment": {
+			"depth": {"belowTransducer": {"value": 12.5}},
+			"wind": {"speedApparent": {"value": 5.0}}
+		}
+	}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	sampleTracks(settingsPath)
+
+	windPts := windGustHistory.since(time.Time{})
+	if len(windPts) != 1 {
+		t.Fatalf("expected 1 wind gust sample recorded despite missing position, got %d", len(windPts))
+	}
+
+	depthPts := depthHistory.since(time.Time{})
+	if len(depthPts) != 1 {
+		t.Fatalf("expected 1 depth sample recorded despite missing position, got %d", len(depthPts))
 	}
 }

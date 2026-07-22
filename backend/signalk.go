@@ -58,6 +58,12 @@ type settingsPayload struct {
 		HullType         string  `json:"hull_type"`
 		WindageAreaM2    float64 `json:"windage_area_m2"`
 	} `json:"anchor"`
+	Influxdb struct {
+		Enabled bool   `json:"enabled"`
+		URL     string `json:"url"`
+		Org     string `json:"org"`
+		Bucket  string `json:"bucket"`
+	} `json:"influxdb"`
 	Units string `json:"units"`
 }
 
@@ -121,6 +127,12 @@ func updateSettingsHandler(c echo.Context) error {
 		"chain_onboard_m":     normalized.Anchor.ChainOnboardM,
 		"hull_type":           normalized.Anchor.HullType,
 		"windage_area_m2":     normalized.Anchor.WindageAreaM2,
+	}
+	settings["influxdb"] = map[string]any{
+		"enabled": normalized.Influxdb.Enabled,
+		"url":     normalized.Influxdb.URL,
+		"org":     normalized.Influxdb.Org,
+		"bucket":  normalized.Influxdb.Bucket,
 	}
 	settings["units"] = normalized.Units
 
@@ -209,6 +221,15 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		}
 	}
 
+	if influxMap, ok := settings["influxdb"].(map[string]any); ok {
+		if v, ok := influxMap["enabled"].(bool); ok {
+			payload.Influxdb.Enabled = v
+		}
+		payload.Influxdb.URL = strings.TrimSpace(coerceString(influxMap["url"]))
+		payload.Influxdb.Org = strings.TrimSpace(coerceString(influxMap["org"]))
+		payload.Influxdb.Bucket = strings.TrimSpace(coerceString(influxMap["bucket"]))
+	}
+
 	units := strings.TrimSpace(coerceString(settings["units"]))
 	if strings.EqualFold(units, "metric") || strings.EqualFold(units, "imperial") {
 		payload.Units = strings.ToLower(units)
@@ -287,6 +308,11 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	if !isSupportedHullType(normalized.Anchor.HullType) {
 		normalized.Anchor.HullType = defaultHullType
 	}
+
+	normalized.Influxdb.Enabled = req.Influxdb.Enabled
+	normalized.Influxdb.URL = strings.TrimSpace(req.Influxdb.URL)
+	normalized.Influxdb.Org = strings.TrimSpace(req.Influxdb.Org)
+	normalized.Influxdb.Bucket = strings.TrimSpace(req.Influxdb.Bucket)
 
 	normalized.Units = strings.ToLower(strings.TrimSpace(req.Units))
 	if normalized.Units != "metric" && normalized.Units != "imperial" {

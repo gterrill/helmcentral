@@ -45,6 +45,12 @@ type SettingsPayload = {
     hull_type?: string
     windage_area_m2?: number
   }
+  influxdb?: {
+    enabled?: boolean
+    url?: string
+    org?: string
+    bucket?: string
+  }
   units?: string
 }
 
@@ -97,6 +103,11 @@ export function SignalKSettingsPanel({
   const [chainOnboardM, setChainOnboardM] = useState('150')
   const [hullType, setHullType] = useState<'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'>('power_cat')
   const [windageAreaM2, setWindageAreaM2] = useState('35')
+
+  const [influxdbEnabled, setInfluxdbEnabled] = useState(false)
+  const [influxdbUrl, setInfluxdbUrl] = useState('')
+  const [influxdbOrg, setInfluxdbOrg] = useState('')
+  const [influxdbBucket, setInfluxdbBucket] = useState('')
 
   const [isConnecting, setIsConnecting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -181,6 +192,19 @@ export function SignalKSettingsPanel({
     }
     if (typeof data.anchor?.windage_area_m2 === 'number') {
       setWindageAreaM2(String(data.anchor.windage_area_m2))
+    }
+
+    if (typeof data.influxdb?.enabled === 'boolean') {
+      setInfluxdbEnabled(data.influxdb.enabled)
+    }
+    if (typeof data.influxdb?.url === 'string') {
+      setInfluxdbUrl(data.influxdb.url)
+    }
+    if (typeof data.influxdb?.org === 'string') {
+      setInfluxdbOrg(data.influxdb.org)
+    }
+    if (typeof data.influxdb?.bucket === 'string') {
+      setInfluxdbBucket(data.influxdb.bucket)
     }
   }
 
@@ -295,6 +319,12 @@ export function SignalKSettingsPanel({
         chain_onboard_m: parseNumber(chainOnboardM, 150),
         hull_type: hullType,
         windage_area_m2: parseNumber(windageAreaM2, 35),
+      },
+      influxdb: {
+        enabled: influxdbEnabled,
+        url: influxdbUrl.trim(),
+        org: influxdbOrg.trim(),
+        bucket: influxdbBucket.trim(),
       },
     }
 
@@ -611,6 +641,52 @@ export function SignalKSettingsPanel({
               </SelectPopup>
             </Select>
           </Field>
+        </div>
+      </FieldSet>
+
+      <FieldSet>
+        <FieldLegend variant="label">InfluxDB (optional)</FieldLegend>
+        <div className="mt-3 space-y-3">
+          <Field orientation="horizontal">
+            <Switch checked={influxdbEnabled} onCheckedChange={setInfluxdbEnabled} />
+            <FieldLabel>Use InfluxDB for wind-gust and depth-trend history instead of the built-in in-memory buffer</FieldLabel>
+          </Field>
+
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+            <Field>
+              <FieldLabel htmlFor="influxdb-url">URL</FieldLabel>
+              <Input
+                id="influxdb-url"
+                value={influxdbUrl}
+                onChange={(e) => setInfluxdbUrl(e.target.value)}
+                aria-label="InfluxDB URL"
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="influxdb-org">Org</FieldLabel>
+              <Input
+                id="influxdb-org"
+                value={influxdbOrg}
+                onChange={(e) => setInfluxdbOrg(e.target.value)}
+                aria-label="InfluxDB organization"
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="influxdb-bucket">Bucket</FieldLabel>
+              <Input
+                id="influxdb-bucket"
+                value={influxdbBucket}
+                onChange={(e) => setInfluxdbBucket(e.target.value)}
+                aria-label="InfluxDB bucket"
+              />
+            </Field>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground">
+            The API token is set via the backend&apos;s INFLUXDB_TOKEN environment variable, not here.
+          </p>
         </div>
       </FieldSet>
 

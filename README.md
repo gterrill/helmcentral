@@ -1,6 +1,6 @@
 # Helmcentral
 
-A modern dashboard application integrating SignalK and InfluxDB for marine monitoring and visualization.
+A modern dashboard application integrating SignalK for marine monitoring and visualization, with optional InfluxDB support for longer-retention telemetry history.
 
 ## Project Structure
 
@@ -17,7 +17,7 @@ helmcentral/
 
 - **Backend (Go)**: RESTful API for data querying and aggregation
   - SignalK integration for real-time maritime data
-  - InfluxDB integration for time-series data storage and retrieval
+  - In-memory telemetry history (wind-gust-max, depth-trend/tide-detection) by default, with optional InfluxDB integration for longer-retention time-series storage and retrieval
   - CORS-enabled for web frontend communication
 
 - **Frontend (TypeScript + Web Components)**: Modern reactive dashboard
@@ -38,7 +38,7 @@ helmcentral/
   - [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) - Needed to calculate true wind and other derived navigation data.
   - [`tracks`](https://github.com/SignalK/tracks) - Needed for drawing vessel trails and retrieving historical path data.
   - [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) - Needed to retrieve generator and advanced electrical states (e.g. from Victron GX devices).
-  - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) - Needed to write time-series data from SignalK to InfluxDB for historical graphing and analysis.
+  - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) - Optional. Only needed if you enable InfluxDB (Settings → InfluxDB) for longer-retention historical graphing and analysis than the built-in in-memory buffer's ~6h window.
 
 ### Server Deployment (Docker)
 
@@ -104,7 +104,7 @@ See [backend/README.md](backend/README.md) for API endpoint documentation.
 
 - **Backend**: Echo web framework with middleware for logging, recovery, and CORS
 - **Frontend**: Custom Web Components with TypeScript for type safety
-- **Data Storage**: InfluxDB for time-series data
+- **Data Storage**: In-memory telemetry history by default; InfluxDB optional for longer retention
 - **Real-time Data**: SignalK integration for live maritime sensor data
 
 ### Trail Architecture
@@ -113,7 +113,7 @@ See [backend/README.md](backend/README.md) for API endpoint documentation.
 - Clients consume trail deltas from backend APIs rather than sampling SignalK directly.
 - The pre-anchor motoring approach is a separate concern from post-anchor trail history.
 
-See [docs/adr/0001-server-owned-trail-sampling.md](docs/adr/0001-server-owned-trail-sampling.md), [docs/adr/0002-separate-motoring-and-anchor-trails.md](docs/adr/0002-separate-motoring-and-anchor-trails.md), and [docs/adr/0003-motoring-seed-downsampling.md](docs/adr/0003-motoring-seed-downsampling.md).
+See [docs/adr/0001-server-owned-trail-sampling.md](docs/adr/0001-server-owned-trail-sampling.md), [docs/adr/0002-separate-motoring-and-anchor-trails.md](docs/adr/0002-separate-motoring-and-anchor-trails.md), and [docs/adr/0003-motoring-seed-downsampling.md](docs/adr/0003-motoring-seed-downsampling.md) (superseded by [docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md)).
 
 ### Route Planning
 
@@ -196,7 +196,7 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 ## Next Steps
 
 1. Configure SignalK connection parameters
-2. Set up InfluxDB database schema
+2. (Optional) Enable InfluxDB in Settings and set up its database schema for longer-retention telemetry history
 3. Implement dashboard data visualization components
 4. Add authentication/authorization
 5. Deploy to production environment

@@ -77,6 +77,58 @@ func TestBuildSettingsPayload_SurfacesUnregisteredTideProviderFromDisk(t *testin
 	}
 }
 
+// TestNormalizeSettingsPayload_RoundTripsInfluxdbSection mirrors the
+// tide-provider round-trip test above: the influxdb section (enabled/url/
+// org/bucket) must be persisted as submitted, trimmed of whitespace, with no
+// silent defaulting or dropping of fields. Note there is deliberately no
+// token field here - INFLUXDB_TOKEN is env-only and never round-trips
+// through settings.
+func TestNormalizeSettingsPayload_RoundTripsInfluxdbSection(t *testing.T) {
+	req := settingsPayload{}
+	req.Influxdb.Enabled = true
+	req.Influxdb.URL = " http://localhost:8086 "
+	req.Influxdb.Org = " myorg "
+	req.Influxdb.Bucket = " mybucket "
+
+	normalized := normalizeSettingsPayload(req)
+
+	if !normalized.Influxdb.Enabled {
+		t.Fatalf("expected influxdb.enabled to round-trip true")
+	}
+	if normalized.Influxdb.URL != "http://localhost:8086" {
+		t.Fatalf("expected influxdb.url to be trimmed, got %q", normalized.Influxdb.URL)
+	}
+	if normalized.Influxdb.Org != "myorg" {
+		t.Fatalf("expected influxdb.org to be trimmed, got %q", normalized.Influxdb.Org)
+	}
+	if normalized.Influxdb.Bucket != "mybucket" {
+		t.Fatalf("expected influxdb.bucket to be trimmed, got %q", normalized.Influxdb.Bucket)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesInfluxdbSectionFromDisk is the read-side
+// counterpart: GET /api/settings must reflect whatever influxdb section is
+// actually stored in settings.yaml.
+func TestBuildSettingsPayload_SurfacesInfluxdbSectionFromDisk(t *testing.T) {
+	settings := map[string]any{
+		"influxdb": map[string]any{
+			"enabled": true,
+			"url":     "http://localhost:8086",
+			"org":     "myorg",
+			"bucket":  "mybucket",
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+
+	if !payload.Influxdb.Enabled {
+		t.Fatalf("expected influxdb.enabled to surface as true")
+	}
+	if payload.Influxdb.URL != "http://localhost:8086" || payload.Influxdb.Org != "myorg" || payload.Influxdb.Bucket != "mybucket" {
+		t.Fatalf("unexpected influxdb section: %+v", payload.Influxdb)
+	}
+}
+
 func TestParseSignalKCurrent_ReadsSetTrueAndDrift(t *testing.T) {
 	payload := map[string]any{
 		"environment": map[string]any{

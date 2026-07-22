@@ -212,7 +212,6 @@ func main() {
 	loadAnchorWatch()
 	loadRoutes()
 	loadDashboardPages()
-	go seedMotoringTrailFromInflux()
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)
 
@@ -293,7 +292,10 @@ func depthTrend(c echo.Context) error {
 	if window == "" {
 		window = "3h"
 	}
-	points := queryInfluxDepthTrend(window)
+	points := inMemoryDepthTrend(window)
+	if influxTelemetryConfigured() {
+		points = queryInfluxDepthTrend(window)
+	}
 	if points == nil {
 		points = []depthTrendPoint{}
 	}
@@ -354,17 +356,16 @@ func vesselState(c echo.Context) error {
 		state = criticalVesselState(state, "signalk not configured")
 	}
 
-	maxGust10mKts := 0.0
-	maxGust1hKts := 0.0
-	if state.WindSpeedApparentKts > 0 {
+	maxGust10mKts, maxGust1hKts := inMemoryMaxWindGustKts("10m"), inMemoryMaxWindGustKts("1h")
+	if influxTelemetryConfigured() {
 		maxGust10mKts = queryInfluxMaxWindGustKts("10m")
 		maxGust1hKts = queryInfluxMaxWindGustKts("1h")
-		if maxGust10mKts < 0 {
-			maxGust10mKts = 0
-		}
-		if maxGust1hKts < maxGust10mKts {
-			maxGust1hKts = maxGust10mKts
-		}
+	}
+	if maxGust10mKts < 0 {
+		maxGust10mKts = 0
+	}
+	if maxGust1hKts < maxGust10mKts {
+		maxGust1hKts = maxGust10mKts
 	}
 
 	vesselPrefix := loadBoatVesselPrefix(settingsPath)

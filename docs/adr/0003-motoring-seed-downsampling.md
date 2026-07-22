@@ -1,7 +1,11 @@
 # ADR 0003: Downsample Influx Seed For Motoring History
 
 ## Status
-Accepted
+Superseded by ADR-0020
+
+The Influx startup seed this ADR describes has been removed entirely (see
+ADR-0020). The motoring trail now starts empty and fills purely from live
+sampling; this document is retained for historical context only.
 
 ## Context
 On startup the server seeds the motoring ring buffer from InfluxDB so `/api/tracks/motoring` is useful before any live server-side sampling has occurred.

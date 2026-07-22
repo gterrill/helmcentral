@@ -5,7 +5,7 @@ Go REST API backend for the Helmcentral dashboard.
 ## Features
 
 - SignalK data integration
-- InfluxDB data querying
+- In-memory telemetry history by default; InfluxDB optional for longer retention
 - RESTful API endpoints
 - CORS-enabled for web frontend
 
@@ -71,11 +71,10 @@ Environment variables:
 - `PORT` - Server port (default: 8080)
 - `ENVIRONMENT` - Environment name (development/production)
 - `LOG_LEVEL` - Logging level (debug/info/warn/error)
-- `INFLUXDB_URL` - InfluxDB connection URL
-- `INFLUXDB_ORG` - InfluxDB organization
-- `INFLUXDB_BUCKET` - InfluxDB bucket for time-series data
-- `INFLUXDB_TOKEN` - InfluxDB API token
+- `INFLUXDB_TOKEN` - InfluxDB API token (only needed if InfluxDB is enabled in Settings; it's the only InfluxDB value that stays an env var, since it's a secret)
 - `SIGNALK_URL` - SignalK server URL
+
+Wind-gust-max and depth-trend/tide-detection work out of the box from an in-memory ring buffer fed by the server's live SignalK polling — no InfluxDB required. InfluxDB is an optional enhancement (longer retention than the ~6h in-memory window) configured from the Settings UI's InfluxDB section (`enabled`/`url`/`org`/`bucket`, stored in `settings.yaml`'s `influxdb` section) plus `INFLUXDB_TOKEN`. See [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md).
 
 ## Architecture Decisions
 
@@ -83,9 +82,10 @@ The durable rationale for trail handling is documented in:
 
 - [../docs/adr/0001-server-owned-trail-sampling.md](../docs/adr/0001-server-owned-trail-sampling.md)
 - [../docs/adr/0002-separate-motoring-and-anchor-trails.md](../docs/adr/0002-separate-motoring-and-anchor-trails.md)
-- [../docs/adr/0003-motoring-seed-downsampling.md](../docs/adr/0003-motoring-seed-downsampling.md)
+- [../docs/adr/0003-motoring-seed-downsampling.md](../docs/adr/0003-motoring-seed-downsampling.md) (superseded by ADR-0020)
 - [../docs/adr/0004-gnss-validation-gate.md](../docs/adr/0004-gnss-validation-gate.md)
 - [../docs/adr/0005-signalk-tracks-backed-ais-trails.md](../docs/adr/0005-signalk-tracks-backed-ais-trails.md)
 - [../docs/adr/0006-manual-route-planning.md](../docs/adr/0006-manual-route-planning.md)
 - [../docs/adr/0007-signalk-route-activation.md](../docs/adr/0007-signalk-route-activation.md)
 - [../docs/adr/0012-configurable-bento-dashboard.md](../docs/adr/0012-configurable-bento-dashboard.md)
+- [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md)

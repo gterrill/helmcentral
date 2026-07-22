@@ -1,9 +1,63 @@
 package main
 
 import (
+	"os"
 	"testing"
 	"time"
 )
+
+func writeInfluxSettingsFixture(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := dir + "/settings.yaml"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed writing settings fixture: %v", err)
+	}
+	return path
+}
+
+func TestLoadInfluxSettings_DisabledReturnsNotConfigured(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: false\n  url: http://localhost:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+
+	_, _, _, _, ok := loadInfluxSettings(path)
+	if ok {
+		t.Fatalf("expected not configured when influxdb.enabled is false")
+	}
+}
+
+func TestLoadInfluxSettings_EnabledButMissingTokenReturnsNotConfigured(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://localhost:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("INFLUXDB_TOKEN", "")
+
+	_, _, _, _, ok := loadInfluxSettings(path)
+	if ok {
+		t.Fatalf("expected not configured when INFLUXDB_TOKEN is missing")
+	}
+}
+
+func TestLoadInfluxSettings_MissingSectionReturnsNotConfigured(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "signalk:\n  address: localhost\n  port: 3000\n")
+	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+
+	_, _, _, _, ok := loadInfluxSettings(path)
+	if ok {
+		t.Fatalf("expected not configured when influxdb section is absent")
+	}
+}
+
+func TestLoadInfluxSettings_EnabledAndFullyConfiguredReturnsConfigured(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://localhost:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+
+	url, org, bucket, token, ok := loadInfluxSettings(path)
+	if !ok {
+		t.Fatalf("expected configured when enabled and all fields present")
+	}
+	if url != "http://localhost:8086" || org != "myorg" || bucket != "mybucket" || token != "sometoken" {
+		t.Fatalf("unexpected values: url=%q org=%q bucket=%q token=%q", url, org, bucket, token)
+	}
+}
 
 func depthPoint(minutesAgo int, depthM float64) depthTrendPoint {
 	return depthTrendPoint{
