@@ -3,3 +3,14 @@
 **/node_modules
 **/dist
 frontend/.vite
+backend/.env
+backend/.env.local
+backend/tmp/
+backend/cache/
+backend/helmcentral
+backend/data/*.sqlite
+backend/data/secrets.key
+backend/data/routes.json
+backend/data/dashboard-layout.json
+backend/data/dashboard-pages.json
+backend/data/sat-charts/

@@ -1,0 +1,12 @@
+.git
+.env
+.env.local
+tmp/
+cache/
+helmcentral
+data/*.sqlite
+data/secrets.key
+data/routes.json
+data/dashboard-layout.json
+data/dashboard-pages.json
+data/sat-charts/
