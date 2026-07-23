@@ -40,6 +40,8 @@ helmcentral/
   - [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) - Needed to retrieve generator and advanced electrical states (e.g. from Victron GX devices).
   - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) - Optional. Only needed if you enable InfluxDB (Settings → InfluxDB) for longer-retention historical graphing and analysis than the built-in in-memory buffer's ~6h window.
 
+Secrets (SignalK credentials, the InfluxDB token, Storm Glass/GeoNames/WeatherKit API keys) are no longer set via a `backend/.env` file — start the app with no secrets configured, then paste them into Settings → Secrets in the running app; they're encrypted at rest. See [docs/adr/0023-encrypted-secrets-store.md](docs/adr/0023-encrypted-secrets-store.md).
+
 ### Server Deployment (Docker)
 
 ```bash
@@ -171,7 +173,7 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 
 (swap the directory for `docs/examples/weather-plugins/weatherkit` or `docs/examples/wave-plugins/open-meteo-marine` — note both are multi-file packages, so the build target is `.`, not a single `main.go`). The bundled `plugins-builder` Compose service (see `docker-compose.yml`/`docker-compose.dev.yml`) already builds and installs all seven reference plugins (two tide, two weather, one wave, two forecast warnings) automatically on every `make dev`/deploy — see each plugin's own README for details and installation notes if building/installing manually.
 
-**Upgrading an existing install:** if you previously ran a version of Helmcentral with the old hardcoded WeatherKit/Open-Meteo-marine integration, delete the now-orphaned `cache/weather_today_cache.json` and `cache/weather_forecast_cache.json` files (weather/wave caching moved to per-plugin files under `cache/weather_wasm_*_cache.json`/`cache/wave_wasm_*_cache.json`). If you were relying on WeatherKit, set the four `WEATHERKIT_*` environment variables on the backend (see the commented-out examples in `docker-compose.yml`) and select "Apple WeatherKit" under Settings → Weather — the default provider on upgrade is Open-Meteo (keyless) unless you explicitly configure otherwise.
+**Upgrading an existing install:** if you previously ran a version of Helmcentral with the old hardcoded WeatherKit/Open-Meteo-marine integration, delete the now-orphaned `cache/weather_today_cache.json` and `cache/weather_forecast_cache.json` files (weather/wave caching moved to per-plugin files under `cache/weather_wasm_*_cache.json`/`cache/wave_wasm_*_cache.json`). If you were relying on WeatherKit, paste the four WeatherKit credentials into Settings → Secrets and select "Apple WeatherKit" under Settings → Weather — the default provider on upgrade is Open-Meteo (keyless) unless you explicitly configure otherwise.
 
 ### Forecast Warnings Provider Plugins
 

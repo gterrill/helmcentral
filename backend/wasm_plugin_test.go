@@ -336,3 +336,142 @@ func TestConfigEchoPlugin_ConfigReachesGuest(t *testing.T) {
 		t.Errorf("expected some_key=some_value, got %+v", result)
 	}
 }
+
+// withTestGlobalSecretsStore points globalSecretsStore at a fresh
+// t.TempDir()-backed store for the duration of the test, restoring the
+// prior value afterwards. Mirrors withTestSecretsStore in
+// secrets_settings_handlers_test.go but lives here too since this file's
+// tests need the same swap for the wasm_plugin.go allowlist gate.
+func withTestGlobalSecretsStore(t *testing.T) *secretsStore {
+	t.Helper()
+	dir := t.TempDir()
+	store, err := newSecretsStore(filepath.Join(dir, "secrets.sqlite"), filepath.Join(dir, "secrets.key"))
+	if err != nil {
+		t.Fatalf("newSecretsStore: %v", err)
+	}
+	prev := globalSecretsStore
+	globalSecretsStore = store
+	t.Cleanup(func() { globalSecretsStore = prev })
+	return store
+}
+
+// TestConfigForWasmPlugin_KnownSecretDroppedWithNoAllowedSecretsFile confirms
+// a known-secret name (e.g. WEATHERKIT_KEY_ID) referenced in a plugin's
+// config.json is dropped when there is no companion allowed_secrets.json -
+// the safe default is "no secrets allowed" for a plugin that hasn't
+// declared any, mirroring allowed_hosts.json's missing-file default.
+func TestConfigForWasmPlugin_KnownSecretDroppedWithNoAllowedSecretsFile(t *testing.T) {
+	withTestGlobalSecretsStore(t)
+	if err := globalSecretsStore.Set("WEATHERKIT_KEY_ID", "the-real-key-id"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	companion := filepath.Join(dir, "plugin.config.json")
+	if err := os.WriteFile(companion, []byte(`{"key_id":"${WEATHERKIT_KEY_ID}"}`), 0o644); err != nil {
+		t.Fatalf("write companion file: %v", err)
+	}
+
+	config, err := configForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := config["key_id"]; ok {
+		t.Errorf("expected key_id to be dropped with no allowed_secrets.json, got %+v", config)
+	}
+}
+
+// TestConfigForWasmPlugin_KnownSecretDroppedAndLoggedWhenNotInAllowedSecretsFile
+// confirms a known-secret name is dropped (and a denial is logged) when
+// allowed_secrets.json exists but does not list it.
+func TestConfigForWasmPlugin_KnownSecretDroppedAndLoggedWhenNotInAllowedSecretsFile(t *testing.T) {
+	withTestGlobalSecretsStore(t)
+	if err := globalSecretsStore.Set("WEATHERKIT_KEY_ID", "the-real-key-id"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.config.json"), []byte(`{"key_id":"${WEATHERKIT_KEY_ID}"}`), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	// allowed_secrets.json exists but lists a different key.
+	if err := os.WriteFile(filepath.Join(dir, "plugin.allowed_secrets.json"), []byte(`["WEATHERKIT_TEAM_ID"]`), 0o644); err != nil {
+		t.Fatalf("write allowed secrets file: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	origOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(origOutput)
+
+	config, err := configForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := config["key_id"]; ok {
+		t.Errorf("expected key_id to be dropped when not listed in allowed_secrets.json, got %+v", config)
+	}
+	if logBuf.Len() == 0 {
+		t.Errorf("expected a denial to be logged when a secret is referenced but not in allowed_secrets.json")
+	}
+}
+
+// TestConfigForWasmPlugin_KnownSecretResolvesFromStoreWhenAllowed confirms a
+// known-secret name resolves correctly from globalSecretsStore when the
+// plugin's allowed_secrets.json DOES list it and the store has the value.
+func TestConfigForWasmPlugin_KnownSecretResolvesFromStoreWhenAllowed(t *testing.T) {
+	withTestGlobalSecretsStore(t)
+	if err := globalSecretsStore.Set("WEATHERKIT_KEY_ID", "the-real-key-id"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.config.json"), []byte(`{"key_id":"${WEATHERKIT_KEY_ID}"}`), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.allowed_secrets.json"), []byte(`["WEATHERKIT_KEY_ID"]`), 0o644); err != nil {
+		t.Fatalf("write allowed secrets file: %v", err)
+	}
+
+	config, err := configForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config["key_id"] != "the-real-key-id" {
+		t.Errorf("expected key_id=the-real-key-id, got %+v", config)
+	}
+}
+
+// TestAllowedSecretsForWasmPlugin_NoCompanionFileReturnsNilNoError mirrors
+// allowedHostsForWasmPlugin's missing-file contract: no file is the safe
+// default (no secrets allowed), not an error.
+func TestAllowedSecretsForWasmPlugin_NoCompanionFileReturnsNilNoError(t *testing.T) {
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+
+	keys, err := allowedSecretsForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("expected no allowed secrets, got %+v", keys)
+	}
+}
+
+// TestAllowedSecretsForWasmPlugin_MalformedJSONIsError mirrors
+// allowedHostsForWasmPlugin's malformed-file contract: a file that exists
+// but isn't valid JSON is a hard error, not silently treated as empty.
+func TestAllowedSecretsForWasmPlugin_MalformedJSONIsError(t *testing.T) {
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.allowed_secrets.json"), []byte(`{not valid json`), 0o644); err != nil {
+		t.Fatalf("write allowed secrets file: %v", err)
+	}
+
+	if _, err := allowedSecretsForWasmPlugin(wasmPath); err == nil {
+		t.Fatalf("expected an error for malformed allowed_secrets.json, got nil")
+	}
+}

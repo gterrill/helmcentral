@@ -12,6 +12,8 @@ backend/data/dashboard-pages.json
 backend/data/sat-charts/
 backend/data/tile-cache.sqlite
 backend/data/nearby-contacts.sqlite
+backend/data/secrets.sqlite
+backend/data/secrets.key
 # Allow the embed placeholder while ignoring real build output
 !backend/dist/
 !backend/dist/.gitkeep

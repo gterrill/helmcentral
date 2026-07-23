@@ -139,6 +139,32 @@ func allowedHostsForWasmPlugin(wasmPath string) ([]string, error) {
 	return hosts, nil
 }
 
+// allowedSecretsForWasmPlugin reads the companion <name>.allowed_secrets.json
+// file next to a .wasm plugin (JSON array of secret key names, e.g.
+// "WEATHERKIT_KEY_ID"). A missing file is the safe default (no secrets
+// visible to that plugin), not an error - mirroring
+// allowedHostsForWasmPlugin's missing-file contract. A file that exists but
+// is malformed JSON IS an error, same "fail loudly" reasoning. Only names in
+// knownSecretKeys are ever gated through this allowlist at all (see
+// configForWasmPlugin's mapping closure); this file has no effect on
+// ordinary, non-secret env var references in a plugin's config.json.
+func allowedSecretsForWasmPlugin(wasmPath string) ([]string, error) {
+	companion := strings.TrimSuffix(wasmPath, ".wasm") + ".allowed_secrets.json"
+	raw, err := os.ReadFile(companion)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read allowed secrets file %s: %w", companion, err)
+	}
+
+	var keys []string
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return nil, fmt.Errorf("failed to parse allowed secrets file %s: %w", companion, err)
+	}
+	return keys, nil
+}
+
 // configForWasmPlugin reads the companion <name>.config.json file next to a
 // .wasm plugin: a flat JSON object of string values. Each value is expanded
 // against the process environment via os.Expand (so a plugin author writes
@@ -151,6 +177,16 @@ func allowedHostsForWasmPlugin(wasmPath string) ([]string, error) {
 // error) - most plugins (e.g. Open-Meteo) need no config at all. A file that
 // exists but is malformed JSON IS an error - same "fail loudly" reasoning as
 // allowedHostsForWasmPlugin.
+//
+// Secrets gate: a referenced name that is one of knownSecretKeys (see
+// secrets_store.go) is resolved from globalSecretsStore instead of the raw
+// process environment, and ONLY if the plugin's companion
+// <name>.allowed_secrets.json explicitly lists it - this is the actual
+// security boundary that keeps secrets like WEATHERKIT_PRIVATE_KEY from
+// being globally visible to every plugin via os.Setenv (LoadIntoEnv
+// deliberately never sets WEATHERKIT_* into the process env at all).
+// Non-secret names are entirely unaffected and keep today's raw
+// os.LookupEnv behavior.
 func configForWasmPlugin(wasmPath string) (map[string]string, error) {
 	companion := strings.TrimSuffix(wasmPath, ".wasm") + ".config.json"
 	raw, err := os.ReadFile(companion)
@@ -166,8 +202,34 @@ func configForWasmPlugin(wasmPath string) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", companion, err)
 	}
 
+	allowedSecrets, err := allowedSecretsForWasmPlugin(wasmPath)
+	if err != nil {
+		return nil, err
+	}
+	allowedSecretsSet := make(map[string]bool, len(allowedSecrets))
+	for _, k := range allowedSecrets {
+		allowedSecretsSet[k] = true
+	}
+
 	sawUnset := false
 	mapping := func(name string) string {
+		if isKnownSecretKey(name) {
+			if !allowedSecretsSet[name] {
+				log.Printf("wasm plugin %q: secret %q not in allowed_secrets.json, denied", strings.TrimSuffix(filepath.Base(wasmPath), ".wasm"), name)
+				sawUnset = true
+				return ""
+			}
+			if globalSecretsStore == nil {
+				sawUnset = true
+				return ""
+			}
+			v, ok, gerr := globalSecretsStore.Get(name)
+			if gerr != nil || !ok {
+				sawUnset = true
+				return ""
+			}
+			return v
+		}
 		v, ok := os.LookupEnv(name)
 		if !ok {
 			sawUnset = true

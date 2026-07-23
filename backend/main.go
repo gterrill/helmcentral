@@ -137,6 +137,21 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
 	}))
 
+	// Encrypted secrets store. Must be opened and loaded into the process
+	// environment before any provider registration below, since SignalK,
+	// Storm Glass, and GeoNames code paths read their secrets via
+	// getEnv/os.Getenv. Fail fast on open error (including a master-key
+	// mismatch against existing encrypted rows) rather than silently
+	// running with secrets unavailable.
+	ss, err := newSecretsStore(secretsDBPath(), secretsKeyPath())
+	if err != nil {
+		log.Fatalf("secrets store: %v", err)
+	}
+	globalSecretsStore = ss
+	if err := globalSecretsStore.LoadIntoEnv(); err != nil {
+		log.Fatalf("secrets store: %v", err)
+	}
+
 	// Tide providers
 	registerTideProvider(newStormGlassTideProvider())
 	loadWasmTideProviders(pluginsTidesDir())
@@ -206,6 +221,9 @@ func main() {
 	e.POST("/api/settings", updateSettingsHandler)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
 	e.POST("/api/settings/signalk", updateSignalKSettingsHandler)
+	e.GET("/api/settings/secrets", getSecretsSettingsHandler)
+	e.POST("/api/settings/secrets", updateSecretsSettingsHandler)
+	e.POST("/api/settings/secrets/import-env", importEnvSecretsHandler)
 	e.GET("/api/anchor-watch", getAnchorWatch)
 	e.POST("/api/anchor-watch", setAnchorWatch)
 	e.PATCH("/api/anchor-watch", patchAnchorWatch)

@@ -9,14 +9,8 @@ services:
         condition: service_completed_successfully
     ports:
       - "8080:8080"
-    env_file:
-      - ./backend/.env
     environment:
       - SETTINGS_FILE=/app/settings.yaml
-      # - WEATHERKIT_KEY_ID=your_key_id
-      # - WEATHERKIT_TEAM_ID=your_team_id
-      # - WEATHERKIT_SERVICE_ID=your_service_id
-      # - WEATHERKIT_PRIVATE_KEY=your_pem_contents
     volumes:
       - ./settings.yaml:/app/settings.yaml
 
@@ -37,14 +31,8 @@ services:
       plugins-builder:
         condition: service_completed_successfully
     working_dir: /app
-    env_file:
-      - ./backend/.env
     environment:
       - SETTINGS_FILE=/app/settings.yaml
-      # - WEATHERKIT_KEY_ID=your_key_id
-      # - WEATHERKIT_TEAM_ID=your_team_id
-      # - WEATHERKIT_SERVICE_ID=your_service_id
-      # - WEATHERKIT_PRIVATE_KEY=your_pem_contents
     ports:
       - "8080:8080"
     volumes:
@@ -93,7 +81,7 @@ services:
         cd /src/tide-plugins/bom && go mod download && tinygo build -o /out/tides/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/tides/bom.allowed_hosts.json &&
         cd /src/tide-plugins/noaa && go mod download && tinygo build -o /out/tides/noaa.wasm -target wasip1 -buildmode c-shared . && cp noaa.allowed_hosts.json /out/tides/noaa.allowed_hosts.json &&
         cd /src/weather-plugins/open-meteo && go mod download && tinygo build -o /out/weather/open-meteo.wasm -target wasip1 -buildmode c-shared . && cp open-meteo.allowed_hosts.json /out/weather/open-meteo.allowed_hosts.json &&
-        cd /src/weather-plugins/weatherkit && go mod download && tinygo build -o /out/weather/weatherkit.wasm -target wasip1 -buildmode c-shared . && cp weatherkit.allowed_hosts.json /out/weather/weatherkit.allowed_hosts.json && cp weatherkit.config.json /out/weather/weatherkit.config.json &&
+        cd /src/weather-plugins/weatherkit && go mod download && tinygo build -o /out/weather/weatherkit.wasm -target wasip1 -buildmode c-shared . && cp weatherkit.allowed_hosts.json /out/weather/weatherkit.allowed_hosts.json && cp weatherkit.config.json /out/weather/weatherkit.config.json && cp weatherkit.allowed_secrets.json /out/weather/weatherkit.allowed_secrets.json &&
         cd /src/wave-plugins/open-meteo-marine && go mod download && tinygo build -o /out/waves/open-meteo-marine.wasm -target wasip1 -buildmode c-shared . && cp open-meteo-marine.allowed_hosts.json /out/waves/open-meteo-marine.allowed_hosts.json &&
         cd /src/forecast-warnings-plugins/bom && go mod download && tinygo build -o /out/forecast-warnings/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/forecast-warnings/bom.allowed_hosts.json &&
         cd /src/forecast-warnings-plugins/nws && go mod download && tinygo build -o /out/forecast-warnings/nws.wasm -target wasip1 -buildmode c-shared . && cp nws.allowed_hosts.json /out/forecast-warnings/nws.allowed_hosts.json

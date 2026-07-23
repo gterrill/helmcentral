@@ -65,16 +65,11 @@ docker run -p 8080:8080 helmcentral-backend
 
 ## Configuration
 
-Create a `.env` file in the backend directory. See `.env.example` for a template.
+Non-secret dev knobs (`PORT`, `ENVIRONMENT`, `LOG_LEVEL`, `SETTINGS_FILE`, `SIGNALK_VESSEL_PATH`, `VESSEL_STATUS`) are set via env vars — see `.env.example` for a template.
 
-Environment variables:
-- `PORT` - Server port (default: 8080)
-- `ENVIRONMENT` - Environment name (development/production)
-- `LOG_LEVEL` - Logging level (debug/info/warn/error)
-- `INFLUXDB_TOKEN` - InfluxDB API token (only needed if InfluxDB is enabled in Settings; it's the only InfluxDB value that stays an env var, since it's a secret)
-- `SIGNALK_URL` - SignalK server URL
+Secrets (SignalK credentials, `INFLUXDB_TOKEN`, `STORMGLASS_API_KEY`, `GEONAMES_USERNAME`, `WEATHERKIT_*`) live in an encrypted-at-rest SQLite store instead, managed via the Settings UI's Secrets panel (`GET`/`POST /api/settings/secrets`). See [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md).
 
-Wind-gust-max and depth-trend/tide-detection work out of the box from an in-memory ring buffer fed by the server's live SignalK polling — no InfluxDB required. InfluxDB is an optional enhancement (longer retention than the ~6h in-memory window) configured from the Settings UI's InfluxDB section (`enabled`/`url`/`org`/`bucket`, stored in `settings.yaml`'s `influxdb` section) plus `INFLUXDB_TOKEN`. See [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md).
+Wind-gust-max and depth-trend/tide-detection work out of the box from an in-memory ring buffer fed by the server's live SignalK polling — no InfluxDB required. InfluxDB is an optional enhancement (longer retention than the ~6h in-memory window) configured from the Settings UI's InfluxDB section (`enabled`/`url`/`org`/`bucket`, stored in `settings.yaml`'s `influxdb` section) plus the `INFLUXDB_TOKEN` secret. See [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md).
 
 ## Architecture Decisions
 
@@ -89,3 +84,4 @@ The durable rationale for trail handling is documented in:
 - [../docs/adr/0007-signalk-route-activation.md](../docs/adr/0007-signalk-route-activation.md)
 - [../docs/adr/0012-configurable-bento-dashboard.md](../docs/adr/0012-configurable-bento-dashboard.md)
 - [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md)
+- [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md)

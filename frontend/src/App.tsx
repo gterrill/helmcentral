@@ -26,6 +26,7 @@ import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
 import { SignalKSettingsPanel } from '@/components/signalk-settings-panel'
+import { SecretsSettingsPanel } from '@/components/secrets-settings-panel'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
@@ -564,10 +565,13 @@ export function App() {
         return <RadarDrawer latitude={latitude} longitude={longitude} />
       case 'settings':
         return (
-          <SignalKSettingsPanel
-            autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
-            onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
-          />
+          <div className="space-y-4">
+            <SignalKSettingsPanel
+              autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
+              onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
+            />
+            <SecretsSettingsPanel />
+          </div>
         )
       case 'anchor-watch':
         return anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null
