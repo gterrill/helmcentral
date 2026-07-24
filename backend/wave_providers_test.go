@@ -36,9 +36,10 @@ type stubWaveProvider struct {
 	err    error
 }
 
-func (s *stubWaveProvider) ID() string        { return s.id }
-func (s *stubWaveProvider) Name() string      { return s.name }
-func (s *stubWaveProvider) TTLSeconds() int64 { return s.ttl }
+func (s *stubWaveProvider) ID() string          { return s.id }
+func (s *stubWaveProvider) Name() string        { return s.name }
+func (s *stubWaveProvider) Description() string { return "Stub wave provider for tests" }
+func (s *stubWaveProvider) TTLSeconds() int64   { return s.ttl }
 func (s *stubWaveProvider) FetchWaves(lat, lon float64, days int) (waveForecastBundle, error) {
 	if s.err != nil {
 		return waveForecastBundle{}, s.err

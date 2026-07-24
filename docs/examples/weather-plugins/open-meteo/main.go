@@ -63,6 +63,12 @@ func ttlSeconds() int32 {
 	return 0
 }
 
+//go:wasmexport description
+func description() int32 {
+	pdk.OutputString("Free, keyless weather forecasts from Open-Meteo.")
+	return 0
+}
+
 //go:wasmexport fetch_forecast
 func fetchForecast() int32 {
 	var input wasmFetchForecastInput

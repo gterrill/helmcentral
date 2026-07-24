@@ -10,8 +10,17 @@
 //	  cd backend/testdata/wasm_plugins/src &&
 //	  go mod tidy &&
 //	  tinygo build -o /src/backend/testdata/wasm_plugins/es256sign.wasm -target wasip1 -buildmode c-shared ./es256sign &&
-//	  tinygo build -o /src/backend/testdata/wasm_plugins/configecho.wasm -target wasip1 -buildmode c-shared ./configecho
+//	  tinygo build -o /src/backend/testdata/wasm_plugins/configecho.wasm -target wasip1 -buildmode c-shared ./configecho &&
+//	  tinygo build -o /src/backend/testdata/wasm_plugins/describedvalid.wasm -target wasip1 -buildmode c-shared ./describedvalid &&
+//	  tinygo build -o /src/backend/testdata/wasm_plugins/describederror.wasm -target wasip1 -buildmode c-shared ./describederror
 //	"
+//
+// describedvalid and describederror back the description()-export tests in
+// this file (present-and-successful, and present-but-fails-when-called,
+// respectively). The absent-export case is deliberately tested against an
+// EXISTING unmodified fixture (e.g. configecho) rather than a new one, since
+// "no description() export at all" is the normal/default state every
+// pre-existing fixture already represents.
 package main
 
 import (
@@ -27,6 +36,8 @@ import (
 )
 
 const configEchoFixtureWasm = "testdata/wasm_plugins/configecho.wasm"
+const describedValidFixtureWasm = "testdata/wasm_plugins/describedvalid.wasm"
+const describedErrorFixtureWasm = "testdata/wasm_plugins/describederror.wasm"
 
 // wasmPluginCacheTestValue is a small local struct used to prove
 // wasmPluginCache[T] is generic, rather than reusing tideChartResult for
@@ -246,6 +257,110 @@ func TestManifestForWasmPlugin_MergesAllowedHostsConfigAndTimeout(t *testing.T) 
 	}
 }
 
+// withTestPluginOverridesStore points globalPluginOverridesStore at a fresh
+// t.TempDir()-backed store for the duration of the test, restoring the
+// prior value (typically nil, in this package's tests) afterwards.
+func withTestPluginOverridesStore(t *testing.T) *pluginOverridesStore {
+	t.Helper()
+	store := newTestPluginOverridesStore(t)
+	prev := globalPluginOverridesStore
+	globalPluginOverridesStore = store
+	t.Cleanup(func() { globalPluginOverridesStore = prev })
+	return store
+}
+
+// TestAllowedHostsForWasmPlugin_OverridePresentReturnsOverrideInsteadOfFile
+// proves that a saved DB override takes priority over the companion
+// <name>.allowed_hosts.json file - the file still exists on disk (an
+// operator wouldn't necessarily delete it after saving an override via the
+// Settings UI) but must be ignored once an override row exists.
+func TestAllowedHostsForWasmPlugin_OverridePresentReturnsOverrideInsteadOfFile(t *testing.T) {
+	store := withTestPluginOverridesStore(t)
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.allowed_hosts.json"), []byte(`["file.example.com"]`), 0o644); err != nil {
+		t.Fatalf("write allowed hosts file: %v", err)
+	}
+	if err := store.Set(wasmPath, []string{"override.example.com"}, nil); err != nil {
+		t.Fatalf("store.Set: %v", err)
+	}
+
+	hosts, err := allowedHostsForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("allowedHostsForWasmPlugin: %v", err)
+	}
+	if len(hosts) != 1 || hosts[0] != "override.example.com" {
+		t.Errorf("expected override hosts [override.example.com], got %+v", hosts)
+	}
+}
+
+// TestAllowedHostsForWasmPlugin_NoOverrideFallsBackToFileBasedBehavior is a
+// regression check: with globalPluginOverridesStore set but no override row
+// for this path, behavior must be unchanged from the pre-override,
+// file-only implementation.
+func TestAllowedHostsForWasmPlugin_NoOverrideFallsBackToFileBasedBehavior(t *testing.T) {
+	withTestPluginOverridesStore(t)
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.allowed_hosts.json"), []byte(`["file.example.com"]`), 0o644); err != nil {
+		t.Fatalf("write allowed hosts file: %v", err)
+	}
+
+	hosts, err := allowedHostsForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("allowedHostsForWasmPlugin: %v", err)
+	}
+	if len(hosts) != 1 || hosts[0] != "file.example.com" {
+		t.Errorf("expected file-based hosts [file.example.com], got %+v", hosts)
+	}
+}
+
+// TestAllowedSecretsForWasmPlugin_OverridePresentReturnsOverrideInsteadOfFile
+// mirrors the allowed-hosts override test above for allowed_secrets.
+func TestAllowedSecretsForWasmPlugin_OverridePresentReturnsOverrideInsteadOfFile(t *testing.T) {
+	store := withTestPluginOverridesStore(t)
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.allowed_secrets.json"), []byte(`["FILE_SECRET"]`), 0o644); err != nil {
+		t.Fatalf("write allowed secrets file: %v", err)
+	}
+	if err := store.Set(wasmPath, nil, []string{"OVERRIDE_SECRET"}); err != nil {
+		t.Fatalf("store.Set: %v", err)
+	}
+
+	secrets, err := allowedSecretsForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("allowedSecretsForWasmPlugin: %v", err)
+	}
+	if len(secrets) != 1 || secrets[0] != "OVERRIDE_SECRET" {
+		t.Errorf("expected override secrets [OVERRIDE_SECRET], got %+v", secrets)
+	}
+}
+
+// TestAllowedSecretsForWasmPlugin_NoOverrideFallsBackToFileBasedBehavior is
+// the allowed-secrets regression check mirroring the allowed-hosts one
+// above.
+func TestAllowedSecretsForWasmPlugin_NoOverrideFallsBackToFileBasedBehavior(t *testing.T) {
+	withTestPluginOverridesStore(t)
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.allowed_secrets.json"), []byte(`["FILE_SECRET"]`), 0o644); err != nil {
+		t.Fatalf("write allowed secrets file: %v", err)
+	}
+
+	secrets, err := allowedSecretsForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("allowedSecretsForWasmPlugin: %v", err)
+	}
+	if len(secrets) != 1 || secrets[0] != "FILE_SECRET" {
+		t.Errorf("expected file-based secrets [FILE_SECRET], got %+v", secrets)
+	}
+}
+
 // TestLoadWasmPluginsFromDir_SkipsInvalidKeepsGoing reuses the existing
 // tide "valid" fixture purely as a generic contract-conforming .wasm file
 // (id/name/ttl_seconds) - loadWasmPluginsFromDir itself has no tide-specific
@@ -334,6 +449,60 @@ func TestConfigEchoPlugin_ConfigReachesGuest(t *testing.T) {
 	}
 	if result["some_key"] != "some_value" {
 		t.Errorf("expected some_key=some_value, got %+v", result)
+	}
+}
+
+// TestNewWasmPluginBase_DescriptionPresentIsCaptured proves that an
+// optional description() export, when present and successful, is captured
+// on the resulting wasmPluginBase - mirroring ttl_seconds()'s existing
+// present-and-successful behavior.
+func TestNewWasmPluginBase_DescriptionPresentIsCaptured(t *testing.T) {
+	manifest := extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: describedValidFixtureWasm}}}
+
+	base, err := newWasmPluginBase(manifest, "plugins/test")
+	if err != nil {
+		t.Fatalf("newWasmPluginBase failed: %v", err)
+	}
+
+	if got, want := base.Description(), "A fixture plugin that exports a description."; got != want {
+		t.Errorf("Description() = %q, want %q", got, want)
+	}
+}
+
+// TestNewWasmPluginBase_DescriptionAbsentDefaultsToEmptyString proves that a
+// plugin with no description() export at all (the normal/default case for
+// older or minimal plugins) loads successfully with an empty description
+// and no error - using an EXISTING unmodified fixture (configecho) so that
+// fixture keeps exercising this "optional export absent" path exactly like
+// it already does for other optional behavior.
+func TestNewWasmPluginBase_DescriptionAbsentDefaultsToEmptyString(t *testing.T) {
+	manifest := extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: configEchoFixtureWasm}}}
+
+	base, err := newWasmPluginBase(manifest, "plugins/test")
+	if err != nil {
+		t.Fatalf("newWasmPluginBase failed: %v", err)
+	}
+
+	if got := base.Description(); got != "" {
+		t.Errorf("Description() = %q, want empty string for a plugin with no description() export", got)
+	}
+}
+
+// TestNewWasmPluginBase_DescriptionCallErrorDefaultsToEmptyStringNoError
+// proves that a description() export which fails WHEN CALLED (as opposed to
+// being absent) is handled the same non-fatal way: newWasmPluginBase must
+// still succeed, with an empty Description() - description() is purely
+// cosmetic metadata and must never block plugin loading.
+func TestNewWasmPluginBase_DescriptionCallErrorDefaultsToEmptyStringNoError(t *testing.T) {
+	manifest := extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: describedErrorFixtureWasm}}}
+
+	base, err := newWasmPluginBase(manifest, "plugins/test")
+	if err != nil {
+		t.Fatalf("newWasmPluginBase failed: %v (a failing description() call must not fail plugin construction)", err)
+	}
+
+	if got := base.Description(); got != "" {
+		t.Errorf("Description() = %q, want empty string when description() fails when called", got)
 	}
 }
 

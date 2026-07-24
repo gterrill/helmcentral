@@ -14,6 +14,7 @@ backend/data/tile-cache.sqlite
 backend/data/nearby-contacts.sqlite
 backend/data/secrets.sqlite
 backend/data/secrets.key
+backend/data/plugin_overrides.sqlite
 # Allow the embed placeholder while ignoring real build output
 !backend/dist/
 !backend/dist/.gitkeep

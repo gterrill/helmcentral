@@ -36,9 +36,10 @@ type stubWeatherProvider struct {
 	err    error
 }
 
-func (s *stubWeatherProvider) ID() string        { return s.id }
-func (s *stubWeatherProvider) Name() string      { return s.name }
-func (s *stubWeatherProvider) TTLSeconds() int64 { return s.ttl }
+func (s *stubWeatherProvider) ID() string          { return s.id }
+func (s *stubWeatherProvider) Name() string        { return s.name }
+func (s *stubWeatherProvider) Description() string { return "Stub weather provider for tests" }
+func (s *stubWeatherProvider) TTLSeconds() int64   { return s.ttl }
 func (s *stubWeatherProvider) FetchForecast(lat, lon float64, days int) (weatherForecastBundle, error) {
 	if s.err != nil {
 		return weatherForecastBundle{}, s.err

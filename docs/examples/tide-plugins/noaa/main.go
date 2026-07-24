@@ -145,6 +145,12 @@ func ttlSeconds() int32 {
 	return 0
 }
 
+//go:wasmexport description
+func description() int32 {
+	pdk.OutputString("NOAA CO-OPS tide predictions for US stations.")
+	return 0
+}
+
 //go:wasmexport search_stations
 func searchStations() int32 {
 	var input searchStationsInput

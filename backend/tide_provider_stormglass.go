@@ -45,6 +45,14 @@ func newStormGlassTideProvider() *stormGlassTideProvider {
 
 func (p *stormGlassTideProvider) ID() string   { return "stormglass" }
 func (p *stormGlassTideProvider) Name() string { return "Storm Glass (current position)" }
+
+// Description is hand-written (not WASM-derived) since this provider has no
+// guest contract to export it from - see wasm_plugin.go's description()
+// export for the WASM-plugin equivalent.
+func (p *stormGlassTideProvider) Description() string {
+	return "Fetches tide extremes for the vessel's current GPS position via the Storm Glass API (requires a paid API key). No fixed station list — always tracks the vessel's live position."
+}
+
 func (p *stormGlassTideProvider) TTLSeconds() int64 {
 	return int64(stormGlassTideCacheTTL / time.Second)
 }

@@ -37,8 +37,11 @@ type stubForecastWarningsProvider struct {
 	err    error
 }
 
-func (s *stubForecastWarningsProvider) ID() string        { return s.id }
-func (s *stubForecastWarningsProvider) Name() string      { return s.name }
+func (s *stubForecastWarningsProvider) ID() string   { return s.id }
+func (s *stubForecastWarningsProvider) Name() string { return s.name }
+func (s *stubForecastWarningsProvider) Description() string {
+	return "Stub forecast warnings provider for tests"
+}
 func (s *stubForecastWarningsProvider) TTLSeconds() int64 { return s.ttl }
 func (s *stubForecastWarningsProvider) FetchWarnings(lat, lon float64) (forecastWarningsBundle, error) {
 	if s.err != nil {

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 export interface WaveProviderInfo {
   id: string
   name: string
+  description: string
 }
 
 export function useWaveProviders() {

@@ -120,6 +120,7 @@ type weatherForecastBundle struct {
 type weatherProvider interface {
 	ID() string
 	Name() string
+	Description() string
 	TTLSeconds() int64
 	FetchForecast(lat, lon float64, days int) (weatherForecastBundle, error)
 }
@@ -138,8 +139,9 @@ func getWeatherProvider(id string) (weatherProvider, bool) {
 }
 
 type weatherProviderInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // weatherProvidersHandler serves GET /api/weather-providers, mirroring
@@ -148,7 +150,7 @@ func weatherProvidersHandler(c echo.Context) error {
 	result := make([]weatherProviderInfo, 0, len(weatherProviderOrder))
 	for _, id := range weatherProviderOrder {
 		if provider, ok := weatherProviderRegistry[id]; ok {
-			result = append(result, weatherProviderInfo{ID: provider.ID(), Name: provider.Name()})
+			result = append(result, weatherProviderInfo{ID: provider.ID(), Name: provider.Name(), Description: provider.Description()})
 		}
 	}
 	return c.JSON(http.StatusOK, result)

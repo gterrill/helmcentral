@@ -79,6 +79,12 @@ func ttlSeconds() int32 {
 	return 0
 }
 
+//go:wasmexport description
+func description() int32 {
+	pdk.OutputString("US National Weather Service marine/coastal warnings.")
+	return 0
+}
+
 //go:wasmexport fetch_warnings
 func fetchWarnings() int32 {
 	var input fetchWarningsInput

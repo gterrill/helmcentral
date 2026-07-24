@@ -85,6 +85,7 @@ type waveForecastBundle struct {
 type waveProvider interface {
 	ID() string
 	Name() string
+	Description() string
 	TTLSeconds() int64
 	FetchWaves(lat, lon float64, days int) (waveForecastBundle, error)
 }
@@ -103,8 +104,9 @@ func getWaveProvider(id string) (waveProvider, bool) {
 }
 
 type waveProviderInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // waveProvidersHandler serves GET /api/wave-providers, mirroring
@@ -113,7 +115,7 @@ func waveProvidersHandler(c echo.Context) error {
 	result := make([]waveProviderInfo, 0, len(waveProviderOrder))
 	for _, id := range waveProviderOrder {
 		if provider, ok := waveProviderRegistry[id]; ok {
-			result = append(result, waveProviderInfo{ID: provider.ID(), Name: provider.Name()})
+			result = append(result, waveProviderInfo{ID: provider.ID(), Name: provider.Name(), Description: provider.Description()})
 		}
 	}
 	return c.JSON(http.StatusOK, result)

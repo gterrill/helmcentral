@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 export interface TideProviderInfo {
   id: string
   name: string
+  description: string
 }
 
 export function useTideProviders() {

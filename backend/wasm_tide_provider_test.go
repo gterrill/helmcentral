@@ -256,9 +256,10 @@ func TestLoadWasmTideProviders_SkipsInvalidPluginWithoutFailingOthers(t *testing
 
 type fakeTideProvider struct{ id string }
 
-func (f *fakeTideProvider) ID() string        { return f.id }
-func (f *fakeTideProvider) Name() string      { return "Fake " + f.id }
-func (f *fakeTideProvider) TTLSeconds() int64 { return 3600 }
+func (f *fakeTideProvider) ID() string          { return f.id }
+func (f *fakeTideProvider) Name() string        { return "Fake " + f.id }
+func (f *fakeTideProvider) Description() string { return "Fake tide provider for tests" }
+func (f *fakeTideProvider) TTLSeconds() int64   { return 3600 }
 func (f *fakeTideProvider) SearchStations(query string, limit int) []tideStation {
 	return nil
 }

@@ -93,6 +93,7 @@ type forecastWarningsBundle struct {
 type forecastWarningsProvider interface {
 	ID() string
 	Name() string
+	Description() string
 	TTLSeconds() int64
 	FetchWarnings(lat, lon float64) (forecastWarningsBundle, error)
 }
@@ -111,8 +112,9 @@ func getForecastWarningsProvider(id string) (forecastWarningsProvider, bool) {
 }
 
 type forecastWarningsProviderInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // forecastWarningsProvidersHandler serves GET /api/forecast-warnings-providers,
@@ -121,7 +123,7 @@ func forecastWarningsProvidersHandler(c echo.Context) error {
 	result := make([]forecastWarningsProviderInfo, 0, len(forecastWarningsProviderOrder))
 	for _, id := range forecastWarningsProviderOrder {
 		if provider, ok := forecastWarningsProviderRegistry[id]; ok {
-			result = append(result, forecastWarningsProviderInfo{ID: provider.ID(), Name: provider.Name()})
+			result = append(result, forecastWarningsProviderInfo{ID: provider.ID(), Name: provider.Name(), Description: provider.Description()})
 		}
 	}
 	return c.JSON(http.StatusOK, result)

@@ -85,3 +85,4 @@ The durable rationale for trail handling is documented in:
 - [../docs/adr/0012-configurable-bento-dashboard.md](../docs/adr/0012-configurable-bento-dashboard.md)
 - [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md)
 - [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md)
+- [../docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md](../docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md)

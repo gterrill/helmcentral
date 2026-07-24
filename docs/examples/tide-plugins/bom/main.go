@@ -71,6 +71,12 @@ func ttlSeconds() int32 {
 	return 0
 }
 
+//go:wasmexport description
+func description() int32 {
+	pdk.OutputString("Bureau of Meteorology tide predictions for Australian stations.")
+	return 0
+}
+
 //go:wasmexport search_stations
 func searchStations() int32 {
 	var input searchStationsInput

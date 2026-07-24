@@ -63,6 +63,7 @@ type tideChartResult struct {
 type tideProvider interface {
 	ID() string
 	Name() string
+	Description() string
 	TTLSeconds() int64
 	SearchStations(query string, limit int) []tideStation
 	FetchTideChart(stationID string) (tideChartResult, error)
@@ -300,15 +301,16 @@ func hasDoubleTide(extremes []tideExtremePoint, station tideStation, now time.Ti
 }
 
 type tideProviderInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 func tideProvidersHandler(c echo.Context) error {
 	result := make([]tideProviderInfo, 0, len(tideProviderOrder))
 	for _, id := range tideProviderOrder {
 		if provider, ok := tideProviderRegistry[id]; ok {
-			result = append(result, tideProviderInfo{ID: provider.ID(), Name: provider.Name()})
+			result = append(result, tideProviderInfo{ID: provider.ID(), Name: provider.Name(), Description: provider.Description()})
 		}
 	}
 	return c.JSON(http.StatusOK, result)

@@ -152,6 +152,20 @@ func main() {
 		log.Fatalf("secrets store: %v", err)
 	}
 
+	// Plugin allowlist override store (per-plugin allowed_hosts/
+	// allowed_secrets overrides settable from the Settings UI instead of
+	// hand-editing companion JSON files over SSH). Must also be opened
+	// before provider registration below, since loadWasm*Providers ->
+	// manifestForWasmPlugin -> allowedHostsForWasmPlugin/
+	// allowedSecretsForWasmPlugin check this store first. Fail fast on open
+	// error, same reasoning as the other stores here - this store has no
+	// encryption/integrity check to run, just a normal sqlite open.
+	pos, err := newPluginOverridesStore(pluginOverridesDBPath())
+	if err != nil {
+		log.Fatalf("plugin overrides store: %v", err)
+	}
+	globalPluginOverridesStore = pos
+
 	// Tide providers
 	registerTideProvider(newStormGlassTideProvider())
 	loadWasmTideProviders(pluginsTidesDir())
@@ -224,6 +238,9 @@ func main() {
 	e.GET("/api/settings/secrets", getSecretsSettingsHandler)
 	e.POST("/api/settings/secrets", updateSecretsSettingsHandler)
 	e.POST("/api/settings/secrets/import-env", importEnvSecretsHandler)
+	e.GET("/api/plugins/:type/:id", getPluginInfoHandler)
+	e.POST("/api/plugins/:type/:id/overrides", postPluginOverridesHandler)
+	e.DELETE("/api/plugins/:type/:id/overrides", deletePluginOverridesHandler)
 	e.GET("/api/anchor-watch", getAnchorWatch)
 	e.POST("/api/anchor-watch", setAnchorWatch)
 	e.PATCH("/api/anchor-watch", patchAnchorWatch)

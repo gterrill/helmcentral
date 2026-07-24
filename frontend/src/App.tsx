@@ -25,8 +25,17 @@ import { ForecastWarningsBanner } from '@/components/forecast-warnings-banner'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
-import { SignalKSettingsPanel } from '@/components/signalk-settings-panel'
-import { SecretsSettingsPanel } from '@/components/secrets-settings-panel'
+import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
@@ -117,6 +126,50 @@ export function App() {
     return raw !== 'false'
   })
   const [layoutEditing, setLayoutEditing] = useState(false)
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const settingsPageRef = useRef<SettingsPageHandle>(null)
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
+  const [isSavingBeforeNavigate, setIsSavingBeforeNavigate] = useState(false)
+
+  // Intercepts sidebar/breadcrumb navigation away from a dirty Settings
+  // page: instead of navigating immediately, stashes the navigation as a
+  // pending callback and lets the confirmation dialog decide (Cancel stays
+  // put, Discard runs it as-is, Save and Continue runs it only after a
+  // successful save). Navigating while NOT on a dirty Settings page (the
+  // overwhelmingly common case) is unaffected — `navigate()` runs immediately.
+  const requestNavigate = useCallback((targetPanel: PanelId | null, navigate: () => void) => {
+    if (activePanel === 'settings' && targetPanel !== 'settings' && settingsDirty) {
+      setPendingNavigation(() => navigate)
+      return
+    }
+    navigate()
+  }, [activePanel, settingsDirty])
+
+  const handleSaveAndContinue = useCallback(async () => {
+    setIsSavingBeforeNavigate(true)
+    try {
+      await settingsPageRef.current?.save()
+      pendingNavigation?.()
+      setPendingNavigation(null)
+    } catch {
+      // Settings page's own error banner is already visible underneath;
+      // stay on the page so the user can see what went wrong and retry.
+    } finally {
+      setIsSavingBeforeNavigate(false)
+    }
+  }, [pendingNavigation])
+
+  // settingsDirty is only meaningful while the Settings page is actually
+  // mounted and reporting it via onDirtyChange. Once the user has left
+  // (Discard, a successful Save and Continue, or any other route away from
+  // 'settings'), clear it explicitly rather than leaving the sidebar dot lit
+  // on stale state — SettingsPageContent stops calling onDirtyChange the
+  // moment it unmounts, so nothing else would ever reset this otherwise.
+  useEffect(() => {
+    if (activePanel !== 'settings') {
+      setSettingsDirty(false)
+    }
+  }, [activePanel])
 
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
@@ -565,13 +618,12 @@ export function App() {
         return <RadarDrawer latitude={latitude} longitude={longitude} />
       case 'settings':
         return (
-          <div className="space-y-4">
-            <SignalKSettingsPanel
-              autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
-              onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
-            />
-            <SecretsSettingsPanel />
-          </div>
+          <SettingsPage
+            ref={settingsPageRef}
+            autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
+            onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
+            onDirtyChange={setSettingsDirty}
+          />
         )
       case 'anchor-watch':
         return anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null
@@ -639,7 +691,7 @@ export function App() {
         <SidebarContent>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton isActive={activePanel === null} onClick={() => setActivePanel(null)} tooltip="Dashboard">
+              <SidebarMenuButton isActive={activePanel === null} onClick={() => requestNavigate(null, () => setActivePanel(null))} tooltip="Dashboard">
                 <LayoutDashboard />
                 <span>Dashboard</span>
               </SidebarMenuButton>
@@ -651,10 +703,10 @@ export function App() {
                     <SidebarMenuSubButton
                       render={<button type="button" />}
                       isActive={activePanel === null && page.id === activePageId}
-                      onClick={() => {
+                      onClick={() => requestNavigate(null, () => {
                         setActivePanel(null)
                         setActivePageId(page.id)
-                      }}
+                      })}
                     >
                       <span>{page.name}</span>
                     </SidebarMenuSubButton>
@@ -664,13 +716,16 @@ export function App() {
             )}
             {PANEL_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
               <SidebarMenuItem key={id}>
-                <SidebarMenuButton isActive={activePanel === id} onClick={() => setActivePanel(id)} tooltip={label}>
+                <SidebarMenuButton isActive={activePanel === id} onClick={() => requestNavigate(id, () => setActivePanel(id))} tooltip={label}>
                   <Icon />
                   <span>{label}</span>
                   {id === 'forecast' && hasActiveWindBulletin && (
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
                   )}
                   {id === 'anchor-watch' && hasActiveAnchorWatch && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+                  )}
+                  {id === 'settings' && settingsDirty && (
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
                   )}
                 </SidebarMenuButton>
@@ -695,7 +750,7 @@ export function App() {
                 ) : (
                   <>
                     <BreadcrumbItem>
-                      <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); setActivePanel(null) }}>
+                      <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); requestNavigate(null, () => setActivePanel(null)) }}>
                         Dashboard
                       </BreadcrumbLink>
                     </BreadcrumbItem>
@@ -756,6 +811,34 @@ export function App() {
           </div>
         </div>
       </SidebarInset>
+
+      <AlertDialog
+        open={pendingNavigation !== null}
+        onOpenChange={(open) => { if (!open) setPendingNavigation(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes on the Settings page. Save them before leaving, or discard them?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingNavigation(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                pendingNavigation?.()
+                setPendingNavigation(null)
+              }}
+            >
+              Discard
+            </AlertDialogAction>
+            <Button onClick={() => void handleSaveAndContinue()} disabled={isSavingBeforeNavigate}>
+              {isSavingBeforeNavigate ? 'Saving…' : 'Save and Continue'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SidebarProvider>
   )
 }

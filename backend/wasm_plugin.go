@@ -63,15 +63,19 @@ const (
 // Plugin is not safe for concurrent use but CompiledPlugin.Instance is
 // Extism's documented pattern for concurrent-safe access.
 type wasmPluginBase struct {
-	id         string
-	name       string
-	ttlSeconds int64
-	compiled   *extism.CompiledPlugin
+	id          string
+	name        string
+	description string
+	ttlSeconds  int64
+	path        string
+	compiled    *extism.CompiledPlugin
 }
 
-func (b *wasmPluginBase) ID() string        { return b.id }
-func (b *wasmPluginBase) Name() string      { return b.name }
-func (b *wasmPluginBase) TTLSeconds() int64 { return b.ttlSeconds }
+func (b *wasmPluginBase) ID() string          { return b.id }
+func (b *wasmPluginBase) Name() string        { return b.name }
+func (b *wasmPluginBase) Description() string { return b.description }
+func (b *wasmPluginBase) TTLSeconds() int64   { return b.ttlSeconds }
+func (b *wasmPluginBase) Path() string        { return b.path }
 
 func (b *wasmPluginBase) ttlDuration() time.Duration {
 	return time.Duration(b.ttlSeconds) * time.Second
@@ -122,7 +126,24 @@ func wasmPluginTimeoutMS() uint64 {
 // safe default (no network access for that plugin), not an error. A file
 // that exists but is malformed IS an error - a plugin author's broken config
 // should fail loudly, not be silently treated as "no hosts allowed".
+//
+// If globalPluginOverridesStore has a saved override for wasmPath (set via
+// POST /api/plugins/:type/:id/overrides), that override is returned instead
+// of reading the companion file at all - see
+// docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md. The nil
+// check matters for tests that call this function (or anything that calls
+// it, like manifestForWasmPlugin) without a global store initialized.
 func allowedHostsForWasmPlugin(wasmPath string) ([]string, error) {
+	if globalPluginOverridesStore != nil {
+		hosts, _, ok, err := globalPluginOverridesStore.Get(wasmPath)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return hosts, nil
+		}
+	}
+
 	companion := strings.TrimSuffix(wasmPath, ".wasm") + ".allowed_hosts.json"
 	raw, err := os.ReadFile(companion)
 	if err != nil {
@@ -148,7 +169,21 @@ func allowedHostsForWasmPlugin(wasmPath string) ([]string, error) {
 // knownSecretKeys are ever gated through this allowlist at all (see
 // configForWasmPlugin's mapping closure); this file has no effect on
 // ordinary, non-secret env var references in a plugin's config.json.
+//
+// Like allowedHostsForWasmPlugin, a saved globalPluginOverridesStore
+// override for wasmPath takes priority over the companion file - see that
+// function's doc comment for the nil-store reasoning.
 func allowedSecretsForWasmPlugin(wasmPath string) ([]string, error) {
+	if globalPluginOverridesStore != nil {
+		_, secrets, ok, err := globalPluginOverridesStore.Get(wasmPath)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return secrets, nil
+		}
+	}
+
 	companion := strings.TrimSuffix(wasmPath, ".wasm") + ".allowed_secrets.json"
 	raw, err := os.ReadFile(companion)
 	if err != nil {
@@ -288,7 +323,8 @@ func manifestForWasmPlugin(path string) (extism.Manifest, error) {
 
 // newWasmPluginBase compiles manifest and validates the universal plugin
 // contract (id()/name() required and callable and non-empty; ttl_seconds()
-// optional, defaulting to defaultWasmPluginTTLSeconds on absence or error).
+// optional, defaulting to defaultWasmPluginTTLSeconds on absence or error;
+// description() optional, defaulting to "" on absence or error - see below).
 // logPrefix is used in log.Printf lines only (e.g. "plugins/tides",
 // "plugins/weather"). The compiled plugin is given a generic "ftp_fetch"
 // custom host function (wasm_ftp_fetch.go), gated by manifest.AllowedHosts -
@@ -359,11 +395,29 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 		}
 	}
 
+	// description() is purely cosmetic metadata (surfaced in the Settings UI's
+	// integration cards) and, like ttl_seconds(), is optional - its absence is
+	// the normal case for older or minimal plugins and is not logged. Unlike
+	// an absent export, a call that fails IS logged, since that indicates the
+	// export exists but is broken - but it must still never fail plugin
+	// construction; the plugin just gets an empty description.
+	description := ""
+	if instance.FunctionExists("description") {
+		_, descOut, derr := instance.Call("description", nil)
+		if derr != nil {
+			log.Printf("%s: plugin %s: description() call failed, using empty description: %v", logPrefix, path, derr)
+		} else {
+			description = strings.TrimSpace(string(descOut))
+		}
+	}
+
 	return &wasmPluginBase{
-		id:         id,
-		name:       name,
-		ttlSeconds: ttlSeconds,
-		compiled:   compiled,
+		id:          id,
+		name:        name,
+		description: description,
+		ttlSeconds:  ttlSeconds,
+		path:        path,
+		compiled:    compiled,
 	}, nil
 }
 

@@ -195,9 +195,10 @@ type stubTideProvider struct {
 	stations []tideStation
 }
 
-func (s *stubTideProvider) ID() string        { return s.id }
-func (s *stubTideProvider) Name() string      { return "Stub " + s.id }
-func (s *stubTideProvider) TTLSeconds() int64 { return 3600 }
+func (s *stubTideProvider) ID() string          { return s.id }
+func (s *stubTideProvider) Name() string        { return "Stub " + s.id }
+func (s *stubTideProvider) Description() string { return "Stub tide provider for tests" }
+func (s *stubTideProvider) TTLSeconds() int64   { return 3600 }
 func (s *stubTideProvider) SearchStations(query string, limit int) []tideStation {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if limit <= 0 {

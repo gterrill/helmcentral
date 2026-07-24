@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 export interface ForecastWarningsProviderInfo {
   id: string
   name: string
+  description: string
 }
 
 export function useForecastWarningsProviders() {
