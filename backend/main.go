@@ -234,7 +234,9 @@ func main() {
 	e.GET("/api/settings", getSettingsHandler)
 	e.POST("/api/settings", updateSettingsHandler)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
-	e.POST("/api/settings/signalk", updateSignalKSettingsHandler)
+	// Probe only — persisting the address is POST /api/settings' job alone
+	// (ADR 0028). There is deliberately no POST /api/settings/signalk.
+	e.POST("/api/settings/signalk/test", testSignalKConnectionHandler)
 	e.GET("/api/settings/secrets", getSecretsSettingsHandler)
 	e.POST("/api/settings/secrets", updateSecretsSettingsHandler)
 	e.POST("/api/settings/secrets/import-env", importEnvSecretsHandler)

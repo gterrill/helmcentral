@@ -91,6 +91,13 @@ func updateSettingsHandler(c echo.Context) error {
 
 	normalized := normalizeSettingsPayload(req)
 
+	if invalid := validateSettingsChange(buildSettingsPayload(settings), normalized); invalid != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{
+			"field": invalid.Field,
+			"error": invalid.Message,
+		})
+	}
+
 	settings["signalk"] = map[string]any{
 		"address": normalized.Signalk.Address,
 		"port":    normalized.Signalk.Port,
@@ -141,6 +148,46 @@ func updateSettingsHandler(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, normalized)
+}
+
+// settingsValidationError identifies which field of a bulk settings save was
+// rejected, so the UI can surface the message against the offending input
+// rather than as a page-level "save failed".
+type settingsValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e *settingsValidationError) Error() string { return e.Message }
+
+// validateSettingsChange gates POST /api/settings, which is a full-payload
+// replace: without it, any value the form happens to be holding gets
+// persisted verbatim — which is how a browser test that filled the address
+// field and clicked "Save and Continue" once repointed the live dashboard at
+// a dead host (docs/adr/0026). Since ADR 0028 removed the old
+// POST /api/settings/signalk, this is the only path that writes the address,
+// so this check is the only thing standing between a typo and an offline
+// dashboard.
+//
+// Checks fire only on *change*. Probing SignalK on every save would mean an
+// unreachable vessel — an entirely normal state, e.g. configuring from home
+// or while the boat is powered down — blocks edits to tank labels, anchor
+// geometry and units that have nothing to do with SignalK. Guarding the
+// transition, not the steady state, is what makes the check safe to apply to
+// an endpoint that saves everything at once.
+func validateSettingsChange(current, next settingsPayload) *settingsValidationError {
+	if next.Signalk.Address != current.Signalk.Address || next.Signalk.Port != current.Signalk.Port {
+		signalkURL := buildSignalKURL(next.Signalk.Address, next.Signalk.Port)
+		vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
+		if _, err := fetchSignalKVesselState(signalkURL, vesselPath); err != nil {
+			return &settingsValidationError{
+				Field:   "signalk.address",
+				Message: fmt.Sprintf("unable to connect to SignalK at %s", signalkURL),
+			}
+		}
+	}
+
+	return nil
 }
 
 func buildSettingsPayload(settings map[string]any) settingsPayload {
@@ -342,7 +389,18 @@ func getSignalKSettingsHandler(c echo.Context) error {
 	})
 }
 
-func updateSignalKSettingsHandler(c echo.Context) error {
+// testSignalKConnectionHandler backs the "Test Connection" button. It is a
+// pure read: it probes the address in the request body and reports what it
+// found, without touching settings.yaml.
+//
+// Its predecessor (POST /api/settings/signalk) both probed and persisted,
+// which gave the SignalK address two independent write paths — the bulk save
+// and this one — and meant a button labelled "Connect" quietly rewrote
+// config as a side effect of a connectivity check. Persisting is now solely
+// the bulk save's job, where validateSettingsChange applies the same probe
+// (ADR 0028). Because nothing here writes, an operator can check an address
+// before committing to it, which the old behaviour made impossible.
+func testSignalKConnectionHandler(c echo.Context) error {
 	var req struct {
 		Address string `json:"address"`
 		Port    int    `json:"port"`
@@ -352,29 +410,45 @@ func updateSignalKSettingsHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
 	}
 
+	// No defaulting here, unlike the old handler: silently probing
+	// "localhost" when the field is blank reports a connectivity failure for
+	// an address the operator never entered, sending them after the wrong
+	// problem. Blank input is input error, and says so.
 	address := strings.TrimSpace(req.Address)
 	if address == "" {
-		address = defaultSignalKAddress
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"field": "signalk.address",
+			"error": "enter a SignalK address to test",
+		})
 	}
 
-	port := req.Port
-	if port <= 0 || port > 65535 {
-		port = defaultSignalKPort
+	if req.Port <= 0 || req.Port > 65535 {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"field": "signalk.port",
+			"error": fmt.Sprintf("port %d is out of range (1-65535)", req.Port),
+		})
 	}
 
-	signalkURL := buildSignalKURL(address, port)
+	signalkURL := buildSignalKURL(address, req.Port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
-	if _, err := fetchSignalKVesselState(signalkURL, vesselPath); err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("unable to connect to SignalK at %s", signalkURL)})
+	state, err := fetchSignalKVesselState(signalkURL, vesselPath)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]any{
+			"field":     "signalk.address",
+			"error":     fmt.Sprintf("unable to connect to SignalK at %s", signalkURL),
+			"connected": false,
+		})
 	}
 
-	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	if err := saveSignalKSettings(settingsPath, address, port); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "connected to SignalK, but failed to persist settings"})
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{"address": address, "port": port, "url": signalkURL, "connected": true})
+	// The vessel name is the useful half of the answer: "something responded"
+	// does not distinguish your boat from a neighbour's server on the same
+	// marina wifi, and this is the one place that distinction can be shown.
+	return c.JSON(http.StatusOK, map[string]any{
+		"connected":   true,
+		"url":         signalkURL,
+		"vessel_name": strings.TrimSpace(state.Name),
+	})
 }
 
 // criticalVesselState marks state's position/GNSS fields as critical when
@@ -1862,18 +1936,6 @@ func loadSignalKSettings(settingsPath string) (string, int, error) {
 	}
 
 	return address, port, nil
-}
-
-func saveSignalKSettings(settingsPath string, address string, port int) error {
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return err
-	}
-
-	signalkMap := map[string]any{"address": strings.TrimSpace(address), "port": port}
-	settings["signalk"] = signalkMap
-
-	return writeSettings(settingsPath, settings)
 }
 
 func writeSettings(settingsPath string, settings map[string]any) error {

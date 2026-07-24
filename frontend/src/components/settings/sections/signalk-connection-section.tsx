@@ -14,18 +14,21 @@ interface SignalKConnectionSectionProps {
 }
 
 export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionSectionProps) {
-  const [isConnecting, setIsConnecting] = useState(false)
-  const [connectError, setConnectError] = useState<string | null>(null)
-  const [connectSuccess, setConnectSuccess] = useState<string | null>(null)
+  const [isTesting, setIsTesting] = useState(false)
+  const [testError, setTestError] = useState<string | null>(null)
+  const [testSuccess, setTestSuccess] = useState<string | null>(null)
 
-  // "Connect" is a separate, immediate action against `/api/settings/signalk`
-  // (not the full-replace `/api/settings` endpoint), matching the old
-  // panel's behavior exactly — it validates/applies the SignalK address
-  // independently of the pinned "Save Settings" button.
-  const connectSignalK = async () => {
-    setIsConnecting(true)
-    setConnectError(null)
-    setConnectSuccess(null)
+  // A pure diagnostic against `/api/settings/signalk/test`: it probes the
+  // address currently in the draft and reports what answered, without saving
+  // anything. Persisting is the pinned "Save Settings" button's job alone
+  // (which re-validates a changed address server-side), so there is exactly
+  // one write path for this field — see ADR 0028. Deliberately does NOT call
+  // onChange: the operator's typed value is the input to the test, not
+  // something the test gets to overwrite.
+  const testConnection = async () => {
+    setIsTesting(true)
+    setTestError(null)
+    setTestSuccess(null)
 
     const normalizedPort = Number.parseInt(draft.signalkPort, 10)
     const payload = {
@@ -34,7 +37,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/settings/signalk`, {
+      const response = await fetch(`${apiBaseUrl}/api/settings/signalk/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -45,16 +48,19 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
         throw new Error(errorPayload?.error ?? 'Unable to connect to SignalK')
       }
 
-      const data = (await response.json()) as { address?: string; port?: number }
-      onChange({
-        signalkAddress: data.address ?? draft.signalkAddress,
-        signalkPort: data.port ? String(data.port) : draft.signalkPort,
-      })
-      setConnectSuccess('SignalK settings updated')
+      const data = (await response.json()) as { vessel_name?: string }
+      const vesselName = data.vessel_name?.trim()
+      // Naming the vessel that answered is the point: "connected" alone
+      // can't tell your boat apart from another server on the same network.
+      setTestSuccess(
+        vesselName
+          ? `Connected — ${vesselName} responded. Save Settings to apply.`
+          : 'Connected. Save Settings to apply.',
+      )
     } catch (error) {
-      setConnectError(error instanceof Error ? error.message : 'Unable to connect to SignalK')
+      setTestError(error instanceof Error ? error.message : 'Unable to connect to SignalK')
     } finally {
-      setIsConnecting(false)
+      setIsTesting(false)
     }
   }
 
@@ -87,11 +93,27 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
           <Button
             variant="outline"
             className="h-10 whitespace-nowrap border-primary/55 px-4 font-display text-xs tracking-[0.14em] text-primary"
-            onClick={connectSignalK}
-            disabled={isConnecting}
+            onClick={testConnection}
+            disabled={isTesting}
           >
-            {isConnecting ? 'Connecting' : 'Connect'}
+            {isTesting ? 'Testing' : 'Test Connection'}
           </Button>
+
+          {/* Directly under the button that produces them. The section runs
+              long (credentials, then a tank label per sensor), so a banner at
+              the bottom of the container is off-screen from the control the
+              operator just clicked — feedback they have to go looking for is
+              feedback they won't see. */}
+          {testError && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive md:col-span-3">
+              {testError}
+            </div>
+          )}
+          {testSuccess && (
+            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs uppercase tracking-[0.08em] text-emerald-600 md:col-span-3">
+              {testSuccess}
+            </div>
+          )}
 
           <Field className="md:col-span-3">
             <FieldLabel htmlFor="signalk-refresh-seconds">Refresh Seconds</FieldLabel>
@@ -144,16 +166,6 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
         </div>
       </FieldSet>
 
-      {connectError && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
-          {connectError}
-        </div>
-      )}
-      {connectSuccess && (
-        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs uppercase tracking-[0.08em] text-emerald-600">
-          {connectSuccess}
-        </div>
-      )}
     </div>
   )
 }
