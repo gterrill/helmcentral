@@ -245,9 +245,21 @@ func init() {
 	loadTideCacheFromDisk()
 }
 
+// cacheFilePath resolves where a piece of runtime state lives. Precedence:
+// an explicit per-file env override wins outright, otherwise the built-in
+// relative fallback is rooted at HELMCENTRAL_STATE_DIR when one is set.
+//
+// The state dir exists so a non-primary stack (the E2E profile in
+// docker-compose.dev.yml) can redirect *all* of its writes — routes,
+// dashboard pages, secrets, caches — with one variable, and so state paths
+// added later are isolated automatically rather than silently landing back
+// in the developer's working tree.
 func cacheFilePath(envKey, fallback string) string {
 	if custom := strings.TrimSpace(os.Getenv(envKey)); custom != "" {
 		return custom
+	}
+	if stateDir := strings.TrimSpace(os.Getenv("HELMCENTRAL_STATE_DIR")); stateDir != "" && !filepath.IsAbs(fallback) {
+		return filepath.Join(stateDir, fallback)
 	}
 	return fallback
 }

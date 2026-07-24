@@ -58,6 +58,79 @@ services:
       - ./:/workspace
       - frontend_node_modules:/workspace/frontend/node_modules
 
+  # E2E stack: a second, throwaway instance for browser-driven verification
+  # (Playwright et al). It exists because those scripts drive the real UI —
+  # including Save buttons — and the "dev" stack above bind-mounts the
+  # developer's live settings.yaml and writes its runtime state straight into
+  # ./backend. Filling in a form field to test a dirty-state indicator must
+  # not be able to repoint the running dashboard's SignalK server.
+  #
+  # Isolation comes from two things:
+  #   - HELMCENTRAL_STATE_DIR + SETTINGS_FILE redirect every write into the
+  #     e2e_state volume (see cacheFilePath in backend/weather_tide.go)
+  #   - ./settings.yaml is deliberately NOT mounted here
+  # ./backend is still mounted so air hot-reloads, but the backend's cwd is no
+  # longer where its state lands.
+  backend-e2e:
+    profiles: ["e2e"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    depends_on:
+      plugins-builder:
+        condition: service_completed_successfully
+    working_dir: /app
+    environment:
+      - HELMCENTRAL_STATE_DIR=/state
+      - SETTINGS_FILE=/state/settings.yaml
+    # Re-seeds on every container start, so `make e2e-reset` (or any restart)
+    # returns the stack to a known state regardless of what the last run
+    # clicked. air restarts the binary, not the container, so an in-progress
+    # session keeps whatever it saved.
+    command:
+      - /bin/sh
+      - -c
+      - >
+        mkdir -p /state/data /state/cache &&
+        cp -f /seed/settings.seed.yaml /state/settings.yaml &&
+        exec /go/bin/air -c /app/.air.toml
+    ports:
+      - "8090:8080"
+    volumes:
+      - ./backend:/app
+      - ./plugins:/app/plugins
+      - ./e2e/settings.seed.yaml:/seed/settings.seed.yaml:ro
+      - e2e_state:/state
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
+  frontend-e2e:
+    profiles: ["e2e"]
+    image: node:20-alpine
+    working_dir: /workspace/frontend
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5174"
+    environment:
+      - CHOKIDAR_USEPOLLING=1
+      - CHOKIDAR_INTERVAL=300
+      - VITE_API_PROXY_TARGET=http://host.docker.internal:8090
+      # Required, not belt-and-braces. Several hooks — including
+      # use-settings-form.ts, the sole caller of POST /api/settings — do not
+      # use the Vite proxy at all; they build an absolute URL defaulting to
+      # `<host>:8080`, which is the *dev* backend and the real settings.yaml.
+      # Without this override, clicking Save on :5174 writes to the live
+      # config, i.e. exactly the incident this stack exists to prevent.
+      # localhost is correct here: the browser runs on the host, not in the
+      # container.
+      - VITE_API_BASE_URL=http://localhost:8090
+    ports:
+      - "5174:5174"
+    volumes:
+      - ./:/workspace
+      # Its own volume, not frontend_node_modules: two containers running
+      # `npm install` against one volume race and corrupt it.
+      - e2e_node_modules:/workspace/frontend/node_modules
+
   # One-shot builder: compiles the bundled reference tide, weather, wave and
   # forecast-warnings plugins (bom/noaa, open-meteo/weatherkit,
   # open-meteo-marine, bom/nws) from
@@ -91,4 +164,6 @@ services:
 
 volumes:
   frontend_node_modules:
+  e2e_node_modules:
+  e2e_state:
 

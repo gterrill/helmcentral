@@ -1,4 +1,4 @@
-.PHONY: dev down logs
+.PHONY: dev down logs e2e-up e2e-down e2e-reset e2e-logs
 
 dev:
 	# --force-recreate: frontend-dev only runs `npm install` once at container
@@ -13,3 +13,30 @@ down:
 
 logs:
 	docker compose -f docker-compose.dev.yml --profile dev logs -f backend-dev frontend-dev
+
+# Isolated stack for browser-driven verification. Serves the same UI on :5174
+# but against a throwaway settings file and state volume, so scripts that
+# click Save can't touch ./settings.yaml or ./backend/data. Safe to tear down
+# and recreate at will — unlike the dev stack, nothing here is shared.
+e2e-up:
+	docker compose -f docker-compose.dev.yml --profile e2e up -d --force-recreate backend-e2e frontend-e2e
+	@echo "E2E dashboard: http://localhost:5174  (API: http://localhost:8090)"
+
+# `rm -sf`, never `down`: compose's `down` is project-wide and ignores
+# --profile for teardown, so it would take the shared long-running dev stack
+# with it — and `down -v` would additionally wipe frontend_node_modules.
+e2e-down:
+	docker compose -f docker-compose.dev.yml --profile e2e rm -sf backend-e2e frontend-e2e
+
+# Discards every mutation an E2E run made and re-seeds from
+# e2e/settings.seed.yaml. Use between runs that need a known starting state.
+# Settings alone are re-seeded by any restart; this also drops the accumulated
+# data/ and cache/ state. Volume name follows compose's default
+# <project>_<volume> convention, where <project> is this directory's name.
+e2e-reset:
+	docker compose -f docker-compose.dev.yml --profile e2e rm -sf backend-e2e frontend-e2e
+	-docker volume rm -f "$$(basename "$$(pwd)")_e2e_state"
+	$(MAKE) e2e-up
+
+e2e-logs:
+	docker compose -f docker-compose.dev.yml --profile e2e logs -f backend-e2e frontend-e2e

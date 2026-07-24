@@ -6,6 +6,44 @@ description: Launch and screenshot the Helmcentral dashboard (frontend + backend
 Helmcentral is a Vite/React frontend proxying `/api` to a Go backend
 that talks to a SignalK server. Both run via Docker Compose.
 
+## 0. Read-only look, or are you going to click things?
+
+Pick the stack **before** you start, by what the script will do:
+
+| What you're doing | Use | URL |
+|---|---|---|
+| Screenshot, visual/layout check, read-only browsing | dev stack | http://localhost:5173 |
+| Anything that submits a form, clicks Save/Connect/Apply, or otherwise mutates state | **E2E stack** (`make e2e-up`) | http://localhost:5174 |
+
+The dev stack bind-mounts the developer's **live** `settings.yaml` and
+writes runtime state into `./backend/data`. It is pointed at a real
+boat. A Playwright script that fills `#signalk-address` with a dummy
+value to test a dirty-state indicator, then clicks "Save and
+Continue", **will persist that value** and take the real dashboard
+offline — this has already happened once (see
+`docs/adr/0026-e2e-stack-isolation.md`). `settings.yaml` is gitignored,
+so there is no history to restore from.
+
+If you are unsure whether your script mutates anything, use the E2E
+stack. It costs one `make e2e-up`.
+
+```bash
+make e2e-up      # dashboard on :5174, API on :8090
+make e2e-reset   # discard everything the run did, re-seed
+make e2e-down    # stop it
+```
+
+It serves the same UI from the same source (hot-reload included), but
+against `e2e/settings.seed.yaml` copied into a container-local state
+volume — `HELMCENTRAL_STATE_DIR` redirects *every* backend write, so
+nothing it does can reach your working tree. Tear it down and recreate
+it freely; unlike the dev stack, nothing there is shared.
+
+Note the seed points SignalK at a black hole, so tiles render `—`
+placeholders by design. That makes it right for layout, form and flow
+checks, and wrong for anything needing live vessel data — for that,
+read-only against :5173.
+
 ## 1. Check whether the dev stack is already running
 
 The dev stack is normally left running for days at a time — **do not
@@ -63,11 +101,21 @@ sips -c <height> <width> --cropOffset <y> <x> /tmp/shot.png --out /tmp/shot-crop
 
 ## Gotchas
 
-- **Live vs. placeholder data**: if the SignalK source configured in
-  `settings.yaml` / `backend/.env` is unreachable, vessel-state hooks
-  return `null` and tiles render `—` placeholders instead of numbers.
-  Components still render structurally fine for layout/style checks —
-  don't mistake this for a broken page.
+- **Live vs. placeholder data**: if the SignalK server is unreachable,
+  vessel-state hooks return `null` and tiles render `—` placeholders
+  instead of numbers. Components still render structurally fine for
+  layout/style checks — don't mistake this for a broken page. On the
+  E2E stack this is the normal state, by design.
+
+  Its address/port come from the `signalk:` stanza of `settings.yaml`.
+  Credentials, if the server requires auth, come from the encrypted
+  secrets store (`backend/data/secrets.sqlite`, managed via Settings →
+  SignalK or `GET`/`POST /api/settings/secrets`) — the backend pushes
+  `SIGNALK_USERNAME`/`SIGNALK_PASSWORD` into its own environment at
+  startup. There is no `.env` file: `backend/.env` was retired in
+  favour of the store, and nothing loads one. Non-secret knobs
+  (`PORT`, `SETTINGS_FILE`, `HELMCENTRAL_STATE_DIR`, …) are real
+  environment variables — see `backend/README.md`.
 - **`npm run dev` on the bare host** (no Docker) also works standalone
   for frontend-only checks, but then `/api` calls fail unless
   `VITE_API_PROXY_TARGET` points at a reachable backend — expect all
