@@ -5,6 +5,7 @@ import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
+import { useSignalKDiscovery } from '@/hooks/use-signalk-discovery'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:8080`
 
@@ -17,6 +18,36 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
   const [isTesting, setIsTesting] = useState(false)
   const [testError, setTestError] = useState<string | null>(null)
   const [testSuccess, setTestSuccess] = useState<string | null>(null)
+
+  const { servers, scannedSubnet, scanning, error: discoveryError, discover, reset: resetDiscovery } = useSignalKDiscovery()
+
+  // The on-demand counterpart to the onboarding prompt (ADR 0029). That one
+  // searches in the background and stays quiet unless it finds something;
+  // this one was asked for, so every outcome gets reported — an empty result
+  // or a failure has to say so, or the button just looks broken.
+  const findServers = async () => {
+    setTestError(null)
+    setTestSuccess(null)
+    resetDiscovery()
+    try {
+      // Search the network the operator typed, not whatever is persisted —
+      // the saved address may be stale, loopback, or on a dead subnet, which
+      // is often exactly why they're here.
+      await discover(draft.signalkAddress)
+    } catch {
+      // Surfaced via discoveryError below.
+    }
+  }
+
+  // Picking a result fills the form; "Save Settings" persists it. Same
+  // draft-then-save model as every other field on this page — nothing here
+  // writes on click (ADR 0028).
+  const useDiscoveredServer = (address: string, port: number) => {
+    onChange({ signalkAddress: address, signalkPort: String(port) })
+    setTestSuccess(null)
+    setTestError(null)
+    resetDiscovery()
+  }
 
   // A pure diagnostic against `/api/settings/signalk/test`: it probes the
   // address currently in the draft and reports what answered, without saving
@@ -90,14 +121,25 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
             />
           </Field>
 
-          <Button
-            variant="outline"
-            className="h-10 whitespace-nowrap border-primary/55 px-4 font-display text-xs tracking-[0.14em] text-primary"
-            onClick={testConnection}
-            disabled={isTesting}
-          >
-            {isTesting ? 'Testing' : 'Test Connection'}
-          </Button>
+          <div className="flex items-end gap-2">
+            <Button
+              variant="outline"
+              className="h-10 whitespace-nowrap border-primary/55 px-4 font-display text-xs tracking-[0.14em] text-primary"
+              onClick={testConnection}
+              disabled={isTesting || scanning}
+            >
+              {isTesting ? 'Testing' : 'Test Connection'}
+            </Button>
+
+            <Button
+              variant="outline"
+              className="h-10 whitespace-nowrap border-primary/55 px-4 font-display text-xs tracking-[0.14em] text-primary"
+              onClick={findServers}
+              disabled={isTesting || scanning}
+            >
+              {scanning ? 'Searching' : 'Find Servers'}
+            </Button>
+          </div>
 
           {/* Directly under the button that produces them. The section runs
               long (credentials, then a tank label per sensor), so a banner at
@@ -112,6 +154,37 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
           {testSuccess && (
             <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs uppercase tracking-[0.08em] text-emerald-600 md:col-span-3">
               {testSuccess}
+            </div>
+          )}
+
+          {discoveryError && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive md:col-span-3">
+              {discoveryError}
+            </div>
+          )}
+
+          {!discoveryError && servers !== null && servers.length === 0 && (
+            <div className="rounded-md border px-3 py-2 text-xs uppercase tracking-[0.08em] text-muted-foreground md:col-span-3">
+              {`No SignalK servers found${scannedSubnet ? ` on ${scannedSubnet}` : ''}`}
+            </div>
+          )}
+
+          {servers !== null && servers.length > 0 && (
+            <div className="flex flex-col gap-2 md:col-span-3">
+              <span className="text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                {`Found on ${scannedSubnet ?? 'the local network'} — pick one to fill in, then Save Settings`}
+              </span>
+              {servers.map((server) => (
+                <Button
+                  key={`${server.address}:${server.port}`}
+                  variant="outline"
+                  className="h-10 justify-between px-3"
+                  onClick={() => useDiscoveredServer(server.address, server.port)}
+                >
+                  <span>{server.vessel_name || 'Unnamed vessel'}</span>
+                  <span className="text-muted-foreground">{`${server.address}:${server.port}`}</span>
+                </Button>
+              ))}
             </div>
           )}
 

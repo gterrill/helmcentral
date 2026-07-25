@@ -63,6 +63,8 @@ import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
+import { useSettingsForm } from '@/hooks/use-settings-form'
+import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
@@ -264,7 +266,12 @@ export function App() {
     engine0Rpm,
     engine1Rpm,
     speedOverGroundKts,
+    source: vesselStateSource,
   } = useVesselState(uiConfig.vesselStateRefreshSeconds)
+  // Only for deciding whether to offer SignalK discovery. Gated on `loading`
+  // below so an unconfigured-looking empty address during the initial fetch
+  // can't trigger the prompt spuriously.
+  const { settings: currentSettings, loading: currentSettingsLoading } = useSettingsForm()
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
   const { tanks, loading: tanksLoading } = useTanksState(uiConfig.vesselStateRefreshSeconds)
   const {
@@ -817,6 +824,13 @@ export function App() {
           </div>
         </div>
       </SidebarInset>
+
+      {!currentSettingsLoading && (
+        <SignalKDiscoveryPrompt
+          configuredAddress={currentSettings.signalk?.address ?? ''}
+          vesselStateSource={vesselStateSource}
+        />
+      )}
 
       <AlertDialog
         open={pendingNavigation !== null}

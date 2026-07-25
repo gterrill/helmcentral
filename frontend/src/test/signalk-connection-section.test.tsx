@@ -106,6 +106,111 @@ describe('SignalKConnectionSection', () => {
     expect(latestDraft().signalkPort).toBe('3000')
   })
 
+  // "Find Servers" is the explicitly-requested counterpart to the background
+  // onboarding prompt (ADR 0029), which stays silent when it finds nothing.
+  // Here the operator asked, so every outcome has to be reported — silence
+  // would read as a broken button.
+  describe('Find Servers', () => {
+    const pikorua = {
+      address: '192.168.50.240',
+      port: 3000,
+      url: 'http://192.168.50.240:3000',
+      vessel_name: 'Pikorua',
+      version: '2.24.0',
+    }
+
+    // The operator has an address field right here. If they type one and hit
+    // Find Servers, that is the network they mean — not whatever stale value
+    // happens to be persisted, which may be loopback or a dead subnet.
+    it('searches the network of the address currently typed in the form', async () => {
+      const fetchMock = stubFetch((url) => {
+        if (url.includes('/api/signalk/discover')) {
+          return { ok: true, json: async () => ({ servers: [pikorua], scanned_subnet: '192.168.50.0/24' }) }
+        }
+        return secretsResponse
+      })
+
+      renderSection({ signalkAddress: '192.168.50.99', signalkPort: '3000' })
+      fireEvent.click(screen.getByRole('button', { name: /find servers/i }))
+
+      await waitFor(() => {
+        const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/signalk/discover'))
+        expect(call).toBeDefined()
+        expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ hint: '192.168.50.99' })
+      })
+    })
+
+    it('lists discovered servers by vessel name', async () => {
+      stubFetch((url) => {
+        if (url.includes('/api/signalk/discover')) {
+          return { ok: true, json: async () => ({ servers: [pikorua], scanned_subnet: '192.168.50.0/24' }) }
+        }
+        return secretsResponse
+      })
+
+      renderSection({ signalkAddress: 'localhost', signalkPort: '3000' })
+      fireEvent.click(screen.getByRole('button', { name: /find servers/i }))
+
+      expect(await screen.findByText(/pikorua/i)).toBeInTheDocument()
+      expect(screen.getByText(/192\.168\.50\.240:3000/)).toBeInTheDocument()
+    })
+
+    it('fills the draft when a server is picked, without saving', async () => {
+      const fetchMock = stubFetch((url) => {
+        if (url.includes('/api/signalk/discover')) {
+          return { ok: true, json: async () => ({ servers: [pikorua], scanned_subnet: '192.168.50.0/24' }) }
+        }
+        return secretsResponse
+      })
+
+      const { latestDraft } = renderSection({ signalkAddress: 'localhost', signalkPort: '3000' })
+      fireEvent.click(screen.getByRole('button', { name: /find servers/i }))
+      fireEvent.click(await screen.findByRole('button', { name: /pikorua/i }))
+
+      await waitFor(() => {
+        expect(latestDraft().signalkAddress).toBe('192.168.50.240')
+      })
+      expect(latestDraft().signalkPort).toBe('3000')
+
+      // Consistent with the rest of this page: picking populates the form,
+      // "Save Settings" persists. Nothing here writes on click.
+      const saves = fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          (init as RequestInit | undefined)?.method === 'POST' && !String(url).includes('/api/signalk/discover'),
+      )
+      expect(saves).toEqual([])
+    })
+
+    it('reports when nothing was found, naming the network it searched', async () => {
+      stubFetch((url) => {
+        if (url.includes('/api/signalk/discover')) {
+          return { ok: true, json: async () => ({ servers: [], scanned_subnet: '192.168.50.0/24' }) }
+        }
+        return secretsResponse
+      })
+
+      renderSection({ signalkAddress: 'localhost', signalkPort: '3000' })
+      fireEvent.click(screen.getByRole('button', { name: /find servers/i }))
+
+      expect(await screen.findByText(/no signalk servers found/i)).toBeInTheDocument()
+      expect(screen.getByText(/192\.168\.50\.0\/24/)).toBeInTheDocument()
+    })
+
+    it('surfaces the backend reason when the network cannot be determined', async () => {
+      stubFetch((url) => {
+        if (url.includes('/api/signalk/discover')) {
+          return { ok: false, json: async () => ({ error: 'cannot determine which network to scan', field: 'signalk.address' }) }
+        }
+        return secretsResponse
+      })
+
+      renderSection({ signalkAddress: 'localhost', signalkPort: '3000' })
+      fireEvent.click(screen.getByRole('button', { name: /find servers/i }))
+
+      expect(await screen.findByText(/cannot determine which network to scan/i)).toBeInTheDocument()
+    })
+  })
+
   it('surfaces the backend reason when the probe fails', async () => {
     stubFetch((url) => {
       if (url.includes('/api/settings/signalk/test')) {
