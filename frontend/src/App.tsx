@@ -63,6 +63,8 @@ import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
+import { useSettingsForm } from '@/hooks/use-settings-form'
+import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
@@ -130,6 +132,7 @@ export function App() {
   const settingsPageRef = useRef<SettingsPageHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
   const [isSavingBeforeNavigate, setIsSavingBeforeNavigate] = useState(false)
+  const [saveAndContinueError, setSaveAndContinueError] = useState<string | null>(null)
 
   // Intercepts sidebar/breadcrumb navigation away from a dirty Settings
   // page: instead of navigating immediately, stashes the navigation as a
@@ -147,13 +150,18 @@ export function App() {
 
   const handleSaveAndContinue = useCallback(async () => {
     setIsSavingBeforeNavigate(true)
+    setSaveAndContinueError(null)
     try {
       await settingsPageRef.current?.save()
       pendingNavigation?.()
       setPendingNavigation(null)
-    } catch {
-      // Settings page's own error banner is already visible underneath;
-      // stay on the page so the user can see what went wrong and retry.
+    } catch (err) {
+      // Stay on the page so the user can fix it and retry. The Settings
+      // page renders its own error banner too, but this dialog is modal and
+      // covers it — without repeating the reason here, a rejected save (e.g.
+      // POST /api/settings refusing an unreachable SignalK address) looks
+      // like the button simply did nothing.
+      setSaveAndContinueError(err instanceof Error ? err.message : 'Unable to save settings')
     } finally {
       setIsSavingBeforeNavigate(false)
     }
@@ -258,7 +266,12 @@ export function App() {
     engine0Rpm,
     engine1Rpm,
     speedOverGroundKts,
+    source: vesselStateSource,
   } = useVesselState(uiConfig.vesselStateRefreshSeconds)
+  // Only for deciding whether to offer SignalK discovery. Gated on `loading`
+  // below so an unconfigured-looking empty address during the initial fetch
+  // can't trigger the prompt spuriously.
+  const { settings: currentSettings, loading: currentSettingsLoading } = useSettingsForm()
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
   const { tanks, loading: tanksLoading } = useTanksState(uiConfig.vesselStateRefreshSeconds)
   const {
@@ -812,9 +825,21 @@ export function App() {
         </div>
       </SidebarInset>
 
+      {!currentSettingsLoading && (
+        <SignalKDiscoveryPrompt
+          configuredAddress={currentSettings.signalk?.address ?? ''}
+          vesselStateSource={vesselStateSource}
+        />
+      )}
+
       <AlertDialog
         open={pendingNavigation !== null}
-        onOpenChange={(open) => { if (!open) setPendingNavigation(null) }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingNavigation(null)
+            setSaveAndContinueError(null)
+          }
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -823,12 +848,25 @@ export function App() {
               You have unsaved changes on the Settings page. Save them before leaving, or discard them?
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {saveAndContinueError && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
+              {saveAndContinueError}
+            </div>
+          )}
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingNavigation(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel
+              onClick={() => {
+                setPendingNavigation(null)
+                setSaveAndContinueError(null)
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 pendingNavigation?.()
                 setPendingNavigation(null)
+                setSaveAndContinueError(null)
               }}
             >
               Discard

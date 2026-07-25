@@ -62,6 +62,10 @@ export function useVesselState(refreshInterval: number) {
   const [generatorRuntime, setGeneratorRuntime] = useState<number | null>(null)
   const [engine0Rpm, setEngine0Rpm] = useState<number | null>(null)
   const [engine1Rpm, setEngine1Rpm] = useState<number | null>(null)
+  // Which source the backend answered from ("signalk", "signalk-unreachable",
+  // "backend-fallback"). Surfaced so the app can offer to go looking for a
+  // server that has moved, rather than leaving the operator with silent tiles.
+  const [source, setSource] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchVesselState = async () => {
@@ -85,6 +89,7 @@ export function useVesselState(refreshInterval: number) {
         setCurrentDriftImpactKts(typeof data.current_drift_impact_kts === 'number' ? data.current_drift_impact_kts : null)
 
         setNavigationState(typeof data.status === 'string' && data.status !== '' ? data.status : null)
+        setSource(typeof data.source === 'string' && data.source !== '' ? data.source : null)
 
         setLatitude(typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null)
         setLongitude(typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null)
@@ -154,5 +159,6 @@ export function useVesselState(refreshInterval: number) {
     generatorRuntime,
     engine0Rpm,
     engine1Rpm,
+    source,
   }
 }

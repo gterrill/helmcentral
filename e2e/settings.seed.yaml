@@ -1,0 +1,45 @@
+# Seed settings for the isolated E2E stack (docker-compose.dev.yml, profile
+# "e2e"). Copied into the container's state volume at startup — never mounted
+# from, and never written back to, the repo's real settings.yaml.
+#
+# Values are deliberately fictitious. E2E runs click Save, so whatever is here
+# WILL be overwritten during a session; the container re-seeds from this file
+# on every start, which is what makes screenshots reproducible.
+#
+# The SignalK address points at a black hole on purpose: E2E verifies layout
+# and form behaviour, not live vessel data, and an unreachable source renders
+# the documented "—" placeholders rather than hanging.
+anchor:
+    bow_roller_height_m: 1.5
+    chain_onboard_m: 100
+    chain_size_mm: 10
+    hull_type: monohull
+    windage_area_m2: 25
+boat:
+    house_battery_capacity_ah: 600
+    model: E2E Test Vessel
+    vessel_prefix: S/V
+influxdb:
+    bucket: e2e_bucket
+    enabled: false
+    org: e2e
+    url: http://127.0.0.1:9
+signalk:
+    address: 127.0.0.1
+    port: 9
+ui:
+    forecast_refresh_seconds: 3600
+    forecast_warnings_provider: bom
+    tank_labels:
+        freshWater.0: PORT
+        freshWater.3: STBD
+        fuel.2: PORT FWD
+        fuel.5: STBD FWD
+    tide_auto_station: false
+    tide_provider: bom
+    tide_station_id: QLD_TP018
+    tide_station_name: Mackay Outer Harbour
+    vessel_state_refresh_seconds: 10
+    wave_provider: open-meteo-marine
+    weather_provider: open-meteo
+units: metric

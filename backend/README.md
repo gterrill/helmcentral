@@ -65,7 +65,18 @@ docker run -p 8080:8080 helmcentral-backend
 
 ## Configuration
 
-Non-secret dev knobs (`PORT`, `ENVIRONMENT`, `LOG_LEVEL`, `SETTINGS_FILE`, `SIGNALK_VESSEL_PATH`, `VESSEL_STATUS`) are set via env vars — see `.env.example` for a template.
+Non-secret knobs are set as real environment variables. There is no `.env` file and nothing loads one — the backend reads these via `os.Getenv` only, so putting them in a file has no effect. Set them in your shell, the compose service's `environment:` block, or your process manager.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `8080` | HTTP listen port |
+| `SETTINGS_FILE` | `../settings.yaml` | Path to the settings file |
+| `SIGNALK_VESSEL_PATH` | `/signalk/v1/api/vessels/self` | Self-vessel path on the SignalK server |
+| `VESSEL_STATUS` | `At Anchor` | Fallback status when SignalK reports none |
+| `HELMCENTRAL_STATE_DIR` | *(unset)* | Roots all runtime state (`data/`, `cache/`) at this directory instead of the working directory. Used by the E2E stack to keep its writes out of the working tree — see [../docs/adr/0026-e2e-stack-isolation.md](../docs/adr/0026-e2e-stack-isolation.md) |
+| `HELMCENTRAL_MASTER_KEY` | *(auto-generated)* | Override for the secrets-store encryption key, otherwise generated on first run |
+
+Individual state paths (`ROUTES_FILE`, `SECRETS_DB_PATH`, `TILE_CACHE_PATH`, …) can each be overridden by name and take precedence over `HELMCENTRAL_STATE_DIR`; see `cacheFilePath` in `weather_tide.go`.
 
 Secrets (SignalK credentials, `INFLUXDB_TOKEN`, `STORMGLASS_API_KEY`, `GEONAMES_USERNAME`, `WEATHERKIT_*`) live in an encrypted-at-rest SQLite store instead, managed via the Settings UI's Secrets panel (`GET`/`POST /api/settings/secrets`). See [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md).
 
