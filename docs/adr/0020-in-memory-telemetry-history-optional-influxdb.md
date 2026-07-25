@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+Amended by ADR 0030 in two places, both scoped to wind gust. The `telemetryHistoryCapacity` figure in Decision 2 no longer applies to `windGustHistory`, which has its own ~24h capacity; 4320 samples now sizes `depthHistory` alone, and the ~6h cap under Consequences holds only for depth. The dispatch shown in Decision 4 became an if/else rather than "compute in-memory, then overwrite when Influx is configured" — the reasoning below is unchanged and still governs, since selection still branches on configuration state alone and a failing Influx still surfaces its own sentinel.
+
 ## Context
 InfluxDB previously backed three read paths in the backend: wind-gust max (`queryInfluxMaxWindGustKts`), depth-trend/tide detection (`queryInfluxDepthTrend`), and motoring-trail startup seeding (`seedMotoringTrailFromInflux`, ADR-0003). All three treated InfluxDB as a hard prerequisite — without it configured, wind-gust and depth-trend silently returned empty/zero data, and a fresh install required standing up InfluxDB plus the `signalk-to-influxdb-v2` plugin before the dashboard was fully useful.
 
@@ -44,3 +46,4 @@ Negative:
 ## Related
 - ADR 0001: Server-Owned Trail Sampling
 - ADR 0003: Downsample Influx Seed For Motoring History (superseded by this ADR)
+- ADR 0030: Selectable Max-Gust Windows (amends Decisions 2 and 4, for wind gust only)
