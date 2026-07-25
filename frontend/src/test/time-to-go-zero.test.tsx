@@ -38,7 +38,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
     headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
     windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
-    maxGust10mKts: null, maxGust1hKts: null, generatorState: null,
+    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
     generatorManualStart: false, generatorManualStartTimer: 0,
     generatorRunningByCondition: null, generatorRuntime: null,
     engine0Rpm: null, engine1Rpm: null, gnssQualityIndicator: null, gnssHdop: null,

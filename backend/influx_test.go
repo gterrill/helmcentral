@@ -59,6 +59,33 @@ func TestLoadInfluxSettings_EnabledAndFullyConfiguredReturnsConfigured(t *testin
 	}
 }
 
+// TestQueryInfluxMaxWindGustKtsFor_NotConfiguredReturnsSentinelForEveryWindow
+// covers the "no Influx configured" path: with no settings file present,
+// newInfluxClient's ok is false, so every requested window in the ladder
+// must come back as the -1 sentinel (mirroring the single-window
+// queryInfluxMaxWindGustKts contract), not just the first one.
+func TestQueryInfluxMaxWindGustKtsFor_NotConfiguredReturnsSentinelForEveryWindow(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: false\n  url: http://localhost:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("SETTINGS_FILE", path)
+	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+
+	windows := []string{"10m", "30m", "1h", "24h"}
+	got := queryInfluxMaxWindGustKtsFor(windows)
+
+	if len(got) != len(windows) {
+		t.Fatalf("expected %d entries, got %d: %+v", len(windows), len(got), got)
+	}
+	for _, w := range windows {
+		v, ok := got[w]
+		if !ok {
+			t.Fatalf("expected an entry for window %q, got %+v", w, got)
+		}
+		if v != -1 {
+			t.Fatalf("expected sentinel -1 for window %q when Influx is not configured, got %v", w, v)
+		}
+	}
+}
+
 func depthPoint(minutesAgo int, depthM float64) depthTrendPoint {
 	return depthTrendPoint{
 		Time:   time.Now().Add(-time.Duration(minutesAgo) * time.Minute),

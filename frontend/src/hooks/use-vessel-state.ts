@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { GUST_WINDOWS, type GustWindow } from '@/lib/gust-windows'
+
 interface VesselState {
   status: string
   datetime: string
@@ -21,8 +23,7 @@ interface VesselState {
   wind_angle_apparent_deg: number
   wind_side: string
   wind_angle_relative_deg: number
-  max_gust_10m_kts: number
-  max_gust_1h_kts: number
+  max_gust_kts: Record<string, number>
   generator_state: string
   generator_manual_start: boolean
   generator_manual_start_timer: number
@@ -53,8 +54,9 @@ export function useVesselState(refreshInterval: number) {
   const [windSide, setWindSide] = useState<'port' | 'starboard' | null>(null)
   const [windAngleRelativeDeg, setWindAngleRelativeDeg] = useState<number | null>(null)
   const [speedOverGroundKts, setSpeedOverGroundKts] = useState<number | null>(null)
-  const [maxGust10mKts, setMaxGust10mKts] = useState<number | null>(null)
-  const [maxGust1hKts, setMaxGust1hKts] = useState<number | null>(null)
+  const [maxGustKts, setMaxGustKts] = useState<Record<GustWindow, number | null>>(
+    () => Object.fromEntries(GUST_WINDOWS.map((window) => [window, null])) as Record<GustWindow, number | null>,
+  )
   const [generatorState, setGeneratorState] = useState<string | null>(null)
   const [generatorManualStart, setGeneratorManualStart] = useState<boolean>(false)
   const [generatorManualStartTimer, setGeneratorManualStartTimer] = useState<number>(0)
@@ -104,8 +106,10 @@ export function useVesselState(refreshInterval: number) {
         setWindAngleApparentDeg(typeof data.wind_angle_apparent_deg === 'number' && data.wind_angle_apparent_deg >= 0 ? data.wind_angle_apparent_deg : null)
         setWindSide(data.wind_side === 'port' || data.wind_side === 'starboard' ? data.wind_side : null)
         setWindAngleRelativeDeg(typeof data.wind_angle_relative_deg === 'number' && data.wind_angle_relative_deg >= 0 ? data.wind_angle_relative_deg : null)
-        setMaxGust10mKts(typeof data.max_gust_10m_kts === 'number' && data.max_gust_10m_kts >= 0 ? data.max_gust_10m_kts : null)
-        setMaxGust1hKts(typeof data.max_gust_1h_kts === 'number' && data.max_gust_1h_kts >= 0 ? data.max_gust_1h_kts : null)
+        setMaxGustKts(Object.fromEntries(GUST_WINDOWS.map((window) => {
+          const value = data.max_gust_kts?.[window]
+          return [window, typeof value === 'number' && value >= 0 ? value : null]
+        })) as Record<GustWindow, number | null>)
         setSpeedOverGroundKts(typeof data.speed_over_ground_kts === 'number' && data.speed_over_ground_kts >= 0 ? data.speed_over_ground_kts : null)
 
         setGeneratorState(typeof data.generator_state === 'string' && data.generator_state !== '' ? data.generator_state : null)
@@ -150,8 +154,7 @@ export function useVesselState(refreshInterval: number) {
     windAngleApparentDeg,
     windSide,
     windAngleRelativeDeg,
-    maxGust10mKts,
-    maxGust1hKts,
+    maxGustKts,
     generatorState,
     generatorManualStart,
     generatorManualStartTimer,
