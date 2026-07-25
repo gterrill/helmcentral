@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,12 +19,34 @@ import (
 )
 
 const (
-	discoveryDialTimeout   = 600 * time.Millisecond
+	// defaultDiscoveryDialTimeoutMS bounds the TCP dial to each candidate
+	// host. It is the sweep's dominant cost: unused addresses in a /24 do not
+	// refuse the connection, they black-hole it, so every one of them burns
+	// the full timeout. Overridable via HELMCENTRAL_DISCOVERY_DIAL_TIMEOUT_MS
+	// for links slower than a LAN, and for tests sweeping a reserved range
+	// where nothing can answer by construction.
+	defaultDiscoveryDialTimeoutMS = 600
+
 	discoveryHTTPTimeout   = 2 * time.Second
 	discoveryBudget        = 12 * time.Second
 	discoveryConcurrency   = 64
 	defaultSignalKScanPort = 3000
 )
+
+// discoveryDialTimeout resolves the per-host dial timeout from
+// HELMCENTRAL_DISCOVERY_DIAL_TIMEOUT_MS, falling back to
+// defaultDiscoveryDialTimeoutMS on an unset or invalid value (logged loudly
+// rather than abandoning discovery over a malformed env var). Mirrors
+// signalKReadTimeout.
+func discoveryDialTimeout() time.Duration {
+	raw := getEnv("HELMCENTRAL_DISCOVERY_DIAL_TIMEOUT_MS", strconv.Itoa(defaultDiscoveryDialTimeoutMS))
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		log.Printf("signalk discovery: invalid HELMCENTRAL_DISCOVERY_DIAL_TIMEOUT_MS %q, falling back to %dms", raw, defaultDiscoveryDialTimeoutMS)
+		return defaultDiscoveryDialTimeoutMS * time.Millisecond
+	}
+	return time.Duration(ms) * time.Millisecond
+}
 
 // discoveredServer is one SignalK server found on the network, in the shape
 // the settings UI needs to offer it: enough to identify the vessel, and
@@ -159,7 +183,7 @@ func scanForSignalK(ctx context.Context, hosts []string, ports []int) []discover
 func probeSignalKServer(ctx context.Context, host string, port int) (discoveredServer, bool) {
 	address := net.JoinHostPort(host, fmt.Sprint(port))
 
-	dialer := net.Dialer{Timeout: discoveryDialTimeout}
+	dialer := net.Dialer{Timeout: discoveryDialTimeout()}
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return discoveredServer{}, false

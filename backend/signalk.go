@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,7 +29,36 @@ const (
 	defaultChainOnboardM             = 150
 	defaultHullType                  = "power_cat"
 	defaultWindageAreaM2             = 35
+
+	// defaultSignalKReadTimeoutMS bounds every read of SignalK state (vessel,
+	// electrical, tanks, nearby vessels, self name, connection probe).
+	// Overridable via SIGNALK_READ_TIMEOUT_MS - the boat's server is on the
+	// LAN, but a deployment reaching it over a slow link may need more, and
+	// tests probing a deliberately unroutable address want far less than a
+	// 3s wall-clock wait per case.
+	defaultSignalKReadTimeoutMS = 3000
 )
+
+// signalKReadTimeout resolves the SignalK read timeout from
+// SIGNALK_READ_TIMEOUT_MS, falling back to defaultSignalKReadTimeoutMS on an
+// unset or invalid value (logged loudly rather than refusing to talk to the
+// vessel over a malformed env var). Mirrors wasmPluginTimeoutMS.
+func signalKReadTimeout() time.Duration {
+	raw := getEnv("SIGNALK_READ_TIMEOUT_MS", strconv.Itoa(defaultSignalKReadTimeoutMS))
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		log.Printf("signalk: invalid SIGNALK_READ_TIMEOUT_MS %q, falling back to %dms", raw, defaultSignalKReadTimeoutMS)
+		return defaultSignalKReadTimeoutMS * time.Millisecond
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// signalKReadClient is the HTTP client for every SignalK state read. Callers
+// share one timeout so a single knob covers the whole read path; the client is
+// built per call because the timeout is resolved at call time.
+func signalKReadClient() *http.Client {
+	return &http.Client{Timeout: signalKReadTimeout()}
+}
 
 type settingsPayload struct {
 	Signalk struct {
@@ -474,7 +505,7 @@ func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateD
 
 	state := vesselStateData{Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, Latitude: -1, Longitude: -1, HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1}
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := signalKReadClient()
 	response, err := client.Get(url)
 	if err != nil {
 		return criticalVesselState(state, fmt.Sprintf("signalk unreachable: %v", err)), err
@@ -749,7 +780,7 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 
 	state := electricalStateData{Datetime: time.Now().UTC(), BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := signalKReadClient()
 	response, err := client.Get(url)
 	if err != nil {
 		return state, err
@@ -967,7 +998,7 @@ func fetchSignalKSolarState(signalkURL string, vesselPath string) (solarStateDat
 		Trend24hTotal: []solarTrendPoint{},
 	}
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := signalKReadClient()
 	response, err := client.Get(url)
 	if err != nil {
 		return state, err
@@ -1281,7 +1312,7 @@ func readChargerInstance(payload map[string]any, index string) chargerInstanceDa
 func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselsPath, "/")
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := signalKReadClient()
 	response, err := client.Get(url)
 	if err != nil {
 		return nil, err
@@ -1384,7 +1415,7 @@ func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitu
 func fetchSignalKVesselNameMap(signalkURL string, vesselsPath string) (map[string]string, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselsPath, "/")
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := signalKReadClient()
 	response, err := client.Get(url)
 	if err != nil {
 		return nil, err
@@ -1425,7 +1456,7 @@ func fetchSignalKVesselNameMap(signalkURL string, vesselsPath string) (map[strin
 func fetchSignalKTanksState(signalkURL string, vesselPath string, labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := signalKReadClient()
 	response, err := client.Get(url)
 	if err != nil {
 		return nil, time.Now().UTC(), err
@@ -2115,7 +2146,7 @@ func loadHouseBatteryCapacityAh(settingsPath string) float64 {
 
 func fetchSignalKSelfName(signalkURL string, vesselPath string) string {
 	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := signalKReadClient()
 	response, err := client.Get(url)
 	if err != nil {
 		return ""

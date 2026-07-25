@@ -182,8 +182,15 @@ func TestWasmTideProvider_BlocksRequestsToNonAllowlistedHost(t *testing.T) {
 
 func TestWasmTideProvider_TimeoutIsEnforced(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second)
-		w.Write([]byte("too slow"))
+		// Still far slower than the manifest timeout, but abandoned the moment
+		// the timed-out guest drops the connection. Sleeping unconditionally
+		// would make httptest's Close block on this handler for the full 2s,
+		// so a test about a 200ms timeout cost 2s of wall clock.
+		select {
+		case <-time.After(2 * time.Second):
+			w.Write([]byte("too slow"))
+		case <-r.Context().Done():
+		}
 	}))
 	defer server.Close()
 

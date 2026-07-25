@@ -44,5 +44,16 @@ export default defineConfig(({ mode }) => ({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Worker threads rather than Vitest's default child-process forks. Nearly
+    // all of this suite's wall clock is per-file fixed cost (jsdom setup, then
+    // transforming and importing the module graph) rather than the test bodies
+    // themselves, and threads start cheaper and share a module cache across
+    // files, which cuts transform and import time roughly in half.
+    //
+    // Files stay isolated (pool isolation is still on): the suite depends on
+    // it, since Testing Library's auto-cleanup is per-file and sharing one
+    // jsdom document across files leaves mounted trees behind, breaking every
+    // getByText that then matches twice.
+    pool: 'threads',
   },
 }))
