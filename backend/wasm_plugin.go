@@ -51,6 +51,36 @@ func wasmModuleConfig() wazero.ModuleConfig {
 	return wazero.NewModuleConfig().WithSysWalltime()
 }
 
+// wasmCompilationCache is shared by every compiled plugin in the process.
+//
+// Compiling the .wasm is by far the dominant cost of constructing a plugin
+// (~175ms per module on an M-series laptop, vs ~20ms for a cache hit). Each
+// extism.NewCompiledPlugin call stands up its own wazero runtime, and a
+// runtime compiles from scratch unless handed a cache, so without this every
+// plugin discovered at startup - and every reload after a settings change -
+// pays the full compile again.
+//
+// wazero keys the cache on the module bytes plus its own version, so a hit is
+// only ever a module compiled from byte-identical wasm; rebuilding or
+// swapping a plugin file is a miss, not a stale hit. The cache is in-process
+// and unbounded, which is bounded in practice by the number of distinct
+// plugin files on disk.
+var (
+	wasmCompilationCacheOnce sync.Once
+	wasmCompilationCache     wazero.CompilationCache
+)
+
+// wasmRuntimeConfig is the wazero config every compiled plugin is built with.
+// Extism layers its own required settings (WithCloseOnContextDone for the
+// manifest timeout, memory limits) on top of whatever it is given, so this
+// only has to contribute the shared compilation cache.
+func wasmRuntimeConfig() wazero.RuntimeConfig {
+	wasmCompilationCacheOnce.Do(func() {
+		wasmCompilationCache = wazero.NewCompilationCache()
+	})
+	return wazero.NewRuntimeConfig().WithCompilationCache(wasmCompilationCache)
+}
+
 const (
 	defaultWasmPluginTimeoutMS  = 15000 // ms, overridable via WASM_PLUGIN_TIMEOUT_MS
 	defaultWasmPluginTTLSeconds = 3600  // used when a plugin has no ttl_seconds() export
@@ -342,7 +372,7 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 	}()
 
 	ctx := context.Background()
-	compiled, cerr := extism.NewCompiledPlugin(ctx, manifest, extism.PluginConfig{EnableWasi: true}, []extism.HostFunction{newFTPFetchHostFunction(manifest.AllowedHosts)})
+	compiled, cerr := extism.NewCompiledPlugin(ctx, manifest, extism.PluginConfig{EnableWasi: true, RuntimeConfig: wasmRuntimeConfig()}, []extism.HostFunction{newFTPFetchHostFunction(manifest.AllowedHosts)})
 	if cerr != nil {
 		return nil, fmt.Errorf("failed to compile plugin %s: %w", path, cerr)
 	}
