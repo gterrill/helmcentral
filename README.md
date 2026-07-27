@@ -18,6 +18,7 @@ helmcentral/
 - **Backend (Go)**: RESTful API for data querying and aggregation
   - SignalK integration for real-time maritime data
   - In-memory telemetry history (wind-gust-max, depth-trend/tide-detection) by default, with optional InfluxDB integration for longer-retention time-series storage and retrieval
+  - Max wind gust over a selectable window (10m / 30m / 1h / 24h), picked per readout on the wind tile — see [docs/adr/0030-selectable-max-gust-windows.md](docs/adr/0030-selectable-max-gust-windows.md)
   - CORS-enabled for web frontend communication
 
 - **Frontend (TypeScript + Web Components)**: Modern reactive dashboard
@@ -38,7 +39,7 @@ helmcentral/
   - [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) - Needed to calculate true wind and other derived navigation data.
   - [`tracks`](https://github.com/SignalK/tracks) - Needed for drawing vessel trails and retrieving historical path data.
   - [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) - Needed to retrieve generator and advanced electrical states (e.g. from Victron GX devices).
-  - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) - Optional. Only needed if you enable InfluxDB (Settings → InfluxDB) for longer-retention historical graphing and analysis than the built-in in-memory buffer's ~6h window.
+  - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) - Optional. Only needed if you enable InfluxDB (Settings → InfluxDB) for longer-retention historical graphing and analysis than the built-in in-memory buffers hold (~24h for wind gust, ~6h for depth) — and for history that survives a backend restart, which the in-memory buffers do not.
 
 Secrets (SignalK credentials, the InfluxDB token, Storm Glass/GeoNames/WeatherKit API keys) are no longer set via a `backend/.env` file — start the app with no secrets configured, then paste them into Settings → Secrets in the running app; they're encrypted at rest. See [docs/adr/0023-encrypted-secrets-store.md](docs/adr/0023-encrypted-secrets-store.md).
 

@@ -2,11 +2,14 @@ package main
 
 import (
 	"math"
+	"sort"
 	"sync"
 	"time"
 )
 
-const telemetryHistoryCapacity = 4320 // ~6h at the 5s poll cadence (main.go's startTrackPoller interval); longest window in active use today is depth-trend's "3h"
+const telemetryHistoryCapacity = 4320 // ~6h at the 5s poll cadence (main.go's startTrackPoller interval); sized for depth-trend's longest window, "3h"
+
+const windGustHistoryCapacity = 17280 // ~24h at the 5s poll cadence — sized for the longest window in the gust ladder (see gustWindowLadder in main.go)
 
 type telemetryPoint struct {
 	Value     float64
@@ -63,13 +66,13 @@ func (b *telemetryRingBuffer) since(cutoff time.Time) []telemetryPoint {
 }
 
 var (
-	windGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+	windGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
 	depthHistory    = newTelemetryRingBuffer(telemetryHistoryCapacity)
 )
 
 // inMemoryMaxWindGustKts returns the max recorded wind speed in the given
-// window, mirroring queryInfluxMaxWindGustKts's contract (-1 sentinel if no
-// samples). Recorded values (state.WindSpeedApparentKts) are already in
+// window, mirroring queryInfluxMaxWindGustKtsForWindow's per-window contract
+// (-1 sentinel if no samples). Recorded values (state.WindSpeedApparentKts) are already in
 // knots, unlike raw Influx data which is in m/s - do NOT re-apply
 // metersPerSecondToKnots here.
 func inMemoryMaxWindGustKts(window string) float64 {
@@ -90,6 +93,93 @@ func inMemoryMaxWindGustKts(window string) float64 {
 		}
 	}
 	return math.Round(maxKts*10) / 10
+}
+
+// inMemoryMaxWindGustKtsFor computes inMemoryMaxWindGustKts for every
+// requested window in a SINGLE backward walk of windGustHistory's ring
+// buffer, instead of one since()-scan-plus-allocation per window (since()
+// scans all windGustHistoryCapacity slots and allocates a result slice on
+// every call).
+//
+// This is only correct because the gust ladder is NESTED: every longer
+// window's time range is a superset of every shorter window's (e.g. 10m ⊂
+// 30m ⊂ 1h ⊂ 24h). Walking the ring newest→oldest while keeping a running
+// max, and snapshotting that running max each time the walk crosses a
+// window's cutoff (shortest cutoff = most recent = crossed first), yields
+// every window's answer in one pass.
+//
+// Because the returned value is a map keyed by window string, callers don't
+// depend on input order — so rather than silently producing wrong answers
+// for an out-of-order or non-nested ladder, this function sorts a local copy
+// of windows by parsed duration (ascending) before the pass. (A ladder whose
+// windows aren't actually nested — e.g. two disjoint windows — is still not
+// something this function can detect; nesting-by-construction is the
+// documented precondition. Sorting only guards against *order*, not against
+// a genuinely non-nested set.)
+func inMemoryMaxWindGustKtsFor(windows []string) map[string]float64 {
+	out := make(map[string]float64, len(windows))
+
+	type parsedWindow struct {
+		window string
+		dur    time.Duration
+	}
+	parsed := make([]parsedWindow, 0, len(windows))
+	for _, w := range windows {
+		dur, err := time.ParseDuration(w)
+		if err != nil {
+			out[w] = -1
+			continue
+		}
+		out[w] = -1 // pre-seed the sentinel; overwritten below only if samples are found
+		parsed = append(parsed, parsedWindow{window: w, dur: dur})
+	}
+	if len(parsed) == 0 {
+		return out
+	}
+
+	sort.Slice(parsed, func(i, j int) bool { return parsed[i].dur < parsed[j].dur })
+
+	now := time.Now().UTC()
+	cutoffs := make([]time.Time, len(parsed))
+	for i, pw := range parsed {
+		cutoffs[i] = now.Add(-pw.dur)
+	}
+
+	windGustHistory.mu.RLock()
+	defer windGustHistory.mu.RUnlock()
+
+	b := windGustHistory
+	n := len(b.points)
+	count := n
+	if !b.full {
+		count = b.index
+	}
+
+	running := math.Inf(-1)
+	wi := 0
+	for i := 0; i < count; i++ {
+		idx := ((b.index-1-i)%n + n) % n
+		p := b.points[idx]
+		for wi < len(parsed) && !p.Timestamp.After(cutoffs[wi]) {
+			if !math.IsInf(running, -1) {
+				out[parsed[wi].window] = math.Round(running*10) / 10
+			}
+			wi++
+		}
+		if wi >= len(parsed) {
+			return out
+		}
+		if p.Value > running {
+			running = p.Value
+		}
+	}
+	for ; wi < len(parsed); wi++ {
+		if !math.IsInf(running, -1) {
+			out[parsed[wi].window] = math.Round(running*10) / 10
+		}
+	}
+
+	return out
 }
 
 // inMemoryDepthTrend returns 5-minute bucketed depth means in the given

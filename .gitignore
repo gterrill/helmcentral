@@ -22,3 +22,5 @@ settings.yaml
 .claude/settings.json
 /backend-data/
 /plugins/
+# Scratch notes kept across branches, not part of any change
+/temp.md

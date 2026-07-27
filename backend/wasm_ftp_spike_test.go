@@ -143,7 +143,13 @@ func ftpFetchSpikeHostFunc(ctx context.Context, plugin *extism.CurrentPlugin, st
 // recognizable bulletin content (not just "some bytes came back") is
 // deliberate - a panic-swallowed empty response or a stale/wrong file would
 // otherwise pass a weaker check.
+// It hits BOM's live FTP server, so -short skips it to keep the default
+// suite offline-clean.
 func TestFTPFetchSpike_RealBOMRoundTripThroughWasmGuest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live BOM FTP round-trip in short mode")
+	}
+
 	ftpFetchHostFunction := extism.NewHostFunctionWithStack(
 		"ftp_fetch",
 		ftpFetchSpikeHostFunc,

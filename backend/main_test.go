@@ -278,3 +278,130 @@ func TestSolarStateHandler_UsesSignalKPayload(t *testing.T) {
 		t.Fatalf("expected one controller entry, got %T len=%d", payload["controllers"], len(controllers))
 	}
 }
+
+// TestVesselStateHandler_MaxGustKtsCoversFullLadderAndClampsMonotonically
+// asserts the vessel-state API's max_gust_kts field is a single keyed object
+// covering the full gustWindowLadder ("10m","30m","1h","24h") - replacing
+// the old max_gust_10m_kts/max_gust_1h_kts fields outright - and that,
+// mirroring the pre-existing 10m/1h clamp, every window's value is >= 0 and
+// non-decreasing walking the ladder in order (a longer window's max gust can
+// never be less than a shorter window's). Only a 10m-window sample is
+// seeded, so this also proves the longer windows still surface a real
+// clamped value rather than falling through to a raw sentinel.
+func TestVesselStateHandler_MaxGustKtsCoversFullLadderAndClampsMonotonically(t *testing.T) {
+	windGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	t.Cleanup(func() {
+		windGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	})
+
+	now := time.Now().UTC()
+	windGustHistory.record(22.3, now.Add(-2*time.Minute))
+
+	body := []byte(`{"name": "Test Vessel", "navigation": {"state": {"value": "sailing"}}}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("failed to parse server url: %v", err)
+	}
+	host, portRaw, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("failed to split host/port: %v", err)
+	}
+	port, err := strconv.Atoi(portRaw)
+	if err != nil {
+		t.Fatalf("failed to parse port: %v", err)
+	}
+
+	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
+	settings := fmt.Sprintf("signalk:\n  address: %q\n  port: %d\n", host, port)
+	if err := os.WriteFile(settingsPath, []byte(settings), 0o600); err != nil {
+		t.Fatalf("failed to write settings file: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/vessel-state", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := vesselState(c); err != nil {
+		t.Fatalf("vesselState returned error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse vessel-state response: %v", err)
+	}
+
+	if _, exists := payload["max_gust_10m_kts"]; exists {
+		t.Fatalf("expected max_gust_10m_kts to be removed, but it was present")
+	}
+	if _, exists := payload["max_gust_1h_kts"]; exists {
+		t.Fatalf("expected max_gust_1h_kts to be removed, but it was present")
+	}
+
+	maxGustKts, ok := payload["max_gust_kts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected max_gust_kts to serialize as an object, got %T: %+v", payload["max_gust_kts"], payload["max_gust_kts"])
+	}
+
+	ladder := []string{"10m", "30m", "1h", "24h"}
+	var previous float64
+	for i, window := range ladder {
+		raw, exists := maxGustKts[window]
+		if !exists {
+			t.Fatalf("expected max_gust_kts to contain window %q, got %+v", window, maxGustKts)
+		}
+		value, ok := raw.(float64)
+		if !ok {
+			t.Fatalf("expected max_gust_kts[%q] to be a number, got %T", window, raw)
+		}
+		if value < 0 {
+			t.Fatalf("expected max_gust_kts[%q] to be clamped to >= 0, got %v", window, value)
+		}
+		if i > 0 && value < previous {
+			t.Fatalf("expected max_gust_kts to be non-decreasing walking the ladder in order; window %q (%v) is less than the previous window's %v", window, value, previous)
+		}
+		previous = value
+	}
+}
+
+// TestComputeMaxGustKtsFor_SkipsInMemoryWhenInfluxConfigured proves the
+// in-memory branch is not consulted when Influx is configured — not just
+// that its result is discarded, but that inMemoryMaxWindGustKts's
+// windGustHistory.mu.RLock() is never attempted. We prove this by holding
+// windGustHistory.mu locked for writing before calling computeMaxGustKtsFor:
+// if the in-memory path were still invoked, it would block forever trying to
+// RLock, and computeMaxGustKtsFor would never return.
+func TestComputeMaxGustKtsFor_SkipsInMemoryWhenInfluxConfigured(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://127.0.0.1:1\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("SETTINGS_FILE", path)
+	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+
+	windGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	windGustHistory.mu.Lock()
+	defer windGustHistory.mu.Unlock()
+
+	done := make(chan map[string]float64, 1)
+	go func() {
+		done <- computeMaxGustKtsFor(gustWindowLadder)
+	}()
+
+	select {
+	case <-done:
+		// Returned without ever needing windGustHistory's lock — in-memory
+		// path was correctly skipped.
+	case <-time.After(3 * time.Second):
+		t.Fatal("computeMaxGustKtsFor blocked, implying it tried to RLock windGustHistory (the in-memory path) even though Influx is configured")
+	}
+}

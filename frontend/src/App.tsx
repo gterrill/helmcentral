@@ -73,7 +73,18 @@ import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 import { getAnchorConfig, getUiConfig } from '@/config/app-config'
-import { DASHBOARD_WIDGET_IDS, DASHBOARD_WIDGET_LABELS, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
+import {
+  DASHBOARD_WIDGET_IDS,
+  DASHBOARD_WIDGET_LABELS,
+  isEmbedWidgetId,
+  newEmbedWidgetId,
+  type DashboardLayoutItem,
+  type DashboardWidgetId,
+  type EmbedWidgetConfig,
+} from '@/lib/dashboard-widgets'
+import { EmbedTile } from '@/components/embed-tile'
+import { EmbedConfigDialog } from '@/components/embed-config-dialog'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -127,7 +138,15 @@ export function App() {
     // Default to true if not set
     return raw !== 'false'
   })
-  const [layoutEditing, setLayoutEditing] = useState(false)
+  const [layoutEditingRequested, setLayoutEditing] = useState(false)
+  const canEditLayout = useMinWidth(BREAKPOINTS.lg)
+  // Derived, not stored: narrowing the window past `lg` removes both the grid and
+  // the toggle that would exit edit mode, so a stored flag would strand the
+  // dashboard in a non-interactive state with no way back out.
+  const layoutEditing = layoutEditingRequested && canEditLayout
+  // The embed widget currently open in the config dialog. For a freshly added
+  // embed this is the only place it exists until it is given a URL and saved.
+  const [embedDraft, setEmbedDraft] = useState<DashboardLayoutItem | null>(null)
   const [settingsDirty, setSettingsDirty] = useState(false)
   const settingsPageRef = useRef<SettingsPageHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
@@ -256,8 +275,7 @@ export function App() {
     windAngleApparentDeg,
     windSide,
     windAngleRelativeDeg,
-    maxGust10mKts,
-    maxGust1hKts,
+    maxGustKts,
     generatorState,
     generatorManualStart,
     generatorManualStartTimer,
@@ -367,6 +385,35 @@ export function App() {
     void updatePage(activePage.id, { widgets: [...effectiveWidgets, { id, x: 0, y: maxY, w: 4, h: 6 }] })
   }, [activePage, effectiveWidgets, updatePage])
 
+  // A new embed is held as an unsaved draft until it has a URL — the backend
+  // rejects a blank one, and rightly so, rather than persisting a broken widget.
+  // Cancelling therefore just discards it. Wider and taller than the builtin
+  // default above, since a chart needs the room.
+  const handleAddEmbed = useCallback(() => {
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    setEmbedDraft({
+      id: newEmbedWidgetId(effectiveWidgets),
+      x: 0,
+      y: maxY,
+      w: 6,
+      h: 8,
+      embed: { title: '', url: '' },
+    })
+  }, [effectiveWidgets])
+
+  const handleSaveEmbed = useCallback((id: DashboardWidgetId, embed: EmbedWidgetConfig) => {
+    if (!activePage) return
+    if (effectiveWidgets.some((w) => w.id === id)) {
+      void updatePage(activePage.id, {
+        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, embed } : w)),
+      })
+      return
+    }
+    if (embedDraft?.id === id) {
+      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...embedDraft, embed }] })
+    }
+  }, [activePage, effectiveWidgets, embedDraft, updatePage])
+
   // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
   // (essentially the entire polled-data surface of the component — vessel,
   // electrical, tanks, nearby-vessels, anchor watch, wind, etc.), several of
@@ -374,7 +421,18 @@ export function App() {
   // recreate the reference on nearly every render anyway, so it buys no real
   // stabilization — left as a plain function per the task's own guidance for
   // this case.
-  const renderWidget = (id: DashboardWidgetId): ReactNode => {
+  const renderWidget = (widget: DashboardLayoutItem): ReactNode => {
+    const { id } = widget
+    if (isEmbedWidgetId(id)) {
+      return (
+        <EmbedTile
+          config={widget.embed}
+          editing={layoutEditing}
+          onConfigure={() => setEmbedDraft(widget)}
+        />
+      )
+    }
+
     switch (id) {
       case 'vessel':
         return <MarineHeader />
@@ -389,8 +447,7 @@ export function App() {
             currentSetDeg={currentSetDeg}
             currentDriftKts={currentDriftKts}
             currentDriftImpactKts={currentDriftImpactKts}
-            maxGust10mKts={maxGust10mKts}
-            maxGust1hKts={maxGust1hKts}
+            maxGustKts={maxGustKts}
           />
         )
       case 'depth-tide':
@@ -546,7 +603,9 @@ export function App() {
         onLayoutSettle={handleLayoutSettle}
       />
 
-      {layoutEditing && unplacedWidgetIds.length > 0 && (
+      {/* Always available in layout mode: Embed is never "placed", so unlike the
+          builtin widgets it can be added any number of times. */}
+      {layoutEditing && (
         <Popover>
           <PopoverTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">
             <Plus className="h-3.5 w-3.5" />
@@ -564,10 +623,25 @@ export function App() {
                   {DASHBOARD_WIDGET_LABELS[id]}
                 </button>
               ))}
+              {unplacedWidgetIds.length > 0 && <div className="my-1 h-px bg-border" />}
+              <button
+                type="button"
+                onClick={handleAddEmbed}
+                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                Embed…
+              </button>
             </div>
           </PopoverContent>
         </Popover>
       )}
+
+      <EmbedConfigDialog
+        widget={embedDraft}
+        open={embedDraft !== null}
+        onOpenChange={(open) => { if (!open) setEmbedDraft(null) }}
+        onSave={handleSaveEmbed}
+      />
     </div>
   )
 
@@ -750,26 +824,33 @@ export function App() {
       </Sidebar>
 
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b">
-          <div className="flex items-center gap-2 px-4">
+        {/* `min-w-0` on both halves is load-bearing, not cosmetic: without it a flex
+            item refuses to shrink below its content width and the right-hand cluster
+            gets pushed off a phone screen (AGENTS.md — prevent viewport overflows).
+            The breadcrumb is the designated slack absorber, so it truncates while the
+            clock and controls keep their size. */}
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
-            <Breadcrumb>
-              <BreadcrumbList>
+            <Separator orientation="vertical" className="mr-2 hidden h-4 sm:block" />
+            <Breadcrumb className="min-w-0">
+              <BreadcrumbList className="flex-nowrap">
                 {activePanel === null ? (
                   <BreadcrumbItem>
                     <BreadcrumbPage>Dashboard</BreadcrumbPage>
                   </BreadcrumbItem>
                 ) : (
                   <>
-                    <BreadcrumbItem>
+                    {/* Below `sm` only the leaf crumb survives — the parent link is
+                        redundant with the sidebar, which navigates to the same place. */}
+                    <BreadcrumbItem className="hidden sm:inline-flex">
                       <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); requestNavigate(null, () => setActivePanel(null)) }}>
                         Dashboard
                       </BreadcrumbLink>
                     </BreadcrumbItem>
-                    <BreadcrumbSeparator />
-                    <BreadcrumbItem>
-                      <BreadcrumbPage>
+                    <BreadcrumbSeparator className="hidden sm:block" />
+                    <BreadcrumbItem className="min-w-0">
+                      <BreadcrumbPage className="truncate">
                         {PANEL_NAV_ITEMS.find((item) => item.id === activePanel)?.label}
                       </BreadcrumbPage>
                     </BreadcrumbItem>
@@ -778,7 +859,7 @@ export function App() {
               </BreadcrumbList>
             </Breadcrumb>
           </div>
-          <div className="ml-auto flex items-center gap-2 px-4">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
             {activePanel === null && !pagesError && (
               <>
                 <DashboardPageSwitcher
@@ -802,7 +883,12 @@ export function App() {
                     })
                   }}
                 />
-                <LayoutModeToggle editing={layoutEditing} onToggle={() => setLayoutEditing((prev) => !prev)} />
+                {/* Gated on the same breakpoint the bento grid uses to decide whether
+                    to mount at all. Below `lg` there is no grid to rearrange, so the
+                    control is absent rather than present-but-inert. */}
+                {canEditLayout && (
+                  <LayoutModeToggle editing={layoutEditing} onToggle={() => setLayoutEditing((prev) => !prev)} />
+                )}
               </>
             )}
             <VesselStatusBar isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />

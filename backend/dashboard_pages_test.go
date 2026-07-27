@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -621,5 +622,152 @@ func TestDashboardPages_MigrationHandlesNeitherFile(t *testing.T) {
 	// Verify the pages file now exists, persisting the default page.
 	if _, err := os.Stat(pagesPath); os.IsNotExist(err) {
 		t.Fatal("expected pages file to be created for the default page")
+	}
+}
+
+// --- Embed widget instances (ADR 0031) ---------------------------------------
+
+func embedWidget(token, title, url string) dashboardLayoutItem {
+	return dashboardLayoutItem{
+		ID: embedWidgetIDPrefix + token, X: 0, Y: 0, W: 6, H: 8,
+		Embed: &dashboardEmbedConfig{Title: title, URL: url},
+	}
+}
+
+func TestValidateDashboardWidgets_AcceptsEmbedInstance(t *testing.T) {
+	widgets := []dashboardLayoutItem{
+		{ID: "wind", X: 0, Y: 0, W: 4, H: 8},
+		embedWidget("m1x8abcd", "Windrose", "http://boat.local:3000/d-solo/abc/windrose?panelId=2"),
+	}
+	if msg := validateDashboardWidgets(widgets); msg != "" {
+		t.Fatalf("expected embed widget to validate, got %q", msg)
+	}
+}
+
+// The whole point of the embed:<token> id scheme: several embeds on one page.
+// The duplicate-id check is untouched and still applies, since tokens differ.
+func TestValidateDashboardWidgets_AcceptsMultipleEmbedInstances(t *testing.T) {
+	widgets := []dashboardLayoutItem{
+		embedWidget("m1x8abcd", "Windrose", "https://grafana.local/d-solo/a?panelId=1"),
+		embedWidget("m1x8efgh", "Polars", "https://grafana.local/d-solo/a?panelId=2"),
+	}
+	if msg := validateDashboardWidgets(widgets); msg != "" {
+		t.Fatalf("expected two distinct embeds to validate, got %q", msg)
+	}
+}
+
+func TestValidateDashboardWidgets_RejectsDuplicateEmbedInstance(t *testing.T) {
+	widgets := []dashboardLayoutItem{
+		embedWidget("m1x8abcd", "Windrose", "https://grafana.local/d-solo/a?panelId=1"),
+		embedWidget("m1x8abcd", "Windrose Again", "https://grafana.local/d-solo/a?panelId=2"),
+	}
+	if msg := validateDashboardWidgets(widgets); msg == "" {
+		t.Fatal("expected duplicate embed token to be rejected")
+	}
+}
+
+func TestValidateDashboardWidgets_RejectsBadEmbeds(t *testing.T) {
+	longURL := "https://grafana.local/?q=" + strings.Repeat("x", 2048)
+
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"token too short", embedWidget("abc", "T", "https://grafana.local/d-solo/a")},
+		{"token has illegal characters", embedWidget("abc/../def", "T", "https://grafana.local/d-solo/a")},
+		{"empty token", embedWidget("", "T", "https://grafana.local/d-solo/a")},
+		{"blank url", embedWidget("m1x8abcd", "T", "")},
+		{"whitespace url", embedWidget("m1x8abcd", "T", "   ")},
+		{"javascript scheme", embedWidget("m1x8abcd", "T", "javascript:alert(1)")},
+		{"file scheme", embedWidget("m1x8abcd", "T", "file:///etc/passwd")},
+		{"data scheme", embedWidget("m1x8abcd", "T", "data:text/html,<script>alert(1)</script>")},
+		{"scheme-relative url has no scheme", embedWidget("m1x8abcd", "T", "//grafana.local/d-solo/a")},
+		{"http url with no host", embedWidget("m1x8abcd", "T", "http:///d-solo/a")},
+		{"url over the length cap", embedWidget("m1x8abcd", "T", longURL)},
+		{"title over the length cap", embedWidget("m1x8abcd", strings.Repeat("t", 65), "https://grafana.local/a")},
+		{
+			"missing embed config",
+			dashboardLayoutItem{ID: embedWidgetIDPrefix + "m1x8abcd", X: 0, Y: 0, W: 6, H: 8},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+				t.Fatalf("expected %s to be rejected", tc.name)
+			}
+		})
+	}
+}
+
+// Fail fast rather than silently dropping config the renderer would never read.
+func TestValidateDashboardWidgets_RejectsEmbedConfigOnBuiltinWidget(t *testing.T) {
+	widgets := []dashboardLayoutItem{
+		{ID: "wind", X: 0, Y: 0, W: 4, H: 8, Embed: &dashboardEmbedConfig{URL: "https://grafana.local/a"}},
+	}
+	if msg := validateDashboardWidgets(widgets); msg == "" {
+		t.Fatal("expected embed config on a builtin widget id to be rejected")
+	}
+}
+
+func TestCreateDashboardPageHandler_RejectsEmbedWithNonHTTPURL(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name": "Hostile Embed",
+		"widgets": []map[string]any{
+			{"id": "embed:m1x8abcd", "x": 0, "y": 0, "w": 6, "h": 8,
+				"embed": map[string]any{"title": "X", "url": "javascript:alert(1)"}},
+		},
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestDashboardPages_EmbedConfigSurvivesReload(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	const panelURL = "http://boat.local:3000/d-solo/abc/windrose?panelId=2&kiosk"
+	page := createTestDashboardPage(t, "Grafana", []dashboardLayoutItem{
+		embedWidget("m1x8abcd", "Windrose", panelURL),
+	})
+
+	// Simulate a process restart: reload state from disk.
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	defer dashboardPagesMu.RUnlock()
+	reloaded, ok := dashboardPagesState[page.ID]
+	if !ok {
+		t.Fatal("expected page to survive reload")
+	}
+	if len(reloaded.Widgets) != 1 {
+		t.Fatalf("expected 1 widget after reload, got %d", len(reloaded.Widgets))
+	}
+	got := reloaded.Widgets[0]
+	if got.Embed == nil {
+		t.Fatal("expected embed config to survive reload")
+	}
+	if got.Embed.URL != panelURL {
+		t.Fatalf("expected url %q, got %q", panelURL, got.Embed.URL)
+	}
+	if got.Embed.Title != "Windrose" {
+		t.Fatalf("expected title %q, got %q", "Windrose", got.Embed.Title)
+	}
+}
+
+// omitempty keeps existing dashboard-pages.json files byte-identical: a builtin
+// widget must not gain an "embed": null key just because the struct grew a field.
+func TestDashboardLayoutItem_OmitsEmbedKeyWhenAbsent(t *testing.T) {
+	encoded, err := json.Marshal(dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 8})
+	if err != nil {
+		t.Fatalf("failed to marshal layout item: %v", err)
+	}
+	if strings.Contains(string(encoded), "embed") {
+		t.Fatalf("expected no embed key for a builtin widget, got %s", encoded)
 	}
 }

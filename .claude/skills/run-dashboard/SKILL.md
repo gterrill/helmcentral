@@ -92,6 +92,38 @@ instrument (there's no `wait-for` command in this CLI, unlike
 fetches to settle in practice; bump it if a screenshot looks
 mid-fetch.
 
+### Viewport matrix
+
+For any layout change, shoot all four. The dashboard renders three
+structurally different layouts across this range (ADR 0032), so one
+screenshot proves very little:
+
+| Viewport | What it covers |
+|---|---|
+| `390,844` | iPhone 14 — the primary phone target; single-column CSS grid |
+| `430,932` | Pro Max — the wide end of the phone band |
+| `768,1024` | iPad portrait — **the tightest case**: two columns *and* a fixed 256px sidebar, so each tile gets ~240px |
+| `1600,1000` | Helm baseline — the react-grid-layout grid; regression guard |
+
+768 is the one that catches overflow. Below it the sidebar is an
+overlay sheet and takes no width; at `lg` the RGL grid takes over. It
+is the only band where two columns and a fixed sidebar compete, and
+it's where large fixed type (`text-3xl` values, `md:` step-ups written
+back when `md` meant "more room") spills its card.
+
+Two CLI gotchas:
+
+- There is **no `--device` flag** on `playwright screenshot`, and it
+  emulates neither touch nor DPR. `--viewport-size` alone is fine for
+  layout and overflow checks, which is all this is for.
+- The CLI can't run `document.documentElement.scrollWidth`, so the
+  tell for horizontal overflow is a `--full-page` shot at `390` that
+  comes back **wider than 390px**.
+
+Note `sips -c` crops from the **centre**, not the top-left, so it's
+awkward for grabbing a header. Easier to re-shoot without
+`--full-page` to get just the viewport.
+
 There is no `--clip` flag for cropping to one element. Crop the full
 screenshot afterward instead:
 

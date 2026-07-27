@@ -3,6 +3,8 @@
 ## Status
 Accepted. The single-global-layout persistence described here (`dashboard-layout.json`, `GET`/`PUT /api/dashboard-layout`) was superseded by ADR 0013 (Multi-Page Dashboard), which replaces it with multiple named pages. The grid-rendering mechanics, widget catalog, and validation described below are unchanged and still apply per-page.
 
+Amended by ADR 0032 (Responsive Dashboard Below the Grid Breakpoint), which replaces the "plain reflowed stack" below `lg` with a two-column CSS grid derived from the same persisted layout. Both decisions below survive intact: the legacy non-responsive RGL API, and one global layout per page. ADR 0032 persists nothing additional — it only changes how the existing coordinates are *rendered* on narrow screens.
+
 ## Context
 
 The dashboard presented a fixed 3-column grid arrangement hardcoded in `App.tsx`, with 13 widgets statically positioned. Operators requested the ability to rearrange, show, or hide widgets without a code deployment, to adapt the layout to changing vessel states and operational needs (e.g., hiding widgets relevant only at anchor when underway, or making room for real-time data that matters in the moment).
@@ -82,6 +84,8 @@ Positive:
 
 Negative / explicitly deferred:
 - Layout mode is desktop/tablet-landscape only (below `lg` breakpoint, the grid is unavailable and all widgets render as a stacked list, always read-only). Phone users cannot rearrange their dashboard, but phone screen density makes a dense grid layout impractical anyway.
+
+  *Amended by ADR 0032.* Edit mode remaining desktop-only still holds, and for a firmer reason than density (a narrow-view drag has no non-arbitrary mapping back to 12-column coordinates). But "renders as a stacked list" no longer describes the behaviour, and the density claim was doing too much work: it conflated "can't be edited" with "can't be laid out". Below `lg` the widgets now reflow into a one- or two-column CSS grid derived from the same persisted coordinates.
 - A fully-emptied layout is indistinguishable from "never configured" (both show the default), so there is no easy way to detect operator intent to create an empty dashboard. This is acceptable for a single-operator embedded device.
 - No per-device or per-user layouts (each vessel has one global layout). Multi-user or multi-device support would require auth/identity infrastructure, explicitly out of scope for this single-station dashboard.
 - The "Hot Water" control block inside Battery & Power remains non-functional (pre-existing, unrelated to this feature, carried over unchanged during component extraction).

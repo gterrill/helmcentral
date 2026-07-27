@@ -27,6 +27,13 @@ var (
 	buildRevision = "unknown"
 )
 
+// gustWindowLadder is the shared, ordered set of "max gust" windows exposed
+// via the vessel-state API's max_gust_kts field (and the frontend's MAX GUST
+// cards, which cycle through it shortest-to-longest). It is the single
+// source of truth for these windows - do not duplicate this literal
+// elsewhere in the package.
+var gustWindowLadder = []string{"10m", "30m", "1h", "24h"}
+
 type vesselStateData struct {
 	Name                        string
 	Status                      string
@@ -387,6 +394,19 @@ func depthTrend(c echo.Context) error {
 	return c.JSON(http.StatusOK, depthTrendResponse{Points: points, Since: "window"})
 }
 
+// computeMaxGustKtsFor picks exactly one source for the gust ladder per
+// request: Influx when configured (queryInfluxMaxWindGustKtsFor), otherwise
+// the in-memory ring buffer (inMemoryMaxWindGustKtsFor). Previously both were
+// computed unconditionally and the in-memory result discarded whenever Influx
+// was configured - wasted CPU/allocations on every /api/vessel-state request
+// on Influx-backed deployments.
+func computeMaxGustKtsFor(windows []string) map[string]float64 {
+	if influxTelemetryConfigured() {
+		return queryInfluxMaxWindGustKtsFor(windows)
+	}
+	return inMemoryMaxWindGustKtsFor(windows)
+}
+
 func vesselState(c echo.Context) error {
 	state := vesselStateData{
 		Status:               getEnv("VESSEL_STATUS", "At Anchor"),
@@ -432,16 +452,23 @@ func vesselState(c echo.Context) error {
 		state = criticalVesselState(state, "signalk not configured")
 	}
 
-	maxGust10mKts, maxGust1hKts := inMemoryMaxWindGustKts("10m"), inMemoryMaxWindGustKts("1h")
-	if influxTelemetryConfigured() {
-		maxGust10mKts = queryInfluxMaxWindGustKts("10m")
-		maxGust1hKts = queryInfluxMaxWindGustKts("1h")
-	}
-	if maxGust10mKts < 0 {
-		maxGust10mKts = 0
-	}
-	if maxGust1hKts < maxGust10mKts {
-		maxGust1hKts = maxGust10mKts
+	maxGustKts := computeMaxGustKtsFor(gustWindowLadder)
+	// Clamp walking the ladder shortest-to-longest: the shortest window's -1
+	// sentinel (no data) clamps to 0, then each subsequent (longer) window is
+	// clamped to be >= the previous, already-clamped window's value - a
+	// longer window's max gust can never be less than a shorter window's,
+	// generalizing the previous 10m/1h-only clamp across the full ladder.
+	previous := 0.0
+	for i, window := range gustWindowLadder {
+		value := maxGustKts[window]
+		if i == 0 && value < 0 {
+			value = 0
+		}
+		if value < previous {
+			value = previous
+		}
+		maxGustKts[window] = value
+		previous = value
 	}
 
 	vesselPrefix := loadBoatVesselPrefix(settingsPath)
@@ -472,8 +499,7 @@ func vesselState(c echo.Context) error {
 		"wind_angle_apparent_deg":        state.WindAngleApparentDeg,
 		"wind_side":                      state.WindSide,
 		"wind_angle_relative_deg":        state.WindAngleRelativeDeg,
-		"max_gust_10m_kts":               maxGust10mKts,
-		"max_gust_1h_kts":                maxGust1hKts,
+		"max_gust_kts":                   maxGustKts,
 		"generator_state":                state.GeneratorState,
 		"generator_manual_start":         state.GeneratorManualStart,
 		"generator_manual_start_timer":   state.GeneratorManualStartTimer,
@@ -639,7 +665,7 @@ func applyInMemorySolarDefaults(state solarStateData) solarStateData {
 }
 
 // applyInfluxSolarOverride wholesale-replaces the four Influx-backed fields,
-// matching queryInfluxMaxWindGustKts/queryInfluxDepthTrend's override
+// matching queryInfluxMaxWindGustKtsFor/queryInfluxDepthTrend's override
 // pattern in vesselState()/depthTrend() — called only when
 // influxTelemetryConfigured(), and does not fall back to the in-memory
 // value if the Influx query itself fails (same Fallback Policy reasoning as

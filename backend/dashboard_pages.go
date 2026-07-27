@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -35,12 +37,34 @@ var validDashboardWidgetIDs = map[string]bool{
 
 const dashboardLayoutMaxCoord = 1000
 
+// Embed widgets (ADR 0031) are the one widget type that can appear more than
+// once on a page, so their id carries a per-instance token: "embed:<token>".
+// The token only needs to be unique within a page — it is a layout key, not a
+// secret — which is why the frontend mints it without crypto.randomUUID (that
+// API is secure-context-only and undefined over plain HTTP on a boat LAN).
+const embedWidgetIDPrefix = "embed:"
+
+const (
+	embedURLMaxLen   = 2048
+	embedTitleMaxLen = 64
+)
+
+var embedWidgetTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+
 type dashboardLayoutItem struct {
-	ID string `json:"id"`
-	X  int    `json:"x"`
-	Y  int    `json:"y"`
-	W  int    `json:"w"`
-	H  int    `json:"h"`
+	ID    string                `json:"id"`
+	X     int                   `json:"x"`
+	Y     int                   `json:"y"`
+	W     int                   `json:"w"`
+	H     int                   `json:"h"`
+	Embed *dashboardEmbedConfig `json:"embed,omitempty"`
+}
+
+// dashboardEmbedConfig is per-instance and per-page, so it rides on the layout
+// item rather than living in settings.yaml.
+type dashboardEmbedConfig struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
 }
 
 // defaultDashboardLayout recreates the pre-bento 3-column arrangement, used to
@@ -97,12 +121,50 @@ func saveDashboardPagesLocked() error {
 	return writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{Pages: list})
 }
 
+// validateEmbedWidget guards the one widget whose content is operator-supplied.
+// The frontend's isValidEmbedUrl in lib/dashboard-widgets.ts applies the same
+// rules for synchronous feedback in the config dialog; keep the two in step.
+func validateEmbedWidget(w dashboardLayoutItem) string {
+	token := strings.TrimPrefix(w.ID, embedWidgetIDPrefix)
+	if !embedWidgetTokenPattern.MatchString(token) {
+		return "invalid embed widget id: " + w.ID
+	}
+	if w.Embed == nil {
+		return "embed widget requires embed config: " + w.ID
+	}
+	if len(w.Embed.URL) > embedURLMaxLen {
+		return "embed url is too long"
+	}
+	if len(w.Embed.Title) > embedTitleMaxLen {
+		return "embed title is too long"
+	}
+
+	parsed, err := url.Parse(strings.TrimSpace(w.Embed.URL))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "embed url must be an http(s) URL"
+	}
+	return ""
+}
+
 func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 	seen := make(map[string]bool, len(widgets))
 	for _, w := range widgets {
-		if !validDashboardWidgetIDs[w.ID] {
-			return "unknown widget id: " + w.ID
+		if strings.HasPrefix(w.ID, embedWidgetIDPrefix) {
+			if msg := validateEmbedWidget(w); msg != "" {
+				return msg
+			}
+		} else {
+			if !validDashboardWidgetIDs[w.ID] {
+				return "unknown widget id: " + w.ID
+			}
+			// Reject rather than silently drop: config the renderer will never
+			// read means the caller has misunderstood the model.
+			if w.Embed != nil {
+				return "embed config not allowed on widget id: " + w.ID
+			}
 		}
+		// Embed tokens are unique per instance, so the duplicate check below
+		// covers both widget kinds unchanged.
 		if seen[w.ID] {
 			return "duplicate widget id: " + w.ID
 		}

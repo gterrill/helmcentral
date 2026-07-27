@@ -8,6 +8,7 @@ import (
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
+	"github.com/influxdata/influxdb-client-go/v2/api"
 )
 
 type depthTrendPoint struct {
@@ -61,16 +62,36 @@ func newInfluxClient() (influxdb2.Client, string, string, bool) {
 	return client, org, bucket, true
 }
 
-func queryInfluxMaxWindGustKts(window string) float64 {
+// queryInfluxMaxWindGustKtsFor returns the max wind gust (in knots) for each
+// requested window, opening a single Influx client and reusing it across all
+// queries in windows - callers (e.g. vesselState, which needs the full
+// gustWindowLadder every poll) would otherwise pay the cost of a fresh
+// client per window. Each window still gets its own -1 sentinel on error/no
+// data, mirroring the single-window contract this replaces.
+func queryInfluxMaxWindGustKtsFor(windows []string) map[string]float64 {
+	results := make(map[string]float64, len(windows))
+
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {
-		return -1
+		for _, window := range windows {
+			results[window] = -1
+		}
+		return results
 	}
 	defer client.Close()
 
 	measurement := trimEnvValue(getEnv("INFLUX_WIND_MEASUREMENT", "environment.wind.speedApparent"))
 	field := trimEnvValue(getEnv("INFLUX_WIND_FIELD", "value"))
+	queryAPI := client.QueryAPI(org)
 
+	for _, window := range windows {
+		results[window] = queryInfluxMaxWindGustKtsForWindow(queryAPI, bucket, measurement, field, window)
+	}
+
+	return results
+}
+
+func queryInfluxMaxWindGustKtsForWindow(queryAPI api.QueryAPI, bucket, measurement, field, window string) float64 {
 	flux := fmt.Sprintf(
 		`from(bucket: %q) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> max(column: "_value") |> keep(columns: ["_value"])`,
 		bucket, window, measurement, field,
@@ -79,7 +100,7 @@ func queryInfluxMaxWindGustKts(window string) float64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
-	result, err := client.QueryAPI(org).Query(ctx, flux)
+	result, err := queryAPI.Query(ctx, flux)
 	if err != nil {
 		return -1
 	}
