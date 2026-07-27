@@ -5,7 +5,7 @@ import 'react-resizable/css/styles.css'
 import '@/styles/dashboard-bento-grid.css'
 import { GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { DashboardLayoutItem, DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { isEmbedWidgetId, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
@@ -32,7 +32,11 @@ function useIsDesktopGrid() {
   return isDesktop
 }
 
-const WIDGET_CONSTRAINTS: Partial<Record<DashboardWidgetId, { minW?: number; minH?: number }>> = {
+// Embeds share one constraint rather than having per-id entries, since their ids
+// carry a per-instance token (see ADR 0031).
+const EMBED_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
+
+const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
   'wind': { minW: 3, minH: 6 },
   'anchor-watch': { minW: 3, minH: 6 },
@@ -53,7 +57,9 @@ const WIDGET_CONSTRAINTS: Partial<Record<DashboardWidgetId, { minW?: number; min
 export interface DashboardBentoGridProps {
   widgets: DashboardLayoutItem[]
   editing: boolean
-  renderWidget: (id: DashboardWidgetId) => React.ReactNode
+  // Takes the whole layout item, not just the id: embed widgets carry their
+  // per-instance config alongside their position.
+  renderWidget: (widget: DashboardLayoutItem) => React.ReactNode
   onRemoveWidget: (id: DashboardWidgetId) => void
   onLayoutSettle: (next: DashboardLayoutItem[]) => void
 }
@@ -62,7 +68,14 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
   const isDesktopGrid = useIsDesktopGrid()
 
   const rglLayout = useMemo<LayoutItem[]>(
-    () => widgets.map((w) => ({ i: w.id, x: w.x, y: w.y, w: w.w, h: w.h, ...WIDGET_CONSTRAINTS[w.id] })),
+    () => widgets.map((w) => ({
+      i: w.id,
+      x: w.x,
+      y: w.y,
+      w: w.w,
+      h: w.h,
+      ...(isEmbedWidgetId(w.id) ? EMBED_WIDGET_CONSTRAINTS : WIDGET_CONSTRAINTS[w.id]),
+    })),
     [widgets],
   )
 
@@ -84,7 +97,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
     return (
       <div className="flex flex-col gap-4">
         {[...widgets].sort((a, b) => a.y - b.y || a.x - b.x).map((w) => (
-          <div key={w.id}>{renderWidget(w.id)}</div>
+          <div key={w.id}>{renderWidget(w)}</div>
         ))}
       </div>
     )
@@ -109,14 +122,14 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
           key={w.id}
           className={cn('relative rounded-xl', editing && 'select-none outline-dashed outline-2 outline-primary/30')}
         >
-          <div className="h-full [&>*]:h-full">{renderWidget(w.id)}</div>
+          <div className="h-full [&>*]:h-full">{renderWidget(w)}</div>
           {editing && (
             <>
               <button
                 type="button"
                 onClick={() => onRemoveWidget(w.id)}
                 className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
-                aria-label={`Remove ${w.id} widget`}
+                aria-label={`Remove ${widgetDisplayName(w)} widget`}
               >
                 <X className="h-3.5 w-3.5" />
               </button>

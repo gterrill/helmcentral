@@ -73,7 +73,17 @@ import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 import { getAnchorConfig, getUiConfig } from '@/config/app-config'
-import { DASHBOARD_WIDGET_IDS, DASHBOARD_WIDGET_LABELS, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import {
+  DASHBOARD_WIDGET_IDS,
+  DASHBOARD_WIDGET_LABELS,
+  isEmbedWidgetId,
+  newEmbedWidgetId,
+  type DashboardLayoutItem,
+  type DashboardWidgetId,
+  type EmbedWidgetConfig,
+} from '@/lib/dashboard-widgets'
+import { EmbedTile } from '@/components/embed-tile'
+import { EmbedConfigDialog } from '@/components/embed-config-dialog'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -128,6 +138,9 @@ export function App() {
     return raw !== 'false'
   })
   const [layoutEditing, setLayoutEditing] = useState(false)
+  // The embed widget currently open in the config dialog. For a freshly added
+  // embed this is the only place it exists until it is given a URL and saved.
+  const [embedDraft, setEmbedDraft] = useState<DashboardLayoutItem | null>(null)
   const [settingsDirty, setSettingsDirty] = useState(false)
   const settingsPageRef = useRef<SettingsPageHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
@@ -366,6 +379,35 @@ export function App() {
     void updatePage(activePage.id, { widgets: [...effectiveWidgets, { id, x: 0, y: maxY, w: 4, h: 6 }] })
   }, [activePage, effectiveWidgets, updatePage])
 
+  // A new embed is held as an unsaved draft until it has a URL — the backend
+  // rejects a blank one, and rightly so, rather than persisting a broken widget.
+  // Cancelling therefore just discards it. Wider and taller than the builtin
+  // default above, since a chart needs the room.
+  const handleAddEmbed = useCallback(() => {
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    setEmbedDraft({
+      id: newEmbedWidgetId(effectiveWidgets),
+      x: 0,
+      y: maxY,
+      w: 6,
+      h: 8,
+      embed: { title: '', url: '' },
+    })
+  }, [effectiveWidgets])
+
+  const handleSaveEmbed = useCallback((id: DashboardWidgetId, embed: EmbedWidgetConfig) => {
+    if (!activePage) return
+    if (effectiveWidgets.some((w) => w.id === id)) {
+      void updatePage(activePage.id, {
+        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, embed } : w)),
+      })
+      return
+    }
+    if (embedDraft?.id === id) {
+      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...embedDraft, embed }] })
+    }
+  }, [activePage, effectiveWidgets, embedDraft, updatePage])
+
   // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
   // (essentially the entire polled-data surface of the component — vessel,
   // electrical, tanks, nearby-vessels, anchor watch, wind, etc.), several of
@@ -373,7 +415,18 @@ export function App() {
   // recreate the reference on nearly every render anyway, so it buys no real
   // stabilization — left as a plain function per the task's own guidance for
   // this case.
-  const renderWidget = (id: DashboardWidgetId): ReactNode => {
+  const renderWidget = (widget: DashboardLayoutItem): ReactNode => {
+    const { id } = widget
+    if (isEmbedWidgetId(id)) {
+      return (
+        <EmbedTile
+          config={widget.embed}
+          editing={layoutEditing}
+          onConfigure={() => setEmbedDraft(widget)}
+        />
+      )
+    }
+
     switch (id) {
       case 'vessel':
         return <MarineHeader />
@@ -544,7 +597,9 @@ export function App() {
         onLayoutSettle={handleLayoutSettle}
       />
 
-      {layoutEditing && unplacedWidgetIds.length > 0 && (
+      {/* Always available in layout mode: Embed is never "placed", so unlike the
+          builtin widgets it can be added any number of times. */}
+      {layoutEditing && (
         <Popover>
           <PopoverTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">
             <Plus className="h-3.5 w-3.5" />
@@ -562,10 +617,25 @@ export function App() {
                   {DASHBOARD_WIDGET_LABELS[id]}
                 </button>
               ))}
+              {unplacedWidgetIds.length > 0 && <div className="my-1 h-px bg-border" />}
+              <button
+                type="button"
+                onClick={handleAddEmbed}
+                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                Embed…
+              </button>
             </div>
           </PopoverContent>
         </Popover>
       )}
+
+      <EmbedConfigDialog
+        widget={embedDraft}
+        open={embedDraft !== null}
+        onOpenChange={(open) => { if (!open) setEmbedDraft(null) }}
+        onSave={handleSaveEmbed}
+      />
     </div>
   )
 
