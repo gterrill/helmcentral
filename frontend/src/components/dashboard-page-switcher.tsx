@@ -80,7 +80,11 @@ export function DashboardPageSwitcher({
         className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors border-border bg-background/70 text-muted-foreground hover:border-primary/40 hover:text-primary md:text-[11px]"
         aria-label="Switch dashboard page"
       >
-        {displayName}
+        {/* Icon-only below `sm`: the header has no room for the page name at phone
+            width, and the aria-label above carries the accessible name. The popover
+            itself stays — create/rename/delete live only here, so hiding the whole
+            control would strand them (the sidebar drawer only navigates). */}
+        <span className="hidden sm:inline">{displayName}</span>
         <ChevronDown className="h-3.5 w-3.5" />
       </PopoverTrigger>
       <PopoverContent className="w-56 p-1">

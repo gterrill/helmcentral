@@ -73,6 +73,7 @@ import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 import { getAnchorConfig, getUiConfig } from '@/config/app-config'
+import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import {
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_WIDGET_LABELS,
@@ -137,7 +138,12 @@ export function App() {
     // Default to true if not set
     return raw !== 'false'
   })
-  const [layoutEditing, setLayoutEditing] = useState(false)
+  const [layoutEditingRequested, setLayoutEditing] = useState(false)
+  const canEditLayout = useMinWidth(BREAKPOINTS.lg)
+  // Derived, not stored: narrowing the window past `lg` removes both the grid and
+  // the toggle that would exit edit mode, so a stored flag would strand the
+  // dashboard in a non-interactive state with no way back out.
+  const layoutEditing = layoutEditingRequested && canEditLayout
   // The embed widget currently open in the config dialog. For a freshly added
   // embed this is the only place it exists until it is given a URL and saved.
   const [embedDraft, setEmbedDraft] = useState<DashboardLayoutItem | null>(null)
@@ -818,26 +824,33 @@ export function App() {
       </Sidebar>
 
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b">
-          <div className="flex items-center gap-2 px-4">
+        {/* `min-w-0` on both halves is load-bearing, not cosmetic: without it a flex
+            item refuses to shrink below its content width and the right-hand cluster
+            gets pushed off a phone screen (AGENTS.md — prevent viewport overflows).
+            The breadcrumb is the designated slack absorber, so it truncates while the
+            clock and controls keep their size. */}
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
-            <Breadcrumb>
-              <BreadcrumbList>
+            <Separator orientation="vertical" className="mr-2 hidden h-4 sm:block" />
+            <Breadcrumb className="min-w-0">
+              <BreadcrumbList className="flex-nowrap">
                 {activePanel === null ? (
                   <BreadcrumbItem>
                     <BreadcrumbPage>Dashboard</BreadcrumbPage>
                   </BreadcrumbItem>
                 ) : (
                   <>
-                    <BreadcrumbItem>
+                    {/* Below `sm` only the leaf crumb survives — the parent link is
+                        redundant with the sidebar, which navigates to the same place. */}
+                    <BreadcrumbItem className="hidden sm:inline-flex">
                       <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); requestNavigate(null, () => setActivePanel(null)) }}>
                         Dashboard
                       </BreadcrumbLink>
                     </BreadcrumbItem>
-                    <BreadcrumbSeparator />
-                    <BreadcrumbItem>
-                      <BreadcrumbPage>
+                    <BreadcrumbSeparator className="hidden sm:block" />
+                    <BreadcrumbItem className="min-w-0">
+                      <BreadcrumbPage className="truncate">
                         {PANEL_NAV_ITEMS.find((item) => item.id === activePanel)?.label}
                       </BreadcrumbPage>
                     </BreadcrumbItem>
@@ -846,7 +859,7 @@ export function App() {
               </BreadcrumbList>
             </Breadcrumb>
           </div>
-          <div className="ml-auto flex items-center gap-2 px-4">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
             {activePanel === null && !pagesError && (
               <>
                 <DashboardPageSwitcher
@@ -870,7 +883,12 @@ export function App() {
                     })
                   }}
                 />
-                <LayoutModeToggle editing={layoutEditing} onToggle={() => setLayoutEditing((prev) => !prev)} />
+                {/* Gated on the same breakpoint the bento grid uses to decide whether
+                    to mount at all. Below `lg` there is no grid to rearrange, so the
+                    control is absent rather than present-but-inert. */}
+                {canEditLayout && (
+                  <LayoutModeToggle editing={layoutEditing} onToggle={() => setLayoutEditing((prev) => !prev)} />
+                )}
               </>
             )}
             <VesselStatusBar isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />

@@ -1,6 +1,7 @@
 import { Circle, Moon, Sun } from 'lucide-react'
 
 import { useVesselIdentity } from '@/hooks/use-vessel-identity'
+import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 
 interface VesselStatusBarProps {
   isDark?: boolean
@@ -10,6 +11,7 @@ interface VesselStatusBarProps {
 export function VesselStatusBar({ isDark = false, onToggleDarkMode }: VesselStatusBarProps) {
   const { currentDate, clock, signalkConnected } = useVesselIdentity()
   const [hh = '--', mm = '--', ss = '--'] = clock.timePart.split(':')
+  const showFullClock = useMinWidth(BREAKPOINTS.sm)
 
   return (
     <div className="flex shrink-0 items-center gap-1">
@@ -25,18 +27,28 @@ export function VesselStatusBar({ isDark = false, onToggleDarkMode }: VesselStat
         {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
         <span className="hidden sm:inline">{isDark ? 'Night' : 'Day'}</span>
       </button>
-      <div className="flex shrink-0 flex-col items-end pl-2">
-        <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 md:text-[11px]">
-          {currentDate}
-        </span>
+      <div className="flex min-w-0 shrink-0 flex-col items-end pl-2">
+        {/* Below `sm` the date and seconds are dropped rather than CSS-hidden. Both
+            are the least-informative parts of this cluster — the date already
+            appears on the Today & Now tile — and the seconds span re-renders every
+            second, so hiding it in CSS would keep paying for a widget nobody can
+            see. The `ch` widths and `tabular-nums` stay: they stop the clock
+            jittering as digits change. */}
+        {showFullClock && (
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 md:text-[11px]">
+            {currentDate}
+          </span>
+        )}
         <time className="inline-flex items-baseline whitespace-nowrap font-display leading-[1.08] tracking-[0.02em] text-gauge-secondary">
-          <span className="inline-block w-[5ch] text-right tabular-nums text-[1.65rem] sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
+          <span className="inline-block w-[5ch] text-right tabular-nums text-[1.35rem] sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
             {hh}:{mm}
           </span>
-          <span className="inline-block w-[3ch] text-left tabular-nums text-[1.65rem] sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
-            :{ss}
-          </span>
-          <span className="ml-1 text-[1.05rem] tracking-[0.06em] sm:text-[1.15rem] md:text-[1.3rem] lg:text-[1.4rem]">
+          {showFullClock && (
+            <span className="inline-block w-[3ch] text-left tabular-nums text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
+              :{ss}
+            </span>
+          )}
+          <span className="ml-1 text-[10px] tracking-[0.06em] sm:text-[1.15rem] md:text-[1.3rem] lg:text-[1.4rem]">
             {clock.meridiem}
           </span>
         </time>
