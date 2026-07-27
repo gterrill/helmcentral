@@ -24,29 +24,29 @@ describe('ProviderIntegrationCard', () => {
     const onActivate = vi.fn()
     render(
       <ProviderIntegrationCard
-        id="stormglass"
-        name="Storm Glass"
-        description="Paid worldwide tide data"
+        id="noaa"
+        name="NOAA"
+        description="US tide data"
         active={false}
         onActivate={onActivate}
         onOpenSettings={vi.fn()}
       />,
     )
 
-    const switchEl = screen.getByRole('switch', { name: /activate storm glass/i })
+    const switchEl = screen.getByRole('switch', { name: /activate noaa/i })
     expect(switchEl).not.toHaveAttribute('aria-disabled')
     fireEvent.click(switchEl)
 
-    expect(onActivate).toHaveBeenCalledWith('stormglass')
+    expect(onActivate).toHaveBeenCalledWith('noaa')
   })
 
   it('calls onOpenSettings with its id when the Settings button is clicked, regardless of active state', () => {
     const onOpenSettings = vi.fn()
     render(
       <ProviderIntegrationCard
-        id="stormglass"
-        name="Storm Glass"
-        description="Paid worldwide tide data"
+        id="noaa"
+        name="NOAA"
+        description="US tide data"
         active={false}
         onActivate={vi.fn()}
         onOpenSettings={onOpenSettings}
@@ -54,6 +54,6 @@ describe('ProviderIntegrationCard', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: /settings/i }))
-    expect(onOpenSettings).toHaveBeenCalledWith('stormglass')
+    expect(onOpenSettings).toHaveBeenCalledWith('noaa')
   })
 })

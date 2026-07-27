@@ -12,9 +12,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// tideStation describes a single tide prediction location, either a
-// provider-defined station (e.g. a BOM port) or a pseudo-station such as
-// Storm Glass's "current vessel position".
+// tideStation describes a single tide prediction location: a
+// provider-defined station (e.g. a BOM port or a NOAA station).
 type tideStation struct {
 	StationID string  `json:"station_id"`
 	Name      string  `json:"name"`
@@ -51,15 +50,16 @@ type tideChartResult struct {
 }
 
 // tideProvider is the interface implemented by each pluggable tide data
-// source (BOM, Storm Glass, ...).
+// source (BOM, NOAA, ...) - every one a WASM plugin, there is no built-in
+// native implementation.
 //
 // Convention: SearchStations("", limit) must return up to limit stations
 // from the provider's full catalog, with real Lat/Lon populated on each
 // station. This isn't just a typeahead-search nicety - nearestStation below
 // relies on it generically to do geo lookup (nearest-station) for any
-// provider, not only BOM. Every provider already follows it:
-// tide_provider_stormglass.go, and the BOM and NOAA WASM plugins
-// (docs/examples/tide-plugins/bom/bom.go, docs/examples/tide-plugins/noaa/main.go).
+// provider, not only BOM. Every provider already follows it: the BOM and
+// NOAA WASM plugins (docs/examples/tide-plugins/bom/bom.go,
+// docs/examples/tide-plugins/noaa/main.go).
 type tideProvider interface {
 	ID() string
 	Name() string

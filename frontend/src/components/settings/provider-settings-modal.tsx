@@ -32,9 +32,6 @@ interface PluginInfoResponse {
 // backend equivalent of this table — it must be kept in sync by hand
 // whenever a new provider requiring secrets is added. See ADR 0025.
 const PROVIDER_SECRET_FIELDS: Partial<Record<ProviderDomain, Record<string, SecretFieldSpec[]>>> = {
-  tide: {
-    stormglass: [{ key: 'STORMGLASS_API_KEY', label: 'Storm Glass API Key' }],
-  },
   weather: {
     weatherkit: [
       { key: 'WEATHERKIT_KEY_ID', label: 'WeatherKit Key ID' },
@@ -62,10 +59,12 @@ const parseList = (value: string) =>
  * Per-provider settings modal: fetches `GET /api/plugins/:type/:id` only
  * while open (not on mount for every card in the grid), shows the
  * provider's description, any secret fields the static
- * `PROVIDER_SECRET_FIELDS` table says this provider needs, and — only for
- * sandboxed (WASM) providers — an allowed-hosts/allowed-secrets override
- * editor. The native, non-sandboxed "stormglass" tide provider omits the
- * allowlist block entirely.
+ * `PROVIDER_SECRET_FIELDS` table says this provider needs, and — once
+ * `info` has loaded — an allowed-hosts/allowed-secrets override editor.
+ * Every provider registered anywhere in the app is WASM-backed (see
+ * backend/plugin_overrides_handlers.go), so `info.sandboxed` is always true
+ * once loaded; the allowlist block is only withheld transiently while
+ * `info` is still loading.
  */
 export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: ProviderSettingsModalProps) {
   const { saveTouchedKeys } = useSecretsStatusContext()
@@ -112,12 +111,11 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
 
   const secretFields = providerId ? PROVIDER_SECRET_FIELDS[type]?.[providerId] : undefined
 
-  // Single Save button for the whole modal: saves allowlist overrides (only
-  // relevant for sandboxed/WASM providers) AND any touched secret field(s)
-  // (only relevant for providers listed in PROVIDER_SECRET_FIELDS) in the
-  // same click. Either branch is skipped when not applicable to this
-  // provider — e.g. the native, non-sandboxed "stormglass" provider only
-  // has secret fields and no allowlist, so only the secrets branch runs.
+  // Single Save button for the whole modal: saves allowlist overrides AND
+  // any touched secret field(s) (only relevant for providers listed in
+  // PROVIDER_SECRET_FIELDS) in the same click. The overrides branch is
+  // skipped only while `info` hasn't loaded yet (every provider is
+  // sandboxed once loaded, see backend/plugin_overrides_handlers.go).
   const handleSave = async () => {
     if (!providerId) return
     setIsSaving(true)
@@ -219,7 +217,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                 id="allowed-secrets"
                 value={secretsInput}
                 onChange={(e) => setSecretsInput(e.target.value)}
-                placeholder="STORMGLASS_API_KEY"
+                placeholder="WEATHERKIT_KEY_ID"
                 aria-label="Allowed secrets"
               />
             </Field>

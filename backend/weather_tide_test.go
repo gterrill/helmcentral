@@ -14,13 +14,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func ensureTideProvidersRegistered(t *testing.T) {
-	t.Helper()
-	if _, ok := getTideProvider("stormglass"); !ok {
-		registerTideProvider(newStormGlassTideProvider())
-	}
-}
-
 func writeTideTodaySettings(t *testing.T, provider, stationID string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "settings.yaml")
@@ -33,7 +26,6 @@ func writeTideTodaySettings(t *testing.T, provider, stationID string) string {
 
 func TestTideToday_ReturnsBadGatewayWhenProviderFetchFails(t *testing.T) {
 	withCleanTideProviderRegistry(t)
-	ensureTideProvidersRegistered(t)
 	registerTideProvider(&stubTideProvider{id: "bom", fetchErr: errors.New("simulated fetch failure")})
 
 	settingsPath := writeTideTodaySettings(t, "bom", "DOES_NOT_EXIST_12345")
@@ -63,7 +55,6 @@ func TestTideToday_ReturnsBadGatewayWhenProviderFetchFails(t *testing.T) {
 
 func TestTideToday_ReturnsOKWithProviderData(t *testing.T) {
 	withCleanTideProviderRegistry(t)
-	ensureTideProvidersRegistered(t)
 
 	station := tideStation{StationID: "TEST_STATION", Name: "Test Harbour"}
 	now := time.Now().UTC()
@@ -108,7 +99,6 @@ func TestTideToday_ReturnsOKWithProviderData(t *testing.T) {
 
 func TestTideToday_ReturnsBadGatewayForUnknownProvider(t *testing.T) {
 	withCleanTideProviderRegistry(t)
-	ensureTideProvidersRegistered(t)
 	settingsPath := writeTideTodaySettings(t, "not-a-real-provider", "ANY")
 	t.Setenv("SETTINGS_FILE", settingsPath)
 
@@ -126,14 +116,52 @@ func TestTideToday_ReturnsBadGatewayForUnknownProvider(t *testing.T) {
 	}
 }
 
+// TestTideToday_ReturnsBadGatewayWhenNoTideProvidersRegistered guards the
+// intended default state for a fresh install: tides are WASM-plugin-only
+// (see backend/tide_providers.go), so with no plugins/tides/*.wasm present
+// the registry is empty - not silently populated by any built-in provider -
+// and configuring a real-looking provider id (e.g. "bom", before its plugin
+// is actually installed) must still 502 with a clear, actionable message
+// rather than crash or silently succeed.
+func TestTideToday_ReturnsBadGatewayWhenNoTideProvidersRegistered(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+
+	if len(tideProviderRegistry) != 0 {
+		t.Fatalf("expected an empty tide provider registry with no plugins loaded, got %d entries", len(tideProviderRegistry))
+	}
+
+	settingsPath := writeTideTodaySettings(t, "bom", "ANY_STATION")
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/tide-today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := tideToday(c); err != nil {
+		t.Fatalf("tideToday returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected status %d when the tide provider registry is empty, got %d (body: %s)", http.StatusBadGateway, rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if !strings.Contains(payload["error"], "unknown tide provider configured") {
+		t.Fatalf("expected a clear 'unknown tide provider' error, got %q", payload["error"])
+	}
+}
+
 // TestTideToday_ReturnsBadGatewayWhenProviderEmpty guards the fix for the
-// bug where an empty ui.tide_provider silently defaulted to "stormglass" -
-// which then 502'd anyway on any install without STORMGLASS_API_KEY set,
-// with no indication of what to actually configure. Empty is now treated
-// the same as "not configured", with an actionable error.
+// bug where an empty ui.tide_provider silently defaulted to a hardcoded
+// provider id, which then 502'd anyway on any install lacking that
+// provider's credentials, with no indication of what to actually configure.
+// Empty is now treated the same as "not configured", with an actionable
+// error.
 func TestTideToday_ReturnsBadGatewayWhenProviderEmpty(t *testing.T) {
 	withCleanTideProviderRegistry(t)
-	ensureTideProvidersRegistered(t)
 
 	path := filepath.Join(t.TempDir(), "settings.yaml")
 	if err := os.WriteFile(path, []byte("ui:\n  tide_station_id: ANY\n"), 0o644); err != nil {
@@ -162,15 +190,17 @@ func TestTideToday_ReturnsBadGatewayWhenProviderEmpty(t *testing.T) {
 	}
 }
 
-// TestTideToday_ReturnsBadGatewayWhenStationEmptyForNonStormglassProvider
-// guards the fix for a live bug: ui.tide_station_id defaulted to Storm
-// Glass's "vessel-position" pseudo-station regardless of which provider was
-// actually configured, so a BOM/NOAA user who hadn't picked a real station
-// got a confusing "unknown BOM tide station: vessel-position" error instead
-// of a clear "you haven't picked a station yet" message.
-func TestTideToday_ReturnsBadGatewayWhenStationEmptyForNonStormglassProvider(t *testing.T) {
+// TestTideToday_ReturnsBadGatewayWhenStationEmpty guards the fix for a live
+// bug: ui.tide_station_id used to silently default to a hardcoded
+// pseudo-station id regardless of which provider was actually configured,
+// so a BOM/NOAA user who hadn't picked a real station got a confusing
+// "unknown BOM tide station: <that id>" error instead of a clear "you
+// haven't picked a station yet" message. Now that every registered provider
+// is station-based (tides are WASM-plugin-only, and every plugin
+// implementation is a real station catalog, never a pseudo-station), an
+// empty station id must always 502 with an actionable message.
+func TestTideToday_ReturnsBadGatewayWhenStationEmpty(t *testing.T) {
 	withCleanTideProviderRegistry(t)
-	ensureTideProvidersRegistered(t)
 	registerTideProvider(&stubTideProvider{id: "bom"})
 
 	settingsPath := writeTideTodaySettings(t, "bom", "")
@@ -185,7 +215,7 @@ func TestTideToday_ReturnsBadGatewayWhenStationEmptyForNonStormglassProvider(t *
 		t.Fatalf("tideToday returned error: %v", err)
 	}
 	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected status %d when no tide station is configured for a non-stormglass provider, got %d (body: %s)", http.StatusBadGateway, rec.Code, rec.Body.String())
+		t.Fatalf("expected status %d when no tide station is configured, got %d (body: %s)", http.StatusBadGateway, rec.Code, rec.Body.String())
 	}
 
 	var payload map[string]string
@@ -194,39 +224,6 @@ func TestTideToday_ReturnsBadGatewayWhenStationEmptyForNonStormglassProvider(t *
 	}
 	if payload["error"] == "" {
 		t.Fatalf("expected a non-empty, actionable error message, got %+v", payload)
-	}
-}
-
-// TestTideToday_StormglassDefaultsEmptyStationToVesselPosition is a
-// regression guard: Storm Glass is the one provider where an empty station
-// ID is meaningful (it has exactly one pseudo-station, the vessel's live
-// position) - that auto-fill behavior must survive the fix above, which
-// only removes the auto-fill for every OTHER provider.
-func TestTideToday_StormglassDefaultsEmptyStationToVesselPosition(t *testing.T) {
-	withCleanTideProviderRegistry(t)
-	ensureTideProvidersRegistered(t)
-
-	settingsPath := writeTideTodaySettings(t, "stormglass", "")
-	t.Setenv("SETTINGS_FILE", settingsPath)
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/tide-today", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := tideToday(c); err != nil {
-		t.Fatalf("tideToday returned error: %v", err)
-	}
-	// Storm Glass has no credentials configured in this test environment,
-	// so the request still fails - but it must fail at the *fetch* step
-	// (proving the empty station was auto-filled and provider resolution
-	// succeeded), not at the provider/station-configuration step.
-	var payload map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to parse error response: %v", err)
-	}
-	if strings.Contains(payload["error"], "no tide provider configured") || strings.Contains(payload["error"], "no tide station configured") {
-		t.Fatalf("expected the stormglass vessel-position station auto-fill to still apply, got configuration error: %q", payload["error"])
 	}
 }
 

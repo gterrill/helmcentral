@@ -2,7 +2,7 @@
 //
 // NOTE on this file's name: it is deliberately "wasm_tide_provider.go", not
 // "tide_provider_wasm.go" (which would otherwise match this repo's
-// tide_provider_bom.go / tide_provider_stormglass.go naming convention).
+// tide_providers.go naming convention).
 // A source file whose name ends in "_wasm.go" (or "_wasm_test.go" - the Go
 // toolchain strips a trailing "_test" before checking) is treated by the Go
 // toolchain as implicitly constrained to GOARCH=wasm, per the filename-based
@@ -196,8 +196,8 @@ func (p *wasmTideProvider) fetchFromPlugin(stationID string) (tideChartResult, e
 // shared loadWasmPluginsFromDir. A file that fails to load as a valid plugin
 // is logged and skipped - discovery continues for the remaining files,
 // mirroring sat_charts.go's listSatChartsHandler "skip corrupt, keep going"
-// idiom. Because native providers register first in main.go, a WASM plugin
-// can never shadow "bom" or "stormglass" - first-registered wins.
+// idiom. Tides are WASM-plugin-only - there is no native provider to shadow,
+// so first-registered-wins here only matters between plugins themselves.
 func loadWasmTideProviders(dir string) {
 	loadWasmPluginsFromDir(dir, "plugins/tides",
 		func(id string) bool {

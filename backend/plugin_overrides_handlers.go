@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -18,12 +19,16 @@ type namedProvider interface {
 	Description() string
 }
 
-// pluginPathProvider is implemented only by WASM-backed providers -
+// pluginPathProvider is implemented by every WASM-backed provider -
 // wasmPluginBase's Path() accessor (Part 1), inherited by every
 // wasmTideProvider/wasmWeatherProvider/wasmWaveProvider/
-// wasmForecastWarningsProvider via embedding. A provider that does NOT
-// implement this (currently only stormGlassTideProvider) is native and has
-// no WASM sandbox or allowlist concept at all.
+// wasmForecastWarningsProvider via embedding. Every provider registered in
+// every domain's registry (tide/weather/wave/forecast-warnings) is
+// WASM-backed, so this assertion holding is an invariant, not a runtime
+// possibility to branch on: a provider that fails it is a programming error
+// (something registered a non-WASM provider), and the call sites below
+// treat that as an internal error rather than a supported "native provider"
+// configuration.
 type pluginPathProvider interface{ Path() string }
 
 // pluginInfoResponse is the exact, fixed HTTP contract for
@@ -77,15 +82,15 @@ func providerByTypeAndID(providerType, id string) (provider namedProvider, valid
 }
 
 // buildPluginInfoResponse builds the pluginInfoResponse for an already
-// resolved provider. For a WASM-backed provider (implements
-// pluginPathProvider), allowed hosts/secrets are resolved via
+// resolved provider. Every registered provider is WASM-backed (implements
+// pluginPathProvider): allowed hosts/secrets are resolved via
 // allowedHostsForWasmPlugin/allowedSecretsForWasmPlugin (already
 // override-aware, Part 2) and the two *Overridden flags come from a direct
 // globalPluginOverridesStore.Get - both flags share the same "is there a
 // saved override row for this path at all" answer, since Set always saves
-// both arrays together in one row. For a native provider (currently only
-// Storm Glass), Sandboxed is false, AllowedHosts/AllowedSecrets are empty
-// (never null) arrays, and both *Overridden flags are false.
+// both arrays together in one row. If provider does not implement
+// pluginPathProvider, that is an invariant violation (see pluginPathProvider
+// doc comment) and is reported as an error rather than a degraded response.
 func buildPluginInfoResponse(providerType string, provider namedProvider) (pluginInfoResponse, error) {
 	resp := pluginInfoResponse{
 		Type:           providerType,
@@ -98,7 +103,7 @@ func buildPluginInfoResponse(providerType string, provider namedProvider) (plugi
 
 	pp, ok := provider.(pluginPathProvider)
 	if !ok {
-		return resp, nil
+		return pluginInfoResponse{}, fmt.Errorf("provider %q (type %s) does not implement pluginPathProvider; every registered provider must be WASM-backed", provider.ID(), providerType)
 	}
 	resp.Sandboxed = true
 
@@ -159,9 +164,13 @@ type pluginOverridesRequest struct {
 	AllowedSecrets []string `json:"allowed_secrets"`
 }
 
-// postPluginOverridesHandler is POST /api/plugins/:type/:id/overrides.
-// Rejects (400) a target provider that isn't WASM-backed (currently only
-// Storm Glass) - a native provider has no allowlist concept to override.
+// postPluginOverridesHandler is POST /api/plugins/:type/:id/overrides. A
+// resolved provider that isn't WASM-backed is an invariant violation (see
+// pluginPathProvider doc comment), not a client-triggerable condition -
+// providerType/id only decide which registry entry is resolved, and every
+// entry in every registry is WASM-backed, so this reports a 500 like any
+// other server-side invariant failure rather than blaming the request with
+// a 400.
 func postPluginOverridesHandler(c echo.Context) error {
 	providerType := c.Param("type")
 	id := c.Param("id")
@@ -176,7 +185,7 @@ func postPluginOverridesHandler(c echo.Context) error {
 
 	pp, ok := provider.(pluginPathProvider)
 	if !ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "provider does not support host/secret allowlisting"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("provider %q (type %s) does not implement pluginPathProvider; every registered provider must be WASM-backed", id, providerType)})
 	}
 
 	var req pluginOverridesRequest
@@ -219,7 +228,7 @@ func deletePluginOverridesHandler(c echo.Context) error {
 
 	pp, ok := provider.(pluginPathProvider)
 	if !ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "provider does not support host/secret allowlisting"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("provider %q (type %s) does not implement pluginPathProvider; every registered provider must be WASM-backed", id, providerType)})
 	}
 
 	if err := globalPluginOverridesStore.Delete(pp.Path()); err != nil {

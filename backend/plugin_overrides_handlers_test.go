@@ -47,6 +47,27 @@ func newTestWasmTideProviderWithCompanionFiles(t *testing.T, hosts, secrets []st
 	return provider
 }
 
+// nonWasmTideProviderFake is a test-only tideProvider that deliberately does
+// NOT implement pluginPathProvider (no Path() method), used to exercise the
+// invariant-violation error path in buildPluginInfoResponse/
+// postPluginOverridesHandler/deletePluginOverridesHandler
+// (backend/plugin_overrides_handlers.go). In production every provider ever
+// registered is WASM-backed (implements pluginPathProvider); this fake
+// simulates the invariant being violated so the fail-fast behavior is
+// actually tested rather than just asserted in comments.
+type nonWasmTideProviderFake struct{}
+
+func (nonWasmTideProviderFake) ID() string          { return "fake-non-wasm" }
+func (nonWasmTideProviderFake) Name() string        { return "Fake Non-WASM Provider" }
+func (nonWasmTideProviderFake) Description() string { return "test-only invariant-violation fixture" }
+func (nonWasmTideProviderFake) TTLSeconds() int64   { return 0 }
+func (nonWasmTideProviderFake) SearchStations(query string, limit int) []tideStation {
+	return nil
+}
+func (nonWasmTideProviderFake) FetchTideChart(stationID string) (tideChartResult, error) {
+	return tideChartResult{}, nil
+}
+
 func newPluginTestEchoContext(method, path string, body string, providerType, id string) (echo.Context, *httptest.ResponseRecorder) {
 	e := echo.New()
 	var req *http.Request
@@ -100,38 +121,24 @@ func TestGetPluginInfoHandler_WasmProviderReturnsSandboxedTrueWithFileBasedAllow
 	}
 }
 
-func TestGetPluginInfoHandler_StormGlassReturnsSandboxedFalseWithEmptyArrays(t *testing.T) {
+func TestGetPluginInfoHandler_NonWasmProviderReturnsInternalServerError(t *testing.T) {
 	withCleanTideProviderRegistry(t)
-	withTestPluginOverridesStore(t)
-	registerTideProvider(newStormGlassTideProvider())
 
-	c, rec := newPluginTestEchoContext(http.MethodGet, "/api/plugins/tide/stormglass", "", "tide", "stormglass")
+	registerTideProvider(nonWasmTideProviderFake{})
+
+	c, rec := newPluginTestEchoContext(http.MethodGet, "/api/plugins/tide/fake-non-wasm", "", "tide", "fake-non-wasm")
 	if err := getPluginInfoHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	var resp pluginInfoResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	var errResp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
 	}
-
-	if resp.Sandboxed {
-		t.Errorf("expected sandboxed=false for Storm Glass")
-	}
-	if resp.AllowedHosts == nil || len(resp.AllowedHosts) != 0 {
-		t.Errorf("expected allowed_hosts to be an empty array (not null), got %+v", resp.AllowedHosts)
-	}
-	if resp.AllowedSecrets == nil || len(resp.AllowedSecrets) != 0 {
-		t.Errorf("expected allowed_secrets to be an empty array (not null), got %+v", resp.AllowedSecrets)
-	}
-	if resp.AllowedHostsOverridden || resp.AllowedSecretsOverridden {
-		t.Errorf("expected both overridden flags false for a non-sandboxed provider, got %+v", resp)
-	}
-	if resp.Description == "" {
-		t.Errorf("expected a non-empty description for Storm Glass")
+	if !strings.Contains(errResp["error"], "failed to read plugin allowlist state") {
+		t.Errorf("expected generic 500 error message, got %+v", errResp)
 	}
 }
 
@@ -247,25 +254,48 @@ func TestDeletePluginOverridesHandler_ClearsOverrideAndGetReverts(t *testing.T) 
 	}
 }
 
-func TestPostPluginOverridesHandler_AgainstStormGlassReturns400(t *testing.T) {
+func TestPostPluginOverridesHandler_NonWasmProviderReturnsInternalServerError(t *testing.T) {
 	withCleanTideProviderRegistry(t)
 	withTestPluginOverridesStore(t)
-	registerTideProvider(newStormGlassTideProvider())
+
+	registerTideProvider(nonWasmTideProviderFake{})
 
 	body := `{"allowed_hosts":["example.com"],"allowed_secrets":[]}`
-	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/stormglass/overrides", body, "tide", "stormglass")
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/fake-non-wasm/overrides", body, "tide", "fake-non-wasm")
 	if err := postPluginOverridesHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var errResp map[string]string
 	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
 		t.Fatalf("unmarshal error response: %v", err)
 	}
-	if errResp["error"] == "" {
-		t.Errorf("expected a non-empty error message")
+	if !strings.Contains(errResp["error"], "fake-non-wasm") || !strings.Contains(errResp["error"], "pluginPathProvider") {
+		t.Errorf("expected error naming the provider and the violated invariant, got %+v", errResp)
+	}
+}
+
+func TestDeletePluginOverridesHandler_NonWasmProviderReturnsInternalServerError(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	registerTideProvider(nonWasmTideProviderFake{})
+
+	c, rec := newPluginTestEchoContext(http.MethodDelete, "/api/plugins/tide/fake-non-wasm/overrides", "", "tide", "fake-non-wasm")
+	if err := deletePluginOverridesHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if !strings.Contains(errResp["error"], "fake-non-wasm") || !strings.Contains(errResp["error"], "pluginPathProvider") {
+		t.Errorf("expected error naming the provider and the violated invariant, got %+v", errResp)
 	}
 }
 

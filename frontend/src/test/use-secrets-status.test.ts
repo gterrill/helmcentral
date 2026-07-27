@@ -6,7 +6,6 @@ const secretsGetResponse = {
   SIGNALK_USERNAME: false,
   SIGNALK_PASSWORD: false,
   INFLUXDB_TOKEN: false,
-  STORMGLASS_API_KEY: false,
   GEONAMES_USERNAME: false,
   WEATHERKIT_KEY_ID: false,
   WEATHERKIT_TEAM_ID: false,

@@ -7,10 +7,9 @@ import { formatRefreshAge } from '@/components/forecast-drawer'
 import { TideChart, TidePhaseBadge } from '@/components/tide-chart'
 import { TideStationPicker } from '@/components/tide-station-picker'
 import { useTideChart } from '@/hooks/use-tide-chart'
+import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useTideSettings } from '@/hooks/use-tide-settings'
 import { classifyTidePhase } from '@/lib/tide-phase'
-
-const STORM_GLASS_STATION_ID = 'vessel-position'
 
 interface ForecastTideSectionProps {
   isImperial: boolean
@@ -27,12 +26,13 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
     error: settingsError,
     saveStation,
   } = useTideSettings()
+  const { providers: tideProviders } = useTideProviders()
   const [showPicker, setShowPicker] = useState(false)
   const [autoDetecting, setAutoDetecting] = useState(true)
   const [autoDetectFailed, setAutoDetectFailed] = useState(false)
 
   useEffect(() => {
-    if (settingsLoading || tideProvider === 'stormglass' || tideStationId) {
+    if (settingsLoading || tideStationId) {
       setAutoDetecting(false)
       return
     }
@@ -43,12 +43,12 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
       .finally(() => setAutoDetecting(false))
   }, [settingsLoading, tideProvider, tideStationId, saveStation])
 
-  const effectiveStationId = tideProvider === 'stormglass' ? STORM_GLASS_STATION_ID : tideStationId
-  // Don't start fetching until settings have loaded — prevents the stormglass default from
-  // briefly appearing when the configured provider is BOM.
+  // Don't start fetching until settings have loaded — prevents a stale/default
+  // provider or station from briefly flashing before the real configured
+  // values are known.
   const { chart, loading, error, isCached, updatedAt, ttlSeconds, refetch } = useTideChart(
     settingsLoading ? '' : tideProvider,
-    settingsLoading ? '' : effectiveStationId,
+    settingsLoading ? '' : tideStationId,
   )
 
   const { windowStart, windowEnd } = useMemo(() => {
@@ -68,7 +68,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
 
       {settingsLoading ? (
         <p className="py-6 text-center text-xs text-muted-foreground">Loading tide settings...</p>
-      ) : tideProvider === 'bom' && !tideStationId ? (
+      ) : !tideStationId ? (
         autoDetecting ? (
           <p className="py-6 text-center text-xs text-muted-foreground">Finding nearest tide station…</p>
         ) : (
@@ -89,10 +89,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
       ) : (
         <>
           {(() => {
-            const displayStationName =
-              tideProvider === 'stormglass'
-                ? (chart?.station.name || 'Current Vessel Position')
-                : (tideStationName || chart?.station.name || '')
+            const displayStationName = tideStationName || chart?.station.name || ''
             const displayStationState = chart?.station.state
             const tidePhase = chart ? classifyTidePhase(chart.extremes, new Date()) : null
 
@@ -105,11 +102,9 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
                   </p>
                   {tidePhase && <TidePhaseBadge phase={tidePhase} className="mt-0.5" />}
                 </div>
-                {tideProvider === 'bom' && (
-                  <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowPicker((prev) => !prev)}>
-                    Change Station
-                  </Button>
-                )}
+                <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowPicker((prev) => !prev)}>
+                  Change Station
+                </Button>
               </div>
             )
           })()}
@@ -141,7 +136,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
 
           {(isCached || updatedAt) && (
             <p className="mt-1 text-xs text-muted-foreground">
-              Data: {tideProvider === 'bom' ? 'Bureau of Meteorology (Australia)' : 'Storm Glass'}
+              Data: {tideProviders.find((p) => p.id === tideProvider)?.name || tideProvider}
               {' · '}
               {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
               {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}

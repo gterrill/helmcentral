@@ -5,13 +5,12 @@ import { SettingsFormProvider } from '@/components/settings/settings-form-contex
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 
 // Guards against a regression of the bug where a provider select/card
-// silently pre-selected "Storm Glass" (a paid, keyless-unfriendly
-// provider) before settings ever loaded, and would then get written back
-// to settings.yaml on the next unrelated save even though nothing was
-// actually configured. Unlike weather/wave/forecast-warnings (which do
-// have an "active if unset" default), tide must show NO provider active
-// until either the server reports one configured, or the operator picks
-// one themselves.
+// silently pre-selected a hardcoded provider before settings ever loaded,
+// and would then get written back to settings.yaml on the next unrelated
+// save even though nothing was actually configured. Unlike weather/wave/
+// forecast-warnings (which do have an "active if unset" default), tide must
+// show NO provider active until either the server reports one configured,
+// or the operator picks one themselves.
 describe('ProviderGroup tide provider default', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -30,7 +29,7 @@ describe('ProviderGroup tide provider default', () => {
             type="tide"
             providers={[
               { id: 'bom', name: 'Bureau of Meteorology', description: 'Australian tide data' },
-              { id: 'stormglass', name: 'Storm Glass', description: 'Paid worldwide tide data' },
+              { id: 'noaa', name: 'NOAA', description: 'US tide data' },
             ]}
           />
         </SecretsStatusProvider>

@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -12,125 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
-const (
-	defaultTideCacheFile = "cache/tide_cache.json"
-	metersToFeet         = 3.28084
-)
-
-type jsonCacheDescriptor struct {
-	Name     string
-	EnvKey   string
-	Fallback string
-	TTL      time.Duration
-}
-
-type cacheInfoResponse struct {
-	Name            string  `json:"name"`
-	FilePath        string  `json:"file_path"`
-	TTLSeconds      int64   `json:"ttl_seconds"`
-	Exists          bool    `json:"exists"`
-	SizeBytes       int64   `json:"size_bytes"`
-	ModifiedAt      *string `json:"modified_at"`
-	InMemoryEntries int     `json:"in_memory_entries"`
-	CacheHits       uint64  `json:"cache_hits"`
-	CacheMisses     uint64  `json:"cache_misses"`
-}
-
-// jsonCacheDescriptors only carries the "tide" entry now - the weather_today
-// and weather_forecast fixed-TTL JSON caches were deleted in favor of the
-// WASM plugin adapter's own per-plugin wasmPluginCache[T] (see
-// wasm_weather_provider.go), the same way tide's WASM plugins already work.
-var jsonCacheDescriptors = []jsonCacheDescriptor{
-	{Name: "tide", EnvKey: "TIDE_CACHE_FILE", Fallback: defaultTideCacheFile, TTL: stormGlassTideCacheTTL},
-}
-
-func listCaches(c echo.Context) error {
-	result := make([]cacheInfoResponse, 0, len(jsonCacheDescriptors))
-
-	for _, descriptor := range jsonCacheDescriptors {
-		filePath := cacheFilePath(descriptor.EnvKey, descriptor.Fallback)
-		info, err := os.Stat(filePath)
-		exists := err == nil
-		sizeBytes := int64(0)
-		var modifiedAt *string
-
-		if exists {
-			sizeBytes = info.Size()
-			timestamp := info.ModTime().UTC().Format(time.RFC3339)
-			modifiedAt = &timestamp
-		} else if !errors.Is(err, os.ErrNotExist) {
-			log.Printf("Failed to stat cache file %s: %v", filePath, err)
-		}
-
-		inMemoryEntries := 0
-		cacheHits := uint64(0)
-		cacheMisses := uint64(0)
-		switch descriptor.Name {
-		case "tide":
-			tideCacheStore.mu.RLock()
-			inMemoryEntries = len(tideCacheStore.data)
-			tideCacheStore.mu.RUnlock()
-			cacheHits = atomic.LoadUint64(&tideCacheHits)
-			cacheMisses = atomic.LoadUint64(&tideCacheMisses)
-		}
-
-		result = append(result, cacheInfoResponse{
-			Name:            descriptor.Name,
-			FilePath:        filePath,
-			TTLSeconds:      int64(descriptor.TTL / time.Second),
-			Exists:          exists,
-			SizeBytes:       sizeBytes,
-			ModifiedAt:      modifiedAt,
-			InMemoryEntries: inMemoryEntries,
-			CacheHits:       cacheHits,
-			CacheMisses:     cacheMisses,
-		})
-	}
-
-	return c.JSON(http.StatusOK, result)
-}
-
-func invalidateCache(c echo.Context) error {
-	name := strings.TrimSpace(c.Param("name"))
-	if name == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing cache name"})
-	}
-
-	var descriptor *jsonCacheDescriptor
-	for idx := range jsonCacheDescriptors {
-		if jsonCacheDescriptors[idx].Name == name {
-			descriptor = &jsonCacheDescriptors[idx]
-			break
-		}
-	}
-
-	if descriptor == nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "cache not found"})
-	}
-
-	switch descriptor.Name {
-	case "tide":
-		tideCacheStore.mu.Lock()
-		tideCacheStore.data = make(map[string]tideChartResult)
-		tideCacheStore.mu.Unlock()
-	}
-
-	filePath := cacheFilePath(descriptor.EnvKey, descriptor.Fallback)
-	if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to remove cache file: %v", err)})
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{
-		"status": "ok",
-		"cache":  descriptor.Name,
-	})
-}
+const metersToFeet = 3.28084
 
 // weatherForecastDayData is the host's per-day forecast assembly, built by
 // weather_providers.go's buildDayData from a weatherProvider's
@@ -241,10 +127,6 @@ type tideTodayETagData struct {
 	DoubleLowToday      bool      `json:"double_low_today,omitempty"`
 }
 
-func init() {
-	loadTideCacheFromDisk()
-}
-
 // cacheFilePath resolves where a piece of runtime state lives. Precedence:
 // an explicit per-file env override wins outright, otherwise the built-in
 // relative fallback is rooted at HELMCENTRAL_STATE_DIR when one is set.
@@ -335,7 +217,7 @@ func tideToday(c echo.Context) error {
 
 	configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
 	if configuredProvider == "" {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "no tide provider configured — set ui.tide_provider in Settings (e.g. \"stormglass\" with STORMGLASS_API_KEY set, \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)"})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "no tide provider configured — set ui.tide_provider in Settings (e.g. \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)"})
 	}
 
 	provider, ok := getTideProvider(configuredProvider)
@@ -345,11 +227,7 @@ func tideToday(c echo.Context) error {
 
 	configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
 	if configuredStation == "" {
-		if configuredProvider == "stormglass" {
-			configuredStation = stormGlassVesselStationID
-		} else {
-			return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)})
-		}
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)})
 	}
 
 	result, fetchErr := provider.FetchTideChart(configuredStation)

@@ -7,8 +7,15 @@ export interface TideSettings {
   tideAutoStation: boolean
 }
 
+// tideProvider starts empty, not a hardcoded provider id: tides are
+// WASM-plugin-only with no built-in default (see backend/tide_providers.go),
+// so silently substituting a fake "default" here would mask an unconfigured
+// install exactly the way backend/weather_tide.go's tideToday deliberately
+// does not - it surfaces "no tide provider configured" instead. Consumers
+// (e.g. ForecastTideSection) already gate on `loading` before reading
+// tideProvider, so an empty initial/fallback value is safe.
 const defaultTideSettings: TideSettings = {
-  tideProvider: 'stormglass',
+  tideProvider: '',
   tideStationId: '',
   tideStationName: '',
   tideAutoStation: false,
@@ -30,9 +37,7 @@ export function useTideSettings() {
 
       const data = await response.json()
       setSettings({
-        tideProvider: typeof data.ui?.tide_provider === 'string' && data.ui.tide_provider !== ''
-          ? data.ui.tide_provider
-          : defaultTideSettings.tideProvider,
+        tideProvider: typeof data.ui?.tide_provider === 'string' ? data.ui.tide_provider : defaultTideSettings.tideProvider,
         tideStationId: typeof data.ui?.tide_station_id === 'string' ? data.ui.tide_station_id : '',
         tideStationName: typeof data.ui?.tide_station_name === 'string' ? data.ui.tide_station_name : '',
         tideAutoStation: typeof data.ui?.tide_auto_station === 'boolean' ? data.ui.tide_auto_station : false,

@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+The caches-admin item deferred under Consequences below — surfacing per-plugin weather/wave cache files in `/api/caches` — was resolved by ADR 0033, which deleted that endpoint and the `/admin` page entirely once Storm Glass's removal left them with nothing to report. Per-plugin caches still exist and work; they are simply unobservable, for all four domains alike.
+
 ## Context
 Weather (`fetchWeatherKitData`, `fetchWeatherKitForecastBundleData`) and wave/swell forecasting (`fetchOpenMeteoMarineForecast`, `fetchOpenMeteoSeaTemperatureF`) were hardcoded directly into `backend/weather_tide.go`, the same problem ADR-0017 already solved for tides: a single maintainer-chosen vendor per domain, no way for an operator to swap providers without a Go rebuild, and — specific to weather — a real single-point-of-failure risk, since Apple WeatherKit requires a paid developer account and per-operator credentials that a fresh install simply doesn't have. `weatherToday` masked that failure mode with a hardcoded `72°F / "Partly Cloudy"` fallback state, and a wave-fetch failure inside `fetchWeatherKitForecastBundleData` was logged and silently swallowed into an empty `HourlyWave`/`WaveSummary` rather than surfaced — both violations of this codebase's fail-fast policy, not just missed features.
 

@@ -41,7 +41,7 @@ helmcentral/
   - [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) - Needed to retrieve generator and advanced electrical states (e.g. from Victron GX devices).
   - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) - Optional. Only needed if you enable InfluxDB (Settings → InfluxDB) for longer-retention historical graphing and analysis than the built-in in-memory buffers hold (~24h for wind gust, ~6h for depth) — and for history that survives a backend restart, which the in-memory buffers do not.
 
-Secrets (SignalK credentials, the InfluxDB token, Storm Glass/GeoNames/WeatherKit API keys) are no longer set via a `backend/.env` file — start the app with no secrets configured, then paste them into Settings → Secrets in the running app; they're encrypted at rest. See [docs/adr/0023-encrypted-secrets-store.md](docs/adr/0023-encrypted-secrets-store.md).
+Secrets (SignalK credentials, the InfluxDB token, GeoNames/WeatherKit API keys) are no longer set via a `backend/.env` file — start the app with no secrets configured, then paste them into Settings → Secrets in the running app; they're encrypted at rest. See [docs/adr/0023-encrypted-secrets-store.md](docs/adr/0023-encrypted-secrets-store.md).
 
 ### Server Deployment (Docker)
 
@@ -136,7 +136,9 @@ See [docs/adr/0012-configurable-bento-dashboard.md](docs/adr/0012-configurable-b
 
 ### Tide Provider Plugins
 
-Tide data comes from a pluggable `tideProvider` registry (`backend/tide_providers.go`), with one built-in provider (Storm Glass, using the vessel's current position). Every regional tide source — including BOM for Australia — ships as a WASM plugin instead, so a developer wanting to add another region's government tide API doesn't need to fork Helmcentral or touch Go at all: drop a compiled WASM plugin into `plugins/tides/` and it's picked up as a new provider in the existing Settings tide-provider dropdown on the next restart — zero frontend changes.
+Tide data comes from a pluggable `tideProvider` registry (`backend/tide_providers.go`) with no built-in provider at all — tides are WASM-plugin-only, the same as weather, waves, and forecast warnings. Every regional tide source, including BOM for Australia, ships as a WASM plugin, so a developer wanting to add another region's government tide API doesn't need to fork Helmcentral or touch Go at all: drop a compiled WASM plugin into `plugins/tides/` and it's picked up as a new provider in the existing Settings tide-provider dropdown on the next restart — zero frontend changes.
+
+With no plugin installed there are no tide providers, and `/api/tide-today` says so rather than guessing — see [docs/adr/0033-remove-storm-glass-tides-plugin-only.md](docs/adr/0033-remove-storm-glass-tides-plugin-only.md) for why the last built-in provider (Storm Glass) was removed, and the recorded path for porting a position-based provider to a plugin.
 
 A plugin is a small guest module exporting five functions (`id`, `name`, `ttl_seconds`, `search_stations`, `fetch_tide_chart`) — the host does the interpolation, caching, and spring/neap classification, so a plugin only ever returns raw station and tide-extreme data. Plugins run sandboxed via [Extism](https://extism.org/)/[wazero](https://wazero.io/) (WASM linear-memory isolation, no filesystem or process access), and can only reach the network hosts explicitly declared in a companion `<name>.allowed_hosts.json` file — no file means no network access at all.
 
@@ -152,7 +154,7 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 
 See [docs/examples/tide-plugins/noaa/README.md](docs/examples/tide-plugins/noaa/README.md) for installing a built plugin, and [docs/adr/0017-wasm-plugin-tide-providers.md](docs/adr/0017-wasm-plugin-tide-providers.md) for why WASM was chosen over alternatives (including Lua) and the full plugin contract.
 
-Unlike weather and waves (below), tides have **no universal keyless default** — tide data is tied to real physical station networks rather than a global forecast model, so there's no free API with genuinely worldwide coverage to hardcode. BOM and NOAA are both built automatically by the `plugins-builder` Compose service, but only cover Australia and the US respectively; Storm Glass has true global reach (it queries the vessel's live position rather than a fixed station list) but requires a paid `STORMGLASS_API_KEY`. An operator must explicitly pick `ui.tide_provider` in Settings to match their region or budget — nothing is silently assumed on their behalf, and `/api/tide-today` returns a clear error naming what's missing until they do.
+Unlike weather and waves (below), tides have **no universal keyless default** — tide data is tied to real physical station networks rather than a global forecast model, so there's no free API with genuinely worldwide coverage to hardcode, and no built-in fallback provider either. BOM and NOAA are both built automatically by the `plugins-builder` Compose service, but only cover Australia and the US respectively, so coverage is limited to whatever plugins are actually installed. An operator must explicitly pick `ui.tide_provider` in Settings to match their region — nothing is silently assumed on their behalf, and `/api/tide-today` returns a clear error naming what's missing until they do.
 
 ### Weather & Wave Forecast Provider Plugins
 

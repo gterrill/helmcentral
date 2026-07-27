@@ -78,7 +78,7 @@ Non-secret knobs are set as real environment variables. There is no `.env` file 
 
 Individual state paths (`ROUTES_FILE`, `SECRETS_DB_PATH`, `TILE_CACHE_PATH`, …) can each be overridden by name and take precedence over `HELMCENTRAL_STATE_DIR`; see `cacheFilePath` in `weather_tide.go`.
 
-Secrets (SignalK credentials, `INFLUXDB_TOKEN`, `STORMGLASS_API_KEY`, `GEONAMES_USERNAME`, `WEATHERKIT_*`) live in an encrypted-at-rest SQLite store instead, managed via the Settings UI's Secrets panel (`GET`/`POST /api/settings/secrets`). See [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md).
+Secrets (SignalK credentials, `INFLUXDB_TOKEN`, `GEONAMES_USERNAME`, `WEATHERKIT_*`) live in an encrypted-at-rest SQLite store instead, managed via the Settings UI's Secrets panel (`GET`/`POST /api/settings/secrets`). See [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md).
 
 Wind-gust-max and depth-trend/tide-detection work out of the box from an in-memory ring buffer fed by the server's live SignalK polling — no InfluxDB required. InfluxDB is an optional enhancement (longer retention than the in-memory windows — ~24h for wind gust, ~6h for depth — and history that survives a restart) configured from the Settings UI's InfluxDB section (`enabled`/`url`/`org`/`bucket`, stored in `settings.yaml`'s `influxdb` section) plus the `INFLUXDB_TOKEN` secret. See [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md).
 
@@ -97,3 +97,4 @@ The durable rationale for trail handling is documented in:
 - [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md)
 - [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md)
 - [../docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md](../docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md)
+- [../docs/adr/0033-remove-storm-glass-tides-plugin-only.md](../docs/adr/0033-remove-storm-glass-tides-plugin-only.md)

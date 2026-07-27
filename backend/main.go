@@ -145,11 +145,10 @@ func main() {
 	}))
 
 	// Encrypted secrets store. Must be opened and loaded into the process
-	// environment before any provider registration below, since SignalK,
-	// Storm Glass, and GeoNames code paths read their secrets via
-	// getEnv/os.Getenv. Fail fast on open error (including a master-key
-	// mismatch against existing encrypted rows) rather than silently
-	// running with secrets unavailable.
+	// environment before any provider registration below, since SignalK and
+	// GeoNames code paths read their secrets via getEnv/os.Getenv. Fail fast
+	// on open error (including a master-key mismatch against existing
+	// encrypted rows) rather than silently running with secrets unavailable.
 	ss, err := newSecretsStore(secretsDBPath(), secretsKeyPath())
 	if err != nil {
 		log.Fatalf("secrets store: %v", err)
@@ -173,8 +172,9 @@ func main() {
 	}
 	globalPluginOverridesStore = pos
 
-	// Tide providers
-	registerTideProvider(newStormGlassTideProvider())
+	// Tide providers - WASM-plugin-only (no native built-in); registry stays
+	// empty (tideToday correctly 502s) until plugins/tides/*.wasm exists,
+	// mirroring the weather/wave providers below.
 	loadWasmTideProviders(pluginsTidesDir())
 
 	// Weather providers - WASM-plugin-only (no native built-in); registry
@@ -236,8 +236,6 @@ func main() {
 	e.GET("/api/tide-chart", tideChartHandler)
 	e.GET("/api/tide-nearest", tideNearestHandler)
 	e.GET("/api/place-name", placeName)
-	e.GET("/api/caches", listCaches)
-	e.POST("/api/caches/:name/invalidate", invalidateCache)
 	e.GET("/api/settings", getSettingsHandler)
 	e.POST("/api/settings", updateSettingsHandler)
 	e.GET("/api/settings/signalk", getSignalKSettingsHandler)

@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+Amended by ADR 0033, which removed the last native tide provider. Tides are now plugin-only, so the registration-ordering guarantee below ("natives register first, so a WASM plugin can never shadow `bom` or `stormglass`") describes a situation that can no longer arise — plugin ids now contend only with each other, under the same first-registered-wins rule. Everything else here, including the plugin contract and the `_wasm.go` filename gotcha, is unchanged.
+
 ## Context
 Adding support for a new region's government tide-data source today means writing a new Go file implementing `tideProvider` (`backend/tide_providers.go`) and rebuilding/redeploying Helmcentral — something only the maintainer can do. Users outside Australia (NOAA for the US, UKHO for the UK, and so on) have no way to add their own region's tide source without forking the app and knowing Go.
 

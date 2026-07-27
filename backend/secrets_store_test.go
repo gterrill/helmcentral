@@ -80,7 +80,7 @@ func TestSecretsStore_ReopenWithSameMasterKeyDecryptsExistingRows(t *testing.T) 
 	if err != nil {
 		t.Fatalf("newSecretsStore (1st open): %v", err)
 	}
-	if err := store1.Set("STORMGLASS_API_KEY", "sg-key-123"); err != nil {
+	if err := store1.Set("GEONAMES_USERNAME", "gn-user-123"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	if err := store1.db.Close(); err != nil {
@@ -93,11 +93,11 @@ func TestSecretsStore_ReopenWithSameMasterKeyDecryptsExistingRows(t *testing.T) 
 	}
 	t.Cleanup(func() { _ = store2.db.Close() })
 
-	value, ok, err := store2.Get("STORMGLASS_API_KEY")
+	value, ok, err := store2.Get("GEONAMES_USERNAME")
 	if err != nil {
 		t.Fatalf("Get after reopen: %v", err)
 	}
-	if !ok || value != "sg-key-123" {
+	if !ok || value != "gn-user-123" {
 		t.Fatalf("expected value to survive reopen with the same key file, got ok=%v value=%q", ok, value)
 	}
 }
@@ -111,7 +111,7 @@ func TestSecretsStore_ReopenWithWrongMasterKeyFailsFast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newSecretsStore (1st open): %v", err)
 	}
-	if err := store1.Set("STORMGLASS_API_KEY", "sg-key-123"); err != nil {
+	if err := store1.Set("GEONAMES_USERNAME", "gn-user-123"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	if err := store1.db.Close(); err != nil {
@@ -221,14 +221,14 @@ func TestSecretsStore_ImportFromEnv_ImportsSetKeysAndSkipsUnset(t *testing.T) {
 		os.Unsetenv(key)
 	}
 	t.Setenv("SIGNALK_USERNAME", "admin")
-	t.Setenv("STORMGLASS_API_KEY", "sg-key")
+	t.Setenv("GEONAMES_USERNAME", "gn-user")
 
 	imported, err := store.ImportFromEnv()
 	if err != nil {
 		t.Fatalf("ImportFromEnv: %v", err)
 	}
 
-	want := []string{"SIGNALK_USERNAME", "STORMGLASS_API_KEY"}
+	want := []string{"SIGNALK_USERNAME", "GEONAMES_USERNAME"}
 	sort.Strings(imported)
 	sort.Strings(want)
 	if len(imported) != len(want) {
@@ -303,7 +303,7 @@ func TestSecretsStore_All_ReflectsSetKeys(t *testing.T) {
 	if !all["SIGNALK_USERNAME"] {
 		t.Errorf("expected SIGNALK_USERNAME=true in All(), got %+v", all)
 	}
-	if all["STORMGLASS_API_KEY"] {
-		t.Errorf("expected STORMGLASS_API_KEY=false in All(), got %+v", all)
+	if all["GEONAMES_USERNAME"] {
+		t.Errorf("expected GEONAMES_USERNAME=false in All(), got %+v", all)
 	}
 }

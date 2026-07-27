@@ -60,7 +60,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
 
   // `touched` covers ALL secret keys tracked by useSecretsStatus — the
   // three inline-section keys (SignalK/InfluxDB/GeoNames) AND the
-  // provider-modal-only keys (Storm Glass/WeatherKit), whether or not that
+  // provider-modal-only keys (WeatherKit), whether or not that
   // modal happens to be open right now. Any of them being touched means
   // there's an in-memory edit that would be lost on navigation, so it must
   // count toward "dirty" too.

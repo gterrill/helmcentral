@@ -3,7 +3,6 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProviderGroup } from '@/components/settings/provider-group'
-import { useSettingsFormContext } from '@/components/settings/settings-form-context'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useForecastWarningsProviders } from '@/hooks/use-forecast-warnings-providers'
 import { useTideProviders } from '@/hooks/use-tide-providers'
@@ -16,15 +15,10 @@ interface WidgetsSectionProps {
 }
 
 export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
-  const { settings } = useSettingsFormContext()
   const { providers: tideProviders } = useTideProviders()
   const { providers: weatherProviders } = useWeatherProviders()
   const { providers: waveProviders } = useWaveProviders()
   const { providers: forecastWarningsProviders } = useForecastWarningsProviders()
-
-  // Tide has no "active if unset" default (see provider-group.tsx), so an
-  // unconfigured tide provider is genuinely empty here, not 'bom'.
-  const tideProvider = settings.ui?.tide_provider || ''
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
@@ -61,15 +55,13 @@ export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
                 />
               </Field>
 
-              {tideProvider === 'bom' && (
-                <Field orientation="horizontal" className="md:col-span-2">
-                  <Switch
-                    checked={draft.tideAutoStation}
-                    onCheckedChange={(checked) => onChange({ tideAutoStation: checked })}
-                  />
-                  <FieldLabel>Auto-update tide station as vessel moves</FieldLabel>
-                </Field>
-              )}
+              <Field orientation="horizontal" className="md:col-span-2">
+                <Switch
+                  checked={draft.tideAutoStation}
+                  onCheckedChange={(checked) => onChange({ tideAutoStation: checked })}
+                />
+                <FieldLabel>Auto-update tide station as vessel moves</FieldLabel>
+              </Field>
             </div>
 
             <ProviderGroup type="tide" providers={tideProviders} />

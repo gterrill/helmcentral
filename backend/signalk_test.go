@@ -40,9 +40,9 @@ func approxEqual(a, b, tolerance float64) bool {
 // TestNormalizeSettingsPayload_PersistsUnregisteredTideProviderAsSubmitted
 // guards against a regression of the bug where any tide_provider value not
 // currently in the registry (e.g. a WASM plugin not yet built/loaded, or a
-// simple typo) was silently rewritten to "stormglass" on every settings
-// save - discarding the caller's choice without any error. tide_provider
-// should round-trip exactly like tide_station_id/tide_station_name already
+// simple typo) was silently rewritten to a hardcoded default provider id on
+// every settings save - discarding the caller's choice without any error.
+// tide_provider should round-trip exactly like tide_station_id/tide_station_name already
 // do a few lines below it; registry validation belongs at read time
 // (tideToday, tideChartHandler, ...), not at write time.
 func TestNormalizeSettingsPayload_PersistsUnregisteredTideProviderAsSubmitted(t *testing.T) {
@@ -60,8 +60,8 @@ func TestNormalizeSettingsPayload_PersistsUnregisteredTideProviderAsSubmitted(t 
 // the read-side counterpart: GET /api/settings must reflect whatever is
 // actually stored in settings.yaml, even if the configured provider isn't
 // currently registered (e.g. between a settings save and a container
-// restart that loads the new plugin) - not silently substitute
-// "stormglass", which would both mislead the Settings UI and risk
+// restart that loads the new plugin) - not silently substitute a hardcoded
+// default provider id, which would both mislead the Settings UI and risk
 // permanently clobbering the real value on the next save.
 func TestBuildSettingsPayload_SurfacesUnregisteredTideProviderFromDisk(t *testing.T) {
 	settings := map[string]any{

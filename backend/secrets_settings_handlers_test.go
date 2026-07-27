@@ -54,8 +54,8 @@ func TestGetSecretsSettingsHandler_ReflectsStoreState(t *testing.T) {
 	if !resp["SIGNALK_USERNAME"] {
 		t.Errorf("expected SIGNALK_USERNAME=true, got %+v", resp)
 	}
-	if resp["STORMGLASS_API_KEY"] {
-		t.Errorf("expected STORMGLASS_API_KEY=false, got %+v", resp)
+	if resp["GEONAMES_USERNAME"] {
+		t.Errorf("expected GEONAMES_USERNAME=false, got %+v", resp)
 	}
 }
 
