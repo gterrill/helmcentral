@@ -1,36 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 import GridLayout, { WidthProvider, type LayoutItem } from 'react-grid-layout/legacy'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import '@/styles/dashboard-bento-grid.css'
 import { GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { isEmbedWidgetId, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
-// Matches Tailwind's `lg` breakpoint (1024px), used elsewhere in App.tsx for the same
-// mobile-stack-vs-desktop-grid split. A JS media query (not CSS-only hiding) so only one
-// of the two layouts is ever mounted — rendering both simultaneously (toggled via CSS
-// classes) leaves duplicate DOM nodes per widget, which is wasted render cost for real
-// users and breaks any `getByText`-style single-match query in tests.
-const DESKTOP_GRID_BREAKPOINT = 1024
+// RGL's row geometry. Shared with the narrow CSS grid below, which derives each tile's
+// minimum height from the same numbers so a tile keeps roughly its authored proportions.
+const GRID_COLUMNS = 12
+const GRID_ROW_HEIGHT = 32
+const GRID_MARGIN = 16
 
-function useIsDesktopGrid() {
-  const [isDesktop, setIsDesktop] = useState(
-    () => typeof window !== 'undefined' && window.innerWidth >= DESKTOP_GRID_BREAKPOINT,
-  )
-
-  useEffect(() => {
-    const mql = window.matchMedia(`(min-width: ${DESKTOP_GRID_BREAKPOINT}px)`)
-    const onChange = () => setIsDesktop(mql.matches)
-    onChange()
-    mql.addEventListener('change', onChange)
-    return () => mql.removeEventListener('change', onChange)
-  }, [])
-
-  return isDesktop
-}
+// At half the 12-column grid or wider, a tile was authored as a "big" one and stays
+// full-bleed in the two-column narrow layout instead of being squeezed into a half.
+const NARROW_FULL_SPAN_MIN_W = GRID_COLUMNS / 2
 
 // Embeds share one constraint rather than having per-id entries, since their ids
 // carry a per-instance token (see ADR 0031).
@@ -65,7 +53,11 @@ export interface DashboardBentoGridProps {
 }
 
 export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onLayoutSettle }: DashboardBentoGridProps) {
-  const isDesktopGrid = useIsDesktopGrid()
+  // Below `lg`, render a plain reflowed stack instead of the RGL grid — never both at once.
+  // Toggling between them via CSS (rather than this JS media query) would mount both layouts
+  // simultaneously, leaving duplicate DOM nodes per widget: wasted render cost for real users,
+  // and it breaks any `getByText`-style single-match query in tests.
+  const isDesktopGrid = useMinWidth(BREAKPOINTS.lg)
 
   const rglLayout = useMemo<LayoutItem[]>(
     () => widgets.map((w) => ({
@@ -92,12 +84,28 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
   }, [onLayoutSettle])
 
   if (!isDesktopGrid) {
-    // Below `lg`, layout mode is unavailable — always show every configured widget as a
-    // plain reflowed stack in (y, x) order, regardless of `editing`.
+    // Below `lg`, reflow the *same* persisted 12-column layout into a CSS grid — one
+    // column on a phone, two from `sm` up (iPad portrait, where a single 900px-wide
+    // column wasted the screen). Nothing extra is persisted, so ADR 0012's one-global-
+    // layout constraint holds; see ADR 0032 for why RGL isn't reused at fewer columns.
+    //
+    // Layout mode stays unavailable regardless of `editing`: a narrow-view drag says
+    // "put this third", which has no non-arbitrary mapping back to (x, y, w, h), and
+    // the backend validator doesn't enforce X+W <= 12 — a bad write-back would be
+    // persisted silently and corrupt the desktop layout.
     return (
-      <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {[...widgets].sort((a, b) => a.y - b.y || a.x - b.x).map((w) => (
-          <div key={w.id}>{renderWidget(w)}</div>
+          <div
+            key={w.id}
+            className={cn(w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
+            // The operator's sizing intent as a floor, not a fixed height: text wraps
+            // more at phone width, so a height copied straight from the desktop grid
+            // would clip. Mirrors RGL's own row maths (rowHeight + margin).
+            style={{ minHeight: w.h * GRID_ROW_HEIGHT + (w.h - 1) * GRID_MARGIN }}
+          >
+            {renderWidget(w)}
+          </div>
         ))}
       </div>
     )
@@ -107,9 +115,9 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
     <ReactGridLayout
       className="layout"
       layout={rglLayout}
-      cols={12}
-      rowHeight={32}
-      margin={[16, 16]}
+      cols={GRID_COLUMNS}
+      rowHeight={GRID_ROW_HEIGHT}
+      margin={[GRID_MARGIN, GRID_MARGIN]}
       containerPadding={[0, 0]}
       isDraggable={editing}
       isResizable={editing}
