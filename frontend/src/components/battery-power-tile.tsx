@@ -120,8 +120,11 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
       <div className="mt-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2">
         <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
           <div className="flex items-baseline gap-2">
-            <span className="font-display text-6xl leading-none tabular-nums text-gauge-primary md:text-7xl">{socLabel}</span>
-            <span className="shrink-0 text-2xl leading-none text-foreground md:text-3xl">%</span>
+            {/* `md` used to mean "more room" and stepped this up. With the narrow
+                dashboard it means the opposite — two columns *and* a fixed sidebar —
+                so the step-up now waits for `lg`, where the RGL grid takes over. */}
+            <span className="font-display text-6xl leading-none tabular-nums text-gauge-primary md:text-5xl lg:text-7xl">{socLabel}</span>
+            <span className="shrink-0 text-2xl leading-none text-foreground md:text-xl lg:text-3xl">%</span>
           </div>
           <div className="mt-3 flex items-center gap-2">
             <div className="h-1.5 flex-1 rounded-full bg-muted/60">
@@ -134,13 +137,18 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
         </div>
         <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
           <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Battery</p>
-          <p className={`font-display text-3xl leading-none md:text-3xl ${chargingValueClass}`}>
+          {/* Steps down between `md` and `lg`. That band is the tightest the tile ever
+              gets: the narrow dashboard is two columns from `sm` up, but from `md` the
+              sidebar is a fixed rail rather than an overlay sheet, so it takes ~256px
+              off the content width — leaving this sub-card ~110px, where a `text-3xl`
+              signed value with its unit suffix spills past the border. */}
+          <p className={`font-display text-3xl leading-none md:text-2xl lg:text-3xl ${chargingValueClass}`}>
             {chargingCurrentLabel}
-            <span className="ml-1 text-xl text-muted-foreground">A</span>
+            <span className="ml-1 text-xl text-muted-foreground md:text-base lg:text-xl">A</span>
           </p>
-          <p className={`mt-1 font-display text-3xl leading-none ${chargingValueClass}`}>
+          <p className={`mt-1 font-display text-3xl leading-none md:text-2xl lg:text-3xl ${chargingValueClass}`}>
             {chargingPowerLabel}
-            <span className="ml-1 text-xl text-muted-foreground">W</span>
+            <span className="ml-1 text-xl text-muted-foreground md:text-base lg:text-xl">W</span>
           </p>
         </div>
       </div>
@@ -208,9 +216,12 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
         </div>
         <div className="rounded-md border bg-background/60 px-3 py-2">
           <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charge Rate</p>
-          <p className={`mt-1 font-display text-3xl leading-none ${chargeRateClass}`}>
+          {/* Same md–lg squeeze as the Battery sub-card above. */}
+          <p className={`mt-1 font-display text-3xl leading-none md:text-2xl lg:text-3xl ${chargeRateClass}`}>
             {chargeRateLabel}
-            <span className="ml-1 text-xl text-muted-foreground">%/hr</span>
+            {/* Four glyphs rather than one, so this suffix steps down further than the
+                A/W ones to keep the pair inside an ~86px sub-card. */}
+            <span className="ml-1 text-xl text-muted-foreground md:text-xs lg:text-xl">%/hr</span>
           </p>
         </div>
       </div>

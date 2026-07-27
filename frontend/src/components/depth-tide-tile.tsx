@@ -91,7 +91,11 @@ export const DepthTideTile = memo(function DepthTideTile({
               {tide.tide_direction}
             </span>
           </div>
-          <div className="mt-2 flex flex-row items-center justify-between gap-x-2">
+          {/* The High/Low pair fits on one line everywhere except md–lg, where the
+              fixed sidebar leaves the two-column dashboard ~240px per tile and the
+              second entry was running past the edge. Stacking them there keeps both
+              readings whole rather than clipping a tide time. */}
+          <div className="mt-2 flex flex-row items-center justify-between gap-x-2 md:flex-col md:items-start md:gap-y-1 lg:flex-row lg:items-center">
             {tideExtremes.map((extreme) => (
               <p key={extreme.isHigh ? 'high' : 'low'} className="inline-flex shrink-0 items-center gap-1.5 text-xs text-foreground">
                 {extreme.isHigh ? (

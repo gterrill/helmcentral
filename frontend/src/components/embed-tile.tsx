@@ -42,7 +42,11 @@ export const EmbedTile = memo(function EmbedTile({ config, editing, onConfigure 
         ) : undefined
       }
     >
-      <div className="h-full min-h-0">
+      {/* `min-h` floor so a newly-added embed is usable before the operator has sized
+          it. The iframe is `h-full`, and in the narrow CSS grid the enclosing chain is
+          auto-height, so without a floor the frame collapses to its ~150px intrinsic
+          default rather than the height the tile was given. */}
+      <div className="h-full min-h-[240px]">
         {hasUsableUrl ? (
           <iframe
             src={config.url.trim()}
