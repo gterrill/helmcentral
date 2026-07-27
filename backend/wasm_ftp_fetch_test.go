@@ -66,7 +66,13 @@ type ftpFetchFixtureInput struct {
 // data over FTP when its AllowedHosts includes the target host - the
 // production wiring path, not the spike's standalone manifest/host function
 // construction.
+// It hits BOM's live FTP server, so -short skips it to keep the default
+// suite offline-clean.
 func TestFTPFetch_AllowedHostRealBOMRoundTripThroughNewWasmPluginBase(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live BOM FTP round-trip in short mode")
+	}
+
 	manifest := extism.Manifest{
 		Wasm:         []extism.Wasm{extism.WasmFile{Path: ftpFetchFixtureWasm}},
 		AllowedHosts: []string{"ftp.bom.gov.au"},

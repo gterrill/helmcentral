@@ -42,7 +42,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
   // Picking a result fills the form; "Save Settings" persists it. Same
   // draft-then-save model as every other field on this page — nothing here
   // writes on click (ADR 0028).
-  const useDiscoveredServer = (address: string, port: number) => {
+  const applyDiscoveredServer = (address: string, port: number) => {
     onChange({ signalkAddress: address, signalkPort: String(port) })
     setTestSuccess(null)
     setTestError(null)
@@ -179,7 +179,7 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
                   key={`${server.address}:${server.port}`}
                   variant="outline"
                   className="h-10 justify-between px-3"
-                  onClick={() => useDiscoveredServer(server.address, server.port)}
+                  onClick={() => applyDiscoveredServer(server.address, server.port)}
                 >
                   <span>{server.vessel_name || 'Unnamed vessel'}</span>
                   <span className="text-muted-foreground">{`${server.address}:${server.port}`}</span>
