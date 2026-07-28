@@ -1,5 +1,6 @@
 import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 
 interface BoatUiSectionProps {
@@ -39,13 +40,19 @@ export function BoatUiSection({ draft, onChange }: BoatUiSectionProps) {
         <FieldLegend variant="label">Power</FieldLegend>
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
           <Field>
-            <FieldLabel htmlFor="battery-ah">Battery Ah</FieldLabel>
-            <Input
-              id="battery-ah"
-              value={draft.houseBatteryCapacityAh}
-              onChange={(e) => onChange({ houseBatteryCapacityAh: e.target.value })}
-              aria-label="House battery capacity"
-            />
+            <FieldLabel htmlFor="battery-ah">Battery</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="battery-ah"
+                inputMode="decimal"
+                value={draft.houseBatteryCapacityAh}
+                onChange={(e) => onChange({ houseBatteryCapacityAh: e.target.value })}
+                aria-label="House battery capacity in amp-hours"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>Ah</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
           </Field>
         </div>
       </FieldSet>

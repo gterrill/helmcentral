@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useSignalKDiscovery } from '@/hooks/use-signalk-discovery'
@@ -188,14 +189,20 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
             </div>
           )}
 
-          <Field className="md:col-span-3">
-            <FieldLabel htmlFor="signalk-refresh-seconds">Refresh Seconds</FieldLabel>
-            <Input
-              id="signalk-refresh-seconds"
-              value={draft.vesselStateRefreshSeconds}
-              onChange={(e) => onChange({ vesselStateRefreshSeconds: e.target.value })}
-              aria-label="Vessel state refresh seconds"
-            />
+          <Field className="md:col-span-1">
+            <FieldLabel htmlFor="signalk-refresh-seconds">Refresh Interval</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="signalk-refresh-seconds"
+                inputMode="decimal"
+                value={draft.vesselStateRefreshSeconds}
+                onChange={(e) => onChange({ vesselStateRefreshSeconds: e.target.value })}
+                aria-label="Vessel state refresh interval in seconds"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>s</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
           </Field>
         </div>
       </FieldSet>

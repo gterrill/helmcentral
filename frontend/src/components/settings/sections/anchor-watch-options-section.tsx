@@ -1,5 +1,5 @@
 import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import type { HullType, RegularSettingsDraft } from '@/components/settings/settings-draft'
@@ -28,43 +28,67 @@ export function AnchorWatchOptionsSection({
         <FieldLegend variant="label">Anchor</FieldLegend>
         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
           <Field>
-            <FieldLabel htmlFor="bow-roller-height">Bow Roller M</FieldLabel>
-            <Input
-              id="bow-roller-height"
-              value={draft.bowRollerHeightM}
-              onChange={(e) => onChange({ bowRollerHeightM: e.target.value })}
-              aria-label="Bow roller height"
-            />
+            <FieldLabel htmlFor="bow-roller-height">Bow Roller</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="bow-roller-height"
+                inputMode="decimal"
+                value={draft.bowRollerHeightM}
+                onChange={(e) => onChange({ bowRollerHeightM: e.target.value })}
+                aria-label="Bow roller height in metres"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>m</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="chain-size">Chain Size Mm</FieldLabel>
-            <Input
-              id="chain-size"
-              value={draft.chainSizeMm}
-              onChange={(e) => onChange({ chainSizeMm: e.target.value })}
-              aria-label="Chain size"
-            />
+            <FieldLabel htmlFor="chain-size">Chain Size</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="chain-size"
+                inputMode="decimal"
+                value={draft.chainSizeMm}
+                onChange={(e) => onChange({ chainSizeMm: e.target.value })}
+                aria-label="Chain size in millimetres"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>mm</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="chain-onboard">Chain Onboard M</FieldLabel>
-            <Input
-              id="chain-onboard"
-              value={draft.chainOnboardM}
-              onChange={(e) => onChange({ chainOnboardM: e.target.value })}
-              aria-label="Chain onboard length"
-            />
+            <FieldLabel htmlFor="chain-onboard">Chain Onboard</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="chain-onboard"
+                inputMode="decimal"
+                value={draft.chainOnboardM}
+                onChange={(e) => onChange({ chainOnboardM: e.target.value })}
+                aria-label="Chain onboard length in metres"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>m</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="windage-area">Windage M2</FieldLabel>
-            <Input
-              id="windage-area"
-              value={draft.windageAreaM2}
-              onChange={(e) => onChange({ windageAreaM2: e.target.value })}
-              aria-label="Windage area"
-            />
+            <FieldLabel htmlFor="windage-area">Windage</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="windage-area"
+                inputMode="decimal"
+                value={draft.windageAreaM2}
+                onChange={(e) => onChange({ windageAreaM2: e.target.value })}
+                aria-label="Windage area in square metres"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>m²</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
           </Field>
 
           <Field className="md:col-span-2">
