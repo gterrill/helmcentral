@@ -159,6 +159,7 @@ vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], 
 
 vi.mock('@/config/app-config', () => ({
   appConfig: { boat: { name: 'Test Vessel', model: 'Test' } },
+  FORECAST_REFRESH_SECONDS: 600,
   getUiConfig: () => ({ vesselStateRefreshSeconds: 10, distanceUnits: 'metric' }),
   getAnchorConfig: () => ({
     bowRollerHeightM: 0,

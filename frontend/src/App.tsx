@@ -72,7 +72,7 @@ import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
-import { getAnchorConfig, getUiConfig } from '@/config/app-config'
+import { FORECAST_REFRESH_SECONDS, getAnchorConfig, getUiConfig } from '@/config/app-config'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import {
   DASHBOARD_WIDGET_IDS,
@@ -319,7 +319,7 @@ export function App() {
   } = useSolarState(10)
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
-  const { activeWarning: activeForecastWarning } = useForecastWarnings(uiConfig.forecastRefreshSeconds)
+  const { activeWarning: activeForecastWarning } = useForecastWarnings(FORECAST_REFRESH_SECONDS)
   const {
     forecast,
     hourlyToday: forecastHourlyToday,
@@ -330,13 +330,13 @@ export function App() {
     updatedAt: forecastUpdatedAt,
     ttlSeconds: forecastTtlSeconds,
     refetch: refetchForecast,
-  } = useWeatherForecast(uiConfig.forecastRefreshSeconds)
+  } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
   const {
     days: waveForecastDays,
     seaTemperatureF: waveSeaTemperatureF,
     loading: waveForecastLoading,
     error: waveForecastError,
-  } = useWaveForecast(uiConfig.forecastRefreshSeconds)
+  } = useWaveForecast(FORECAST_REFRESH_SECONDS)
   const anchorWatch = useAnchorWatch(
     latitude,
     longitude,

@@ -197,16 +197,6 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
               aria-label="Vessel state refresh seconds"
             />
           </Field>
-
-          <Field className="md:col-span-3">
-            <FieldLabel htmlFor="forecast-refresh-seconds">Forecast Refresh Seconds</FieldLabel>
-            <Input
-              id="forecast-refresh-seconds"
-              value={draft.forecastRefreshSeconds}
-              onChange={(e) => onChange({ forecastRefreshSeconds: e.target.value })}
-              aria-label="Forecast refresh seconds"
-            />
-          </Field>
         </div>
       </FieldSet>
 

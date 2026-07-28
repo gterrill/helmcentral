@@ -28,7 +28,6 @@ signalk:
     address: 127.0.0.1
     port: 9
 ui:
-    forecast_refresh_seconds: 3600
     forecast_warnings_provider: bom
     tank_labels:
         freshWater.0: PORT

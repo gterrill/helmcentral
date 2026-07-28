@@ -227,4 +227,12 @@ describe('SignalKConnectionSection', () => {
 
     expect(await screen.findByText(/unable to connect to signalk at http:\/\/10\.0\.0\.5:3000/i)).toBeInTheDocument()
   })
+
+  it('does not render a forecast refresh input — the poll interval is a hardcoded constant now', () => {
+    stubFetch(() => secretsResponse)
+
+    renderSection({ signalkAddress: '10.0.0.5', signalkPort: '3000' })
+
+    expect(screen.queryByLabelText('Forecast refresh seconds')).toBeNull()
+  })
 })

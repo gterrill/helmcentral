@@ -27,7 +27,6 @@ export interface RegularSettingsDraft {
   signalkAddress: string
   signalkPort: string
   vesselStateRefreshSeconds: string
-  forecastRefreshSeconds: string
   vesselPrefix: string
   boatModel: string
   houseBatteryCapacityAh: string
@@ -51,7 +50,6 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   signalkAddress: 'localhost',
   signalkPort: '3000',
   vesselStateRefreshSeconds: '10',
-  forecastRefreshSeconds: '3600',
   vesselPrefix: '',
   boatModel: '',
   houseBatteryCapacityAh: '1440',
@@ -87,9 +85,6 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (settings.units === 'metric' || settings.units === 'imperial') draft.distanceUnits = settings.units
   if (typeof settings.ui?.vessel_state_refresh_seconds === 'number') {
     draft.vesselStateRefreshSeconds = String(settings.ui.vessel_state_refresh_seconds)
-  }
-  if (typeof settings.ui?.forecast_refresh_seconds === 'number') {
-    draft.forecastRefreshSeconds = String(settings.ui.forecast_refresh_seconds)
   }
   if (settings.ui?.tank_labels && typeof settings.ui.tank_labels === 'object') {
     draft.tankLabels = { ...draft.tankLabels, ...settings.ui.tank_labels }
@@ -136,7 +131,6 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.signalkAddress !== b.signalkAddress) return false
   if (a.signalkPort !== b.signalkPort) return false
   if (a.vesselStateRefreshSeconds !== b.vesselStateRefreshSeconds) return false
-  if (a.forecastRefreshSeconds !== b.forecastRefreshSeconds) return false
   if (a.vesselPrefix !== b.vesselPrefix) return false
   if (a.boatModel !== b.boatModel) return false
   if (a.houseBatteryCapacityAh !== b.houseBatteryCapacityAh) return false
@@ -191,7 +185,6 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
     units: draft.distanceUnits,
     ui: {
       vessel_state_refresh_seconds: Math.round(parseNumber(draft.vesselStateRefreshSeconds, 10)),
-      forecast_refresh_seconds: Math.round(parseNumber(draft.forecastRefreshSeconds, 3600)),
       tank_labels: draft.tankLabels,
       tide_station_id: draft.tideStationId,
       tide_station_name: draft.tideStationName,

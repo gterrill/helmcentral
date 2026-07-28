@@ -32,7 +32,6 @@ export type AnchorConfig = {
 type UiConfig = {
   ui?: {
     vessel_state_refresh_seconds?: number
-    forecast_refresh_seconds?: number
   }
   units?: string
   anchor?: {
@@ -49,9 +48,16 @@ export type DistanceUnits = 'metric' | 'imperial'
 const fallbackUiConfig = {
   distanceUnits: 'metric' as DistanceUnits,
   vesselStateRefreshSeconds: 10,
-  forecastRefreshSeconds: 3600,
   autoCloseAnchorWatchOnEngine: true,
 }
+
+// How often the browser polls the backend for a fresh forecast. This is not
+// a user-facing setting: upstream provider calls are already bounded
+// independently by each plugin's own ttl_seconds() (open-meteo/weatherkit
+// weather 900s, open-meteo-marine waves 3600s, nws warnings 1800s, bom
+// warnings 5400s), so this constant only governs how quickly the UI notices
+// data the backend has already refreshed.
+export const FORECAST_REFRESH_SECONDS = 600
 
 const fallbackAnchorConfig: AnchorConfig = {
   bowRollerHeightM: 1.5,
@@ -63,7 +69,6 @@ const fallbackAnchorConfig: AnchorConfig = {
 
 function parseUiConfig(): {
   vesselStateRefreshSeconds: number
-  forecastRefreshSeconds: number
   distanceUnits: DistanceUnits
   autoCloseAnchorWatchOnEngine: boolean
 } {
@@ -74,7 +79,6 @@ function parseUiConfig(): {
   try {
     const parsed = YAML.parse(getSettingsRaw()) as UiConfig | null
     const configuredSeconds = parsed?.ui?.vessel_state_refresh_seconds
-    const configuredForecastSeconds = parsed?.ui?.forecast_refresh_seconds
     const configuredUnits = parsed?.units
 
     if (typeof configuredUnits === 'string') {
@@ -86,9 +90,6 @@ function parseUiConfig(): {
 
     if (typeof configuredSeconds === 'number' && configuredSeconds > 0) {
       parsedConfig.vesselStateRefreshSeconds = configuredSeconds
-    }
-    if (typeof configuredForecastSeconds === 'number' && configuredForecastSeconds > 0) {
-      parsedConfig.forecastRefreshSeconds = configuredForecastSeconds
     }
   } catch {
     // Keep fallback.
