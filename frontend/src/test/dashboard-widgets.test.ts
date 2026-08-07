@@ -6,6 +6,7 @@ import {
   EMBED_WIDGET_ID_PREFIX,
   isEmbedWidgetId,
   isValidEmbedUrl,
+  mergeLayoutGeometry,
   newEmbedWidgetId,
   widgetDisplayName,
   type DashboardLayoutItem,
@@ -96,5 +97,69 @@ describe('widgetDisplayName', () => {
       id: 'embed:m1x8abcd', x: 0, y: 0, w: 6, h: 8,
       embed: { title: '   ', url: 'https://grafana.local/a' },
     })).toBe('Embed')
+  })
+})
+
+describe('mergeLayoutGeometry', () => {
+  // REGRESSION TEST for the embed-drag silent-save-failure bug: rebuilding
+  // widgets from RGL's LayoutItem alone drops `embed`, which the backend
+  // then rejects, so no drag/resize on the page persists. This must keep
+  // `embed` intact while still picking up the new geometry.
+  test('preserves an embed widget config while applying new geometry', () => {
+    const widgets: DashboardLayoutItem[] = [
+      { id: 'embed:m1x8abcd', x: 0, y: 0, w: 6, h: 8, embed: { title: 'Windrose', url: 'https://grafana.local/a' } },
+    ]
+    const geometry = [{ i: 'embed:m1x8abcd', x: 2, y: 4, w: 5, h: 7 }]
+
+    const result = mergeLayoutGeometry(widgets, geometry)
+
+    expect(result).toEqual([
+      { id: 'embed:m1x8abcd', x: 2, y: 4, w: 5, h: 7, embed: { title: 'Windrose', url: 'https://grafana.local/a' } },
+    ])
+  })
+
+  test('applies new geometry to a builtin widget', () => {
+    const widgets: DashboardLayoutItem[] = [{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }]
+    const geometry = [{ i: 'wind', x: 8, y: 3, w: 4, h: 6 }]
+
+    const result = mergeLayoutGeometry(widgets, geometry)
+
+    expect(result).toEqual([{ id: 'wind', x: 8, y: 3, w: 4, h: 6 }])
+  })
+
+  test('leaves a widget untouched when geometry has no entry for its id', () => {
+    const widgets: DashboardLayoutItem[] = [{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }]
+
+    const result = mergeLayoutGeometry(widgets, [])
+
+    expect(result).toEqual(widgets)
+  })
+
+  test('preserves the order of widgets, not the order of geometry', () => {
+    const widgets: DashboardLayoutItem[] = [
+      { id: 'wind', x: 0, y: 0, w: 4, h: 6 },
+      { id: 'solar', x: 4, y: 0, w: 4, h: 6 },
+    ]
+    // Geometry supplied in the opposite order.
+    const geometry = [
+      { i: 'solar', x: 4, y: 2, w: 4, h: 6 },
+      { i: 'wind', x: 0, y: 2, w: 4, h: 6 },
+    ]
+
+    const result = mergeLayoutGeometry(widgets, geometry)
+
+    expect(result.map((w) => w.id)).toEqual(['wind', 'solar'])
+  })
+
+  test('does not invent widgets from geometry entries that match no widget', () => {
+    const widgets: DashboardLayoutItem[] = [{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }]
+    const geometry = [
+      { i: 'wind', x: 1, y: 1, w: 4, h: 6 },
+      { i: 'solar', x: 4, y: 0, w: 4, h: 6 },
+    ]
+
+    const result = mergeLayoutGeometry(widgets, geometry)
+
+    expect(result).toEqual([{ id: 'wind', x: 1, y: 1, w: 4, h: 6 }])
   })
 })

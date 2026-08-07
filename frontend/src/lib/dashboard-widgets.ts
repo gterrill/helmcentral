@@ -113,6 +113,26 @@ export function newEmbedWidgetId(existing: readonly DashboardLayoutItem[]): Embe
   }
 }
 
+/**
+ * Re-applies the grid's geometry to the persisted widget list.
+ *
+ * RGL's LayoutItem carries only `{i,x,y,w,h}`, so rebuilding widgets from it
+ * alone drops the `embed` config that `embed:` widgets require — the backend
+ * then rejects the whole PATCH (validateEmbedWidget in dashboard_pages.go) and
+ * no layout change on the page persists at all. Iterating `widgets` rather than
+ * the geometry keeps every non-geometry field, including ones added later.
+ */
+export function mergeLayoutGeometry(
+  widgets: readonly DashboardLayoutItem[],
+  geometry: readonly { i: string; x: number; y: number; w: number; h: number }[],
+): DashboardLayoutItem[] {
+  const byId = new Map(geometry.map((g) => [g.i, g]))
+  return widgets.map((w) => {
+    const g = byId.get(w.id)
+    return g ? { ...w, x: g.x, y: g.y, w: g.w, h: g.h } : w
+  })
+}
+
 /** Human-readable name for a placed widget, for labels and screen-reader text. */
 export function widgetDisplayName(widget: DashboardLayoutItem): string {
   if (isEmbedWidgetId(widget.id)) {
