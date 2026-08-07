@@ -429,6 +429,7 @@ export function App() {
           config={widget.embed}
           editing={layoutEditing}
           onConfigure={() => setEmbedDraft(widget)}
+          isDarkTheme={isDarkTheme}
         />
       )
     }
