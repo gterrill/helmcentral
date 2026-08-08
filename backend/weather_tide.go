@@ -460,3 +460,35 @@ func vesselLocalLocation(longitude float64) *time.Location {
 	zoneLabel := fmt.Sprintf("UTC%+d", offsetHours)
 	return time.FixedZone(zoneLabel, offsetHours*3600)
 }
+
+// vesselLocalTimezoneName names the same offset vesselLocalLocation produces,
+// as an IANA zone identifier a weather plugin can pass to an upstream API so
+// that API rolls its daily forecast up on the vessel's local day boundaries
+// rather than UTC's.
+//
+// The host buckets and labels days in vesselLocalLocation time
+// (buildHourlySeriesByDay/weatherForecast in weather_providers.go), so a
+// provider rolling days up in a different zone puts the day summary and the
+// hourly series it is displayed beside on different windows - at UTC+10 that
+// shifted "today" ten hours and dropped the record covering local midnight
+// to 10AM entirely. See docs/adr/0035-weather-local-day-boundaries.md.
+//
+// Etc/GMT zones invert the sign by POSIX convention - UTC+10 is "Etc/GMT-10"
+// - which is why this is a named helper with a test rather than an inline
+// Sprintf. Fixed-offset zones (no DST) are used deliberately: they mirror
+// vesselLocalLocation's own longitude-derived fixed offset exactly, so the
+// two can never disagree.
+func vesselLocalTimezoneName(longitude float64) string {
+	loc := vesselLocalLocation(longitude)
+	if loc == time.UTC {
+		return "UTC"
+	}
+
+	_, offsetSeconds := time.Now().In(loc).Zone()
+	offsetHours := offsetSeconds / 3600
+	if offsetHours == 0 {
+		return "UTC"
+	}
+
+	return fmt.Sprintf("Etc/GMT%+d", -offsetHours)
+}

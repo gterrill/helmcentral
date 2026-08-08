@@ -10,25 +10,27 @@ package main
 
 import (
 	"fmt"
+	neturl "net/url"
+	"strings"
 	"time"
 )
 
 // --- Open-Meteo API response shapes ---
 
 type openMeteoResponse struct {
-	Latitude           float64 `json:"latitude"`
-	Longitude          float64 `json:"longitude"`
-	UTCOffsetSeconds   int     `json:"utc_offset_seconds"`
-	Timezone           string  `json:"timezone"`
-	Current            *struct {
-		Time                  string  `json:"time"`
-		Temperature2m         float64 `json:"temperature_2m"`
-		WeatherCode           int     `json:"weather_code"`
-		WindSpeed10m          float64 `json:"wind_speed_10m"`
-		WindGusts10m          float64 `json:"wind_gusts_10m"`
-		WindDirection10m      int     `json:"wind_direction_10m"`
-		IsDay                 int     `json:"is_day"`
-		PrecipitationProbability int `json:"precipitation_probability"`
+	Latitude         float64 `json:"latitude"`
+	Longitude        float64 `json:"longitude"`
+	UTCOffsetSeconds int     `json:"utc_offset_seconds"`
+	Timezone         string  `json:"timezone"`
+	Current          *struct {
+		Time                     string  `json:"time"`
+		Temperature2m            float64 `json:"temperature_2m"`
+		WeatherCode              int     `json:"weather_code"`
+		WindSpeed10m             float64 `json:"wind_speed_10m"`
+		WindGusts10m             float64 `json:"wind_gusts_10m"`
+		WindDirection10m         int     `json:"wind_direction_10m"`
+		IsDay                    int     `json:"is_day"`
+		PrecipitationProbability int     `json:"precipitation_probability"`
 	} `json:"current"`
 	Daily *struct {
 		Time                        []string  `json:"time"`
@@ -62,6 +64,56 @@ type wasmFetchForecastInput struct {
 	Lat  float64 `json:"lat"`
 	Lon  float64 `json:"lon"`
 	Days int     `json:"days"`
+	// Timezone is the vessel's IANA local zone, supplied by the host, that
+	// Open-Meteo must roll its daily[] arrays up on. See openMeteoRequestURL.
+	Timezone string `json:"timezone"`
+}
+
+// openMeteoRequestURL builds the forecast request. It lives here rather than
+// in main.go so it is covered by the plain-host `go test ./...` run (main.go
+// is //go:build tinygo gated) - same split rationale as the weatherkit
+// plugin's weatherKitRequestURL.
+//
+// timezone comes from the host (fetch_forecast's "timezone" input, from
+// vesselLocalTimezoneName) instead of the previous `timezone=auto`. The host
+// buckets and labels its own day series on vesselLocalLocation's
+// longitude-derived fixed offset; letting Open-Meteo independently pick the
+// civil IANA zone puts the daily summary and the hourly series displayed
+// beside it on different windows wherever the two disagree. See
+// docs/adr/0035-weather-local-day-boundaries.md.
+//
+// days is clamped to Open-Meteo's documented 1-16 range, with 0/negative
+// meaning "unset" and taking a 7-day default.
+//
+// An absent timezone is rejected by validateFetchForecastInput before this
+// is reached rather than defaulted here - silently defaulting is what
+// produced misaligned day boundaries in the first place.
+func openMeteoRequestURL(input wasmFetchForecastInput) string {
+	days := input.Days
+	if days <= 0 {
+		days = 7
+	} else if days > 16 {
+		days = 16
+	}
+
+	return fmt.Sprintf(
+		"https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"+
+			"&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,precipitation_probability"+
+			"&hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day"+
+			"&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max,sunrise,sunset"+
+			"&wind_speed_unit=ms&timezone=%s&forecast_days=%d",
+		input.Lat, input.Lon, neturl.QueryEscape(strings.TrimSpace(input.Timezone)), days,
+	)
+}
+
+// validateFetchForecastInput rejects an input the host should never send.
+// Mirrors the weatherkit plugin's identically-named check - see AGENTS.md's
+// fallback policy on why this fails loudly instead of defaulting.
+func validateFetchForecastInput(input wasmFetchForecastInput) error {
+	if strings.TrimSpace(input.Timezone) == "" {
+		return fmt.Errorf("open-meteo: fetch_forecast input missing required \"timezone\" (host must supply the vessel's IANA local zone)")
+	}
+	return nil
 }
 
 type wasmWeatherCurrentOutput struct {

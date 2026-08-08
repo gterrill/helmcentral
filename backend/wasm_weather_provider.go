@@ -75,10 +75,14 @@ func newWasmWeatherProviderFromBase(base *wasmPluginBase) *wasmWeatherProvider {
 }
 
 // wasmFetchForecastInput mirrors the guest's fetch_forecast input contract.
+// Timezone is the IANA zone the plugin must roll its days[] up on - see
+// vesselLocalTimezoneName (weather_tide.go) and the guest contract doc
+// comment in weather_providers.go.
 type wasmFetchForecastInput struct {
-	Lat  float64 `json:"lat"`
-	Lon  float64 `json:"lon"`
-	Days int     `json:"days"`
+	Lat      float64 `json:"lat"`
+	Lon      float64 `json:"lon"`
+	Days     int     `json:"days"`
+	Timezone string  `json:"timezone"`
 }
 
 // wasmWeatherCurrentOutput/wasmWeatherDayOutput/wasmWeatherHourOutput/
@@ -231,16 +235,18 @@ func mapWasmFetchForecastOutput(out wasmFetchForecastOutput) (weatherForecastBun
 // pre-Phase-3 weatherToday cache used) and folds in days, so a
 // weatherToday(days=1) call and a weatherForecast(days=10) call at the same
 // position never share - and silently truncate - each other's cached bundle.
-func weatherWasmCacheKey(lat, lon float64, days int) string {
+// timezone is folded in for the same reason: it selects the day-rollup
+// boundaries, so bundles built on different boundaries are different data.
+func weatherWasmCacheKey(lat, lon float64, days int, timezone string) string {
 	roundedLat := math.Round(lat*10) / 10
 	roundedLon := math.Round(lon*10) / 10
-	return fmt.Sprintf("%.1f,%.1f,%d", roundedLat, roundedLon, days)
+	return fmt.Sprintf("%.1f,%.1f,%d,%s", roundedLat, roundedLon, days, timezone)
 }
 
 // FetchForecast calls the guest's fetch_forecast, unmarshals+maps the raw
 // JSON into a typed weatherForecastBundle, and applies the same TTL cache +
 // stale-on-error fallback pattern as wasmTideProvider.FetchTideChart.
-func (p *wasmWeatherProvider) FetchForecast(lat, lon float64, days int) (bundle weatherForecastBundle, err error) {
+func (p *wasmWeatherProvider) FetchForecast(lat, lon float64, days int, timezone string) (bundle weatherForecastBundle, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("plugin %q panicked in fetch_forecast: %v", p.id, r)
@@ -248,14 +254,14 @@ func (p *wasmWeatherProvider) FetchForecast(lat, lon float64, days int) (bundle 
 		}
 	}()
 
-	key := weatherWasmCacheKey(lat, lon, days)
+	key := weatherWasmCacheKey(lat, lon, days, timezone)
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true
 		return cached, nil
 	}
 
-	fetched, ferr := p.fetchFromPlugin(lat, lon, days)
+	fetched, ferr := p.fetchFromPlugin(lat, lon, days, timezone)
 	if ferr != nil {
 		if stale, ok := p.cache.getStale(key); ok {
 			stale.Cached = true
@@ -271,8 +277,8 @@ func (p *wasmWeatherProvider) FetchForecast(lat, lon float64, days int) (bundle 
 	return fetched, nil
 }
 
-func (p *wasmWeatherProvider) fetchFromPlugin(lat, lon float64, days int) (weatherForecastBundle, error) {
-	input, err := json.Marshal(wasmFetchForecastInput{Lat: lat, Lon: lon, Days: days})
+func (p *wasmWeatherProvider) fetchFromPlugin(lat, lon float64, days int, timezone string) (weatherForecastBundle, error) {
+	input, err := json.Marshal(wasmFetchForecastInput{Lat: lat, Lon: lon, Days: days, Timezone: timezone})
 	if err != nil {
 		return weatherForecastBundle{}, fmt.Errorf("plugin %q: failed to marshal fetch_forecast input: %w", p.id, err)
 	}

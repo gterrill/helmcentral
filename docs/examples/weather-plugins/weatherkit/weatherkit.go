@@ -64,6 +64,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -222,11 +223,32 @@ func buildWeatherKitJWT(keyID, teamID, serviceID, privateKeyPEM string, now time
 // (the original native code made two separate requests across two host
 // functions - see this file's top doc comment). timezone=UTC, not the
 // original's hardcoded America/Los_Angeles - see top doc comment point 1.
-func weatherKitRequestURL(lat, lon float64) string {
+// weatherKitRequestURL builds the single merged-dataSets request URL.
+//
+// timezone is the IANA zone WeatherKit rolls forecastDaily up on, supplied by
+// the host (fetch_forecast's "timezone" input, from vesselLocalTimezoneName).
+// It used to be hardcoded to UTC, which put every daily summary on UTC
+// midnight while the host bucketed and labelled the hourly series on the
+// vessel's local midnight - at UTC+10 that shifted "today" ten hours and
+// discarded the day record covering local midnight to 10AM. See
+// docs/adr/0035-weather-local-day-boundaries.md.
+func weatherKitRequestURL(lat, lon float64, timezone string) string {
 	return fmt.Sprintf(
-		"https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=currentWeather,forecastDaily,forecastHourly&timezone=UTC",
-		lat, lon,
+		"https://weatherkit.apple.com/api/v1/weather/en/%.4f/%.4f?dataSets=currentWeather,forecastDaily,forecastHourly&timezone=%s",
+		lat, lon, neturl.QueryEscape(timezone),
 	)
+}
+
+// validateFetchForecastInput rejects an input the host should never send.
+// A missing timezone is not defaulted to UTC: silently defaulting is what
+// produced misaligned day boundaries in the first place, and a wrong-but-
+// plausible forecast is worse than a loud failure (see README's fallback
+// notes and AGENTS.md's fallback policy).
+func validateFetchForecastInput(input fetchForecastInput) error {
+	if strings.TrimSpace(input.Timezone) == "" {
+		return fmt.Errorf("weatherkit: fetch_forecast input missing required \"timezone\" (host must supply the vessel's IANA local zone)")
+	}
+	return nil
 }
 
 // kphToMS converts a KPH value (WeatherKit's native wind-speed unit) to m/s
@@ -246,6 +268,10 @@ type fetchForecastInput struct {
 	Lat  float64 `json:"lat"`
 	Lon  float64 `json:"lon"`
 	Days int     `json:"days"`
+	// Timezone is the vessel's IANA local zone, supplied by the host, that
+	// WeatherKit must roll forecastDaily up on. Required - see
+	// validateFetchForecastInput.
+	Timezone string `json:"timezone"`
 }
 
 type weatherCurrentOutput struct {
@@ -404,15 +430,16 @@ func parseWeatherKitResponse(body []byte, maxDays int) (fetchForecastOutput, err
 	return out, nil
 }
 
-// mapCurrentWeather maps currentWeather plus a precipitation-chance fallback
-// cascade (current -> forecastDaily.days[0] -> forecastHourly.hours[0]),
-// replicating the original fetchWeatherKitData's fallback chain.
-// precipitationChance is a 0-1 fraction in WeatherKit's JSON; multiplied by
-// 100 for this contract's "*_pct" field. Falls back to
-// precipitationIntensity (mm/hr) verbatim when precipitationChance itself is
-// absent - the original code's own fallback, kept as-is even though mixing
-// an mm/hr value into a "pct" field is a pre-existing quirk, not a new one
-// introduced here.
+// mapCurrentWeather maps currentWeather onto the contract's current output.
+//
+// It used to run a precipitation-chance fallback cascade (current ->
+// precipitationIntensity -> forecastDaily.days[0] -> forecastHourly.hours[0]),
+// inherited from the original fetchWeatherKitData. That cascade is gone: the
+// intensity leg wrote an mm/hr rate into a percentage field, and the other
+// legs reported a different time window's number as if it were current
+// conditions. Both invent data the provider never gave for this instant,
+// which AGENTS.md's fallback policy forbids. An absent chance is now
+// reported as absent (-1) and rendered as "unavailable" upstream.
 func mapCurrentWeather(resp weatherKitResponse) (weatherCurrentOutput, error) {
 	cw := resp.CurrentWeather
 	if strings.TrimSpace(cw.AsOf) == "" {
@@ -428,18 +455,25 @@ func mapCurrentWeather(resp weatherKitResponse) (weatherCurrentOutput, error) {
 		WindDirectionDeg: cw.WindDirection,
 	}
 
-	switch {
-	case cw.PrecipitationChance != nil:
-		current.PrecipitationChancePct = *cw.PrecipitationChance * 100
-	case cw.PrecipitationIntensity != nil:
-		current.PrecipitationChancePct = math.Max(0, *cw.PrecipitationIntensity)
-	case len(resp.ForecastDaily.Days) > 0 && resp.ForecastDaily.Days[0].PrecipitationChance != nil:
-		current.PrecipitationChancePct = *resp.ForecastDaily.Days[0].PrecipitationChance * 100
-	case resp.ForecastHourly != nil && len(resp.ForecastHourly.Hours) > 0 && resp.ForecastHourly.Hours[0].PrecipitationChance != nil:
-		current.PrecipitationChancePct = *resp.ForecastHourly.Hours[0].PrecipitationChance * 100
-	}
+	current.PrecipitationChancePct = precipitationChancePct(cw.PrecipitationChance)
 
 	return current, nil
+}
+
+// precipitationChancePct converts WeatherKit's 0-1 precipitationChance
+// fraction to this contract's "*_pct" percentage, mapping an absent value to
+// the -1 "no data" sentinel the host understands
+// (sentinelPrecipitationPct in backend/weather_providers.go).
+//
+// Absence must NOT collapse to 0: 0% is a legitimate reading, so a provider
+// that reported nothing would otherwise be indistinguishable from one
+// forecasting a dry day - which is exactly how a drizzling morning came to
+// display "0% precip". See docs/adr/0035-weather-local-day-boundaries.md.
+func precipitationChancePct(chance *float64) float64 {
+	if chance == nil {
+		return -1
+	}
+	return math.Max(0, *chance) * 100
 }
 
 // mapForecastDays maps forecastDaily.days[] onto weatherDayOutput, preferring
@@ -481,10 +515,7 @@ func mapForecastDays(rawDays []weatherKitDayForecast, maxDays int) ([]weatherDay
 			windDirectionDeg = *d.WindDirection
 		}
 
-		var precipPct float64
-		if d.PrecipitationChance != nil {
-			precipPct = *d.PrecipitationChance * 100
-		}
+		precipPct := precipitationChancePct(d.PrecipitationChance)
 
 		days = append(days, weatherDayOutput{
 			Start:                  d.ForecastStart,
@@ -527,10 +558,7 @@ func mapForecastHours(rawHours []weatherKitHourForecast) []weatherHourOutput {
 			windGustMS = kphToMS(*h.WindGust)
 		}
 
-		var precipPct float64
-		if h.PrecipitationChance != nil {
-			precipPct = *h.PrecipitationChance * 100
-		}
+		precipPct := precipitationChancePct(h.PrecipitationChance)
 
 		var precipMM float64
 		if h.PrecipitationIntensity != nil {

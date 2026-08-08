@@ -246,7 +246,7 @@ func forecastWarningsHandler(c echo.Context) error {
 	if vesselErr != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
 	}
-	if vesselState.Latitude < -90 || vesselState.Latitude > 90 || vesselState.Longitude < -180 || vesselState.Longitude > 180 {
+	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
 	}
 

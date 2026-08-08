@@ -32,7 +32,7 @@ func mustNewWasmWeatherProvider(t *testing.T, path string) *wasmWeatherProvider 
 func TestWasmWeatherProvider_FetchForecast_MapsFixtureFieldsCorrectly(t *testing.T) {
 	provider := mustNewWasmWeatherProvider(t, weatherValidFixtureWasm)
 
-	bundle, err := provider.FetchForecast(-27.4, 153.0, 2)
+	bundle, err := provider.FetchForecast(-27.4, 153.0, 2, "Etc/GMT-10")
 	if err != nil {
 		t.Fatalf("FetchForecast returned error: %v", err)
 	}
@@ -78,10 +78,26 @@ func TestWasmWeatherProvider_FetchForecast_MapsFixtureFieldsCorrectly(t *testing
 	}
 }
 
+// The timezone drives the provider's daily rollup boundaries, so two
+// requests for the same position in different zones are genuinely different
+// bundles and must not share a cache slot - otherwise a vessel crossing a
+// zone boundary keeps serving day summaries rolled up on the old boundary.
+func TestWeatherWasmCacheKey_DistinguishesTimezone(t *testing.T) {
+	brisbane := weatherWasmCacheKey(-21.1, 149.2, 10, "Etc/GMT-10")
+	utc := weatherWasmCacheKey(-21.1, 149.2, 10, "UTC")
+
+	if brisbane == utc {
+		t.Fatalf("expected different cache keys for different timezones, both were %q", brisbane)
+	}
+	if same := weatherWasmCacheKey(-21.1, 149.2, 10, "Etc/GMT-10"); same != brisbane {
+		t.Fatalf("expected a stable key for identical inputs, got %q then %q", brisbane, same)
+	}
+}
+
 func TestWasmWeatherProvider_FetchForecast_CachesWithinTTL(t *testing.T) {
 	provider := mustNewWasmWeatherProvider(t, weatherValidFixtureWasm)
 
-	first, err := provider.FetchForecast(10.0, 20.0, 2)
+	first, err := provider.FetchForecast(10.0, 20.0, 2, "Etc/GMT-1")
 	if err != nil {
 		t.Fatalf("first FetchForecast returned error: %v", err)
 	}
@@ -89,7 +105,7 @@ func TestWasmWeatherProvider_FetchForecast_CachesWithinTTL(t *testing.T) {
 		t.Fatalf("expected the first fetch to be a live (non-cached) fetch")
 	}
 
-	second, err := provider.FetchForecast(10.0, 20.0, 2)
+	second, err := provider.FetchForecast(10.0, 20.0, 2, "Etc/GMT-1")
 	if err != nil {
 		t.Fatalf("second FetchForecast returned error: %v", err)
 	}
@@ -104,7 +120,7 @@ func TestWasmWeatherProvider_FetchForecast_CachesWithinTTL(t *testing.T) {
 func TestWasmWeatherProvider_FetchForecast_StaleOnErrorFallback(t *testing.T) {
 	provider := mustNewWasmWeatherProvider(t, weatherValidFixtureWasm)
 
-	fresh, err := provider.FetchForecast(30.0, 40.0, 2)
+	fresh, err := provider.FetchForecast(30.0, 40.0, 2, "Etc/GMT-3")
 	if err != nil {
 		t.Fatalf("initial FetchForecast returned error: %v", err)
 	}
@@ -114,7 +130,7 @@ func TestWasmWeatherProvider_FetchForecast_StaleOnErrorFallback(t *testing.T) {
 	// TestWasmPluginCache_PastTTLMissesButGetStaleHits in wasm_plugin_test.go)
 	// so the next FetchForecast call is forced to attempt a live call rather
 	// than serving a within-TTL hit.
-	cacheKey := "30.0,40.0,2"
+	cacheKey := "30.0,40.0,2,Etc/GMT-3"
 	provider.cache.mu.Lock()
 	entry, ok := provider.cache.data[cacheKey]
 	if !ok {
@@ -130,7 +146,7 @@ func TestWasmWeatherProvider_FetchForecast_StaleOnErrorFallback(t *testing.T) {
 	// upstream outage without needing a second, failure-simulating fixture.
 	provider.compiled.Close(context.Background())
 
-	stale, err := provider.FetchForecast(30.0, 40.0, 2)
+	stale, err := provider.FetchForecast(30.0, 40.0, 2, "Etc/GMT-3")
 	if err != nil {
 		t.Fatalf("expected a stale-cache fallback instead of an error, got: %v", err)
 	}

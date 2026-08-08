@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -344,5 +345,49 @@ func TestParseOpenMeteoForecast_MalformedCurrentTime(t *testing.T) {
 	}
 	if err.Error() != "failed to parse current.time: parsing time \"not-a-valid-time\" as \"2006-01-02T15:04\": cannot parse \"not-a-valid-time\" as \"2006\"" {
 		t.Logf("got error: %v", err)
+	}
+}
+
+// --- request URL ---
+
+// Open-Meteo rolls its daily[] arrays up on the timezone named in the
+// request. `timezone=auto` picks the true IANA zone at the coordinates,
+// which is NOT always the offset the host buckets its own day series on
+// (vesselLocalLocation derives a fixed offset from longitude, so e.g. eastern
+// Spain or western China disagree with their civil zone by hours). Where the
+// two disagree, the day summary and the hourly series shown beside it
+// describe different windows. The host now names the zone; the plugin must
+// use it verbatim rather than asking Open-Meteo to guess.
+func TestOpenMeteoRequestURL_UsesCallerTimezone(t *testing.T) {
+	url := openMeteoRequestURL(wasmFetchForecastInput{Lat: -21.1113, Lon: 149.2277, Days: 10, Timezone: "Etc/GMT-10"})
+
+	if !strings.Contains(url, "timezone=Etc%2FGMT-10") {
+		t.Errorf("expected the caller's escaped timezone in the URL, got: %s", url)
+	}
+	if strings.Contains(url, "timezone=auto") {
+		t.Errorf("expected timezone=auto to be gone, got: %s", url)
+	}
+	if !strings.Contains(url, "forecast_days=10") {
+		t.Errorf("expected forecast_days to carry through, got: %s", url)
+	}
+}
+
+// Days clamping is Open-Meteo's documented 1-16 range; 0 means "unset" and
+// takes the plugin's 7-day default. This moved out of main.go with the URL
+// builder, so it needs coverage here.
+func TestOpenMeteoRequestURL_ClampsDaysToSupportedRange(t *testing.T) {
+	for _, tc := range []struct {
+		days int
+		want string
+	}{
+		{0, "forecast_days=7"},
+		{-3, "forecast_days=7"},
+		{10, "forecast_days=10"},
+		{99, "forecast_days=16"},
+	} {
+		url := openMeteoRequestURL(wasmFetchForecastInput{Lat: 1, Lon: 2, Days: tc.days, Timezone: "UTC"})
+		if !strings.Contains(url, tc.want) {
+			t.Errorf("days=%d: expected %q in URL, got: %s", tc.days, tc.want, url)
+		}
 	}
 }

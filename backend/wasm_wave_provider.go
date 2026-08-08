@@ -131,8 +131,12 @@ func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, erro
 // waveForecast(days=10) call at the same rounded position doesn't clobber a
 // different days value's cache entry within the TTL window - same reasoning
 // as weatherWasmCacheKey.
+//
+// The empty timezone is deliberate: fetch_waves takes no timezone (waves are
+// a continuous hourly series with no daily rollup to place on a boundary),
+// so unlike weather there is no zone dimension for the key to distinguish.
 func waveWasmCacheKey(lat, lon float64, days int) string {
-	return weatherWasmCacheKey(lat, lon, days)
+	return weatherWasmCacheKey(lat, lon, days, "")
 }
 
 // FetchWaves calls the guest's fetch_waves, unmarshals+maps the raw JSON

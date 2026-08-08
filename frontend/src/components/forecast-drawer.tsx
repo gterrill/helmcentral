@@ -30,7 +30,8 @@ interface ForecastDay {
   windDirection: string
   windSummary: string | null
   precipitationSummary: string | null
-  precipitation: number
+  /** null when the provider reported no chance-of-precipitation data at all - distinct from a real 0%. */
+  precipitation: number | null
   sunriseTime: string | null
   sunsetTime: string | null
   moonPhase: string | null
@@ -46,6 +47,7 @@ interface ForecastDrawerProps {
   summary?: string | null
   loading?: boolean
   error?: string | null
+  provider?: string | null
   isCached?: boolean
   updatedAt?: string | null
   ttlSeconds?: number | null
@@ -388,7 +390,7 @@ const EMPTY_DAY: ForecastDay = {
   windDirection: '',
   windSummary: null,
   precipitationSummary: null,
-  precipitation: 0,
+  precipitation: null,
   sunriseTime: null,
   sunsetTime: null,
   moonPhase: null,
@@ -404,6 +406,10 @@ export function ForecastDrawer({
   summary = null,
   loading = false,
   error = null,
+  provider = null,
+  isCached = false,
+  updatedAt = null,
+  ttlSeconds = null,
   onRetry,
   unit,
   activeForecastWarning = null,
@@ -454,8 +460,13 @@ export function ForecastDrawer({
   // hourlyWave array with no error is the legitimate "no data" case.
   const waveUnavailableDueToError = Boolean(waveError) && selectedWaveDay === null
 
-  const humidityPct = Math.max(35, Math.min(95, Math.round(45 + (selectedDay.precipitation * 0.4))))
-  const visibilityNm = Math.max(1, 12 - (selectedDay.precipitation * 0.06))
+  // Humidity and visibility are both derived from the precipitation chance,
+  // so when that is unavailable they have nothing to stand on - showing a
+  // computed-from-nothing number would be as misleading as the "0% precip"
+  // this null-handling exists to prevent.
+  const precipitationPct = selectedDay.precipitation
+  const humidityPct = precipitationPct === null ? null : Math.max(35, Math.min(95, Math.round(45 + (precipitationPct * 0.4))))
+  const visibilityNm = precipitationPct === null ? null : Math.max(1, 12 - (precipitationPct * 0.06))
 
   const windHourly = selectedDay.hourlyWind ?? []
   const waveHourly = selectedWaveDay?.hourlyWave ?? []
@@ -556,7 +567,10 @@ export function ForecastDrawer({
       precipHourly.map((entry) => ({
         hourOfDay: entry.hourOfDay,
         precipIntensityMm: Math.max(0, entry.precipIntensityMm),
-        precipChancePct: Math.max(0, Math.min(100, entry.precipChancePct)),
+        // null (provider reported nothing for this hour) leaves a gap in the
+        // chance line rather than pinning it to the 0% baseline, which would
+        // read as a confident "no rain this hour".
+        precipChancePct: entry.precipChancePct === null ? null : Math.max(0, Math.min(100, entry.precipChancePct)),
       })),
     [precipHourly],
   )
@@ -775,7 +789,7 @@ export function ForecastDrawer({
                     <span className="text-sm text-muted-foreground">/</span>
                     <span className="font-display text-sm text-muted-foreground">{Math.round(displayTemp(day.low))}</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">{Math.round(day.precipitation)}% precip</p>
+                  <p className="text-[10px] text-muted-foreground">{day.precipitation === null ? '— precip' : `${Math.round(day.precipitation)}% precip`}</p>
                 </div>
 
                 <p className="mt-1 text-[10px] font-semibold text-gauge-secondary">{Math.round(day.windSpeed)}{windUnit} {day.windDirection}</p>
@@ -794,9 +808,9 @@ export function ForecastDrawer({
               <div className="flex flex-wrap gap-2 text-[11px]">
                 <span className="rounded bg-muted/50 px-2 py-1">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-amber-600">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">Precip <span className="font-semibold">{Math.round(selectedDay.precipitation)}%</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">Humidity <span className="font-semibold">{humidityPct}%</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">Visibility <span className="font-semibold">{visibilityNm.toFixed(1)} nm</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Precip <span data-testid="forecast-selected-precip" className="font-semibold">{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold">{humidityPct === null ? '—' : `${humidityPct}%`}</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-gauge-secondary">{uvIndex}</span></span>
                 {selectedDay.sunriseTime && (
                   <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
@@ -1241,7 +1255,7 @@ export function ForecastDrawer({
                       <ChartTooltipBubble
                         pixelX={precipTooltip.tooltipPixelX ?? 0}
                         time={precipTooltipEntry.label}
-                        primary={`${Math.round(precipTooltipEntry.precipChancePct)}% chance`}
+                        primary={precipTooltipEntry.precipChancePct === null ? 'Chance unavailable' : `${Math.round(precipTooltipEntry.precipChancePct)}% chance`}
                         secondary={`${precipTooltipEntry.precipIntensityMm.toFixed(1)} mm/hr`}
                       />
                     )}
@@ -1296,7 +1310,7 @@ export function ForecastDrawer({
                         <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
                         <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
 
-                        {precipTooltipEntry && precipTooltipEntry.hourOfDay >= 0 && (
+                        {precipTooltipEntry && precipTooltipEntry.hourOfDay >= 0 && precipTooltipEntry.precipChancePct !== null && (
                           <ChartTooltipMarker
                             x={hourlyXForHour(precipTooltipEntry.hourOfDay)}
                             y={precipChanceYFor(Math.max(0, Math.min(100, precipTooltipEntry.precipChancePct)))}
@@ -1316,6 +1330,17 @@ export function ForecastDrawer({
             </div>
 
             <ForecastTideSection isImperial={unit === 'imperial'} dayOffset={selectedDayIndex} />
+
+            {/* Without this the provider's stale-on-error cache is invisible:
+                a days-old forecast renders exactly like a live one. Mirrors
+                the tide section's line so both read the same way. */}
+            {(isCached || updatedAt) && (
+              <p data-testid="forecast-refresh-meta" className="mt-1 text-xs text-muted-foreground">
+                {provider ? `Data: ${provider} · ` : ''}
+                {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
+                {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 60)}m` : ''}
+              </p>
+            )}
 
           </div>
         </div>

@@ -26,7 +26,8 @@
 // Guest contract (fetch_forecast), mirrored below by wasmFetchForecastOutput
 // in wasm_weather_provider.go:
 //
-//	fetch_forecast({"lat": float64, "lon": float64, "days": int}) -> {
+//	fetch_forecast({"lat": float64, "lon": float64, "days": int,
+//	                "timezone": string}) -> {
 //	  "current": {time, temperature_c, condition, wind_speed_ms, wind_gust_ms,
 //	              wind_direction_deg, precipitation_chance_pct},
 //	  "days": [{start, condition, temp_max_c, temp_min_c, wind_speed_ms,
@@ -36,6 +37,15 @@
 //	              wind_direction_deg, precipitation_chance_pct,
 //	              precipitation_mm, uv_index, is_daylight}]
 //	}
+//
+// "timezone" is an IANA zone identifier (from vesselLocalTimezoneName in
+// weather_tide.go, e.g. "Etc/GMT-10" for a vessel at UTC+10). A plugin whose
+// upstream API rolls hourly data up into daily summaries MUST pass it
+// through, so days[] boundaries land on the vessel's local midnight - the
+// host buckets and labels days in that same local zone, and a provider
+// rolling up on a different boundary silently shifts every day summary and
+// drops the record covering local midnight to the offset. See
+// docs/adr/0035-weather-local-day-boundaries.md.
 //
 // All times are RFC3339 (UTC "Z" or an explicit offset - either is valid;
 // the host does its own local-day bucketing via vesselLocalLocation, never
@@ -122,7 +132,7 @@ type weatherProvider interface {
 	Name() string
 	Description() string
 	TTLSeconds() int64
-	FetchForecast(lat, lon float64, days int) (weatherForecastBundle, error)
+	FetchForecast(lat, lon float64, days int, timezone string) (weatherForecastBundle, error)
 }
 
 var weatherProviderRegistry = map[string]weatherProvider{}
@@ -277,6 +287,56 @@ func sentinelTemperatureF(valueC float64) float64 {
 	return valueC*9/5 + 32
 }
 
+// hasUsableVesselPosition reports whether a SignalK-derived position is safe
+// to hand to a geolocated provider.
+//
+// A plain lat/lon range check is not enough. fetchSignalKVesselState seeds
+// its state with Latitude/Longitude of -1, and resolveGNSSPosition
+// (gnss_validation.go) returns -1,-1 when GNSS is untrusted and there is no
+// prior trusted fix - both syntactically valid coordinates that sit in the
+// Gulf of Guinea. The repo's own weather cache accumulated a real
+// "-1.0,-1.0,1" entry that way: a forecast for the wrong hemisphere,
+// fetched, cached and shown as if it were local weather.
+//
+// 0,0 (Null Island) is rejected for the same reason - it is the classic
+// "unset coordinates" value, and no vessel this system serves is moored
+// there. Genuine positions that merely contain a -1 or 0 component (e.g.
+// 51.5,-1.0) stay usable; only the exact sentinel pairs are refused.
+func hasUsableVesselPosition(latitude, longitude float64) bool {
+	if latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {
+		return false
+	}
+	if latitude == -1 && longitude == -1 {
+		return false
+	}
+	if latitude == 0 && longitude == 0 {
+		return false
+	}
+	return true
+}
+
+// sentinelPrecipitationPct normalizes a precipitation-chance percentage.
+//
+// It deliberately breaks the "exactly zero means no data" convention the
+// sentinels above use, because for precipitation zero is a legitimate and
+// very common reading - a dry day genuinely is 0%. Absence must therefore be
+// signalled explicitly by the plugin as a negative value, which this maps to
+// the -1 sentinel; a real 0 survives untouched.
+//
+// Conflating the two is precisely what let a provider that reported nothing
+// render as a confident "0% precip" during actual rainfall. Consumers treat
+// a negative as "unavailable" and must not display it as a number. See
+// docs/adr/0035-weather-local-day-boundaries.md.
+func sentinelPrecipitationPct(pct float64) float64 {
+	if pct < 0 {
+		return -1
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
+}
+
 // buildHourlySeriesByDay buckets a provider's flat hourly points into
 // per-day (local date) wind/precipitation/UV/cloud series, keyed by
 // "2006-01-02" in localLocation - the typed-contract replacement for the old
@@ -389,7 +449,7 @@ func buildDayData(
 		WindGustKts:          windGustKts,
 		WindDirection:        windDirection,
 		WindSummary:          buildWindSummary(windSeries),
-		PrecipitationPct:     dayPoint.PrecipitationChancePct,
+		PrecipitationPct:     sentinelPrecipitationPct(dayPoint.PrecipitationChancePct),
 		PrecipitationSummary: buildPrecipitationSummary(precipSeries),
 		SunriseTime:          sunriseTime,
 		SunsetTime:           sunsetTime,
@@ -592,7 +652,7 @@ func mapWeatherHourlyPrecipitationResponse(entries []weatherHourlyPrecipitationD
 		response = append(response, weatherHourlyPrecipitationResponse{
 			Label:                    entry.Label,
 			HourOfDay:                entry.HourOfDay,
-			PrecipitationChancePct:   entry.PrecipitationChancePct,
+			PrecipitationChancePct:   sentinelPrecipitationPct(entry.PrecipitationChancePct),
 			PrecipitationIntensityMm: entry.PrecipitationIntensityMm,
 		})
 	}
@@ -690,11 +750,11 @@ func weatherToday(c echo.Context) error {
 	if vesselErr != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
 	}
-	if vesselState.Latitude < -90 || vesselState.Latitude > 90 || vesselState.Longitude < -180 || vesselState.Longitude > 180 {
+	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
 	}
 
-	bundle, fetchErr := provider.FetchForecast(vesselState.Latitude, vesselState.Longitude, 1)
+	bundle, fetchErr := provider.FetchForecast(vesselState.Latitude, vesselState.Longitude, 1, vesselLocalTimezoneName(vesselState.Longitude))
 	if fetchErr != nil {
 		log.Printf("weather provider %q error: %v", configuredProvider, fetchErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("weather provider %q unavailable: %v", configuredProvider, fetchErr)})
@@ -775,11 +835,11 @@ func weatherForecast(c echo.Context) error {
 	if vesselErr != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
 	}
-	if vesselState.Latitude < -90 || vesselState.Latitude > 90 || vesselState.Longitude < -180 || vesselState.Longitude > 180 {
+	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
 	}
 
-	bundle, forecastErr := provider.FetchForecast(vesselState.Latitude, vesselState.Longitude, 10)
+	bundle, forecastErr := provider.FetchForecast(vesselState.Latitude, vesselState.Longitude, 10, vesselLocalTimezoneName(vesselState.Longitude))
 	if forecastErr != nil {
 		log.Printf("weather provider %q forecast error: %v", configuredProvider, forecastErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("weather provider %q unavailable: %v", configuredProvider, forecastErr)})

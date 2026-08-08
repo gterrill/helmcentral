@@ -377,15 +377,124 @@ func TestParseWeatherKitResponse_ErrorsOnUnparseableJSON(t *testing.T) {
 
 // --- request URL ---
 
-func TestWeatherKitRequestURL_UsesUTCTimezoneAndMergedDataSets(t *testing.T) {
-	url := weatherKitRequestURL(37.8199, -122.4783)
-	if !strings.Contains(url, "timezone=UTC") {
-		t.Errorf("expected request URL to use timezone=UTC, got: %s", url)
+// WeatherKit rolls forecastDaily up on the timezone named in the request.
+// The host buckets and labels days in the vessel's local zone, so requesting
+// a different zone shifts every day summary by the offset and drops the
+// record covering local midnight to that offset - which is exactly how a
+// rainy morning at UTC+10 ended up displayed as a dry "today". The zone must
+// therefore come from the caller, never be hardcoded.
+func TestWeatherKitRequestURL_UsesCallerTimezoneAndMergedDataSets(t *testing.T) {
+	url := weatherKitRequestURL(37.8199, -122.4783, "Etc/GMT-10")
+	if !strings.Contains(url, "timezone=Etc%2FGMT-10") {
+		t.Errorf("expected request URL to carry the caller's escaped timezone, got: %s", url)
+	}
+	if strings.Contains(url, "timezone=UTC") {
+		t.Errorf("expected the hardcoded timezone=UTC to be gone, got: %s", url)
 	}
 	if !strings.Contains(url, "dataSets=currentWeather,forecastDaily,forecastHourly") {
 		t.Errorf("expected request URL to request all three datasets in one call, got: %s", url)
 	}
 	if !strings.Contains(url, "37.8199") || !strings.Contains(url, "-122.4783") {
 		t.Errorf("expected request URL to contain the lat/lon, got: %s", url)
+	}
+}
+
+// An absent timezone is a host contract violation, not something to paper
+// over with a UTC default - defaulting is what silently produced misaligned
+// days in the first place. Fail loudly instead (AGENTS.md fallback policy).
+func TestValidateFetchForecastInput_RejectsMissingTimezone(t *testing.T) {
+	if err := validateFetchForecastInput(fetchForecastInput{Lat: -21.1, Lon: 149.2, Days: 10}); err == nil {
+		t.Fatal("expected an error when timezone is absent, got nil")
+	}
+	if err := validateFetchForecastInput(fetchForecastInput{Lat: -21.1, Lon: 149.2, Days: 10, Timezone: "   "}); err == nil {
+		t.Fatal("expected an error when timezone is blank, got nil")
+	}
+	if err := validateFetchForecastInput(fetchForecastInput{Lat: -21.1, Lon: 149.2, Days: 10, Timezone: "Etc/GMT-10"}); err != nil {
+		t.Fatalf("expected a valid input to pass, got: %v", err)
+	}
+}
+
+// --- absent precipitation must not read as 0% ---
+
+// Real capture from Mackay, 2026-08-09: WeatherKit omitted
+// currentWeather.precipitationChance entirely and reported 0.0 daily chance
+// for the near-term days while it was actually drizzling. The plugin must
+// distinguish "upstream said 0" from "upstream said nothing" - a -1 sentinel
+// for the latter - so the UI can show "unavailable" instead of a confident
+// 0%. See docs/adr/0035-weather-local-day-boundaries.md.
+func TestParseWeatherKitResponse_AbsentPrecipitationChanceBecomesSentinel(t *testing.T) {
+	body, err := os.ReadFile("testdata/weatherkit_response_dry_nearterm.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	out, err := parseWeatherKitResponse(body, 0)
+	if err != nil {
+		t.Fatalf("parseWeatherKitResponse failed: %v", err)
+	}
+
+	// currentWeather.precipitationChance is absent in this capture.
+	if out.Current.PrecipitationChancePct != -1 {
+		t.Errorf("expected absent current precipitationChance to map to -1, got %v", out.Current.PrecipitationChancePct)
+	}
+
+	// forecastDaily days DO carry an explicit 0.0 here - that is a real
+	// reading and must survive as 0, not be turned into the sentinel.
+	if out.Days[0].PrecipitationChancePct != 0 {
+		t.Errorf("expected an explicit daily 0.0 to stay 0, got %v", out.Days[0].PrecipitationChancePct)
+	}
+	// ...and a real non-zero day still converts fraction -> percent.
+	if out.Days[6].PrecipitationChancePct != 43 {
+		t.Errorf("expected day 6 chance 0.43 -> 43, got %v", out.Days[6].PrecipitationChancePct)
+	}
+}
+
+func TestMapForecastDays_MissingPrecipitationChanceBecomesSentinel(t *testing.T) {
+	days, err := mapForecastDays([]weatherKitDayForecast{
+		{ForecastStart: "2026-08-09T14:00:00Z", ConditionCode: "Drizzle"}, // no precipitationChance
+	}, 0)
+	if err != nil {
+		t.Fatalf("mapForecastDays failed: %v", err)
+	}
+	if days[0].PrecipitationChancePct != -1 {
+		t.Errorf("expected a missing daily precipitationChance to map to -1, got %v", days[0].PrecipitationChancePct)
+	}
+}
+
+func TestMapForecastHours_MissingPrecipitationChanceBecomesSentinel(t *testing.T) {
+	hours := mapForecastHours([]weatherKitHourForecast{
+		{ForecastStart: "2026-08-09T14:00:00Z", ConditionCode: "Drizzle"}, // no precipitationChance
+	})
+	if len(hours) != 1 {
+		t.Fatalf("expected 1 hour, got %d", len(hours))
+	}
+	if hours[0].PrecipitationChancePct != -1 {
+		t.Errorf("expected a missing hourly precipitationChance to map to -1, got %v", hours[0].PrecipitationChancePct)
+	}
+}
+
+// The old mapCurrentWeather fell back to precipitationIntensity (mm/hr) when
+// precipitationChance was absent, writing a rainfall rate into a percentage
+// field, then to other time windows' values. Both invent a reading the
+// provider never gave; AGENTS.md's fallback policy forbids exactly that.
+func TestMapCurrentWeather_DoesNotSubstituteIntensityForAbsentChance(t *testing.T) {
+	intensity := 4.2
+	dailyChance := 0.9
+	out, err := mapCurrentWeather(weatherKitResponse{
+		CurrentWeather: &weatherKitCurrentWeather{
+			AsOf:                   "2026-08-09T20:00:00Z",
+			ConditionCode:          "Drizzle",
+			PrecipitationIntensity: &intensity,
+		},
+		ForecastDaily: &weatherKitForecastDaily{
+			Days: []weatherKitDayForecast{{ForecastStart: "2026-08-09T14:00:00Z", PrecipitationChance: &dailyChance}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("mapCurrentWeather failed: %v", err)
+	}
+	if out.PrecipitationChancePct != -1 {
+		t.Errorf("expected absent current chance to stay absent (-1), got %v - a %v mm/hr intensity or another window's %v must not be substituted",
+			out.PrecipitationChancePct, intensity, dailyChance)
 	}
 }

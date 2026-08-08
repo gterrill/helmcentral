@@ -147,4 +147,72 @@ describe('useWeatherForecast', () => {
     expect(result.current.forecast[0].dayKey).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(result.current.provider).toBeNull()
   })
+  // The backend sends -1 when the provider reported no precipitation data at
+  // all, which is different from a genuine 0% chance. Collapsing the two is
+  // what showed a confident "0% precip" during actual drizzle, so the hook
+  // must surface absence as null and let the UI say "unavailable".
+  it('maps an absent precipitation chance to null and keeps a real 0 as 0', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        provider: 'weatherkit',
+        days: [
+          {
+            day_key: '2026-08-09',
+            date: 'Aug 9',
+            day_name: 'Sunday',
+            condition: 'Drizzle',
+            precipitation_pct: -1,
+            hourly_precip: [
+              { label: '6AM', hour_of_day: 6, precipitation_chance_pct: -1, precipitation_intensity_mm: 0 },
+              { label: '7AM', hour_of_day: 7, precipitation_chance_pct: 0, precipitation_intensity_mm: 0 },
+              { label: '8AM', hour_of_day: 8, precipitation_chance_pct: 65, precipitation_intensity_mm: 1.2 },
+            ],
+          },
+          {
+            day_key: '2026-08-10',
+            date: 'Aug 10',
+            day_name: 'Monday',
+            condition: 'Clear',
+            precipitation_pct: 0,
+          },
+        ],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.forecast[0].precipitation).toBeNull()
+    expect(result.current.forecast[1].precipitation).toBe(0)
+
+    const hourly = result.current.forecast[0].hourlyPrecip
+    expect(hourly[0].precipChancePct).toBeNull()
+    expect(hourly[1].precipChancePct).toBe(0)
+    expect(hourly[2].precipChancePct).toBe(65)
+  })
+
+  // A field the backend omitted entirely is also "no data", not 0%.
+  it('maps a missing precipitation_pct field to null rather than 0', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        provider: 'weatherkit',
+        days: [{ day_key: '2026-08-09', date: 'Aug 9', day_name: 'Sunday', condition: 'Drizzle' }],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.forecast[0].precipitation).toBeNull()
+  })
 })

@@ -327,6 +327,7 @@ export function App() {
     summary: forecastSummary,
     loading: forecastLoading,
     error: forecastError,
+    provider: forecastProvider,
     isCached: forecastIsCached,
     updatedAt: forecastUpdatedAt,
     ttlSeconds: forecastTtlSeconds,
@@ -657,6 +658,7 @@ export function App() {
             summary={forecastSummary}
             loading={forecastLoading}
             error={forecastError}
+            provider={forecastProvider}
             isCached={forecastIsCached}
             updatedAt={forecastUpdatedAt}
             ttlSeconds={forecastTtlSeconds}

@@ -101,7 +101,9 @@ func TestWasmWaveProvider_FetchWaves_StaleOnErrorFallback(t *testing.T) {
 	// TestWasmWeatherProvider_FetchForecast_StaleOnErrorFallback) so the next
 	// FetchWaves call is forced to attempt a live call rather than serving a
 	// within-TTL hit.
-	cacheKey := "30.0,40.0,2"
+	// Trailing comma: waveWasmCacheKey delegates to weatherWasmCacheKey with
+	// an empty timezone, since fetch_waves has no daily rollup to place.
+	cacheKey := "30.0,40.0,2,"
 	provider.cache.mu.Lock()
 	entry, ok := provider.cache.data[cacheKey]
 	if !ok {

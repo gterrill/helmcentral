@@ -63,6 +63,11 @@ func fetchForecast() int32 {
 		return -1
 	}
 
+	if err := validateFetchForecastInput(input); err != nil {
+		pdk.SetErrorString(err.Error())
+		return -1
+	}
+
 	cfg, missing := resolveWeatherKitConfig(pdk.GetConfig)
 	if len(missing) > 0 {
 		pdk.SetErrorString(missingConfigKeyErrorMessage(missing))
@@ -75,7 +80,7 @@ func fetchForecast() int32 {
 		return -1
 	}
 
-	url := weatherKitRequestURL(input.Lat, input.Lon)
+	url := weatherKitRequestURL(input.Lat, input.Lon, input.Timezone)
 	req := pdk.NewHTTPRequest(pdk.MethodGet, url)
 	req.SetHeader("Authorization", "Bearer "+token)
 	res := req.Send()

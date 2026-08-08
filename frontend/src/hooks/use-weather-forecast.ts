@@ -12,8 +12,23 @@ export interface WeatherHourlyWindPoint {
 export interface WeatherHourlyPrecipPoint {
   label: string;
   hourOfDay: number;
-  precipChancePct: number;
+  /** null when the provider reported no chance-of-precipitation data at all - distinct from a real 0%. */
+  precipChancePct: number | null;
   precipIntensityMm: number;
+}
+
+/**
+ * The backend sends -1 for "the provider reported nothing here", because 0%
+ * is itself a legitimate precipitation reading and so cannot double as the
+ * absent marker (see sentinelPrecipitationPct in
+ * backend/weather_providers.go). Absence becomes null so the UI can render
+ * "unavailable" instead of a confident 0%.
+ */
+function precipitationPctOrNull(value: number | undefined): number | null {
+  if (typeof value !== 'number' || value < 0) {
+    return null;
+  }
+  return value;
 }
 
 export interface WeatherHourlyUVPoint {
@@ -41,7 +56,8 @@ export interface WeatherForecastDay {
   windDirection: string;
   windSummary: string | null;
   precipitationSummary: string | null;
-  precipitation: number;
+  /** null when the provider reported no chance-of-precipitation data at all - distinct from a real 0%. */
+  precipitation: number | null;
   sunriseTime: string | null;
   sunsetTime: string | null;
   moonPhase: string | null;
@@ -182,7 +198,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
               windDirection: day.wind_direction || '—',
               windSummary: typeof day.wind_summary === 'string' && day.wind_summary !== '' ? day.wind_summary : null,
               precipitationSummary: typeof day.precipitation_summary === 'string' && day.precipitation_summary !== '' ? day.precipitation_summary : null,
-              precipitation: typeof day.precipitation_pct === 'number' ? day.precipitation_pct : 0,
+              precipitation: precipitationPctOrNull(day.precipitation_pct),
               sunriseTime: typeof day.sunrise_time === 'string' && day.sunrise_time !== '' ? day.sunrise_time : null,
               sunsetTime: typeof day.sunset_time === 'string' && day.sunset_time !== '' ? day.sunset_time : null,
               moonPhase: typeof day.moon_phase === 'string' && day.moon_phase !== '' ? day.moon_phase : null,
@@ -200,7 +216,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                 ? day.hourly_precip.map((entry) => ({
                     label: entry.label || '—',
                     hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
-                    precipChancePct: typeof entry.precipitation_chance_pct === 'number' ? entry.precipitation_chance_pct : 0,
+                    precipChancePct: precipitationPctOrNull(entry.precipitation_chance_pct),
                     precipIntensityMm: typeof entry.precipitation_intensity_mm === 'number' ? entry.precipitation_intensity_mm : 0,
                   }))
                 : [],

@@ -120,6 +120,53 @@ describe('ForecastDrawer refresh age', () => {
     expect(formatRefreshAge('2026-06-14T10:00:00Z', new Date('2026-06-14T12:30:00Z').getTime())).toBe('2 hours ago')
   })
 
+  // isCached/updatedAt/ttlSeconds were declared on ForecastDrawerProps and
+  // passed from App.tsx, but never destructured or rendered - so a forecast
+  // served from the provider's stale-on-error cache looked identical to a
+  // live one. The tide section already shows this; weather must too.
+  it('shows the provider, cache state and refresh age for the forecast', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        loading={false}
+        error={null}
+        unit="metric"
+        provider="weatherkit"
+        isCached
+        updatedAt="2026-06-14T10:00:00Z"
+        ttlSeconds={900}
+      />,
+    )
+
+    const meta = screen.getByTestId('forecast-refresh-meta')
+    expect(meta).toHaveTextContent('cached')
+    expect(meta).toHaveTextContent('2 hours ago')
+    expect(meta).toHaveTextContent('weatherkit')
+  })
+
+  it('labels a freshly fetched forecast as live', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        loading={false}
+        error={null}
+        unit="metric"
+        isCached={false}
+        updatedAt="2026-06-14T12:30:00Z"
+      />,
+    )
+
+    const meta = screen.getByTestId('forecast-refresh-meta')
+    expect(meta).toHaveTextContent('live')
+    expect(meta).toHaveTextContent('just now')
+  })
+
+  it('omits the refresh line entirely when no cache metadata is available', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.queryByTestId('forecast-refresh-meta')).not.toBeInTheDocument()
+  })
+
   it('updates summary metrics when a day card is selected', () => {
     render(
       <ForecastDrawer
@@ -445,6 +492,33 @@ describe('ForecastDrawer refresh age', () => {
 
     expect(screen.getByTestId('forecast-precip-chart')).toBeInTheDocument()
     expect(screen.getAllByTestId('forecast-precip-bar').length).toBeGreaterThan(0)
+  })
+
+  // -1 from the backend means "the provider reported no precipitation data",
+  // which the hook maps to null. Rendering that as "0%" is what told the crew
+  // there was no chance of rain while it was drizzling on deck - it must read
+  // as unavailable instead.
+  it('shows a dash instead of 0% when the precipitation chance is unavailable', () => {
+    render(<ForecastDrawer forecast={[buildDay({ precipitation: null })]} loading={false} error={null} unit="metric" />)
+
+    const precip = screen.getByTestId('forecast-selected-precip')
+    expect(precip).toHaveTextContent('—')
+    expect(precip).not.toHaveTextContent('0%')
+  })
+
+  it('still shows 0% when the provider genuinely forecasts no rain', () => {
+    render(<ForecastDrawer forecast={[buildDay({ precipitation: 0 })]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByTestId('forecast-selected-precip')).toHaveTextContent('0%')
+  })
+
+  it('does not derive humidity or visibility from an unavailable precipitation chance', () => {
+    render(<ForecastDrawer forecast={[buildDay({ precipitation: null })]} loading={false} error={null} unit="metric" />)
+
+    // Both are computed from precipitation; with no precipitation reading
+    // they would otherwise render a fabricated but plausible number.
+    expect(screen.getByTestId('forecast-selected-humidity')).toHaveTextContent('—')
+    expect(screen.getByTestId('forecast-selected-visibility')).toHaveTextContent('—')
   })
 
   it('shows the precipitation summary sentence for the selected day', () => {

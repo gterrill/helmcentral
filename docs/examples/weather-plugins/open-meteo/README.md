@@ -24,6 +24,28 @@ AssemblyScript, C++, and Haskell PDKs all implement the same contract
 identically; see [Extism's PDK list](https://extism.org/docs/concepts/pdk)
 if you'd rather use one of those.
 
+## Contract requirements every weather plugin must honour
+
+Two rules from
+[ADR 0035](../../../adr/0035-weather-local-day-boundaries.md) are easy to get
+wrong and produce a plausible-looking but incorrect forecast rather than an
+obvious failure:
+
+1. **Use the host's `timezone` input.** `fetch_forecast` receives an IANA zone
+   (e.g. `Etc/GMT-10`). If your upstream API rolls hourly data up into daily
+   summaries, pass this through instead of hardcoding a zone or letting the
+   API pick one. The host buckets and labels its own day series in that same
+   zone; rolling up on a different boundary silently shifts every day summary
+   and drops the record covering local midnight to the offset. An absent
+   `timezone` is rejected, not defaulted.
+
+2. **Report absent precipitation as `-1`, never `0`.** `0%` is a legitimate
+   forecast, so it cannot double as "no data". If the upstream response omits
+   a chance-of-precipitation value, emit `-1` on
+   `precipitation_chance_pct` so the UI can show "unavailable". Never
+   substitute a value from a different field or a different time window - that
+   is how an mm/hr rainfall rate once ended up rendered as a percentage.
+
 ## Why this plugin is two files
 
 `open-meteo.go` holds all the parsing/filtering logic and has no dependency

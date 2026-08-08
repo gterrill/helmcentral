@@ -40,7 +40,7 @@ func updateNearestTideStation() {
 	signalkURL := buildSignalKURL(address, port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 	vesselState, err := fetchSignalKVesselState(signalkURL, vesselPath)
-	if err != nil || vesselState.Latitude < -90 || vesselState.Latitude > 90 {
+	if err != nil || !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
 		return
 	}
 

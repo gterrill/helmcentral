@@ -77,23 +77,15 @@ func fetchForecast() int32 {
 		return -1
 	}
 
-	// Clamp days to Open-Meteo's supported range: 1-16 (default 7 if <= 0)
-	days := input.Days
-	if days <= 0 {
-		days = 7
-	} else if days > 16 {
-		days = 16
+	if err := validateFetchForecastInput(input); err != nil {
+		pdk.SetErrorString(err.Error())
+		return -1
 	}
 
-	// Build URL
-	url := fmt.Sprintf(
-		"https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"+
-			"&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,precipitation_probability"+
-			"&hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day"+
-			"&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max,sunrise,sunset"+
-			"&wind_speed_unit=ms&timezone=auto&forecast_days=%d",
-		input.Lat, input.Lon, days,
-	)
+	// Days clamping and the timezone the daily[] arrays roll up on both live
+	// in openMeteoRequestURL (open-meteo.go) so they are unit-testable
+	// without a TinyGo build.
+	url := openMeteoRequestURL(input)
 
 	// Fetch the forecast
 	req := pdk.NewHTTPRequest(pdk.MethodGet, url)

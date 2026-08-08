@@ -70,8 +70,7 @@ func placeName(c echo.Context) error {
 	}
 
 	vesselState, vesselErr := fetchSignalKVesselState(signalkURL, vesselPath)
-	if vesselErr != nil || vesselState.Latitude < -90 || vesselState.Latitude > 90 ||
-		vesselState.Longitude < -180 || vesselState.Longitude > 180 {
+	if vesselErr != nil || !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
 		return c.JSON(http.StatusOK, map[string]string{"name": ""})
 	}
 

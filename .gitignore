@@ -24,3 +24,8 @@ settings.yaml
 /plugins/
 # Scratch notes kept across branches, not part of any change
 /temp.md
+
+# Plugin binaries built in place by the TinyGo build documented in each
+# plugin's README; the deployed copies live in the ignored /plugins/.
+# (backend/testdata/**/*.wasm are committed test fixtures and stay tracked.)
+/docs/examples/**/*.wasm

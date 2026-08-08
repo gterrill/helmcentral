@@ -34,13 +34,18 @@ type stubWeatherProvider struct {
 	ttl    int64
 	bundle weatherForecastBundle
 	err    error
+
+	// gotTimezone records the zone the handler asked for, so tests can assert
+	// the vessel's local zone (not UTC) reaches the plugin.
+	gotTimezone string
 }
 
 func (s *stubWeatherProvider) ID() string          { return s.id }
 func (s *stubWeatherProvider) Name() string        { return s.name }
 func (s *stubWeatherProvider) Description() string { return "Stub weather provider for tests" }
 func (s *stubWeatherProvider) TTLSeconds() int64   { return s.ttl }
-func (s *stubWeatherProvider) FetchForecast(lat, lon float64, days int) (weatherForecastBundle, error) {
+func (s *stubWeatherProvider) FetchForecast(lat, lon float64, days int, timezone string) (weatherForecastBundle, error) {
+	s.gotTimezone = timezone
 	if s.err != nil {
 		return weatherForecastBundle{}, s.err
 	}
@@ -541,5 +546,163 @@ func TestBuildDayData_MapsUnitsAndSummaries(t *testing.T) {
 	}
 	if day.MoonPhase == "" {
 		t.Fatalf("expected a non-empty moon phase")
+	}
+}
+
+// Precipitation is the one field where the codebase's usual "exactly zero
+// means no data" sentinel convention must NOT apply: 0% chance of rain is a
+// legitimate, extremely common reading. Absence therefore has to arrive as an
+// explicit negative from the plugin, and a real 0 must survive untouched.
+// Conflating the two is what showed a confident "0% precip" on a drizzling
+// morning.
+func TestSentinelPrecipitationPct_DistinguishesRealZeroFromAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   float64
+		want float64
+	}{
+		{"a real zero stays zero", 0, 0},
+		{"a real reading passes through", 43, 43},
+		{"100 percent passes through", 100, 100},
+		{"negative means absent", -1, -1},
+		{"any negative normalizes to the sentinel", -12.5, -1},
+		{"out-of-range high clamps", 140, 100},
+	} {
+		if got := sentinelPrecipitationPct(tc.in); got != tc.want {
+			t.Errorf("%s: sentinelPrecipitationPct(%v) = %v, want %v", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestBuildDayData_PropagatesAbsentPrecipitationAsSentinel(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	referenceDatetime := time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC)
+	dayPoint := weatherDayPoint{
+		Start:                  time.Date(2026, 8, 8, 14, 0, 0, 0, time.UTC),
+		Condition:              "drizzle",
+		TempMaxC:               21.0,
+		TempMinC:               18.0,
+		PrecipitationChancePct: -1, // plugin says "upstream did not report this"
+	}
+
+	day := buildDayData(dayPoint, referenceDatetime, loc, nil, nil, nil, nil)
+
+	if day.PrecipitationPct != -1 {
+		t.Fatalf("expected an absent precipitation chance to stay -1, got %v", day.PrecipitationPct)
+	}
+
+	dayPoint.PrecipitationChancePct = 0
+	if day := buildDayData(dayPoint, referenceDatetime, loc, nil, nil, nil, nil); day.PrecipitationPct != 0 {
+		t.Fatalf("expected a genuine 0%% to stay 0, got %v", day.PrecipitationPct)
+	}
+}
+
+func TestMapWeatherHourlyPrecipitationResponse_PropagatesAbsentAsSentinel(t *testing.T) {
+	entries := []weatherHourlyPrecipitationData{
+		{Label: "6AM", HourOfDay: 6, PrecipitationChancePct: -1, PrecipitationIntensityMm: 0},
+		{Label: "7AM", HourOfDay: 7, PrecipitationChancePct: 0, PrecipitationIntensityMm: 0},
+		{Label: "8AM", HourOfDay: 8, PrecipitationChancePct: 65, PrecipitationIntensityMm: 1.2},
+	}
+
+	got := mapWeatherHourlyPrecipitationResponse(entries)
+
+	if got[0].PrecipitationChancePct != -1 {
+		t.Errorf("expected absent hourly chance to stay -1, got %v", got[0].PrecipitationChancePct)
+	}
+	if got[1].PrecipitationChancePct != 0 {
+		t.Errorf("expected a genuine 0%% hourly chance to stay 0, got %v", got[1].PrecipitationChancePct)
+	}
+	if got[2].PrecipitationChancePct != 65 {
+		t.Errorf("expected a real hourly chance to pass through, got %v", got[2].PrecipitationChancePct)
+	}
+}
+
+// resolveGNSSPosition (gnss_validation.go) returns the -1,-1 sentinel when
+// GNSS is untrusted and no prior trusted fix exists. A plain range check
+// accepts that, because -1,-1 is a syntactically valid coordinate - it is
+// just in the Gulf of Guinea rather than under the boat. The repo's own
+// weather cache picked up a real "-1.0,-1.0,1" entry this way, meaning a
+// forecast for the wrong hemisphere was fetched, cached and displayed.
+func TestHasUsableVesselPosition_RejectsSentinelAndOutOfRange(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		lat  float64
+		lon  float64
+		want bool
+	}{
+		{"a real fix is usable", -21.111, 149.228, true},
+		{"the untrusted -1,-1 sentinel is not", -1, -1, false},
+		{"latitude out of range", 91, 149.228, false},
+		{"longitude out of range", -21.111, 181, false},
+		{"null island is not a plausible vessel fix", 0, 0, false},
+		{"a genuine position near -1 longitude still works", 51.5, -1.0, true},
+		{"a genuine position near -1 latitude still works", -1.0, 36.8, true},
+	} {
+		if got := hasUsableVesselPosition(tc.lat, tc.lon); got != tc.want {
+			t.Errorf("%s: hasUsableVesselPosition(%v, %v) = %v, want %v", tc.name, tc.lat, tc.lon, got, tc.want)
+		}
+	}
+}
+
+// End-to-end guard: a vessel reporting the untrusted -1,-1 sentinel must get
+// a 502, not a confidently-rendered forecast for the Gulf of Guinea.
+func TestWeatherForecast_RejectsSentinelPosition(t *testing.T) {
+	withCleanWeatherProviderRegistry(t)
+	stub := &stubWeatherProvider{id: "open-meteo", name: "Open-Meteo", ttl: 900}
+	registerWeatherProvider(stub)
+
+	server := trustedSignalKPayloadServer(t, -1, -1)
+	defer server.Close()
+
+	settingsPath := writeWeatherSettings(t, "open-meteo", server.URL)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/weather-forecast", nil)
+	rec := httptest.NewRecorder()
+
+	if err := weatherForecast(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("weatherForecast returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 for the -1,-1 sentinel position, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	if stub.gotTimezone != "" {
+		t.Errorf("expected the provider never to be called for an unusable position, but it was")
+	}
+}
+
+// The vessel's local zone - not UTC - must reach the plugin, so the provider
+// rolls its daily summaries up on the same boundaries the host buckets on.
+func TestWeatherForecast_PassesVesselLocalTimezoneToProvider(t *testing.T) {
+	withCleanWeatherProviderRegistry(t)
+	now := time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC)
+	stub := &stubWeatherProvider{
+		id: "open-meteo", name: "Open-Meteo", ttl: 900,
+		bundle: weatherForecastBundle{
+			Current: weatherCurrentPoint{Time: now, TemperatureC: 19, Condition: "drizzle"},
+			Days: []weatherDayPoint{
+				{Start: time.Date(2026, 8, 9, 14, 0, 0, 0, time.UTC), Condition: "drizzle", TempMaxC: 22, TempMinC: 18, PrecipitationChancePct: 91},
+			},
+			CachedAt: now,
+		},
+	}
+	registerWeatherProvider(stub)
+
+	server := trustedSignalKPayloadServer(t, -21.1113, 149.2277) // Mackay, UTC+10
+	defer server.Close()
+
+	settingsPath := writeWeatherSettings(t, "open-meteo", server.URL)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/weather-forecast", nil)
+	rec := httptest.NewRecorder()
+
+	if err := weatherForecast(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("weatherForecast returned error: %v", err)
+	}
+	if stub.gotTimezone != "Etc/GMT-10" {
+		t.Fatalf("expected the vessel's local zone Etc/GMT-10 to reach the provider, got %q", stub.gotTimezone)
 	}
 }
