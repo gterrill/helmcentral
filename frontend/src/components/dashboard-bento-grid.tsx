@@ -6,7 +6,7 @@ import '@/styles/dashboard-bento-grid.css'
 import { GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
-import { isEmbedWidgetId, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { isEmbedWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
@@ -72,16 +72,8 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
   )
 
   const commit = useCallback((layout: readonly LayoutItem[]) => {
-    onLayoutSettle(
-      Array.from(layout).map((l) => ({
-        id: l.i as DashboardWidgetId,
-        x: l.x,
-        y: l.y,
-        w: l.w,
-        h: l.h,
-      }))
-    )
-  }, [onLayoutSettle])
+    onLayoutSettle(mergeLayoutGeometry(widgets, layout))
+  }, [widgets, onLayoutSettle])
 
   if (!isDesktopGrid) {
     // Below `lg`, reflow the *same* persisted 12-column layout into a CSS grid — one

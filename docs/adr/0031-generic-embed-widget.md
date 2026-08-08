@@ -5,6 +5,8 @@ Accepted
 
 Extends ADR 0012, which introduced the configurable bento dashboard, and ADR 0013, which made it multi-page. Both assumed a widget is fully described by its id and its position. This ADR breaks that assumption for exactly one widget type.
 
+Decision 8 (theme synchronisation) was added in place after the fact. It is a pure extension — nothing above it changed — and it is recorded here rather than as its own ADR because it is entirely a consequence of decision 1's vendor-neutrality rule.
+
 ## Context
 
 Operators build panels in Grafana — a windrose, polar plots, battery history — against the same InfluxDB this app already writes to. Those panels belong next to the native tiles, not behind a separate browser tab.
@@ -56,6 +58,14 @@ So a `grafana` widget id would have permitted exactly one embedded panel per pag
 
    `pointer-events-none` while `editing`. A drag or resize whose mouse-up lands over the iframe is otherwise swallowed by the embedded document and the gesture never completes — the classic iframe-drag bug. The drag handle and resize corner both sit outside the frame, so nothing is lost.
 
+8. **A `theme` param already in the URL is kept in sync with the app's day/night mode; one that is absent is never added.** An embedded panel renders in whatever theme its own server defaults to, so a dark Grafana panel sat inside a light dashboard card. Grafana reads `?theme=light|dark`, and `EmbedTile` now rewrites that param from the app's `isDarkTheme`.
+
+   Injecting `theme=` into *every* embed URL was rejected, and decision 1 is the whole reason. `theme` is a Grafana convention, not a universal one; writing it unconditionally would push it onto the Node-RED, Home Assistant and Signal K plugin UIs this widget deliberately also serves, and would collide with any embed using `theme` for its own purposes. Opt-in by presence means the operator writes `&theme=` once and the app takes over from there, while untouched URLs stay byte-identical — which is also what keeps the rewrite honest enough to assert in a test.
+
+   The parent cannot style a cross-origin frame, so this is the only theming lever available without a proxy. It reaches the panel chrome only: the windrose plugin in use draws its own legend and ignores Grafana's theme, so a perfect match is not achievable this way.
+
+   **The memoisation is load-bearing, not an optimisation.** Changing an iframe's `src` remounts the frame. Deriving the URL from the theme flag means it is no longer referentially stable across App's frequent re-renders, so without `useMemo` the string is rebuilt every render and the embed reloads continuously. Toggling day/night does reload the panel once, which is accepted.
+
 ## Consequences
 
 **Positive:**
@@ -72,6 +82,7 @@ So a `grafana` widget id would have permitted exactly one embedded panel per pag
 - If Helmcentral is ever served over HTTPS, `http://` panels break as mixed content. The dialog warns about this; nothing enforces it.
 - Grafana still requires `security.allow_embedding = true` server-side. Nothing in this app can detect or report that — a frame refused by `X-Frame-Options` simply renders blank.
 - No `frame-src` CSP exists to constrain which origins may be embedded. Deferred: the app has no CSP at all today, and adding one only for embeds would be a partial measure.
+- Theme sync (decision 8) is silent when it does nothing. An operator whose URL lacks `theme=` gets no hint that the toggle could drive the panel; the config dialog does not mention it.
 
 **Deferred follow-ons:** a backend reverse proxy injecting a Grafana service-account token (needed only if the operator's Grafana ever requires auth, since an iframe cannot carry an `Authorization` header); a Settings section for named embed sources; a `frame-src` allowlist.
 

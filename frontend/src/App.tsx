@@ -46,6 +46,7 @@ import { SatChartsDrawer } from '@/components/sat-charts-drawer'
 import { RouteTile } from '@/components/route-tile'
 import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
+import { Toaster } from '@/components/ui/sonner'
 import { useRoutes } from '@/hooks/use-routes'
 import { useSatCharts } from '@/hooks/use-sat-charts'
 import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
@@ -429,6 +430,7 @@ export function App() {
           config={widget.embed}
           editing={layoutEditing}
           onConfigure={() => setEmbedDraft(widget)}
+          isDarkTheme={isDarkTheme}
         />
       )
     }
@@ -963,6 +965,8 @@ export function App() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Toaster isDarkTheme={isDarkTheme} />
     </SidebarProvider>
   )
 }

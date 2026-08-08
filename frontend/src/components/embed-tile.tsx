@@ -1,5 +1,5 @@
 import { Globe, Settings2 } from 'lucide-react'
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
@@ -10,6 +10,22 @@ interface EmbedTileProps {
   config: EmbedWidgetConfig | undefined
   editing: boolean
   onConfigure?: () => void
+  isDarkTheme?: boolean
+}
+
+/** Keeps a `theme` param already present in an operator URL in sync with the
+ *  app's light/dark mode. URLs without one are returned untouched: ADR 0031
+ *  keeps this widget vendor-neutral, so we do not inject a Grafana convention
+ *  into every embed. The operator opts in by writing `&theme=` once. */
+function withTheme(rawUrl: string, isDarkTheme: boolean): string {
+  try {
+    const url = new URL(rawUrl)
+    if (!url.searchParams.has('theme')) return rawUrl
+    url.searchParams.set('theme', isDarkTheme ? 'dark' : 'light')
+    return url.toString()
+  } catch {
+    return rawUrl
+  }
 }
 
 /**
@@ -17,12 +33,23 @@ interface EmbedTileProps {
  * inside the bento grid. See ADR 0031.
  *
  * Unlike the Windy embed in radar-drawer.tsx, the URL here comes from persisted
- * config rather than live GPS, so it is referentially stable across App's
- * frequent re-renders and needs no latching to avoid reloading the frame.
+ * config rather than live GPS, so the day/night toggle is the only thing that
+ * should ever change it. Changing an iframe's src remounts the frame, so `src`
+ * is memoised on the config URL and isDarkTheme: without that, App's frequent
+ * re-renders would rebuild the string each time and reload the embed.
  */
-export const EmbedTile = memo(function EmbedTile({ config, editing, onConfigure }: EmbedTileProps) {
+export const EmbedTile = memo(function EmbedTile({
+  config,
+  editing,
+  onConfigure,
+  isDarkTheme = false,
+}: EmbedTileProps) {
   const title = config?.title.trim() || 'Embed'
   const hasUsableUrl = config !== undefined && isValidEmbedUrl(config.url)
+  const src = useMemo(
+    () => (config ? withTheme(config.url.trim(), isDarkTheme) : ''),
+    [config?.url, isDarkTheme],
+  )
 
   return (
     <Tile
@@ -49,7 +76,7 @@ export const EmbedTile = memo(function EmbedTile({ config, editing, onConfigure 
       <div className="h-full min-h-[240px]">
         {hasUsableUrl ? (
           <iframe
-            src={config.url.trim()}
+            src={src}
             title={title}
             loading="lazy"
             referrerPolicy="no-referrer-when-downgrade"

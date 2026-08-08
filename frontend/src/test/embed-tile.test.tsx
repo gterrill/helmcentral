@@ -77,3 +77,48 @@ describe('EmbedTile', () => {
     expect(onConfigure).toHaveBeenCalledOnce()
   })
 })
+
+describe('EmbedTile theme sync', () => {
+  const grafanaUrl =
+    'http://192.168.50.240:3030/d-solo/ad6vblf/weather?orgId=1&panelId=panel-1&kiosk&theme=light'
+
+  test('rewrites theme=light to theme=dark when isDarkTheme is true', () => {
+    render(<EmbedTile config={{ title: 'Weather', url: grafanaUrl }} editing={false} isDarkTheme />)
+
+    const src = getIframe().getAttribute('src') ?? ''
+    expect(new URL(src).searchParams.get('theme')).toBe('dark')
+  })
+
+  test('rewrites theme=dark to theme=light when isDarkTheme is false', () => {
+    const darkUrl = grafanaUrl.replace('theme=light', 'theme=dark')
+    render(<EmbedTile config={{ title: 'Weather', url: darkUrl }} editing={false} isDarkTheme={false} />)
+
+    const src = getIframe().getAttribute('src') ?? ''
+    expect(new URL(src).searchParams.get('theme')).toBe('light')
+  })
+
+  test('preserves other query params, including valueless ones like kiosk', () => {
+    render(<EmbedTile config={{ title: 'Weather', url: grafanaUrl }} editing={false} isDarkTheme />)
+
+    const src = getIframe().getAttribute('src') ?? ''
+    const params = new URL(src).searchParams
+    expect(params.get('orgId')).toBe('1')
+    expect(params.get('panelId')).toBe('panel-1')
+    expect(params.has('kiosk')).toBe(true)
+  })
+
+  test('passes a URL with no theme param through byte-for-byte unchanged', () => {
+    render(<EmbedTile config={config} editing={false} isDarkTheme />)
+
+    const src = getIframe().getAttribute('src') ?? ''
+    expect(src).toBe(config.url)
+  })
+
+  test('omitting isDarkTheme behaves as light mode', () => {
+    const darkUrl = grafanaUrl.replace('theme=light', 'theme=dark')
+    render(<EmbedTile config={{ title: 'Weather', url: darkUrl }} editing={false} />)
+
+    const src = getIframe().getAttribute('src') ?? ''
+    expect(new URL(src).searchParams.get('theme')).toBe('light')
+  })
+})
