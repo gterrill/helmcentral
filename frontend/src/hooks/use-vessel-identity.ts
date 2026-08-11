@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { apiBaseUrl } from '@/config/api'
-import { getUiConfig } from '@/config/app-config'
+import { useAppConfig } from '@/hooks/use-app-config'
 
 export function formatClock(date: Date) {
   const value = new Intl.DateTimeFormat('en-US', {
@@ -30,6 +30,8 @@ export function useVesselIdentity() {
   const [boatName, setBoatName] = useState<string | null>(null)
   const [boatModel, setBoatModel] = useState<string | null>(null)
   const [signalkConnected, setSignalkConnected] = useState<boolean | null>(null)
+  const { ui: uiConfig } = useAppConfig()
+  const refreshSeconds = uiConfig.vesselStateRefreshSeconds
 
   useEffect(() => {
     const clockTimer = window.setInterval(() => {
@@ -104,13 +106,14 @@ export function useVesselIdentity() {
     const syncTimer = window.setInterval(() => {
       void fetchVesselState()
       void fetchSettings()
-    }, getUiConfig().vesselStateRefreshSeconds * 1000)
+    }, refreshSeconds * 1000)
 
     return () => {
       window.clearInterval(clockTimer)
       window.clearInterval(syncTimer)
     }
-  }, [])
+    // Re-arms the poll when the operator changes the refresh interval.
+  }, [refreshSeconds])
 
   const currentDate = useMemo(() => formatDate(now).toUpperCase(), [now])
   const clock = useMemo(() => formatClock(now), [now])

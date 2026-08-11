@@ -312,8 +312,6 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 - **Authentication/authorization** — Helmcentral is currently unauthenticated
   and assumes a trusted LAN. This is the largest known gap; see the security
   note at the top.
-- Runtime-configurable units and anchor geometry (both are currently
-  build-time defaults in the frontend; the backend already stores them).
 - mDNS-based SignalK discovery, now viable for native installs — the container
   networking that ruled it out no longer applies. See
   [docs/adr/0029-signalk-discovery.md](docs/adr/0029-signalk-discovery.md).

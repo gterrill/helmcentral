@@ -73,7 +73,8 @@ import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
-import { FORECAST_REFRESH_SECONDS, getAnchorConfig, getUiConfig } from '@/config/app-config'
+import { FORECAST_REFRESH_SECONDS } from '@/config/app-config'
+import { useAppConfig } from '@/hooks/use-app-config'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import {
   DASHBOARD_WIDGET_IDS,
@@ -127,8 +128,7 @@ const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const AUTO_CLOSE_ANCHOR_WATCH_KEY = 'anchorWatch.autoClose.enabled'
 
 export function App() {
-  const uiConfig = getUiConfig()
-  const anchorConfig = getAnchorConfig()
+  const { ui: uiConfig, anchor: anchorConfig } = useAppConfig()
   const [activePanel, setActivePanel] = useState<PanelId | null>(null)
   const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { getUiConfig, getAnchorConfig } from '@/config/app-config'
+import { normalizeUiConfig, normalizeAnchorConfig } from '@/config/app-config'
 
 // Vitest runs with the frontend package root as cwd; the jsdom environment
 // leaves import.meta.url as a non-file URL, so resolve from cwd instead.
@@ -24,12 +24,12 @@ describe('app-config', () => {
   })
 
   it('resolves to documented defaults with no bundled config', () => {
-    expect(getUiConfig()).toEqual({
+    expect(normalizeUiConfig(null)).toEqual({
       distanceUnits: 'metric',
       vesselStateRefreshSeconds: 10,
       autoCloseAnchorWatchOnEngine: true,
     })
-    expect(getAnchorConfig()).toEqual({
+    expect(normalizeAnchorConfig(null)).toEqual({
       bowRollerHeightM: 1.5,
       chainSizeMm: 12,
       chainOnboardM: 150,

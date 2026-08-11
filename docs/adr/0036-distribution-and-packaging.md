@@ -116,18 +116,29 @@ per the repo's policy against retaining superseded paths "just in case".
 
 ### 5. No build-time configuration bake
 
-The `import.meta.glob` on `settings.yaml` is gone. `getUiConfig` and
-`getAnchorConfig` return documented defaults, guarded by
+The `import.meta.glob` on `settings.yaml` is gone, guarded by
 `src/test/app-config-no-build-time-bake.test.ts`, which asserts against the
 inlining mechanisms rather than the filename.
 
-This leaves a known gap, recorded honestly rather than silently: `units` and
-the `anchor` block are operator-configurable and stored by the backend, but
-nothing reads them back at runtime, so every shipped artifact uses the
-defaults. That was already true of every Docker install — the image never
-copied `settings.yaml` — so removing the glob changes nothing for users and
-only stops maintainers leaking their own config. Wiring both to
-`GET /api/settings` is tracked separately.
+Removing it exposed that `units` and the `anchor` block had no runtime source
+at all: they are operator-configurable and stored by the backend, but nothing
+read them back, so every shipped artifact used the compiled defaults and an
+operator who chose imperial still saw metric. That was already true of every
+Docker install — the image never copied `settings.yaml` — so it was a
+pre-existing defect rather than one the glob removal introduced.
+
+It is now fixed. `app-config.ts` holds the defaults and pure normalizers;
+`useAppConfig` (`src/hooks/use-app-config.ts`) reads `GET /api/settings` at
+runtime and hands `App` both blocks. The store is module-level rather than a
+context provider, because it is consumed from hooks that do not render beneath
+`App`, and single-flighted so a dozen consumers issue one request. Every field
+is validated individually — settings.yaml is hand-editable and the endpoint
+returns whatever it was given, so one bad key falls back for that field alone
+instead of discarding the rest.
+
+A successful `POST /api/settings` publishes its own response to the store, so a
+save takes effect immediately rather than after a reload, without a redundant
+GET for data the app was just handed.
 
 ### 6. CI gates releases
 

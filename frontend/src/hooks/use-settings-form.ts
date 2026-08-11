@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { apiBaseUrl } from '@/config/api'
+import { publishAppConfigSettings } from '@/hooks/use-app-config'
 
 export type SettingsPayload = {
   signalk?: {
@@ -155,6 +156,10 @@ export function useSettingsForm(): UseSettingsFormResult {
 
       const data = (await response.json()) as SettingsPayload
       setSettings(data)
+      // Units and anchor geometry drive rendering across the dashboard, not
+      // just this form, so push the authoritative response to those consumers
+      // rather than making the operator reload.
+      publishAppConfigSettings(data)
       return data
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to save settings'

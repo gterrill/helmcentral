@@ -144,17 +144,16 @@ vi.mock('@/hooks/use-czone-switches', () => ({
 
 vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], since: 'window' }) }))
 
-vi.mock('@/config/app-config', () => ({
-  appConfig: { boat: { name: 'Test Vessel', model: 'Test' } },
-  FORECAST_REFRESH_SECONDS: 600,
-  getUiConfig: () => ({ vesselStateRefreshSeconds: 10, distanceUnits: 'metric' }),
-  getAnchorConfig: () => ({
-    bowRollerHeightM: 0,
-    chainSizeMm: 10,
-    chainOnboardM: 50,
-    hullType: 'power_cat',
-    windageAreaM2: 10,
+vi.mock('@/hooks/use-app-config', () => ({
+  useAppConfig: () => ({
+    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    anchor: {
+      bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
+      hullType: 'power_cat', windageAreaM2: 10,
+    },
+    loaded: true,
   }),
+  publishAppConfigSettings: vi.fn(),
 }))
 
 describe('Anchor watch drawer drop button', () => {
