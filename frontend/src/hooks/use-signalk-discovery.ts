@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react'
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:8080`
+import { apiBaseUrl } from '@/config/api'
 
 export interface DiscoveredServer {
   address: string

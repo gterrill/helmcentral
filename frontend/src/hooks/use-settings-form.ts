@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { apiBaseUrl } from '@/config/api'
+
 export type SettingsPayload = {
   signalk?: {
     address?: string
@@ -44,8 +46,6 @@ export type DeepPartial<T> = T extends (infer U)[]
   : T extends object
     ? { [K in keyof T]?: DeepPartial<T[K]> }
     : T
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:8080`
 
 /**
  * Merges `patch` into `current`, one level deep for each top-level

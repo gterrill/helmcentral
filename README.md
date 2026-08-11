@@ -1,14 +1,56 @@
 # Helmcentral
 
-A modern dashboard application integrating SignalK for marine monitoring and visualization, with optional InfluxDB support for longer-retention telemetry history.
+A marine dashboard for SignalK — anchor watch, tides, weather, routes, tanks
+and electrical monitoring on one screen, with optional InfluxDB for
+longer-retention telemetry history.
+
+Helmcentral is a single self-contained binary: the web UI is embedded in it,
+there is no database server to run and no runtime dependencies. If you already
+have a SignalK server, you are one command away.
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gterrill/helmcentral/main/install.sh | sh
+```
+
+Then open `http://<this-machine>:8080/`. On first run Helmcentral searches your
+network for a SignalK server and offers what it finds — there is nothing to
+edit by hand.
+
+Other ways to install, including Docker, are [below](#other-ways-to-install).
+
+> **Security:** Helmcentral has no authentication, and its API can control
+> connected equipment (generator start/stop, CZone switching). Run it on a
+> trusted boat LAN only — do not port-forward it to the internet. For remote
+> access use a VPN or an authenticating reverse proxy.
+
+## Requirements
+
+- A SignalK server reachable on your network, with:
+  - [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) — true wind and other derived navigation data.
+  - [`tracks`](https://github.com/SignalK/tracks) — vessel trails and historical path data.
+  - [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) — generator and advanced electrical state (e.g. Victron GX devices).
+  - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) — optional, only for InfluxDB-backed history.
+- Linux (x86-64, arm64 or armv7 — covers every Raspberry Pi), macOS, or Windows.
+
+Secrets (SignalK credentials, InfluxDB token, GeoNames/WeatherKit keys) are
+never set in files or environment variables: start with none configured, then
+paste them into Settings → Secrets in the running app, where they are
+encrypted at rest. See [docs/adr/0023-encrypted-secrets-store.md](docs/adr/0023-encrypted-secrets-store.md).
+
+Full operator reference: [docs/configuration.md](docs/configuration.md).
 
 ## Project Structure
 
 ```
 helmcentral/
-├── backend/          # Go REST API
-├── frontend/         # TypeScript Web Components Dashboard
-├── docker-compose.yml      # Server deployment (pulls GHCR image)
+├── backend/          # Go REST API; embeds the built frontend
+├── frontend/         # React + TypeScript + Vite dashboard
+├── packaging/        # systemd unit, plugin build script
+├── install.sh        # One-line installer
+├── .goreleaser.yaml  # Cross-platform release builds
+├── docker-compose.yml      # Docker deployment (pulls GHCR image)
 ├── docker-compose.dev.yml  # Local build/dev workflows
 └── README.md
 ```
@@ -19,31 +61,62 @@ helmcentral/
   - SignalK integration for real-time maritime data
   - In-memory telemetry history (wind-gust-max, depth-trend/tide-detection) by default, with optional InfluxDB integration for longer-retention time-series storage and retrieval
   - Max wind gust over a selectable window (10m / 30m / 1h / 24h), picked per readout on the wind tile — see [docs/adr/0030-selectable-max-gust-windows.md](docs/adr/0030-selectable-max-gust-windows.md)
-  - CORS-enabled for web frontend communication
+  - Serves the dashboard from the same origin as the API — one port, no CORS setup
 
-- **Frontend (TypeScript + Web Components)**: Modern reactive dashboard
-  - Web Components architecture for modularity
+- **Frontend (React + TypeScript)**: Modern reactive dashboard
   - Vite for fast development and optimized builds
   - Real-time data visualization
-  - Responsive design
+  - Responsive design, built for a helm touchscreen
 
-- **Pluggable tide providers**: drop a sandboxed WASM plugin into `plugins/tides/` to add support for another region's government tide API, with no fork or rebuild required
+- **Pluggable providers**: drop a sandboxed WASM plugin into `plugins/tides/` to add support for another region's government tide API, with no fork or rebuild required
 
-## How To Run
+## Other ways to install
 
-### Prerequisites
+### Install script (recommended)
 
-- Docker & Docker Compose (recommended)
-- OR: Go 1.22+, Node.js 18+
-- SignalK Server with the following plugins installed and enabled:
-  - [`signalk-derived-data`](https://github.com/SignalK/signalk-derived-data) - Needed to calculate true wind and other derived navigation data.
-  - [`tracks`](https://github.com/SignalK/tracks) - Needed for drawing vessel trails and retrieving historical path data.
-  - [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) - Needed to retrieve generator and advanced electrical states (e.g. from Victron GX devices).
-  - [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) - Optional. Only needed if you enable InfluxDB (Settings → InfluxDB) for longer-retention historical graphing and analysis than the built-in in-memory buffers hold (~24h for wind gust, ~6h for depth) — and for history that survives a backend restart, which the in-memory buffers do not.
+```sh
+curl -fsSL https://raw.githubusercontent.com/gterrill/helmcentral/main/install.sh | sh
+```
 
-Secrets (SignalK credentials, the InfluxDB token, GeoNames/WeatherKit API keys) are no longer set via a `backend/.env` file — start the app with no secrets configured, then paste them into Settings → Secrets in the running app; they're encrypted at rest. See [docs/adr/0023-encrypted-secrets-store.md](docs/adr/0023-encrypted-secrets-store.md).
+Detects your platform, verifies the download against the published checksums,
+installs to `/usr/local/bin`, creates `/var/lib/helmcentral` for state,
+installs the reference plugin bundle, and enables a systemd service on Linux.
+Re-run it any time to upgrade — your settings and data are left alone.
 
-### Server Deployment (Docker)
+Pin a version or change locations with `HELMCENTRAL_VERSION`,
+`HELMCENTRAL_PREFIX`, `HELMCENTRAL_STATE_DIR`.
+
+Useful afterwards:
+
+```sh
+systemctl status helmcentral
+journalctl -u helmcentral -f
+```
+
+On macOS the script installs the binary and prints how to run it (no launchd
+service). On Windows, download the `.zip` from the
+[releases page](https://github.com/gterrill/helmcentral/releases).
+
+### Manual binary download
+
+Grab the archive for your platform from the
+[releases page](https://github.com/gterrill/helmcentral/releases), then:
+
+```sh
+tar -xzf helmcentral_<version>_linux_arm64.tar.gz
+sudo install -m0755 helmcentral /usr/local/bin/helmcentral
+
+# State must live somewhere explicit, or it lands in the working directory.
+sudo mkdir -p /var/lib/helmcentral
+HELMCENTRAL_STATE_DIR=/var/lib/helmcentral \
+  SETTINGS_FILE=/var/lib/helmcentral/settings.yaml \
+  helmcentral
+```
+
+The archive also contains `packaging/helmcentral.service` if you want the
+systemd unit, and `settings.example.yaml` as a starting config.
+
+### Docker
 
 ```bash
 docker compose pull
@@ -52,11 +125,23 @@ docker compose up -d --force-recreate
 
 - Helmcentral Dashboard/API: http://localhost:9091
 
+The image is multi-arch (amd64, arm64, armv7), so it runs on a Raspberry Pi.
+Add the reference plugins — they are deliberately not baked into the image, so
+you can add or update one without repulling:
+
+```bash
+mkdir -p plugins && curl -fsSL \
+  https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \
+  | tar -xz -C plugins
+```
+
 To stop:
 
 ```bash
 docker compose down
 ```
+
+## Development
 
 ### Local Production-Like Build (Docker)
 
@@ -84,6 +169,8 @@ docker compose -f docker-compose.dev.yml --profile dev down
 
 ### Local Development
 
+Requires Go 1.22+ and Node.js 24+.
+
 #### Backend
 
 ```bash
@@ -98,6 +185,28 @@ cd frontend
 npm install
 npm run dev
 ```
+
+The Vite dev server proxies `/api` to `localhost:8080`, so the frontend always
+talks to the backend on the same origin — exactly as it does in a release
+build, where the SPA is embedded in the binary.
+
+#### Tests
+
+```bash
+cd backend && go test -short ./...   # -short skips live BOM FTP round-trips
+cd frontend && npm test && npm run lint
+```
+
+#### Release builds
+
+```bash
+goreleaser build --snapshot --clean   # cross-compiles every published target
+```
+
+The build hooks build the frontend and stage it into `backend/dist` for the
+`//go:embed`, so a snapshot binary is the real thing. Tagging `vX.Y.Z` and
+pushing runs [.github/workflows/release.yml](.github/workflows/release.yml),
+which publishes the archives, the WASM plugin bundle and the multi-arch image.
 
 ## API Documentation
 
@@ -198,13 +307,25 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 
 **Upgrading an existing install:** the old `GET /api/marine-warnings` endpoint and `cache/bom_marine_warnings_cache.json` file are gone — warnings now live at `GET /api/forecast-warnings`, cached per-plugin under `cache/forecast_warnings_wasm_*_cache.json`. No environment variables are needed for the default BOM plugin (it's keyless, using BOM's own public anonymous FTP mirror).
 
-## Next Steps
+## Roadmap
 
-1. Configure SignalK connection parameters
-2. (Optional) Enable InfluxDB in Settings and set up its database schema for longer-retention telemetry history
-3. Implement dashboard data visualization components
-4. Add authentication/authorization
-5. Deploy to production environment
+- **Authentication/authorization** — Helmcentral is currently unauthenticated
+  and assumes a trusted LAN. This is the largest known gap; see the security
+  note at the top.
+- Runtime-configurable units and anchor geometry (both are currently
+  build-time defaults in the frontend; the backend already stores them).
+- mDNS-based SignalK discovery, now viable for native installs — the container
+  networking that ruled it out no longer applies. See
+  [docs/adr/0029-signalk-discovery.md](docs/adr/0029-signalk-discovery.md).
+
+## Contributing
+
+Issues and pull requests are welcome. CI runs `go vet`, the Go and frontend
+test suites, lint, and a full cross-platform release build on every PR — run
+those locally first (see [Development](#development)).
+
+Durable design decisions live in [docs/adr/](docs/adr/); if a change turns on
+a non-obvious trade-off, add an ADR alongside it.
 
 ## Inspiration
 
@@ -212,4 +333,4 @@ Dashboard design inspired by modern maritime monitoring systems.
 
 ## License
 
-UNLICENSED
+[MIT](LICENSE)

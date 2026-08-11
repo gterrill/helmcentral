@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import { apiBaseUrl } from '@/config/api'
 import { getUiConfig } from '@/config/app-config'
 
 export function formatClock(date: Date) {
@@ -29,7 +30,6 @@ export function useVesselIdentity() {
   const [boatName, setBoatName] = useState<string | null>(null)
   const [boatModel, setBoatModel] = useState<string | null>(null)
   const [signalkConnected, setSignalkConnected] = useState<boolean | null>(null)
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:8080`
 
   useEffect(() => {
     const clockTimer = window.setInterval(() => {
@@ -110,7 +110,7 @@ export function useVesselIdentity() {
       window.clearInterval(clockTimer)
       window.clearInterval(syncTimer)
     }
-  }, [apiBaseUrl])
+  }, [])
 
   const currentDate = useMemo(() => formatDate(now).toUpperCase(), [now])
   const clock = useMemo(() => formatClock(now), [now])

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiBaseUrl } from '@/config/api'
 
 export type SecretKey =
   | 'SIGNALK_USERNAME'
@@ -20,8 +21,6 @@ export const SECRET_KEYS: SecretKey[] = [
   'WEATHERKIT_SERVICE_ID',
   'WEATHERKIT_PRIVATE_KEY',
 ]
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:8080`
 
 const emptyValues = (): Record<SecretKey, string> =>
   Object.fromEntries(SECRET_KEYS.map((key) => [key, ''])) as Record<SecretKey, string>

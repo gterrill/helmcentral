@@ -1,0 +1,53 @@
+[Unit]
+Description=Helmcentral marine dashboard
+Documentation=https://github.com/gterrill/helmcentral
+# SignalK is the one hard dependency. Wants= rather than Requires= so
+# Helmcentral still starts (and can run its discovery sweep) when SignalK
+# lives on a different machine and there is no local unit to order against.
+Wants=network-online.target
+After=network-online.target signalk.service
+
+[Service]
+Type=simple
+User=helmcentral
+Group=helmcentral
+
+WorkingDirectory=/var/lib/helmcentral
+
+# Every piece of runtime state — the four SQLite stores, routes, dashboard
+# pages, plugin caches, uploaded MBTiles and the reference plugins — resolves
+# through cacheFilePath() in backend/weather_tide.go, which roots relative
+# paths at HELMCENTRAL_STATE_DIR. Without this the binary would scatter state
+# through its working directory.
+Environment=HELMCENTRAL_STATE_DIR=/var/lib/helmcentral
+# settings.yaml is read *and rewritten* by POST /api/settings from the
+# Settings UI, so it belongs in the writable state dir, not /etc.
+Environment=SETTINGS_FILE=/var/lib/helmcentral/settings.yaml
+Environment=PORT=8080
+
+ExecStart=/usr/local/bin/helmcentral
+
+Restart=on-failure
+RestartSec=5s
+
+# Startup is deliberately fail-fast: an unreadable secrets store, plugin
+# override store, tile cache or nearby-contacts DB calls log.Fatalf rather
+# than degrading. Cap restarts so a genuinely broken state dir surfaces as a
+# failed unit instead of an endless loop.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/helmcentral
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

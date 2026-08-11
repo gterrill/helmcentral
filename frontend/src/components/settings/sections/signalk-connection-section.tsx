@@ -7,8 +7,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useSignalKDiscovery } from '@/hooks/use-signalk-discovery'
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:8080`
+import { apiBaseUrl } from '@/config/api'
 
 interface SignalKConnectionSectionProps {
   draft: RegularSettingsDraft

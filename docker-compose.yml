@@ -3,47 +3,27 @@ services:
     image: ghcr.io/gterrill/helmcentral:latest
     container_name: helmcentral
     restart: unless-stopped
-    depends_on:
-      plugins-builder:
-        condition: service_completed_successfully
     ports:
+      # Host 9091 → container 8080. Change the left-hand side to serve the
+      # dashboard on a different port.
       - "9091:8080"
-    dns:
-      - 192.168.50.240
-      - 1.1.1.1
     environment:
-      SETTINGS_FILE: /app/settings.yaml
+      # settings.yaml is read *and rewritten* by the Settings UI, so it lives
+      # inside the writable data volume rather than being bind-mounted
+      # read-only from the host.
+      SETTINGS_FILE: /app/data/settings.yaml
     volumes:
-      - ./settings.yaml:/app/settings.yaml:ro
+      # All persistent state: settings.yaml, the four SQLite stores, routes,
+      # dashboard pages, plugin caches and uploaded charts. Created on first
+      # run if absent — no file needs to exist before the first `up`.
       - ./backend-data:/app/data
+      # Reference tide/weather/wave/warning providers. Download the plugin
+      # bundle from the releases page and unpack it here:
+      #
+      #   mkdir -p plugins && curl -fsSL \
+      #     https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \
+      #     | tar -xz -C plugins
+      #
+      # Kept outside the image on purpose (ADR 0017) so a plugin can be added
+      # or updated without rebuilding or repulling.
       - ./plugins:/app/plugins:ro
-
-  # One-shot builder: compiles the bundled reference tide, weather, wave and
-  # forecast-warnings plugins (bom/noaa, open-meteo/weatherkit,
-  # open-meteo-marine, bom/nws) from
-  # docs/examples/{tide,weather,wave,forecast-warnings}-plugins/ with TinyGo
-  # and drops each <name>.wasm + <name>.allowed_hosts.json (+
-  # <name>.config.json, for weatherkit) into
-  # ./plugins/{tides,weather,waves,forecast-warnings}, the same host
-  # directory bind-mounted into the app above. Re-running this is
-  # idempotent (rebuilds and overwrites); it never bakes plugins into an
-  # image, preserving ADR-0017's "drop a plugin in without an image rebuild"
-  # model. Pinned to 0.41.1 (not :latest) to match this repo's other TinyGo
-  # WASM fixtures and avoid version drift.
-  plugins-builder:
-    image: tinygo/tinygo:0.41.1
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        set -e &&
-        mkdir -p /out/tides /out/weather /out/waves /out/forecast-warnings &&
-        cd /src/tide-plugins/bom && go mod download && tinygo build -o /out/tides/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/tides/bom.allowed_hosts.json &&
-        cd /src/tide-plugins/noaa && go mod download && tinygo build -o /out/tides/noaa.wasm -target wasip1 -buildmode c-shared . && cp noaa.allowed_hosts.json /out/tides/noaa.allowed_hosts.json &&
-        cd /src/weather-plugins/open-meteo && go mod download && tinygo build -o /out/weather/open-meteo.wasm -target wasip1 -buildmode c-shared . && cp open-meteo.allowed_hosts.json /out/weather/open-meteo.allowed_hosts.json &&
-        cd /src/weather-plugins/weatherkit && go mod download && tinygo build -o /out/weather/weatherkit.wasm -target wasip1 -buildmode c-shared . && cp weatherkit.allowed_hosts.json /out/weather/weatherkit.allowed_hosts.json && cp weatherkit.config.json /out/weather/weatherkit.config.json && cp weatherkit.allowed_secrets.json /out/weather/weatherkit.allowed_secrets.json &&
-        cd /src/wave-plugins/open-meteo-marine && go mod download && tinygo build -o /out/waves/open-meteo-marine.wasm -target wasip1 -buildmode c-shared . && cp open-meteo-marine.allowed_hosts.json /out/waves/open-meteo-marine.allowed_hosts.json &&
-        cd /src/forecast-warnings-plugins/bom && go mod download && tinygo build -o /out/forecast-warnings/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/forecast-warnings/bom.allowed_hosts.json &&
-        cd /src/forecast-warnings-plugins/nws && go mod download && tinygo build -o /out/forecast-warnings/nws.wasm -target wasip1 -buildmode c-shared . && cp nws.allowed_hosts.json /out/forecast-warnings/nws.allowed_hosts.json
-    volumes:
-      - ./docs/examples:/src:ro
-      - ./plugins:/out

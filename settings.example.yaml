@@ -1,0 +1,55 @@
+# Helmcentral settings.
+#
+# Nothing here is required to start: a missing or empty file is tolerated, and
+# the Settings UI writes this file back on save. On first run Helmcentral
+# sweeps the local network for a SignalK server and offers what it finds, so
+# the usual path is to start the service and configure it in the browser
+# rather than to edit this file by hand.
+#
+# Secrets (SignalK credentials, InfluxDB token, WeatherKit keys) are NOT kept
+# here — they live in an encrypted store managed from Settings. See
+# docs/configuration.md.
+
+signalk:
+  # Hostname or IP of your SignalK server. `localhost` is correct when
+  # Helmcentral runs on the same machine as SignalK.
+  address: localhost
+  port: 3000
+
+boat:
+  vessel_prefix: M/V
+  model: My Boat
+  house_battery_capacity_ah: 600
+
+# metric | imperial
+units: metric
+
+anchor:
+  bow_roller_height_m: 1.5
+  chain_size_mm: 12
+  chain_onboard_m: 150
+  # power_cat | power_mono | sail_cat | sail_mono
+  hull_type: power_mono
+  windage_area_m2: 35
+
+ui:
+  vessel_state_refresh_seconds: 10
+  # Provider names must match a plugin installed under <state dir>/plugins/.
+  # The released plugin bundle ships: tides bom/noaa, weather
+  # open-meteo/weatherkit, waves open-meteo-marine, warnings bom/nws.
+  tide_provider: noaa
+  tide_auto_station: true
+  weather_provider: open-meteo
+  wave_provider: open-meteo-marine
+  forecast_warnings_provider: nws
+  # Optional friendly names for SignalK tank paths, e.g.
+  # tank_labels:
+  #   freshWater.0: PORT
+  #   fuel.2: STBD
+
+# Optional: long-term history from a SignalK InfluxDB v2 setup.
+influxdb:
+  enabled: false
+  url: http://localhost:8086
+  org: my-org
+  bucket: SignalK_Data

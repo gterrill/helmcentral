@@ -1,7 +1,10 @@
 .DS_Store
 *.log
+node_modules/
 dist/
 build/
+# GoReleaser output
+/dist-plugins/
 .vscode/settings.json
 backend/cache/
 backend/tmp/
@@ -15,8 +18,12 @@ backend/data/nearby-contacts.sqlite
 backend/data/secrets.sqlite
 backend/data/secrets.key
 backend/data/plugin_overrides.sqlite
-# Allow the embed placeholder while ignoring real build output
+# Allow the embed placeholder while ignoring real build output. backend/dist is
+# where the built frontend is staged for //go:embed (by the Dockerfile and the
+# GoReleaser hooks), so its contents must never be committed — but .gitkeep has
+# to stay tracked or `go build` fails on a fresh clone.
 !backend/dist/
+backend/dist/*
 !backend/dist/.gitkeep
 settings.yaml
 .claude/settings.json

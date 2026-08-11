@@ -1,0 +1,115 @@
+version: 2
+project_name: helmcentral
+
+# The backend serves the React SPA from a //go:embed of backend/dist
+# (see backend/static.go), so the frontend has to be built and staged into
+# place before any Go compile happens. This is the same sequence the root
+# Dockerfile performs; keeping it here means `goreleaser build` produces a
+# genuinely self-contained binary rather than an API-only one.
+before:
+  hooks:
+    - sh -c "cd frontend && npm ci"
+    - sh -c "cd frontend && npm run build"
+    # .gitkeep is restored because it is the tracked placeholder that keeps
+    # `//go:embed all:dist` compiling for developers who have not built the
+    # frontend; without it a release build leaves the repo unable to `go build`.
+    - sh -c "rm -rf backend/dist && cp -R frontend/dist backend/dist && touch backend/dist/.gitkeep"
+
+# The Go module lives in backend/, not at the repo root; without this
+# GoReleaser runs `go list -m` at the root, finds no go.mod, and fails.
+gomod:
+  dir: backend
+
+builds:
+  - id: helmcentral
+    dir: backend
+    main: .
+    binary: helmcentral
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # buildVersion/buildRevision are declared in backend/main.go and surfaced
+    # on GET /api/health via resolveBuildMetadata().
+    ldflags:
+      - -s -w
+      - -X main.buildVersion={{ .Version }}
+      - -X main.buildRevision={{ .FullCommit }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    # armv7 covers Raspberry Pis still running 32-bit Pi OS, which is a large
+    # share of existing SignalK installs.
+    goarm:
+      - "7"
+    ignore:
+      - goos: darwin
+        goarch: arm
+      - goos: windows
+        goarch: arm
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: helmcentral
+    ids:
+      - helmcentral
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_
+      {{- if eq .Arch "arm" }}armv{{ .Arm }}{{ else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - settings.example.yaml
+      - src: packaging/helmcentral.service
+        dst: packaging/helmcentral.service
+      - src: docs/configuration.md
+        dst: docs/configuration.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  draft: false
+  prerelease: auto
+  # The reference WASM plugins are architecture-independent, so CI builds them
+  # once with TinyGo and attaches the bundle here rather than baking them into
+  # each archive. Keeps ADR 0017's "drop a plugin in without a rebuild" model.
+  extra_files:
+    - glob: ./dist-plugins/helmcentral-plugins-*.tar.gz
+  header: |
+    ## Install
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/gterrill/helmcentral/main/install.sh | sh
+    ```
+
+    Requires an existing SignalK server on the same network. See the
+    [configuration reference](https://github.com/gterrill/helmcentral/blob/main/docs/configuration.md).
+  footer: |
+    ---
+
+    **Security:** Helmcentral has no authentication and is intended for a
+    trusted boat LAN only. Do not port-forward it to the internet.
