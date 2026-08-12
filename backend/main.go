@@ -213,6 +213,18 @@ func main() {
 	}
 	globalNearbyContactStore = ncs
 
+	// Alarm log (occurrence history behind the alarm centre). Fail fast on open
+	// error, same reasoning as the stores above.
+	als, err := newAlarmLogStore(alarmLogDBPath())
+	if err != nil {
+		log.Fatalf("failed to open alarm log store: %v", err)
+	}
+	globalAlarmLogStore = als
+
+	if err := loadAlarmRules(); err != nil {
+		log.Fatalf("failed to load alarm rules: %v", err)
+	}
+
 	// World imagery HTTP client for tile fetches (with timeout to prevent hangs).
 	worldImageryClient := newWorldImageryHTTPClient()
 
@@ -220,6 +232,13 @@ func main() {
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
 	e.GET("/api/stream", telemetryStream)
+	e.GET("/api/alarms", alarmsHandler)
+	e.POST("/api/alarms/:id/acknowledge", acknowledgeAlarmHandler)
+	e.GET("/api/alarms/log", alarmLogHandler)
+	e.GET("/api/alarm-rules", listAlarmRulesHandler)
+	e.POST("/api/alarm-rules", createAlarmRuleHandler)
+	e.PUT("/api/alarm-rules/:id", updateAlarmRuleHandler)
+	e.DELETE("/api/alarm-rules/:id", deleteAlarmRuleHandler)
 	e.GET("/api/electrical-state", electricalState)
 	e.GET("/api/solar-state", solarState)
 	e.GET("/api/tanks-state", tanksState)
@@ -301,6 +320,7 @@ func main() {
 	streamCtx, cancelStream := context.WithCancel(context.Background())
 	defer cancelStream()
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
+	go startAlarmEvaluator(streamCtx, alarmEvaluationInterval)
 
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)

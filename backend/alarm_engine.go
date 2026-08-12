@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -24,11 +25,33 @@ const (
 )
 
 // alarmSample is one reading of a path. Present distinguishes "no such path" —
-// which must never satisfy a threshold — from a real zero.
+// which must never satisfy a threshold — from a real zero. LastSeen is when the
+// path last carried an update; the reader reports it as a fact and the engine
+// decides what counts as stale, because the threshold is per-rule.
 type alarmSample struct {
-	Value   float64
-	Present bool
-	Stale   bool
+	Value    float64
+	Present  bool
+	LastSeen time.Time
+}
+
+// alarmSampleStale applies a rule's staleness threshold.
+//
+// Zero means the rule does not gate on staleness at all, not "stale after zero
+// seconds" — otherwise every sample would be stale the instant it was read, and
+// no threshold rule could ever fire. validateAlarmRule guarantees a staleness
+// rule has a non-zero threshold; threshold rules opt in explicitly.
+//
+// A path that has never reported counts as stale: for a staleness rule that is
+// the same fault as one that stopped, and it surfaces a mistyped path rather
+// than hiding it.
+func alarmSampleStale(rule alarmRule, sample alarmSample, now time.Time) bool {
+	if rule.StaleAfterSeconds <= 0 {
+		return false
+	}
+	if !sample.Present || sample.LastSeen.IsZero() {
+		return true
+	}
+	return now.Sub(sample.LastSeen) > time.Duration(rule.StaleAfterSeconds)*time.Second
 }
 
 type alarmReader func(path string) alarmSample
@@ -43,10 +66,34 @@ type alarmStatus struct {
 	Message string     `json:"message"`
 
 	SinceTrue time.Time `json:"-"`
-	RaisedAt  time.Time `json:"raised_at,omitempty"`
-	AckedAt   time.Time `json:"acked_at,omitempty"`
+	RaisedAt  time.Time `json:"-"`
+	AckedAt   time.Time `json:"-"`
 
 	escalated bool
+}
+
+// MarshalJSON omits the timestamps when unset. encoding/json's omitempty does
+// not apply to time.Time, so without this an un-acknowledged alarm reports
+// "acked_at":"0001-01-01T00:00:00Z", which reads as acknowledged in 1 AD.
+func (s alarmStatus) MarshalJSON() ([]byte, error) {
+	type wire alarmStatus
+	payload := map[string]any{}
+
+	encoded, err := json.Marshal(wire(s))
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return nil, err
+	}
+
+	if !s.RaisedAt.IsZero() {
+		payload["raised_at"] = s.RaisedAt.UTC()
+	}
+	if !s.AckedAt.IsZero() {
+		payload["acked_at"] = s.AckedAt.UTC()
+	}
+	return json.Marshal(payload)
 }
 
 type alarmEvent struct {
@@ -115,12 +162,13 @@ func (e *alarmEngine) evaluate(rules []alarmRule, read alarmReader, now time.Tim
 //	                             ↓          ↓
 //	                           normal ← (hysteresis clears)
 func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, now time.Time) (alarmEvent, bool) {
+	stale := alarmSampleStale(rule, sample, now)
 	live := status.Phase == alarmPhaseActive || status.Phase == alarmPhaseAcknowledged
 
 	if live {
 		// Clearing uses the deadband, not the raise threshold, so a value
 		// hovering at the boundary cannot flap the alarm.
-		if alarmConditionCleared(rule, sample) {
+		if alarmConditionCleared(rule, sample, stale) {
 			status.Phase = alarmPhaseNormal
 			status.State = alarmStateNormal
 			status.SinceTrue = time.Time{}
@@ -140,7 +188,7 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 		return alarmEvent{}, false
 	}
 
-	if !alarmConditionMet(rule, sample) {
+	if !alarmConditionMet(rule, sample, stale) {
 		// Recovery before the dwell elapsed restarts the timer; a condition
 		// that keeps flickering never accumulates enough time to fire.
 		status.Phase = alarmPhaseNormal
@@ -179,13 +227,14 @@ func shouldEscalateAlarm(rule alarmRule, status *alarmStatus, now time.Time) boo
 }
 
 // alarmConditionMet reports whether the raise condition holds.
-func alarmConditionMet(rule alarmRule, sample alarmSample) bool {
+func alarmConditionMet(rule alarmRule, sample alarmSample, stale bool) bool {
 	if rule.Op == alarmOpStale {
-		return sample.Stale
+		return stale
 	}
 	// An absent path is unknown, not safe: treating it as zero would fire every
-	// threshold rule on a boat that has just booted.
-	if !sample.Present || sample.Stale {
+	// threshold rule on a boat that has just booted. A stale value is equally
+	// untrustworthy — under a delta stream it persists until superseded.
+	if !sample.Present || stale {
 		return false
 	}
 
@@ -205,16 +254,13 @@ func alarmConditionMet(rule alarmRule, sample alarmSample) bool {
 // alarmConditionCleared applies the hysteresis deadband. It is deliberately not
 // the negation of alarmConditionMet: the value has to travel back past the
 // threshold by Hysteresis before the alarm lets go.
-func alarmConditionCleared(rule alarmRule, sample alarmSample) bool {
+func alarmConditionCleared(rule alarmRule, sample alarmSample, stale bool) bool {
 	if rule.Op == alarmOpStale {
-		return !sample.Stale
+		return !stale
 	}
-	if !sample.Present {
-		// The path vanished while the alarm was live. Clearing on that would
-		// silence an alarm because its sensor died, so hold it.
-		return false
-	}
-	if sample.Stale {
+	// The path vanished or went quiet while the alarm was live. Clearing on
+	// that would silence an alarm because its sensor died, so hold it.
+	if !sample.Present || stale {
 		return false
 	}
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -10,15 +11,18 @@ var alarmNow = time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
 // staticReader answers every path with one sample, which is all a
 // single-rule test needs.
 func staticReader(value float64) alarmReader {
-	return func(string) alarmSample { return alarmSample{Value: value, Present: true} }
+	return func(string) alarmSample { return alarmSample{Value: value, Present: true, LastSeen: alarmNow} }
 }
 
 func absentReader() alarmReader {
 	return func(string) alarmSample { return alarmSample{} }
 }
 
+// staleReader reports a path that exists but last updated long ago.
 func staleReader() alarmReader {
-	return func(string) alarmSample { return alarmSample{Present: true, Stale: true} }
+	return func(string) alarmSample {
+		return alarmSample{Value: 12.5, Present: true, LastSeen: alarmNow.Add(-10 * time.Minute)}
+	}
 }
 
 func lowVoltageRule() alarmRule {
@@ -293,5 +297,67 @@ func TestEngineForgetsStatusForDeletedRule(t *testing.T) {
 
 	if len(engine.active()) != 0 {
 		t.Fatalf("a deleted rule must not leave a live alarm behind")
+	}
+}
+
+// Zero staleness must mean "do not gate on staleness", not "stale immediately".
+// Getting this wrong makes every sample stale the instant it is read and no
+// threshold rule can ever fire.
+func TestEngineZeroStaleThresholdDoesNotGateThresholdRules(t *testing.T) {
+	engine := newAlarmEngine()
+	rule := lowVoltageRule()
+	rule.DwellSeconds = 0
+	rule.StaleAfterSeconds = 0
+
+	reader := func(string) alarmSample {
+		return alarmSample{Value: 11.0, Present: true, LastSeen: alarmNow.Add(-time.Hour)}
+	}
+
+	events := engine.evaluate([]alarmRule{rule}, reader, alarmNow)
+	if len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("expected the rule to fire with staleness gating off, got %+v", events)
+	}
+}
+
+// With staleness configured, a threshold rule must not fire on a frozen
+// reading: under a delta stream a dead sensor's last value persists forever.
+func TestEngineThresholdRuleIgnoresStaleValueWhenGatingConfigured(t *testing.T) {
+	engine := newAlarmEngine()
+	rule := lowVoltageRule()
+	rule.DwellSeconds = 0
+	rule.StaleAfterSeconds = 60
+
+	reader := func(string) alarmSample {
+		return alarmSample{Value: 11.0, Present: true, LastSeen: alarmNow.Add(-time.Hour)}
+	}
+
+	events := engine.evaluate([]alarmRule{rule}, reader, alarmNow)
+	if len(events) != 0 {
+		t.Fatalf("a frozen reading must not satisfy a threshold, got %+v", events)
+	}
+}
+
+// encoding/json's omitempty does not apply to time.Time, so an unset timestamp
+// would otherwise serialize as year 1 and read as "acknowledged in 1 AD".
+func TestAlarmStatusOmitsUnsetTimestamps(t *testing.T) {
+	engine := newAlarmEngine()
+	rule := lowVoltageRule()
+	rule.DwellSeconds = 0
+	engine.evaluate([]alarmRule{rule}, staticReader(11.0), alarmNow)
+
+	encoded, err := json.Marshal(engine.statusFor("rule-1"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := payload["acked_at"]; present {
+		t.Fatalf("acked_at must be absent until acknowledged: %s", encoded)
+	}
+	if _, present := payload["raised_at"]; !present {
+		t.Fatalf("raised_at must be present on an active alarm: %s", encoded)
 	}
 }

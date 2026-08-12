@@ -268,3 +268,11 @@ func (s *signalKSnapshot) knownContexts() []string {
 	sort.Strings(result)
 	return result
 }
+
+// lastSeen reports when a path last carried an update, or the zero time if it
+// never has. Alarm rules use it to tell a live sensor from a frozen one.
+func (s *signalKSnapshot) lastSeen(context, path string) time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pathSeen[context+"|"+path]
+}
