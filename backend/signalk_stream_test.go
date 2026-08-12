@@ -317,7 +317,7 @@ func TestStreamDeltaReachesVesselStateFetcher(t *testing.T) {
 	go client.connectOnce(ctx, stub.wsURL(), "")
 
 	waitFor(t, 2*time.Second, "vessel state fetcher to read the streamed depth", func() bool {
-		state, err := fetchSignalKVesselState("http://unused", "/signalk/v1/api/vessels/self")
+		state, err := fetchSignalKVesselState()
 		return err == nil && state.Depth == 8.75
 	})
 }

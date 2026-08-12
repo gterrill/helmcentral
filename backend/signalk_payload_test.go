@@ -103,7 +103,7 @@ func TestFetchSignalKVesselStateReadsFromStreamSnapshot(t *testing.T) {
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
 
-	state, err := fetchSignalKVesselState("http://unused", "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKVesselState()
 	if err != nil {
 		t.Fatalf("fetchSignalKVesselState: unexpected error %v", err)
 	}
@@ -122,7 +122,7 @@ func TestFetchSignalKVesselStateReportsCriticalWhenStreamHasNoData(t *testing.T)
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
 
-	state, err := fetchSignalKVesselState("http://unused", "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKVesselState()
 	if err == nil {
 		t.Fatalf("expected an error when the stream has no data, got nil")
 	}

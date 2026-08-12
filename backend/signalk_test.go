@@ -207,47 +207,29 @@ func TestParseSignalKCurrent_NilDriftImpactWhenMissing(t *testing.T) {
 	}
 }
 
-func TestFetchSignalKVesselState_MarksCriticalOnConnectionRefused(t *testing.T) {
+// With no stream data and no prior fix there is nothing to freeze at, so the
+// position must read as the unknown sentinel rather than a plausible-looking
+// coordinate.
+func TestFetchSignalKVesselState_MarksCriticalWithNoStreamDataAndNoPriorFix(t *testing.T) {
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
+	withGlobalSnapshot(t, newSignalKSnapshot())
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	url := srv.URL
-	srv.Close() // guarantees connection refused
-
-	state, err := fetchSignalKVesselState(url, "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKVesselState()
 	if err == nil {
-		t.Fatalf("expected error for unreachable signalk")
+		t.Fatalf("expected error when the stream carries no data")
 	}
 	if !state.GNSSCriticalAlert {
-		t.Fatalf("expected gnss critical alert when signalk is unreachable")
+		t.Fatalf("expected gnss critical alert when the stream carries no data")
 	}
 	if state.GNSSValidationReason == "" {
 		t.Fatalf("expected a validation reason explaining the failure")
 	}
 	if state.GNSSSatellites != -1 {
-		t.Fatalf("expected -1 satellites when signalk is unreachable, got %d", state.GNSSSatellites)
+		t.Fatalf("expected -1 satellites with no stream data, got %d", state.GNSSSatellites)
 	}
 	if state.Latitude != -1 || state.Longitude != -1 {
 		t.Fatalf("expected -1,-1 with no prior trusted fix, got %.4f %.4f", state.Latitude, state.Longitude)
-	}
-}
-
-func TestFetchSignalKVesselState_MarksCriticalOnNon200(t *testing.T) {
-	resetGNSSPositionValidationState()
-	t.Cleanup(resetGNSSPositionValidationState)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	state, err := fetchSignalKVesselState(srv.URL, "/signalk/v1/api/vessels/self")
-	if err == nil {
-		t.Fatalf("expected error for non-200 signalk response")
-	}
-	if !state.GNSSCriticalAlert {
-		t.Fatalf("expected gnss critical alert on non-200 response")
 	}
 }
 
@@ -260,7 +242,7 @@ func TestFetchSignalKVesselState_FreezesLastTrustedPositionWhenStreamStops(t *te
 
 	seedSelfTree(t, trustedSignalKPayload(-25.2939, 152.9103))
 
-	state, err := fetchSignalKVesselState("", "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKVesselState()
 	if err != nil {
 		t.Fatalf("unexpected error establishing trusted fix: %v", err)
 	}
@@ -277,7 +259,7 @@ func TestFetchSignalKVesselState_FreezesLastTrustedPositionWhenStreamStops(t *te
 	// The stream drops: no data for any context.
 	withGlobalSnapshot(t, newSignalKSnapshot())
 
-	state, err = fetchSignalKVesselState("", "/signalk/v1/api/vessels/self")
+	state, err = fetchSignalKVesselState()
 	if err == nil {
 		t.Fatalf("expected error once the stream stops carrying data")
 	}
@@ -312,7 +294,7 @@ func TestFetchSignalKNearbyVessels_ParsesStringMMSI(t *testing.T) {
 
 	seedVesselTrees(t, string(body))
 
-	vessels, err := fetchSignalKNearbyVessels("", "/vessels", -21.595297, 149.796444, time.Now().UTC(), nil)
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, time.Now().UTC(), nil)
 	if err != nil {
 		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
 	}
@@ -343,7 +325,7 @@ func TestFetchSignalKNearbyVessels_ParsesNumericMMSI(t *testing.T) {
 
 	seedVesselTrees(t, string(body))
 
-	vessels, err := fetchSignalKNearbyVessels("", "/vessels", -21.595297, 149.796444, time.Now().UTC(), nil)
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, time.Now().UTC(), nil)
 	if err != nil {
 		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
 	}
@@ -376,7 +358,7 @@ func TestFetchSignalKElectricalState_ReadsCharger0Fields(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState("", "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKElectricalState()
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -416,7 +398,7 @@ func TestFetchSignalKElectricalState_ReadsCharger0MixedShapes(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState("", "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKElectricalState()
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -463,7 +445,7 @@ func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState("", "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKSolarState()
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
@@ -504,7 +486,7 @@ func TestFetchSignalKSolarState_NormalizesWhYieldToKWh(t *testing.T) {
 
 	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState("", "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKSolarState()
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}

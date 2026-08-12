@@ -738,15 +738,7 @@ func weatherToday(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
-
-	vesselState, vesselErr := fetchSignalKVesselState(signalkURL, vesselPath)
+	vesselState, vesselErr := fetchSignalKVesselState()
 	if vesselErr != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
 	}
@@ -826,12 +818,11 @@ func weatherForecast(c echo.Context) error {
 		port = defaultSignalKPort
 	}
 	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 	if signalkURL == "" {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "SignalK URL is not configured"})
 	}
 
-	vesselState, vesselErr := fetchSignalKVesselState(signalkURL, vesselPath)
+	vesselState, vesselErr := fetchSignalKVesselState()
 	if vesselErr != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
 	}

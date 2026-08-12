@@ -353,15 +353,7 @@ func tideNearestHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown tide provider"})
 	}
 
-	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
-	vesselState, err := fetchSignalKVesselState(signalkURL, vesselPath)
+	vesselState, err := fetchSignalKVesselState()
 	if err != nil || !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "vessel position unavailable"})
 	}

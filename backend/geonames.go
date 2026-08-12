@@ -63,13 +63,12 @@ func placeName(c echo.Context) error {
 	}
 
 	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
 	if signalkURL == "" {
 		return c.JSON(http.StatusOK, map[string]string{"name": ""})
 	}
 
-	vesselState, vesselErr := fetchSignalKVesselState(signalkURL, vesselPath)
+	vesselState, vesselErr := fetchSignalKVesselState()
 	if vesselErr != nil || !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
 		return c.JSON(http.StatusOK, map[string]string{"name": ""})
 	}

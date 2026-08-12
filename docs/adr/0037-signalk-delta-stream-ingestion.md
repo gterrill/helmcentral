@@ -55,7 +55,7 @@ SignalK offers a delta WebSocket at `/signalk/v1/stream`, previously unused. It 
 - The browser no longer polls for telemetry. `GET /api/stream` pushes five named event types (`vessel-state`, `electrical-state`, `nearby-vessels`, `solar-state`, `tanks-state`) over one shared, ref-counted `EventSource`, each on its own interval and change-gated. SSE rather than a WebSocket for the browser leg: the traffic is one-way, `EventSource` reconnects and resumes on its own, and it survives an authenticating reverse proxy.
 - Weather, tide and place-name still poll, correctly — they are external API data behind long TTL caches, not vessel telemetry.
 - Each SSE connection holds a goroutine rebuilding payloads on a timer, and every builder re-reads `settings.yaml` from disk. Fine for a helm browser or two; the settings read wants caching before it serves more.
-- The `signalkURL`/`vesselPath` parameters on the `fetchSignalK*` functions are now vestigial — the fetchers ignore them and read the snapshot. Removing them touches ~13 call sites across 10 files and was left as follow-up.
+- The `fetchSignalK*` telemetry functions take no URL or path arguments: they read the snapshot, so passing a server address was meaningless. Callers that existed only to compute one lost their `loadSignalKSettings`/`buildSignalKURL` preamble with it. The write and control paths (`generator.go`, `czone.go`, `route_activation.go`) still take a URL, because they PUT to a real endpoint.
 
 ## Verification
 

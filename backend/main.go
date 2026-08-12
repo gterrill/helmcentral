@@ -443,10 +443,9 @@ func buildVesselStatePayload() map[string]any {
 	}
 
 	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
 	if signalkURL != "" {
-		signalkState, err := fetchSignalKVesselState(signalkURL, vesselPath)
+		signalkState, err := fetchSignalKVesselState()
 		// Always adopt signalkState, even on error: fetchSignalKVesselState
 		// now always returns position/GNSS fields correctly marked critical
 		// (and frozen at the last trusted fix) rather than a bare sentinel,
@@ -555,10 +554,9 @@ func buildElectricalStatePayload() map[string]any {
 	}
 
 	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
 	if signalkURL != "" {
-		electrical, fetchErr := fetchSignalKElectricalState(signalkURL, vesselPath)
+		electrical, fetchErr := fetchSignalKElectricalState()
 		if fetchErr == nil {
 			state = electrical
 			source = "signalk"
@@ -621,10 +619,9 @@ func buildSolarStatePayload() map[string]any {
 	}
 
 	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
 	if signalkURL != "" {
-		solar, fetchErr := fetchSignalKSolarState(signalkURL, vesselPath)
+		solar, fetchErr := fetchSignalKSolarState()
 		if fetchErr == nil {
 			state = solar
 			source = "signalk"
@@ -722,11 +719,10 @@ func buildTanksStatePayload() map[string]any {
 	}
 
 	signalkURL := buildSignalKURL(address, port)
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 	labelOverrides := loadTankLabelOverrides(settingsPath)
 
 	if signalkURL != "" {
-		stateTanks, datetime, fetchErr := fetchSignalKTanksState(signalkURL, vesselPath, labelOverrides)
+		stateTanks, datetime, fetchErr := fetchSignalKTanksState(labelOverrides)
 		if fetchErr == nil {
 			tanks = stateTanks
 			now = datetime
@@ -771,16 +767,14 @@ func buildNearbyVesselsPayload() map[string]any {
 	}
 
 	signalkURL := buildSignalKURL(address, port)
-	vesselsPath := getEnv("SIGNALK_VESSELS_PATH", "/signalk/v1/api/vessels")
-	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
 	if signalkURL != "" {
-		signalkSelfName := fetchSignalKSelfName(signalkURL, vesselPath)
+		signalkSelfName := fetchSignalKSelfName()
 		excludedNames := []string{signalkSelfName}
 
-		state, selfErr := fetchSignalKVesselState(signalkURL, vesselPath)
+		state, selfErr := fetchSignalKVesselState()
 		if selfErr == nil && state.Latitude >= -90 && state.Latitude <= 90 && state.Longitude >= -180 && state.Longitude <= 180 {
-			nearby, nearbyErr := fetchSignalKNearbyVessels(signalkURL, vesselsPath, state.Latitude, state.Longitude, now, excludedNames)
+			nearby, nearbyErr := fetchSignalKNearbyVessels(state.Latitude, state.Longitude, now, excludedNames)
 			if nearbyErr == nil {
 				if globalNearbyContactStore != nil {
 					for i := range nearby {

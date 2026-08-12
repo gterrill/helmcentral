@@ -490,7 +490,7 @@ func criticalVesselState(state vesselStateData, reason string) vesselStateData {
 	return state
 }
 
-func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateData, error) {
+func fetchSignalKVesselState() (vesselStateData, error) {
 	state := vesselStateData{Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, Latitude: -1, Longitude: -1, HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1}
 
 	// A stream outage lands here the same way an unreachable REST server does,
@@ -749,7 +749,7 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 	return drift, setDeg, driftImpactKts
 }
 
-func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electricalStateData, error) {
+func fetchSignalKElectricalState() (electricalStateData, error) {
 	state := electricalStateData{Datetime: time.Now().UTC(), BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
 	payload, err := signalKSelfPayload()
@@ -941,7 +941,7 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 	return state, nil
 }
 
-func fetchSignalKSolarState(signalkURL string, vesselPath string) (solarStateData, error) {
+func fetchSignalKSolarState() (solarStateData, error) {
 	state := solarStateData{
 		Datetime:      time.Now().UTC(),
 		CurrentW:      -1,
@@ -1247,7 +1247,7 @@ func readChargerInstance(payload map[string]any, index string) chargerInstanceDa
 	return inst
 }
 
-func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
+func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
 	payload, err := signalKVesselsPayload()
 	if err != nil {
 		return nil, err
@@ -1332,7 +1332,7 @@ func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitu
 	return vessels, nil
 }
 
-func fetchSignalKVesselNameMap(signalkURL string, vesselsPath string) (map[string]string, error) {
+func fetchSignalKVesselNameMap() (map[string]string, error) {
 	payload, err := signalKVesselsPayload()
 	if err != nil {
 		return nil, err
@@ -1355,7 +1355,7 @@ func fetchSignalKVesselNameMap(signalkURL string, vesselsPath string) (map[strin
 	return names, nil
 }
 
-func fetchSignalKTanksState(signalkURL string, vesselPath string, labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
+func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
 	payload, err := signalKSelfPayload()
 	if err != nil {
 		return nil, time.Now().UTC(), err
@@ -2028,7 +2028,7 @@ func loadHouseBatteryCapacityAh(settingsPath string) float64 {
 	return capacity
 }
 
-func fetchSignalKSelfName(signalkURL string, vesselPath string) string {
+func fetchSignalKSelfName() string {
 	payload, err := signalKSelfPayload()
 	if err != nil {
 		return ""

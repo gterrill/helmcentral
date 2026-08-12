@@ -78,7 +78,7 @@ func sampleTracks(settingsPath string) {
 	now := time.Now().UTC() // shared by wind/depth/solar recording this tick
 
 	// Sample self vessel
-	state, err := fetchSignalKVesselState(signalkURL, vesselPath)
+	state, err := fetchSignalKVesselState()
 	if err == nil {
 		if state.WindSpeedApparentKts >= 0 {
 			windGustHistory.record(state.WindSpeedApparentKts, now)
@@ -88,7 +88,7 @@ func sampleTracks(settingsPath string) {
 		}
 	}
 
-	solar, solarErr := fetchSignalKSolarState(signalkURL, vesselPath)
+	solar, solarErr := fetchSignalKSolarState()
 	if solarErr == nil && solar.CurrentW >= 0 {
 		solarStats.record(solar.CurrentW, now)
 		solarPowerHistory.record(solar.CurrentW, now)
@@ -120,11 +120,11 @@ func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, stat
 		return
 	}
 
-	signalkSelfName := fetchSignalKSelfName(signalkURL, vesselPath)
+	signalkSelfName := fetchSignalKSelfName()
 	excludedNames := []string{signalkSelfName}
 
 	now := time.Now().UTC()
-	nearby, err := fetchSignalKNearbyVessels(signalkURL, vesselsPath, state.Latitude, state.Longitude, now, excludedNames)
+	nearby, err := fetchSignalKNearbyVessels(state.Latitude, state.Longitude, now, excludedNames)
 	if err != nil {
 		return
 	}
@@ -190,7 +190,6 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 		return map[string][]trackPoint{}
 	}
 
-	vesselsPath := getEnv("SIGNALK_VESSELS_PATH", "/signalk/v1/api/vessels")
 	tracksPath := getEnv("SIGNALK_TRACKS_PATH", "/signalk/v1/api/tracks")
 	tracksURL := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(tracksPath, "/")
 
@@ -214,11 +213,11 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 		return map[string][]trackPoint{}
 	}
 
-	nameMap, nameErr := fetchSignalKVesselNameMap(signalkURL, vesselsPath)
+	nameMap, nameErr := fetchSignalKVesselNameMap()
 	if nameErr != nil {
 		nameMap = map[string]string{}
 	}
-	signalkSelfName := strings.ToUpper(strings.TrimSpace(fetchSignalKSelfName(signalkURL, getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self"))))
+	signalkSelfName := strings.ToUpper(strings.TrimSpace(fetchSignalKSelfName()))
 
 	result := make(map[string][]trackPoint, len(payload))
 	now := time.Now().UTC()
