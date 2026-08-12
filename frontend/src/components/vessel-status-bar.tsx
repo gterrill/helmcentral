@@ -1,6 +1,7 @@
 import { Circle, Moon, Sun } from 'lucide-react'
 
 import { useVesselIdentity } from '@/hooks/use-vessel-identity'
+import { useTelemetryStatus } from '@/hooks/use-telemetry-stream'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 
 interface VesselStatusBarProps {
@@ -10,14 +11,25 @@ interface VesselStatusBarProps {
 
 export function VesselStatusBar({ isDark = false, onToggleDarkMode }: VesselStatusBarProps) {
   const { currentDate, clock, signalkConnected } = useVesselIdentity()
+  const telemetryStatus = useTelemetryStatus()
   const [hh = '--', mm = '--', ss = '--'] = clock.timePart.split(':')
   const showFullClock = useMinWidth(BREAKPOINTS.sm)
 
+  // Two independent things can go wrong: the backend can't reach SignalK
+  // (signalkConnected, polled via /api/vessel-state's `source` field), or the
+  // browser's own push stream to the backend is down (telemetryStatus - see
+  // use-telemetry-stream.ts). Either one freezes the dashboard's live tiles,
+  // including the anchor drag alarm's position feed, so both have to be
+  // healthy for this badge to say "Live".
+  const noSignal = signalkConnected === false || telemetryStatus === 'disconnected'
+  const reconnecting = !noSignal && telemetryStatus === 'reconnecting'
+  const label = noSignal ? 'No Signal' : reconnecting ? 'Reconnecting' : 'Live'
+
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] md:text-[11px] ${signalkConnected === true ? 'border-border bg-background/70 text-muted-foreground' : signalkConnected === false ? 'border-red-300/60 bg-red-50/60 text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-400' : 'border-border bg-background/70 text-muted-foreground'}`}>
-        <Circle className={`h-2.5 w-2.5 ${signalkConnected === true ? 'fill-secondary text-secondary' : signalkConnected === false ? 'fill-red-500 text-red-500' : 'fill-muted-foreground text-muted-foreground'}`} />
-        <span className="hidden sm:inline">{signalkConnected === false ? 'No Signal' : 'Live'}</span>
+      <div className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] md:text-[11px] ${noSignal ? 'border-red-300/60 bg-red-50/60 text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-400' : reconnecting ? 'border-amber-300/60 bg-amber-50/60 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-400' : 'border-border bg-background/70 text-muted-foreground'}`}>
+        <Circle className={`h-2.5 w-2.5 ${noSignal ? 'fill-red-500 text-red-500' : reconnecting ? 'fill-amber-500 text-amber-500' : 'fill-secondary text-secondary'}`} />
+        <span className="hidden sm:inline">{label}</span>
       </div>
       <button
         onClick={onToggleDarkMode}

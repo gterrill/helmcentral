@@ -117,9 +117,12 @@ export function useVesselState() {
 
     // The backend pushes vessel state as it changes (ADR 0037) instead of the
     // client sampling on a timer. The connection is shared with every other
-    // telemetry hook; EventSource reconnects on its own, so there is no retry
-    // loop here, and a genuinely dead backend surfaces through the `source`
-    // field the last event carried rather than through silent staleness.
+    // telemetry hook, and reconnection on a dropped stream is owned centrally
+    // by use-telemetry-stream.ts, not per-hook: a non-200/wrong-content-type
+    // response is a *permanent* EventSource failure per spec, not something
+    // the browser retries on its own, so that module reconnects and surfaces
+    // the outage via useTelemetryStatus() rather than leaving this hook to
+    // notice only through `source` going stale.
     return subscribeTelemetry('vessel-state', (raw) => {
       try {
         applyVesselState(JSON.parse(raw) as VesselState)
