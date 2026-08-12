@@ -48,11 +48,23 @@ type signalKNotifyConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+// watchdogConfig covers the failures the alarm rules cannot see: the data
+// source dying, and the boat itself going off.
+type watchdogConfig struct {
+	// StreamSilenceSeconds is how long the delta stream may be quiet before it
+	// is treated as an outage. Zero uses the default.
+	StreamSilenceSeconds int `json:"stream_silence_seconds"`
+	// HeartbeatMinutes is how often to send a "still alive" notification, so
+	// that its absence is itself the alarm. Zero disables it.
+	HeartbeatMinutes int `json:"heartbeat_minutes"`
+}
+
 type alarmTransportConfig struct {
-	Ntfy    ntfyConfig          `json:"ntfy"`
-	SMTP    smtpConfig          `json:"smtp"`
-	Webhook webhookConfig       `json:"webhook"`
-	SignalK signalKNotifyConfig `json:"signalk"`
+	Ntfy     ntfyConfig          `json:"ntfy"`
+	SMTP     smtpConfig          `json:"smtp"`
+	Webhook  webhookConfig       `json:"webhook"`
+	SignalK  signalKNotifyConfig `json:"signalk"`
+	Watchdog watchdogConfig      `json:"watchdog"`
 }
 
 var (
@@ -150,6 +162,13 @@ func validateAlarmTransports(config *alarmTransportConfig) error {
 		if len(config.SMTP.To) == 0 {
 			return fmt.Errorf("smtp requires at least one recipient")
 		}
+	}
+
+	if config.Watchdog.StreamSilenceSeconds < 0 {
+		return fmt.Errorf("stream silence seconds cannot be negative")
+	}
+	if config.Watchdog.HeartbeatMinutes < 0 {
+		return fmt.Errorf("heartbeat minutes cannot be negative")
 	}
 
 	config.Webhook.URL = strings.TrimSpace(config.Webhook.URL)

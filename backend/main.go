@@ -329,6 +329,8 @@ func main() {
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	go startAlarmEvaluator(streamCtx, alarmEvaluationInterval)
 	go startNotificationDrainer(streamCtx, notifyDrainInterval)
+	go startStreamWatchdog(streamCtx, watchdogCheckInterval)
+	go startHeartbeat(streamCtx, heartbeatCheckInterval)
 
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)
