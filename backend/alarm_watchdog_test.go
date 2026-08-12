@@ -186,3 +186,15 @@ func TestHeartbeatSkipsTheOnBoatSignalKTransport(t *testing.T) {
 		t.Fatalf("off-boat transports must still receive it, got %d", webhook.count())
 	}
 }
+
+// Resetting the threshold to zero must restore the default. A guard that
+// skipped zero left the running watchdog on its previous value while the API
+// reported the default — config and behaviour silently disagreeing.
+func TestWatchdogSilenceAfterTreatsZeroAsDefault(t *testing.T) {
+	if got := watchdogSilenceAfter(watchdogConfig{StreamSilenceSeconds: 0}); got != defaultStreamSilenceSeconds*time.Second {
+		t.Fatalf("zero should resolve to the default, got %s", got)
+	}
+	if got := watchdogSilenceAfter(watchdogConfig{StreamSilenceSeconds: 30}); got != 30*time.Second {
+		t.Fatalf("configured value: got %s, want 30s", got)
+	}
+}

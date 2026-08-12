@@ -41,6 +41,18 @@ func newStreamWatchdog(snapshot *signalKSnapshot, silenceAfter time.Duration) *s
 	return &streamWatchdog{snapshot: snapshot, silenceAfter: silenceAfter}
 }
 
+// watchdogSilenceAfter resolves the configured threshold, treating zero as
+// "use the default". It exists so the running watchdog and the value the API
+// reports can never disagree: a guard that skipped zero left the watchdog on a
+// previous threshold while /api/alarm-transports reported the default, which is
+// the trusted-and-silently-wrong failure this package tries hardest to avoid.
+func watchdogSilenceAfter(config watchdogConfig) time.Duration {
+	if config.StreamSilenceSeconds <= 0 {
+		return defaultStreamSilenceSeconds * time.Second
+	}
+	return time.Duration(config.StreamSilenceSeconds) * time.Second
+}
+
 // check reports a transition, if any. Like the rule engine it is edge-triggered:
 // a persistently dead stream produces one alarm, not one per tick.
 func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
@@ -110,8 +122,7 @@ func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
 }
 
 func startStreamWatchdog(ctx context.Context, interval time.Duration) {
-	watchdog := newStreamWatchdog(globalSignalKSnapshot,
-		time.Duration(getAlarmTransports().Watchdog.StreamSilenceSeconds)*time.Second)
+	watchdog := newStreamWatchdog(globalSignalKSnapshot, watchdogSilenceAfter(getAlarmTransports().Watchdog))
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -122,10 +133,8 @@ func startStreamWatchdog(ctx context.Context, interval time.Duration) {
 			return
 		case now := <-ticker.C:
 			// Re-read each tick so a settings change takes effect without a
-			// restart.
-			if seconds := getAlarmTransports().Watchdog.StreamSilenceSeconds; seconds > 0 {
-				watchdog.silenceAfter = time.Duration(seconds) * time.Second
-			}
+			// restart, including a reset back to the default.
+			watchdog.silenceAfter = watchdogSilenceAfter(getAlarmTransports().Watchdog)
 
 			if event, ok := watchdog.check(now.UTC()); ok {
 				recordAlarmEvent(event, now.UTC())
