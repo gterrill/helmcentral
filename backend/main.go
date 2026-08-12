@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -218,6 +219,7 @@ func main() {
 	// Routes
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
+	e.GET("/api/stream", telemetryStream)
 	e.GET("/api/electrical-state", electricalState)
 	e.GET("/api/solar-state", solarState)
 	e.GET("/api/tanks-state", tanksState)
@@ -293,6 +295,13 @@ func main() {
 	loadAnchorWatch()
 	loadRoutes()
 	loadDashboardPages()
+	// All vessel data arrives over the SignalK delta stream (ADR 0037). There
+	// is no REST read path to fall back to: a dropped stream surfaces as an
+	// outage rather than being papered over.
+	streamCtx, cancelStream := context.WithCancel(context.Background())
+	defer cancelStream()
+	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
+
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)
 
@@ -405,7 +414,10 @@ func computeMaxGustKtsFor(windows []string) map[string]float64 {
 	return inMemoryMaxWindGustKtsFor(windows)
 }
 
-func vesselState(c echo.Context) error {
+// buildVesselStatePayload produces the /api/vessel-state body. It is separate
+// from the handler so the SSE stream can emit the identical shape without the
+// two drifting apart.
+func buildVesselStatePayload() map[string]any {
 	state := vesselStateData{
 		Status:               getEnv("VESSEL_STATUS", "At Anchor"),
 		Datetime:             time.Now().UTC(),
@@ -474,7 +486,7 @@ func vesselState(c echo.Context) error {
 		vesselPrefix = "M/V"
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return map[string]any{
 		"name":                           state.Name,
 		"vessel_prefix":                  vesselPrefix,
 		"status":                         state.Status,
@@ -506,10 +518,16 @@ func vesselState(c echo.Context) error {
 		"engine_0_rpm":                   state.Engine0RPM,
 		"engine_1_rpm":                   state.Engine1RPM,
 		"source":                         source,
-	})
+	}
 }
 
-func electricalState(c echo.Context) error {
+func vesselState(c echo.Context) error {
+	return c.JSON(http.StatusOK, buildVesselStatePayload())
+}
+
+// buildElectricalStatePayload produces the /api response body. Split from the handler so
+// the SSE stream emits the identical shape without the two drifting apart.
+func buildElectricalStatePayload() map[string]any {
 	state := electricalStateData{
 		Datetime:            time.Now().UTC(),
 		BatterySocPercent:   -1,
@@ -547,7 +565,7 @@ func electricalState(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return map[string]any{
 		"datetime":                   state.Datetime.Format(time.RFC3339),
 		"battery_soc_percent":        state.BatterySocPercent,
 		"battery_capacity_ah":        state.BatteryCapacityAh,
@@ -575,10 +593,15 @@ func electricalState(c echo.Context) error {
 		"charger_0_charging_mode":    state.Charger0.ChargingMode,
 		"charger_0_error":            state.Charger0.Error,
 		"source":                     source,
-	})
+	}
+}
+func electricalState(c echo.Context) error {
+	return c.JSON(http.StatusOK, buildElectricalStatePayload())
 }
 
-func solarState(c echo.Context) error {
+// buildSolarStatePayload produces the /api response body. Split from the handler so
+// the SSE stream emits the identical shape without the two drifting apart.
+func buildSolarStatePayload() map[string]any {
 	state := solarStateData{
 		Datetime:      time.Now().UTC(),
 		CurrentW:      -1,
@@ -631,7 +654,7 @@ func solarState(c echo.Context) error {
 		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return map[string]any{
 		"datetime":        state.Datetime.Format(time.RFC3339),
 		"source":          source,
 		"current_w":       state.CurrentW,
@@ -640,7 +663,10 @@ func solarState(c echo.Context) error {
 		"peak_today_w":    state.PeakTodayW,
 		"controllers":     controllers,
 		"trend_24h_total": state.Trend24hTotal,
-	})
+	}
+}
+func solarState(c echo.Context) error {
+	return c.JSON(http.StatusOK, buildSolarStatePayload())
 }
 
 // applyInMemorySolarDefaults fills any field SignalK didn't report, from the
@@ -681,7 +707,9 @@ func applyInfluxSolarOverride(state solarStateData) solarStateData {
 	return state
 }
 
-func tanksState(c echo.Context) error {
+// buildTanksStatePayload produces the /api response body. Split from the handler so
+// the SSE stream emits the identical shape without the two drifting apart.
+func buildTanksStatePayload() map[string]any {
 	now := time.Now().UTC()
 	tanks := []tankLevelData{}
 	source := "backend-fallback"
@@ -706,11 +734,14 @@ func tanksState(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return map[string]any{
 		"datetime": now.Format(time.RFC3339),
 		"source":   source,
 		"tanks":    tanks,
-	})
+	}
+}
+func tanksState(c echo.Context) error {
+	return c.JSON(http.StatusOK, buildTanksStatePayload())
 }
 
 type nearbyVessel struct {
@@ -725,7 +756,9 @@ type nearbyVessel struct {
 	LastSeenAt string   `json:"last_seen_at,omitempty"`
 }
 
-func nearbyVessels(c echo.Context) error {
+// buildNearbyVesselsPayload produces the /api response body. Split from the handler so
+// the SSE stream emits the identical shape without the two drifting apart.
+func buildNearbyVesselsPayload() map[string]any {
 	source := "backend-fallback"
 	now := time.Now().UTC()
 	vessels := []nearbyVessel{}
@@ -774,11 +807,14 @@ func nearbyVessels(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return map[string]any{
 		"datetime": now.Format(time.RFC3339),
 		"source":   source,
 		"vessels":  vessels,
-	})
+	}
+}
+func nearbyVessels(c echo.Context) error {
+	return c.JSON(http.StatusOK, buildNearbyVesselsPayload())
 }
 
 func formatWeatherCondition(code string) string {

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+
 interface SolarControllerState {
   id: string
   label: string
@@ -42,7 +44,7 @@ function normalizeText(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
-export function useSolarState(refreshInterval: number) {
+export function useSolarState() {
   const [currentW, setCurrentW] = useState<number | null>(null)
   const [todayKWh, setTodayKWh] = useState<number | null>(null)
   const [yesterdayKWh, setYesterdayKWh] = useState<number | null>(null)
@@ -50,14 +52,9 @@ export function useSolarState(refreshInterval: number) {
   const [controllers, setControllers] = useState<SolarController[]>([])
 
   useEffect(() => {
-    const fetchSolarState = async () => {
+    const applySolarState = (payload: unknown) => {
       try {
-        const response = await fetch('/api/solar-state')
-        if (!response.ok) {
-          throw new Error('Failed to fetch solar state')
-        }
-
-        const data = (await response.json()) as SolarState
+        const data = payload as SolarState
 
         setCurrentW(normalizeNumber(data.current_w))
         setTodayKWh(normalizeNumber(data.today_kwh))
@@ -84,15 +81,10 @@ export function useSolarState(refreshInterval: number) {
       }
     }
 
-    void fetchSolarState()
-    const timer = window.setInterval(() => {
-      void fetchSolarState()
-    }, refreshInterval * 1000)
-
-    return () => {
-      window.clearInterval(timer)
-    }
-  }, [refreshInterval])
+    return subscribeTelemetry('solar-state', (raw) => {
+      applySolarState(JSON.parse(raw))
+    })
+  }, [])
 
   return {
     currentW,

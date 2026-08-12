@@ -220,9 +220,10 @@ func TestSolarStateHandler_UsesSignalKPayload(t *testing.T) {
 		}
 	}`)
 
+	seedSelfTree(t, string(body))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
+		w.Write(body)
 	}))
 	defer srv.Close()
 
@@ -299,9 +300,10 @@ func TestVesselStateHandler_MaxGustKtsCoversFullLadderAndClampsMonotonically(t *
 
 	body := []byte(`{"name": "Test Vessel", "navigation": {"state": {"value": "sailing"}}}`)
 
+	seedSelfTree(t, string(body))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
+		w.Write(body)
 	}))
 	defer srv.Close()
 

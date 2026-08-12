@@ -286,13 +286,13 @@ export function App() {
     engine1Rpm,
     speedOverGroundKts,
     source: vesselStateSource,
-  } = useVesselState(uiConfig.vesselStateRefreshSeconds)
+  } = useVesselState()
   // Only for deciding whether to offer SignalK discovery. Gated on `loading`
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
   const { settings: currentSettings, loading: currentSettingsLoading } = useSettingsForm()
-  const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels(uiConfig.vesselStateRefreshSeconds)
-  const { tanks, loading: tanksLoading } = useTanksState(uiConfig.vesselStateRefreshSeconds)
+  const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels()
+  const { tanks, loading: tanksLoading } = useTanksState()
   const {
     batterySocPercent,
     chargingCurrentA,
@@ -310,14 +310,14 @@ export function App() {
     charger0Error,
     batteryRatePercentPerHour,
     timeToGoHours,
-  } = useElectricalState(5)
+  } = useElectricalState()
   const {
     currentW: solarCurrentW,
     todayKWh: solarTodayKWh,
     yesterdayKWh: solarYesterdayKWh,
     peakTodayW: solarPeakTodayW,
     controllers: solarControllers,
-  } = useSolarState(10)
+  } = useSolarState()
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
   const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
   const { activeWarning: activeForecastWarning } = useForecastWarnings(FORECAST_REFRESH_SECONDS)

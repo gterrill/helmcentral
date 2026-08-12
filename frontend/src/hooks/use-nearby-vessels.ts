@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+
 export type NearbyVessel = {
   name: string
   mmsi?: string
@@ -16,19 +18,14 @@ type NearbyVesselsResponse = {
   vessels?: NearbyVessel[]
 }
 
-export function useNearbyVessels(refreshInterval: number) {
+export function useNearbyVessels() {
   const [vessels, setVessels] = useState<NearbyVessel[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetchNearbyVessels = async () => {
+    const applyNearbyVessels = (payload: unknown) => {
       try {
-        const response = await fetch('/api/nearby-vessels')
-        if (!response.ok) {
-          throw new Error('Failed to fetch nearby vessels')
-        }
-
-        const data = (await response.json()) as NearbyVesselsResponse
+        const data = payload as NearbyVesselsResponse
         const list = Array.isArray(data.vessels) ? data.vessels : []
         setVessels(
           list.filter(
@@ -54,15 +51,10 @@ export function useNearbyVessels(refreshInterval: number) {
       }
     }
 
-    void fetchNearbyVessels()
-    const timer = window.setInterval(() => {
-      void fetchNearbyVessels()
-    }, refreshInterval * 1000)
-
-    return () => {
-      window.clearInterval(timer)
-    }
-  }, [refreshInterval])
+    return subscribeTelemetry('nearby-vessels', (raw) => {
+      applyNearbyVessels(JSON.parse(raw))
+    })
+  }, [])
 
   return { vessels, loading }
 }

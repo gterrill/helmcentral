@@ -12,10 +12,24 @@ import (
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
+// makeTracksServer serves the tracks plugin endpoint over HTTP — that one is a
+// REST API the delta stream does not carry — while seeding vessel data into the
+// snapshot, which is where every vessel lookup now reads from (ADR 0037). Self
+// is seeded too so name-based self-filtering keeps working.
 func makeTracksServer(t *testing.T, tracksBody map[string]any, vesselsBody map[string]any) *httptest.Server {
 	t.Helper()
 	tracksJSON, _ := json.Marshal(tracksBody)
 	vesselsJSON, _ := json.Marshal(vesselsBody)
+
+	snapshot := newSignalKSnapshot()
+	for id, tree := range vesselsBody {
+		if asMap, ok := tree.(map[string]any); ok {
+			snapshot.contexts[vesselContextPrefix+id] = asMap
+		}
+	}
+	snapshot.contexts["vessels.self"] = map[string]any{"name": "TESTSELF"}
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -216,6 +230,7 @@ func TestSampleTracks_RecordsWindAndDepthHistoryEvenWithoutValidPosition(t *test
 			"wind": {"speedApparent": {"value": 5.0}}
 		}
 	}`)
+	seedSelfTree(t, string(body))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(body)
@@ -255,6 +270,7 @@ func TestSampleTracks_RecordsSolarHistoryOnEachTick(t *testing.T) {
 			}
 		}
 	}`)
+	seedSelfTree(t, string(body))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(body)
@@ -291,6 +307,7 @@ func TestSampleTracks_SkipsSolarRecordingWhenCurrentWMissing(t *testing.T) {
 			"state": {"value": "anchored"}
 		}
 	}`)
+	seedSelfTree(t, string(body))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(body)

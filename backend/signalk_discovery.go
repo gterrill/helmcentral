@@ -201,7 +201,7 @@ func probeSignalKServer(ctx context.Context, host string, port int) (discoveredS
 		Address:    host,
 		Port:       port,
 		URL:        baseURL,
-		VesselName: strings.TrimSpace(fetchSignalKSelfName(baseURL, vesselPath)),
+		VesselName: strings.TrimSpace(probeSignalKVesselName(baseURL, vesselPath)),
 		Version:    version,
 	}, true
 }

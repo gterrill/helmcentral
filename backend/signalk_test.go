@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-func trustedSignalKPayloadServer(t *testing.T, latitude, longitude float64) *httptest.Server {
-	t.Helper()
-	body := []byte(fmt.Sprintf(`{
+func trustedSignalKPayload(latitude, longitude float64) string {
+	return fmt.Sprintf(`{
 		"navigation": {
 			"datetime": {"value": %q},
 			"state": {"value": "anchored"},
@@ -21,11 +20,21 @@ func trustedSignalKPayloadServer(t *testing.T, latitude, longitude float64) *htt
 				"satellites": {"value": 8}
 			}
 		}
-	}`, time.Now().UTC().Format(time.RFC3339), latitude, longitude))
+	}`, time.Now().UTC().Format(time.RFC3339), latitude, longitude)
+}
+
+// trustedSignalKPayloadServer both seeds the delta-stream snapshot and serves
+// the same payload over HTTP. Telemetry reads the snapshot (ADR 0037) while
+// probe and settings-validation tests still need a real address to fetch, and
+// callers of this helper span both.
+func trustedSignalKPayloadServer(t *testing.T, latitude, longitude float64) *httptest.Server {
+	t.Helper()
+	body := trustedSignalKPayload(latitude, longitude)
+	seedSelfTree(t, body)
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(body)
+		w.Write([]byte(body))
 	}))
 }
 
@@ -242,13 +251,16 @@ func TestFetchSignalKVesselState_MarksCriticalOnNon200(t *testing.T) {
 	}
 }
 
-func TestFetchSignalKVesselState_FreezesLastTrustedPositionWhenConnectionLost(t *testing.T) {
+// The anchor alarm must be able to tell "the stream went away" apart from "the
+// vessel moved". Losing the stream has to freeze position at the last trusted
+// fix, never report a jump.
+func TestFetchSignalKVesselState_FreezesLastTrustedPositionWhenStreamStops(t *testing.T) {
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
 
-	goodSrv := trustedSignalKPayloadServer(t, -25.2939, 152.9103)
+	seedSelfTree(t, trustedSignalKPayload(-25.2939, 152.9103))
 
-	state, err := fetchSignalKVesselState(goodSrv.URL, "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKVesselState("", "/signalk/v1/api/vessels/self")
 	if err != nil {
 		t.Fatalf("unexpected error establishing trusted fix: %v", err)
 	}
@@ -262,15 +274,15 @@ func TestFetchSignalKVesselState_FreezesLastTrustedPositionWhenConnectionLost(t 
 		t.Fatalf("expected 8 satellites from trusted payload, got %d", state.GNSSSatellites)
 	}
 
-	goodURL := goodSrv.URL
-	goodSrv.Close()
+	// The stream drops: no data for any context.
+	withGlobalSnapshot(t, newSignalKSnapshot())
 
-	state, err = fetchSignalKVesselState(goodURL, "/signalk/v1/api/vessels/self")
+	state, err = fetchSignalKVesselState("", "/signalk/v1/api/vessels/self")
 	if err == nil {
-		t.Fatalf("expected error once signalk becomes unreachable")
+		t.Fatalf("expected error once the stream stops carrying data")
 	}
 	if !state.GNSSCriticalAlert {
-		t.Fatalf("expected gnss critical alert once signalk becomes unreachable")
+		t.Fatalf("expected gnss critical alert once the stream stops")
 	}
 	if state.Latitude != -25.2939 || state.Longitude != 152.9103 {
 		t.Fatalf("expected position frozen at last trusted fix, got %.4f %.4f", state.Latitude, state.Longitude)
@@ -298,13 +310,9 @@ func TestFetchSignalKNearbyVessels_ParsesStringMMSI(t *testing.T) {
 		}
 	}`)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(body)
-	}))
-	defer srv.Close()
+	seedVesselTrees(t, string(body))
 
-	vessels, err := fetchSignalKNearbyVessels(srv.URL, "/vessels", -21.595297, 149.796444, time.Now().UTC(), nil)
+	vessels, err := fetchSignalKNearbyVessels("", "/vessels", -21.595297, 149.796444, time.Now().UTC(), nil)
 	if err != nil {
 		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
 	}
@@ -333,13 +341,9 @@ func TestFetchSignalKNearbyVessels_ParsesNumericMMSI(t *testing.T) {
 		}
 	}`)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(body)
-	}))
-	defer srv.Close()
+	seedVesselTrees(t, string(body))
 
-	vessels, err := fetchSignalKNearbyVessels(srv.URL, "/vessels", -21.595297, 149.796444, time.Now().UTC(), nil)
+	vessels, err := fetchSignalKNearbyVessels("", "/vessels", -21.595297, 149.796444, time.Now().UTC(), nil)
 	if err != nil {
 		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
 	}
@@ -370,13 +374,9 @@ func TestFetchSignalKElectricalState_ReadsCharger0Fields(t *testing.T) {
 		}
 	}`)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
-	}))
-	defer srv.Close()
+	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState(srv.URL, "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKElectricalState("", "/signalk/v1/api/vessels/self")
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -414,13 +414,9 @@ func TestFetchSignalKElectricalState_ReadsCharger0MixedShapes(t *testing.T) {
 		}
 	}`)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
-	}))
-	defer srv.Close()
+	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKElectricalState(srv.URL, "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKElectricalState("", "/signalk/v1/api/vessels/self")
 	if err != nil {
 		t.Fatalf("fetchSignalKElectricalState: %v", err)
 	}
@@ -465,13 +461,9 @@ func TestFetchSignalKSolarState_ReadsControllersAndAggregate(t *testing.T) {
 		}
 	}`)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
-	}))
-	defer srv.Close()
+	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState(srv.URL, "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKSolarState("", "/signalk/v1/api/vessels/self")
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}
@@ -510,13 +502,9 @@ func TestFetchSignalKSolarState_NormalizesWhYieldToKWh(t *testing.T) {
 		}
 	}`)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
-	}))
-	defer srv.Close()
+	seedSelfTree(t, string(body))
 
-	state, err := fetchSignalKSolarState(srv.URL, "/signalk/v1/api/vessels/self")
+	state, err := fetchSignalKSolarState("", "/signalk/v1/api/vessels/self")
 	if err != nil {
 		t.Fatalf("fetchSignalKSolarState: %v", err)
 	}

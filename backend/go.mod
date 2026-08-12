@@ -3,6 +3,7 @@ module helmcentral
 go 1.22.0
 
 require (
+	github.com/coder/websocket v1.8.13
 	github.com/extism/go-sdk v1.7.1
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0

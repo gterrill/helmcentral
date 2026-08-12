@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+
 interface AlternatorInstance {
   currentA: number | null
   voltageV: number | null
@@ -39,7 +41,7 @@ function parseAlt(v: unknown): number | null {
   return typeof v === 'number' && v >= 0 ? v : null
 }
 
-export function useElectricalState(refreshInterval: number) {
+export function useElectricalState() {
   const [batterySocPercent, setBatterySocPercent] = useState<number | null>(null)
   const [chargingCurrentA, setChargingCurrentA] = useState<number | null>(null)
   const [chargingPowerW, setChargingPowerW] = useState<number | null>(null)
@@ -63,15 +65,9 @@ export function useElectricalState(refreshInterval: number) {
     let previousSocSample: { socPercent: number; timestampMs: number } | null = null
     let smoothedChargeRatePercentPerHour: number | null = null
 
-    const fetchElectricalState = async () => {
+    const applyElectricalState = (payload: unknown) => {
       try {
-        const response = await fetch('/api/electrical-state')
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch electrical state')
-        }
-
-        const data = (await response.json()) as ElectricalState
+        const data = payload as ElectricalState
 
         const nextBatterySocPercent =
           typeof data.battery_soc_percent === 'number' && data.battery_soc_percent >= 0 ? data.battery_soc_percent : null
@@ -150,15 +146,10 @@ export function useElectricalState(refreshInterval: number) {
       }
     }
 
-    void fetchElectricalState()
-    const timer = window.setInterval(() => {
-      void fetchElectricalState()
-    }, refreshInterval * 1000)
-
-    return () => {
-      window.clearInterval(timer)
-    }
-  }, [refreshInterval])
+    return subscribeTelemetry('electrical-state', (raw) => {
+      applyElectricalState(JSON.parse(raw))
+    })
+  }, [])
 
   return {
     batterySocPercent,

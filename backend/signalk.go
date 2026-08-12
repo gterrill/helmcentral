@@ -207,7 +207,7 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 	if next.Signalk.Address != current.Signalk.Address || next.Signalk.Port != current.Signalk.Port {
 		signalkURL := buildSignalKURL(next.Signalk.Address, next.Signalk.Port)
 		vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
-		if _, err := fetchSignalKVesselState(signalkURL, vesselPath); err != nil {
+		if err := probeSignalKReachable(signalkURL, vesselPath); err != nil {
 			return &settingsValidationError{
 				Field:   "signalk.address",
 				Message: fmt.Sprintf("unable to connect to SignalK at %s", signalkURL),
@@ -450,7 +450,10 @@ func testSignalKConnectionHandler(c echo.Context) error {
 	signalkURL := buildSignalKURL(address, req.Port)
 	vesselPath := getEnv("SIGNALK_VESSEL_PATH", "/signalk/v1/api/vessels/self")
 
-	state, err := fetchSignalKVesselState(signalkURL, vesselPath)
+	// A direct REST probe, not the delta-stream snapshot: the address under
+	// test is not the configured one and has no stream open, so the snapshot
+	// would answer for the currently configured server no matter what was typed.
+	payload, err := probeSignalKTree(signalkURL, vesselPath)
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]any{
 			"field":     "signalk.address",
@@ -465,7 +468,7 @@ func testSignalKConnectionHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"connected":   true,
 		"url":         signalkURL,
-		"vessel_name": strings.TrimSpace(state.Name),
+		"vessel_name": strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name"))),
 	})
 }
 
@@ -488,30 +491,14 @@ func criticalVesselState(state vesselStateData, reason string) vesselStateData {
 }
 
 func fetchSignalKVesselState(signalkURL string, vesselPath string) (vesselStateData, error) {
-	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
-
 	state := vesselStateData{Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, Latitude: -1, Longitude: -1, HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1}
 
-	client := signalKReadClient()
-	response, err := client.Get(url)
+	// A stream outage lands here the same way an unreachable REST server does,
+	// so the position freezes at the last trusted fix rather than reading as a
+	// jump to null island and tripping the anchor alarm.
+	payload, err := signalKSelfPayload()
 	if err != nil {
-		return criticalVesselState(state, fmt.Sprintf("signalk unreachable: %v", err)), err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		err := fmt.Errorf("signalk returned status %d", response.StatusCode)
 		return criticalVesselState(state, err.Error()), err
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return criticalVesselState(state, fmt.Sprintf("signalk response unreadable: %v", err)), err
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return criticalVesselState(state, fmt.Sprintf("signalk response malformed: %v", err)), err
 	}
 
 	state.Name = strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))
@@ -763,28 +750,10 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 }
 
 func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electricalStateData, error) {
-	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
-
 	state := electricalStateData{Datetime: time.Now().UTC(), BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
-	client := signalKReadClient()
-	response, err := client.Get(url)
+	payload, err := signalKSelfPayload()
 	if err != nil {
-		return state, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return state, fmt.Errorf("signalk returned status %d", response.StatusCode)
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return state, err
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
 		return state, err
 	}
 
@@ -973,8 +942,6 @@ func fetchSignalKElectricalState(signalkURL string, vesselPath string) (electric
 }
 
 func fetchSignalKSolarState(signalkURL string, vesselPath string) (solarStateData, error) {
-	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
-
 	state := solarStateData{
 		Datetime:      time.Now().UTC(),
 		CurrentW:      -1,
@@ -985,24 +952,8 @@ func fetchSignalKSolarState(signalkURL string, vesselPath string) (solarStateDat
 		Trend24hTotal: []solarTrendPoint{},
 	}
 
-	client := signalKReadClient()
-	response, err := client.Get(url)
+	payload, err := signalKSelfPayload()
 	if err != nil {
-		return state, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return state, fmt.Errorf("signalk returned status %d", response.StatusCode)
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return state, err
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
 		return state, err
 	}
 
@@ -1297,26 +1248,8 @@ func readChargerInstance(payload map[string]any, index string) chargerInstanceDa
 }
 
 func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
-	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselsPath, "/")
-
-	client := signalKReadClient()
-	response, err := client.Get(url)
+	payload, err := signalKVesselsPayload()
 	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("signalk returned status %d", response.StatusCode)
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, err
 	}
 
@@ -1400,26 +1333,8 @@ func fetchSignalKNearbyVessels(signalkURL string, vesselsPath string, selfLatitu
 }
 
 func fetchSignalKVesselNameMap(signalkURL string, vesselsPath string) (map[string]string, error) {
-	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselsPath, "/")
-
-	client := signalKReadClient()
-	response, err := client.Get(url)
+	payload, err := signalKVesselsPayload()
 	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("signalk returned status %d", response.StatusCode)
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, err
 	}
 
@@ -1441,26 +1356,8 @@ func fetchSignalKVesselNameMap(signalkURL string, vesselsPath string) (map[strin
 }
 
 func fetchSignalKTanksState(signalkURL string, vesselPath string, labelOverrides map[string]string) ([]tankLevelData, time.Time, error) {
-	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
-
-	client := signalKReadClient()
-	response, err := client.Get(url)
+	payload, err := signalKSelfPayload()
 	if err != nil {
-		return nil, time.Now().UTC(), err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return nil, time.Now().UTC(), fmt.Errorf("signalk returned status %d", response.StatusCode)
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, time.Now().UTC(), err
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, time.Now().UTC(), err
 	}
 
@@ -2132,22 +2029,8 @@ func loadHouseBatteryCapacityAh(settingsPath string) float64 {
 }
 
 func fetchSignalKSelfName(signalkURL string, vesselPath string) string {
-	url := strings.TrimRight(signalkURL, "/") + "/" + strings.TrimLeft(vesselPath, "/")
-	client := signalKReadClient()
-	response, err := client.Get(url)
+	payload, err := signalKSelfPayload()
 	if err != nil {
-		return ""
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return ""
-	}
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return ""
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
 		return ""
 	}
 	return strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))

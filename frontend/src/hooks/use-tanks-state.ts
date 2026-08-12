@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+
 export type TankLevel = {
   id: string
   label: string
@@ -12,19 +14,14 @@ type TanksStateResponse = {
   tanks?: TankLevel[]
 }
 
-export function useTanksState(refreshInterval: number) {
+export function useTanksState() {
   const [tanks, setTanks] = useState<TankLevel[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetchTanksState = async () => {
+    const applyTanksState = (payload: unknown) => {
       try {
-        const response = await fetch('/api/tanks-state')
-        if (!response.ok) {
-          throw new Error('Failed to fetch tanks state')
-        }
-
-        const data = (await response.json()) as TanksStateResponse
+        const data = payload as TanksStateResponse
         const list = Array.isArray(data.tanks) ? data.tanks : []
 
         const valid = list.filter(
@@ -45,15 +42,10 @@ export function useTanksState(refreshInterval: number) {
       }
     }
 
-    void fetchTanksState()
-    const timer = window.setInterval(() => {
-      void fetchTanksState()
-    }, refreshInterval * 1000)
-
-    return () => {
-      window.clearInterval(timer)
-    }
-  }, [refreshInterval])
+    return subscribeTelemetry('tanks-state', (raw) => {
+      applyTanksState(JSON.parse(raw))
+    })
+  }, [])
 
   return { tanks, loading }
 }
