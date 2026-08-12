@@ -69,6 +69,16 @@ func recordAlarmEvent(event alarmEvent, now time.Time) {
 			log.Printf("alarm log: %v", err)
 		}
 	}
+
+	if globalAlarmDispatcher != nil {
+		globalAlarmDispatcher.dispatch(event, vesselNameForNotifications())
+	}
+}
+
+// vesselNameForNotifications labels off-boat notifications, which is the whole
+// difference between "ALARM: Bilge" and knowing which boat sent it.
+func vesselNameForNotifications() string {
+	return fetchSignalKSelfName()
 }
 
 // activeAlarms merges rule-driven alarms with notifications raised by anything
@@ -171,4 +181,54 @@ func alarmLogHandler(c echo.Context) error {
 		entries = []alarmLogEntry{}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"entries": entries})
+}
+
+func getAlarmTransportsHandler(c echo.Context) error {
+	return c.JSON(http.StatusOK, getAlarmTransports())
+}
+
+func setAlarmTransportsHandler(c echo.Context) error {
+	var config alarmTransportConfig
+	if err := c.Bind(&config); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+	}
+
+	saved, err := setAlarmTransports(config)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, saved)
+}
+
+// testAlarmTransportsHandler sends a probe through every enabled transport.
+// Discovering at 3am that the ntfy topic was mistyped is the failure this
+// exists to prevent.
+func testAlarmTransportsHandler(c echo.Context) error {
+	transports := buildTransports(getAlarmTransports())
+	if len(transports) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no transports are enabled"})
+	}
+
+	msg := notificationMessage{
+		Kind:    alarmEventRaised,
+		Label:   "Helmcentral test notification",
+		Path:    "notifications.helmcentral.test",
+		State:   alarmStateAlert,
+		Message: "If you can read this, alarm notifications are working.",
+		Vessel:  vesselNameForNotifications(),
+		At:      time.Now().UTC(),
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 20*time.Second)
+	defer cancel()
+
+	results := map[string]string{}
+	for _, transport := range transports {
+		if err := transport.Send(ctx, msg); err != nil {
+			results[transport.ID()] = err.Error()
+			continue
+		}
+		results[transport.ID()] = "ok"
+	}
+	return c.JSON(http.StatusOK, map[string]any{"results": results})
 }

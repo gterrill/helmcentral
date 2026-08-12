@@ -224,6 +224,10 @@ func main() {
 	if err := loadAlarmRules(); err != nil {
 		log.Fatalf("failed to load alarm rules: %v", err)
 	}
+	if err := loadAlarmTransports(); err != nil {
+		log.Fatalf("failed to load alarm transports: %v", err)
+	}
+	globalAlarmDispatcher = newAlarmDispatcher()
 
 	// World imagery HTTP client for tile fetches (with timeout to prevent hangs).
 	worldImageryClient := newWorldImageryHTTPClient()
@@ -233,6 +237,9 @@ func main() {
 	e.GET("/api/vessel-state", vesselState)
 	e.GET("/api/stream", telemetryStream)
 	e.GET("/api/alarms", alarmsHandler)
+	e.GET("/api/alarm-transports", getAlarmTransportsHandler)
+	e.POST("/api/alarm-transports", setAlarmTransportsHandler)
+	e.POST("/api/alarm-transports/test", testAlarmTransportsHandler)
 	e.POST("/api/alarms/:id/acknowledge", acknowledgeAlarmHandler)
 	e.GET("/api/alarms/log", alarmLogHandler)
 	e.GET("/api/alarm-rules", listAlarmRulesHandler)
@@ -321,6 +328,7 @@ func main() {
 	defer cancelStream()
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	go startAlarmEvaluator(streamCtx, alarmEvaluationInterval)
+	go startNotificationDrainer(streamCtx, notifyDrainInterval)
 
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)

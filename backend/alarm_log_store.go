@@ -85,7 +85,12 @@ func newAlarmLogStore(dbPath string) (*alarmLogStore, error) {
 		return nil, fmt.Errorf("index alarm log: %w", err)
 	}
 
-	return &alarmLogStore{db: db}, nil
+	store := &alarmLogStore{db: db}
+	if err := store.ensureQueueTable(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create notification queue table: %w", err)
+	}
+	return store, nil
 }
 
 func (s *alarmLogStore) Close() error {
@@ -199,4 +204,141 @@ func (s *alarmLogStore) Recent(limit int) ([]alarmLogEntry, error) {
 	}
 
 	return entries, rows.Err()
+}
+
+// ── delivery queue ────────────────────────────────────────────────────────────
+
+// A boat's internet comes and goes, so a notification that fails to send is
+// queued rather than dropped. A late alarm is far better than a lost one.
+
+type queuedNotification struct {
+	ID        string
+	Transport string
+	Payload   []byte
+	Attempts  int
+	LastError string
+}
+
+func (s *alarmLogStore) ensureQueueTable() error {
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS notification_queue (
+			id              TEXT PRIMARY KEY,
+			transport       TEXT NOT NULL,
+			payload         BLOB NOT NULL,
+			attempts        INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at INTEGER NOT NULL,
+			created_at      INTEGER NOT NULL,
+			last_error      TEXT NOT NULL DEFAULT ''
+		)`)
+	return err
+}
+
+func (s *alarmLogStore) Enqueue(transport string, payload []byte, dueAt time.Time) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		`INSERT INTO notification_queue (id, transport, payload, attempts, next_attempt_at, created_at)
+		 VALUES (?, ?, ?, 0, ?, ?)`,
+		uuid.NewString(), transport, payload, dueAt.UTC().Unix(), time.Now().UTC().Unix())
+	if err != nil {
+		return fmt.Errorf("enqueue notification: %w", err)
+	}
+	return nil
+}
+
+// DueNotifications returns queued deliveries whose backoff has elapsed.
+func (s *alarmLogStore) DueNotifications(now time.Time, limit int) ([]queuedNotification, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT id, transport, payload, attempts, last_error FROM notification_queue
+		 WHERE next_attempt_at <= ? ORDER BY created_at ASC LIMIT ?`,
+		now.UTC().Unix(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("read notification queue: %w", err)
+	}
+	defer rows.Close()
+
+	var out []queuedNotification
+	for rows.Next() {
+		var item queuedNotification
+		if err := rows.Scan(&item.ID, &item.Transport, &item.Payload, &item.Attempts, &item.LastError); err != nil {
+			return nil, fmt.Errorf("scan notification queue: %w", err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *alarmLogStore) DeleteQueued(id string) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.db.Exec(`DELETE FROM notification_queue WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete queued notification: %w", err)
+	}
+	return nil
+}
+
+// RescheduleQueued records a failed attempt and pushes the next one out.
+func (s *alarmLogStore) RescheduleQueued(id string, attempts int, nextAttempt time.Time, lastError string) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		`UPDATE notification_queue SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE id = ?`,
+		attempts, nextAttempt.UTC().Unix(), lastError, id)
+	if err != nil {
+		return fmt.Errorf("reschedule queued notification: %w", err)
+	}
+	return nil
+}
+
+// DropQueuedOlderThan discards deliveries that have been retrying for too long.
+// Retrying forever would eventually deliver a day-old alarm as if it were new,
+// which is its own kind of wrong; the drop is logged by the caller.
+func (s *alarmLogStore) DropQueuedOlderThan(cutoff time.Time) (int64, error) {
+	if s == nil {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(`DELETE FROM notification_queue WHERE created_at < ?`, cutoff.UTC().Unix())
+	if err != nil {
+		return 0, fmt.Errorf("drop stale queued notifications: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+func (s *alarmLogStore) QueueDepth() (int, error) {
+	if s == nil {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM notification_queue`).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }

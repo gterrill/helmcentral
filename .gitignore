@@ -20,6 +20,7 @@ backend/data/secrets.key
 backend/data/plugin_overrides.sqlite
 backend/data/alarm-rules.json
 backend/data/alarm-log.sqlite
+backend/data/alarm-transports.json
 # Allow the embed placeholder while ignoring real build output. backend/dist is
 # where the built frontend is staged for //go:embed (by the Dockerfile and the
 # GoReleaser hooks), so its contents must never be committed — but .gitkeep has
