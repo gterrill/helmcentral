@@ -1,5 +1,6 @@
 import {
   Anchor,
+  BellRing,
   CloudSun,
   LayoutDashboard,
   Map,
@@ -22,6 +23,8 @@ import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { ForecastWarningsBanner } from '@/components/forecast-warnings-banner'
+import { AlarmBanner } from '@/components/alarm-banner'
+import { AlarmsDrawer } from '@/components/alarms-drawer'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
@@ -64,6 +67,7 @@ import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
+import { useAlarms } from '@/hooks/use-alarms'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useServerTrails } from '@/hooks/use-server-trails'
@@ -113,7 +117,7 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 
-type PanelId = 'forecast' | 'routes' | 'charts' | 'radar' | 'anchor-watch' | 'settings'
+type PanelId = 'forecast' | 'routes' | 'charts' | 'radar' | 'anchor-watch' | 'alarms' | 'settings'
 
 const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
@@ -121,6 +125,7 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
   { id: 'charts', label: 'Charts', icon: Map },
   { id: 'radar', label: 'Radar', icon: RadarIcon },
   { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
+  { id: 'alarms', label: 'Alarms', icon: BellRing },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
 
@@ -287,6 +292,8 @@ export function App() {
     speedOverGroundKts,
     source: vesselStateSource,
   } = useVesselState()
+
+  const { alarms, acknowledge: acknowledgeAlarm } = useAlarms()
   // Only for deciding whether to offer SignalK discovery. Gated on `loading`
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
@@ -671,6 +678,8 @@ export function App() {
             waveError={waveForecastError}
           />
         )
+      case 'alarms':
+        return <AlarmsDrawer alarms={alarms} onAcknowledge={acknowledgeAlarm} />
       case 'routes':
         return (
           <RoutePlannerDrawer
@@ -900,6 +909,7 @@ export function App() {
         </header>
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
+            <AlarmBanner alarms={alarms} onOpen={() => requestNavigate('alarms', () => setActivePanel('alarms'))} />
             <ForecastWarningsBanner warnings={activeForecastWarning} />
 
             <div className="min-h-0 flex-1">

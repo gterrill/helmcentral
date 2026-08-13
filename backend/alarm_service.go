@@ -147,11 +147,17 @@ func deleteAlarmRuleHandler(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func alarmsHandler(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]any{
+// buildAlarmsPayload is shared by the REST handler and the SSE stream so the
+// two shapes cannot drift apart.
+func buildAlarmsPayload() map[string]any {
+	return map[string]any{
 		"alarms": activeAlarms(),
 		"worst":  worstAlarmState(),
-	})
+	}
+}
+
+func alarmsHandler(c echo.Context) error {
+	return c.JSON(http.StatusOK, buildAlarmsPayload())
 }
 
 func acknowledgeAlarmHandler(c echo.Context) error {
