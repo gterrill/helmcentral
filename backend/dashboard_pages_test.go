@@ -771,3 +771,101 @@ func TestDashboardLayoutItem_OmitsEmbedKeyWhenAbsent(t *testing.T) {
 		t.Fatalf("expected no embed key for a builtin widget, got %s", encoded)
 	}
 }
+
+func gaugeWidget(id string, config *dashboardGaugeConfig) dashboardLayoutItem {
+	return dashboardLayoutItem{ID: id, X: 0, Y: 0, W: 4, H: 4, Gauge: config}
+}
+
+func validGaugeConfig() *dashboardGaugeConfig {
+	return &dashboardGaugeConfig{
+		Path:     "propulsion.port.oilPressure",
+		Label:    "Port oil pressure",
+		Display:  "radial",
+		Quantity: "pressure",
+		Unit:     "psi",
+	}
+}
+
+func TestValidateGaugeWidgetAcceptsAWellFormedGauge(t *testing.T) {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", validGaugeConfig())}); msg != "" {
+		t.Fatalf("expected a valid gauge to be accepted, got %q", msg)
+	}
+}
+
+func TestValidateGaugeWidgetRejectsBadInput(t *testing.T) {
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"short token", gaugeWidget("gauge:abc", validGaugeConfig())},
+		{"missing config", gaugeWidget("gauge:abcd1234", nil)},
+		{"blank path", gaugeWidget("gauge:abcd1234", &dashboardGaugeConfig{Display: "radial"})},
+		{"unknown display", gaugeWidget("gauge:abcd1234", &dashboardGaugeConfig{Path: "a.b", Display: "hologram"})},
+	}
+
+	for _, tc := range cases {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			t.Fatalf("%s: expected rejection", tc.name)
+		}
+	}
+}
+
+// min >= max would make the arc maths meaningless rather than merely ugly.
+func TestValidateGaugeWidgetRejectsInvertedRange(t *testing.T) {
+	config := validGaugeConfig()
+	low, high := 100.0, 10.0
+	config.Min, config.Max = &low, &high
+
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+		t.Fatalf("expected an inverted range to be rejected")
+	}
+}
+
+// Zones reuse the alarm severity vocabulary (ADR 0038) rather than inventing
+// gauge-only colours, so an unknown state is a real error.
+func TestValidateGaugeWidgetRejectsUnknownZoneState(t *testing.T) {
+	config := validGaugeConfig()
+	config.Zones = []gaugeZone{{From: 0, To: 10, State: "spicy"}}
+
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+		t.Fatalf("expected an unknown zone state to be rejected")
+	}
+}
+
+// Reject rather than silently drop, matching the embed precedent: config the
+// renderer will never read means the caller has misunderstood the model.
+func TestValidateDashboardWidgetsRejectsGaugeConfigOnABuiltinWidget(t *testing.T) {
+	widget := dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig()}
+
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg == "" {
+		t.Fatalf("expected gauge config on a builtin id to be rejected")
+	}
+}
+
+func TestGaugeBoundPathsDeduplicatesAcrossPages(t *testing.T) {
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{
+		"a": {ID: "a", Widgets: []dashboardLayoutItem{
+			gaugeWidget("gauge:aaaa1111", &dashboardGaugeConfig{Path: "propulsion.port.oilPressure", Display: "radial"}),
+			gaugeWidget("gauge:bbbb2222", &dashboardGaugeConfig{Path: "environment.depth.belowTransducer", Display: "numeric"}),
+		}},
+		"b": {ID: "b", Widgets: []dashboardLayoutItem{
+			gaugeWidget("gauge:cccc3333", &dashboardGaugeConfig{Path: "propulsion.port.oilPressure", Display: "bar"}),
+		}},
+	}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+
+	paths := gaugeBoundPaths()
+	if len(paths) != 2 {
+		t.Fatalf("the same path on two pages is one subscription, got %v", paths)
+	}
+	if paths[0] != "environment.depth.belowTransducer" || paths[1] != "propulsion.port.oilPressure" {
+		t.Fatalf("expected sorted unique paths, got %v", paths)
+	}
+}

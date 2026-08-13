@@ -6,7 +6,7 @@ import '@/styles/dashboard-bento-grid.css'
 import { GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
-import { isEmbedWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { isGaugeWidgetId, isEmbedWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
@@ -22,6 +22,8 @@ const NARROW_FULL_SPAN_MIN_W = GRID_COLUMNS / 2
 
 // Embeds share one constraint rather than having per-id entries, since their ids
 // carry a per-instance token (see ADR 0031).
+const GAUGE_WIDGET_CONSTRAINTS = { minW: 2, minH: 4 }
+
 const EMBED_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
 
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
@@ -66,7 +68,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       y: w.y,
       w: w.w,
       h: w.h,
-      ...(isEmbedWidgetId(w.id) ? EMBED_WIDGET_CONSTRAINTS : WIDGET_CONSTRAINTS[w.id]),
+      ...(isEmbedWidgetId(w.id) ? EMBED_WIDGET_CONSTRAINTS : isGaugeWidgetId(w.id) ? GAUGE_WIDGET_CONSTRAINTS : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
     })),
     [widgets],
   )

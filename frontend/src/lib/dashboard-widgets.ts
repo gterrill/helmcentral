@@ -25,9 +25,11 @@ export type BuiltinWidgetId = typeof DASHBOARD_WIDGET_IDS[number]
  * a page, so each instance carries a token in its id: `embed:<token>`.
  */
 export const EMBED_WIDGET_ID_PREFIX = 'embed:'
+export const GAUGE_WIDGET_ID_PREFIX = 'gauge:'
 export type EmbedWidgetId = `${typeof EMBED_WIDGET_ID_PREFIX}${string}`
+export type GaugeWidgetId = `${typeof GAUGE_WIDGET_ID_PREFIX}${string}`
 
-export type DashboardWidgetId = BuiltinWidgetId | EmbedWidgetId
+export type DashboardWidgetId = BuiltinWidgetId | EmbedWidgetId | GaugeWidgetId
 
 export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'vessel': 'Vessel',
@@ -53,6 +55,28 @@ export interface EmbedWidgetConfig {
   url: string
 }
 
+export type GaugeDisplay = 'numeric' | 'radial' | 'bar' | 'lamp'
+
+/** A band of the range coloured by alarm severity (ADR 0038's vocabulary). */
+export interface GaugeZone {
+  from: number
+  to: number
+  state: 'normal' | 'alert' | 'warn' | 'alarm' | 'emergency'
+}
+
+/** Binds one widget to one SignalK path (ADR 0039). */
+export interface GaugeWidgetConfig {
+  path: string
+  label: string
+  display: GaugeDisplay
+  quantity: string
+  unit: string
+  decimals?: number
+  min?: number
+  max?: number
+  zones?: GaugeZone[]
+}
+
 export interface DashboardLayoutItem {
   id: DashboardWidgetId
   x: number
@@ -61,6 +85,8 @@ export interface DashboardLayoutItem {
   h: number
   /** Present only on `embed:` widgets; the backend rejects it on any other id. */
   embed?: EmbedWidgetConfig
+  /** Present only on `gauge:` widgets; the backend rejects it on any other id. */
+  gauge?: GaugeWidgetConfig
 }
 
 /** Length caps mirroring embedURLMaxLen / embedTitleMaxLen in backend/dashboard_pages.go. */
@@ -113,6 +139,19 @@ export function newEmbedWidgetId(existing: readonly DashboardLayoutItem[]): Embe
   }
 }
 
+export function isGaugeWidgetId(id: string): id is GaugeWidgetId {
+  return id.startsWith(GAUGE_WIDGET_ID_PREFIX)
+}
+
+/** Mints a gauge id. Same reasoning as newEmbedWidgetId, including why not crypto.randomUUID. */
+export function newGaugeWidgetId(existing: readonly DashboardLayoutItem[]): GaugeWidgetId {
+  for (;;) {
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10).padEnd(8, '0')}`
+    const id: GaugeWidgetId = `${GAUGE_WIDGET_ID_PREFIX}${token}`
+    if (!existing.some((w) => w.id === id)) return id
+  }
+}
+
 /**
  * Re-applies the grid's geometry to the persisted widget list.
  *
@@ -137,6 +176,9 @@ export function mergeLayoutGeometry(
 export function widgetDisplayName(widget: DashboardLayoutItem): string {
   if (isEmbedWidgetId(widget.id)) {
     return widget.embed?.title.trim() || 'Embed'
+  }
+  if (isGaugeWidgetId(widget.id)) {
+    return widget.gauge?.label.trim() || widget.gauge?.path || 'Gauge'
   }
   return DASHBOARD_WIDGET_LABELS[widget.id]
 }

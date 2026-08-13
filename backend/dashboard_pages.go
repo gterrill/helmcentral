@@ -44,6 +44,21 @@ const dashboardLayoutMaxCoord = 1000
 // API is secure-context-only and undefined over plain HTTP on a boat LAN).
 const embedWidgetIDPrefix = "embed:"
 
+// Gauge widgets (ADR 0039) are the second multi-instance widget type, following
+// exactly the precedent ADR 0031 set for embeds: a per-instance token in the id
+// and per-instance config riding on the layout item.
+const gaugeWidgetIDPrefix = "gauge:"
+
+const (
+	gaugeLabelMaxLen = 48
+	gaugePathMaxLen  = 256
+)
+
+// Display kinds a gauge can render as.
+var validGaugeDisplays = map[string]bool{
+	"numeric": true, "radial": true, "bar": true, "lamp": true,
+}
+
 const (
 	embedURLMaxLen   = 2048
 	embedTitleMaxLen = 64
@@ -58,6 +73,30 @@ type dashboardLayoutItem struct {
 	W     int                   `json:"w"`
 	H     int                   `json:"h"`
 	Embed *dashboardEmbedConfig `json:"embed,omitempty"`
+	Gauge *dashboardGaugeConfig `json:"gauge,omitempty"`
+}
+
+// dashboardGaugeConfig binds one widget to one SignalK path. Like the embed
+// config it is per-instance and per-page, so it rides on the layout item.
+// omitempty keeps existing dashboard-pages.json files byte-identical.
+type dashboardGaugeConfig struct {
+	Path     string      `json:"path"`
+	Label    string      `json:"label"`
+	Display  string      `json:"display"`
+	Quantity string      `json:"quantity"`
+	Unit     string      `json:"unit"`
+	Decimals *int        `json:"decimals,omitempty"`
+	Min      *float64    `json:"min,omitempty"`
+	Max      *float64    `json:"max,omitempty"`
+	Zones    []gaugeZone `json:"zones,omitempty"`
+}
+
+// gaugeZone colours a band of the range by alarm severity, reusing the same
+// vocabulary as alarms (ADR 0038) rather than inventing gauge-only colours.
+type gaugeZone struct {
+	From  float64 `json:"from"`
+	To    float64 `json:"to"`
+	State string  `json:"state"`
 }
 
 // dashboardEmbedConfig is per-instance and per-page, so it rides on the layout
@@ -153,6 +192,10 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 			if msg := validateEmbedWidget(w); msg != "" {
 				return msg
 			}
+		} else if strings.HasPrefix(w.ID, gaugeWidgetIDPrefix) {
+			if msg := validateGaugeWidget(w); msg != "" {
+				return msg
+			}
 		} else {
 			if !validDashboardWidgetIDs[w.ID] {
 				return "unknown widget id: " + w.ID
@@ -161,6 +204,9 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 			// read means the caller has misunderstood the model.
 			if w.Embed != nil {
 				return "embed config not allowed on widget id: " + w.ID
+			}
+			if w.Gauge != nil {
+				return "gauge config not allowed on widget id: " + w.ID
 			}
 		}
 		// Embed tokens are unique per instance, so the duplicate check below
@@ -414,4 +460,69 @@ func deleteDashboardPageHandler(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// validateGaugeWidget guards the second operator-configured widget. It mirrors
+// validateEmbedWidget's reject-rather-than-drop stance: config the renderer
+// would never read means the caller has misunderstood the model.
+func validateGaugeWidget(w dashboardLayoutItem) string {
+	token := strings.TrimPrefix(w.ID, gaugeWidgetIDPrefix)
+	if !embedWidgetTokenPattern.MatchString(token) {
+		return "invalid gauge widget id: " + w.ID
+	}
+	if w.Embed != nil {
+		return "embed config not allowed on gauge widget: " + w.ID
+	}
+	if w.Gauge == nil {
+		return "gauge widget requires gauge config: " + w.ID
+	}
+
+	path := strings.TrimSpace(w.Gauge.Path)
+	if path == "" {
+		return "gauge widget requires a SignalK path: " + w.ID
+	}
+	if len(path) > gaugePathMaxLen {
+		return "gauge path too long: " + w.ID
+	}
+	if len(w.Gauge.Label) > gaugeLabelMaxLen {
+		return "gauge label too long: " + w.ID
+	}
+	if !validGaugeDisplays[w.Gauge.Display] {
+		return "unknown gauge display: " + w.Gauge.Display
+	}
+	if w.Gauge.Min != nil && w.Gauge.Max != nil && *w.Gauge.Min >= *w.Gauge.Max {
+		return "gauge min must be below max: " + w.ID
+	}
+	for _, zone := range w.Gauge.Zones {
+		if _, ok := alarmStateRank[zone.State]; !ok {
+			return "unknown gauge zone state: " + zone.State
+		}
+	}
+	return ""
+}
+
+// gaugeBoundPaths returns every SignalK path any gauge on any page is bound to.
+// The stream uses it to push exactly those values and no more — the backend
+// already owns the page config, so no subscription protocol is needed.
+func gaugeBoundPaths() []string {
+	dashboardPagesMu.RLock()
+	defer dashboardPagesMu.RUnlock()
+
+	seen := map[string]bool{}
+	var paths []string
+	for _, page := range dashboardPagesState {
+		for _, widget := range page.Widgets {
+			if widget.Gauge == nil {
+				continue
+			}
+			path := strings.TrimSpace(widget.Gauge.Path)
+			if path == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths
 }

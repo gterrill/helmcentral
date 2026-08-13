@@ -84,13 +84,19 @@ import {
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_WIDGET_LABELS,
   isEmbedWidgetId,
+  isGaugeWidgetId,
   newEmbedWidgetId,
+  newGaugeWidgetId,
   type DashboardLayoutItem,
   type DashboardWidgetId,
   type EmbedWidgetConfig,
+  type GaugeWidgetConfig,
 } from '@/lib/dashboard-widgets'
 import { EmbedTile } from '@/components/embed-tile'
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
+import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
+import { GaugeTile } from '@/components/gauge-tile'
+import { useGaugeValues } from '@/hooks/use-gauge-values'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -153,6 +159,10 @@ export function App() {
   // The embed widget currently open in the config dialog. For a freshly added
   // embed this is the only place it exists until it is given a URL and saved.
   const [embedDraft, setEmbedDraft] = useState<DashboardLayoutItem | null>(null)
+  // Same pattern as embedDraft: a freshly added gauge exists only here until it
+  // is given a path, since the backend rejects one without.
+  const [gaugeDraft, setGaugeDraft] = useState<DashboardLayoutItem | null>(null)
+  const gaugeValues = useGaugeValues()
   const [settingsDirty, setSettingsDirty] = useState(false)
   const settingsPageRef = useRef<SettingsPageHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
@@ -410,6 +420,31 @@ export function App() {
     })
   }, [effectiveWidgets])
 
+  const handleAddGauge = useCallback(() => {
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    setGaugeDraft({
+      id: newGaugeWidgetId(effectiveWidgets),
+      x: 0,
+      y: maxY,
+      w: 3,
+      h: 6,
+      gauge: { path: '', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' },
+    })
+  }, [effectiveWidgets])
+
+  const handleSaveGauge = useCallback((gauge: GaugeWidgetConfig) => {
+    if (!activePage || !gaugeDraft) return
+    const id = gaugeDraft.id
+    if (effectiveWidgets.some((w) => w.id === id)) {
+      void updatePage(activePage.id, {
+        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, gauge } : w)),
+      })
+    } else {
+      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...gaugeDraft, gauge }] })
+    }
+    setGaugeDraft(null)
+  }, [activePage, effectiveWidgets, gaugeDraft, updatePage])
+
   const handleSaveEmbed = useCallback((id: DashboardWidgetId, embed: EmbedWidgetConfig) => {
     if (!activePage) return
     if (effectiveWidgets.some((w) => w.id === id)) {
@@ -432,6 +467,18 @@ export function App() {
   // this case.
   const renderWidget = (widget: DashboardLayoutItem): ReactNode => {
     const { id } = widget
+    if (isGaugeWidgetId(id)) {
+      if (!widget.gauge) return null
+      return (
+        <GaugeTile
+          config={widget.gauge}
+          value={gaugeValues[widget.gauge.path] ?? null}
+          editing={layoutEditing}
+          onConfigure={() => setGaugeDraft(widget)}
+        />
+      )
+    }
+
     if (isEmbedWidgetId(id)) {
       return (
         <EmbedTile
@@ -636,6 +683,13 @@ export function App() {
               {unplacedWidgetIds.length > 0 && <div className="my-1 h-px bg-border" />}
               <button
                 type="button"
+                onClick={handleAddGauge}
+                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                Gauge…
+              </button>
+              <button
+                type="button"
                 onClick={handleAddEmbed}
                 className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
@@ -645,6 +699,12 @@ export function App() {
           </PopoverContent>
         </Popover>
       )}
+
+      <GaugeConfigDialog
+        widget={gaugeDraft}
+        onCancel={() => setGaugeDraft(null)}
+        onSave={handleSaveGauge}
+      />
 
       <EmbedConfigDialog
         widget={embedDraft}

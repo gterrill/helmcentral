@@ -236,6 +236,7 @@ func main() {
 	e.GET("/api/health", healthCheck)
 	e.GET("/api/vessel-state", vesselState)
 	e.GET("/api/stream", telemetryStream)
+	e.GET("/api/signalk/paths", signalKPathsHandler)
 	e.GET("/api/alarms", alarmsHandler)
 	e.GET("/api/alarm-transports", getAlarmTransportsHandler)
 	e.POST("/api/alarm-transports", setAlarmTransportsHandler)
