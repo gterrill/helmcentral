@@ -27,6 +27,13 @@ go build -o helmcentral .
 ./helmcentral
 ```
 
+Or straight from source — `go run .`, not `go run main.go`: `package main`
+spans every file in this directory, so naming one file fails to compile.
+
+```bash
+go run .
+```
+
 The API will be available at `http://localhost:8080`
 
 ### Dev Hot Reload

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
-import type { AnchorWatchState } from './use-anchor-watch'
+import type { ActiveAlarm } from './use-alarms'
 
 interface UseAnchorAlarmResult {
   isAlarming: boolean
@@ -8,22 +8,30 @@ interface UseAnchorAlarmResult {
 }
 
 /**
- * Manages anchor watch alarm audio playback and screen wake lock.
- * 
- * - Plays a looping klaxon when anchorState transitions into 'dragging'
- * - Keeps alarm silent once user calls silence(), resets when state leaves alarm zone
- * - Requests screen wake lock when alarm is active (prevents tablet sleep)
- * - Handles browser autoplay policy by lazy-initializing AudioContext
+ * Plays the local klaxon for a server-detected anchor drag, and keeps the
+ * screen awake while it sounds.
+ *
+ * Drag detection itself is server-side (ADR 0038). This hook renders the audible
+ * half only: when it lived here, closing the tab silenced the alarm, which is
+ * the worst property an anchor alarm can have. The server now also logs it and
+ * delivers it off the boat.
+ *
+ * Silencing is likewise the server's acknowledgement, not local state, so every
+ * screen agrees and a second browser cannot be left ringing. That also removes
+ * the bug in the previous version: the re-scheduling interval was created only
+ * on the transition into 'dragging', so after un-silencing it was never
+ * recreated and the klaxon stayed quiet for the rest of the drag.
  */
-export function useAnchorAlarm(anchorState: AnchorWatchState): UseAnchorAlarmResult {
+export function useAnchorAlarm(
+  alarm: ActiveAlarm | null,
+  acknowledge?: (ruleId: string) => Promise<void>,
+): UseAnchorAlarmResult {
   const audioContextRef = useRef<AudioContext | null>(null)
   const oscillatorsRef = useRef<OscillatorNode[]>([])
   const gainsRef = useRef<GainNode[]>([])
   const isPlayingRef = useRef(false)
-  const prevStateRef = useRef<AnchorWatchState>('none')
-  const [isSilenced, setIsSilenced] = useState(false)
-  const [isAlarming, setIsAlarming] = useState(false)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
+  const [silenceError, setSilenceError] = useState<string | null>(null)
 
   /**
    * Initialize AudioContext on first user gesture (lazy-load pattern)
@@ -178,61 +186,53 @@ export function useAnchorAlarm(anchorState: AnchorWatchState): UseAnchorAlarmRes
     }
   }, [])
 
+  const isSilenced = alarm?.phase === 'acknowledged'
+  const isAlarming = alarm !== null && !isSilenced
+  const ruleId = alarm?.rule_id ?? null
+
   /**
-   * Silence the alarm until state exits and re-enters alarm zone
+   * Acknowledges server-side so the alarm is silenced everywhere, and stops the
+   * local klaxon immediately rather than waiting for the next stream event.
    */
   const silence = useCallback(() => {
-    setIsSilenced(true)
     stopKlaxon()
-  }, [stopKlaxon])
+    setSilenceError(null)
+    if (!ruleId || !acknowledge) return
+    void acknowledge(ruleId).catch((err: unknown) => {
+      setSilenceError(err instanceof Error ? err.message : String(err))
+    })
+  }, [ruleId, acknowledge, stopKlaxon])
 
-  /**
-   * Main effect: monitor anchorState and control alarm playback
-   */
+  // Driven by whether it should currently be sounding, not by a transition, so
+  // there is no state in which the loop fails to be (re)created.
   useEffect(() => {
-    const isInAlarmState = anchorState === 'dragging'
-    const wasInAlarmState = prevStateRef.current === 'dragging'
-
-    // State transition into alarm zone
-    if (isInAlarmState && !wasInAlarmState) {
-      setIsAlarming(true)
-      setIsSilenced(false) // Reset silence flag on new alarm event
-      requestWakeLock()
-
-      if (!isSilenced) {
-        playKlaxon()
-        // Schedule recurring playback to loop indefinitely
-        const interval = setInterval(() => {
-          if (!isPlayingRef.current && isInAlarmState && !isSilenced) {
-            playKlaxon()
-          }
-        }, 16000) // Restart every 16 seconds (20 cycles × 800ms per cycle)
-
-        prevStateRef.current = anchorState
-        return () => clearInterval(interval)
-      }
-    }
-
-    // State transition out of alarm zone
-    if (!isInAlarmState && wasInAlarmState) {
-      setIsAlarming(false)
+    if (!isAlarming) {
       stopKlaxon()
       releaseWakeLock()
+      return
     }
 
-    // If alarming but isSilenced changed, stop playback
-    if (isInAlarmState && isSilenced && isPlayingRef.current) {
-      stopKlaxon()
-    }
+    void requestWakeLock()
+    void playKlaxon()
 
-    prevStateRef.current = anchorState
+    // playKlaxon pre-schedules ~16s of audio, so re-arm just before it runs out.
+    const interval = window.setInterval(() => {
+      if (!isPlayingRef.current) {
+        void playKlaxon()
+      }
+    }, 16000)
 
     return () => {
-      // Cleanup on unmount
+      window.clearInterval(interval)
       stopKlaxon()
-      releaseWakeLock()
     }
-  }, [anchorState, isSilenced, playKlaxon, stopKlaxon, requestWakeLock, releaseWakeLock])
+  }, [isAlarming, playKlaxon, stopKlaxon, requestWakeLock, releaseWakeLock])
+
+  // Release the wake lock on unmount; the effect above only covers transitions
+  // while mounted.
+  useEffect(() => () => { releaseWakeLock() }, [releaseWakeLock])
+
+  void silenceError
 
   return { isAlarming, isSilenced, silence }
 }

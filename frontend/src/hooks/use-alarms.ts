@@ -62,3 +62,10 @@ export function useAlarms() {
 
   return { alarms, worst, acknowledge }
 }
+
+/** Rule id the server uses for its own anchor drag detection (ADR 0038). */
+export const ANCHOR_DRAG_RULE_ID = 'helmcentral:anchor-drag'
+
+export function findAnchorDragAlarm(alarms: ActiveAlarm[]): ActiveAlarm | null {
+  return alarms.find((alarm) => alarm.rule_id === ANCHOR_DRAG_RULE_ID) ?? null
+}

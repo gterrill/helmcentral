@@ -3,6 +3,7 @@ import { memo, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
+import { findAnchorDragAlarm, useAlarms } from '@/hooks/use-alarms'
 import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
 import { primeAudioContextForAlarm } from '@/lib/audio-utils'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
@@ -61,8 +62,10 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     clearAnchor,
   } = watch
 
-  // Monitor anchor state and trigger alarm when entering dragging/critical state
-  const { isAlarming, isSilenced, silence } = useAnchorAlarm(anchorState)
+  // Drag detection is server-side (ADR 0038); this renders the audible half and
+  // silences by acknowledging, so every screen agrees.
+  const { alarms, acknowledge } = useAlarms()
+  const { isAlarming, isSilenced, silence } = useAnchorAlarm(findAnchorDragAlarm(alarms), acknowledge)
 
   const handleDropHere = useCallback(() => {
     if (lat === null || lon === null) return

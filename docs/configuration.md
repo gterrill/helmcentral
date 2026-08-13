@@ -93,7 +93,8 @@ UI's Secrets panel. See [ADR 0023](adr/0023-encrypted-secrets-store.md).
 
 Tide, weather, wave and forecast-warning data all come from WASM plugins
 rather than being built in, so a provider can be added or swapped without
-rebuilding (see [ADR 0017](adr/0017-wasm-plugin-contract.md)). The release
+rebuilding (see [ADR 0017](adr/0017-wasm-plugin-tide-providers.md), and
+[plugins.md](plugins.md) for the contracts and how to build one). The release
 bundle ships:
 
 | Category | Plugins |

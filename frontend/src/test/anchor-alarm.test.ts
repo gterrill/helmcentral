@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
-import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
+import type { ActiveAlarm } from '@/hooks/use-alarms'
 
 describe('useAnchorAlarm', () => {
   interface MockOscillator {
@@ -76,89 +76,83 @@ describe('useAnchorAlarm', () => {
     vi.clearAllMocks()
   })
 
-  it('should not alarm when anchorState is "none"', () => {
-    const { result } = renderHook(() => useAnchorAlarm('none'))
+  const dragging: ActiveAlarm = {
+    rule_id: 'helmcentral:anchor-drag',
+    label: 'Anchor dragging',
+    path: 'notifications.navigation.anchor',
+    phase: 'active',
+    state: 'alarm',
+    value: 62,
+    message: 'Anchor dragging: 62m from where it was set',
+  }
+  const acknowledged: ActiveAlarm = { ...dragging, phase: 'acknowledged' }
+
+  it('does not alarm when the server reports no drag', () => {
+    const { result } = renderHook(() => useAnchorAlarm(null))
 
     expect(result.current.isAlarming).toBe(false)
     expect(result.current.isSilenced).toBe(false)
   })
 
-  it('should not alarm when anchorState is "set"', () => {
-    const { result } = renderHook(() => useAnchorAlarm('set'))
+  it('alarms when the server raises a drag', () => {
+    const { result } = renderHook(() => useAnchorAlarm(dragging))
+
+    expect(result.current.isAlarming).toBe(true)
+    expect(result.current.isSilenced).toBe(false)
+  })
+
+  it('reports silenced once the server has acknowledged it', () => {
+    const { result } = renderHook(() => useAnchorAlarm(acknowledged))
 
     expect(result.current.isAlarming).toBe(false)
-    expect(result.current.isSilenced).toBe(false)
-  })
-
-  it('should start alarm when transitioning to "dragging"', () => {
-    const { rerender, result } = renderHook(
-      ({ state }: { state: AnchorWatchState }) => useAnchorAlarm(state),
-      { initialProps: { state: 'set' as AnchorWatchState } },
-    )
-
-    act(() => {
-      rerender({ state: 'dragging' as AnchorWatchState })
-    })
-
-    expect(result.current.isAlarming).toBe(true)
-    expect(result.current.isSilenced).toBe(false)
-  })
-
-  it('should silence alarm when silence() is called', () => {
-    const { result } = renderHook(
-      ({ state }: { state: AnchorWatchState }) => useAnchorAlarm(state),
-      { initialProps: { state: 'dragging' as AnchorWatchState } },
-    )
-
-    expect(result.current.isAlarming).toBe(true)
-    expect(result.current.isSilenced).toBe(false)
-
-    act(() => {
-      result.current.silence()
-    })
-
     expect(result.current.isSilenced).toBe(true)
   })
 
-  it('should reset silence flag when state exits alarm zone and re-enters', () => {
-    const { rerender, result } = renderHook(
-      ({ state }: { state: AnchorWatchState }) => useAnchorAlarm(state),
-      { initialProps: { state: 'dragging' as AnchorWatchState } },
-    )
+  it('silences by acknowledging server-side so every screen agrees', async () => {
+    const acknowledge = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() => useAnchorAlarm(dragging, acknowledge))
 
-    // Silence the alarm
-    act(() => {
+    await act(async () => {
       result.current.silence()
     })
-    expect(result.current.isSilenced).toBe(true)
 
-    // Exit alarm zone
-    act(() => {
-      rerender({ state: 'set' as AnchorWatchState })
-    })
-    expect(result.current.isAlarming).toBe(false)
-
-    // Re-enter alarm zone
-    act(() => {
-      rerender({ state: 'dragging' as AnchorWatchState })
-    })
-    expect(result.current.isAlarming).toBe(true)
-    expect(result.current.isSilenced).toBe(false) // Should reset
+    expect(acknowledge).toHaveBeenCalledWith('helmcentral:anchor-drag')
   })
 
-  it('should stop alarm when transitioning out of alarm state', () => {
+  // Regression: the klaxon loop used to be created only on the transition into
+  // 'dragging', so after un-silencing it was never recreated and the alarm
+  // stayed quiet for the rest of the drag.
+  it('sounds again when an acknowledged alarm becomes active once more', async () => {
     const { rerender, result } = renderHook(
-      ({ state }: { state: AnchorWatchState }) => useAnchorAlarm(state),
-      { initialProps: { state: 'dragging' as AnchorWatchState } },
+      ({ alarm }: { alarm: ActiveAlarm | null }) => useAnchorAlarm(alarm),
+      { initialProps: { alarm: acknowledged } },
+    )
+
+    expect(result.current.isAlarming).toBe(false)
+    const callsWhileSilenced = mockAudioContext.createOscillator.mock.calls.length
+
+    // playKlaxon awaits ensureAudioContext, so the oscillators are created on a
+    // microtask rather than synchronously with the rerender.
+    await act(async () => {
+      rerender({ alarm: dragging })
+    })
+
+    expect(result.current.isAlarming).toBe(true)
+    expect(mockAudioContext.createOscillator.mock.calls.length).toBeGreaterThan(callsWhileSilenced)
+  })
+
+  it('stops sounding when the drag clears', () => {
+    const { rerender, result } = renderHook(
+      ({ alarm }: { alarm: ActiveAlarm | null }) => useAnchorAlarm(alarm),
+      { initialProps: { alarm: dragging as ActiveAlarm | null } },
     )
 
     expect(result.current.isAlarming).toBe(true)
 
     act(() => {
-      rerender({ state: 'set' as AnchorWatchState })
+      rerender({ alarm: null })
     })
 
     expect(result.current.isAlarming).toBe(false)
   })
-
 })

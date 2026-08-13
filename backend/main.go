@@ -331,6 +331,7 @@ func main() {
 	go startNotificationDrainer(streamCtx, notifyDrainInterval)
 	go startStreamWatchdog(streamCtx, watchdogCheckInterval)
 	go startHeartbeat(streamCtx, heartbeatCheckInterval)
+	go startAnchorDragWatcher(streamCtx, anchorDragCheckInterval)
 
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)
