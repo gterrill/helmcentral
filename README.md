@@ -194,13 +194,17 @@ is persisted server-side and restored next session
 
 Beyond the grid:
 
-- **Anchor watch** with server-owned trail sampling for your vessel and nearby
-  AIS targets — the server samples and clients consume deltas, so the trail
-  keeps building whether or not a browser tab is open. (The drag klaxon itself
-  is still browser-tab-only; migrating it onto the alarm engine is on the
-  [roadmap](#roadmap).)
+- **Anchor watch** — trail sampling *and* drag detection both run on the
+  server, for your vessel and nearby AIS targets. Closing the browser cannot
+  silence a drag: it is a normal alarm, so it is logged, acknowledgeable, and
+  delivered off the boat by whatever transports you have configured. Silencing
+  is the server-side acknowledgement, so a second browser can't be left
+  ringing. A lost GNSS fix never raises a drag — position freezes at its last
+  trusted value during an outage, and the stream watchdog reports that
+  separately
   ([ADR 0001](docs/adr/0001-server-owned-trail-sampling.md),
-  [ADR 0002](docs/adr/0002-separate-motoring-and-anchor-trails.md)).
+  [ADR 0002](docs/adr/0002-separate-motoring-and-anchor-trails.md),
+  [ADR 0038](docs/adr/0038-alarms.md)).
 - **Route planning** — multi-leg waypoint sequences with per-leg distance,
   bearing and ETA. A saved route can be *activated*, pushing it to SignalK as
   the vessel's active route so autopilots and MFDs can follow it. This is
@@ -248,6 +252,10 @@ Three things it does deliberately:
   discarded, because delivering a day-old alarm as if it were current is its
   own kind of wrong. The heartbeat is the exception: it is never queued, since
   a burst of stale "still alive" messages is worse than useless.
+
+Alongside your own rules, anchor drag and the stream watchdog are built in and
+travel the same path — see
+[Anchor watch](#whats-on-the-dashboard) above.
 
 Four transports, none requiring a paid subscription: **ntfy** (self-hostable,
 or the free public server, no account), **SMTP**, **webhook**, and **SignalK
@@ -385,9 +393,10 @@ why each non-obvious trade-off went the way it did.
 - **Authentication and authorization.** Helmcentral is currently
   unauthenticated and assumes a trusted LAN. This is the largest known gap; see
   the warning under [Install](#install).
-- **Migrate the anchor drag klaxon onto the alarm engine.** It is still
-  browser-tab-only Web Audio, so closing the tab silences it
-  ([ADR 0038](docs/adr/0038-alarms.md)).
+- **Collapse the client-side `dragging` state onto the server's answer.**
+  `use-anchor-watch.ts` still derives its own for map and tile styling; the
+  alarm no longer depends on it, but the two can disagree inside the hysteresis
+  band ([ADR 0038](docs/adr/0038-alarms.md)).
 - **mDNS-based SignalK discovery**, now viable for native installs — the
   container networking that ruled it out no longer applies
   ([ADR 0029](docs/adr/0029-signalk-discovery.md)).
