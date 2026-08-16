@@ -42,6 +42,8 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'alternator': { minW: 2, minH: 4 },
   'generator': { minW: 2, minH: 4 },
   'czone-switches': { minW: 2, minH: 3 },
+  // The control pad needs finger-sized hold-to-confirm targets (ADR 0041).
+  'autopilot': { minW: 4, minH: 6 },
 }
 
 export interface DashboardBentoGridProps {

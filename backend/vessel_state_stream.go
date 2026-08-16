@@ -41,6 +41,7 @@ type streamEmitter struct {
 func telemetryEmitters() []*streamEmitter {
 	return []*streamEmitter{
 		{event: "vessel-state", interval: 1 * time.Second, build: buildVesselStatePayload},
+		{event: "autopilot", interval: 1 * time.Second, build: buildAutopilotPayload},
 		{event: "alarms", interval: 2 * time.Second, build: buildAlarmsPayload},
 		{event: "gauge-values", interval: 1 * time.Second, build: buildGaugeValuesPayload},
 		{event: "electrical-state", interval: 5 * time.Second, build: buildElectricalStatePayload},

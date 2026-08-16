@@ -39,6 +39,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { AutopilotTile } from '@/components/autopilot-tile'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
@@ -74,6 +75,7 @@ import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
+import { useAutopilot } from '@/hooks/use-autopilot'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
@@ -374,6 +376,7 @@ export function App() {
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
   const depthTrend = useDepthTrend('3h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
+  const autopilot = useAutopilot()
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
 
@@ -637,6 +640,25 @@ export function App() {
         )
       case 'czone-switches':
         return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
+      case 'autopilot':
+        return (
+          <AutopilotTile
+            state={autopilot.state}
+            pending={autopilot.pending}
+            error={autopilot.error}
+            availableModes={autopilot.availableModes}
+            capabilityError={autopilot.capabilityError}
+            onEngage={autopilot.engage}
+            onDisengage={autopilot.disengage}
+            onTack={autopilot.tack}
+            onGybe={autopilot.gybe}
+            onAdjustHeading={autopilot.adjustHeading}
+            onSetMode={autopilot.setMode}
+            onDodge={autopilot.dodge}
+            onClearDodge={autopilot.clearDodge}
+            headingTrueDeg={headingTrue}
+          />
+        )
       case 'hot-water':
         return <HotWaterTile />
       default:

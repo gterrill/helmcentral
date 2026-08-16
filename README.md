@@ -179,11 +179,11 @@ AES-256-GCM ([ADR 0023](docs/adr/0023-encrypted-secrets-store.md)).
 
 ## What's on the dashboard
 
-Sixteen built-in widgets: Vessel, Apparent Wind, Depth & Tide, Position,
+Seventeen built-in widgets: Vessel, Apparent Wind, Depth & Tide, Position,
 Today & Now, Anchor Watch, Rode & Scope, Tanks, Route, Nearby Vessels,
-Battery & Power, Solar, Alternator, Generator, Switches, and Hot Water. Plus
-embed tiles, which put any URL (a Grafana panel, a camera feed) in the grid —
-the windrose in the screenshot above is one.
+Battery & Power, Solar, Alternator, Generator, Switches, Hot Water, and
+Autopilot. Plus embed tiles, which put any URL (a Grafana panel, a camera
+feed) in the grid — the windrose in the screenshot above is one.
 
 Arrange them yourself: toggle layout mode in the header, then drag, resize, or
 remove widgets and add them back from a picker. Layouts are named **pages** you
@@ -216,6 +216,14 @@ Beyond the grid:
   It never fetches or bulk-caches tiles from a live provider, so it takes on no
   licensing exposure
   ([ADR 0011](docs/adr/0011-mbtiles-satellite-chart-upload.md)).
+- **Autopilot** — engage/disengage, mode, heading nudges, tack and gybe either
+  way, and dodge, against SignalK's v2 Autopilot API only (no legacy
+  `steering.autopilot.*` write fallback). The tile shows only what the pilot
+  itself last reported on the delta stream, never what a command requested,
+  greys itself if steering data goes quiet, and disables — rather than hides —
+  any action the connected pilot doesn't currently advertise. Anything that
+  changes who is steering needs a deliberate press-and-hold
+  ([ADR 0041](docs/adr/0041-autopilot-widget.md)).
 - **Weather radar** via an embedded Windy map, centred on the vessel.
 - **Max wind gust** over a window you pick per readout — 10m, 30m, 1h or 24h
   ([ADR 0030](docs/adr/0030-selectable-max-gust-windows.md)).

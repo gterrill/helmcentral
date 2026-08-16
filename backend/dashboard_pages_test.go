@@ -786,6 +786,31 @@ func validGaugeConfig() *dashboardGaugeConfig {
 	}
 }
 
+// ── autopilot widget registration ────────────────────────────────────────────
+
+func TestValidateDashboardWidgets_AcceptsAutopilotBuiltin(t *testing.T) {
+	widgets := []dashboardLayoutItem{{ID: "autopilot", X: 0, Y: 0, W: 4, H: 6}}
+	if msg := validateDashboardWidgets(widgets); msg != "" {
+		t.Fatalf("expected the autopilot builtin id to be accepted, got %q", msg)
+	}
+}
+
+func TestValidateDashboardWidgets_RejectsEmbedConfigOnAutopilotWidget(t *testing.T) {
+	widgets := []dashboardLayoutItem{
+		{ID: "autopilot", X: 0, Y: 0, W: 4, H: 6, Embed: &dashboardEmbedConfig{URL: "https://grafana.local/a"}},
+	}
+	if msg := validateDashboardWidgets(widgets); msg == "" {
+		t.Fatal("expected embed config on the autopilot widget to be rejected")
+	}
+}
+
+func TestValidateDashboardWidgets_RejectsGaugeConfigOnAutopilotWidget(t *testing.T) {
+	widget := dashboardLayoutItem{ID: "autopilot", X: 0, Y: 0, W: 4, H: 6, Gauge: validGaugeConfig()}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg == "" {
+		t.Fatal("expected gauge config on the autopilot widget to be rejected")
+	}
+}
+
 func TestValidateGaugeWidgetAcceptsAWellFormedGauge(t *testing.T) {
 	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", validGaugeConfig())}); msg != "" {
 		t.Fatalf("expected a valid gauge to be accepted, got %q", msg)

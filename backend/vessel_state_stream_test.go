@@ -142,3 +142,153 @@ func TestTelemetryStreamHonoursPerEmitterIntervals(t *testing.T) {
 		t.Fatalf("reader did not finish")
 	}
 }
+
+// ── buildAutopilotPayload ───────────────────────────────────────────────────
+
+func autopilotDelta(context string, now time.Time, values map[string]any) signalKDelta {
+	vals := make([]signalKValue, 0, len(values))
+	for path, value := range values {
+		vals = append(vals, signalKValue{Path: path, Value: value})
+	}
+	return signalKDelta{
+		Context: context,
+		Updates: []signalKUpdate{{
+			Timestamp: now.Format(time.RFC3339),
+			SourceRef: "autopilot-provider.0",
+			Values:    vals,
+		}},
+	}
+}
+
+// Absence is not a value: a stream with no steering.autopilot.* at all must
+// report present:false, never a synthesized disengaged pilot (mirrors the
+// alarm engine's and gauge-values' treatment of missing paths).
+func TestBuildAutopilotPayload_AbsentWhenNoAutopilotOnStream(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(depthDelta("vessels.self", 2.0), time.Now())
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	payload := buildAutopilotPayload()
+	if present, _ := payload["present"].(bool); present {
+		t.Fatalf("expected present:false, got %+v", payload)
+	}
+	if _, hasEngaged := payload["engaged"]; hasEngaged {
+		t.Fatalf("must not synthesize an engaged field when absent, got %+v", payload)
+	}
+}
+
+func TestBuildAutopilotPayload_AbsentOnEmptySnapshot(t *testing.T) {
+	withGlobalSnapshot(t, newSignalKSnapshot())
+
+	payload := buildAutopilotPayload()
+	if present, _ := payload["present"].(bool); present {
+		t.Fatalf("expected present:false on an empty snapshot, got %+v", payload)
+	}
+}
+
+func TestBuildAutopilotPayload_ReportsLiveStateFromDeltaStream(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(autopilotDelta("vessels.self", time.Now(), map[string]any{
+		"steering.autopilot.engaged":          true,
+		"steering.autopilot.state":            "auto",
+		"steering.autopilot.mode":             "compass",
+		"steering.autopilot.target":           135.5,
+		"steering.autopilot.availableActions": []any{"disengage", "tack"},
+	}), time.Now())
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	payload := buildAutopilotPayload()
+	if present, _ := payload["present"].(bool); !present {
+		t.Fatalf("expected present:true, got %+v", payload)
+	}
+	if engaged, _ := payload["engaged"].(bool); !engaged {
+		t.Fatalf("expected engaged:true, got %+v", payload)
+	}
+	if payload["state"] != "auto" || payload["mode"] != "compass" {
+		t.Fatalf("expected state/mode to reflect the delta stream, got %+v", payload)
+	}
+	if payload["target"] != 135.5 {
+		t.Fatalf("expected target 135.5, got %v", payload["target"])
+	}
+	actions, ok := payload["available_actions"].([]string)
+	if !ok || len(actions) != 2 || actions[0] != "disengage" || actions[1] != "tack" {
+		t.Fatalf("expected available_actions [disengage tack], got %+v", payload["available_actions"])
+	}
+	if stale, _ := payload["stale"].(bool); stale {
+		t.Fatalf("expected stale:false for a just-received update, got %+v", payload)
+	}
+}
+
+// Stale state must be visible: if steering.autopilot.* goes quiet while the
+// tile last knew it was engaged, the payload must say stale rather than let
+// the frontend keep trusting a frozen "engaged: true".
+func TestBuildAutopilotPayload_StaleWhenSteeringDataGoesQuiet(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	longAgo := time.Now().Add(-30 * time.Second)
+	snapshot.applyDelta(autopilotDelta("vessels.self", longAgo, map[string]any{
+		"steering.autopilot.engaged": true,
+		"steering.autopilot.state":   "auto",
+	}), longAgo)
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	payload := buildAutopilotPayload()
+	if present, _ := payload["present"].(bool); !present {
+		t.Fatalf("expected present:true (last known pilot), got %+v", payload)
+	}
+	if stale, _ := payload["stale"].(bool); !stale {
+		t.Fatalf("expected stale:true once steering.autopilot.* has gone quiet, got %+v", payload)
+	}
+	// Stale must not be reported as disengaged — that's still a claim about
+	// steering the payload cannot back up once the source has gone quiet.
+	if engaged, _ := payload["engaged"].(bool); !engaged {
+		t.Fatalf("expected last-known engaged:true to still be reported (as stale, not silently flipped), got %+v", payload)
+	}
+}
+
+func TestTelemetryStreamEmitsAutopilotEvent(t *testing.T) {
+	server := streamTestServer(t)
+
+	response, err := http.Get(server.URL + "/api/stream")
+	if err != nil {
+		t.Fatalf("GET /api/stream: %v", err)
+	}
+	defer response.Body.Close()
+
+	type frame struct {
+		event string
+		data  string
+	}
+	frames := make(chan frame, 8)
+
+	go func() {
+		scanner := bufio.NewScanner(response.Body)
+		event := ""
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				frames <- frame{event: event, data: strings.TrimPrefix(line, "data: ")}
+			}
+		}
+	}()
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-frames:
+			if got.event == "autopilot" {
+				if !strings.Contains(got.data, `"present":false`) {
+					t.Fatalf("expected present:false on an empty snapshot, got %s", got.data)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no autopilot event within 5s")
+		}
+	}
+}

@@ -33,6 +33,7 @@ var validDashboardWidgetIDs = map[string]bool{
 	"generator":      true,
 	"czone-switches": true,
 	"hot-water":      true,
+	"autopilot":      true,
 }
 
 const dashboardLayoutMaxCoord = 1000
