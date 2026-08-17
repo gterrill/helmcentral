@@ -88,6 +88,13 @@ interface TransientInfo {
   distanceM: number
   bearing: number
   label: string
+  // vesselId identifies which AIS marker is selected, independent of label.
+  // label carries display text and doubles as the 'pin' sentinel (see the
+  // transient-pin render below), so two vessels sharing a name previously
+  // both matched transient?.label === vessel.name and lit up together -
+  // vesselId is the field selection actually compares on. Unset for a plain
+  // map-click pin, which has no vessel to select.
+  vesselId?: string
   expiresMs: number
 }
 
@@ -498,7 +505,7 @@ export function AnchorWatchMap({
       if (vessel.lat === undefined || vessel.lon === undefined) return
       const dist = Math.round(haversineMeters(vesselLat, vesselLon, vessel.lat, vessel.lon))
       const bearing = Math.round(bearingDeg(vesselLat, vesselLon, vessel.lat, vessel.lon))
-      showTransient({ lat: vessel.lat, lon: vessel.lon, distanceM: dist, bearing, label: vessel.name })
+      showTransient({ lat: vessel.lat, lon: vessel.lon, distanceM: dist, bearing, label: vessel.name, vesselId: vessel.id })
     },
     [vesselLat, vesselLon, showTransient],
   )
@@ -732,10 +739,10 @@ export function AnchorWatchMap({
         {/* AIS vessel markers */}
         {aisVessels.map((vessel) => {
           if (vessel.lat === undefined || vessel.lon === undefined) return null
-          const isSelected = transient?.label === vessel.name
+          const isSelected = transient?.vesselId === vessel.id
           return (
             <Marker
-              key={vessel.name}
+              key={vessel.id}
               latitude={vessel.lat}
               longitude={vessel.lon}
               style={{ zIndex: isSelected ? 30 : 10 }}

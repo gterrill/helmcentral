@@ -8,27 +8,20 @@ import { useVesselSightings, type VesselSighting } from '@/hooks/use-vessel-sigh
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { formatCoordinate } from '@/lib/format'
 
-function formatAge(ageSeconds: number) {
-  if (ageSeconds < 60) {
-    return `${ageSeconds}s ago`
+// formatRelativeAge renders a seconds count on the shared s/m/h/d ladder.
+// Both the server-computed age_seconds (currently capped well under an hour
+// by nearbyVesselMaxAge) and formatLastSeen (a client-side delta against
+// last_seen_at, which can be days old) share this: age_seconds only ever
+// exercises the top of the ladder today, but keeping one implementation
+// means a future staleness-cutoff change can't silently reintroduce the
+// "2648m ago" bug by falling through a ladder that was never extended.
+function formatRelativeAge(seconds: number) {
+  const clamped = Math.max(0, seconds)
+  if (clamped < 60) {
+    return `${clamped}s ago`
   }
 
-  const minutes = Math.floor(ageSeconds / 60)
-  return `${minutes}m ago`
-}
-
-function formatLastSeen(lastSeenAt: string, nowMs = Date.now()) {
-  const parsedMs = Date.parse(lastSeenAt)
-  if (!Number.isFinite(parsedMs)) {
-    return 'unknown'
-  }
-
-  const deltaSeconds = Math.max(0, Math.floor((nowMs - parsedMs) / 1000))
-  if (deltaSeconds < 60) {
-    return `${deltaSeconds}s ago`
-  }
-
-  const minutes = Math.floor(deltaSeconds / 60)
+  const minutes = Math.floor(clamped / 60)
   if (minutes < 60) {
     return `${minutes}m ago`
   }
@@ -40,6 +33,16 @@ function formatLastSeen(lastSeenAt: string, nowMs = Date.now()) {
 
   const days = Math.floor(hours / 24)
   return `${days}d ago`
+}
+
+function formatLastSeen(lastSeenAt: string, nowMs = Date.now()) {
+  const parsedMs = Date.parse(lastSeenAt)
+  if (!Number.isFinite(parsedMs)) {
+    return 'unknown'
+  }
+
+  const deltaSeconds = Math.max(0, Math.floor((nowMs - parsedMs) / 1000))
+  return formatRelativeAge(deltaSeconds)
 }
 
 // vesselContactKey mirrors the backend's vesselContactKey resolution
@@ -122,13 +125,11 @@ type NearbyVesselsTileProps = {
   distanceUnits: DistanceUnits
 }
 
-function formatRange(rangeFeet: number, distanceUnits: DistanceUnits) {
+function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
   if (distanceUnits === 'imperial') {
-    return `${Math.round(rangeFeet)} ft`
+    return `${Math.round(rangeMeters * 3.28084)} ft`
   }
-
-  const meters = rangeFeet / 3.28084
-  return `${Math.round(meters)} m`
+  return `${Math.round(rangeMeters)} m`
 }
 
 export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits }: NearbyVesselsTileProps) {
@@ -136,10 +137,10 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
     <Tile title="Nearby Vessels" icon={<Ship className="h-3.5 w-3.5 text-gauge-secondary" />}>
       <div className="mt-3 space-y-2">
         {vessels.map((vessel) => (
-          <div key={vessel.name} className="flex items-center justify-between gap-2 rounded-md border bg-muted/45 px-3 py-2">
+          <div key={vessel.id} className="flex items-center justify-between gap-2 rounded-md border bg-muted/45 px-3 py-2">
             <div className="min-w-0">
               <p className="truncate font-display text-lg uppercase leading-none text-foreground">{vessel.name}</p>
-              <p className="mt-1 text-xs text-muted-foreground">({formatAge(vessel.age_seconds)})</p>
+              <p className="mt-1 text-xs text-muted-foreground">({formatRelativeAge(vessel.age_seconds)})</p>
               {typeof vessel.seen_count === 'number' && vessel.seen_count > 0 ? (
                 <VesselHistoryPopover vessel={vessel}>
                   <p className="mt-1 text-xs text-muted-foreground underline decoration-dotted underline-offset-2">
@@ -150,7 +151,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
               ) : null}
             </div>
             <div className="shrink-0 text-right">
-              <p className="font-display text-3xl leading-none text-gauge-secondary">{formatRange(vessel.range_ft, distanceUnits)}</p>
+              <p className="font-display text-3xl leading-none text-gauge-secondary">{formatRange(vessel.range_m, distanceUnits)}</p>
               {typeof vessel.sog_knots === 'number' ? <p className="mt-1 text-xs text-gauge-secondary">{vessel.sog_knots.toFixed(1)} kts</p> : null}
             </div>
           </div>

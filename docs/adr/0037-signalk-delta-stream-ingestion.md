@@ -45,6 +45,8 @@ SignalK offers a delta WebSocket at `/signalk/v1/stream`, previously unused. It 
 
 10. **A malformed frame is logged and skipped, not fatal to the connection.** Dropping the session over one corrupt frame would reset every path to unseen for the whole backoff window, blanking the dashboard. Reconnects use exponential backoff and log every attempt with its delay and cause, as the Fallback Policy requires of retry behaviour.
 
+See also ADR 0042 (nearby-vessel staleness filtering), which works around a consequence of decision 8 that this ADR left open: the snapshot never evicts contexts, so a vessel that transmitted once and left stays frozen in `contexts` forever until something downstream filters it out by age.
+
 ## Consequences
 
 - Latency drops from the 5s poll floor to source cadence, and upstream load collapses from ~8 fetches/10s/tab plus the poller to a single subscription.

@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react'
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 
 export type NearbyVessel = {
+  id: string
   name: string
   mmsi?: string
-  range_ft: number
+  range_m: number
   age_seconds: number
   sog_knots?: number
   lat?: number
@@ -30,9 +31,11 @@ export function useNearbyVessels() {
         setVessels(
           list.filter(
             (item) =>
+              typeof item.id === 'string' &&
+              item.id !== '' &&
               typeof item.name === 'string' &&
-              typeof item.range_ft === 'number' &&
-              Number.isFinite(item.range_ft) &&
+              typeof item.range_m === 'number' &&
+              Number.isFinite(item.range_m) &&
               typeof item.age_seconds === 'number' &&
               Number.isFinite(item.age_seconds),
           ).map((item) => ({

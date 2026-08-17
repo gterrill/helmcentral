@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
+import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 
 vi.mock('maplibre-gl', () => ({
   default: {},
@@ -29,7 +30,11 @@ vi.mock('react-map-gl/maplibre', async () => {
   }
 })
 
-function renderMap() {
+const defaultAisVessels: NearbyVessel[] = [
+  { id: 'urn:mrn:imo:mmsi:100000001', name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_m: 61, age_seconds: 5 },
+]
+
+function renderMap(aisVessels: NearbyVessel[] = defaultAisVessels) {
   return render(
     <AnchorWatchMap
       vesselLat={-25.2939}
@@ -45,9 +50,7 @@ function renderMap() {
       bearingDeg={80}
       isImperial={false}
       vesselTrail={() => []}
-      aisVessels={[
-        { name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_ft: 200, age_seconds: 5 },
-      ]}
+      aisVessels={aisVessels}
       aisTrails={() => new Map()}
       isDarkTheme={false}
       showImageryLayer
@@ -113,5 +116,29 @@ describe('AnchorWatchMap controls and AIS selection', () => {
 
     expect(screen.getByTestId('layer-world-imagery-layer').dataset.beforeId).toBe('alarm-circle-fill')
     expect(screen.getByTestId('layer-openseamap-layer').dataset.beforeId).toBe('alarm-circle-fill')
+  })
+
+  // Regression test: selection previously matched on transient?.label ===
+  // vessel.name, so two vessels sharing a name both lit up as "selected"
+  // when either was clicked. Selection now compares on vessel.id instead.
+  it('selects only the clicked marker when two AIS vessels share a name', () => {
+    vi.useFakeTimers()
+
+    renderMap([
+      { id: 'urn:mrn:imo:mmsi:100000001', name: 'TWIN', lat: -25.2939, lon: 152.9103, range_m: 61, age_seconds: 5 },
+      { id: 'urn:mrn:imo:mmsi:100000002', name: 'TWIN', lat: -25.295, lon: 152.911, range_m: 140, age_seconds: 8 },
+    ])
+
+    const buttons = screen.getAllByRole('button', { name: 'AIS vessel: TWIN' })
+    expect(buttons).toHaveLength(2)
+
+    fireEvent.click(buttons[0])
+
+    // Exactly one marker shows the selected (ring-2, larger) styling, and
+    // the transient distance/bearing readout appears exactly once.
+    expect(document.querySelectorAll('.h-11.w-11.ring-2')).toHaveLength(1)
+    expect(screen.getAllByText('0 m · 0°')).toHaveLength(1)
+
+    vi.useRealTimers()
   })
 })

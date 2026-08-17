@@ -1294,6 +1294,21 @@ func readChargerInstance(payload map[string]any, index string) chargerInstanceDa
 	return inst
 }
 
+// nearbyVesselMaxAge drops AIS contacts whose position has not been refreshed
+// recently. The snapshot never evicts contexts, so without this a vessel that
+// transmitted once and left stays frozen at its last position forever - and
+// because the list sorts by range and caps at 10, a nearby ghost crowds out
+// live targets. Class A and Class B both transmit at least every 3 minutes
+// when stationary, so 10 minutes is ~3 missed reports.
+const nearbyVesselMaxAge = 10 * time.Minute
+
+const (
+	// nearbyMinRangeMeters drops this vessel itself, which SignalK may publish
+	// under a non-self context as well.
+	nearbyMinRangeMeters = 9.144 // the 30 ft threshold this replaced
+	nearbyMaxRangeMeters = 5000.0
+)
+
 func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now time.Time, excludedNames []string) ([]nearbyVessel, error) {
 	payload, err := signalKVesselsPayload()
 	if err != nil {
@@ -1344,21 +1359,33 @@ func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now 
 			}
 		}
 
-		rangeFeet := int(math.Round(haversineMeters(selfLatitude, selfLongitude, latitude, longitude) * 3.28084))
-		if rangeFeet < 30 || rangeFeet > 16404 { // ignore <30ft (self) and >5km
+		rangeMeters := math.Round(haversineMeters(selfLatitude, selfLongitude, latitude, longitude)*10) / 10
+		if rangeMeters < nearbyMinRangeMeters || rangeMeters > nearbyMaxRangeMeters {
 			continue
 		}
 
-		ageSeconds := 0
-		timestamp := firstNonEmptyString(lookupString(vesselMap, "navigation", "position", "timestamp"), lookupString(vesselMap, "navigation", "position", "value", "timestamp"), lookupString(vesselMap, "timestamp"))
-		if timestamp != "" {
-			parsed, parseErr := time.Parse(time.RFC3339, timestamp)
-			if parseErr == nil {
-				delta := int(now.Sub(parsed.UTC()).Seconds())
-				if delta > 0 {
-					ageSeconds = delta
-				}
-			}
+		// Age comes from delta receive time (pathSeen), not the AIS-reported
+		// navigation.position.timestamp: receive time is always present for
+		// any vessel that exists in the snapshot at all, is immune to
+		// transmitter clock skew, and resets cleanly with the process. The
+		// old timestamp-parse approach silently left ageSeconds at 0 whenever
+		// the field was missing or failed to parse - a masking fallback that
+		// reported a dead target as "0s ago" forever, which is exactly the
+		// case a staleness filter most needs to catch (see ADR 0042).
+		positionSeen := globalSignalKSnapshot.lastSeen(vesselContextPrefix+vesselID, "navigation.position")
+		if positionSeen.IsZero() {
+			// No position delta was ever received for this context; there is
+			// nothing to age against and the position in the tree cannot be
+			// trusted.
+			continue
+		}
+		age := now.Sub(positionSeen)
+		if age > nearbyVesselMaxAge {
+			continue
+		}
+		ageSeconds := int(age.Seconds())
+		if ageSeconds < 0 {
+			ageSeconds = 0
 		}
 
 		var sogKnots *float64
@@ -1368,10 +1395,10 @@ func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now 
 			sogKnots = &knots
 		}
 
-		vessels = append(vessels, nearbyVessel{Name: strings.ToUpper(name), Mmsi: mmsi, RangeFt: rangeFeet, AgeSeconds: ageSeconds, SogKnots: sogKnots, Lat: latitude, Lon: longitude})
+		vessels = append(vessels, nearbyVessel{ID: vesselID, Name: strings.ToUpper(name), Mmsi: mmsi, RangeM: rangeMeters, AgeSeconds: ageSeconds, SogKnots: sogKnots, Lat: latitude, Lon: longitude})
 	}
 
-	sort.Slice(vessels, func(i int, j int) bool { return vessels[i].RangeFt < vessels[j].RangeFt })
+	sort.Slice(vessels, func(i int, j int) bool { return vessels[i].RangeM < vessels[j].RangeM })
 	if len(vessels) > 10 {
 		vessels = vessels[:10]
 	}

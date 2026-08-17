@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -334,6 +337,234 @@ func TestFetchSignalKNearbyVessels_ParsesNumericMMSI(t *testing.T) {
 	}
 	if vessels[0].Mmsi != "316042555" {
 		t.Fatalf("expected MMSI '316042555' parsed from a JSON number field, got %q", vessels[0].Mmsi)
+	}
+}
+
+// vesselTreeAt returns a single-vessel GET .../vessels-shaped fixture at the
+// given position, for the staleness tests below where each vessel's age is
+// what's under test, not its lat/lon.
+func vesselTreeAt(id, name string, latitude, longitude float64) string {
+	return fmt.Sprintf(`{%q: {"name": %q, "navigation": {"position": {"value": {"latitude": %f, "longitude": %f}}}}}`, id, name, latitude, longitude)
+}
+
+// TestFetchSignalKNearbyVessels_DropsStaleVessels is the core regression test
+// for the ghost-contact bug: a vessel whose position hasn't been refreshed in
+// over nearbyVesselMaxAge must not be reported as a live target.
+func TestFetchSignalKNearbyVessels_DropsStaleVessels(t *testing.T) {
+	body := `{
+		"fresh-vessel": {"name": "FRESH", "navigation": {"position": {"value": {"latitude": -21.592353, "longitude": 149.780485}}}},
+		"stale-vessel": {"name": "GHOST", "navigation": {"position": {"value": {"latitude": -21.592453, "longitude": 149.780585}}}}
+	}`
+	now := time.Now().UTC()
+	seedVesselTreesAged(t, body, map[string]time.Duration{
+		"fresh-vessel": 30 * time.Second,
+		"stale-vessel": 11 * time.Minute,
+	}, now)
+
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, now, nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 1 {
+		t.Fatalf("expected 1 nearby vessel (the fresh one), got %d: %+v", len(vessels), vessels)
+	}
+	if vessels[0].Name != "FRESH" {
+		t.Fatalf("expected the fresh vessel to survive, got %q", vessels[0].Name)
+	}
+}
+
+// TestFetchSignalKNearbyVessels_KeepsVesselAtCutoffBoundary asserts the
+// comparison is strictly greater-than: a vessel aged exactly nearbyVesselMaxAge
+// has not yet exceeded it and must still be reported.
+func TestFetchSignalKNearbyVessels_KeepsVesselAtCutoffBoundary(t *testing.T) {
+	body := vesselTreeAt("boundary-vessel", "BOUNDARY", -21.592353, 149.780485)
+	now := time.Now().UTC()
+	seedVesselTreesAged(t, body, map[string]time.Duration{"boundary-vessel": nearbyVesselMaxAge}, now)
+
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, now, nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 1 {
+		t.Fatalf("expected the vessel at exactly the cutoff to be kept, got %d vessels", len(vessels))
+	}
+}
+
+// TestFetchSignalKNearbyVessels_DropsVesselWithNoPositionDelta covers a
+// vessel context that exists in the tree but has never had a
+// navigation.position delta recorded in pathSeen. There is nothing to age
+// against, so it must be dropped rather than silently reported as age 0 -
+// the same masking fallback the old ageSeconds parse failure produced.
+func TestFetchSignalKNearbyVessels_DropsVesselWithNoPositionDelta(t *testing.T) {
+	body := vesselTreeAt("no-delta-vessel", "NODELTA", -21.592353, 149.780485)
+	seedVesselTreesAged(t, body, map[string]time.Duration{}, time.Now().UTC())
+	// Remove the freshness stamp seedVesselTreesAged would otherwise apply,
+	// reproducing a tree entry with no recorded position delta at all.
+	delete(globalSignalKSnapshot.pathSeen, vesselContextPrefix+"no-delta-vessel|navigation.position")
+
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, time.Now().UTC(), nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 0 {
+		t.Fatalf("expected a vessel with no position delta to be dropped, got %d: %+v", len(vessels), vessels)
+	}
+}
+
+// TestFetchSignalKNearbyVessels_AgeSecondsFromReceiveTime asserts age_seconds
+// tracks delta receive time, not the AIS-reported navigation.position.timestamp
+// - including when that timestamp disagrees with receive time, and when it is
+// unparseable (which must be filtered normally on receive time, not silently
+// reported as age 0 as the old timestamp-parse fallback did).
+func TestFetchSignalKNearbyVessels_AgeSecondsFromReceiveTime(t *testing.T) {
+	now := time.Now().UTC()
+	body := fmt.Sprintf(`{
+		"disagreeing-vessel": {
+			"name": "DISAGREE",
+			"navigation": {"position": {"value": {"latitude": -21.592353, "longitude": 149.780485}, "timestamp": %q}}
+		},
+		"unparseable-vessel": {
+			"name": "BADTS",
+			"navigation": {"position": {"value": {"latitude": -21.592453, "longitude": 149.780585}, "timestamp": "not-a-timestamp"}}
+		}
+	}`, now.Add(-2*time.Hour).Format(time.RFC3339))
+
+	seedVesselTreesAged(t, body, map[string]time.Duration{
+		"disagreeing-vessel": 45 * time.Second,
+		"unparseable-vessel":  45 * time.Second,
+	}, now)
+
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, now, nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 2 {
+		t.Fatalf("expected both vessels within the age cutoff to be reported, got %d: %+v", len(vessels), vessels)
+	}
+	for _, v := range vessels {
+		if v.AgeSeconds < 44 || v.AgeSeconds > 46 {
+			t.Fatalf("expected age_seconds ~45s from receive time regardless of the AIS timestamp field, got %d for %q", v.AgeSeconds, v.Name)
+		}
+	}
+}
+
+// TestFetchSignalKNearbyVessels_StaleFilterAppliedBeforeTopTenCap is the
+// regression test for the reported screenshot: 11 stale, close ghosts must
+// not crowd a fresh, more distant vessel out of the top-10 truncation.
+func TestFetchSignalKNearbyVessels_StaleFilterAppliedBeforeTopTenCap(t *testing.T) {
+	now := time.Now().UTC()
+	trees := make([]string, 0, 12)
+	ages := map[string]time.Duration{}
+	for i := 0; i < 11; i++ {
+		id := fmt.Sprintf("ghost-%d", i)
+		// A tiny lat offset per ghost keeps them all close (well under 1km)
+		// and at distinct positions, all closer than the fresh vessel below.
+		trees = append(trees, fmt.Sprintf(`%q: {"name": "GHOST%d", "navigation": {"position": {"value": {"latitude": %f, "longitude": 149.780485}}}}`, id, i, -21.593000-float64(i)*0.0001))
+		ages[id] = 11 * time.Minute
+	}
+	// A fresh vessel roughly 3km out - farther than every ghost, but it must
+	// still survive because the ghosts are dropped before the top-10 cap.
+	trees = append(trees, `"fresh-distant": {"name": "FARAWAY", "navigation": {"position": {"value": {"latitude": -21.622000, "longitude": 149.780485}}}}`)
+	ages["fresh-distant"] = 30 * time.Second
+
+	body := "{" + strings.Join(trees, ",") + "}"
+	seedVesselTreesAged(t, body, ages, now)
+
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, now, nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 1 {
+		t.Fatalf("expected only the fresh distant vessel to survive, got %d: %+v", len(vessels), vessels)
+	}
+	if vessels[0].Name != "FARAWAY" {
+		t.Fatalf("expected FARAWAY to survive the stale-then-cap filtering, got %q", vessels[0].Name)
+	}
+}
+
+// TestFetchSignalKNearbyVessels_ReportsRangeInMeters asserts RangeM against a
+// known haversine distance, and that the 5000m cutoff is a metres boundary,
+// not a feet-derived one.
+func TestFetchSignalKNearbyVessels_ReportsRangeInMeters(t *testing.T) {
+	const selfLat, selfLon = -21.595297, 149.796444
+	const otherLat, otherLon = -21.592353, 149.780485
+	wantRangeM := math.Round(haversineMeters(selfLat, selfLon, otherLat, otherLon)*10) / 10
+
+	body := vesselTreeAt("known-distance-vessel", "KNOWNDIST", otherLat, otherLon)
+	now := time.Now().UTC()
+	seedVesselTreesAged(t, body, nil, now)
+
+	vessels, err := fetchSignalKNearbyVessels(selfLat, selfLon, now, nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 1 {
+		t.Fatalf("expected 1 nearby vessel, got %d", len(vessels))
+	}
+	if vessels[0].RangeM != wantRangeM {
+		t.Fatalf("expected RangeM %v, got %v", wantRangeM, vessels[0].RangeM)
+	}
+
+	// Just inside vs. just beyond the 5000m horizon.
+	const closeLat = -21.595297
+	nearOffsetDeg := 4900.0 / 111320.0  // ~4900m north
+	farOffsetDeg := 5100.0 / 111320.0   // ~5100m north
+	insideBody := vesselTreeAt("inside-vessel", "INSIDE", closeLat+nearOffsetDeg, selfLon)
+	outsideBody := vesselTreeAt("outside-vessel", "OUTSIDE", closeLat+farOffsetDeg, selfLon)
+	combined := `{` +
+		`"inside-vessel": ` + mustExtractSingleVesselTree(t, insideBody, "inside-vessel") + `,` +
+		`"outside-vessel": ` + mustExtractSingleVesselTree(t, outsideBody, "outside-vessel") +
+		`}`
+	seedVesselTreesAged(t, combined, nil, now)
+
+	vessels, err = fetchSignalKNearbyVessels(selfLat, selfLon, now, nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 1 || vessels[0].Name != "INSIDE" {
+		t.Fatalf("expected only the vessel inside 5000m to be kept, got %+v", vessels)
+	}
+}
+
+// mustExtractSingleVesselTree pulls the inner vessel object back out of a
+// vesselTreeAt fixture, so two single-vessel fixtures can be recombined into
+// one multi-vessel body without hand-duplicating the JSON.
+func mustExtractSingleVesselTree(t *testing.T, body, id string) string {
+	t.Helper()
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("mustExtractSingleVesselTree: %v", err)
+	}
+	raw, ok := payload[id]
+	if !ok {
+		t.Fatalf("mustExtractSingleVesselTree: id %q not found in body", id)
+	}
+	return string(raw)
+}
+
+// TestFetchSignalKNearbyVessels_PopulatesStableID reproduces the duplicate
+// React key bug at the seam where it originates: two vessels sharing a name
+// must still come back with distinct, non-empty IDs.
+func TestFetchSignalKNearbyVessels_PopulatesStableID(t *testing.T) {
+	body := `{
+		"urn:mrn:imo:mmsi:111111111": {"name": "SAME NAME", "navigation": {"position": {"value": {"latitude": -21.592353, "longitude": 149.780485}}}},
+		"urn:mrn:imo:mmsi:222222222": {"name": "SAME NAME", "navigation": {"position": {"value": {"latitude": -21.592453, "longitude": 149.780585}}}}
+	}`
+	now := time.Now().UTC()
+	seedVesselTreesAged(t, body, nil, now)
+
+	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, now, nil)
+	if err != nil {
+		t.Fatalf("fetchSignalKNearbyVessels: %v", err)
+	}
+	if len(vessels) != 2 {
+		t.Fatalf("expected 2 nearby vessels, got %d", len(vessels))
+	}
+	if vessels[0].ID == "" || vessels[1].ID == "" {
+		t.Fatalf("expected every vessel to have a non-empty ID, got %+v", vessels)
+	}
+	if vessels[0].ID == vessels[1].ID {
+		t.Fatalf("expected distinct IDs for two vessels sharing a name, both got %q", vessels[0].ID)
 	}
 }
 

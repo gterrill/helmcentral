@@ -22,8 +22,9 @@ describe('NearbyVesselsTile', () => {
         distanceUnits="metric"
         vessels={[
           {
+            id: 'urn:mrn:imo:mmsi:316042555',
             name: 'TAKU X',
-            range_ft: 5536,
+            range_m: 1687.6,
             age_seconds: 39,
             seen_count: 3,
             last_seen_at: '2026-07-10T12:00:00Z',
@@ -42,8 +43,9 @@ describe('NearbyVesselsTile', () => {
         distanceUnits="metric"
         vessels={[
           {
+            id: 'urn:mrn:imo:mmsi:316042555',
             name: 'TAKU X',
-            range_ft: 5536,
+            range_m: 1687.6,
             age_seconds: 39,
             seen_count: 0,
           },
@@ -71,9 +73,10 @@ describe('NearbyVesselsTile', () => {
         distanceUnits="metric"
         vessels={[
           {
+            id: 'urn:mrn:imo:mmsi:316042555',
             name: 'TAKU X',
             mmsi: '316042555',
-            range_ft: 5536,
+            range_m: 1687.6,
             age_seconds: 39,
             seen_count: 3,
             last_seen_at: '2026-07-10T12:00:00Z',
@@ -107,9 +110,10 @@ describe('NearbyVesselsTile', () => {
         distanceUnits="metric"
         vessels={[
           {
+            id: 'urn:mrn:imo:mmsi:316042555',
             name: 'TAKU X',
             mmsi: '316042555',
-            range_ft: 5536,
+            range_m: 1687.6,
             age_seconds: 39,
             seen_count: 3,
             last_seen_at: '2026-07-10T12:00:00Z',
@@ -119,5 +123,31 @@ describe('NearbyVesselsTile', () => {
     )
 
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  // Regression test for keying the vessel list by name: names are not
+  // unique (two boats can share one, and unnamed vessels all fall back to
+  // the same compactVesselID shape), so React needs the backend's stable id
+  // for reconciliation. Rendering two same-named vessels with distinct ids
+  // must produce two rows and no duplicate-key warning.
+  it('renders two vessels sharing a name without a duplicate-key warning', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    render(
+      <NearbyVesselsTile
+        loading={false}
+        distanceUnits="metric"
+        vessels={[
+          { id: 'urn:mrn:imo:mmsi:111111111', name: 'SAME NAME', range_m: 100, age_seconds: 10 },
+          { id: 'urn:mrn:imo:mmsi:222222222', name: 'SAME NAME', range_m: 200, age_seconds: 20 },
+        ]}
+      />,
+    )
+
+    expect(screen.getAllByText('SAME NAME')).toHaveLength(2)
+    const keyWarning = consoleError.mock.calls.some((call) => String(call[0]).includes('same key'))
+    expect(keyWarning).toBe(false)
+
+    consoleError.mockRestore()
   })
 })

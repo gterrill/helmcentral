@@ -851,9 +851,17 @@ func tanksState(c echo.Context) error {
 }
 
 type nearbyVessel struct {
+	// ID is the bare SignalK vessel id (the key fetchSignalKNearbyVessels
+	// reads from vesselsTree()), always present and unique by construction.
+	// It exists because Name is not a real identity - two boats can share a
+	// display name, and unnamed vessels all fall back to the same
+	// compactVesselID shape - so the frontend needs a field it can use for
+	// React reconciliation and marker-selection matching. No omitempty: a
+	// missing id here is a bug, not an absent optional value.
+	ID         string   `json:"id"`
 	Name       string   `json:"name"`
 	Mmsi       string   `json:"mmsi,omitempty"`
-	RangeFt    int      `json:"range_ft"`
+	RangeM     float64  `json:"range_m"`
 	AgeSeconds int      `json:"age_seconds"`
 	SogKnots   *float64 `json:"sog_knots,omitempty"`
 	Lat        float64  `json:"lat"`

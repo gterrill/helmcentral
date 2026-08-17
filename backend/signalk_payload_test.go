@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // withGlobalSnapshot swaps the package-level snapshot for the duration of a test.
@@ -31,8 +32,21 @@ func seedSelfTree(t *testing.T, body string) {
 }
 
 // seedVesselTrees installs a GET /signalk/v1/api/vessels-shaped body, keyed by
-// bare vessel id, as the set of known vessel contexts.
+// bare vessel id, as the set of known vessel contexts. Every vessel's
+// navigation.position is stamped as seen right now, so fixtures written before
+// the staleness filter existed (backend/signalk.go's fetchSignalKNearbyVessels)
+// still report as fresh without having to know about pathSeen at all.
 func seedVesselTrees(t *testing.T, body string) {
+	t.Helper()
+	seedVesselTreesAged(t, body, nil, time.Now().UTC())
+}
+
+// seedVesselTreesAged is seedVesselTrees with control over receive time: each
+// vessel id present in ages has its navigation.position path backdated by that
+// duration from now; any id absent from ages is stamped fresh, same as
+// seedVesselTrees. This is what drives the staleness-filter tests, which need
+// pathSeen to disagree with "just seeded" for specific vessels.
+func seedVesselTreesAged(t *testing.T, body string, ages map[string]time.Duration, now time.Time) {
 	t.Helper()
 
 	var payload map[string]any
@@ -42,9 +56,17 @@ func seedVesselTrees(t *testing.T, body string) {
 
 	snapshot := newSignalKSnapshot()
 	for id, tree := range payload {
-		if asMap, ok := tree.(map[string]any); ok {
-			snapshot.contexts[vesselContextPrefix+id] = asMap
+		asMap, ok := tree.(map[string]any)
+		if !ok {
+			continue
 		}
+		snapshot.contexts[vesselContextPrefix+id] = asMap
+
+		seenAt := now
+		if age, ok := ages[id]; ok {
+			seenAt = now.Add(-age)
+		}
+		snapshot.pathSeen[vesselContextPrefix+id+"|navigation.position"] = seenAt
 	}
 	withGlobalSnapshot(t, snapshot)
 }
