@@ -9,6 +9,7 @@ export type SettingsSectionId =
   | 'influxdb'
   | 'geonames'
   | 'anchor-watch'
+  | 'security'
 
 export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> = [
   { id: 'general', label: 'General' },
@@ -17,6 +18,7 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> 
   { id: 'influxdb', label: 'InfluxDB' },
   { id: 'anchor-watch', label: 'Anchor Watch' },
   { id: 'widgets', label: 'Widgets' },
+  { id: 'security', label: 'Security' },
   { id: 'geonames', label: 'GeoNames' },
 ]
 

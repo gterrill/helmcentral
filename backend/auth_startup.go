@@ -57,7 +57,7 @@ func checkAuthModeAtStartup(settingsPath string) (mode string, err error) {
 		return mode, fmt.Errorf(
 			"auth.mode is %q but SignalK at %s reports security is disabled — this combination is unsatisfiable. "+
 				"Enable security on the SignalK server (Server -> Security), or set auth.mode: none in settings.yaml "+
-				"(or the recovery override HELMCENTRAL_AUTH_MODE=none) to run Helmcentral without authentication",
+				"to run Helmcentral without authentication",
 			authModeSignalK, signalkURL,
 		)
 	}

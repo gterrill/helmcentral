@@ -93,6 +93,9 @@ type settingsPayload struct {
 		Org     string `json:"org"`
 		Bucket  string `json:"bucket"`
 	} `json:"influxdb"`
+	Auth struct {
+		Mode string `json:"mode"`
+	} `json:"auth"`
 	Units string `json:"units"`
 }
 
@@ -163,6 +166,9 @@ func updateSettingsHandler(c echo.Context) error {
 		"hull_type":           normalized.Anchor.HullType,
 		"windage_area_m2":     normalized.Anchor.WindageAreaM2,
 	}
+	settings["auth"] = map[string]any{
+		"mode": normalized.Auth.Mode,
+	}
 	settings["influxdb"] = map[string]any{
 		"enabled": normalized.Influxdb.Enabled,
 		"url":     normalized.Influxdb.URL,
@@ -211,6 +217,38 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 			return &settingsValidationError{
 				Field:   "signalk.address",
 				Message: fmt.Sprintf("unable to connect to SignalK at %s", signalkURL),
+			}
+		}
+	}
+
+	if next.Auth.Mode != current.Auth.Mode {
+		if !validAuthModes[next.Auth.Mode] {
+			return &settingsValidationError{
+				Field:   "auth.mode",
+				Message: fmt.Sprintf("unknown authentication mode %q", next.Auth.Mode),
+			}
+		}
+
+		// Turning auth off is never gated: it is the way out of a lockout, and
+		// requiring a reachable SignalK to disable it would make a broken
+		// server unrecoverable from the UI.
+		if next.Auth.Mode == authModeSignalK {
+			signalkURL := buildSignalKURL(next.Signalk.Address, next.Signalk.Port)
+			enabled, err := probeSignalKSecurityEnabled(signalkURL)
+			if err != nil {
+				return &settingsValidationError{
+					Field:   "auth.mode",
+					Message: fmt.Sprintf("could not check SignalK security at %s — is the server reachable?", signalkURL),
+				}
+			}
+			if !enabled {
+				// Refuse at save time rather than at the next restart. Saving an
+				// unsatisfiable config and only finding out on reboot is exactly
+				// how an operator locks themselves out of a running boat.
+				return &settingsValidationError{
+					Field:   "auth.mode",
+					Message: fmt.Sprintf("SignalK at %s has security disabled — enable it there (Server → Security) before requiring login", signalkURL),
+				}
 			}
 		}
 	}
@@ -300,6 +338,10 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		payload.Influxdb.Bucket = strings.TrimSpace(coerceString(influxMap["bucket"]))
 	}
 
+	if authMap, ok := settings["auth"].(map[string]any); ok {
+		payload.Auth.Mode = strings.TrimSpace(coerceString(authMap["mode"]))
+	}
+
 	units := strings.TrimSpace(coerceString(settings["units"]))
 	if strings.EqualFold(units, "metric") || strings.EqualFold(units, "imperial") {
 		payload.Units = strings.ToLower(units)
@@ -378,6 +420,11 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Influxdb.URL = strings.TrimSpace(req.Influxdb.URL)
 	normalized.Influxdb.Org = strings.TrimSpace(req.Influxdb.Org)
 	normalized.Influxdb.Bucket = strings.TrimSpace(req.Influxdb.Bucket)
+
+	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
+	if normalized.Auth.Mode == "" {
+		normalized.Auth.Mode = authModeNone
+	}
 
 	normalized.Units = strings.ToLower(strings.TrimSpace(req.Units))
 	if normalized.Units != "metric" && normalized.Units != "imperial" {

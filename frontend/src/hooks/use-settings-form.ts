@@ -37,6 +37,9 @@ export type SettingsPayload = {
     org?: string
     bucket?: string
   }
+  auth?: {
+    mode?: string
+  }
   units?: string
 }
 

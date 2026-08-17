@@ -13,13 +13,12 @@ import (
 func noopOKHandler(c echo.Context) error { return c.JSON(http.StatusOK, map[string]bool{"ok": true}) }
 
 // setupAuthMiddlewareTest points SETTINGS_FILE at a fresh temp settings.yaml
-// with auth.mode set as requested, and clears any HELMCENTRAL_AUTH_MODE
+// with auth.mode set as requested.
 // override left over from another test.
 func setupAuthMiddlewareTest(t *testing.T, mode string) {
 	t.Helper()
 	settingsPath := writeAuthModeSettingsFixture(t, mode)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
 }
 
 func mustSessionToken(t *testing.T, sessions *sessionStore, role string) string {

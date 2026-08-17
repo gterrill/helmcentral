@@ -245,3 +245,97 @@ func TestUpdateSettings_RejectsUnreachableNewSignalKPort(t *testing.T) {
 		t.Fatalf("rejected port change must not persist, got %d", gotPort)
 	}
 }
+
+// Switching auth on must be refused when SignalK's security is off, at save
+// time rather than at the next restart. Saving an unsatisfiable config and
+// only discovering it on reboot is how an operator locks themselves out.
+func TestValidateSettingsChange_RejectsAuthSignalKWhenSignalKSecurityIsDisabled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A server with security disabled answers the login probe with 404.
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	current := settingsPayload{}
+	current.Signalk.Address = srv.URL
+	current.Signalk.Port = 3000
+	current.Auth.Mode = "none"
+
+	next := current
+	next.Auth.Mode = "signalk"
+
+	invalid := validateSettingsChange(current, next)
+	if invalid == nil {
+		t.Fatalf("expected turning auth on against an unsecured SignalK to be refused")
+	}
+	if invalid.Field != "auth.mode" {
+		t.Fatalf("error should pin to the field the operator changed, got %q", invalid.Field)
+	}
+}
+
+// Turning auth off must always be allowed: it is the way out of a lockout, and
+// gating it on a reachable SignalK would make a broken server unrecoverable.
+func TestValidateSettingsChange_AlwaysAllowsTurningAuthOff(t *testing.T) {
+	current := settingsPayload{}
+	current.Signalk.Address = "203.0.113.1"
+	current.Signalk.Port = 3000
+	current.Auth.Mode = "signalk"
+
+	next := current
+	next.Auth.Mode = "none"
+
+	if invalid := validateSettingsChange(current, next); invalid != nil {
+		t.Fatalf("turning auth off must never be blocked, got %+v", invalid)
+	}
+}
+
+// Only a change is probed, matching how the SignalK address check already
+// behaves — re-saving an unrelated setting must not hit the network.
+func TestValidateSettingsChange_DoesNotProbeWhenAuthModeIsUnchanged(t *testing.T) {
+	current := settingsPayload{}
+	current.Signalk.Address = "203.0.113.1"
+	current.Signalk.Port = 3000
+	current.Auth.Mode = "signalk"
+
+	next := current
+	next.UI.VesselStateRefreshSeconds = 30
+
+	if invalid := validateSettingsChange(current, next); invalid != nil {
+		t.Fatalf("an unchanged auth mode must not be re-probed, got %+v", invalid)
+	}
+}
+
+func TestValidateSettingsChange_RejectsUnknownAuthMode(t *testing.T) {
+	current := settingsPayload{}
+	current.Auth.Mode = "none"
+
+	next := current
+	next.Auth.Mode = "sometimes"
+
+	invalid := validateSettingsChange(current, next)
+	if invalid == nil || invalid.Field != "auth.mode" {
+		t.Fatalf("an unknown auth mode must be refused, got %+v", invalid)
+	}
+}
+
+// The auth section must survive a settings save like every other section.
+func TestSettingsPayload_RoundTripsAuthSection(t *testing.T) {
+	settings := map[string]any{"auth": map[string]any{"mode": "signalk"}}
+
+	if got := buildSettingsPayload(settings).Auth.Mode; got != "signalk" {
+		t.Fatalf("auth.mode should surface from disk, got %q", got)
+	}
+
+	req := settingsPayload{}
+	req.Auth.Mode = "signalk"
+	if got := normalizeSettingsPayload(req).Auth.Mode; got != "signalk" {
+		t.Fatalf("auth.mode should round-trip, got %q", got)
+	}
+}
+
+// An install that has never set it reads as none, not empty.
+func TestSettingsPayload_DefaultsAuthModeToNone(t *testing.T) {
+	if got := buildSettingsPayload(map[string]any{}).Auth.Mode; got != "none" {
+		t.Fatalf("missing auth section should default to none, got %q", got)
+	}
+}

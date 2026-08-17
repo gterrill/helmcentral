@@ -9,6 +9,7 @@ import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
 import { GeneralSection } from '@/components/settings/sections/general-section'
 import { GeonamesSection } from '@/components/settings/sections/geonames-section'
+import { SecuritySection } from '@/components/settings/sections/security-section'
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
 import { WidgetsSection } from '@/components/settings/sections/widgets-section'
@@ -138,6 +139,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <BoatUiSection draft={draft} onChange={handleDraftChange} />
       case 'widgets':
         return <WidgetsSection draft={draft} onChange={handleDraftChange} />
+      case 'security':
+        return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':
         return <InfluxdbSection draft={draft} onChange={handleDraftChange} />
       case 'geonames':

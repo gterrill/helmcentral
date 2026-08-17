@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -26,17 +25,22 @@ const (
 
 // ── auth.mode resolution ─────────────────────────────────────────────────────
 
-// resolveAuthMode resolves the operative auth.mode. HELMCENTRAL_AUTH_MODE
-// always wins over settings.yaml — it is the documented recovery hatch for a
-// locked-out operator, since the Settings page that would otherwise flip
-// this setting sits behind admin (docs/adr/0040). Falls back to "none" when
-// neither is set, which is this release's default: upgrading an existing,
-// unauthenticated install must never lock its operator out of a running
-// boat.
+// resolveAuthMode resolves the operative auth.mode from settings.yaml.
+//
+// settings.yaml is the only source. There was previously a
+// HELMCENTRAL_AUTH_MODE environment override as a lockout escape hatch, but it
+// was both redundant and confusing: a locked-out operator can already edit
+// settings.yaml (which is what setting the mode meant anyway), while a second
+// source that silently outranked the Settings page made "I changed it and
+// nothing happened" a plausible outcome during setup.
+//
+// The lockout it guarded against is now prevented rather than undone —
+// validateSettingsChange refuses to save mode:signalk against a SignalK server
+// whose security is switched off.
+//
+// Read per request rather than cached, so a change takes effect without a
+// restart. Only the startup security probe is one-shot.
 func resolveAuthMode(settingsPath string) string {
-	if override := strings.TrimSpace(os.Getenv("HELMCENTRAL_AUTH_MODE")); override != "" {
-		return override
-	}
 	mode := loadSettingString(settingsPath, []string{"auth", "mode"})
 	if mode == "" {
 		return authModeNone

@@ -435,7 +435,6 @@ func writeAuthStartupSettingsFixture(t *testing.T, signalkURL, mode string) stri
 }
 
 func TestCheckAuthModeAtStartup_SignalKModeAgainstSecurityOffStubFailsFast(t *testing.T) {
-	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusNotFound, "Cannot POST /signalk/v1/auth/login")
@@ -452,7 +451,6 @@ func TestCheckAuthModeAtStartup_SignalKModeAgainstSecurityOffStubFailsFast(t *te
 }
 
 func TestCheckAuthModeAtStartup_SignalKModeAgainstSecurityOnStubSucceeds(t *testing.T) {
-	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusUnauthorized, `{"message":"invalid username or password"}`)
@@ -472,7 +470,6 @@ func TestCheckAuthModeAtStartup_SignalKModeAgainstSecurityOnStubSucceeds(t *test
 // takes no dependency on SignalK being reachable at all — a boat configured
 // with no SignalK address yet, or one that's powered off, must still boot.
 func TestCheckAuthModeAtStartup_ModeNoneNeverProbesSignalK(t *testing.T) {
-	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
 	settingsPath := writeAuthStartupSettingsFixture(t, "http://127.0.0.1:1", "none")
 
 	mode, err := checkAuthModeAtStartup(settingsPath)
@@ -485,7 +482,6 @@ func TestCheckAuthModeAtStartup_ModeNoneNeverProbesSignalK(t *testing.T) {
 }
 
 func TestCheckAuthModeAtStartup_UnrecognisedModeFailsFast(t *testing.T) {
-	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
 	settingsPath := writeAuthStartupSettingsFixture(t, "http://localhost:3000", "yolo")
 
 	_, err := checkAuthModeAtStartup(settingsPath)

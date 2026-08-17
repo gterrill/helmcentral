@@ -402,7 +402,6 @@ func TestMeHandler_ExpiredCookieReturnsUnauthenticated(t *testing.T) {
 func TestAuthModeHandler_DefaultsToNoneWhenUnset(t *testing.T) {
 	settingsPath := writeAuthModeSettingsFixture(t, "")
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
 
 	c, rec := newAuthRequest(t, http.MethodGet, "/api/auth/mode", nil)
 	if err := authModeHandler(c); err != nil {
@@ -421,7 +420,6 @@ func TestAuthModeHandler_DefaultsToNoneWhenUnset(t *testing.T) {
 func TestAuthModeHandler_ReadsSignalKModeFromSettings(t *testing.T) {
 	settingsPath := writeAuthModeSettingsFixture(t, "signalk")
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
 
 	c, rec := newAuthRequest(t, http.MethodGet, "/api/auth/mode", nil)
 	if err := authModeHandler(c); err != nil {
@@ -437,11 +435,12 @@ func TestAuthModeHandler_ReadsSignalKModeFromSettings(t *testing.T) {
 	}
 }
 
-// TestAuthModeHandler_EnvOverrideWinsOverSettings covers the documented
-// recovery hatch for a locked-out operator: HELMCENTRAL_AUTH_MODE=none must
-// win even when settings.yaml says signalk, since the Settings page that
-// would otherwise fix this sits behind admin.
-func TestAuthModeHandler_EnvOverrideWinsOverSettings(t *testing.T) {
+// settings.yaml is the only source of auth.mode. The HELMCENTRAL_AUTH_MODE
+// override was removed: a second source that silently outranked the Settings
+// page made "I changed it and nothing happened" a plausible setup outcome, and
+// the lockout it guarded against is now prevented at save time instead
+// (validateSettingsChange refuses mode:signalk against an unsecured SignalK).
+func TestAuthModeHandler_ReadsModeOnlyFromSettings(t *testing.T) {
 	settingsPath := writeAuthModeSettingsFixture(t, "signalk")
 	t.Setenv("SETTINGS_FILE", settingsPath)
 	t.Setenv("HELMCENTRAL_AUTH_MODE", "none")
@@ -455,8 +454,8 @@ func TestAuthModeHandler_EnvOverrideWinsOverSettings(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("could not parse response: %v", err)
 	}
-	if payload["mode"] != authModeNone {
-		t.Fatalf("expected env override to force mode=none, got %q", payload["mode"])
+	if payload["mode"] != authModeSignalK {
+		t.Fatalf("settings.yaml must win; a stale env var must be ignored, got %q", payload["mode"])
 	}
 }
 

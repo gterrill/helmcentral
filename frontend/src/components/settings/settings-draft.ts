@@ -44,6 +44,7 @@ export interface RegularSettingsDraft {
   influxdbUrl: string
   influxdbOrg: string
   influxdbBucket: string
+  authMode: 'none' | 'signalk'
 }
 
 export const initialRegularSettingsDraft: RegularSettingsDraft = {
@@ -64,6 +65,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   hullType: 'power_cat',
   windageAreaM2: '35',
   influxdbEnabled: false,
+  authMode: 'none',
   influxdbUrl: '',
   influxdbOrg: '',
   influxdbBucket: '',
@@ -107,6 +109,7 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.anchor?.windage_area_m2 === 'number') draft.windageAreaM2 = String(settings.anchor.windage_area_m2)
 
   if (typeof settings.influxdb?.enabled === 'boolean') draft.influxdbEnabled = settings.influxdb.enabled
+  if (settings.auth?.mode === 'signalk' || settings.auth?.mode === 'none') draft.authMode = settings.auth.mode
   if (typeof settings.influxdb?.url === 'string') draft.influxdbUrl = settings.influxdb.url
   if (typeof settings.influxdb?.org === 'string') draft.influxdbOrg = settings.influxdb.org
   if (typeof settings.influxdb?.bucket === 'string') draft.influxdbBucket = settings.influxdb.bucket
@@ -144,6 +147,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.hullType !== b.hullType) return false
   if (a.windageAreaM2 !== b.windageAreaM2) return false
   if (a.influxdbEnabled !== b.influxdbEnabled) return false
+  if (a.authMode !== b.authMode) return false
   if (a.influxdbUrl !== b.influxdbUrl) return false
   if (a.influxdbOrg !== b.influxdbOrg) return false
   if (a.influxdbBucket !== b.influxdbBucket) return false
@@ -202,6 +206,9 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       url: draft.influxdbUrl.trim(),
       org: draft.influxdbOrg.trim(),
       bucket: draft.influxdbBucket.trim(),
+    },
+    auth: {
+      mode: draft.authMode,
     },
   }
 }
