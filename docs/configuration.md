@@ -51,8 +51,11 @@ or your shell.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HELMCENTRAL_AUTH_MODE` | *(unset)* | Overrides `settings.yaml`'s `auth.mode` (`signalk` or `none`) in both directions. Documented recovery hatch for an operator locked out of `mode: signalk`, since the Settings page that would fix it sits behind `admin`. |
 | `SESSIONS_DB_PATH` | `data/sessions.sqlite` | Session store — see State paths below. |
+
+`auth.mode` is set in `settings.yaml` (or from Settings → Security in the
+running app) and has no environment-variable override — `settings.yaml` is its
+only source. Changes take effect on the next request, without a restart.
 
 See [ADR 0040](adr/0040-signalk-delegated-authentication.md) for the full design.
 
@@ -139,8 +142,16 @@ store. Check `journalctl -u helmcentral -n 50`.
 SignalK server's security status once at startup and refuses to boot if
 SignalK's own security is disabled — "login required" against a server with
 no login to require can't be satisfied. Enable security on the SignalK server
-first, or set `auth.mode: none` (or `HELMCENTRAL_AUTH_MODE=none`) to boot
-without it.
+first, or set `auth.mode: none` in `settings.yaml` to boot without it.
+
+You should not normally reach that state: Settings → Security refuses to save
+`signalk` in the first place unless SignalK reports security is already on, so
+the unsatisfiable combination is prevented rather than discovered on the next
+reboot. Reaching it means `settings.yaml` was edited by hand, or SignalK's
+security was turned off after Helmcentral was configured. Either way the fix
+is the same — turn SignalK's security back on, or set `auth.mode: none` in
+`settings.yaml` and restart. Turning authentication *off* is never gated on
+SignalK being reachable, so that route out always works.
 
 ## Security
 

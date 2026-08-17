@@ -185,10 +185,11 @@ Helmcentral checks once at startup and refuses to boot into `auth.mode:
 signalk` against a SignalK server with security switched off, since "login
 required" against a server with no login to require can't be satisfied.
 `auth.mode` defaults to `none` (no authentication, this release's default) so
-upgrading an existing install never locks anyone out of a running boat; a
-locked-out operator can force `none` back on with the
-`HELMCENTRAL_AUTH_MODE=none` environment variable, since the Settings page
-that would otherwise fix it sits behind `admin`. Full design:
+upgrading an existing install never locks anyone out of a running boat. Turn it
+on from Settings → Security, which refuses to save unless SignalK's security is
+already enabled — the lockout is prevented at save time rather than discovered
+on the next reboot. Turning it back off is never gated on SignalK being
+reachable, so that way out always works. Full design:
 [ADR 0040](docs/adr/0040-signalk-delegated-authentication.md).
 
 - **Full operator reference:** [docs/configuration.md](docs/configuration.md) —
