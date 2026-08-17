@@ -35,6 +35,8 @@ describe('app-config', () => {
       chainOnboardM: 150,
       hullType: 'power_cat',
       windageAreaM2: 35,
+      gpsFromBowM: 0,
+      loaM: 0,
     })
   })
 })

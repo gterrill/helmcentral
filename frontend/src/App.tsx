@@ -844,6 +844,9 @@ export function App() {
               currentDriftImpactKts={currentDriftImpactKts}
               distanceMeters={anchorWatch.distanceMeters}
               bearingDeg={anchorWatch.bearingDeg}
+              bowOffsetM={anchorWatch.bowOffsetM}
+              bowOffsetApplied={anchorWatch.bowOffsetApplied}
+              bowOffsetReason={anchorWatch.bowOffsetReason}
               vesselTrail={getSelfTrail}
               aisVessels={nearbyVessels}
               aisTrails={getAisTrails}

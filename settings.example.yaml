@@ -40,6 +40,8 @@ units: metric
 
 anchor:
   bow_roller_height_m: 1.5
+  gps_from_bow_m: 0        # antenna distance aft of the bow roller; 0 = no correction
+  loa_m: 0                 # length overall, display only
   chain_size_mm: 12
   chain_onboard_m: 150
   # power_cat | power_mono | sail_cat | sail_mono

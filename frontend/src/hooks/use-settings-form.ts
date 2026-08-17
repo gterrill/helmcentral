@@ -26,6 +26,8 @@ export type SettingsPayload = {
   }
   anchor?: {
     bow_roller_height_m?: number
+    gps_from_bow_m?: number
+    loa_m?: number
     chain_size_mm?: number
     chain_onboard_m?: number
     hull_type?: string

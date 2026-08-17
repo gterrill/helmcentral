@@ -65,6 +65,34 @@ describe('useAppConfig', () => {
     expect(result.current.ui.vesselStateRefreshSeconds).toBe(30)
   })
 
+  // gps_from_bow_m defaults to 0, meaning "no bow-offset correction" — unlike
+  // every other anchor field, 0 is the meaningful explicit value here, not an
+  // absent one. positiveNumber() would wrongly reject it and fall back to the
+  // (also 0) default, masking a real backend value of e.g. 0 sent on purpose
+  // to disable a previously-configured correction.
+  it('preserves an explicit gps_from_bow_m of 0 rather than treating it as unset', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      anchor: { gps_from_bow_m: 0, loa_m: 12 },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await waitFor(() => expect(result.current.anchor.loaM).toBe(12))
+
+    expect(result.current.anchor.gpsFromBowM).toBe(0)
+  })
+
+  it('applies a configured non-zero gps_from_bow_m', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      anchor: { gps_from_bow_m: 8.2 },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+
+    await waitFor(() => expect(result.current.anchor.gpsFromBowM).toBe(8.2))
+  })
+
   it('ignores malformed values rather than rendering nonsense', async () => {
     vi.stubGlobal('fetch', settingsResponse({
       units: 'furlongs',

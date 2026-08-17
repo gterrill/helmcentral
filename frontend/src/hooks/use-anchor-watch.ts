@@ -13,6 +13,9 @@ interface AnchorWatchServerState {
   sea_state?: SeaState
   seabed_type?: SeabedType
   set_at?: string
+  bow_offset_m?: number
+  bow_offset_applied?: boolean
+  bow_offset_reason?: string
 }
 
 export interface AnchorWatchResult {
@@ -28,6 +31,9 @@ export interface AnchorWatchResult {
   bearingDeg: number | null
   suggestSet: boolean
   setAt: string | null
+  bowOffsetM: number
+  bowOffsetApplied: boolean
+  bowOffsetReason: string
   setAnchorHere: (lat: number, lon: number, radiusMeters?: number) => Promise<void>
   updatePosition: (lat: number, lon: number) => Promise<void>
   updateRadius: (radiusMeters: number) => Promise<void>
@@ -78,7 +84,15 @@ export function useAnchorWatch(
   }, [fetchState, refreshInterval])
 
   const setAnchorHere = useCallback(async (lat: number, lon: number, radiusMeters?: number) => {
-    const payload: { lat: number; lon: number; radius_meters?: number } = { lat, lon }
+    // Fed the live GPS fix, so the backend should apply the bow-offset
+    // correction (projecting forward by gps_from_bow_m along heading) if
+    // it's configured. updatePosition below is a user-dragged map point
+    // that is already meant to be the anchor, so it deliberately omits this.
+    const payload: { lat: number; lon: number; radius_meters?: number; apply_bow_offset: true } = {
+      lat,
+      lon,
+      apply_bow_offset: true,
+    }
     if (typeof radiusMeters === 'number' && radiusMeters > 0) {
       payload.radius_meters = radiusMeters
     }
@@ -187,6 +201,11 @@ export function useAnchorWatch(
 
   const suggestSet = !serverState.active && navigationState === 'anchored'
   const setAt = serverState.active && serverState.set_at ? serverState.set_at : null
+  const bowOffsetM = serverState.active && typeof serverState.bow_offset_m === 'number' ? serverState.bow_offset_m : 0
+  const bowOffsetApplied = serverState.active ? Boolean(serverState.bow_offset_applied) : false
+  const bowOffsetReason = serverState.active && typeof serverState.bow_offset_reason === 'string'
+    ? serverState.bow_offset_reason
+    : ''
 
   return {
     anchorState,
@@ -201,6 +220,9 @@ export function useAnchorWatch(
     bearingDeg,
     suggestSet,
     setAt,
+    bowOffsetM,
+    bowOffsetApplied,
+    bowOffsetReason,
     setAnchorHere,
     updatePosition,
     updateRadius,

@@ -141,6 +141,69 @@ func TestBuildSettingsPayload_SurfacesInfluxdbSectionFromDisk(t *testing.T) {
 	}
 }
 
+// TestNormalizeSettingsPayload_PreservesGPSFromBowMZero guards the anchor
+// bow-offset correction (see docs on setAnchorWatch): gps_from_bow_m
+// defaults to 0, meaning "no correction", so 0 is a meaningful explicit
+// value rather than an absent one. Unlike every other anchor field, it must
+// survive load -> normalize -> emit without being clamped up to a
+// non-zero default — a guessed antenna position is worse than none.
+func TestNormalizeSettingsPayload_PreservesGPSFromBowMZero(t *testing.T) {
+	req := settingsPayload{}
+	req.Anchor.GPSFromBowM = 0
+
+	normalized := normalizeSettingsPayload(req)
+
+	if normalized.Anchor.GPSFromBowM != 0 {
+		t.Fatalf("expected gps_from_bow_m to stay 0, got %v", normalized.Anchor.GPSFromBowM)
+	}
+}
+
+// TestNormalizeSettingsPayload_RoundTripsGPSFromBowMNonZero is the
+// counterpart: a configured, non-zero value must also round-trip exactly.
+func TestNormalizeSettingsPayload_RoundTripsGPSFromBowMNonZero(t *testing.T) {
+	req := settingsPayload{}
+	req.Anchor.GPSFromBowM = 8.2
+
+	normalized := normalizeSettingsPayload(req)
+
+	if normalized.Anchor.GPSFromBowM != 8.2 {
+		t.Fatalf("expected gps_from_bow_m to round-trip as 8.2, got %v", normalized.Anchor.GPSFromBowM)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesGPSFromBowMZeroFromDisk is the read-side
+// counterpart: an explicit 0 stored on disk must surface as 0, not be
+// mistaken for "unset" and replaced with a default.
+func TestBuildSettingsPayload_SurfacesGPSFromBowMZeroFromDisk(t *testing.T) {
+	settings := map[string]any{
+		"anchor": map[string]any{
+			"gps_from_bow_m": 0,
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+
+	if payload.Anchor.GPSFromBowM != 0 {
+		t.Fatalf("expected gps_from_bow_m to surface as 0, got %v", payload.Anchor.GPSFromBowM)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesGPSFromBowMFromDisk mirrors the above for
+// a configured non-zero value.
+func TestBuildSettingsPayload_SurfacesGPSFromBowMFromDisk(t *testing.T) {
+	settings := map[string]any{
+		"anchor": map[string]any{
+			"gps_from_bow_m": 8.5,
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+
+	if payload.Anchor.GPSFromBowM != 8.5 {
+		t.Fatalf("expected gps_from_bow_m to surface as 8.5, got %v", payload.Anchor.GPSFromBowM)
+	}
+}
+
 func TestParseSignalKCurrent_ReadsSetTrueAndDrift(t *testing.T) {
 	payload := map[string]any{
 		"environment": map[string]any{
@@ -431,7 +494,7 @@ func TestFetchSignalKNearbyVessels_AgeSecondsFromReceiveTime(t *testing.T) {
 
 	seedVesselTreesAged(t, body, map[string]time.Duration{
 		"disagreeing-vessel": 45 * time.Second,
-		"unparseable-vessel":  45 * time.Second,
+		"unparseable-vessel": 45 * time.Second,
 	}, now)
 
 	vessels, err := fetchSignalKNearbyVessels(-21.595297, 149.796444, now, nil)
@@ -507,8 +570,8 @@ func TestFetchSignalKNearbyVessels_ReportsRangeInMeters(t *testing.T) {
 
 	// Just inside vs. just beyond the 5000m horizon.
 	const closeLat = -21.595297
-	nearOffsetDeg := 4900.0 / 111320.0  // ~4900m north
-	farOffsetDeg := 5100.0 / 111320.0   // ~5100m north
+	nearOffsetDeg := 4900.0 / 111320.0 // ~4900m north
+	farOffsetDeg := 5100.0 / 111320.0  // ~5100m north
 	insideBody := vesselTreeAt("inside-vessel", "INSIDE", closeLat+nearOffsetDeg, selfLon)
 	outsideBody := vesselTreeAt("outside-vessel", "OUTSIDE", closeLat+farOffsetDeg, selfLon)
 	combined := `{` +

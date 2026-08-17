@@ -79,6 +79,12 @@ describe('settings unit addons', () => {
       const bowRoller = screen.getByLabelText('Bow roller height in metres')
       expect(within(bowRoller.closest('[data-slot="input-group"]') as HTMLElement).getByText('m')).toBeInTheDocument()
 
+      const gpsFromBow = screen.getByLabelText('GPS antenna distance aft of bow roller in metres')
+      expect(within(gpsFromBow.closest('[data-slot="input-group"]') as HTMLElement).getByText('m')).toBeInTheDocument()
+
+      const loa = screen.getByLabelText('Length overall in metres')
+      expect(within(loa.closest('[data-slot="input-group"]') as HTMLElement).getByText('m')).toBeInTheDocument()
+
       const chainSize = screen.getByLabelText('Chain size in millimetres')
       expect(within(chainSize.closest('[data-slot="input-group"]') as HTMLElement).getByText('mm')).toBeInTheDocument()
 
@@ -88,9 +94,10 @@ describe('settings unit addons', () => {
       const windage = screen.getByLabelText('Windage area in square metres')
       expect(within(windage.closest('[data-slot="input-group"]') as HTMLElement).getByText('m²')).toBeInTheDocument()
 
-      // "m" appears twice on this section (bow roller + chain onboard), hence
-      // scoping each lookup above rather than a single page-wide getByText.
-      expect(screen.getAllByText('m')).toHaveLength(2)
+      // "m" appears four times on this section (bow roller, GPS-from-bow, LOA,
+      // chain onboard), hence scoping each lookup above rather than a single
+      // page-wide getByText.
+      expect(screen.getAllByText('m')).toHaveLength(4)
     })
 
     it('still fires onChange with the raw string value when typing into an addon-wrapped input', () => {

@@ -86,6 +86,8 @@ type settingsPayload struct {
 		ChainOnboardM    float64 `json:"chain_onboard_m"`
 		HullType         string  `json:"hull_type"`
 		WindageAreaM2    float64 `json:"windage_area_m2"`
+		GPSFromBowM      float64 `json:"gps_from_bow_m"`
+		LOAM             float64 `json:"loa_m"`
 	} `json:"anchor"`
 	Influxdb struct {
 		Enabled bool   `json:"enabled"`
@@ -165,6 +167,8 @@ func updateSettingsHandler(c echo.Context) error {
 		"chain_onboard_m":     normalized.Anchor.ChainOnboardM,
 		"hull_type":           normalized.Anchor.HullType,
 		"windage_area_m2":     normalized.Anchor.WindageAreaM2,
+		"gps_from_bow_m":      normalized.Anchor.GPSFromBowM,
+		"loa_m":               normalized.Anchor.LOAM,
 	}
 	settings["auth"] = map[string]any{
 		"mode": normalized.Auth.Mode,
@@ -327,6 +331,16 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if value := coerceFloat(anchorMap["windage_area_m2"]); value > 0 {
 			payload.Anchor.WindageAreaM2 = value
 		}
+		// gps_from_bow_m defaults to 0 ("no correction"), so 0 is itself a
+		// meaningful, explicit value — unlike the other anchor fields above, it
+		// must not be treated the same as "absent". coerceFloat returns -1 for
+		// a missing/unparseable key, so >= 0 is the correct guard here.
+		if value := coerceFloat(anchorMap["gps_from_bow_m"]); value >= 0 {
+			payload.Anchor.GPSFromBowM = value
+		}
+		if value := coerceFloat(anchorMap["loa_m"]); value > 0 {
+			payload.Anchor.LOAM = value
+		}
 	}
 
 	if influxMap, ok := settings["influxdb"].(map[string]any); ok {
@@ -414,6 +428,18 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Anchor.HullType = strings.TrimSpace(req.Anchor.HullType)
 	if !isSupportedHullType(normalized.Anchor.HullType) {
 		normalized.Anchor.HullType = defaultHullType
+	}
+	// gps_from_bow_m and loa_m assign straight through, with no positive-default
+	// clamp: both default to 0 ("no correction" / "not entered"), and 0 must
+	// survive the round-trip rather than being replaced by a guessed value. A
+	// negative submission is still nonsensical, so floor it at 0.
+	normalized.Anchor.GPSFromBowM = req.Anchor.GPSFromBowM
+	if normalized.Anchor.GPSFromBowM < 0 {
+		normalized.Anchor.GPSFromBowM = 0
+	}
+	normalized.Anchor.LOAM = req.Anchor.LOAM
+	if normalized.Anchor.LOAM < 0 {
+		normalized.Anchor.LOAM = 0
 	}
 
 	normalized.Influxdb.Enabled = req.Influxdb.Enabled
@@ -2079,6 +2105,31 @@ func haversineMeters(lat1 float64, lon1 float64, lat2 float64, lon2 float64) flo
 	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) + math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return earthRadiusMeters * c
+}
+
+// destinationPoint projects (lat, lon) forward by distanceM metres along
+// bearingRad (radians, 0 = north, clockwise), returning the resulting
+// lat/lon in degrees. Spherical model, ported from
+// frontend/src/lib/geo.ts's destinationPoint (same R = 6371000, same
+// longitude wrap) so the two stay numerically consistent.
+func destinationPoint(lat float64, lon float64, bearingRad float64, distanceM float64) (float64, float64) {
+	const earthRadiusMeters = 6371000.0
+	lat1 := lat * math.Pi / 180
+	lon1 := lon * math.Pi / 180
+
+	lat2 := math.Asin(
+		math.Sin(lat1)*math.Cos(distanceM/earthRadiusMeters) +
+			math.Cos(lat1)*math.Sin(distanceM/earthRadiusMeters)*math.Cos(bearingRad),
+	)
+	lon2 := lon1 + math.Atan2(
+		math.Sin(bearingRad)*math.Sin(distanceM/earthRadiusMeters)*math.Cos(lat1),
+		math.Cos(distanceM/earthRadiusMeters)-math.Sin(lat1)*math.Sin(lat2),
+	)
+
+	latDeg := lat2 * 180 / math.Pi
+	lonDeg := math.Mod(lon2*180/math.Pi+540, 360) - 180
+
+	return latDeg, lonDeg
 }
 
 func compactVesselID(vesselID string) string {

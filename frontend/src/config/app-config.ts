@@ -6,6 +6,8 @@ export type AnchorConfig = {
   chainOnboardM: number
   hullType: HullType
   windageAreaM2: number
+  gpsFromBowM: number
+  loaM: number
 }
 
 export type DistanceUnits = 'metric' | 'imperial'
@@ -42,6 +44,8 @@ export const fallbackAnchorConfig: AnchorConfig = {
   chainOnboardM: 150,
   hullType: 'power_cat',
   windageAreaM2: 35,
+  gpsFromBowM: 0,
+  loaM: 0,
 }
 
 /** The subset of GET /api/settings this module reads. */
@@ -56,6 +60,8 @@ export type AppConfigSettings = {
     chain_onboard_m?: number
     hull_type?: string
     windage_area_m2?: number
+    gps_from_bow_m?: number
+    loa_m?: number
   }
 }
 
@@ -67,6 +73,13 @@ const HULL_TYPES: HullType[] = ['power_cat', 'sail_mono', 'power_mono', 'sail_ca
 // alone, so one bad key can't take out the rest of the config.
 function positiveNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+// gps_from_bow_m defaults to 0, meaning "no correction" — unlike every other
+// anchor field, 0 is itself the meaningful, valid value (not an absent one),
+// so it must not be rejected the way positiveNumber rejects 0.
+function nonNegativeNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback
 }
 
 export function normalizeUiConfig(settings: AppConfigSettings | null | undefined): UiConfig {
@@ -103,5 +116,7 @@ export function normalizeAnchorConfig(settings: AppConfigSettings | null | undef
       ? (hullType as HullType)
       : fallbackAnchorConfig.hullType,
     windageAreaM2: positiveNumber(anchor?.windage_area_m2, fallbackAnchorConfig.windageAreaM2),
+    gpsFromBowM: nonNegativeNumber(anchor?.gps_from_bow_m, fallbackAnchorConfig.gpsFromBowM),
+    loaM: positiveNumber(anchor?.loa_m, fallbackAnchorConfig.loaM),
   }
 }

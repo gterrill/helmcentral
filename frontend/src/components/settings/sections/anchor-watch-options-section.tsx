@@ -44,6 +44,38 @@ export function AnchorWatchOptionsSection({
           </Field>
 
           <Field>
+            <FieldLabel htmlFor="gps-from-bow">GPS aft of Bow Roller</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="gps-from-bow"
+                inputMode="decimal"
+                value={draft.gpsFromBowM}
+                onChange={(e) => onChange({ gpsFromBowM: e.target.value })}
+                aria-label="GPS antenna distance aft of bow roller in metres"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>m</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="loa">Length Overall</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="loa"
+                inputMode="decimal"
+                value={draft.loaM}
+                onChange={(e) => onChange({ loaM: e.target.value })}
+                aria-label="Length overall in metres"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>m</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+
+          <Field>
             <FieldLabel htmlFor="chain-size">Chain Size</FieldLabel>
             <InputGroup>
               <InputGroupInput

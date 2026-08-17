@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -15,13 +16,17 @@ const defaultAnchorWatchRadiusMeters = 20.0
 const maxTrailPoints = 1000
 
 type anchorWatchData struct {
-	Lat           float64   `json:"lat"`
-	Lon           float64   `json:"lon"`
-	RadiusMeters  float64   `json:"radius_meters"`
-	RodeDeployedM float64   `json:"rode_deployed_m"`
-	SeaState      string    `json:"sea_state"`
-	SeabedType    string    `json:"seabed_type"`
-	SetAt         time.Time `json:"set_at"`
+	Lat              float64   `json:"lat"`
+	Lon              float64   `json:"lon"`
+	RadiusMeters     float64   `json:"radius_meters"`
+	RodeDeployedM    float64   `json:"rode_deployed_m"`
+	SeaState         string    `json:"sea_state"`
+	SeabedType       string    `json:"seabed_type"`
+	SetAt            time.Time `json:"set_at"`
+	BowOffsetM       float64   `json:"bow_offset_m"` // d actually applied
+	BowOffsetApplied bool      `json:"bow_offset_applied"`
+	BowOffsetReason  string    `json:"bow_offset_reason"`  // why not, when not applied
+	HeadingAtSetDeg  float64   `json:"heading_at_set_deg"` // -1 when not read
 }
 
 type trailPoint struct {
@@ -191,23 +196,28 @@ func getAnchorWatch(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"active":          true,
-		"lat":             state.Lat,
-		"lon":             state.Lon,
-		"radius_meters":   state.RadiusMeters,
-		"rode_deployed_m": state.RodeDeployedM,
-		"sea_state":       state.SeaState,
-		"seabed_type":     state.SeabedType,
-		"set_at":          state.SetAt.Format(time.RFC3339),
+		"active":             true,
+		"lat":                state.Lat,
+		"lon":                state.Lon,
+		"radius_meters":      state.RadiusMeters,
+		"rode_deployed_m":    state.RodeDeployedM,
+		"sea_state":          state.SeaState,
+		"seabed_type":        state.SeabedType,
+		"set_at":             state.SetAt.Format(time.RFC3339),
+		"bow_offset_m":       state.BowOffsetM,
+		"bow_offset_applied": state.BowOffsetApplied,
+		"bow_offset_reason":  state.BowOffsetReason,
+		"heading_at_set_deg": state.HeadingAtSetDeg,
 	})
 }
 
 // POST /api/anchor-watch
 func setAnchorWatch(c echo.Context) error {
 	var body struct {
-		Lat          float64  `json:"lat"`
-		Lon          float64  `json:"lon"`
-		RadiusMeters *float64 `json:"radius_meters"`
+		Lat            float64  `json:"lat"`
+		Lon            float64  `json:"lon"`
+		RadiusMeters   *float64 `json:"radius_meters"`
+		ApplyBowOffset *bool    `json:"apply_bow_offset"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -230,14 +240,54 @@ func setAnchorWatch(c echo.Context) error {
 		radius = previousRadius
 	}
 
+	lat, lon := body.Lat, body.Lon
+	bowOffsetM := 0.0
+	bowOffsetApplied := false
+	bowOffsetReason := ""
+	headingAtSetDeg := -1.0
+
+	// Only the live-GPS "set anchor here" path requests the correction; a
+	// user dragging the anchor marker on the map (updatePosition) sends a
+	// point that's already meant to be the anchor, and must never be shoved
+	// forward by the offset again.
+	if body.ApplyBowOffset != nil && *body.ApplyBowOffset {
+		settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+		settings, err := readSettings(settingsPath)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings"})
+		}
+		gpsFromBowM := buildSettingsPayload(settings).Anchor.GPSFromBowM
+
+		if gpsFromBowM <= 0 {
+			bowOffsetReason = "gps_from_bow_m not configured"
+		} else {
+			state, err := fetchSignalKVesselState()
+			if err != nil || state.HeadingTrue < 0 {
+				// Never silently assume d=0 and never substitute COG for
+				// heading — still set the anchor at the raw fix and say why
+				// the correction didn't apply.
+				bowOffsetReason = "heading unavailable"
+			} else {
+				headingAtSetDeg = state.HeadingTrue
+				lat, lon = destinationPoint(body.Lat, body.Lon, state.HeadingTrue*math.Pi/180, gpsFromBowM)
+				bowOffsetM = gpsFromBowM
+				bowOffsetApplied = true
+			}
+		}
+	}
+
 	aw := &anchorWatchData{
-		Lat:           body.Lat,
-		Lon:           body.Lon,
-		RadiusMeters:  radius,
-		RodeDeployedM: 0,
-		SeaState:      "calm",
-		SeabedType:    "sand",
-		SetAt:         time.Now().UTC(),
+		Lat:              lat,
+		Lon:              lon,
+		RadiusMeters:     radius,
+		RodeDeployedM:    0,
+		SeaState:         "calm",
+		SeabedType:       "sand",
+		SetAt:            time.Now().UTC(),
+		BowOffsetM:       bowOffsetM,
+		BowOffsetApplied: bowOffsetApplied,
+		BowOffsetReason:  bowOffsetReason,
+		HeadingAtSetDeg:  headingAtSetDeg,
 	}
 
 	if err := saveAnchorWatch(aw); err != nil {
@@ -255,14 +305,18 @@ func setAnchorWatch(c echo.Context) error {
 	trailMu.Unlock()
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"active":          true,
-		"lat":             aw.Lat,
-		"lon":             aw.Lon,
-		"radius_meters":   aw.RadiusMeters,
-		"rode_deployed_m": aw.RodeDeployedM,
-		"sea_state":       aw.SeaState,
-		"seabed_type":     aw.SeabedType,
-		"set_at":          aw.SetAt.Format(time.RFC3339),
+		"active":             true,
+		"lat":                aw.Lat,
+		"lon":                aw.Lon,
+		"radius_meters":      aw.RadiusMeters,
+		"rode_deployed_m":    aw.RodeDeployedM,
+		"sea_state":          aw.SeaState,
+		"seabed_type":        aw.SeabedType,
+		"set_at":             aw.SetAt.Format(time.RFC3339),
+		"bow_offset_m":       aw.BowOffsetM,
+		"bow_offset_applied": aw.BowOffsetApplied,
+		"bow_offset_reason":  aw.BowOffsetReason,
+		"heading_at_set_deg": aw.HeadingAtSetDeg,
 	})
 }
 
@@ -310,13 +364,17 @@ func patchAnchorWatch(c echo.Context) error {
 	}
 
 	updated := &anchorWatchData{
-		Lat:           current.Lat,
-		Lon:           current.Lon,
-		RadiusMeters:  current.RadiusMeters,
-		RodeDeployedM: current.RodeDeployedM,
-		SeaState:      current.SeaState,
-		SeabedType:    current.SeabedType,
-		SetAt:         current.SetAt,
+		Lat:              current.Lat,
+		Lon:              current.Lon,
+		RadiusMeters:     current.RadiusMeters,
+		RodeDeployedM:    current.RodeDeployedM,
+		SeaState:         current.SeaState,
+		SeabedType:       current.SeabedType,
+		SetAt:            current.SetAt,
+		BowOffsetM:       current.BowOffsetM,
+		BowOffsetApplied: current.BowOffsetApplied,
+		BowOffsetReason:  current.BowOffsetReason,
+		HeadingAtSetDeg:  current.HeadingAtSetDeg,
 	}
 
 	if body.RadiusMeters != nil {
@@ -344,14 +402,18 @@ func patchAnchorWatch(c echo.Context) error {
 	anchorWatchMu.Unlock()
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"active":          true,
-		"lat":             updated.Lat,
-		"lon":             updated.Lon,
-		"radius_meters":   updated.RadiusMeters,
-		"rode_deployed_m": updated.RodeDeployedM,
-		"sea_state":       updated.SeaState,
-		"seabed_type":     updated.SeabedType,
-		"set_at":          updated.SetAt.Format(time.RFC3339),
+		"active":             true,
+		"lat":                updated.Lat,
+		"lon":                updated.Lon,
+		"radius_meters":      updated.RadiusMeters,
+		"rode_deployed_m":    updated.RodeDeployedM,
+		"sea_state":          updated.SeaState,
+		"seabed_type":        updated.SeabedType,
+		"set_at":             updated.SetAt.Format(time.RFC3339),
+		"bow_offset_m":       updated.BowOffsetM,
+		"bow_offset_applied": updated.BowOffsetApplied,
+		"bow_offset_reason":  updated.BowOffsetReason,
+		"heading_at_set_deg": updated.HeadingAtSetDeg,
 	})
 }
 

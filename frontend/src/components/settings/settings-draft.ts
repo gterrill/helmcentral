@@ -36,6 +36,8 @@ export interface RegularSettingsDraft {
   tideStationName: string
   tideAutoStation: boolean
   bowRollerHeightM: string
+  gpsFromBowM: string
+  loaM: string
   chainSizeMm: string
   chainOnboardM: string
   hullType: HullType
@@ -60,6 +62,8 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   tideStationName: '',
   tideAutoStation: false,
   bowRollerHeightM: '1.5',
+  gpsFromBowM: '0',
+  loaM: '0',
   chainSizeMm: '12',
   chainOnboardM: '150',
   hullType: 'power_cat',
@@ -96,6 +100,10 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.ui?.tide_auto_station === 'boolean') draft.tideAutoStation = settings.ui.tide_auto_station
 
   if (typeof settings.anchor?.bow_roller_height_m === 'number') draft.bowRollerHeightM = String(settings.anchor.bow_roller_height_m)
+  // gps_from_bow_m: 0 is a meaningful explicit value ("no correction"), not
+  // an absent one, so it must hydrate the same as any other number here.
+  if (typeof settings.anchor?.gps_from_bow_m === 'number') draft.gpsFromBowM = String(settings.anchor.gps_from_bow_m)
+  if (typeof settings.anchor?.loa_m === 'number') draft.loaM = String(settings.anchor.loa_m)
   if (typeof settings.anchor?.chain_size_mm === 'number') draft.chainSizeMm = String(settings.anchor.chain_size_mm)
   if (typeof settings.anchor?.chain_onboard_m === 'number') draft.chainOnboardM = String(settings.anchor.chain_onboard_m)
   if (
@@ -122,6 +130,14 @@ const parseNumber = (value: string, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
+// gps_from_bow_m defaults to 0, meaning "no correction" - unlike every other
+// numeric anchor field, 0 is the meaningful explicit value here, not an
+// absent one, so parseNumber's `parsed > 0` guard would wrongly discard it.
+const parseNonNegativeNumber = (value: string, fallback: number) => {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
 /**
  * Deep-equality check for two RegularSettingsDraft values, used to derive
  * whether the draft actually differs from what's saved (rather than
@@ -142,6 +158,8 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.tideStationName !== b.tideStationName) return false
   if (a.tideAutoStation !== b.tideAutoStation) return false
   if (a.bowRollerHeightM !== b.bowRollerHeightM) return false
+  if (a.gpsFromBowM !== b.gpsFromBowM) return false
+  if (a.loaM !== b.loaM) return false
   if (a.chainSizeMm !== b.chainSizeMm) return false
   if (a.chainOnboardM !== b.chainOnboardM) return false
   if (a.hullType !== b.hullType) return false
@@ -196,6 +214,8 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
     },
     anchor: {
       bow_roller_height_m: parseNumber(draft.bowRollerHeightM, 1.5),
+      gps_from_bow_m: parseNonNegativeNumber(draft.gpsFromBowM, 0),
+      loa_m: parseNumber(draft.loaM, 0),
       chain_size_mm: parseNumber(draft.chainSizeMm, 12),
       chain_onboard_m: parseNumber(draft.chainOnboardM, 150),
       hull_type: draft.hullType,
