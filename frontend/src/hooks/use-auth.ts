@@ -104,6 +104,24 @@ async function loadModeAndMe(): Promise<void> {
 }
 
 /**
+ * Re-reads mode and session, and returns the resulting state.
+ *
+ * Called after a settings save so a change to auth.mode takes effect in the
+ * tab that made it. Without this the operator turns on "require login", sees
+ * the dashboard carry on unchanged, and gets no signal that anything happened
+ * — while every request from that tab is in fact now unauthenticated. Since
+ * App.tsx gates on `mode === 'signalk' && user === null`, re-reading both is
+ * enough to drop straight to the login screen.
+ *
+ * Unlike verifySession below this deliberately re-reads `mode` too, because
+ * the mode is precisely what changed.
+ */
+export async function refreshAuthState(): Promise<{ mode: AuthMode | null; user: AuthUser | null }> {
+  await loadModeAndMe()
+  return { mode: current.mode, user: current.user }
+}
+
+/**
  * Re-checks GET /api/auth/me without touching `mode` or `error` — used only
  * by the SSE-blip guard below. A transport failure here (backend mid-restart,
  * LAN drop) is left alone rather than treated as a logout: the whole point of

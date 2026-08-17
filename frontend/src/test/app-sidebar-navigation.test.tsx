@@ -16,6 +16,7 @@ import { App } from '../App'
 // explicitly — an install with auth.mode:none — rather than depending on what
 // the real useAuth happens to return when its probe fails (ADR 0040).
 vi.mock('@/hooks/use-auth', () => ({
+  refreshAuthState: vi.fn().mockResolvedValue({ mode: 'none', user: null }),
   useAuth: () => ({
     mode: 'none' as const,
     user: null,

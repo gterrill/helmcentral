@@ -3,6 +3,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { Button } from '@/components/ui/button'
 import { SettingsFormProvider, useSettingsFormContext } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider, useSecretsStatusContext } from '@/components/settings/secrets-status-context'
+import { refreshAuthState } from '@/hooks/use-auth'
 import { SettingsNav, SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
 import { SECRET_KEYS } from '@/hooks/use-secrets-status'
 import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor-watch-options-section'
@@ -108,6 +109,19 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
       }),
     ])
     setSavedDraftSnapshot(draft)
+
+    // Re-read auth after every save. If this save turned authentication on,
+    // App.tsx's gate drops this tab to the login screen, rather than leaving it
+    // looking signed in while every request is unauthenticated. Unconditional
+    // because it is two small GETs with no visible effect when the mode did not
+    // change.
+    //
+    // Deliberately not awaited: it is a side effect of saving, not part of it.
+    // Awaiting would make "Save and Continue" navigation wait on an unrelated
+    // request, and a slow or failed auth check would stall a save that already
+    // succeeded. The module publishes to its listeners when it resolves, so the
+    // gate applies either way.
+    void refreshAuthState()
   }, [save, draft, saveTouchedKeys])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])

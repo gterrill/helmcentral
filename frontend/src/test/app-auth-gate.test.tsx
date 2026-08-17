@@ -172,6 +172,7 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 }))
 
 vi.mock('@/hooks/use-auth', () => ({
+  refreshAuthState: vi.fn().mockResolvedValue({ mode: 'none', user: null }),
   useAuth: vi.fn(),
 }))
 
