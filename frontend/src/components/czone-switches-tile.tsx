@@ -9,9 +9,16 @@ type CZoneSwitchesTileProps = {
   loading: boolean
   pending: Set<string>
   onToggle: (id: string, newState: 0 | 1) => void
+  /**
+   * Cosmetic-only role gate (ADR 0040 §frontend, backend `write` tier): the
+   * server is the actual enforcement point for a PUT to
+   * /api/czone/switches/:id/state, this just avoids offering a control below
+   * readonly that would only 403.
+   */
+  readOnly?: boolean
 }
 
-export const CZoneSwitchesTile = memo(function CZoneSwitchesTile({ switches, loading, pending, onToggle }: CZoneSwitchesTileProps) {
+export const CZoneSwitchesTile = memo(function CZoneSwitchesTile({ switches, loading, pending, onToggle, readOnly = false }: CZoneSwitchesTileProps) {
   return (
     <Tile title="CZone" icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
       <div className="mt-3 space-y-1.5">
@@ -26,7 +33,7 @@ export const CZoneSwitchesTile = memo(function CZoneSwitchesTile({ switches, loa
               </p>
               <button
                 type="button"
-                disabled={isPending}
+                disabled={isPending || readOnly}
                 onClick={() => onToggle(sw.id, isOn ? 0 : 1)}
                 aria-label={`${sw.display_name}: ${isOn ? 'on' : 'off'}, tap to toggle`}
                 aria-pressed={isOn}

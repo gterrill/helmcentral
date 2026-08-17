@@ -63,4 +63,27 @@ describe('VesselStatusBar', () => {
 
     expect(screen.getByText('No Signal')).toBeInTheDocument()
   })
+
+  // ── the logout affordance (ADR 0040) ─────────────────────────────────────
+
+  it('shows no logout control when onLogout is not provided — mode:none, no behaviour change', () => {
+    mockSignalkConnected.mockReturnValue(true)
+    mockTelemetryStatus.mockReturnValue('connected')
+
+    render(<VesselStatusBar />)
+
+    expect(screen.queryByRole('button', { name: /log out/i })).not.toBeInTheDocument()
+  })
+
+  it('shows a logout control that calls onLogout, and names the signed-in user, under mode:signalk', () => {
+    mockSignalkConnected.mockReturnValue(true)
+    mockTelemetryStatus.mockReturnValue('connected')
+    const onLogout = vi.fn()
+
+    render(<VesselStatusBar username="skipper" onLogout={onLogout} />)
+
+    const button = screen.getByRole('button', { name: /log out skipper/i })
+    button.click()
+    expect(onLogout).toHaveBeenCalledTimes(1)
+  })
 })

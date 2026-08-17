@@ -56,6 +56,7 @@ docker run -p 8080:8080 helmcentral-backend
 ## API Endpoints
 
 - `GET /api/health` - Health check
+- `POST /api/auth/login` / `POST /api/auth/logout` / `GET /api/auth/me` / `GET /api/auth/mode` - SignalK delegated login; see [../docs/adr/0040-signalk-delegated-authentication.md](../docs/adr/0040-signalk-delegated-authentication.md)
 - `GET /api/weather-today` - Current weather summary for vessel position
 - `GET /api/weather-forecast` - 6-day daily forecast including sustained wind and gusts. Response shape includes `days`, `cached`, `updated_at`, and `ttl_seconds`. Cached for 60 minutes per rounded vessel position; returns `502` when upstream forecast data cannot be fetched.
 - `GET /api/tide-today` - Current and upcoming tide conditions
@@ -103,5 +104,6 @@ The durable rationale for trail handling is documented in:
 - [../docs/adr/0012-configurable-bento-dashboard.md](../docs/adr/0012-configurable-bento-dashboard.md)
 - [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md)
 - [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md)
+- [../docs/adr/0040-signalk-delegated-authentication.md](../docs/adr/0040-signalk-delegated-authentication.md)
 - [../docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md](../docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md)
 - [../docs/adr/0033-remove-storm-glass-tides-plugin-only.md](../docs/adr/0033-remove-storm-glass-tides-plugin-only.md)

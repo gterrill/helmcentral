@@ -1,4 +1,4 @@
-import { Circle, Moon, Sun } from 'lucide-react'
+import { Circle, LogOut, Moon, Sun } from 'lucide-react'
 
 import { useVesselIdentity } from '@/hooks/use-vessel-identity'
 import { useTelemetryStatus } from '@/hooks/use-telemetry-stream'
@@ -7,9 +7,17 @@ import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 interface VesselStatusBarProps {
   isDark?: boolean
   onToggleDarkMode?: () => void
+  /**
+   * The SignalK username of the current session, or null under mode:none
+   * (no auth) or before mode has resolved. Only mode:signalk ever passes a
+   * value here — App.tsx is what decides that, not this component.
+   */
+  username?: string | null
+  /** Present only under mode:signalk; its absence is what hides the control. */
+  onLogout?: () => void
 }
 
-export function VesselStatusBar({ isDark = false, onToggleDarkMode }: VesselStatusBarProps) {
+export function VesselStatusBar({ isDark = false, onToggleDarkMode, username = null, onLogout }: VesselStatusBarProps) {
   const { currentDate, clock, signalkConnected } = useVesselIdentity()
   const telemetryStatus = useTelemetryStatus()
   const [hh = '--', mm = '--', ss = '--'] = clock.timePart.split(':')
@@ -39,6 +47,16 @@ export function VesselStatusBar({ isDark = false, onToggleDarkMode }: VesselStat
         {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
         <span className="hidden sm:inline">{isDark ? 'Night' : 'Day'}</span>
       </button>
+      {onLogout && (
+        <button
+          onClick={onLogout}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary md:text-[11px]"
+          aria-label={username ? `Log out ${username}` : 'Log out'}
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          {username && <span className="hidden sm:inline">{username}</span>}
+        </button>
+      )}
       <div className="flex min-w-0 shrink-0 flex-col items-end pl-2">
         {/* Below `sm` the date and seconds are dropped rather than CSS-hidden. Both
             are the least-informative parts of this cluster — the date already

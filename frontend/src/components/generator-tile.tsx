@@ -12,6 +12,12 @@ interface GeneratorTileProps {
   generatorRealPowerW: number | null
   batterySocPercent: number | null
   batteryRatePercentPerHour: number | null
+  /**
+   * Cosmetic-only role gate (ADR 0040 §frontend, backend `write` tier): the
+   * server is the actual enforcement point for /api/generator/start|stop,
+   * this just avoids offering a control below readwrite that would only 403.
+   */
+  readOnly?: boolean
 }
 
 function formatRuntime(seconds: number | null): string {
@@ -46,6 +52,7 @@ export const GeneratorTile = memo(function GeneratorTile({
   generatorRealPowerW,
   batterySocPercent,
   batteryRatePercentPerHour,
+  readOnly = false,
 }: GeneratorTileProps) {
   const [timedRunEnabled, setTimedRunEnabled] = useState(false)
   const [timerHours, setTimerHours] = useState(1)
@@ -139,7 +146,7 @@ export const GeneratorTile = memo(function GeneratorTile({
           size="default"
           variant={isRunning ? 'outline' : 'default'}
           className={`h-10 min-w-[64px] shrink-0 antialiased transition-colors${isRunning ? ' border-red-300 text-red-500 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950' : ''}`}
-          disabled={pending}
+          disabled={pending || readOnly}
           onClick={isRunning ? handleStop : handleStart}
         >
           {pending ? '…' : isRunning ? 'Stop' : 'Start'}

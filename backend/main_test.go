@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -405,5 +406,134 @@ func TestComputeMaxGustKtsFor_SkipsInMemoryWhenInfluxConfigured(t *testing.T) {
 		// path was correctly skipped.
 	case <-time.After(3 * time.Second):
 		t.Fatal("computeMaxGustKtsFor blocked, implying it tried to RLock windGustHistory (the in-memory path) even though Influx is configured")
+	}
+}
+
+// ── auth.mode startup validation (docs/adr/0040) ─────────────────────────────
+//
+// checkAuthModeAtStartup is the pure, error-returning function main() wraps
+// with log.Fatalf — following this codebase's established pattern for every
+// other fail-fast startup check (secrets store, tile cache, ...), none of
+// which are tested by actually exec'ing a subprocess. Testing the
+// error-returning function directly is what "exits rather than booting"
+// means here: main() has exactly one line translating a non-nil error from
+// this function into a fatal exit, and that translation is not itself
+// meaningfully testable in-process.
+
+func writeAuthStartupSettingsFixture(t *testing.T, signalkURL, mode string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.yaml")
+	content := "signalk:\n  address: " + signalkURL + "\n  port: 3000\n"
+	if mode != "" {
+		content += "auth:\n  mode: " + mode + "\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("could not write temp settings: %v", err)
+	}
+	return path
+}
+
+func TestCheckAuthModeAtStartup_SignalKModeAgainstSecurityOffStubFailsFast(t *testing.T) {
+	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusNotFound, "Cannot POST /signalk/v1/auth/login")
+
+	settingsPath := writeAuthStartupSettingsFixture(t, srv.URL, "signalk")
+
+	_, err := checkAuthModeAtStartup(settingsPath)
+	if err == nil {
+		t.Fatal("expected checkAuthModeAtStartup to fail fast when auth.mode is signalk but SignalK security is off")
+	}
+	if !strings.Contains(err.Error(), "security is disabled") {
+		t.Fatalf("expected the error to name the unsatisfiable combination, got: %v", err)
+	}
+}
+
+func TestCheckAuthModeAtStartup_SignalKModeAgainstSecurityOnStubSucceeds(t *testing.T) {
+	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusUnauthorized, `{"message":"invalid username or password"}`)
+
+	settingsPath := writeAuthStartupSettingsFixture(t, srv.URL, "signalk")
+
+	mode, err := checkAuthModeAtStartup(settingsPath)
+	if err != nil {
+		t.Fatalf("expected startup to succeed when SignalK security is on, got: %v", err)
+	}
+	if mode != authModeSignalK {
+		t.Fatalf("expected mode %q, got %q", authModeSignalK, mode)
+	}
+}
+
+// TestCheckAuthModeAtStartup_ModeNoneNeverProbesSignalK proves mode:none
+// takes no dependency on SignalK being reachable at all — a boat configured
+// with no SignalK address yet, or one that's powered off, must still boot.
+func TestCheckAuthModeAtStartup_ModeNoneNeverProbesSignalK(t *testing.T) {
+	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://127.0.0.1:1", "none")
+
+	mode, err := checkAuthModeAtStartup(settingsPath)
+	if err != nil {
+		t.Fatalf("expected mode:none to boot without ever reaching SignalK, got: %v", err)
+	}
+	if mode != authModeNone {
+		t.Fatalf("expected mode %q, got %q", authModeNone, mode)
+	}
+}
+
+func TestCheckAuthModeAtStartup_UnrecognisedModeFailsFast(t *testing.T) {
+	t.Setenv("HELMCENTRAL_AUTH_MODE", "")
+	settingsPath := writeAuthStartupSettingsFixture(t, "http://localhost:3000", "yolo")
+
+	_, err := checkAuthModeAtStartup(settingsPath)
+	if err == nil {
+		t.Fatal("expected an unrecognised auth.mode value to fail fast rather than guess")
+	}
+	if !strings.Contains(err.Error(), "yolo") {
+		t.Fatalf("expected the error to name the bad value, got: %v", err)
+	}
+}
+
+// ── SignalK security probe ───────────────────────────────────────────────────
+
+func TestProbeSignalKSecurityEnabled_404MeansDisabled(t *testing.T) {
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusNotFound, "not found")
+
+	enabled, err := probeSignalKSecurityEnabled(srv.URL)
+	if err != nil {
+		t.Fatalf("probeSignalKSecurityEnabled: %v", err)
+	}
+	if enabled {
+		t.Fatal("expected a 404 from the login route to mean security is disabled")
+	}
+}
+
+func TestProbeSignalKSecurityEnabled_NonNotFoundMeansEnabled(t *testing.T) {
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusUnauthorized, `{"message":"bad creds"}`)
+
+	enabled, err := probeSignalKSecurityEnabled(srv.URL)
+	if err != nil {
+		t.Fatalf("probeSignalKSecurityEnabled: %v", err)
+	}
+	if !enabled {
+		t.Fatal("expected a non-404 response from the login route to mean security is enabled")
+	}
+}
+
+func TestProbeSignalKSecurityEnabled_UnreachableSurfacesErrorNotSwallowed(t *testing.T) {
+	unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := unreachable.URL
+	unreachable.Close()
+
+	_, err := probeSignalKSecurityEnabled(url)
+	if err == nil {
+		t.Fatal("expected an unreachable SignalK to surface an explicit error rather than a guessed answer")
 	}
 }

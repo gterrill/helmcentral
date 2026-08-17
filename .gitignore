@@ -17,6 +17,7 @@ backend/data/tile-cache.sqlite
 backend/data/nearby-contacts.sqlite
 backend/data/secrets.sqlite
 backend/data/secrets.key
+backend/data/sessions.sqlite
 backend/data/plugin_overrides.sqlite
 backend/data/alarm-rules.json
 backend/data/alarm-log.sqlite

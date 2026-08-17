@@ -16,6 +16,17 @@ signalk:
   address: localhost
   port: 3000
 
+auth:
+  # none   — no authentication (default). Anyone on the network this server
+  #          is reachable from can read and control everything the API
+  #          exposes. Fine for a trusted boat LAN; never expose past it.
+  # signalk — require login via your SignalK server's own accounts before
+  #          serving anything but the login screen. SignalK's own security
+  #          must already be enabled; Helmcentral checks this once at
+  #          startup and refuses to boot otherwise. See
+  #          docs/adr/0040-signalk-delegated-authentication.md.
+  mode: none
+
 boat:
   vessel_prefix: M/V
   model: My Boat

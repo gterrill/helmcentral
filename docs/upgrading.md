@@ -5,6 +5,18 @@ alone. The notes below cover the handful of releases that needed a manual step.
 
 If you are installing fresh, none of this applies.
 
+## SignalK delegated authentication (opt-in)
+
+Not a breaking change — no action required. `auth.mode` defaults to `none`
+(no authentication, matching every prior release's behaviour), so an upgrade
+never locks you out of a running boat.
+
+**Recommended:** once your SignalK server has security enabled, set
+`auth.mode: signalk` in `settings.yaml` to require login before the API and
+dashboard respond to anything but the login screen. See
+[ADR 0040](adr/0040-signalk-delegated-authentication.md) and the
+[README's Configuration section](../README.md#configuration).
+
 ## Weather and waves moved to WASM plugins
 
 Applies if you previously ran a version with the hardcoded WeatherKit /

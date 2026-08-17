@@ -75,6 +75,7 @@ import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
 import { useWeatherToday } from '@/hooks/use-weather-today'
+import { useAuth } from '@/hooks/use-auth'
 import { useAutopilot } from '@/hooks/use-autopilot'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
@@ -99,6 +100,7 @@ import { EmbedConfigDialog } from '@/components/embed-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
 import { GaugeTile } from '@/components/gauge-tile'
 import { useGaugeValues } from '@/hooks/use-gauge-values'
+import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -141,6 +143,18 @@ const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const AUTO_CLOSE_ANCHOR_WATCH_KEY = 'anchorWatch.autoClose.enabled'
 
 export function App() {
+  // Called before every other hook, and unconditionally on every render
+  // (rules of hooks) even while the login screen is what actually renders
+  // below — the conditional return happens only at the very end of this
+  // component, once every hook Helmcentral's dashboard needs has already run.
+  const auth = useAuth()
+  // Role-gating is cosmetic only (ADR 0040 §frontend): the server is the
+  // enforcement point for every one of these tiers. In mode:none there is no
+  // session and no role to gate on, so both stay permissive — "no behaviour
+  // change at all" is the explicit requirement for that mode.
+  const canWrite = auth.mode !== 'signalk' || auth.role === 'readwrite' || auth.role === 'admin'
+  const canAdmin = auth.mode !== 'signalk' || auth.role === 'admin'
+
   const { ui: uiConfig, anchor: anchorConfig } = useAppConfig()
   const [activePanel, setActivePanel] = useState<PanelId | null>(null)
   const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
@@ -387,6 +401,11 @@ export function App() {
 
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
+
+  // Settings hosts Secrets as a subsection (settings-page.tsx), so hiding
+  // this one nav item covers both per ADR 0040's tier table — there is no
+  // separate top-level Secrets entry to hide independently.
+  const visiblePanelNavItems = canAdmin ? PANEL_NAV_ITEMS : PANEL_NAV_ITEMS.filter((item) => item.id !== 'settings')
 
   const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
   const unplacedWidgetIds = DASHBOARD_WIDGET_IDS.filter((id) => !effectiveWidgets.some((w) => w.id === id))
@@ -636,10 +655,11 @@ export function App() {
             generatorRealPowerW={generatorRealPowerW}
             batterySocPercent={batterySocPercent}
             batteryRatePercentPerHour={batteryRatePercentPerHour}
+            readOnly={!canWrite}
           />
         )
       case 'czone-switches':
-        return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} />
+        return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} readOnly={!canWrite} />
       case 'autopilot':
         return (
           <AutopilotTile
@@ -657,6 +677,7 @@ export function App() {
             onDodge={autopilot.dodge}
             onClearDodge={autopilot.clearDodge}
             headingTrueDeg={headingTrue}
+            readOnly={!canWrite}
           />
         )
       case 'hot-water':
@@ -855,6 +876,48 @@ export function App() {
     }
   })()
 
+  // Gate the entire dashboard shell, not just its content area — an
+  // unauthenticated visitor under mode:signalk gets no sidebar navigation,
+  // no widget data, nothing, only the login form. mode:none renders exactly
+  // as it did before this change.
+  //
+  // The order below matters, and all three non-dashboard branches come first
+  // deliberately. `canWrite`/`canAdmin` above are derived from
+  // `auth.mode !== 'signalk'`, so an unknown mode reads as permissive — which
+  // means "render the dashboard whenever mode isn't literally 'signalk'"
+  // would hand full admin affordances to a visitor whose mode probe merely
+  // failed. Server enforcement still holds either way, but the UI does not
+  // get to guess: it says what it doesn't know.
+  if (auth.loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Checking sign-in…
+      </div>
+    )
+  }
+
+  if (auth.mode === null) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+        <p className="text-sm font-semibold text-foreground">
+          Could not determine whether this Helmcentral requires a sign-in.
+        </p>
+        {auth.error && (
+          <p className="max-w-md text-xs text-muted-foreground" role="alert">
+            {auth.error}
+          </p>
+        )}
+        <Button variant="outline" size="sm" onClick={() => globalThis.location.reload()}>
+          Retry
+        </Button>
+      </div>
+    )
+  }
+
+  if (auth.mode === 'signalk' && auth.user === null) {
+    return <LoginScreen onLogin={auth.login} error={auth.error} />
+  }
+
   return (
     <SidebarProvider>
       <div
@@ -896,7 +959,7 @@ export function App() {
                 ))}
               </SidebarMenuSub>
             )}
-            {PANEL_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+            {visiblePanelNavItems.map(({ id, label, icon: Icon }) => (
               <SidebarMenuItem key={id}>
                 <SidebarMenuButton isActive={activePanel === id} onClick={() => requestNavigate(id, () => setActivePanel(id))} tooltip={label}>
                   <Icon />
@@ -986,7 +1049,12 @@ export function App() {
                 )}
               </>
             )}
-            <VesselStatusBar isDark={isDarkTheme} onToggleDarkMode={toggleDarkMode} />
+            <VesselStatusBar
+              isDark={isDarkTheme}
+              onToggleDarkMode={toggleDarkMode}
+              username={auth.mode === 'signalk' ? auth.user?.username ?? null : null}
+              onLogout={auth.mode === 'signalk' ? () => { void auth.logout() } : undefined}
+            />
           </div>
         </header>
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">

@@ -107,3 +107,49 @@ test('does not treat zero output as running when generatorState also says stoppe
   expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
 })
+
+// Role-gating (ADR 0040 §frontend): below readwrite, Start/Stop must be
+// disabled rather than hidden — cosmetic only, the server is the actual
+// enforcement point.
+test('disables Start when readOnly', () => {
+  render(
+    <GeneratorTile
+      {...baseProps}
+      generatorState={null}
+      generatorRealPowerW={0}
+      batterySocPercent={null}
+      batteryRatePercentPerHour={null}
+      readOnly
+    />,
+  )
+
+  expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled()
+})
+
+test('disables Stop when readOnly', () => {
+  render(
+    <GeneratorTile
+      {...baseProps}
+      generatorRealPowerW={3000}
+      batterySocPercent={null}
+      batteryRatePercentPerHour={null}
+      readOnly
+    />,
+  )
+
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled()
+})
+
+test('Start is enabled when not readOnly', () => {
+  render(
+    <GeneratorTile
+      {...baseProps}
+      generatorState={null}
+      generatorRealPowerW={0}
+      batterySocPercent={null}
+      batteryRatePercentPerHour={null}
+    />,
+  )
+
+  expect(screen.getByRole('button', { name: 'Start' })).not.toBeDisabled()
+})

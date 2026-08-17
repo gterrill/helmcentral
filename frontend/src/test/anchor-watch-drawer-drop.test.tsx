@@ -2,6 +2,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { App } from '../App'
 
+// This test renders the dashboard, not the auth gate. State the precondition
+// explicitly — an install with auth.mode:none — rather than depending on what
+// the real useAuth happens to return when its probe fails (ADR 0040).
+vi.mock('@/hooks/use-auth', () => ({
+  useAuth: () => ({
+    mode: 'none' as const,
+    user: null,
+    role: null,
+    loading: false,
+    error: null,
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
+}))
+
+
 const setAnchorHereMock = vi.fn()
 let anchorStateMock: 'none' | 'set' = 'none'
 

@@ -52,11 +52,13 @@ edit by hand.
 [Other ways to install](#other-ways-to-install), including Docker, are below.
 
 > [!WARNING]
-> **Helmcentral has no authentication**, its API can control connected
-> equipment (generator start/stop, CZone switching), and it sends
-> `Access-Control-Allow-Origin: *`. Run it on a trusted boat LAN only — never
-> port-forward it to the internet. For remote access, put it behind a VPN or an
-> authenticating reverse proxy.
+> **Authentication is opt-in and off by default** (`auth.mode: none`), so a
+> fresh install's API can control connected equipment (generator start/stop,
+> CZone switching) with no login. Run it on a trusted boat LAN only — never
+> port-forward it to the internet. Set `auth.mode: signalk` to require login
+> against your SignalK server's own accounts before opening this up further;
+> see [Configuration](#configuration). Either way, for remote access put it
+> behind a VPN or an authenticating reverse proxy.
 
 ---
 
@@ -171,6 +173,23 @@ AES-256-GCM ([ADR 0023](docs/adr/0023-encrypted-secrets-store.md)).
 
 > Back up `data/secrets.key`. Lose it and every stored credential is
 > unrecoverable.
+
+**Authentication is opt-in.** Set `auth.mode: signalk` in `settings.yaml` to
+require login before Helmcentral's API and dashboard respond to anything but
+`/api/health` and the login screen itself — Helmcentral has no user database
+of its own, it forwards the submitted credentials to your SignalK server's own
+`/signalk/v1/auth/login` and trusts SignalK's answer, mapping SignalK's
+`readonly`/`readwrite`/`admin` access levels onto matching Helmcentral
+permissions. This requires SignalK's own security to be enabled first —
+Helmcentral checks once at startup and refuses to boot into `auth.mode:
+signalk` against a SignalK server with security switched off, since "login
+required" against a server with no login to require can't be satisfied.
+`auth.mode` defaults to `none` (no authentication, this release's default) so
+upgrading an existing install never locks anyone out of a running boat; a
+locked-out operator can force `none` back on with the
+`HELMCENTRAL_AUTH_MODE=none` environment variable, since the Settings page
+that would otherwise fix it sits behind `admin`. Full design:
+[ADR 0040](docs/adr/0040-signalk-delegated-authentication.md).
 
 - **Full operator reference:** [docs/configuration.md](docs/configuration.md) —
   every environment variable, state path, and startup behaviour.
@@ -393,14 +412,17 @@ helmcentral/
 - **Startup is fail-fast.** If the secrets store or a plugin-override database
   can't be opened, the process exits rather than running degraded.
 
-Durable design decisions live in [docs/adr/](docs/adr/) — 38 of them, covering
+Durable design decisions live in [docs/adr/](docs/adr/) — 41 of them, covering
 why each non-obvious trade-off went the way it did.
 
 ## Roadmap
 
-- **Authentication and authorization.** Helmcentral is currently
-  unauthenticated and assumes a trusted LAN. This is the largest known gap; see
-  the warning under [Install](#install).
+- **`auth.mode: signalk` as the default.** Delegated login against your
+  SignalK server's own accounts is implemented and opt-in
+  ([ADR 0040](docs/adr/0040-signalk-delegated-authentication.md)), but stays
+  off by default for this release so upgrading an existing install can't lock
+  anyone out of a running boat. A later major version can flip the default
+  once operators have had a release to opt in deliberately.
 - **Collapse the client-side `dragging` state onto the server's answer.**
   `use-anchor-watch.ts` still derives its own for map and tile styling; the
   alarm no longer depends on it, but the two can disagree inside the hysteresis

@@ -279,4 +279,42 @@ describe('AutopilotTile', () => {
     expect(screen.getByRole('button', { name: /switch to wind mode/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /dodge 5° to port/i })).toBeDisabled()
   })
+
+  // Role-gating (ADR 0040 §frontend): below readwrite, every control is
+  // disabled even when the pilot advertises the action and steering data is
+  // fresh — cosmetic only, the server is the actual enforcement point.
+  describe('readOnly', () => {
+    it('disables engage/disengage, heading nudges, tack/gybe and dodge on an otherwise fully-capable pilot', () => {
+      const props = baseProps()
+      const dodgeable = { ...ENGAGED, availableActions: [...ENGAGED.availableActions, 'dodge'] }
+      render(<AutopilotTile {...props} state={dodgeable} readOnly />)
+
+      expect(screen.getByRole('button', { name: /hold to disengage/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '+1°' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /tack.*port/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /gybe.*starboard/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /dodge 5° to port/i })).toBeDisabled()
+    })
+
+    it('disables mode switching', () => {
+      const props = baseProps()
+      render(<AutopilotTile {...props} state={ENGAGED} readOnly />)
+
+      expect(screen.getByRole('button', { name: /switch to wind mode/i })).toBeDisabled()
+    })
+
+    it('does not grey the tile or claim steering data is stale — this is a permission gate, not a data problem', () => {
+      const props = baseProps()
+      render(<AutopilotTile {...props} state={ENGAGED} readOnly />)
+
+      expect(screen.queryByText(/stale/i)).not.toBeInTheDocument()
+    })
+
+    it('leaves controls enabled when readOnly is false (the default)', () => {
+      const props = baseProps()
+      render(<AutopilotTile {...props} state={ENGAGED} />)
+
+      expect(screen.getByRole('button', { name: /hold to disengage/i })).not.toBeDisabled()
+    })
+  })
 })

@@ -45,6 +45,16 @@ or your shell.
 | `SETTINGS_FILE` | `../settings.yaml` | Path to the settings file. The default assumes running from inside `backend/` during development. |
 | `VESSEL_STATUS` | `At Anchor` | Fallback status when SignalK reports none |
 | `HELMCENTRAL_MASTER_KEY` | *(auto-generated)* | Base64, exactly 32 bytes. Overrides the generated `data/secrets.key`. |
+| `CORS_ALLOWED_ORIGINS` | *(unset)* | Comma-separated extra origins allowed to call the API with credentials, on top of the server's own origin (always allowed). Only needed for a frontend hosted somewhere other than this binary. |
+
+### Authentication
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HELMCENTRAL_AUTH_MODE` | *(unset)* | Overrides `settings.yaml`'s `auth.mode` (`signalk` or `none`) in both directions. Documented recovery hatch for an operator locked out of `mode: signalk`, since the Settings page that would fix it sits behind `admin`. |
+| `SESSIONS_DB_PATH` | `data/sessions.sqlite` | Session store — see State paths below. |
+
+See [ADR 0040](adr/0040-signalk-delegated-authentication.md) for the full design.
 
 ### SignalK
 
@@ -72,6 +82,7 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 | `DASHBOARD_PAGES_FILE` | `data/dashboard-pages.json` |
 | `SECRETS_DB_PATH` | `data/secrets.sqlite` |
 | `SECRETS_KEY_PATH` | `data/secrets.key` |
+| `SESSIONS_DB_PATH` | `data/sessions.sqlite` |
 | `PLUGIN_OVERRIDES_DB_PATH` | `data/plugin_overrides.sqlite` |
 | `NEARBY_CONTACTS_DB_PATH` | `data/nearby-contacts.sqlite` |
 | `TILE_CACHE_PATH` | `data/tile-cache.sqlite` |
@@ -118,19 +129,38 @@ sudo systemctl restart helmcentral
 
 ## Startup behaviour
 
-Startup is deliberately fail-fast. If the secrets store, plugin-override
-store, tile cache or nearby-contacts store cannot be opened, the process exits
-rather than running degraded — usually a permissions problem on the state
-directory, or a `secrets.key` that no longer matches the store. Check
-`journalctl -u helmcentral -n 50`.
+Startup is deliberately fail-fast. If the secrets store, session store,
+plugin-override store, tile cache or nearby-contacts store cannot be opened,
+the process exits rather than running degraded — usually a permissions
+problem on the state directory, or a `secrets.key` that no longer matches the
+store. Check `journalctl -u helmcentral -n 50`.
+
+`auth.mode: signalk` adds one more fail-fast check: Helmcentral probes your
+SignalK server's security status once at startup and refuses to boot if
+SignalK's own security is disabled — "login required" against a server with
+no login to require can't be satisfied. Enable security on the SignalK server
+first, or set `auth.mode: none` (or `HELMCENTRAL_AUTH_MODE=none`) to boot
+without it.
 
 ## Security
 
-Helmcentral has **no authentication**, its CORS policy accepts any origin, and
-its API can control connected equipment (generator start/stop, CZone
-switching). It is designed for a trusted boat LAN.
+By default (`auth.mode: none`), Helmcentral has **no authentication** and its
+API can control connected equipment (generator start/stop, CZone switching).
+It is designed for a trusted boat LAN in this mode.
 
 - Do not port-forward it to the internet.
 - For remote access, use a VPN (Tailscale, WireGuard) or put it behind a
   reverse proxy that enforces authentication.
 - Anyone who can reach the port can change settings and operate equipment.
+
+Set `auth.mode: signalk` to require login via your SignalK server's own
+accounts before Helmcentral serves anything but the login screen — see
+[ADR 0040](adr/0040-signalk-delegated-authentication.md). This still assumes a
+trusted-enough network to reach the login screen itself: it does not replace
+a VPN or reverse proxy for genuine internet exposure, and every startup with
+`auth.mode: none` logs a warning naming the risk so it isn't easy to run this
+way by accident.
+
+CORS is an explicit allowlist (the server's own origin, plus optional
+`CORS_ALLOWED_ORIGINS`) rather than the wildcard earlier releases sent, so a
+credentialed cross-origin request only succeeds against an origin you named.

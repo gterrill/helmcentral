@@ -31,6 +31,15 @@ interface AutopilotTileProps {
   onClearDodge: () => void
   /** Current true heading in degrees, from the vessel-state stream (not the autopilot's own data). */
   headingTrueDeg?: number | null
+  /**
+   * Cosmetic-only role gate (ADR 0040 §frontend, backend `write` tier): the
+   * server is the actual enforcement point for every /api/autopilot/*
+   * command, this just avoids offering a control below readwrite that would
+   * only 403. Deliberately does not reuse `stale`'s greyscale/banner
+   * treatment — this is a permission gate, not a data-quality one, and the
+   * two must stay visually distinguishable.
+   */
+  readOnly?: boolean
 }
 
 function formatDegrees(value: number | null | undefined): string {
@@ -144,6 +153,7 @@ export const AutopilotTile = memo(function AutopilotTile({
   onDodge,
   onClearDodge,
   headingTrueDeg,
+  readOnly = false,
 }: AutopilotTileProps) {
   const modeBadge = state.present ? (state.mode ?? state.state ?? '').toUpperCase() : ''
 
@@ -175,6 +185,7 @@ export const AutopilotTile = memo(function AutopilotTile({
           onDodge={onDodge}
           onClearDodge={onClearDodge}
           headingTrueDeg={headingTrueDeg}
+          readOnly={readOnly}
         />
       )}
     </Tile>
@@ -196,17 +207,23 @@ function AutopilotControls({
   onDodge,
   onClearDodge,
   headingTrueDeg,
-}: Required<Pick<AutopilotTileProps, 'state' | 'pending' | 'error' | 'availableModes' | 'capabilityError' | 'onEngage' | 'onDisengage' | 'onTack' | 'onGybe' | 'onAdjustHeading' | 'onSetMode' | 'onDodge' | 'onClearDodge'>> & { headingTrueDeg?: number | null }) {
+  readOnly,
+}: Required<Pick<AutopilotTileProps, 'state' | 'pending' | 'error' | 'availableModes' | 'capabilityError' | 'onEngage' | 'onDisengage' | 'onTack' | 'onGybe' | 'onAdjustHeading' | 'onSetMode' | 'onDodge' | 'onClearDodge' | 'readOnly'>> & { headingTrueDeg?: number | null }) {
   const { engaged, target, stale, availableActions, mode } = state
 
   // Stale steering data can't be trusted: no command should go out while the
   // tile doesn't actually know the pilot's current state (ADR 0041).
   const locked = stale
+  // Every command is additionally disabled below readwrite (ADR 0040), but
+  // deliberately kept out of `locked` — that drives the stale-specific
+  // greyscale/banner treatment below, which must not fire for a permission
+  // gate that has nothing to do with data quality.
+  const commandsDisabled = locked || readOnly
   const has = (action: string) => availableActions.includes(action)
 
-  const engageDisabled = locked || pending.has(engaged ? 'disengage' : 'engage') || !has(engaged ? 'disengage' : 'engage')
-  const adjustDisabled = locked || !has('adjustHeading')
-  const dodgeDisabled = locked || !has('dodge')
+  const engageDisabled = commandsDisabled || pending.has(engaged ? 'disengage' : 'engage') || !has(engaged ? 'disengage' : 'engage')
+  const adjustDisabled = commandsDisabled || !has('adjustHeading')
+  const dodgeDisabled = commandsDisabled || !has('dodge')
 
   return (
     <div className={cn('mt-2 flex flex-col gap-3', stale && 'opacity-60 grayscale')}>
@@ -247,7 +264,7 @@ function AutopilotControls({
                 key={m}
                 label={m}
                 ariaLabel={active ? `${m} mode (active)` : `Hold to switch to ${m} mode`}
-                disabled={active || locked || pending.has(`mode-${m}`)}
+                disabled={active || commandsDisabled || pending.has(`mode-${m}`)}
                 onConfirm={() => onSetMode(m)}
                 className={cn(
                   'flex-1 px-2 py-1.5 text-[10px]',
@@ -312,7 +329,7 @@ function AutopilotControls({
               key={`${maneuver}-${side}`}
               label={side === 'port' ? `◄ ${maneuver}` : `${maneuver} ►`}
               ariaLabel={`Hold to ${maneuver} to ${side}`}
-              disabled={locked || !has(maneuver) || pending.has(`${maneuver}-${side}`)}
+              disabled={commandsDisabled || !has(maneuver) || pending.has(`${maneuver}-${side}`)}
               onConfirm={() => (maneuver === 'tack' ? onTack : onGybe)(side)}
               className="border border-border bg-card capitalize text-foreground hover:bg-muted"
             />

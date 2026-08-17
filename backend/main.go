@@ -140,10 +140,10 @@ func main() {
 	// Middleware
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
-	}))
+	// corsMiddleware (cors.go) replaces AllowOrigins: []string{"*"}: that
+	// combined with credentials is rejected by every browser anyway, and was
+	// half the README's security warning (docs/adr/0040).
+	e.Use(corsMiddleware())
 
 	// Encrypted secrets store. Must be opened and loaded into the process
 	// environment before any provider registration below, since SignalK and
@@ -157,6 +157,35 @@ func main() {
 	globalSecretsStore = ss
 	if err := globalSecretsStore.LoadIntoEnv(); err != nil {
 		log.Fatalf("secrets store: %v", err)
+	}
+
+	// Session store for SignalK delegated authentication (docs/adr/0040).
+	// Fail fast on open error, same reasoning as every other SQLite store
+	// here (secrets_store.go's precedent): a session store that silently
+	// doesn't persist would make every login look like it worked and then
+	// vanish.
+	sessions, err := newSessionStore(sessionsDBPath())
+	if err != nil {
+		log.Fatalf("session store: %v", err)
+	}
+
+	// auth.mode validation. mode:none (this release's default) only logs a
+	// warning naming the risk; mode:signalk additionally probes SignalK's
+	// security status once and fails fast if it's off, since "Helmcentral
+	// requires login" against a server with no login to require is an
+	// unsatisfiable combination that must not boot into a half-state.
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	authMode, err := checkAuthModeAtStartup(settingsPath)
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+	if authMode == authModeNone {
+		log.Printf("WARNING: auth.mode is 'none' — Helmcentral is running without authentication. " +
+			"Any device on this boat's network can read and control everything the API exposes, " +
+			"including starting the generator and switching CZone outputs. " +
+			"Set auth.mode: signalk in settings.yaml to require SignalK login (docs/adr/0040-signalk-delegated-authentication.md).")
+	} else {
+		log.Printf("auth.mode is 'signalk' — SignalK login required for read/write/admin API access.")
 	}
 
 	// Plugin allowlist override store (per-plugin allowed_hosts/
@@ -232,101 +261,10 @@ func main() {
 	// World imagery HTTP client for tile fetches (with timeout to prevent hangs).
 	worldImageryClient := newWorldImageryHTTPClient()
 
-	// Routes
-	e.GET("/api/health", healthCheck)
-	e.GET("/api/vessel-state", vesselState)
-	e.GET("/api/stream", telemetryStream)
-	e.GET("/api/signalk/paths", signalKPathsHandler)
-	e.GET("/api/alarms", alarmsHandler)
-	e.GET("/api/alarm-transports", getAlarmTransportsHandler)
-	e.POST("/api/alarm-transports", setAlarmTransportsHandler)
-	e.POST("/api/alarm-transports/test", testAlarmTransportsHandler)
-	e.POST("/api/alarms/:id/acknowledge", acknowledgeAlarmHandler)
-	e.GET("/api/alarms/log", alarmLogHandler)
-	e.GET("/api/alarm-rules", listAlarmRulesHandler)
-	e.POST("/api/alarm-rules", createAlarmRuleHandler)
-	e.PUT("/api/alarm-rules/:id", updateAlarmRuleHandler)
-	e.DELETE("/api/alarm-rules/:id", deleteAlarmRuleHandler)
-	e.GET("/api/electrical-state", electricalState)
-	e.GET("/api/solar-state", solarState)
-	e.GET("/api/tanks-state", tanksState)
-	e.GET("/api/nearby-vessels", nearbyVessels)
-	e.GET("/api/nearby-vessels/:key/sightings", getNearbyVesselSightingsHandler(globalNearbyContactStore))
-	e.GET("/api/weather-today", weatherToday)
-	e.GET("/api/weather-forecast", weatherForecast)
-	e.GET("/api/weather-providers", weatherProvidersHandler)
-	e.GET("/api/wave-forecast", waveForecast)
-	e.GET("/api/wave-providers", waveProvidersHandler)
-	e.GET("/api/forecast-warnings", forecastWarningsHandler)
-	e.GET("/api/forecast-warnings-providers", forecastWarningsProvidersHandler)
-	e.GET("/api/tide-today", tideToday)
-	e.GET("/api/tide-providers", tideProvidersHandler)
-	e.GET("/api/tide-stations", tideStationsHandler)
-	e.GET("/api/tide-chart", tideChartHandler)
-	e.GET("/api/tide-nearest", tideNearestHandler)
-	e.GET("/api/place-name", placeName)
-	e.GET("/api/settings", getSettingsHandler)
-	e.POST("/api/settings", updateSettingsHandler)
-	e.GET("/api/settings/signalk", getSignalKSettingsHandler)
-	// Probe only — persisting the address is POST /api/settings' job alone
-	// (ADR 0028). There is deliberately no POST /api/settings/signalk.
-	e.POST("/api/settings/signalk/test", testSignalKConnectionHandler)
-	// Also a pure read: sweeps the local network and reports what it found.
-	// Accepting a result saves through POST /api/settings like any other write.
-	e.POST("/api/signalk/discover", discoverSignalKHandler)
-	e.GET("/api/settings/secrets", getSecretsSettingsHandler)
-	e.POST("/api/settings/secrets", updateSecretsSettingsHandler)
-	e.POST("/api/settings/secrets/import-env", importEnvSecretsHandler)
-	e.GET("/api/plugins/:type/:id", getPluginInfoHandler)
-	e.POST("/api/plugins/:type/:id/overrides", postPluginOverridesHandler)
-	e.DELETE("/api/plugins/:type/:id/overrides", deletePluginOverridesHandler)
-	e.GET("/api/anchor-watch", getAnchorWatch)
-	e.POST("/api/anchor-watch", setAnchorWatch)
-	e.PATCH("/api/anchor-watch", patchAnchorWatch)
-	e.DELETE("/api/anchor-watch", deleteAnchorWatch)
-	e.GET("/api/anchor-watch/trails/self", getSelfTrailHandler)
-	e.GET("/api/anchor-watch/trails/ais/:id", getAISTrailHandler)
-	e.GET("/api/anchor-watch/trails/ais", getAllAISTrailsHandler)
-	e.GET("/api/dashboard-pages", listDashboardPagesHandler)
-	e.POST("/api/dashboard-pages", createDashboardPageHandler)
-	e.GET("/api/dashboard-pages/:id", getDashboardPageHandler)
-	e.PATCH("/api/dashboard-pages/:id", patchDashboardPageHandler)
-	e.DELETE("/api/dashboard-pages/:id", deleteDashboardPageHandler)
-	e.GET("/api/routes", listRoutesHandler)
-	e.POST("/api/routes", createRouteHandler)
-	e.GET("/api/routes/:id", getRouteHandler)
-	e.PATCH("/api/routes/:id", patchRouteHandler)
-	e.DELETE("/api/routes/:id", deleteRouteHandler)
-	e.POST("/api/routes/:id/activate", activateRouteHandler)
-	e.POST("/api/routes/deactivate", deactivateRouteHandler)
-	e.GET("/api/routes/active", getActiveRouteHandler)
-	e.GET("/api/tracks", getTracksHandler)
-	e.GET("/api/tracks/motoring", getMotoringTrackHandler)
-	e.GET("/api/depth-trend", depthTrend)
-	e.GET("/api/czone/switches", getCZoneSwitchesHandler)
-	e.PUT("/api/czone/switches/:id/state", putCZoneSwitchStateHandler)
-	e.POST("/api/generator/start", postGeneratorStartHandler)
-	e.POST("/api/generator/stop", postGeneratorStopHandler)
-	e.GET("/api/autopilot", getAutopilotHandler)
-	e.POST("/api/autopilot/engage", postAutopilotEngageHandler)
-	e.POST("/api/autopilot/disengage", postAutopilotDisengageHandler)
-	e.PUT("/api/autopilot/state", putAutopilotStateHandler)
-	e.PUT("/api/autopilot/mode", putAutopilotModeHandler)
-	e.PUT("/api/autopilot/target", putAutopilotTargetHandler)
-	e.PUT("/api/autopilot/target/adjust", putAutopilotTargetAdjustHandler)
-	e.POST("/api/autopilot/tack/:side", postAutopilotTackHandler)
-	e.POST("/api/autopilot/gybe/:side", postAutopilotGybeHandler)
-	e.PUT("/api/autopilot/dodge", putAutopilotDodgeHandler)
-	e.DELETE("/api/autopilot/dodge", deleteAutopilotDodgeHandler)
-	e.GET("/api/world-imagery/:z/:x/:y", proxyWorldImageryTileHandler(globalTileCache, worldImageryClient))
-	e.POST("/api/world-imagery/prefetch", prefetchWorldImageryHandler(globalTileCache, worldImageryClient))
-	e.GET("/api/world-imagery/prefetch/:jobId", prefetchStatusHandler())
-	e.DELETE("/api/world-imagery/cache", deleteWorldImageryCacheHandler(globalTileCache))
-	e.GET("/api/gshhg-coastline", gshhgCoastlineHandler)
-	e.POST("/api/sat-charts", uploadSatChartHandler)
-	e.GET("/api/sat-charts", listSatChartsHandler)
-	e.DELETE("/api/sat-charts/:id", deleteSatChartHandler)
-	e.GET("/api/sat-charts/:id/:z/:x/:y", satChartTileHandler)
+	// Every /api route, tiered per docs/adr/0040 §3 and registered through
+	// registerAPIRoutes — the one place a route reaches Echo at all. See
+	// buildAPIRoutes below for the full table and its tier assignments.
+	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, worldImageryClient))
 
 	registerStaticHandler(e)
 
@@ -347,11 +285,140 @@ func main() {
 
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)
+	// Sweeps expired sessions once at startup and hourly thereafter
+	// (docs/adr/0040). Runs regardless of auth.mode — a mode:none boat can
+	// still have leftover session rows from a previous mode:signalk run, and
+	// this is cheap to run unconditionally.
+	go startSessionSweeper(streamCtx, sessions, sessionSweepInterval)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("Starting server on %s", addr)
 	if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("error starting server: %v", err)
+	}
+}
+
+// buildAPIRoutes is the single source of truth for every /api endpoint and
+// its auth tier (docs/adr/0040 §3). It is data, not a sequence of e.GET/
+// e.POST calls: a route registered in the wrong tier here is a visible
+// mistake in this table, whereas a scattered per-call tag would silently
+// default to open if forgotten. main() is the only caller in production;
+// tests call it directly to build and register the exact same table
+// (auth_middleware_test.go's route-coverage walk, most notably).
+//
+// worldImageryClient is passed in because it's a plain local value in
+// main() (not a package-level global like globalTileCache/
+// globalNearbyContactStore, which the five closures below read directly).
+func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []apiRoute {
+	return []apiRoute{
+		// ── public: no session required ─────────────────────────────────
+		{http.MethodGet, "/api/health", tierPublic, healthCheck},
+		{http.MethodPost, "/api/auth/login", tierPublic, loginHandler(sessions)},
+		{http.MethodPost, "/api/auth/logout", tierPublic, logoutHandler(sessions)},
+		{http.MethodGet, "/api/auth/me", tierPublic, meHandler(sessions)},
+		{http.MethodGet, "/api/auth/mode", tierPublic, authModeHandler},
+
+		// ── read: readonly and above ────────────────────────────────────
+		{http.MethodGet, "/api/vessel-state", tierRead, vesselState},
+		{http.MethodGet, "/api/stream", tierRead, telemetryStream},
+		{http.MethodGet, "/api/signalk/paths", tierRead, signalKPathsHandler},
+		{http.MethodGet, "/api/alarms", tierRead, alarmsHandler},
+		{http.MethodGet, "/api/alarms/log", tierRead, alarmLogHandler},
+		{http.MethodGet, "/api/alarm-rules", tierRead, listAlarmRulesHandler},
+		{http.MethodGet, "/api/electrical-state", tierRead, electricalState},
+		{http.MethodGet, "/api/solar-state", tierRead, solarState},
+		{http.MethodGet, "/api/tanks-state", tierRead, tanksState},
+		{http.MethodGet, "/api/nearby-vessels", tierRead, nearbyVessels},
+		{http.MethodGet, "/api/nearby-vessels/:key/sightings", tierRead, getNearbyVesselSightingsHandler(globalNearbyContactStore)},
+		{http.MethodGet, "/api/weather-today", tierRead, weatherToday},
+		{http.MethodGet, "/api/weather-forecast", tierRead, weatherForecast},
+		{http.MethodGet, "/api/weather-providers", tierRead, weatherProvidersHandler},
+		{http.MethodGet, "/api/wave-forecast", tierRead, waveForecast},
+		{http.MethodGet, "/api/wave-providers", tierRead, waveProvidersHandler},
+		{http.MethodGet, "/api/forecast-warnings", tierRead, forecastWarningsHandler},
+		{http.MethodGet, "/api/forecast-warnings-providers", tierRead, forecastWarningsProvidersHandler},
+		{http.MethodGet, "/api/tide-today", tierRead, tideToday},
+		{http.MethodGet, "/api/tide-providers", tierRead, tideProvidersHandler},
+		{http.MethodGet, "/api/tide-stations", tierRead, tideStationsHandler},
+		{http.MethodGet, "/api/tide-chart", tierRead, tideChartHandler},
+		{http.MethodGet, "/api/tide-nearest", tierRead, tideNearestHandler},
+		{http.MethodGet, "/api/place-name", tierRead, placeName},
+		{http.MethodGet, "/api/anchor-watch", tierRead, getAnchorWatch},
+		{http.MethodGet, "/api/anchor-watch/trails/self", tierRead, getSelfTrailHandler},
+		{http.MethodGet, "/api/anchor-watch/trails/ais/:id", tierRead, getAISTrailHandler},
+		{http.MethodGet, "/api/anchor-watch/trails/ais", tierRead, getAllAISTrailsHandler},
+		{http.MethodGet, "/api/dashboard-pages", tierRead, listDashboardPagesHandler},
+		{http.MethodGet, "/api/dashboard-pages/:id", tierRead, getDashboardPageHandler},
+		{http.MethodGet, "/api/routes", tierRead, listRoutesHandler},
+		{http.MethodGet, "/api/routes/:id", tierRead, getRouteHandler},
+		{http.MethodGet, "/api/routes/active", tierRead, getActiveRouteHandler},
+		{http.MethodGet, "/api/tracks", tierRead, getTracksHandler},
+		{http.MethodGet, "/api/tracks/motoring", tierRead, getMotoringTrackHandler},
+		{http.MethodGet, "/api/depth-trend", tierRead, depthTrend},
+		{http.MethodGet, "/api/czone/switches", tierRead, getCZoneSwitchesHandler},
+		{http.MethodGet, "/api/autopilot", tierRead, getAutopilotHandler},
+		{http.MethodGet, "/api/world-imagery/:z/:x/:y", tierRead, proxyWorldImageryTileHandler(globalTileCache, worldImageryClient)},
+		{http.MethodGet, "/api/world-imagery/prefetch/:jobId", tierRead, prefetchStatusHandler()},
+		{http.MethodGet, "/api/gshhg-coastline", tierRead, gshhgCoastlineHandler},
+		{http.MethodGet, "/api/sat-charts", tierRead, listSatChartsHandler},
+		{http.MethodGet, "/api/sat-charts/:id/:z/:x/:y", tierRead, satChartTileHandler},
+
+		// ── write: readwrite and above — commands equipment or changes
+		//           stored state that isn't itself a security setting ────
+		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
+		{http.MethodPost, "/api/alarm-rules", tierWrite, createAlarmRuleHandler},
+		{http.MethodPut, "/api/alarm-rules/:id", tierWrite, updateAlarmRuleHandler},
+		{http.MethodDelete, "/api/alarm-rules/:id", tierWrite, deleteAlarmRuleHandler},
+		{http.MethodPost, "/api/anchor-watch", tierWrite, setAnchorWatch},
+		{http.MethodPatch, "/api/anchor-watch", tierWrite, patchAnchorWatch},
+		{http.MethodDelete, "/api/anchor-watch", tierWrite, deleteAnchorWatch},
+		{http.MethodPost, "/api/dashboard-pages", tierWrite, createDashboardPageHandler},
+		{http.MethodPatch, "/api/dashboard-pages/:id", tierWrite, patchDashboardPageHandler},
+		{http.MethodDelete, "/api/dashboard-pages/:id", tierWrite, deleteDashboardPageHandler},
+		{http.MethodPost, "/api/routes", tierWrite, createRouteHandler},
+		{http.MethodPatch, "/api/routes/:id", tierWrite, patchRouteHandler},
+		{http.MethodDelete, "/api/routes/:id", tierWrite, deleteRouteHandler},
+		{http.MethodPost, "/api/routes/:id/activate", tierWrite, activateRouteHandler},
+		{http.MethodPost, "/api/routes/deactivate", tierWrite, deactivateRouteHandler},
+		{http.MethodPut, "/api/czone/switches/:id/state", tierWrite, putCZoneSwitchStateHandler},
+		{http.MethodPost, "/api/generator/start", tierWrite, postGeneratorStartHandler},
+		{http.MethodPost, "/api/generator/stop", tierWrite, postGeneratorStopHandler},
+		{http.MethodPost, "/api/autopilot/engage", tierWrite, postAutopilotEngageHandler},
+		{http.MethodPost, "/api/autopilot/disengage", tierWrite, postAutopilotDisengageHandler},
+		{http.MethodPut, "/api/autopilot/state", tierWrite, putAutopilotStateHandler},
+		{http.MethodPut, "/api/autopilot/mode", tierWrite, putAutopilotModeHandler},
+		{http.MethodPut, "/api/autopilot/target", tierWrite, putAutopilotTargetHandler},
+		{http.MethodPut, "/api/autopilot/target/adjust", tierWrite, putAutopilotTargetAdjustHandler},
+		{http.MethodPost, "/api/autopilot/tack/:side", tierWrite, postAutopilotTackHandler},
+		{http.MethodPost, "/api/autopilot/gybe/:side", tierWrite, postAutopilotGybeHandler},
+		{http.MethodPut, "/api/autopilot/dodge", tierWrite, putAutopilotDodgeHandler},
+		{http.MethodDelete, "/api/autopilot/dodge", tierWrite, deleteAutopilotDodgeHandler},
+		{http.MethodPost, "/api/world-imagery/prefetch", tierWrite, prefetchWorldImageryHandler(globalTileCache, worldImageryClient)},
+		{http.MethodDelete, "/api/world-imagery/cache", tierWrite, deleteWorldImageryCacheHandler(globalTileCache)},
+		{http.MethodPost, "/api/sat-charts", tierWrite, uploadSatChartHandler},
+		{http.MethodDelete, "/api/sat-charts/:id", tierWrite, deleteSatChartHandler},
+
+		// ── admin: settings, secrets, plugin config, alarm transports ───
+		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
+		{http.MethodPost, "/api/settings", tierAdmin, updateSettingsHandler},
+		{http.MethodGet, "/api/settings/signalk", tierAdmin, getSignalKSettingsHandler},
+		// Probe only — persisting the address is POST /api/settings' job
+		// alone (ADR 0028). There is deliberately no POST /api/settings/signalk.
+		{http.MethodPost, "/api/settings/signalk/test", tierAdmin, testSignalKConnectionHandler},
+		// Also a pure read: sweeps the local network and reports what it
+		// found. Accepting a result saves through POST /api/settings like
+		// any other write. Gated admin, alongside the rest of the settings
+		// workflow it belongs to.
+		{http.MethodPost, "/api/signalk/discover", tierAdmin, discoverSignalKHandler},
+		{http.MethodGet, "/api/settings/secrets", tierAdmin, getSecretsSettingsHandler},
+		{http.MethodPost, "/api/settings/secrets", tierAdmin, updateSecretsSettingsHandler},
+		{http.MethodPost, "/api/settings/secrets/import-env", tierAdmin, importEnvSecretsHandler},
+		{http.MethodGet, "/api/plugins/:type/:id", tierAdmin, getPluginInfoHandler},
+		{http.MethodPost, "/api/plugins/:type/:id/overrides", tierAdmin, postPluginOverridesHandler},
+		{http.MethodDelete, "/api/plugins/:type/:id/overrides", tierAdmin, deletePluginOverridesHandler},
+		{http.MethodGet, "/api/alarm-transports", tierAdmin, getAlarmTransportsHandler},
+		{http.MethodPost, "/api/alarm-transports", tierAdmin, setAlarmTransportsHandler},
+		{http.MethodPost, "/api/alarm-transports/test", tierAdmin, testAlarmTransportsHandler},
 	}
 }
 
