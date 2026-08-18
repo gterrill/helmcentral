@@ -26,6 +26,12 @@
     --radius: 0.5rem;
     --gauge-primary: 39 100% 39%;
     --gauge-secondary: 175 42% 32%;
+    --chart-wind: 226 72% 53%;
+    --chart-gust: 38 92% 50%;
+    --chart-wave: 173 80% 40%;
+    --chart-swell: 258 90% 66%;
+    --chart-temp: 32 95% 44%;
+    --chart-grid: 214 20% 39%;
     --font-display: 'Geist Mono';
     --font-sans: 'Geist Sans';
     --sidebar-background: var(--card);
@@ -60,6 +66,12 @@
     --ring: 226 52% 50%;
     --gauge-primary: 39 90% 52%;
     --gauge-secondary: 175 50% 45%;
+    --chart-wind: 226 85% 68%;
+    --chart-gust: 38 95% 64%;
+    --chart-wave: 173 70% 55%;
+    --chart-swell: 258 90% 76%;
+    --chart-temp: 32 90% 60%;
+    --chart-grid: 214 15% 65%;
     --sidebar-background: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-primary: var(--primary);

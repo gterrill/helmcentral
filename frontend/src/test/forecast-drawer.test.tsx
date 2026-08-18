@@ -272,8 +272,8 @@ describe('ForecastDrawer refresh age', () => {
 
     const chart = screen.getByTestId('forecast-wind-chart')
     const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
-    const speedLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(37,99,235,0.95)')
-    const gustLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(245,158,11,0.75)')
+    const speedLine = curves.find((path) => path.getAttribute('stroke') === 'hsl(var(--chart-wind) / 0.95)')
+    const gustLine = curves.find((path) => path.getAttribute('stroke') === 'hsl(var(--chart-gust) / 0.75)')
     expect(speedLine).toBeTruthy()
     expect(gustLine).toBeTruthy()
     expect(gustLine).toHaveAttribute('stroke-dasharray', '4 3')
@@ -293,7 +293,7 @@ describe('ForecastDrawer refresh age', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
     const chart = screen.getByTestId('forecast-wind-chart')
-    const curve = chart.querySelector('path.recharts-curve[stroke="rgba(37,99,235,0.95)"]')
+    const curve = chart.querySelector('path.recharts-curve[stroke="hsl(var(--chart-wind) / 0.95)"]')
     expect(curve).toBeTruthy()
     const d = curve!.getAttribute('d') ?? ''
     const firstPoint = /^M(-?[\d.]+),(-?[\d.]+)/.exec(d)
@@ -313,6 +313,23 @@ describe('ForecastDrawer refresh age', () => {
 
     expect(Number(xStr)).toBeCloseTo(hourlyChartLeft, 0)
     expect(Number(yStr)).toBeCloseTo(windYFor(10), 0)
+  })
+
+  // Task 1 (visual polish): every forecast-drawer series should render as a
+  // smooth monotone curve, not a linear/straight-segment polyline - d3-shape's
+  // monotone interpolator (what recharts' type="monotone" uses) emits cubic
+  // bezier "C" commands between points, whereas type="linear" only ever emits
+  // "M"/"L" commands. Checking for a "C" command in the rendered `d` is a
+  // reliable way to distinguish the two without depending on recharts'
+  // internals - this fails under type="linear" and passes under "monotone".
+  it('renders the windSpeed curve as a smooth (monotone) curve, not straight segments', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wind-chart')
+    const curve = chart.querySelector('path.recharts-curve[stroke="hsl(var(--chart-wind) / 0.95)"]')
+    expect(curve).toBeTruthy()
+    const d = curve!.getAttribute('d') ?? ''
+    expect(d).toMatch(/C/)
   })
 
   // Regression test for hourlyXFor's index/count-based bug: it computed pixel-x
@@ -382,9 +399,9 @@ describe('ForecastDrawer refresh age', () => {
 
     const chart = screen.getByTestId('forecast-wave-chart')
     const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
-    const waveLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(20,184,166,0.9)')
-    const windWaveLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(245,158,11,0.85)')
-    const swellLine = curves.find((path) => path.getAttribute('stroke') === 'rgba(139,92,246,0.85)')
+    const waveLine = curves.find((path) => path.getAttribute('stroke') === 'hsl(var(--chart-wave) / 0.9)')
+    const windWaveLine = curves.find((path) => path.getAttribute('stroke') === 'hsl(var(--chart-gust) / 0.85)')
+    const swellLine = curves.find((path) => path.getAttribute('stroke') === 'hsl(var(--chart-swell) / 0.85)')
     expect(waveLine).toBeTruthy()
     expect(windWaveLine).toBeTruthy()
     expect(swellLine).toBeTruthy()
@@ -596,6 +613,142 @@ describe('ForecastDrawer refresh age', () => {
     const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
     const gradientStroked = curves.some((path) => (path.getAttribute('stroke') ?? '').startsWith('url(#'))
     expect(gradientStroked).toBe(true)
+  })
+
+  // Task 3 (visual polish): the Wind/Wave/Temperature Area fills should fade
+  // from a visible tint at the curve down to nearly transparent at the
+  // baseline, instead of a single flat semi-transparent fill - implemented as
+  // a <linearGradient>, so the rendered <Area>'s fill path should reference
+  // one via url(#...) rather than a literal color.
+  it('fills the wind Area with a vertical gradient instead of a flat color', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wind-chart')
+    const areaFill = chart.querySelector('path.recharts-area-area')
+    expect(areaFill).toBeTruthy()
+    expect(areaFill!.getAttribute('fill')).toMatch(/^url\(#/)
+  })
+
+  it('fills the wave Area with a vertical gradient instead of a flat color', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wave-chart')
+    const areaFill = chart.querySelector('path.recharts-area-area')
+    expect(areaFill).toBeTruthy()
+    expect(areaFill!.getAttribute('fill')).toMatch(/^url\(#/)
+  })
+
+  it('fills the temperature Area with a vertical gradient instead of a flat color', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-cloud-chart')
+    const areaFill = chart.querySelector('path.recharts-area-area')
+    expect(areaFill).toBeTruthy()
+    expect(areaFill!.getAttribute('fill')).toMatch(/^url\(#/)
+  })
+
+  // Task 4 (visual polish): all five forecast charts should share the same
+  // faint horizontal-gridline convention (rather than CartesianGrid appearing
+  // on only the Cloud & Temperature chart, and only as vertical dividers).
+  it.each([
+    ['forecast-wind-chart'],
+    ['forecast-wave-chart'],
+    ['forecast-precip-chart'],
+    ['forecast-cloud-chart'],
+  ])('renders faint horizontal gridlines using the chart-grid token on %s', (testId) => {
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId(testId)
+    const horizontalLines = Array.from(chart.querySelectorAll('.recharts-cartesian-grid-horizontal line'))
+    expect(horizontalLines.length).toBeGreaterThan(0)
+    expect(horizontalLines.every((line) => line.getAttribute('stroke') === 'hsl(var(--chart-grid) / 0.12)')).toBe(true)
+
+    // Cloud & Temperature used to render vertical dividers instead - confirm
+    // it (and every other chart) no longer renders any vertical grid lines,
+    // now that the whole family shares the horizontal-only convention.
+    const verticalLines = Array.from(chart.querySelectorAll('.recharts-cartesian-grid-vertical line'))
+    expect(verticalLines.length).toBe(0)
+  })
+
+  // Task 5 (visual polish): the wind/wave/precip legends used to fake a solid
+  // vs. dashed line with text characters (an em-dash / hyphens), which don't
+  // track the real series' color or strokeDasharray. They should now draw a
+  // real inline <svg><line> swatch instead.
+  it('draws real solid/dashed line swatches in the wind legend, not text-character fakes', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const legend = screen.getByTestId('forecast-wind-legend')
+    expect(legend.textContent).not.toMatch(/[—-] ?- ?Gusts|— Wind/)
+
+    const swatchLines = Array.from(legend.querySelectorAll('svg line'))
+    const windSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-wind) / 0.95)')
+    const gustSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-gust) / 0.75)')
+    expect(windSwatch).toBeTruthy()
+    expect(windSwatch).not.toHaveAttribute('stroke-dasharray')
+    expect(gustSwatch).toBeTruthy()
+    expect(gustSwatch).toHaveAttribute('stroke-dasharray', '4 3')
+    expect(legend).toHaveTextContent('barbs show direction the wind is coming from')
+  })
+
+  it('draws real solid/dashed line swatches in the wave legend, not text-character fakes', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+
+    const legend = screen.getByTestId('forecast-wave-legend')
+    const swatchLines = Array.from(legend.querySelectorAll('svg line'))
+    const waveSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-wave) / 0.9)')
+    const chopSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-gust) / 0.85)')
+    const swellSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-swell) / 0.85)')
+    expect(waveSwatch).toBeTruthy()
+    expect(waveSwatch).not.toHaveAttribute('stroke-dasharray')
+    expect(chopSwatch).toBeTruthy()
+    expect(chopSwatch).toHaveAttribute('stroke-dasharray', '4 3')
+    expect(swellSwatch).toBeTruthy()
+    expect(swellSwatch).toHaveAttribute('stroke-dasharray', '2 3')
+  })
+
+  it('draws a real bar swatch and a real line swatch in the precipitation legend, not text-character fakes', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const legend = screen.getByTestId('forecast-precip-legend')
+    expect(legend.textContent).not.toMatch(/▮|— Chance/)
+
+    expect(legend.querySelector('svg rect')).toBeTruthy()
+    const swatchLines = Array.from(legend.querySelectorAll('svg line'))
+    const chanceSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-gust) / 0.85)')
+    expect(chanceSwatch).toBeTruthy()
+  })
+
+  // Task 6 (visual polish): the topmost Y-axis tick on the Wind/Wave/
+  // Precipitation charts used to append its unit only on that one tick (e.g.
+  // "40 kts"), which can run past the plot's left gutter at fontSize 10. The
+  // unit now lives in the chart's <h4> header instead, and every tick
+  // (including the topmost) renders as a bare number.
+  it('moves the wind chart max-tick unit into the header instead of the tick label', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByText('Wind (kts)')).toBeInTheDocument()
+    const chart = screen.getByTestId('forecast-wind-chart')
+    // windDataMax=38 > 30 -> windMax rounds up to 40 (same fixture math as
+    // the pixel-exactness test above).
+    const topTick = Array.from(chart.querySelectorAll('text')).find((el) => el.textContent === '40')
+    expect(topTick).toBeTruthy()
+    expect(Array.from(chart.querySelectorAll('text')).some((el) => /kts/.test(el.textContent ?? ''))).toBe(false)
+  })
+
+  it('moves the wave chart max-tick unit into the header instead of the tick label', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByText('Wave (m)')).toBeInTheDocument()
+    const chart = screen.getByTestId('forecast-wave-chart')
+    expect(Array.from(chart.querySelectorAll('text')).some((el) => /\bm\b/.test(el.textContent ?? ''))).toBe(false)
+  })
+
+  it('moves the precipitation chart max-tick unit into the header instead of the tick label', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByText('Precipitation (mm/hr)')).toBeInTheDocument()
+    const chart = screen.getByTestId('forecast-precip-chart')
+    expect(Array.from(chart.querySelectorAll('text')).some((el) => /mm\/hr/.test(el.textContent ?? ''))).toBe(false)
   })
 
   it('still renders the cloud & temperature chart when a day has no UV forecast', () => {

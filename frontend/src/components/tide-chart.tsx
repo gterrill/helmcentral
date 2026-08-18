@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 
-import { Area, ComposedChart, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
+import { Area, CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
 
 import { ChartTooltipBubble, ChartTooltipMarker, ChartUnavailableMessage } from '@/components/chart-tooltip'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
@@ -34,6 +34,35 @@ function derivePhaseFromTidalPhase(tidalPhase: string | undefined): 'spring' | '
   if (tidalPhase.startsWith('springs')) return 'spring'
   if (tidalPhase.startsWith('neaps')) return 'neap'
   return null
+}
+
+// A small inline swatch used by the legend below, drawing an actual stroked
+// <line> in the series' real color/width/dasharray - replacing the old fake
+// swatches that stood a plain em-dash character in for the solid tide curve
+// and a "┊" character in for the dashed "now" marker line, neither of which
+// tracked the real stroke or dasharray. `kind="vertical"` mirrors the
+// vertical dashed ReferenceLine drawn for the "now" marker; `kind="line"`
+// (the default) mirrors every other horizontal series line.
+function LegendSwatch({
+  color,
+  strokeWidth = 2,
+  dasharray,
+  kind = 'line',
+}: {
+  color: string
+  strokeWidth?: number
+  dasharray?: string
+  kind?: 'line' | 'vertical'
+}) {
+  return (
+    <svg width="14" height="8" viewBox="0 0 14 8" className="inline-block align-middle" aria-hidden="true">
+      {kind === 'vertical' ? (
+        <line x1="7" y1="0" x2="7" y2="8" stroke={color} strokeWidth={strokeWidth} strokeDasharray={dasharray} strokeLinecap="round" />
+      ) : (
+        <line x1="0" y1="4" x2="14" y2="4" stroke={color} strokeWidth={strokeWidth} strokeDasharray={dasharray} strokeLinecap="round" />
+      )}
+    </svg>
+  )
 }
 
 // Amber for spring (bigger swings), teal for neap (calmer) - matching the
@@ -238,27 +267,28 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
               off by 30-500px) and passes once this is added. */}
           <XAxis dataKey="t" type="number" domain={[chartStartMs, chartEndMs]} allowDataOverflow hide />
           <YAxis dataKey="h" type="number" domain={[yMin, yMax]} hide />
+          <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
           <Area
             dataKey="h"
             type="linear"
             isAnimationActive={false}
             dot={false}
             stroke="none"
-            fill="rgba(20,184,166,0.12)"
+            fill="hsl(var(--chart-wave) / 0.12)"
           />
           <Line
             dataKey="h"
             type="linear"
             isAnimationActive={false}
             dot={false}
-            stroke="rgba(20,184,166,0.9)"
+            stroke="hsl(var(--chart-wave) / 0.9)"
             strokeWidth={2.4}
           />
 
           {zeroInRange && (
             <ReferenceLine
               segment={[{ x: chartStartMs, y: 0 }, { x: chartEndMs, y: 0 }]}
-              stroke="rgba(80,98,118,0.2)"
+              stroke="hsl(var(--chart-grid) / 0.2)"
               strokeWidth={1}
               strokeDasharray="3 3"
             />
@@ -272,7 +302,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
                 x={t}
                 y={toDisplay(extreme.heightM)}
                 r={3}
-                fill={extreme.high ? 'rgba(20,184,166,0.95)' : 'rgba(245,158,11,0.95)'}
+                fill={extreme.high ? 'hsl(var(--chart-wave) / 0.95)' : 'hsl(var(--chart-gust) / 0.95)'}
                 stroke="none"
                 isFront
               />
@@ -283,7 +313,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
             <>
               <ReferenceLine
                 segment={[{ x: nowMs, y: yMin }, { x: nowMs, y: yMax }]}
-                stroke="rgba(199,137,0,0.7)"
+                stroke="hsl(var(--gauge-primary) / 0.7)"
                 strokeWidth={1.5}
                 strokeDasharray="4 3"
               />
@@ -304,11 +334,11 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           <text x={6} y={CHART_TOP + 4} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMax.toFixed(1)} {unit}</text>
           <text x={6} y={CHART_BOTTOM} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMin.toFixed(1)} {unit}</text>
 
-          <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+          <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
           {dayTicks.map((tick) => (
             <g key={tick.label + tick.x}>
-              <line x1={tick.x} y1={CHART_TOP} x2={tick.x} y2={CHART_BOTTOM} stroke="rgba(80,98,118,0.12)" strokeWidth="1" />
+              <line x1={tick.x} y1={CHART_TOP} x2={tick.x} y2={CHART_BOTTOM} stroke="hsl(var(--chart-grid) / 0.12)" strokeWidth="1" />
               <text x={tick.x} y={CHART_BOTTOM + 28} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{tick.label}</text>
             </g>
           ))}
@@ -337,14 +367,14 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
             <ChartTooltipMarker
               x={xFor(tideTooltipEntry.t)}
               y={yFor(tideTooltipEntry.h)}
-              color="rgba(20,184,166,0.9)"
+              color="hsl(var(--chart-wave) / 0.9)"
             />
           )}
         </svg>
       </div>
 
-      <p className="mt-1 text-xs text-muted-foreground">
-        <span className="text-gauge-secondary">— Tide height ({unit})</span> · <span className="text-amber-600">●</span> low · <span className="text-gauge-secondary">●</span> high · <span style={{ color: 'rgba(199,137,0,0.95)' }}>┊</span> now
+      <p data-testid="forecast-tide-legend" className="mt-1 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Tide height ({unit})</span> · <span className="text-amber-600">●</span> low · <span className="text-gauge-secondary">●</span> high · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="vertical" color="hsl(var(--gauge-primary) / 0.7)" strokeWidth={1.5} dasharray="4 3" /> now</span>
       </p>
 
     </div>

@@ -137,7 +137,7 @@ function getCloudChartIcon(condition: string, isDaylight: boolean, size: number)
 function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; speedKts: number; directionDeg: number }) {
   if (speedKts < 0 || directionDeg < 0) return null
 
-  const color = 'rgba(37,99,235,0.85)'
+  const color = 'hsl(var(--chart-wind) / 0.85)'
 
   if (speedKts < 3) {
     return <circle data-testid="forecast-wind-barb" cx={cx} cy={cy} r="2.5" fill="none" stroke={color} strokeWidth="1.2" />
@@ -207,7 +207,7 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
 function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; directionDeg: number }) {
   if (directionDeg < 0) return null
 
-  const color = 'rgba(20,184,166,0.85)'
+  const color = 'hsl(var(--chart-wave) / 0.85)'
   const angleRad = ((directionDeg + 180) * Math.PI) / 180
   const dirX = Math.sin(angleRad)
   const dirY = -Math.cos(angleRad)
@@ -232,6 +232,33 @@ function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; 
       <line x1={tailX} y1={tailY} x2={tipX} y2={tipY} stroke={color} strokeWidth="1.4" strokeLinecap="round" />
       <polygon points={`${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`} fill={color} />
     </g>
+  )
+}
+
+// A small inline swatch used by the chart legends below, drawing an actual
+// stroked <line> (or, for the precipitation bar series, a filled <rect>) in
+// the series' real color/width/dasharray - replacing the old fake swatches
+// that stood in an em-dash for a solid line and two hyphens for a dashed one
+// without tracking the real strokeDasharray at all.
+function LegendSwatch({
+  color,
+  strokeWidth = 2,
+  dasharray,
+  kind = 'line',
+}: {
+  color: string
+  strokeWidth?: number
+  dasharray?: string
+  kind?: 'line' | 'bar'
+}) {
+  return (
+    <svg width="14" height="8" viewBox="0 0 14 8" className="inline-block align-middle" aria-hidden="true">
+      {kind === 'bar' ? (
+        <rect x="2" y="1" width="10" height="6" rx="1" fill={color} />
+      ) : (
+        <line x1="0" y1="4" x2="14" y2="4" stroke={color} strokeWidth={strokeWidth} strokeDasharray={dasharray} strokeLinecap="round" />
+      )}
+    </svg>
   )
 }
 
@@ -421,6 +448,9 @@ export function ForecastDrawer({
   const hasForecast = Boolean(forecast && forecast.length > 0)
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
   const uvLineGradientId = useId()
+  const windAreaGradientId = useId()
+  const waveAreaGradientId = useId()
+  const tempAreaGradientId = useId()
   const detailsCardRef = useRef<HTMLDivElement>(null)
   const dayTabsRowRef = useRef<HTMLDivElement>(null)
 
@@ -588,7 +618,7 @@ export function ForecastDrawer({
   const precipBarWidth = precipHourly.length > 1 ? (hourlyChartWidth / (precipHourly.length - 1)) * 0.5 : 20
   const precipChartConfig: ChartConfig = {
     precipIntensityMm: { label: 'Intensity (mm/hr)', color: 'rgba(59,130,246,0.85)' },
-    precipChancePct: { label: 'Chance of precip (%)', color: 'rgba(245,158,11,0.85)' },
+    precipChancePct: { label: 'Chance of precip (%)', color: 'hsl(var(--chart-gust) / 0.85)' },
   }
 
   const cloudTemps = cloudHourly.map((entry) => displayTemp(entry.temperatureF))
@@ -658,7 +688,7 @@ export function ForecastDrawer({
   const cloudLabelByHour = useMemo(() => buildLabelByHour(cloudHourly), [cloudHourly])
   const cloudChartMargin = hourlyChartMargin(175)
   const cloudChartConfig: ChartConfig = {
-    displayTemperature: { label: `Temperature (${tempUnit})`, color: 'rgba(217,119,6,0.9)' },
+    displayTemperature: { label: `Temperature (${tempUnit})`, color: 'hsl(var(--chart-temp) / 0.9)' },
     uvIndex: { label: 'UV Index', color: 'rgb(249,115,22)' },
   }
 
@@ -873,24 +903,24 @@ export function ForecastDrawer({
                         allowDuplicatedCategory={false}
                         height={RECHARTS_XAXIS_HEIGHT}
                       />
-                      <CartesianGrid vertical horizontal={false} stroke="rgba(80,98,118,0.12)" />
+                      <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
                       <YAxis domain={[cloudTempMin, cloudTempMin + cloudTempRange]} hide />
                       <YAxis yAxisId="uv" domain={[0, uvMax]} hide />
                       <Area
                         data={cloudChartData}
                         dataKey="displayTemperature"
-                        type="linear"
+                        type="monotone"
                         isAnimationActive={false}
                         dot={false}
                         stroke={cloudChartConfig.displayTemperature.color}
                         strokeWidth={2.4}
-                        fill="rgba(217,119,6,0.12)"
+                        fill={`url(#${tempAreaGradientId})`}
                       />
                       <Line
                         data={uvChartData}
                         dataKey="uvIndex"
                         yAxisId="uv"
-                        type="linear"
+                        type="monotone"
                         isAnimationActive={false}
                         dot={false}
                         stroke={`url(#${uvLineGradientId})`}
@@ -901,7 +931,7 @@ export function ForecastDrawer({
                           x={cloudHourly[cloudMinIdx].hourOfDay}
                           y={cloudTempMin}
                           r={3}
-                          fill="rgba(217,119,6,0.95)"
+                          fill="hsl(var(--chart-temp) / 0.95)"
                           stroke="none"
                           isFront
                           label={{ value: 'L', position: 'bottom', fill: AXIS_LABEL_COLOR, fontSize: Number(AXIS_LABEL_FONT_SIZE) }}
@@ -912,7 +942,7 @@ export function ForecastDrawer({
                           x={cloudHourly[cloudMaxIdx].hourOfDay}
                           y={cloudTempMax}
                           r={3}
-                          fill="rgba(217,119,6,0.95)"
+                          fill="hsl(var(--chart-temp) / 0.95)"
                           stroke="none"
                           isFront
                           label={{ value: 'H', position: 'top', fill: AXIS_LABEL_COLOR, fontSize: Number(AXIS_LABEL_FONT_SIZE) }}
@@ -930,6 +960,10 @@ export function ForecastDrawer({
                       onPointerLeave={cloudTooltip.onPointerLeave}
                     >
                       <defs>
+                        <linearGradient id={tempAreaGradientId} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.28" />
+                          <stop offset="100%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.02" />
+                        </linearGradient>
                         <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
                           {UV_GRADIENT_STOPS.map((stop) => (
                             <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
@@ -942,13 +976,13 @@ export function ForecastDrawer({
                       {UV_BAND_LABELS.map((band) => (
                         <text key={band.label} x={forecastChartWidth - 6} y={uvYFor(band.value)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
                       ))}
-                      <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                      <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
                       {cloudTooltipEntry && cloudTooltipEntry.hourOfDay >= 0 && (
                         <ChartTooltipMarker
                           x={hourlyXForHour(cloudTooltipEntry.hourOfDay)}
                           y={cloudYFor(displayTemp(cloudTooltipEntry.temperatureF))}
-                          color="rgba(217,119,6,0.95)"
+                          color="hsl(var(--chart-temp) / 0.95)"
                         />
                       )}
                       {uvTooltipEntry && (
@@ -986,7 +1020,7 @@ export function ForecastDrawer({
 
             <div className="rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <Wind size={13} className="text-gauge-secondary" /> Wind
+                <Wind size={13} className="text-gauge-secondary" /> Wind ({windUnit})
               </h4>
               {windHourly.length > 0 ? (
                 <>
@@ -1021,32 +1055,33 @@ export function ForecastDrawer({
                           height={RECHARTS_XAXIS_HEIGHT}
                         />
                         <YAxis domain={[0, windMax]} hide />
+                        <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
                         <Area
                           data={windChartData}
                           dataKey="windSpeed"
-                          type="linear"
+                          type="monotone"
                           isAnimationActive={false}
                           dot={false}
                           stroke="none"
-                          fill="rgba(37,99,235,0.12)"
+                          fill={`url(#${windAreaGradientId})`}
                         />
                         <Line
                           data={windChartData}
                           dataKey="windGust"
-                          type="linear"
+                          type="monotone"
                           isAnimationActive={false}
                           dot={false}
-                          stroke="rgba(245,158,11,0.75)"
+                          stroke="hsl(var(--chart-gust) / 0.75)"
                           strokeWidth={1.5}
                           strokeDasharray="4 3"
                         />
                         <Line
                           data={windChartData}
                           dataKey="windSpeed"
-                          type="linear"
+                          type="monotone"
                           isAnimationActive={false}
                           dot={false}
-                          stroke="rgba(37,99,235,0.95)"
+                          stroke="hsl(var(--chart-wind) / 0.95)"
                           strokeWidth={2.4}
                         />
                         <Customized
@@ -1075,25 +1110,31 @@ export function ForecastDrawer({
                         onPointerMove={windTooltip.onPointerMove}
                         onPointerLeave={windTooltip.onPointerLeave}
                       >
+                        <defs>
+                          <linearGradient id={windAreaGradientId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="hsl(var(--chart-wind))" stopOpacity="0.28" />
+                            <stop offset="100%" stopColor="hsl(var(--chart-wind))" stopOpacity="0.02" />
+                          </linearGradient>
+                        </defs>
                         {windAxisTicks.map((tick) => (
                           <text key={tick} x={6} y={axisTickLabelY(windYFor, tick, windChartTop, windChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                            {tick}{tick === windMax ? ` ${windUnit}` : ''}
+                            {tick}
                           </text>
                         ))}
-                        <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                        <line x1={hourlyChartLeft} y1={windChartBottom} x2={hourlyChartRight} y2={windChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
                         {windTooltipEntry && windTooltipEntry.hourOfDay >= 0 && (
                           <ChartTooltipMarker
                             x={hourlyXForHour(windTooltipEntry.hourOfDay)}
                             y={windYFor(Math.max(0, windTooltipEntry.windSpeed))}
-                            color="rgba(37,99,235,0.95)"
+                            color="hsl(var(--chart-wind) / 0.95)"
                           />
                         )}
                       </svg>
                     </div>
                   </div>
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-blue-600">— Wind</span> · <span className="text-amber-600">- - Gusts</span> ({windUnit}) · barbs show direction the wind is coming from (full feather = 10kt, half = 5kt)
+                  <p data-testid="forecast-wind-legend" className="mt-1 text-[10px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wind) / 0.95)" strokeWidth={2.4} /> Wind</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.75)" strokeWidth={1.5} dasharray="4 3" /> Gusts</span> ({windUnit}) · barbs show direction the wind is coming from (full feather = 10kt, half = 5kt)
                   </p>
                 </>
               ) : (
@@ -1104,7 +1145,7 @@ export function ForecastDrawer({
             <div className="mt-3 rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center justify-between gap-1.5">
                 <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  <Waves size={13} className="text-gauge-secondary" /> Wave
+                  <Waves size={13} className="text-gauge-secondary" /> Wave (m)
                 </span>
                 {waveSeaTemperatureF !== null && (
                   <span className="text-[11px] text-muted-foreground">
@@ -1151,42 +1192,43 @@ export function ForecastDrawer({
                           height={RECHARTS_XAXIS_HEIGHT}
                         />
                         <YAxis domain={[0, waveMax]} hide />
+                        <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
                         <Area
                           data={waveChartData}
                           dataKey="waveHeightM"
-                          type="linear"
+                          type="monotone"
                           isAnimationActive={false}
                           dot={false}
                           stroke="none"
-                          fill="rgba(20,184,166,0.12)"
+                          fill={`url(#${waveAreaGradientId})`}
                         />
                         <Line
                           data={waveChartData}
                           dataKey="swellWaveHeightM"
-                          type="linear"
+                          type="monotone"
                           isAnimationActive={false}
                           dot={false}
-                          stroke="rgba(139,92,246,0.85)"
+                          stroke="hsl(var(--chart-swell) / 0.85)"
                           strokeWidth={1.5}
                           strokeDasharray="2 3"
                         />
                         <Line
                           data={waveChartData}
                           dataKey="windWaveHeightM"
-                          type="linear"
+                          type="monotone"
                           isAnimationActive={false}
                           dot={false}
-                          stroke="rgba(245,158,11,0.85)"
+                          stroke="hsl(var(--chart-gust) / 0.85)"
                           strokeWidth={1.5}
                           strokeDasharray="4 3"
                         />
                         <Line
                           data={waveChartData}
                           dataKey="waveHeightM"
-                          type="linear"
+                          type="monotone"
                           isAnimationActive={false}
                           dot={false}
-                          stroke="rgba(20,184,166,0.9)"
+                          stroke="hsl(var(--chart-wave) / 0.9)"
                           strokeWidth={2.4}
                         />
                         <Customized
@@ -1215,25 +1257,31 @@ export function ForecastDrawer({
                         onPointerMove={waveTooltip.onPointerMove}
                         onPointerLeave={waveTooltip.onPointerLeave}
                       >
+                        <defs>
+                          <linearGradient id={waveAreaGradientId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="hsl(var(--chart-wave))" stopOpacity="0.28" />
+                            <stop offset="100%" stopColor="hsl(var(--chart-wave))" stopOpacity="0.02" />
+                          </linearGradient>
+                        </defs>
                         {waveAxisTicks.filter((tick) => Number.isInteger(tick)).map((tick) => (
                           <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                            {tick}{tick === waveMax ? ' m' : ''}
+                            {tick}
                           </text>
                         ))}
-                        <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                        <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
                         {waveTooltipEntry && waveTooltipEntry.hourOfDay >= 0 && (
                           <ChartTooltipMarker
                             x={hourlyXForHour(waveTooltipEntry.hourOfDay)}
                             y={waveYFor(Math.max(0, waveTooltipEntry.waveHeightM))}
-                            color="rgba(20,184,166,0.9)"
+                            color="hsl(var(--chart-wave) / 0.9)"
                           />
                         )}
                       </svg>
                     </div>
                   </div>
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-gauge-secondary">— Total wave height (m)</span> · <span className="text-amber-600">- - Wind wave (chop)</span> · <span className="text-violet-600">·· Swell</span> · arrows show direction the swell is heading, with period (sec) below each
+                  <p data-testid="forecast-wave-legend" className="mt-1 text-[10px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Total wave height (m)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.85)" strokeWidth={1.5} dasharray="4 3" /> Wind wave (chop)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-swell) / 0.85)" strokeWidth={1.5} dasharray="2 3" /> Swell</span> · arrows show direction the swell is heading, with period (sec) below each
                   </p>
                 </>
               ) : (
@@ -1243,7 +1291,7 @@ export function ForecastDrawer({
 
             <div className="mt-3 rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <CloudRain size={13} className="text-gauge-secondary" /> Precipitation
+                <CloudRain size={13} className="text-gauge-secondary" /> Precipitation (mm/hr)
               </h4>
               {precipHourly.length > 0 ? (
                 <>
@@ -1279,6 +1327,7 @@ export function ForecastDrawer({
                         />
                         <YAxis domain={[0, precipMax]} hide />
                         <YAxis yAxisId="chance" domain={[0, 100]} orientation="right" hide />
+                        <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
                         <Bar dataKey="precipIntensityMm" barSize={precipBarWidth} isAnimationActive={false}>
                           {precipChartData.map((entry, idx) => (
                             <Cell key={idx} data-testid="forecast-precip-bar" fill={precipBarColor(entry.precipIntensityMm)} />
@@ -1287,7 +1336,7 @@ export function ForecastDrawer({
                         <Line
                           dataKey="precipChancePct"
                           yAxisId="chance"
-                          type="linear"
+                          type="monotone"
                           dot={false}
                           isAnimationActive={false}
                           stroke={precipChartConfig.precipChancePct.color}
@@ -1304,24 +1353,24 @@ export function ForecastDrawer({
                         onPointerMove={precipTooltip.onPointerMove}
                         onPointerLeave={precipTooltip.onPointerLeave}
                       >
-                        <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)} mm/hr</text>
+                        <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)}</text>
                         <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
                         <text x={forecastChartWidth - 6} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
                         <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
-                        <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="rgba(80,98,118,0.25)" strokeWidth="1" />
+                        <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
                         {precipTooltipEntry && precipTooltipEntry.hourOfDay >= 0 && precipTooltipEntry.precipChancePct !== null && (
                           <ChartTooltipMarker
                             x={hourlyXForHour(precipTooltipEntry.hourOfDay)}
                             y={precipChanceYFor(Math.max(0, Math.min(100, precipTooltipEntry.precipChancePct)))}
-                            color="rgba(245,158,11,0.9)"
+                            color="hsl(var(--chart-gust) / 0.9)"
                           />
                         )}
                       </svg>
                     </div>
                   </div>
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="text-blue-500">▮ Intensity (mm/hr)</span> · <span className="text-amber-600">— Chance of precip (%)</span>
+                  <p data-testid="forecast-precip-legend" className="mt-1 text-[10px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={precipChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Intensity (mm/hr)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={precipChartConfig.precipChancePct.color ?? 'currentColor'} strokeWidth={2.4} /> Chance of precip (%)</span>
                   </p>
                 </>
               ) : (

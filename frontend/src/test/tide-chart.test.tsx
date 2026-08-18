@@ -174,6 +174,62 @@ describe('TideChart', () => {
     expect(screen.getByText('6PM')).toBeInTheDocument()
   })
 
+  // Task 4 (visual polish): Tide should share the same faint horizontal
+  // CartesianGrid convention as the sibling Wind/Wave/Precipitation/Cloud
+  // charts in forecast-drawer.tsx, using the same --chart-grid token.
+  it('renders faint horizontal gridlines using the chart-grid token', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const { container } = render(
+      <TideChart
+        chart={buildChart({
+          extremes: [
+            { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
+            { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false },
+          ],
+        })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    const horizontalLines = Array.from(container.querySelectorAll('.recharts-cartesian-grid-horizontal line'))
+    expect(horizontalLines.length).toBeGreaterThan(0)
+    expect(horizontalLines.every((line) => line.getAttribute('stroke') === 'hsl(var(--chart-grid) / 0.12)')).toBe(true)
+  })
+
+  // Task 5 (visual polish): the "Tide height" / "now" entries used a text
+  // em-dash and a "┊" character to fake a solid and a dashed-vertical line
+  // swatch. They should now draw real inline <svg><line> swatches instead.
+  it('draws real line swatches in the legend for tide height and the now marker, not text-character fakes', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    render(
+      <TideChart
+        chart={buildChart({
+          extremes: [
+            { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
+            { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false },
+          ],
+        })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    const legend = screen.getByTestId('forecast-tide-legend')
+    expect(legend.textContent).not.toMatch(/— Tide height|┊/)
+
+    const swatchLines = Array.from(legend.querySelectorAll('svg line'))
+    const tideSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-wave) / 0.9)')
+    expect(tideSwatch).toBeTruthy()
+    expect(tideSwatch).not.toHaveAttribute('stroke-dasharray')
+
+    const nowSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--gauge-primary) / 0.7)')
+    expect(nowSwatch).toBeTruthy()
+    expect(nowSwatch).toHaveAttribute('stroke-dasharray', '4 3')
+  })
+
   // Pins the migration's trickiest piece: curvePoints/extreme markers are
   // precomputed in PIXEL space (not a real data domain) and handed to
   // recharts on an identity domain, so a recharts-rendered <ReferenceDot>
@@ -312,7 +368,7 @@ describe('TideChart', () => {
       />,
     )
 
-    const curve = container.querySelector('path.recharts-curve[stroke="rgba(20,184,166,0.9)"]')
+    const curve = container.querySelector('path.recharts-curve[stroke="hsl(var(--chart-wave) / 0.9)"]')
     expect(curve).toBeTruthy()
     const d = curve!.getAttribute('d') ?? ''
     expect(d).not.toBe('')
