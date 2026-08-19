@@ -7,6 +7,12 @@
 #   docker run --rm -v "$PWD:/src" -w /src tinygo/tinygo:0.41.1 \
 #     sh packaging/build-plugins.sh docs/examples ./plugins
 #
+# That plain form works locally, where Docker Desktop's bind mounts ignore host
+# ownership. It does NOT work on a Linux host whose checkout is owned by some
+# other uid — the image runs as its own uid 1000 and cannot create $OUT in the
+# mount. .github/workflows/release.yml therefore adds -u and a writable HOME;
+# keep the two in step when changing either.
+#
 # WASM output is architecture-independent, so one build serves every release
 # platform. Plugins are deliberately never baked into the binary or the image
 # (ADR 0017: drop a plugin in without a rebuild) — they ship as a separate

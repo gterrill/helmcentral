@@ -17,12 +17,20 @@ ENV VITE_API_BASE_URL=""
 RUN npm run build
 
 # ── Stage 2: build backend with embedded frontend ────────────────────────────
-FROM golang:1.22-alpine AS backend-builder
+# --platform=$BUILDPLATFORM again: CGO is off, so the Go toolchain cross-
+# compiles every target natively. Letting buildx pick the target platform here
+# instead would compile Go under QEMU emulation for the two arm legs, which is
+# an order of magnitude slower for an identical binary.
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS backend-builder
 
 WORKDIR /app
 
 ARG APP_VERSION=dev
 ARG APP_REVISION=unknown
+
+# Supplied by buildx per target: linux/arm/v7 arrives as arm + v7.
+ARG TARGETARCH
+ARG TARGETVARIANT
 
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
@@ -33,9 +41,13 @@ COPY backend/. .
 RUN rm -rf dist
 COPY --from=frontend-builder /app/frontend/dist ./dist
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
-	-ldflags "-X main.buildVersion=${APP_VERSION} -X main.buildRevision=${APP_REVISION}" \
-	-o helmcentral .
+# GOARM is set only for 32-bit arm, where it selects the floating-point ABI;
+# it is meaningless on amd64 and arm64, so it stays unset there.
+RUN set -eu; \
+	if [ "$TARGETARCH" = "arm" ]; then export GOARM="${TARGETVARIANT#v}"; fi; \
+	CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" go build -a -installsuffix cgo \
+		-ldflags "-X main.buildVersion=${APP_VERSION} -X main.buildRevision=${APP_REVISION}" \
+		-o helmcentral .
 
 # ── Stage 3: minimal runtime image ───────────────────────────────────────────
 FROM alpine:latest
