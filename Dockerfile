@@ -1,5 +1,9 @@
 # ── Stage 1: build frontend ──────────────────────────────────────────────────
-FROM node:24-alpine AS frontend-builder
+# --platform=$BUILDPLATFORM: the output is static JS/CSS, identical for every
+# target arch, so this stage always runs natively on the builder. It also has
+# to: node:24-alpine publishes no linux/arm/v7 manifest, so pinning it to the
+# target platform breaks the armv7 leg of the multi-arch build outright.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 

@@ -22,7 +22,14 @@ jobs:
 
       - name: Build with TinyGo
         run: |
-          docker run --rm -v "$PWD:/src" -w /src tinygo/tinygo:0.41.1 \
+          # The image has its own uid 1000, but the runner's workspace is owned
+          # by uid 1001, so the container cannot create ./plugins inside the
+          # bind mount (it is gitignored, so the checkout never provides it).
+          # Run as the runner instead, with a writable HOME: once the uid is
+          # overridden /home/tinygo is off-limits, and both `go mod download`
+          # and TinyGo's build cache write under $HOME.
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/src" -w /src tinygo/tinygo:0.41.1 \
             sh packaging/build-plugins.sh docs/examples ./plugins
 
       - name: Package bundle
