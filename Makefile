@@ -1,4 +1,4 @@
-.PHONY: dev down logs e2e-up e2e-down e2e-reset e2e-logs
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs
 
 dev:
 	# --force-recreate: frontend-dev only runs `npm install` once at container
@@ -13,6 +13,21 @@ down:
 
 logs:
 	docker compose -f docker-compose.dev.yml --profile dev logs -f backend-dev frontend-dev
+
+# Did my last edit actually build? air keeps the previous binary running when a
+# build fails, so the dashboard goes on answering with stale code and nothing
+# in the UI says so. backend/scripts/dev-build.sh truncates this file on every
+# attempt, so it is either empty (the running backend is current) or it holds
+# the compiler errors from the most recent failure.
+build-status:
+	@if [ ! -f backend/tmp/build-errors.log ]; then \
+		echo "no build recorded yet — is the dev stack running? (make dev)"; \
+	elif [ -s backend/tmp/build-errors.log ]; then \
+		cat backend/tmp/build-errors.log; \
+		exit 1; \
+	else \
+		echo "last build OK — the running backend is up to date"; \
+	fi
 
 # Isolated stack for browser-driven verification. Serves the same UI on :5174
 # but against a throwaway settings file and state volume, so scripts that

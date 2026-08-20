@@ -2,11 +2,18 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -o ./tmp/helmcentral ."
+# Wrapped rather than a bare `go build` so a failed build is legible: air keeps
+# the last good binary running, so without this a compile error leaves a stale
+# backend serving with nothing to say so. See scripts/dev-build.sh.
+cmd = "./scripts/dev-build.sh"
 bin = "./tmp/helmcentral"
 delay = 500
 exclude_dir = ["tmp", "cache"]
 include_ext = ["go", "yaml", "yml", "env"]
+# Air's own error log, kept out of the way: it records only "exit status N",
+# with no newline and no compiler output, and would otherwise clobber the
+# readable log the build script writes to tmp/build-errors.log.
+log = "air-internal.log"
 
 [log]
 time = true
