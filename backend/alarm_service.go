@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"time"
 
@@ -161,8 +163,39 @@ func alarmsHandler(c echo.Context) error {
 }
 
 func acknowledgeAlarmHandler(c echo.Context) error {
-	ruleID := c.Param("id")
+	// Echo prefers URL.RawPath, so a param arrives still percent-encoded. Rule
+	// ids are UUIDs and never notice, but a bus-sourced id carries the
+	// "notifications:" namespace colon the browser encodes as %3A — left
+	// escaped it matches no prefix and no rule, and answers 409 for every
+	// alarm on the bus.
+	ruleID, err := url.PathUnescape(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "malformed alarm id"})
+	}
 	now := time.Now().UTC()
+
+	// A bus-sourced notification is never in the engine's status map — it is
+	// rebuilt from the SignalK tree on every poll — so acknowledging one means
+	// writing the acknowledgement back to the bus, where it survives.
+	if path, busSourced := notificationRuleIDPath(ruleID); busSourced {
+		status, err := acknowledgeSignalKNotification(globalSignalKSnapshot, path, now, putSignalKNotification)
+		if err != nil {
+			// A refusal is a 409 the operator can act on; a failed write is an
+			// upstream fault and must not be dressed up as one.
+			code := http.StatusBadGateway
+			if errors.Is(err, errNotificationNotLive) || errors.Is(err, errNotificationEmergency) {
+				code = http.StatusConflict
+			}
+			return c.JSON(code, map[string]string{"error": err.Error()})
+		}
+
+		if err := globalAlarmLogStore.MarkAcknowledged(ruleID, now); err != nil {
+			log.Printf("alarm log: %v", err)
+		}
+		// The status we just committed, not a re-read: the write has to travel
+		// back through the delta stream before the snapshot reflects it.
+		return c.JSON(http.StatusOK, status)
+	}
 
 	if !globalAlarmEngine.acknowledge(ruleID, now) {
 		// Either there is nothing live to acknowledge, or it is an emergency,

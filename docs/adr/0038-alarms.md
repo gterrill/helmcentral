@@ -74,6 +74,26 @@ The heartbeat inverts the second failure: a periodic "still alive" makes its **a
 
 One row per raise, closed on clear. A recurring fault therefore shows how often it happens, which is usually the diagnosis; collapsing it to a single entry would hide exactly that. Acknowledge and clear stamp only the newest open occurrence.
 
+## Addendum: acknowledging a bus-sourced notification writes back to SignalK
+
+The original implementation could not acknowledge an alarm it had not raised itself. `acknowledgeAlarmHandler` consulted only `alarmEngine.statuses`, which holds rule-driven alarms; a notification from another producer is synthesised fresh by `signalKNotifications` on every read and is never in that map. The lookup missed, and the button answered `409 alarm is not acknowledgeable` for every alarm on the bus — reported against `notifications.arrivalCircleEntered` from the course provider.
+
+Adding those statuses to the engine's map would not have fixed it. They are rebuilt from the SignalK tree on each poll, so a local acknowledgement is erased a second later, and it would silence nothing outside Helmcentral: the buzzer plugin and the MFD are reading the same tree.
+
+**The bus is the acknowledgement record.** SignalK has no `acknowledged` state — the vocabulary decision in §1 means using the one the spec does have. Silence is expressed through `method`: acknowledging writes the notification back with `sound` dropped and everything else preserved, and a notification whose `method` no longer contains `sound` reads back as `alarmPhaseAcknowledged`. The ack survives restarts, and every other consumer on the bus stops sounding, because it is the same fact in the same place.
+
+Three details that are decisions, not incidentals:
+
+- **An absent `method` is not silence.** It is a producer that never said how to alert. Reading it as acknowledged would silently swallow every alarm such a producer raises, so it reads as active; acknowledging one writes `["visual"]`.
+- **The whole value object is copied on write.** A SignalK PUT replaces the notification, so rebuilding it from just the fields Helmcentral models would strip whatever else the producer set.
+- **A failed write is a 502, never a 409.** A refusal (nothing live there, or an emergency) is a considered answer the operator can act on. An upstream write failure is a fault, and reporting it as a refusal would leave the operator reading "cannot be acknowledged" while the real cause was that SignalK rejected the PUT. Per the repo's fallback policy, the acknowledgement never reports success it did not achieve.
+
+One thing that had to be found rather than reasoned about: bus-sourced ids are the first alarm ids containing a character the browser percent-encodes, and Echo hands path params to the handler **still escaped** (it prefers `URL.RawPath`). Left escaped, `notifications%3A...` matches no prefix and no rule, and reproduces the original 409 exactly. Rule ids are UUIDs and never exercised this. A handler test that sets the param directly cannot see it either, so the regression test drives the router the way the browser does.
+
+Whether a given path accepts a PUT is the server's call: SignalK routes it to whichever provider registered a handler, and one that registered none answers 405. That surfaces verbatim in the 502 rather than being masked.
+
+§1's emergency rule is unchanged and now applies on both sides — an emergency on the bus is refused before anything is written.
+
 ## Consequences
 
 - Any path the SignalK server publishes can be alarmed on, without code changes. This is the first feature to use ADR 0037's generic ingestion, and the precondition ADR 0039 (bindable widgets) also depends on.
@@ -84,6 +104,7 @@ One row per raise, closed on clear. A recurring fault therefore shows how often 
 - Anchor drag detection moved to the server (`alarm_anchor.go`) rather than being derived in the React hook. Closing the tab no longer silences it, and it now flows through the normal path: logged, acknowledgeable, and delivered off the boat. Silencing is the server acknowledgement, so a second browser cannot be left ringing. It also fixed the old bug where the klaxon loop was created only on the transition into `dragging`, so un-silencing never restarted it.
 - Drag uses asymmetric thresholds like every other rule: it fires past `radius + 4.572m` (the old client buffer, so the firing distance is unchanged) but clears only back inside the radius. A lost GNSS fix never raises a drag — position freezes at its last trusted value during an outage (ADR 0037), and the stream watchdog already reports the outage itself.
 - `use-anchor-watch.ts` still derives its own client-side `dragging` state for map and tile styling. The alarm no longer depends on it, but the two can disagree inside the hysteresis band; collapsing them onto the server's answer is worth doing when that component is next touched.
+- A rule alarm acknowledged in Helmcentral still does **not** write back to the bus. When the `signalk` transport is enabled, Helmcentral publishes its own alarms with `method: ["visual","sound"]`, and acknowledging one silences the engine's copy while the published copy goes on sounding for every other consumer. That transport also makes each rule alarm appear twice in `activeAlarms` — once from the engine, once echoed back off the bus — with no de-duplication. Both follow from the same gap and want fixing together.
 - Rules are evaluated only while Helmcentral runs. There is no persistence of engine state across restarts, so a restart re-raises a still-true condition — which is the safe direction, but means the alarm log can show a duplicate occurrence after a deploy.
 
 ## Verification
