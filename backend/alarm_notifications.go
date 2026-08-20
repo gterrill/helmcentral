@@ -85,15 +85,28 @@ func collectSignalKNotifications(node map[string]any, prefix []string, out *[]al
 	}
 }
 
-func notificationStatus(value map[string]any, prefix []string) (alarmStatus, bool) {
+// notificationValueIsLive reports whether a notification value is actually
+// raised. normal is the cleared state, and an unknown state is not something to
+// raise a klaxon over.
+//
+// Shared with the publish path (signalk_publish.go), which confirms a write by
+// reading it back: if the two disagreed about what "cleared" means, publishing
+// would report failures for clears the server had accepted. signalk-server does
+// not delete a cleared notification — it keeps the key and normalises it to
+// state "normal" — so absence is not the test, liveness is.
+func notificationValueIsLive(value map[string]any) bool {
 	state, _ := value["state"].(string)
 	state = strings.TrimSpace(state)
 
-	// normal is the cleared state, and an unknown state is not something to
-	// raise a klaxon over.
-	if _, known := alarmStateRank[state]; !known || state == alarmStateNormal {
+	_, known := alarmStateRank[state]
+	return known && state != alarmStateNormal
+}
+
+func notificationStatus(value map[string]any, prefix []string) (alarmStatus, bool) {
+	if !notificationValueIsLive(value) {
 		return alarmStatus{}, false
 	}
+	state := strings.TrimSpace(value["state"].(string))
 
 	path := strings.Join(prefix, ".")
 	message, _ := value["message"].(string)

@@ -26,12 +26,19 @@ const vesselContextPrefix = "vessels."
 
 // signalKDelta is a SignalK delta message received over the WebSocket stream.
 type signalKDelta struct {
-	Context string          `json:"context"`
+	// omitempty on both string fields is load-bearing for publishing
+	// (signalk_publish.go), not cosmetic: signalk-server silently DROPS a delta
+	// carrying "context": "", while one that omits the key is filed under the
+	// sending connection's own vessel. Without this the socket accepts the
+	// frame and the server discards it, which is the hardest kind of failure to
+	// see. Unmarshalling is unaffected — absent and empty both decode to "".
+	Context string          `json:"context,omitempty"`
 	Updates []signalKUpdate `json:"updates"`
 
 	// Self is only populated on the server's opening hello frame, which names
-	// this vessel's context and carries no updates.
-	Self string `json:"self"`
+	// this vessel's context and carries no updates. It is server-to-client
+	// only, so it must never appear on a published delta.
+	Self string `json:"self,omitempty"`
 }
 
 // signalKUpdate is an update within a delta message, containing timestamp,

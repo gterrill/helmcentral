@@ -235,7 +235,7 @@ func buildTransports(config alarmTransportConfig) []notificationTransport {
 		transports = append(transports, smtpTransport{config: config.SMTP, password: secretOrEmpty("SMTP_PASSWORD")})
 	}
 	if config.SignalK.Enabled {
-		transports = append(transports, signalKNotifyTransport{put: putSignalKNotification})
+		transports = append(transports, signalKNotifyTransport{put: publishSignalKNotification})
 	}
 
 	return transports
@@ -288,39 +288,7 @@ func notificationFor(event alarmEvent, vessel string, now time.Time) notificatio
 	}
 }
 
-// putSignalKNotification writes an alarm into the vessel's notifications tree,
-// reusing the write path's retry-once-on-401 idiom (generator.go): a rejected
-// token is nearly always an expired one.
-func putSignalKNotification(path string, value any) error {
-	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-	signalkURL := buildSignalKURL(address, port)
-
-	username, password := loadSignalKCredentials(settingsPath)
-	token, err := acquireSignalKToken(signalkURL, username, password)
-	if err != nil {
-		return err
-	}
-
-	// SignalK PUT paths are slash-separated, and live under the same
-	// vessels/self API prefix as every other write (czone switches,
-	// generatorPut). Appending the bare path to the base URL hits no endpoint
-	// the server serves — Express answers "Cannot PUT /notifications/..." — so
-	// nothing written this way ever reached the bus.
-	putPath := signalKSelfAPIPath + "/" + strings.ReplaceAll(path, ".", "/")
-
-	err = putSignalKValue(signalkURL, putPath, value, token)
-	if err != nil && token != "" {
-		invalidateSignalKToken()
-		token, tokenErr := acquireSignalKToken(signalkURL, username, password)
-		if tokenErr != nil {
-			return tokenErr
-		}
-		err = putSignalKValue(signalkURL, putPath, value, token)
-	}
-	return err
-}
+// The signalk transport publishes as a producer on the delta stream
+// (signalk_publish.go). It used to write over REST, which reached no endpoint
+// the server serves — notifications have no PUT handler — so it had never once
+// delivered anything. See the ADR 0038 addendum.

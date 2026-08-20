@@ -198,7 +198,7 @@ func TestSignalKNotifyTransportWritesStateAndMethod(t *testing.T) {
 	}
 }
 
-// TestPutSignalKNotification_ReachableWithNoUserSessionPresent is the
+// TestPublishSignalKNotification_ReachableWithNoUserSessionPresent is the
 // critical regression guard from docs/adr/0040: the alarm/notification path
 // must keep working with every browser closed and nobody logged in, because
 // it authenticates with Helmcentral's own service account
@@ -209,43 +209,21 @@ func TestSignalKNotifyTransportWritesStateAndMethod(t *testing.T) {
 // involved in the entire path being exercised, which is the point: nothing
 // about this call has anything to authorize against but the service
 // account, so it cannot depend on a session that doesn't exist here.
-func TestPutSignalKNotification_ReachableWithNoUserSessionPresent(t *testing.T) {
-	invalidateSignalKToken()
-	t.Cleanup(invalidateSignalKToken)
+//
+// The mechanism moved from a REST write to a delta publish
+// (signalk_publish.go), but the guarantee is unchanged and is the reason this
+// test survived the move.
+func TestPublishSignalKNotification_ReachableWithNoUserSessionPresent(t *testing.T) {
+	stub := newPublishStub(t)
+	withServiceAccount(t, stub)
 
-	t.Setenv("SIGNALK_USERNAME", "helmcentral-service")
-	t.Setenv("SIGNALK_PASSWORD", "service-secret")
-
-	srv, rs := newRecordingServer(t)
-	defer srv.Close()
-
-	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusOK, `{"token":"service-jwt-xyz","timeToLive":86400}`)
-	// putSignalKNotification turns "notifications.anchor.drag" into a PUT under
-	// the same /signalk/v1/api/vessels/self prefix every other write path uses
-	// (czone switches, generatorPut). It previously appended the path straight
-	// to the base URL, which is not an endpoint SignalK serves: the server's
-	// Express router answered "Cannot PUT /notifications/anchor/drag" with a
-	// 404, so this transport never reached the bus at all.
-	rs.on(http.MethodPut, signalKSelfAPIPath+"/notifications/anchor/drag", http.StatusOK, `{}`)
-
-	settingsPath := settingsFileForServer(t, srv.URL)
-	t.Setenv("SETTINGS_FILE", settingsPath)
-
-	err := putSignalKNotification("notifications.anchor.drag", map[string]any{
+	err := publishSignalKNotification("notifications.anchor.drag", map[string]any{
 		"state":   alarmStateAlarm,
 		"message": "anchor drag detected",
 		"method":  []string{"visual", "sound"},
 	})
 	if err != nil {
-		t.Fatalf("putSignalKNotification: expected success with no user session present, got: %v", err)
-	}
-
-	calls := rs.calls()
-	if len(calls) != 2 {
-		t.Fatalf("expected exactly 2 upstream calls (service-account login then the PUT), got %d: %+v", len(calls), calls)
-	}
-	if calls[0].Path != "/signalk/v1/auth/login" {
-		t.Fatalf("expected the first call to authenticate the service account, got %q", calls[0].Path)
+		t.Fatalf("publishSignalKNotification: expected success with no user session present, got: %v", err)
 	}
 
 	if skTokenCache == nil {
