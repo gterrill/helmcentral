@@ -11,13 +11,25 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// newTestNearbyContactStore returns a store with dwell 0, so a candidate new
+// encounter confirms on its very first tick - preserving the pre-dwell
+// one-call-one-row semantics the majority of this file's tests rely on.
 func newTestNearbyContactStore(t *testing.T) *nearbyContactStore {
+	t.Helper()
+	return newTestNearbyContactStoreWithDwell(t, 0)
+}
+
+// newTestNearbyContactStoreWithDwell is like newTestNearbyContactStore but
+// lets a test exercise the confirmation dwell explicitly, for the
+// dwell/confirmation state-machine tests below.
+func newTestNearbyContactStoreWithDwell(t *testing.T, dwell time.Duration) *nearbyContactStore {
 	t.Helper()
 	dir := t.TempDir()
 	store, err := newNearbyContactStore(filepath.Join(dir, "test.sqlite"))
 	if err != nil {
 		t.Fatalf("newNearbyContactStore: %v", err)
 	}
+	store.dwell = dwell
 	t.Cleanup(func() { _ = store.close() })
 	return store
 }
@@ -39,15 +51,15 @@ func TestRecordContactIfNew_SameVesselWithinSessionGapInsertsOnlyOneRow(t *testi
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (1st tick): %v", err)
 	}
 	// Second tick 5 seconds later, well within the 1-hour session gap.
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(5*time.Second)); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(5*time.Second), base.Add(5*time.Second)); err != nil {
 		t.Fatalf("recordContactIfNew (2nd tick): %v", err)
 	}
 	// Third tick 20 minutes later, still within the gap.
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(20*time.Minute)); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(20*time.Minute), base.Add(20*time.Minute)); err != nil {
 		t.Fatalf("recordContactIfNew (3rd tick): %v", err)
 	}
 
@@ -60,12 +72,12 @@ func TestRecordContactIfNew_AfterGapElapsedInsertsSecondRow(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (encounter 1): %v", err)
 	}
 	// Gap of 61 minutes (> the 1-hour contactSessionGap) is a new encounter.
 	second := base.Add(61 * time.Minute)
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.60, 149.80, "Airlie Beach", "motoring", second); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.60, 149.80, "Airlie Beach", "motoring", second, second); err != nil {
 		t.Fatalf("recordContactIfNew (encounter 2): %v", err)
 	}
 
@@ -95,10 +107,10 @@ func TestRecordContactIfNew_FortyFiveMinuteGapStaysSameEncounter(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (1st tick): %v", err)
 	}
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(45*time.Minute)); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(45*time.Minute), base.Add(45*time.Minute)); err != nil {
 		t.Fatalf("recordContactIfNew (2nd tick, 45 min later): %v", err)
 	}
 
@@ -138,7 +150,11 @@ func TestRecordContactIfNew_SurvivesProcessRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newNearbyContactStore (1st process): %v", err)
 	}
-	if err := store1.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	// Zero dwell: this test is about lastSeen surviving a restart, not about
+	// the confirmation dwell, so confirm on the first tick as before dwell
+	// existed.
+	store1.dwell = 0
+	if err := store1.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (before restart): %v", err)
 	}
 	if err := store1.close(); err != nil {
@@ -151,11 +167,12 @@ func TestRecordContactIfNew_SurvivesProcessRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newNearbyContactStore (2nd process): %v", err)
 	}
+	store2.dwell = 0
 	t.Cleanup(func() { _ = store2.close() })
 
 	// 5 seconds later, well within contactSessionGap - a real continuation
 	// of the same encounter, not a new one.
-	if err := store2.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(5*time.Second)); err != nil {
+	if err := store2.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(5*time.Second), base.Add(5*time.Second)); err != nil {
 		t.Fatalf("recordContactIfNew (after restart): %v", err)
 	}
 
@@ -177,12 +194,12 @@ func TestRecordContactIfNew_GapExceedsSessionGapButPositionUnchangedStaysSameEnc
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (1st tick): %v", err)
 	}
 	// 90 minutes later, same position: past contactSessionGap but within
 	// contactSessionMaxGapForPositionOverride and unmoved.
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(90*time.Minute)); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(90*time.Minute), base.Add(90*time.Minute)); err != nil {
 		t.Fatalf("recordContactIfNew (2nd tick, 90 min later, same position): %v", err)
 	}
 
@@ -195,21 +212,23 @@ func TestRecordContactIfNew_GapExceedsSessionGapButPositionUnchangedStaysSameEnc
 // confirms the position override does NOT apply when the vessel has
 // actually relocated: same 90-minute gap as the "unchanged position" case
 // above, but this time the position has moved well past
-// contactSessionMoveThresholdMeters (~556m via a 0.005 degree latitude
-// shift), so this must still count as a new encounter.
+// contactSessionMoveThresholdMeters (~1112m via a 0.010 degree latitude
+// shift - comfortably clear of the 750m threshold, unlike the old ~556m
+// shift this test used before contactSessionMoveThresholdMeters was widened
+// from 100m to 750m), so this must still count as a new encounter.
 func TestRecordContactIfNew_GapExceedsSessionGapAndPositionMovedInsertsSecondRow(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (1st tick): %v", err)
 	}
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.585, 149.79, "Airlie Beach", "motoring", base.Add(90*time.Minute)); err != nil {
-		t.Fatalf("recordContactIfNew (2nd tick, 90 min later, moved ~556m): %v", err)
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.58, 149.79, "Airlie Beach", "motoring", base.Add(90*time.Minute), base.Add(90*time.Minute)); err != nil {
+		t.Fatalf("recordContactIfNew (2nd tick, 90 min later, moved ~1112m): %v", err)
 	}
 
 	if got := countRows(t, store, "316042555"); got != 2 {
-		t.Fatalf("expected 2 rows: a 90-minute gap combined with a >100m relocation should not trigger the position override, got %d", got)
+		t.Fatalf("expected 2 rows: a 90-minute gap combined with a >750m relocation should not trigger the position override, got %d", got)
 	}
 }
 
@@ -223,10 +242,10 @@ func TestRecordContactIfNew_GapExceeds24HourCapInsertsNewEncounterDespiteUnchang
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (1st tick): %v", err)
 	}
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(25*time.Hour)); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(25*time.Hour), base.Add(25*time.Hour)); err != nil {
 		t.Fatalf("recordContactIfNew (2nd tick, 25h later, same position): %v", err)
 	}
 
@@ -243,10 +262,10 @@ func TestRecordContactIfNew_GapJustUnder24HourCapStaysSameEncounterWhenPositionU
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (1st tick): %v", err)
 	}
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(23*time.Hour)); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(23*time.Hour), base.Add(23*time.Hour)); err != nil {
 		t.Fatalf("recordContactIfNew (2nd tick, 23h later, same position): %v", err)
 	}
 
@@ -255,45 +274,48 @@ func TestRecordContactIfNew_GapJustUnder24HourCapStaysSameEncounterWhenPositionU
 	}
 }
 
-// TestRecordContactIfNew_PositionOverrideBoundaryAt100Meters checks both
+// TestRecordContactIfNew_PositionOverrideBoundaryAt750Meters checks both
 // sides of the contactSessionMoveThresholdMeters boundary with a fixed
 // 90-minute gap (past contactSessionGap, within the 24h cap) and a fixed
 // longitude, varying only latitude - latitude degrees are a constant
 // ~111,195m (per haversineMeters's earth radius) regardless of longitude,
 // unlike longitude degrees which shrink away from the equator, so varying
-// latitude keeps the math simple. A ~0.0008 degree shift is ~89m (within
-// the threshold, no new row); a ~0.0010 degree shift is ~111m (outside it,
-// new row).
-func TestRecordContactIfNew_PositionOverrideBoundaryAt100Meters(t *testing.T) {
+// latitude keeps the math simple. A ~0.0067 degree shift is ~745m (within
+// the 750m threshold, no new row); a ~0.0072 degree shift is ~800m (outside
+// it, new row). These replace the old 100m-boundary test now that
+// contactSessionMoveThresholdMeters is 750m, per the measured bimodal
+// distance distribution (largest non-relocation excursion 555m, smallest
+// genuine relocation 5117m) documented on the constant itself.
+func TestRecordContactIfNew_PositionOverrideBoundaryAt750Meters(t *testing.T) {
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 	const baseLat = -21.59
 	const baseLon = 149.79
 
-	t.Run("within 100m stays same encounter", func(t *testing.T) {
+	t.Run("within 750m stays same encounter", func(t *testing.T) {
 		store := newTestNearbyContactStore(t)
-		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat, baseLon, "Airlie Beach", "anchored", base); err != nil {
+		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat, baseLon, "Airlie Beach", "anchored", base, base); err != nil {
 			t.Fatalf("recordContactIfNew (1st tick): %v", err)
 		}
-		// ~89m offset: within the 100m threshold.
-		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat+0.0008, baseLon, "Airlie Beach", "anchored", base.Add(90*time.Minute)); err != nil {
-			t.Fatalf("recordContactIfNew (2nd tick, ~89m away): %v", err)
+		// ~745m offset: within the 750m threshold.
+		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat+0.0067, baseLon, "Airlie Beach", "anchored", base.Add(90*time.Minute), base.Add(90*time.Minute)); err != nil {
+			t.Fatalf("recordContactIfNew (2nd tick, ~745m away): %v", err)
 		}
 		if got := countRows(t, store, "316042555"); got != 1 {
-			t.Fatalf("expected 1 row: a ~89m shift is within contactSessionMoveThresholdMeters, got %d", got)
+			t.Fatalf("expected 1 row: a ~745m shift is within contactSessionMoveThresholdMeters, got %d", got)
 		}
 	})
 
-	t.Run("beyond 100m starts new encounter", func(t *testing.T) {
+	t.Run("beyond 750m starts new encounter", func(t *testing.T) {
 		store := newTestNearbyContactStore(t)
-		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat, baseLon, "Airlie Beach", "anchored", base); err != nil {
+		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat, baseLon, "Airlie Beach", "anchored", base, base); err != nil {
 			t.Fatalf("recordContactIfNew (1st tick): %v", err)
 		}
-		// ~111m offset: outside the 100m threshold.
-		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat+0.0010, baseLon, "Airlie Beach", "anchored", base.Add(90*time.Minute)); err != nil {
-			t.Fatalf("recordContactIfNew (2nd tick, ~111m away): %v", err)
+		// ~800m offset: outside the 750m threshold.
+		if err := store.recordContactIfNew("316042555", "TAKU X", baseLat+0.0072, baseLon, "Airlie Beach", "anchored", base.Add(90*time.Minute), base.Add(90*time.Minute)); err != nil {
+			t.Fatalf("recordContactIfNew (2nd tick, ~800m away): %v", err)
 		}
 		if got := countRows(t, store, "316042555"); got != 2 {
-			t.Fatalf("expected 2 rows: a ~111m shift exceeds contactSessionMoveThresholdMeters, got %d", got)
+			t.Fatalf("expected 2 rows: a ~800m shift exceeds contactSessionMoveThresholdMeters, got %d", got)
 		}
 	})
 }
@@ -314,7 +336,11 @@ func TestRecordContactIfNew_SurvivesProcessRestartWithPositionOverride(t *testin
 	if err != nil {
 		t.Fatalf("newNearbyContactStore (1st process): %v", err)
 	}
-	if err := store1.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	// Zero dwell: this test is about the position override surviving a
+	// restart via the DB fallback, not about the confirmation dwell, so
+	// confirm on the first tick as before dwell existed.
+	store1.dwell = 0
+	if err := store1.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew (before restart): %v", err)
 	}
 	if err := store1.close(); err != nil {
@@ -327,13 +353,14 @@ func TestRecordContactIfNew_SurvivesProcessRestartWithPositionOverride(t *testin
 	if err != nil {
 		t.Fatalf("newNearbyContactStore (2nd process): %v", err)
 	}
+	store2.dwell = 0
 	t.Cleanup(func() { _ = store2.close() })
 
 	// 90 minutes later, same position: past contactSessionGap but within
 	// the position-override cap and unmoved. The in-memory map is cold
 	// (post-restart), so this exercises the DB fallback's lastRecordedContact
 	// lookup rather than the in-memory lastSeen map.
-	if err := store2.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(90*time.Minute)); err != nil {
+	if err := store2.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base.Add(90*time.Minute), base.Add(90*time.Minute)); err != nil {
 		t.Fatalf("recordContactIfNew (after restart): %v", err)
 	}
 
@@ -366,7 +393,7 @@ func TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount(t *testing.T) {
 	}
 	for i, ts := range times {
 		lat, lon := positions[i][0], positions[i][1]
-		if err := store.recordContactIfNew("316042555", "TAKU X", lat, lon, "Airlie Beach", "anchored", ts); err != nil {
+		if err := store.recordContactIfNew("316042555", "TAKU X", lat, lon, "Airlie Beach", "anchored", ts, ts); err != nil {
 			t.Fatalf("recordContactIfNew: %v", err)
 		}
 	}
@@ -393,7 +420,7 @@ func TestSummary_SingleRowReturnsZeroPriorSightings(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
 
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
 		t.Fatalf("recordContactIfNew: %v", err)
 	}
 
@@ -430,10 +457,10 @@ func TestListSightings_ReturnsNewestFirst(t *testing.T) {
 
 	first := base
 	second := base.Add(1 * time.Hour)
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", first); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", first, first); err != nil {
 		t.Fatalf("recordContactIfNew (1st): %v", err)
 	}
-	if err := store.recordContactIfNew("316042555", "TAKU X", -21.61, 149.81, "Nara Inlet", "motoring", second.Add(31*time.Minute+time.Hour)); err != nil {
+	if err := store.recordContactIfNew("316042555", "TAKU X", -21.61, 149.81, "Nara Inlet", "motoring", second.Add(31*time.Minute+time.Hour), second.Add(31*time.Minute+time.Hour)); err != nil {
 		t.Fatalf("recordContactIfNew (2nd): %v", err)
 	}
 
@@ -467,7 +494,7 @@ func TestListSightings_ReturnsNewestFirst(t *testing.T) {
 func TestGetNearbyVesselSightingsHandler_DecodesURLEncodedKeyParam(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	seenAt := time.Date(2026, time.July, 10, 9, 14, 0, 0, time.UTC)
-	if err := store.recordContactIfNew("name:TAKU X", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", seenAt); err != nil {
+	if err := store.recordContactIfNew("name:TAKU X", "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", seenAt, seenAt); err != nil {
 		t.Fatalf("recordContactIfNew: %v", err)
 	}
 
@@ -512,5 +539,202 @@ func TestVesselContactKey_NotOkWhenMMSIEmpty(t *testing.T) {
 	}
 	if _, ok := vesselContactKey("   "); ok {
 		t.Fatalf("expected ok=false for whitespace-only MMSI")
+	}
+}
+
+// ── Confirmation dwell state machine (nearby_contacts.go's pendingContact) ──
+
+// TestRecordContactIfNew_RingGrazeBlipDoesNotBecomeASightingButGenuineArrivalDoes
+// is the regression test for the bug this whole change fixes: Osprey IV
+// showed two sighting-history rows an hour apart for what was a single
+// visit. One tick placed it just inside the 5000m detection ring (an
+// optimistic range fix on a boat actually anchored just outside it), then it
+// went silent for over an hour, then it genuinely motored over and anchored
+// - using the real timestamps from that incident (2026-08-20 04:28:23 and
+// 05:28:39 UTC). With the confirmation dwell in place, the lone ring-graze
+// tick never accumulates the required dwell before the 61-minute silence
+// resets it, so it produces no row at all; only the genuine arrival, once
+// confirmed, produces the single expected row - backdated to its first
+// tick, not whatever tick happened to cross the dwell threshold.
+func TestRecordContactIfNew_RingGrazeBlipDoesNotBecomeASightingButGenuineArrivalDoes(t *testing.T) {
+	store := newTestNearbyContactStoreWithDwell(t, contactConfirmDwell)
+	const vesselKey = "231234567"
+
+	// The lone ring-graze blip: one optimistic fix, never followed up.
+	blipAt := time.Date(2026, time.August, 20, 4, 28, 23, 0, time.UTC)
+	if err := store.recordContactIfNew(vesselKey, "OSPREY IV", -20.83767, 149.23831, "Keswick Island", "anchored", blipAt, blipAt); err != nil {
+		t.Fatalf("recordContactIfNew (ring-graze blip): %v", err)
+	}
+
+	// Silence for 61 minutes - well past contactConfirmMaxTickGap - so the
+	// blip's pending candidate is discarded rather than resumed.
+	arrivalStart := time.Date(2026, time.August, 20, 5, 28, 39, 0, time.UTC)
+	arrivalLat, arrivalLon := -20.79810, 149.26460 // genuinely motored over and anchored here, 5179m away
+	posSeenAtArrival := arrivalStart
+	posSeenRefreshed := arrivalStart.Add(2 * time.Minute)
+
+	// The genuine arrival: polled every 5s, exactly like the real 5s server
+	// poller, for the full contactConfirmDwell (5 minutes), with the AIS
+	// position refreshing partway through. navContext changes from
+	// "motoring" (still underway on arrival) to "anchored" (settled) partway
+	// through, so the confirmed row can be checked against the *first*
+	// tick's value, not the last.
+	for elapsed := 0 * time.Second; elapsed <= contactConfirmDwell; elapsed += 5 * time.Second {
+		tick := arrivalStart.Add(elapsed)
+		posSeen := posSeenAtArrival
+		if elapsed >= 2*time.Minute {
+			posSeen = posSeenRefreshed
+		}
+		navContext := "motoring"
+		if elapsed >= 1*time.Minute {
+			navContext = "anchored"
+		}
+		if err := store.recordContactIfNew(vesselKey, "OSPREY IV", arrivalLat, arrivalLon, "Keswick Island", navContext, posSeen, tick); err != nil {
+			t.Fatalf("recordContactIfNew (arrival tick at +%s): %v", elapsed, err)
+		}
+	}
+
+	if got := countRows(t, store, vesselKey); got != 1 {
+		t.Fatalf("expected exactly 1 row (the ring-graze blip must not become a sighting), got %d", got)
+	}
+
+	sightings, err := store.listSightings(vesselKey)
+	if err != nil {
+		t.Fatalf("listSightings: %v", err)
+	}
+	if !sightings[0].SeenAt.Equal(arrivalStart) {
+		t.Fatalf("expected the row backdated to the arrival's first tick %s, got %s", arrivalStart, sightings[0].SeenAt)
+	}
+	if sightings[0].NavContext != "motoring" {
+		t.Fatalf("expected the row to carry the arrival's first-tick nav_context %q, not a later tick's, got %q", "motoring", sightings[0].NavContext)
+	}
+}
+
+// TestRecordContactIfNew_DwellConfirmationBackdatesToFirstTick is the core
+// dwell-confirmation case: ticks every 5 seconds (mirroring the real 5s
+// server poller) for the full contactConfirmDwell, with the AIS position
+// refreshing partway through, produces exactly one row - backdated to the
+// very first tick, not the tick that happened to cross the dwell threshold.
+func TestRecordContactIfNew_DwellConfirmationBackdatesToFirstTick(t *testing.T) {
+	store := newTestNearbyContactStoreWithDwell(t, contactConfirmDwell)
+	const vesselKey = "316042555"
+	start := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	posSeenA := start
+	posSeenB := start.Add(2 * time.Minute)
+
+	for elapsed := 0 * time.Second; elapsed <= contactConfirmDwell; elapsed += 5 * time.Second {
+		tick := start.Add(elapsed)
+		posSeen := posSeenA
+		if elapsed >= 2*time.Minute {
+			posSeen = posSeenB
+		}
+		if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", posSeen, tick); err != nil {
+			t.Fatalf("recordContactIfNew (tick at +%s): %v", elapsed, err)
+		}
+	}
+
+	if got := countRows(t, store, vesselKey); got != 1 {
+		t.Fatalf("expected exactly 1 row once the dwell elapses with a refreshed position, got %d", got)
+	}
+	sightings, err := store.listSightings(vesselKey)
+	if err != nil {
+		t.Fatalf("listSightings: %v", err)
+	}
+	if !sightings[0].SeenAt.Equal(start) {
+		t.Fatalf("expected the row backdated to the first tick %s, got %s", start, sightings[0].SeenAt)
+	}
+}
+
+// TestRecordContactIfNew_DwellNotYetElapsedInsertsNoRow confirms a candidate
+// that has been ticking continuously, with its position refreshed, for less
+// than contactConfirmDwell produces no row at all yet.
+func TestRecordContactIfNew_DwellNotYetElapsedInsertsNoRow(t *testing.T) {
+	store := newTestNearbyContactStoreWithDwell(t, contactConfirmDwell)
+	const vesselKey = "316042555"
+	start := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	posSeenA := start
+	posSeenB := start.Add(2 * time.Minute)
+
+	const dwellShyOf = 4 * time.Minute
+	for elapsed := 0 * time.Second; elapsed <= dwellShyOf; elapsed += 5 * time.Second {
+		tick := start.Add(elapsed)
+		posSeen := posSeenA
+		if elapsed >= 2*time.Minute {
+			posSeen = posSeenB
+		}
+		if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", posSeen, tick); err != nil {
+			t.Fatalf("recordContactIfNew (tick at +%s): %v", elapsed, err)
+		}
+	}
+
+	if got := countRows(t, store, vesselKey); got != 0 {
+		t.Fatalf("expected 0 rows: 4 minutes of ticking is still short of the 5-minute contactConfirmDwell, got %d", got)
+	}
+}
+
+// TestRecordContactIfNew_DwellInterruptedByGapRestartsAndInsertsNoRow
+// confirms a gap wider than contactConfirmMaxTickGap restarts the dwell
+// timer from scratch rather than resuming it: 4 minutes of continuous
+// ticking, then a 60-second gap (4x contactConfirmMaxTickGap), then 4 more
+// minutes of ticking. Neither stretch alone reaches the 5-minute dwell, and
+// the second stretch must not inherit elapsed time from the first, so no
+// row is ever inserted.
+func TestRecordContactIfNew_DwellInterruptedByGapRestartsAndInsertsNoRow(t *testing.T) {
+	store := newTestNearbyContactStoreWithDwell(t, contactConfirmDwell)
+	const vesselKey = "316042555"
+	start := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+
+	tickPosSeen := func(stretchStart time.Time, elapsed time.Duration) time.Time {
+		if elapsed >= 1*time.Minute {
+			return stretchStart.Add(1 * time.Minute)
+		}
+		return stretchStart
+	}
+
+	const stretch = 4 * time.Minute
+	for elapsed := 0 * time.Second; elapsed <= stretch; elapsed += 5 * time.Second {
+		tick := start.Add(elapsed)
+		if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", tickPosSeen(start, elapsed), tick); err != nil {
+			t.Fatalf("recordContactIfNew (1st stretch, tick at +%s): %v", elapsed, err)
+		}
+	}
+
+	// A 60s gap - 4x contactConfirmMaxTickGap (15s) - restarts the dwell.
+	secondStart := start.Add(stretch).Add(60 * time.Second)
+	for elapsed := 0 * time.Second; elapsed <= stretch; elapsed += 5 * time.Second {
+		tick := secondStart.Add(elapsed)
+		if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", tickPosSeen(secondStart, elapsed), tick); err != nil {
+			t.Fatalf("recordContactIfNew (2nd stretch, tick at +%s): %v", elapsed, err)
+		}
+	}
+
+	if got := countRows(t, store, vesselKey); got != 0 {
+		t.Fatalf("expected 0 rows: neither 4-minute stretch alone reaches the 5-minute dwell, and the gap must discard the first stretch rather than letting it carry over, got %d", got)
+	}
+}
+
+// TestRecordContactIfNew_StalePositionNeverConfirms confirms that ticking
+// continuously for far longer than contactConfirmDwell is not sufficient on
+// its own: if the AIS position is never refreshed (positionSeen never
+// changes from its value at dwell start), the candidate never confirms,
+// however long it keeps ticking. This is what stops a frozen optimistic fix
+// (ADR 0042's staleness gap) from ever being mistaken for a real, continuing
+// presence.
+func TestRecordContactIfNew_StalePositionNeverConfirms(t *testing.T) {
+	store := newTestNearbyContactStoreWithDwell(t, contactConfirmDwell)
+	const vesselKey = "316042555"
+	start := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	posSeen := start // never changes across any tick below
+
+	const tickFor = 10 * time.Minute // double the 5-minute dwell
+	for elapsed := 0 * time.Second; elapsed <= tickFor; elapsed += 5 * time.Second {
+		tick := start.Add(elapsed)
+		if err := store.recordContactIfNew(vesselKey, "TAKU X", -21.59, 149.79, "Airlie Beach", "anchored", posSeen, tick); err != nil {
+			t.Fatalf("recordContactIfNew (tick at +%s): %v", elapsed, err)
+		}
+	}
+
+	if got := countRows(t, store, vesselKey); got != 0 {
+		t.Fatalf("expected 0 rows: a position that never refreshes must never confirm, however long the dwell has elapsed, got %d", got)
 	}
 }

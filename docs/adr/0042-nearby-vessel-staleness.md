@@ -5,6 +5,8 @@ Accepted
 
 Works around a gap left open by ADR 0037 (delta-stream ingestion): the snapshot never evicts contexts. This ADR filters at read time rather than closing that gap - see Consequences below.
 
+Extended by ADR 0044 (nearby-vessel encounter confirmation): the 10-minute staleness window this ADR introduces can keep a single optimistic fix looking "present" long enough for `recordContactIfNew` to record a spurious sighting; ADR 0044's confirmation dwell, and its position-refresh requirement in particular, closes that interaction.
+
 ## Context
 
 The Nearby Vessels tile showed contacts that had left hours ago. In a reported screenshot, `VIVA` at 12 m and `GREY GOOSE` at 28 m sat at the top of the list while `232060792` read `(1211m ago)` - 20 hours stale - and `AURORA` read `(2648m ago)`, 44 hours stale. Every one of them rendered as a current target at a frozen position.

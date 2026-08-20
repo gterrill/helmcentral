@@ -30,7 +30,17 @@ const contactSessionGap = 1 * time.Hour
 // noise for a vessel that hasn't actually moved - anchor swing, GPS drift,
 // marina berth positioning - so a routine AIS dropout while stationary
 // doesn't fragment one encounter into several.
-const contactSessionMoveThresholdMeters = 100.0
+//
+// 750.0 is not a finely-tuned number: bucketing every consecutive
+// same-vessel row pair 1h-24h apart across the live contact database showed
+// the distances involved are strictly bimodal. Every pair is either <=555m
+// (69 of 72 pairs - one boat that never left, re-recorded because anchor
+// swing carried its position past whatever threshold was in force during an
+// AIS dropout) or >=5117m (the remaining pairs - genuine relocations to a
+// different anchorage), with nothing recorded in between. 750m sits inside
+// that ~4.5km empty band, comfortably clear of both the largest observed
+// non-relocation excursion and the smallest genuine relocation.
+const contactSessionMoveThresholdMeters = 750.0
 
 // contactSessionMaxGapForPositionOverride bounds how long the position
 // override above can be trusted: beyond this gap, a contact is always a new
@@ -40,6 +50,35 @@ const contactSessionMoveThresholdMeters = 100.0
 // without this cap, a boat's home berth would generate exactly one sighting
 // forever.
 const contactSessionMaxGapForPositionOverride = 24 * time.Hour
+
+// contactConfirmDwell is how long a candidate new encounter must stay
+// continuously in range - with its AIS position refreshed at least once -
+// before recordContactIfNew commits it as a real sighting, rather than on
+// the very first tick a vessel looks like it's arrived. This closes the
+// "ring-graze" defect: fetchSignalKNearbyVessels's 5000m range cutoff,
+// combined with anchor swing and GPS noise on both ends, can put a vessel
+// that is actually anchored just outside the ring inside it for a single
+// optimistic tick, and nearbyVesselMaxAge's 10-minute staleness window then
+// keeps that one fix looking "present" for up to 10 more minutes even
+// though no further data corroborates it. 5 minutes is longer than the
+// ~3-minute stationary Class A/B AIS report interval already cited by
+// nearbyVesselMaxAge's comment, so a single optimistic fix cannot carry a
+// candidate to confirmation by dwell time alone - a genuine visit will also
+// see at least one fresh AIS position report land inside the window, which
+// the position-refresh requirement below checks for separately.
+const contactConfirmDwell = 5 * time.Minute
+
+// contactConfirmMaxTickGap bounds how long a pending candidate can go
+// without a poll tick before its dwell timer restarts from scratch instead
+// of resuming where it left off. main.go's server-owned poller
+// (recordNearbyVesselContacts, tracks.go) runs every 5 seconds, so a
+// genuinely continuous encounter never sees a gap wider than that between
+// ticks. 15 seconds is 3x that interval - enough headroom to absorb an
+// occasional missed tick - but a gap wider than this means the vessel
+// dropped out of the contact set entirely (fell outside the range or
+// staleness filters) and later reappeared, which should start a fresh dwell
+// rather than quietly resuming an old one across the gap.
+const contactConfirmMaxTickGap = 15 * time.Second
 
 // globalNearbyContactStore is the process-wide nearby-vessel contact store,
 // opened once in main() and shared by the track poller (writes) and the
@@ -62,18 +101,48 @@ type lastContact struct {
 	lon    float64
 }
 
+// pendingContact is a candidate new encounter that recordContactIfNew has
+// seen but not yet confirmed: it has not been in range continuously (with a
+// refreshed AIS position) for contactConfirmDwell. It is never written to
+// the database on its own - only confirmation does that, and the row it
+// writes is backdated to firstSeenAt/lat/lon/geoname/navContext, the
+// candidate's arrival moment, not whichever tick happened to cross the
+// dwell threshold.
+type pendingContact struct {
+	firstSeenAt time.Time // encounter start; backdated into the row on confirmation
+	lastTickAt  time.Time // continuity check against contactConfirmMaxTickGap
+
+	// positionSeen is the AIS receive time recorded at dwell start (the
+	// tick that created this candidate), held fixed for the candidate's
+	// whole pending lifetime. Confirmation requires a later tick's
+	// positionSeen to differ from this value - i.e. proof that a fresh AIS
+	// position report, not just a repeated poll of a frozen fix, arrived
+	// during the window.
+	positionSeen time.Time
+
+	lat, lon   float64
+	geoname    string
+	navContext string
+}
+
 // nearbyContactStore is a SQLite-backed store of nearby-vessel contact
 // history, mirroring tile_cache.go's pattern for this app's other SQLite
 // usage. lastSeen tracks, in memory and for the process lifetime only, the
 // most recent tick at which each vessel was recorded and where it was seen
 // - it's what lets recordContactIfNew tell "still the same encounter" apart
 // from "a new one has started" without a database round trip on every poll
-// tick.
+// tick. pending tracks, also in memory only, candidate new encounters
+// awaiting confirmation per the dwell state machine documented on
+// recordContactIfNew; dwell is the confirmation duration required, normally
+// contactConfirmDwell but overridable (to 0) in tests that want the
+// pre-dwell one-call-one-row behavior.
 type nearbyContactStore struct {
 	db *sql.DB
 
 	mu       sync.Mutex
 	lastSeen map[string]lastContact
+	pending  map[string]pendingContact
+	dwell    time.Duration
 }
 
 // nearbyContactRecord is a single row read back from listSightings, backing
@@ -124,7 +193,12 @@ func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
 		return nil, fmt.Errorf("create nearby_vessel_contacts vessel_key index: %w", err)
 	}
 
-	return &nearbyContactStore{db: db, lastSeen: make(map[string]lastContact)}, nil
+	return &nearbyContactStore{
+		db:       db,
+		lastSeen: make(map[string]lastContact),
+		pending:  make(map[string]pendingContact),
+		dwell:    contactConfirmDwell,
+	}, nil
 }
 
 func (s *nearbyContactStore) close() error {
@@ -132,8 +206,9 @@ func (s *nearbyContactStore) close() error {
 }
 
 // recordContactIfNew records a contact for vesselKey at now, but only
-// inserts a new row if this is a new encounter. A contact is treated as a
-// continuation of the current encounter (no new row) if either:
+// inserts a new row once a new encounter has been confirmed. A contact is
+// treated as a continuation of the current encounter (no new row, no
+// pending state touched beyond being cleared) if either:
 //   - it's within contactSessionGap of the last time this vessel was seen,
 //     regardless of position; or
 //   - the gap exceeds contactSessionGap but is still within
@@ -146,21 +221,37 @@ func (s *nearbyContactStore) close() error {
 //     it stayed continuously.
 //
 // Anything else - the vessel hasn't been seen before, or the gap exceeds
-// both thresholds above - is a new encounter. lastSeen[vesselKey] is always
-// updated to now and to the current position regardless, so the gap timer
-// (and the reference position for the move check) resets on every tick the
-// vessel stays in range - this is what makes "record once per encounter"
-// work, not a DB uniqueness constraint.
+// both thresholds above - looks like a new encounter, but is not recorded
+// immediately. Instead it becomes (or continues) a pendingContact candidate,
+// which is only turned into a row once it has been continuously in range
+// for store.dwell (normally contactConfirmDwell) *and* its AIS position has
+// been refreshed at least once during that window - see pendingContact's
+// doc comment for why both conditions are required. While a candidate is
+// pending, lastSeen[vesselKey] is deliberately left untouched: that's what
+// keeps this same "looks new" branch evaluating on every tick of the
+// candidacy instead of falling into the continuation branch above.
 //
-// lastSeen is process-lifetime only, so on a cold cache (first tick after
-// process start for this vesselKey) it falls back to querying the database
-// for the vessel's actual most-recently-recorded seen_at and position via
-// lastRecordedContact, rather than assuming "not in the map" means "never
-// seen." Without this, every backend restart would cause every
+// A candidate resumes across ticks as long as they arrive within
+// contactConfirmMaxTickGap of each other; a wider gap discards it and starts
+// a fresh one, since that gap means the vessel actually dropped out of the
+// contact set rather than just being in the middle of confirmation. Once
+// confirmed, the row is inserted using the *candidate's* firstSeenAt/lat/
+// lon/geoname/navContext (the arrival moment), not the confirming tick's,
+// and only then does lastSeen[vesselKey] advance, to the confirming tick's
+// own now/lat/lon.
+//
+// lastSeen (and lastRecordedContact's DB fallback for it) is unaffected by
+// any of the above: it is process-lifetime only, so on a cold cache (first
+// tick after process start for this vesselKey) it falls back to querying
+// the database for the vessel's actual most-recently-recorded seen_at and
+// position via lastRecordedContact, rather than assuming "not in the map"
+// means "never seen." Without this, every backend restart would cause every
 // currently-visible vessel to look brand new to the in-memory map and get
 // falsely re-recorded as a new encounter, even if it had been continuously
-// in range for weeks.
-func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon float64, geoname, navContext string, now time.Time) error {
+// in range for weeks. pending, by contrast, is allowed to reset on
+// restart - a candidate that hadn't yet confirmed is not durable state
+// worth recovering, and will simply re-accumulate its dwell.
+func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon float64, geoname, navContext string, positionSeen, now time.Time) error {
 	s.mu.Lock()
 	last, ok := s.lastSeen[vesselKey]
 	s.mu.Unlock()
@@ -180,20 +271,53 @@ func (s *nearbyContactStore) recordContactIfNew(vesselKey, name string, lat, lon
 		haversineMeters(last.lat, last.lon, lat, lon) <= contactSessionMoveThresholdMeters
 	isNewEncounter := !withinSessionGap && !withinMoveOverride
 
-	s.mu.Lock()
-	s.lastSeen[vesselKey] = lastContact{seenAt: now, lat: lat, lon: lon}
-	s.mu.Unlock()
-
 	if !isNewEncounter {
+		s.mu.Lock()
+		delete(s.pending, vesselKey)
+		s.lastSeen[vesselKey] = lastContact{seenAt: now, lat: lat, lon: lon}
+		s.mu.Unlock()
 		return nil
 	}
 
+	s.mu.Lock()
+	pend, pendOk := s.pending[vesselKey]
+	fresh := !pendOk || now.Sub(pend.lastTickAt) > contactConfirmMaxTickGap
+	if fresh {
+		pend = pendingContact{
+			firstSeenAt:  now,
+			positionSeen: positionSeen,
+			lat:          lat,
+			lon:          lon,
+			geoname:      geoname,
+			navContext:   navContext,
+		}
+	}
+	pend.lastTickAt = now
+
+	elapsed := now.Sub(pend.firstSeenAt)
+	// A freshly-created candidate has nothing yet to compare positionSeen
+	// against, so it can never be judged "stale" on the very tick that
+	// creates it - that's what lets a zero dwell (the test helper's
+	// default) confirm on the first tick.
+	stalePosition := !fresh && positionSeen.Equal(pend.positionSeen)
+	if elapsed < s.dwell || stalePosition {
+		s.pending[vesselKey] = pend
+		s.mu.Unlock()
+		return nil
+	}
+	delete(s.pending, vesselKey)
+	s.mu.Unlock()
+
 	if _, err := s.db.Exec(
 		`INSERT INTO nearby_vessel_contacts (vessel_key, name, seen_at, lat, lon, geoname, nav_context) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		vesselKey, name, now.Unix(), lat, lon, geoname, navContext,
+		vesselKey, name, pend.firstSeenAt.Unix(), pend.lat, pend.lon, pend.geoname, pend.navContext,
 	); err != nil {
 		return fmt.Errorf("record nearby vessel contact: %w", err)
 	}
+
+	s.mu.Lock()
+	s.lastSeen[vesselKey] = lastContact{seenAt: now, lat: lat, lon: lon}
+	s.mu.Unlock()
 	return nil
 }
 
@@ -248,6 +372,17 @@ func (s *nearbyContactStore) lastRecordedContact(vesselKey string) (lastContact,
 // "vesselKey is currently visible" guarantee above. If that guarantee ever
 // stops holding for some future caller, this function's result for that
 // caller would be meaningless and it should not reuse this method as-is.
+//
+// Known transient undercount: while a returning vessel is a pendingContact
+// candidate awaiting confirmation (recordContactIfNew), it is genuinely
+// visible but has no row yet at all - the "most-recently-recorded row"
+// this function relies on is still the previous encounter's. For up to
+// store.dwell (normally contactConfirmDwell, 5 minutes), that means
+// seenCount reads one lower than the vessel's real prior-sightings count.
+// It self-corrects the moment the candidate confirms and its row is
+// inserted. This is accepted rather than special-cased here: it is a
+// narrow, self-healing window, and this function has no way to know a
+// pending candidate exists without new plumbing between the two files.
 func (s *nearbyContactStore) summary(vesselKey string) (seenCount int, lastSeenAt time.Time, err error) {
 	rows, err := s.db.Query(
 		`SELECT seen_at FROM nearby_vessel_contacts WHERE vessel_key = ? ORDER BY seen_at DESC`,

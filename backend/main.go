@@ -869,6 +869,16 @@ type nearbyVessel struct {
 	Lon        float64  `json:"lon"`
 	SeenCount  int      `json:"seen_count"`
 	LastSeenAt string   `json:"last_seen_at,omitempty"`
+
+	// PositionSeen is the delta receive time this vessel's position was
+	// last refreshed at (see fetchSignalKNearbyVessels), threaded through to
+	// recordNearbyVesselContacts -> recordContactIfNew so its confirmation
+	// dwell can tell "still ticking on a frozen position" apart from "a
+	// fresh AIS report actually arrived" (see nearby_contacts.go's
+	// pendingContact). json:"-" keeps it off the wire entirely: it's
+	// internal plumbing, not something either the tile or the anchor-watch
+	// map has any use for.
+	PositionSeen time.Time `json:"-"`
 }
 
 // buildNearbyVesselsPayload produces the /api response body. Split from the handler so

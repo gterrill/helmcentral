@@ -136,7 +136,7 @@ func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, stat
 			log.Printf("Skipping nearby vessel contact for %q: no MMSI reported", v.Name)
 			continue
 		}
-		if err := globalNearbyContactStore.recordContactIfNew(key, v.Name, v.Lat, v.Lon, geoname, state.Status, now); err != nil {
+		if err := globalNearbyContactStore.recordContactIfNew(key, v.Name, v.Lat, v.Lon, geoname, state.Status, v.PositionSeen, now); err != nil {
 			log.Printf("Failed to record nearby vessel contact for %s: %v", key, err)
 		}
 	}
