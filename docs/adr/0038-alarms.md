@@ -74,25 +74,44 @@ The heartbeat inverts the second failure: a periodic "still alive" makes its **a
 
 One row per raise, closed on clear. A recurring fault therefore shows how often it happens, which is usually the diagnosis; collapsing it to a single entry would hide exactly that. Acknowledge and clear stamp only the newest open occurrence.
 
-## Addendum: acknowledging a bus-sourced notification writes back to SignalK
+## Addendum: alerts are managed through the SignalK Notifications API, not by writing the tree
 
 The original implementation could not acknowledge an alarm it had not raised itself. `acknowledgeAlarmHandler` consulted only `alarmEngine.statuses`, which holds rule-driven alarms; a notification from another producer is synthesised fresh by `signalKNotifications` on every read and is never in that map. The lookup missed, and the button answered `409 alarm is not acknowledgeable` for every alarm on the bus — reported against `notifications.arrivalCircleEntered` from the course provider.
 
-Adding those statuses to the engine's map would not have fixed it. They are rebuilt from the SignalK tree on each poll, so a local acknowledgement is erased a second later, and it would silence nothing outside Helmcentral: the buzzer plugin and the MFD are reading the same tree.
+Adding those statuses to the engine's map would not have fixed it. They are rebuilt from the SignalK tree on each poll, so a local acknowledgement is erased a second later, and it would silence nothing outside Helmcentral: the buzzer plugin and the MFD are reading the same tree. **The server is the acknowledgement record.**
 
-**The bus is the acknowledgement record.** SignalK has no `acknowledged` state — the vocabulary decision in §1 means using the one the spec does have. Silence is expressed through `method`: acknowledging writes the notification back with `sound` dropped and everything else preserved, and a notification whose `method` no longer contains `sound` reads back as `alarmPhaseAcknowledged`. The ack survives restarts, and every other consumer on the bus stops sounding, because it is the same fact in the same place.
+The first attempt got that principle right and the mechanism wrong. It reasoned from the core spec — which has no `acknowledged` state, only the `method` array — and wrote the notification back to its own path with `sound` removed. Two live failures, in order, corrected it:
 
-Three details that are decisions, not incidentals:
+1. `404 Cannot PUT /notifications/arrivalCircleEntered`. Express's catch-all, meaning no such URL: the write was missing the `/signalk/v1/api/vessels/self` prefix every other write path (czone switches, `generatorPut`) uses. That prefix is now the shared `signalKSelfAPIPath` constant.
+2. `{"state":"COMPLETED","statusCode":404,...,"user":"admin"}`. SignalK's own PUT request protocol, authenticated and routed, reporting **no registered PUT handler** for that path. Notifications are not writable that way at all.
 
-- **An absent `method` is not silence.** It is a producer that never said how to alert. Reading it as acknowledged would silently swallow every alarm such a producer raises, so it reads as active; acknowledging one writes `["visual"]`.
-- **The whole value object is copied on write.** A SignalK PUT replaces the notification, so rebuilding it from just the fields Helmcentral models would strip whatever else the producer set.
-- **A failed write is a 502, never a 409.** A refusal (nothing live there, or an emergency) is a considered answer the operator can act on. An upstream write failure is a fault, and reporting it as a refusal would leave the operator reading "cannot be acknowledged" while the real cause was that SignalK rejected the PUT. Per the repo's fallback policy, the acknowledgement never reports success it did not achieve.
+Reading the server settled it. SignalK 2.x serves a **Notifications API** (`/signalk/v2/api/notifications`, spec published at `/skServer/openapi/notifications`), and each notification already carries what the operation needs:
+
+```json
+"id": "7f060fc2-…", "status": { "silenced": false, "acknowledged": false,
+                                "canSilence": true, "canAcknowledge": true, "canClear": false }
+```
+
+So the decision: **actions go to the notification's id, and the server owns the edit.**
+
+- `POST /{id}/silence` — removes `sound`, sets `status.silenced`
+- `POST /{id}/acknowledge` — removes `sound` **and** `visual`, sets `status.acknowledged`
+
+The hand-rolled write was reimplementing `silence` badly, at the wrong layer, without maintaining the status flags. It is deleted rather than kept as a fallback: the API is the mechanism, and a second path that half-works would only mask the case where the real one does not.
+
+### Silencing is not acknowledging
+
+SignalK draws a distinction the engine does not, and it is a real one on a boat: silencing stops the noise while the alarm goes on demanding attention; acknowledging says it has been seen. Collapsing them onto one button would have meant picking which of the two the operator gets and hiding the other, so the drawer offers both, and `alarmStatus` carries `silenced` as a flag **alongside** `phase` rather than as another phase — only acknowledging moves an alarm out of `active` and out of the banner.
+
+What each alarm supports is the server's answer, not a guess: `can_silence` / `can_acknowledge` come from the notification's own capability flags, and the drawer renders exactly the buttons an alarm advertises. §1's emergency rule outranks them both — an emergency offers neither, however permissive `canSilence` is. Rule-driven alarms advertise `can_acknowledge` only, because the engine has no silence action, and asking it to silence one is refused rather than quietly treated as an acknowledgement.
+
+### Details that are decisions
+
+- **Capabilities require an `id`.** Both actions are POSTs to a notification id, so a producer that writes the tree directly offers neither — rendering a button whose only possible outcome is an error would be worse than rendering none. Such a notification's `method` array is still read for display, and agrees by construction, because the API defines its own actions as removing exactly those methods.
+- **An absent `method` is not silence.** It is a producer that never said how to alert; reading it as acknowledged would swallow every alarm it raises.
+- **A failed call is a 502, never a 409.** A refusal — nothing live, an emergency, or an action the server does not offer — is a considered answer the operator can act on. A failure is a fault, and dressing it as a refusal would leave the operator reading "cannot be acknowledged" when the real cause was that SignalK rejected the call. Per the repo's fallback policy, an acknowledgement never reports success it did not achieve.
 
 One thing that had to be found rather than reasoned about: bus-sourced ids are the first alarm ids containing a character the browser percent-encodes, and Echo hands path params to the handler **still escaped** (it prefers `URL.RawPath`). Left escaped, `notifications%3A...` matches no prefix and no rule, and reproduces the original 409 exactly. Rule ids are UUIDs and never exercised this. A handler test that sets the param directly cannot see it either, so the regression test drives the router the way the browser does.
-
-Whether a given path accepts a PUT is the server's call: SignalK routes it to whichever provider registered a handler, and one that registered none answers 405. That surfaces verbatim in the 502 rather than being masked.
-
-§1's emergency rule is unchanged and now applies on both sides — an emergency on the bus is refused before anything is written.
 
 ## Consequences
 
@@ -104,7 +123,8 @@ Whether a given path accepts a PUT is the server's call: SignalK routes it to wh
 - Anchor drag detection moved to the server (`alarm_anchor.go`) rather than being derived in the React hook. Closing the tab no longer silences it, and it now flows through the normal path: logged, acknowledgeable, and delivered off the boat. Silencing is the server acknowledgement, so a second browser cannot be left ringing. It also fixed the old bug where the klaxon loop was created only on the transition into `dragging`, so un-silencing never restarted it.
 - Drag uses asymmetric thresholds like every other rule: it fires past `radius + 4.572m` (the old client buffer, so the firing distance is unchanged) but clears only back inside the radius. A lost GNSS fix never raises a drag — position freezes at its last trusted value during an outage (ADR 0037), and the stream watchdog already reports the outage itself.
 - `use-anchor-watch.ts` still derives its own client-side `dragging` state for map and tile styling. The alarm no longer depends on it, but the two can disagree inside the hysteresis band; collapsing them onto the server's answer is worth doing when that component is next touched.
-- A rule alarm acknowledged in Helmcentral still does **not** write back to the bus. When the `signalk` transport is enabled, Helmcentral publishes its own alarms with `method: ["visual","sound"]`, and acknowledging one silences the engine's copy while the published copy goes on sounding for every other consumer. That transport also makes each rule alarm appear twice in `activeAlarms` — once from the engine, once echoed back off the bus — with no de-duplication. Both follow from the same gap and want fixing together.
+- The `signalk` notify transport — Helmcentral publishing its own rule alarms onto the bus — is still broken, and for the same reason the first attempt failed: it writes notifications by v1 PUT, and the server registers no PUT handler for those paths. It defaults to disabled, so no rule alarm has ever exercised it. Publishing needs Helmcentral to emit a delta as a producer instead, which is a separate change.
+- A rule alarm acknowledged in Helmcentral still does **not** reach the bus. When the `signalk` transport is enabled, Helmcentral publishes its own alarms with `method: ["visual","sound"]`, and acknowledging one silences the engine's copy while the published copy goes on sounding for every other consumer. That transport also makes each rule alarm appear twice in `activeAlarms` — once from the engine, once echoed back off the bus — with no de-duplication. Both follow from the same gap and want fixing together.
 - Rules are evaluated only while Helmcentral runs. There is no persistence of engine state across restarts, so a restart re-raises a still-true condition — which is the safe direction, but means the alarm log can show a duplicate occurrence after a deploy.
 
 ## Verification

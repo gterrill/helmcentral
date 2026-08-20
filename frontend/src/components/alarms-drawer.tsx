@@ -46,9 +46,10 @@ function formatTime(value?: string): string {
 interface AlarmsDrawerProps {
   alarms: ActiveAlarm[]
   onAcknowledge: (ruleId: string) => Promise<void>
+  onSilence: (ruleId: string) => Promise<void>
 }
 
-export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge }: AlarmsDrawerProps) {
+export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, onSilence }: AlarmsDrawerProps) {
   const { rules, loading, error, createRule, updateRule, deleteRule } = useAlarmRules()
   const { entries, refresh: refreshLog } = useAlarmLog(true)
   const [draft, setDraft] = useState<AlarmRuleDraft | null>(null)
@@ -110,6 +111,15 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge }
     }
   }, [onAcknowledge])
 
+  const silence = useCallback(async (ruleId: string) => {
+    setAckError(null)
+    try {
+      await onSilence(ruleId)
+    } catch (err) {
+      setAckError(err instanceof Error ? err.message : String(err))
+    }
+  }, [onSilence])
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
       <Tile title="Active Alarms" icon={<BellRing className="h-3.5 w-3.5 text-gauge-secondary" />}>
@@ -132,10 +142,24 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge }
                       {alarm.state} · {alarm.path} · {formatTime(alarm.raised_at)}
                     </p>
                   </div>
-                  <div className="shrink-0">
+                  {/*
+                    SignalK reports per notification which actions it offers, so
+                    render exactly those: silencing stops the sound, and
+                    acknowledging also stops the visual alert. An emergency
+                    offers neither, and a rule alarm offers no silence.
+                  */}
+                  <div className="flex shrink-0 items-center gap-2">
                     {alarm.phase === 'acknowledged' ? (
                       <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Acknowledged</span>
-                    ) : (
+                    ) : alarm.silenced ? (
+                      <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Silenced</span>
+                    ) : null}
+                    {alarm.can_silence && (
+                      <Button size="sm" variant="ghost" onClick={() => void silence(alarm.rule_id)}>
+                        Silence
+                      </Button>
+                    )}
+                    {alarm.can_acknowledge && (
                       <Button size="sm" variant="outline" onClick={() => void acknowledge(alarm.rule_id)}>
                         Acknowledge
                       </Button>

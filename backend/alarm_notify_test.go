@@ -220,15 +220,13 @@ func TestPutSignalKNotification_ReachableWithNoUserSessionPresent(t *testing.T) 
 	defer srv.Close()
 
 	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusOK, `{"token":"service-jwt-xyz","timeToLive":86400}`)
-	// putSignalKNotification (alarm_notify.go) turns "notifications.anchor.drag"
-	// into a PUT at this path (dots -> slashes, appended directly to the
-	// SignalK base URL) — matching its actual current request construction,
-	// not the /signalk/v1/api/vessels/self/... prefix other write paths
-	// (generatorPut, route activation) use. That prefix question is
-	// pre-existing behaviour this test isn't the place to change; it only
-	// needs to match what putSignalKNotification actually sends so the
-	// no-session assertion below is real.
-	rs.on(http.MethodPut, "/notifications/anchor/drag", http.StatusOK, `{}`)
+	// putSignalKNotification turns "notifications.anchor.drag" into a PUT under
+	// the same /signalk/v1/api/vessels/self prefix every other write path uses
+	// (czone switches, generatorPut). It previously appended the path straight
+	// to the base URL, which is not an endpoint SignalK serves: the server's
+	// Express router answered "Cannot PUT /notifications/anchor/drag" with a
+	// 404, so this transport never reached the bus at all.
+	rs.on(http.MethodPut, signalKSelfAPIPath+"/notifications/anchor/drag", http.StatusOK, `{}`)
 
 	settingsPath := settingsFileForServer(t, srv.URL)
 	t.Setenv("SETTINGS_FILE", settingsPath)

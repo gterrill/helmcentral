@@ -366,6 +366,7 @@ func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []a
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
+		{http.MethodPost, "/api/alarms/:id/silence", tierWrite, silenceAlarmHandler},
 		{http.MethodPost, "/api/alarm-rules", tierWrite, createAlarmRuleHandler},
 		{http.MethodPut, "/api/alarm-rules/:id", tierWrite, updateAlarmRuleHandler},
 		{http.MethodDelete, "/api/alarm-rules/:id", tierWrite, deleteAlarmRuleHandler},

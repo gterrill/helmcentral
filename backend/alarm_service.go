@@ -163,6 +163,17 @@ func alarmsHandler(c echo.Context) error {
 }
 
 func acknowledgeAlarmHandler(c echo.Context) error {
+	return alarmActionHandler(c, notificationActionAcknowledge)
+}
+
+// silenceAlarmHandler stops an alarm sounding without acknowledging it. SignalK
+// draws that distinction and Helmcentral's own engine does not, so this action
+// exists only for notifications on the bus.
+func silenceAlarmHandler(c echo.Context) error {
+	return alarmActionHandler(c, notificationActionSilence)
+}
+
+func alarmActionHandler(c echo.Context, action string) error {
 	// Echo prefers URL.RawPath, so a param arrives still percent-encoded. Rule
 	// ids are UUIDs and never notice, but a bus-sourced id carries the
 	// "notifications:" namespace colon the browser encodes as %3A — left
@@ -175,26 +186,36 @@ func acknowledgeAlarmHandler(c echo.Context) error {
 	now := time.Now().UTC()
 
 	// A bus-sourced notification is never in the engine's status map — it is
-	// rebuilt from the SignalK tree on every poll — so acknowledging one means
-	// writing the acknowledgement back to the bus, where it survives.
+	// rebuilt from the SignalK tree on every poll — so the action goes to the
+	// SignalK Notifications API, where it survives and where every other
+	// consumer sees it.
 	if path, busSourced := notificationRuleIDPath(ruleID); busSourced {
-		status, err := acknowledgeSignalKNotification(globalSignalKSnapshot, path, now, putSignalKNotification)
+		status, err := actOnSignalKNotification(globalSignalKSnapshot, path, action, now, postSignalKNotificationAction)
 		if err != nil {
-			// A refusal is a 409 the operator can act on; a failed write is an
+			// A refusal is a 409 the operator can act on; a failed call is an
 			// upstream fault and must not be dressed up as one.
 			code := http.StatusBadGateway
-			if errors.Is(err, errNotificationNotLive) || errors.Is(err, errNotificationEmergency) {
+			if errors.Is(err, errNotificationNotLive) || errors.Is(err, errNotificationEmergency) || errors.Is(err, errNotificationNotAllowed) {
 				code = http.StatusConflict
 			}
 			return c.JSON(code, map[string]string{"error": err.Error()})
 		}
 
-		if err := globalAlarmLogStore.MarkAcknowledged(ruleID, now); err != nil {
-			log.Printf("alarm log: %v", err)
+		if action == notificationActionAcknowledge {
+			if err := globalAlarmLogStore.MarkAcknowledged(ruleID, now); err != nil {
+				log.Printf("alarm log: %v", err)
+			}
 		}
-		// The status we just committed, not a re-read: the write has to travel
-		// back through the delta stream before the snapshot reflects it.
 		return c.JSON(http.StatusOK, status)
+	}
+
+	if action == notificationActionSilence {
+		// The engine has one action. Silencing a rule alarm without
+		// acknowledging it is not a thing it can express, and pretending
+		// otherwise would report a silence that never happened.
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "a rule-driven alarm can only be acknowledged, not silenced",
+		})
 	}
 
 	if !globalAlarmEngine.acknowledge(ruleID, now) {

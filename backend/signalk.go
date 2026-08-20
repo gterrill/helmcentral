@@ -29,6 +29,13 @@ const (
 	defaultHullType                  = "power_cat"
 	defaultWindageAreaM2             = 35
 
+	// signalKSelfAPIPath is the v1 REST prefix every read and write of the
+	// self vessel's data model goes through. Reads default to it through
+	// SIGNALK_VESSEL_PATH; writes (czone switches, generatorPut, alarm
+	// notifications) hard-code the same prefix, because a PUT to a path
+	// outside it reaches no endpoint the server serves.
+	signalKSelfAPIPath = "/signalk/v1/api/vessels/self"
+
 	// defaultSignalKReadTimeoutMS bounds every read of SignalK state (vessel,
 	// electrical, tanks, nearby vessels, self name, connection probe).
 	// Overridable via SIGNALK_READ_TIMEOUT_MS - the boat's server is on the

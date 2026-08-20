@@ -65,6 +65,15 @@ type alarmStatus struct {
 	Value   float64    `json:"value"`
 	Message string     `json:"message"`
 
+	// Silenced and the two capability flags mirror the SignalK Notifications
+	// API's own status object. Silencing is not acknowledging — a silenced
+	// alarm has stopped sounding but is still demanding attention — so it is a
+	// flag alongside Phase rather than another phase. The capabilities are the
+	// server's answer about a given notification, not something inferred.
+	Silenced       bool `json:"silenced"`
+	CanSilence     bool `json:"can_silence"`
+	CanAcknowledge bool `json:"can_acknowledge"`
+
 	SinceTrue time.Time `json:"-"`
 	RaisedAt  time.Time `json:"-"`
 	AckedAt   time.Time `json:"-"`
@@ -309,9 +318,19 @@ func (e *alarmEngine) statusFor(ruleID string) alarmStatus {
 	defer e.mu.RUnlock()
 
 	if status, ok := e.statuses[ruleID]; ok {
-		return *status
+		return status.withRuleCapabilities()
 	}
 	return alarmStatus{RuleID: ruleID, Phase: alarmPhaseNormal, State: alarmStateNormal}
+}
+
+// withRuleCapabilities reports what a rule-driven alarm supports. The engine
+// has exactly one action — acknowledge — and no notion of silencing separate
+// from it, so unlike a bus notification it never offers CanSilence. An
+// emergency offers nothing (ADR 0038).
+func (s alarmStatus) withRuleCapabilities() alarmStatus {
+	s.CanAcknowledge = s.Phase == alarmPhaseActive && s.State != alarmStateEmergency
+	s.CanSilence = false
+	return s
 }
 
 // active returns every alarm currently raised, acknowledged included — an
@@ -323,7 +342,7 @@ func (e *alarmEngine) active() []alarmStatus {
 	var out []alarmStatus
 	for _, status := range e.statuses {
 		if status.Phase == alarmPhaseActive || status.Phase == alarmPhaseAcknowledged {
-			out = append(out, *status)
+			out = append(out, status.withRuleCapabilities())
 		}
 	}
 	return out

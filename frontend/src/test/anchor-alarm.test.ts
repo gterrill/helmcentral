@@ -84,8 +84,12 @@ describe('useAnchorAlarm', () => {
     state: 'alarm',
     value: 62,
     message: 'Anchor dragging: 62m from where it was set',
+    silenced: false,
+    // A rule-driven alarm has no silence action; the engine only acknowledges.
+    can_silence: false,
+    can_acknowledge: true,
   }
-  const acknowledged: ActiveAlarm = { ...dragging, phase: 'acknowledged' }
+  const acknowledged: ActiveAlarm = { ...dragging, phase: 'acknowledged', silenced: true, can_acknowledge: false }
 
   it('does not alarm when the server reports no drag', () => {
     const { result } = renderHook(() => useAnchorAlarm(null))

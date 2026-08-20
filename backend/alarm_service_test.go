@@ -61,14 +61,11 @@ func TestAcknowledgeAlarmHandlerAcknowledgesABusSourcedNotification(t *testing.T
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusOK, `{"token":"service-jwt","timeToLive":86400}`)
-	rs.on(http.MethodPut, "/notifications/arrivalCircleEntered", http.StatusOK, `{}`)
+	rs.on(http.MethodPost, signalKNotificationsAPIPath+"/"+liveNotificationID+"/acknowledge", http.StatusOK, `{"state":"COMPLETE","statusCode":200}`)
 	t.Setenv("SETTINGS_FILE", settingsFileForServer(t, srv.URL))
 
-	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered", map[string]any{
-		"state":   "alarm",
-		"message": "WP arrival circle entered!",
-		"method":  []any{"visual", "sound"},
-	}))
+	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered",
+		notificationWithStatus("alarm", liveNotificationStatus())))
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/alarms/x/acknowledge", nil)
@@ -84,17 +81,17 @@ func TestAcknowledgeAlarmHandlerAcknowledgesABusSourcedNotification(t *testing.T
 		t.Fatalf("status: got %d, want 200 (body %s)", rec.Code, rec.Body.String())
 	}
 
-	var put *capturedRequest
+	var action *capturedRequest
 	for i, call := range rs.calls() {
-		if call.Method == http.MethodPut {
-			put = &rs.calls()[i]
+		if call.Method == http.MethodPost && strings.HasPrefix(call.Path, signalKNotificationsAPIPath) {
+			action = &rs.calls()[i]
 		}
 	}
-	if put == nil {
-		t.Fatalf("acknowledging must write back to the bus; calls were %+v", rs.calls())
+	if action == nil {
+		t.Fatalf("acknowledging must call the Notifications API; calls were %+v", rs.calls())
 	}
-	if !strings.Contains(string(put.Body), `"visual"`) || strings.Contains(string(put.Body), `"sound"`) {
-		t.Fatalf("the acknowledgement must drop sound and keep visual, got %s", string(put.Body))
+	if action.Path != signalKNotificationsAPIPath+"/"+liveNotificationID+"/acknowledge" {
+		t.Fatalf("the action is keyed by the notification's own id, got %q", action.Path)
 	}
 
 	var status alarmStatus
@@ -108,11 +105,8 @@ func TestAcknowledgeAlarmHandlerAcknowledgesABusSourcedNotification(t *testing.T
 
 // An emergency still cannot be silenced, and the refusal must not reach the bus.
 func TestAcknowledgeAlarmHandlerRefusesABusSourcedEmergency(t *testing.T) {
-	withGlobalSnapshot(t, snapshotWithNotification("notifications.mob", map[string]any{
-		"state":   "emergency",
-		"message": "MOB",
-		"method":  []any{"visual", "sound"},
-	}))
+	withGlobalSnapshot(t, snapshotWithNotification("notifications.mob",
+		notificationWithStatus("emergency", liveNotificationStatus())))
 
 	e := echo.New()
 	rec := httptest.NewRecorder()
@@ -143,14 +137,11 @@ func TestAcknowledgeAlarmRouteDecodesTheNamespacedNotificationID(t *testing.T) {
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
 	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusOK, `{"token":"service-jwt","timeToLive":86400}`)
-	rs.on(http.MethodPut, "/notifications/arrivalCircleEntered", http.StatusOK, `{}`)
+	rs.on(http.MethodPost, signalKNotificationsAPIPath+"/"+liveNotificationID+"/acknowledge", http.StatusOK, `{"state":"COMPLETE","statusCode":200}`)
 	t.Setenv("SETTINGS_FILE", settingsFileForServer(t, srv.URL))
 
-	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered", map[string]any{
-		"state":   "alarm",
-		"message": "WP arrival circle entered!",
-		"method":  []any{"visual", "sound"},
-	}))
+	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered",
+		notificationWithStatus("alarm", liveNotificationStatus())))
 
 	e := echo.New()
 	e.POST("/api/alarms/:id/acknowledge", acknowledgeAlarmHandler)
@@ -161,5 +152,98 @@ func TestAcknowledgeAlarmRouteDecodesTheNamespacedNotificationID(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// Silencing is a separate action with separate semantics: the alarm stops
+// sounding but stays active, so it is not dropped from the banner the way an
+// acknowledged one is.
+func TestSilenceAlarmHandlerSilencesWithoutAcknowledging(t *testing.T) {
+	invalidateSignalKToken()
+	t.Cleanup(invalidateSignalKToken)
+
+	t.Setenv("SIGNALK_USERNAME", "helmcentral-service")
+	t.Setenv("SIGNALK_PASSWORD", "service-secret")
+
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusOK, `{"token":"service-jwt","timeToLive":86400}`)
+	rs.on(http.MethodPost, signalKNotificationsAPIPath+"/"+liveNotificationID+"/silence", http.StatusOK, `{"state":"COMPLETE","statusCode":200}`)
+	t.Setenv("SETTINGS_FILE", settingsFileForServer(t, srv.URL))
+
+	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered",
+		notificationWithStatus("alarm", liveNotificationStatus())))
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/alarms/x/silence", nil), rec)
+	c.SetParamNames("id")
+	c.SetParamValues("notifications:arrivalCircleEntered")
+
+	if err := silenceAlarmHandler(c); err != nil {
+		t.Fatalf("silenceAlarmHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+
+	var status alarmStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !status.Silenced {
+		t.Fatalf("expected the alarm to report silenced")
+	}
+	if status.Phase != alarmPhaseActive {
+		t.Fatalf("silencing is not acknowledging: phase got %q, want %q", status.Phase, alarmPhaseActive)
+	}
+	if !status.CanAcknowledge {
+		t.Fatalf("a silenced alarm can still be acknowledged")
+	}
+}
+
+// The engine has one action, so silencing a rule alarm is refused rather than
+// quietly treated as an acknowledgement.
+func TestSilenceAlarmHandlerRefusesARuleDrivenAlarm(t *testing.T) {
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/alarms/x/silence", nil), rec)
+	c.SetParamNames("id")
+	c.SetParamValues("a3f1-locally-configured-rule")
+
+	if err := silenceAlarmHandler(c); err != nil {
+		t.Fatalf("silenceAlarmHandler: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status: got %d, want 409 (body %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// Rule alarms advertise the one action the engine has, so the drawer renders
+// an Acknowledge button for them and no Silence button.
+func TestRuleDrivenAlarmsAdvertiseAcknowledgeOnly(t *testing.T) {
+	withTempAlarmRules(t)
+	withGlobalSnapshot(t, snapshotWithSelfDelta("electrical.batteries.house.voltage", 11.0, alarmNow))
+
+	original := globalAlarmEngine
+	globalAlarmEngine = newAlarmEngine()
+	t.Cleanup(func() { globalAlarmEngine = original })
+
+	rule := validRule()
+	rule.DwellSeconds = 0
+	if _, err := createAlarmRule(rule); err != nil {
+		t.Fatalf("createAlarmRule: %v", err)
+	}
+	evaluateAlarmsOnce(alarmNow)
+
+	alarms := activeAlarms()
+	if len(alarms) != 1 {
+		t.Fatalf("expected the rule to be firing, got %d", len(alarms))
+	}
+	if !alarms[0].CanAcknowledge {
+		t.Fatalf("a live rule alarm can be acknowledged")
+	}
+	if alarms[0].CanSilence {
+		t.Fatalf("the engine has no silence action, so it must not advertise one")
 	}
 }

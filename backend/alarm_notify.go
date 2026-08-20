@@ -306,8 +306,12 @@ func putSignalKNotification(path string, value any) error {
 		return err
 	}
 
-	// SignalK PUT paths are slash-separated.
-	putPath := strings.ReplaceAll(path, ".", "/")
+	// SignalK PUT paths are slash-separated, and live under the same
+	// vessels/self API prefix as every other write (czone switches,
+	// generatorPut). Appending the bare path to the base URL hits no endpoint
+	// the server serves — Express answers "Cannot PUT /notifications/..." — so
+	// nothing written this way ever reached the bus.
+	putPath := signalKSelfAPIPath + "/" + strings.ReplaceAll(path, ".", "/")
 
 	err = putSignalKValue(signalkURL, putPath, value, token)
 	if err != nil && token != "" {

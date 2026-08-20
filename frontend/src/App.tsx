@@ -319,7 +319,7 @@ export function App() {
     source: vesselStateSource,
   } = useVesselState()
 
-  const { alarms, acknowledge: acknowledgeAlarm } = useAlarms()
+  const { alarms, acknowledge: acknowledgeAlarm, silence: silenceAlarm } = useAlarms()
   // Only for deciding whether to offer SignalK discovery. Gated on `loading`
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
@@ -782,7 +782,7 @@ export function App() {
           />
         )
       case 'alarms':
-        return <AlarmsDrawer alarms={alarms} onAcknowledge={acknowledgeAlarm} />
+        return <AlarmsDrawer alarms={alarms} onAcknowledge={acknowledgeAlarm} onSilence={silenceAlarm} />
       case 'routes':
         return (
           <RoutePlannerDrawer
