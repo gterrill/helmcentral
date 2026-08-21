@@ -25,6 +25,11 @@ This file mirrors AGENTS.md. AGENTS.md is the canonical repo instruction file.
 - Write or update a failing test that reproduces the expected behavior before implementing the fix.
 - Implement the minimal change required to make the test pass.
 - Run relevant tests after the change and include the test result summary in your response.
+- **Apply TDD only to functional code and business logic** (new features, bug fixes, algorithmic changes).
+- **Do NOT use TDD for:**
+  - Build/tooling changes (`Makefile`, `Dockerfile`, CI/CD pipelines, config files).
+  - Dependency upgrades and package manager lockfile updates.
+  - Pure refactoring that doesn't change public interfaces.
 
 ## Documentation Location Policy
 

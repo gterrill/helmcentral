@@ -18,6 +18,7 @@ const SAT_HANDOFF_START_ZOOM = 9
 const SAT_HANDOFF_END_ZOOM = 10
 const WORLD_IMAGERY_MAX_ZOOM = 18
 const ANCHOR_WATCH_ZOOM_STORAGE_KEY = 'anchor-watch-map-zoom'
+const ANCHOR_WATCH_CENTER_STORAGE_KEY = 'anchor-watch-map-center'
 const AIS_TRAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 // Threshold above which the current is judged strong enough to visually call out.
 const HIGH_DRIFT_IMPACT_KTS = 1.5
@@ -40,6 +41,32 @@ function readStoredZoom(): number | null {
   if (!Number.isFinite(value)) return null
   // Keep persisted values within map bounds.
   return Math.max(10, Math.min(22, value))
+}
+
+function readStoredCenter(): { latitude: number; longitude: number } | null {
+  if (typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem(ANCHOR_WATCH_CENTER_STORAGE_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as { latitude?: unknown; longitude?: unknown }
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof parsed.latitude === 'number' &&
+      Number.isFinite(parsed.latitude) &&
+      typeof parsed.longitude === 'number' &&
+      Number.isFinite(parsed.longitude) &&
+      parsed.latitude >= -90 &&
+      parsed.latitude <= 90 &&
+      parsed.longitude >= -180 &&
+      parsed.longitude <= 180
+    ) {
+      return { latitude: parsed.latitude, longitude: parsed.longitude }
+    }
+  } catch {
+    // Ignore JSON parse errors and return null
+  }
+  return null
 }
 
 // ── Generate a circle GeoJSON polygon ──────────────────────────────────────
@@ -198,8 +225,6 @@ export function AnchorWatchMap({
     ? Math.round(bearingDeg(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon))
     : bearingDegProp
   const showRepositionBreadcrumbs = editMode === 'reposition'
-  const currentFavorable = currentDriftImpactKts !== null ? currentDriftImpactKts >= 0 : null
-  const currentColorClass = currentFavorable === null ? 'text-white' : currentFavorable ? 'text-teal-400' : 'text-amber-500'
   const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
   const formatTransientDistance = useCallback(
     (distanceM: number) => {
@@ -546,16 +571,35 @@ export function AnchorWatchMap({
   }, [])
 
   const handleRecenter = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(ANCHOR_WATCH_CENTER_STORAGE_KEY)
+    }
     mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
   }, [anchorLat, anchorLon])
 
+  const handleMoveEnd = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
+    if (typeof window === 'undefined') return
+    const { latitude, longitude, zoom } = e.viewState
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      window.localStorage.setItem(
+        ANCHOR_WATCH_CENTER_STORAGE_KEY,
+        JSON.stringify({ latitude, longitude }),
+      )
+    }
+    if (Number.isFinite(zoom)) {
+      setCurrentZoom(zoom)
+    }
+  }, [])
+
   // ── Initial map view ─────────────────────────────────────────────────────
-  const initialViewState = useMemo(
-    () => ({
-      longitude: anchorLon,
-      latitude: anchorLat,
+  const initialViewState = useMemo(() => {
+    const storedCenter = readStoredCenter()
+    return {
+      longitude: storedCenter ? storedCenter.longitude : anchorLon,
+      latitude: storedCenter ? storedCenter.latitude : anchorLat,
       zoom: currentZoom,
-    }),
+    }
+  },
     // Only used as initial value — no deps to avoid re-centering on every update
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -577,6 +621,7 @@ export function AnchorWatchMap({
         mapStyle={mapStyle}
         minZoom={10}
         onZoom={handleZoomChange}
+        onMoveEnd={handleMoveEnd}
         onClick={handleMapClick}
         onMouseMove={handleMouseMove}
         onDblClick={handleDblClick}
@@ -950,15 +995,17 @@ export function AnchorWatchMap({
             </p>
             {label === 'Current' ? (
               <div className="flex items-center justify-end gap-2">
-                {value !== '0.0' && value !== '—' && (
-                  <ArrowUp
-                    className={cn('shrink-0', currentColorClass, highDriftImpact ? 'h-5 w-5' : 'h-4 w-4')}
-                    strokeWidth={highDriftImpact ? 2.75 : 2}
-                    style={{ transform: `rotate(${setDeg ?? 0}deg)` }}
-                    aria-hidden="true"
-                  />
-                )}
-                <p className={cn('font-display tabular-nums leading-tight', currentColorClass)} style={{ fontSize: '1.1rem' }}>
+                <ArrowUp
+                  className={cn(
+                    'shrink-0 text-white',
+                    highDriftImpact ? 'h-5 w-5' : 'h-4 w-4',
+                    (value === '0.0' || value === '—') && 'invisible',
+                  )}
+                  strokeWidth={highDriftImpact ? 2.75 : 2}
+                  style={{ transform: `rotate(${setDeg ?? 0}deg)` }}
+                  aria-hidden="true"
+                />
+                <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
                   {value}
                   <span className="ml-0.5 text-[11px] text-white/80">{unit}</span>
                 </p>

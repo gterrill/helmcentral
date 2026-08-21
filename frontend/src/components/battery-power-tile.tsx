@@ -117,7 +117,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
 
   return (
     <Tile title="Battery & Power">
-      <div className="mt-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2">
+      <div className="mt-1 grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
           <div className="flex items-baseline gap-2">
             {/* `md` used to mean "more room" and stepped this up. With the narrow
