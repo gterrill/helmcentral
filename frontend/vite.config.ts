@@ -1,11 +1,18 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8080'
 
 export default defineConfig(({ mode }) => ({
+  // React Fast Refresh. Without this plugin Vite has no component boundary to
+  // swap at, so every save under src/ degraded to a full page reload — losing
+  // component state (an open drawer, a half-filled settings form, map pan and
+  // zoom) on each edit. The plugin also supplies the automatic JSX runtime, so
+  // components no longer need React in scope.
+  plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -21,9 +28,25 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 5173,
     host: '0.0.0.0',
+    // No usePolling here on purpose. This was `usePolling: true, interval: 300`,
+    // which stat-polled every watched file every 300ms, forever, whether or not
+    // a browser was connected — the container bind-mounts the whole repo
+    // (~32k files) at /workspace, and that poll loop was the frontend
+    // container's entire ~5% idle CPU baseline.
+    //
+    // Polling was tested and rejected, not merely never tried: Docker Desktop
+    // for macOS forwards FSEvents into the container as inotify over VirtioFS,
+    // so native watching works. Verified end to end with a real browser on
+    // :5173 — appending a module-level `console.log` to src/main.tsx made the
+    // browser execute the new code on its own, with no manual reload. With
+    // @vitejs/plugin-react now in `plugins` above, that update is a true Fast
+    // Refresh component swap rather than a full page reload. If you are on a
+    // setup where inotify does not cross the mount (older Docker Desktop with
+    // gRPC-FUSE/osxfs, some Windows/WSL2 layouts) and HMR stops firing, restore
+    // polling with `interval: 1000` and an `ignored` list covering
+    // '**/.git/**', '**/dist/**', '**/ds-bundle/**' and '**/backend/**' —
+    // Vite only needs frontend/src, but the mount gives it the whole repo.
     watch: {
-      usePolling: true,
-      interval: 300,
       ignored: ['**/settings.yaml'],
     },
     fs: {

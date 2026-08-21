@@ -39,6 +39,13 @@ services:
       - ./backend:/app
       - ./settings.yaml:/app/settings.yaml
       - ./plugins:/app/plugins
+      # air recompiles on every save, so the Go build and module caches grow
+      # continuously. Left unmounted they land in the container's writable
+      # layer (measured at 1.46GB: ~754MB build + ~749MB modules) and are
+      # thrown away and re-accumulated on every image rebuild. Named volumes
+      # keep them outside the layer and let them survive a rebuild.
+      - backend_go_build_cache:/root/.cache/go-build
+      - backend_go_mod_cache:/go/pkg/mod
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -48,9 +55,11 @@ services:
     image: node:20-alpine
     working_dir: /workspace/frontend
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    # No CHOKIDAR_USEPOLLING/CHOKIDAR_INTERVAL here on purpose — see the watch
+    # comment in frontend/vite.config.ts. Native FSEvents-backed inotify over
+    # VirtioFS works, so the 300ms stat-poll over the whole ~32k-file /workspace
+    # mount was removed after HMR was verified without it.
     environment:
-      - CHOKIDAR_USEPOLLING=1
-      - CHOKIDAR_INTERVAL=300
       - VITE_API_PROXY_TARGET=http://host.docker.internal:8080
     ports:
       - "5173:5173"
@@ -101,6 +110,10 @@ services:
       - ./plugins:/app/plugins
       - ./e2e/settings.seed.yaml:/seed/settings.seed.yaml:ro
       - e2e_state:/state
+      # Same rationale as backend-dev above. Its own volumes, not shared with
+      # backend-dev: two air instances compiling into one cache would race.
+      - e2e_go_build_cache:/root/.cache/go-build
+      - e2e_go_mod_cache:/go/pkg/mod
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -166,4 +179,8 @@ volumes:
   frontend_node_modules:
   e2e_node_modules:
   e2e_state:
+  backend_go_build_cache:
+  backend_go_mod_cache:
+  e2e_go_build_cache:
+  e2e_go_mod_cache:
 
