@@ -98,6 +98,30 @@ func (w *busNotificationWatcher) check(now time.Time) []alarmEvent {
 		state.path = status.Path
 
 		if !state.raised {
+			// An alarm already acknowledged on the bus has been seen and dealt
+			// with -- by an MFD, another client, or by this crew before a
+			// Helmcentral restart. Raising it pages someone for something they
+			// have already handled, and because these statuses are rebuilt from
+			// the tree rather than held locally, a restart would do it again on
+			// every boot for as long as the condition lasts.
+			//
+			// Deliberately a skip of the raise only, not a filter on the live
+			// set above. Acknowledging is not clearing: dropping these from
+			// live would make an already-raised one look like it had vanished,
+			// emitting a clear that closes its log row and pushes "alarm over"
+			// while the condition is still live.
+			//
+			// Silenced is not acknowledged and is not skipped -- a silenced
+			// alarm has stopped sounding but is still demanding attention
+			// (alarm_notifications.go).
+			if status.Phase == alarmPhaseAcknowledged {
+				// An acknowledgement withdrawn later leaves a live alarm nobody
+				// has answered, so it serves a full fresh dwell from that point
+				// rather than raising the instant the flag flips back.
+				state.pendingSince = now
+				continue
+			}
+
 			if now.Sub(state.pendingSince) < w.dwell {
 				continue
 			}
