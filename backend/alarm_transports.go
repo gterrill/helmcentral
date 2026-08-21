@@ -18,6 +18,7 @@ const (
 	transportSMTP    = "smtp"
 	transportWebhook = "webhook"
 	transportSignalK = "signalk"
+	transportWebPush = "webpush"
 )
 
 const defaultNtfyServer = "https://ntfy.sh"
@@ -48,6 +49,14 @@ type signalKNotifyConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+// webPushConfig carries no fields beyond the toggle, deliberately. The VAPID
+// keypair is generated into the secrets store and the registered devices live
+// in their own SQLite file, so there is nothing for an operator to type and
+// nothing for validateAlarmTransports to check.
+type webPushConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 // watchdogConfig covers the failures the alarm rules cannot see: the data
 // source dying, and the boat itself going off.
 type watchdogConfig struct {
@@ -64,6 +73,7 @@ type alarmTransportConfig struct {
 	SMTP     smtpConfig          `json:"smtp"`
 	Webhook  webhookConfig       `json:"webhook"`
 	SignalK  signalKNotifyConfig `json:"signalk"`
+	WebPush  webPushConfig       `json:"webpush"`
 	Watchdog watchdogConfig      `json:"watchdog"`
 }
 

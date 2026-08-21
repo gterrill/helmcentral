@@ -57,7 +57,7 @@ Lifted from `escalateValidation` in `gnss_validation.go` rather than reinvented,
 
 ### 6. Delivery is self-hosted, and failures are queued rather than dropped
 
-Four transports, none requiring a paid subscription: **ntfy** (self-hostable, or the free public server with no account — the default), **SMTP**, **webhook**, and **SignalK `notifications.*`** which needs no internet at all. Twilio/SMS and a Maretron-style cloud relay are excluded on exactly that ground.
+Five transports, none requiring a paid subscription: **ntfy** (self-hostable, or the free public server with no account — the default), **SMTP**, **webhook**, **SignalK `notifications.*`** which needs no internet at all, and **web push** (added later; see the addendum below). Twilio/SMS and a Maretron-style cloud relay are excluded on exactly that ground.
 
 A boat's internet comes and goes, so a failed delivery is queued in the alarm-log database and retried with backoff from 30s to 30m, every attempt logged — the fallback policy requires retry behaviour to be loud, since a silent retry is indistinguishable from one that never happened. Deliveries still failing after 24h are discarded, because eventually delivering a day-old alarm as if it were current is its own kind of wrong. Disabling a transport keeps its queued items so re-enabling still delivers them.
 
@@ -126,6 +126,39 @@ Two things about publishing had to be found against a real server, and both were
 
 One thing that had to be found rather than reasoned about: bus-sourced ids are the first alarm ids containing a character the browser percent-encodes, and Echo hands path params to the handler **still escaped** (it prefers `URL.RawPath`). Left escaped, `notifications%3A...` matches no prefix and no rule, and reproduces the original 409 exactly. Rule ids are UUIDs and never exercised this. A handler test that sets the param directly cannot see it either, so the regression test drives the router the way the browser does.
 
+## Addendum: web push as a fifth transport
+
+Every other transport reaches a phone only through something the crew installed and configured first — the ntfy app, a mail client, a webhook consumer. Web push delivers to the lock screen of the browser they already use, with no app and no account, and RFC 8291 encrypts the payload end to end so the push service cannot read the boat's alarms. That satisfies §6's rule without adding a subscription.
+
+It is the only transport that fans out to N recipients, so the decisions below are all about what that does to §6's queue.
+
+### A dead device is not a delivery failure
+
+Each response is classified per device. `404`/`410` means the browser discarded the subscription — the site was uninstalled, or notifications were revoked — so the row is pruned and **`Send` still returns nil**. Counting it as a failure would requeue the alarm for a full 24h on behalf of a device that no longer exists, and re-notify every other device on each retry. Everything else keeps the row and fails, so the alarm queues.
+
+Zero registered devices is an error, not a quiet success. "Enabled but silently undeliverable" is the state §6 exists to prevent, and failing means the alarm queues — so a phone registered within the queue's 24h life still receives the backlog.
+
+### Duplicates are accepted, then collapsed
+
+The queue retries per **transport**, not per subscription: `dispatch` marshals the message once and enqueues it under one transport id. Three phones and one transient failure therefore means all three receive the alarm again on retry.
+
+That is accepted. §6 already holds that a late alarm beats a lost one, and the same reasoning makes a duplicate alarm beat a missed one. A per-subscription queue would need a `notification_queue` schema change, a fan-out of one alarm into N rows with N independent backoff timers, and a new failure mode where a partially drained fan-out is indistinguishable from a partially failed one — a lot of machinery whose whole benefit is suppressing a second buzz.
+
+Instead the duplicates are collapsed at the two layers that can actually do it:
+
+- **`Topic`** (RFC 8030 §5.4): a push service replaces any *still-undelivered* message carrying the same topic for that subscription. The payload is marshalled once, so every retry of a transition produces a byte-identical topic and a phone that was offline across three retries receives one notification. The topic deliberately hashes `Kind` and `At` as well as the rule — keying on the rule alone would let a `cleared` supersede an undelivered `raised`, so an alarm that raised and cleared while the phone was off would vanish entirely.
+- **`showNotification({ tag, renotify: false })`**: the OS replaces the notification already in the shade instead of stacking a second one, and does it without buzzing again.
+
+### The heartbeat does not skip it
+
+`alarm_watchdog.go` skips only the SignalK transport, because delivering on the boat proves nothing about reachability off it. Web push goes over the boat's internet to a third-party push service and then to a phone that may be anywhere, so a heartbeat over it answers exactly the question the heartbeat exists to ask. The consequence is that web push enabled with zero devices logs one failure per heartbeat interval — correct, and loud.
+
+### Nothing else changed
+
+`dispatch`, `drain`, `notifyBackoffFor`, the queue schema, `testAlarmTransportsHandler` and the watchdog are untouched. A transport that required the retry contract to be rewritten around it would be the wrong shape; web push participates in the test button and the heartbeat for free, and reports "no devices are subscribed" when that is the truth — the single most useful thing that button can say about it.
+
+The secure-context requirement, the PWA shell this needs on iOS, and the `tailscale serve` deployment answer are not alarm concerns and live in [ADR 0045](0045-web-push-secure-context-and-pwa-shell.md).
+
 ## Consequences
 
 - Any path the SignalK server publishes can be alarmed on, without code changes. This is the first feature to use ADR 0037's generic ingestion, and the precondition ADR 0039 (bindable widgets) also depends on.
@@ -136,6 +169,8 @@ One thing that had to be found rather than reasoned about: bus-sourced ids are t
 - Anchor drag detection moved to the server (`alarm_anchor.go`) rather than being derived in the React hook. Closing the tab no longer silences it, and it now flows through the normal path: logged, acknowledgeable, and delivered off the boat. Silencing is the server acknowledgement, so a second browser cannot be left ringing. It also fixed the old bug where the klaxon loop was created only on the transition into `dragging`, so un-silencing never restarted it.
 - Drag uses asymmetric thresholds like every other rule: it fires past `radius + 4.572m` (the old client buffer, so the firing distance is unchanged) but clears only back inside the radius. A lost GNSS fix never raises a drag — position freezes at its last trusted value during an outage (ADR 0037), and the stream watchdog already reports the outage itself.
 - `use-anchor-watch.ts` still derives its own client-side `dragging` state for map and tile styling. The alarm no longer depends on it, but the two can disagree inside the hysteresis band; collapsing them onto the server's answer is worth doing when that component is next touched.
+- Web push is the first feature to require a *secure context*, which Helmcentral does not ship. On a plain-HTTP boat LAN the Push API is absent entirely and the settings UI says so rather than offering a toggle that cannot work. See ADR 0045.
+- Losing the secrets store now costs more than credentials: the VAPID keypair goes with it, and every registered device must physically re-subscribe.
 - The `signalk` notify transport now publishes as a producer on the delta stream, and confirms delivery by reading the value back. It defaults to disabled, so the first person to enable it is the first to exercise the path against a real server.
 - A rule alarm acknowledged in Helmcentral still does **not** reach the bus. When the `signalk` transport is enabled, Helmcentral publishes its own alarms with `method: ["visual","sound"]`, and acknowledging one silences the engine's copy while the published copy goes on sounding for every other consumer. That transport also makes each rule alarm appear twice in `activeAlarms` — once from the engine, once echoed back off the bus — with no de-duplication. Both follow from the same gap and want fixing together.
 - Rules are evaluated only while Helmcentral runs. There is no persistence of engine state across restarts, so a restart re-raises a still-true condition — which is the safe direction, but means the alarm log can show a duplicate occurrence after a deploy.

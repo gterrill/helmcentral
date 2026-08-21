@@ -9,6 +9,7 @@ export interface AlarmTransportConfig {
   smtp: { enabled: boolean; host: string; port: number; username: string; from: string; to: string[] | null }
   webhook: { enabled: boolean; url: string }
   signalk: { enabled: boolean }
+  webpush: { enabled: boolean }
   watchdog: { stream_silence_seconds: number; heartbeat_minutes: number }
 }
 
@@ -18,6 +19,7 @@ export function emptyTransportConfig(): AlarmTransportConfig {
     smtp: { enabled: false, host: '', port: 587, username: '', from: '', to: [] },
     webhook: { enabled: false, url: '' },
     signalk: { enabled: false },
+    webpush: { enabled: false },
     watchdog: { stream_silence_seconds: 0, heartbeat_minutes: 0 },
   }
 }

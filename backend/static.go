@@ -3,6 +3,8 @@ package main
 import (
 	"embed"
 	"io/fs"
+	"log"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -33,6 +35,14 @@ func registerStaticHandler(e *echo.Echo) {
 // registerStaticHandlerFS is the testable core of registerStaticHandler: it
 // assumes distFS already holds a real frontend build.
 func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
+	// Go's builtin MIME table has no .webmanifest entry, and the release
+	// container ships no /etc/mime.types, so http.FileServer would sniff the
+	// manifest as text/plain — which Firefox rejects outright, silently
+	// un-installing the PWA and with it iOS's only route to web push.
+	if err := mime.AddExtensionType(".webmanifest", "application/manifest+json"); err != nil {
+		log.Printf("static: could not register the .webmanifest MIME type: %v", err)
+	}
+
 	fileServer := http.FileServer(http.FS(distFS))
 
 	serve := func(c echo.Context) error {

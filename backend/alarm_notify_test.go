@@ -487,3 +487,27 @@ func TestDispatcherKeepsQueuedItemsForADisabledTransport(t *testing.T) {
 		t.Fatalf("queued items must survive a disabled transport, depth %d", depth)
 	}
 }
+
+// Web push carries no operator-supplied configuration at all: the keypair is
+// generated into the secrets store and the devices live in their own SQLite
+// file, so `enabled` is the whole of it. This pins that as a decision rather
+// than an oversight — an empty validation branch would be ceremony.
+func TestValidateAlarmTransportsAcceptsWebPushWithNoConfiguration(t *testing.T) {
+	config := alarmTransportConfig{WebPush: webPushConfig{Enabled: true}}
+
+	if err := validateAlarmTransports(&config); err != nil {
+		t.Fatalf("web push has nothing to validate: %v", err)
+	}
+}
+
+func TestBuildTransportsIncludesWebPushWhenEnabled(t *testing.T) {
+	transports := buildTransports(alarmTransportConfig{WebPush: webPushConfig{Enabled: true}})
+
+	if len(transports) != 1 || transports[0].ID() != transportWebPush {
+		t.Fatalf("expected only the web push transport, got %+v", transports)
+	}
+
+	if got := buildTransports(alarmTransportConfig{}); len(got) != 0 {
+		t.Fatalf("a disabled web push transport must not be built, got %+v", got)
+	}
+}

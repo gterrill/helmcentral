@@ -285,9 +285,12 @@ Alongside your own rules, anchor drag and the stream watchdog are built in and
 travel the same path — see
 [Anchor watch](#whats-on-the-dashboard) above.
 
-Four transports, none requiring a paid subscription: **ntfy** (self-hostable,
-or the free public server, no account), **SMTP**, **webhook**, and **SignalK
-`notifications.*`**, which needs no internet at all. `POST
+Five transports, none requiring a paid subscription: **ntfy** (self-hostable,
+or the free public server, no account), **SMTP**, **webhook**, **SignalK
+`notifications.*`**, which needs no internet at all, and **web push** — alarms
+on your phone's lock screen with no app to install, which needs Helmcentral
+served over https (see [ADR 0045](docs/adr/0045-web-push-secure-context-and-pwa-shell.md)
+for the `tailscale serve` recipe). `POST
 /api/alarm-transports/test` probes every enabled transport — discovering at 3am
 that the ntfy topic was mistyped is the failure that justifies one button.
 

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Tile } from '@/components/ui/tile'
+import { WebPushSection } from '@/components/web-push-section'
 import {
   emptyTransportConfig,
   useAlarmTransports,
@@ -171,6 +172,11 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
             Writes alarms back to notifications.* so a buzzer or MFD reacts. Needs no internet.
           </p>
         </section>
+
+        <WebPushSection
+          enabled={draft.webpush.enabled}
+          onEnabledChange={(enabled) => setSection('webpush', { enabled })}
+        />
 
         <section className="rounded-md border bg-background/60 p-3">
           <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Watchdog</p>

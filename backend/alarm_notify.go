@@ -237,6 +237,14 @@ func buildTransports(config alarmTransportConfig) []notificationTransport {
 	if config.SignalK.Enabled {
 		transports = append(transports, signalKNotifyTransport{put: publishSignalKNotification})
 	}
+	if config.WebPush.Enabled {
+		transports = append(transports, webPushTransport{
+			config:     config.WebPush,
+			publicKey:  secretOrEmpty(vapidPublicKeySecret),
+			privateKey: secretOrEmpty(vapidPrivateKeySecret),
+			store:      globalWebPushSubscriptionStore,
+		})
+	}
 
 	return transports
 }

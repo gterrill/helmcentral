@@ -23,6 +23,7 @@ import (
 var knownSecretKeys = []string{
 	"SIGNALK_USERNAME", "SIGNALK_PASSWORD", "INFLUXDB_TOKEN",
 	"GEONAMES_USERNAME", "SMTP_PASSWORD", "NTFY_TOKEN", "WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY",
+	"VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY",
 }
 
 // coreEnvSecretKeys is the subset of knownSecretKeys trusted, non-sandboxed

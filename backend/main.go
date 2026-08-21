@@ -250,6 +250,32 @@ func main() {
 	}
 	globalAlarmLogStore = als
 
+	// Registered web push devices. Its own file rather than the alarm log's:
+	// these are durable device registrations whose loss cannot be recovered
+	// without physically revisiting every phone, unlike the log's prunable
+	// history and self-expiring queue.
+	wps, err := newWebPushSubscriptionStore(webPushDBPath())
+	if err != nil {
+		log.Fatalf("failed to open web push subscription store: %v", err)
+	}
+	globalWebPushSubscriptionStore = wps
+
+	// Mint the VAPID keypair on first run. Fail fast: a half-written pair signs
+	// with one key and advertises another, which every push service rejects
+	// with an opaque 403.
+	vapidPublicKey, err := ensureVAPIDKeys(globalSecretsStore)
+	if err != nil {
+		log.Fatalf("web push: %v", err)
+	}
+	// Devices registered against a previous keypair can never be delivered to
+	// again, so discard them loudly rather than letting every push fail
+	// silently forever.
+	if discarded, err := globalWebPushSubscriptionStore.DeleteWhereKeyNot(vapidPublicKey); err != nil {
+		log.Printf("web push: could not check registered devices against the current VAPID key: %v", err)
+	} else if discarded > 0 {
+		log.Printf("web push: discarded %d subscription(s) registered against a previous VAPID key; those devices must re-subscribe", discarded)
+	}
+
 	if err := loadAlarmRules(); err != nil {
 		log.Fatalf("failed to load alarm rules: %v", err)
 	}
@@ -420,6 +446,11 @@ func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []a
 		{http.MethodGet, "/api/alarm-transports", tierAdmin, getAlarmTransportsHandler},
 		{http.MethodPost, "/api/alarm-transports", tierAdmin, setAlarmTransportsHandler},
 		{http.MethodPost, "/api/alarm-transports/test", tierAdmin, testAlarmTransportsHandler},
+		{http.MethodGet, "/api/alarm-transports/webpush/key", tierAdmin, webPushKeyHandler},
+		{http.MethodPost, "/api/alarm-transports/webpush/subscribe", tierAdmin, subscribeWebPushHandler},
+		{http.MethodPost, "/api/alarm-transports/webpush/unsubscribe", tierAdmin, unsubscribeWebPushHandler},
+		{http.MethodGet, "/api/alarm-transports/webpush/subscriptions", tierAdmin, listWebPushSubscriptionsHandler},
+		{http.MethodDelete, "/api/alarm-transports/webpush/subscriptions/:id", tierAdmin, deleteWebPushSubscriptionHandler},
 	}
 }
 

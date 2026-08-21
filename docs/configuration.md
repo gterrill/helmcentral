@@ -88,6 +88,7 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 | `SESSIONS_DB_PATH` | `data/sessions.sqlite` |
 | `PLUGIN_OVERRIDES_DB_PATH` | `data/plugin_overrides.sqlite` |
 | `NEARBY_CONTACTS_DB_PATH` | `data/nearby-contacts.sqlite` |
+| `WEBPUSH_DB_PATH` | `data/webpush-subscriptions.sqlite` |
 | `TILE_CACHE_PATH` | `data/tile-cache.sqlite` |
 | `SAT_CHARTS_DIR` | `data/sat-charts` |
 | `PLUGINS_TIDES_DIR` | `plugins/tides` |
@@ -98,10 +99,20 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 
 ## Secrets
 
-SignalK credentials, `INFLUXDB_TOKEN`, `GEONAMES_USERNAME` and the
-`WEATHERKIT_*` keys are **not** environment variables in normal use. They live
-in an AES-256-GCM encrypted SQLite store and are managed from the Settings
-UI's Secrets panel. See [ADR 0023](adr/0023-encrypted-secrets-store.md).
+SignalK credentials, `INFLUXDB_TOKEN`, `GEONAMES_USERNAME`, the
+`WEATHERKIT_*` keys and the `VAPID_*` web push keys are **not** environment
+variables in normal use. They live in an AES-256-GCM encrypted SQLite store and
+are managed from the Settings UI's Secrets panel. See
+[ADR 0023](adr/0023-encrypted-secrets-store.md).
+
+`VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to "managed from
+the UI": they are generated automatically on first start and never rotate,
+because there is nowhere to obtain a VAPID keypair from — it is self-issued.
+**Losing them is unrecoverable.** Every registered web push device holds the
+public key it subscribed with, so a new pair means every phone must physically
+re-subscribe. Helmcentral discards the orphaned registrations at boot and logs
+how many, rather than letting every push fail silently forever. Back up
+`backend/data/secrets.sqlite` and `backend/data/secrets.key` together.
 
 ## Plugins
 
@@ -152,6 +163,41 @@ security was turned off after Helmcentral was configured. Either way the fix
 is the same — turn SignalK's security back on, or set `auth.mode: none` in
 `settings.yaml` and restart. Turning authentication *off* is never gated on
 SignalK being reachable, so that route out always works.
+
+## Web push over Tailscale
+
+Web push puts alarms on a phone's lock screen with no app to install, but
+browsers only expose the Push API in a **secure context**. Helmcentral ships no
+TLS certificate of its own, so on a plain `http://<lan-ip>:8080` address the
+feature cannot work at all — the alarm settings detect this and say so rather
+than offering a toggle that does nothing.
+
+The supported route is Tailscale, on the machine running Helmcentral:
+
+```sh
+tailscale serve --bg 8080
+```
+
+That publishes the dashboard at `https://<machine>.<tailnet>.ts.net` with a real
+Let's Encrypt certificate — no public DNS, no certificate to install on each
+phone, and no open port on the boat. Open Helmcentral at that address, then
+enable web push under Alarms → Notifications.
+
+**Do not use `tailscale funnel`.** The push service never calls back into
+Helmcentral; the only party that needs the secure origin is the browser, and it
+is already on the tailnet. Funnel would expose the boat to the public internet
+to solve a problem it does not have.
+
+**On iPhone and iPad**, add Helmcentral to the Home Screen first (Share → Add to
+Home Screen) and open it from that icon: iOS grants the Push API only to
+installed web apps, and only since iOS 16.4. It must be installed **from the
+`https://…ts.net` address** — installing from a LAN `http://` address produces
+an app that still cannot receive push, with nothing on screen to explain why.
+
+Registered devices live in `backend/data/webpush-subscriptions.sqlite`
+(`WEBPUSH_DB_PATH`), separate from the alarm log so that clearing alarm history
+never disconnects a phone. See
+[ADR 0045](adr/0045-web-push-secure-context-and-pwa-shell.md).
 
 ## Security
 

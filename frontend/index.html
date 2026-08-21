@@ -2,9 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Helmcentral Dashboard</title>
+
+    <!--
+      Installable web app. iOS grants the Push API only to a site added to the
+      Home Screen, so these are what make alarm push possible on a phone at all
+      (docs/adr/0045). iOS ignores the manifest's icons and reads
+      apple-touch-icon, which must be a PNG — an SVG or a missing file gives a
+      screenshot of the page as the Home Screen icon.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Helmcentral" />
+    <meta name="theme-color" content="#FFFFFF" />
   </head>
   <body style="margin: 0; padding: 0;">
     <div id="root"></div>
