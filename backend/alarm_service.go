@@ -17,6 +17,7 @@ import (
 const alarmEvaluationInterval = 1 * time.Second
 
 var globalAlarmEngine = newAlarmEngine()
+var globalBusNotificationWatcher = newBusNotificationWatcher(globalSignalKSnapshot)
 
 // startAlarmEvaluator runs the rule engine against the delta-stream snapshot
 // until ctx is cancelled, persisting every transition to the alarm log.
@@ -44,6 +45,15 @@ func evaluateAlarmsOnce(now time.Time) {
 	for _, event := range events {
 		recordAlarmEvent(event, now)
 	}
+
+	// Re-read each tick, the same reason startStreamWatchdog re-reads its
+	// silence threshold: production never reassigns globalSignalKSnapshot, so
+	// this is a no-op there, but tests substitute it per case and the watcher
+	// must never be left watching a stale snapshot object.
+	globalBusNotificationWatcher.snapshot = globalSignalKSnapshot
+	for _, event := range globalBusNotificationWatcher.check(now) {
+		recordAlarmEvent(event, now)
+	}
 }
 
 func recordAlarmEvent(event alarmEvent, now time.Time) {
@@ -51,11 +61,16 @@ func recordAlarmEvent(event alarmEvent, now time.Time) {
 	// transition, never the steady state, so a live alarm does not flood.
 	log.Printf("alarm %s: %s [%s] %s", event.Kind, event.Rule.Label, event.Status.State, event.Status.Message)
 
+	source := event.Source
+	if source == "" {
+		source = alarmSourceRule
+	}
+
 	switch event.Kind {
 	case alarmEventRaised:
 		_, err := globalAlarmLogStore.RecordRaised(alarmLogEntry{
 			RuleID:       event.Rule.ID,
-			Source:       alarmSourceRule,
+			Source:       source,
 			Label:        event.Rule.Label,
 			Path:         event.Rule.Path,
 			State:        event.Status.State,

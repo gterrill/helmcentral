@@ -44,6 +44,25 @@ var globalAlarmDispatcher *alarmDispatcher
 func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string) {
 	all := d.transports()
 	selected := selectTransports(all, event.Rule.Notify)
+
+	// A bus-sourced event's path is owned by whatever producer raised it, not
+	// by Helmcentral. signalKNotifyTransport.Send writes to msg.Path
+	// (alarm_notify.go), so sending one through it would make Helmcentral
+	// overwrite that producer's own notification object -- destroying its id
+	// and status, and writing null over it on clear. Precedent:
+	// heartbeatSender.send skips the same transport for the mirror-image
+	// reason (alarm_watchdog.go).
+	if event.Source == alarmSourceSignalK {
+		filtered := selected[:0:0]
+		for _, transport := range selected {
+			if transport.ID() == transportSignalK {
+				continue
+			}
+			filtered = append(filtered, transport)
+		}
+		selected = filtered
+	}
+
 	if len(selected) == 0 {
 		return
 	}

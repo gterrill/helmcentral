@@ -219,6 +219,64 @@ func TestSilenceAlarmHandlerRefusesARuleDrivenAlarm(t *testing.T) {
 	}
 }
 
+// The log constant alarmSourceSignalK existed but was never written anywhere
+// until the bus watcher: recordAlarmEvent must carry a bus-sourced event's
+// Source through to the log row rather than hardcoding alarmSourceRule.
+func TestRecordAlarmEventUsesEventSourceForTheLogRow(t *testing.T) {
+	store := newTestAlarmLog(t)
+	original := globalAlarmLogStore
+	globalAlarmLogStore = store
+	t.Cleanup(func() { globalAlarmLogStore = original })
+
+	event := alarmEvent{
+		Kind:   alarmEventRaised,
+		Source: alarmSourceSignalK,
+		Rule: alarmRule{
+			ID:    "notifications:electrical.batteries.0.voltage.high",
+			Label: "High cell voltage",
+			Path:  "electrical.batteries.0.voltage.high",
+			State: alarmStateAlarm,
+		},
+		Status: alarmStatus{State: alarmStateAlarm, Message: "High cell voltage"},
+	}
+	recordAlarmEvent(event, alarmNow)
+
+	entries, err := store.Recent(10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Source != alarmSourceSignalK {
+		t.Fatalf("expected the log row to carry the bus source, got %+v", entries)
+	}
+}
+
+func TestRecordAlarmEventDefaultsEmptySourceToRule(t *testing.T) {
+	store := newTestAlarmLog(t)
+	original := globalAlarmLogStore
+	globalAlarmLogStore = store
+	t.Cleanup(func() { globalAlarmLogStore = original })
+
+	event := alarmEvent{
+		Kind: alarmEventRaised,
+		Rule: alarmRule{
+			ID:    "rule-1",
+			Label: "House bank low",
+			Path:  "electrical.batteries.house.voltage",
+			State: alarmStateAlarm,
+		},
+		Status: alarmStatus{State: alarmStateAlarm, Message: "House bank low"},
+	}
+	recordAlarmEvent(event, alarmNow)
+
+	entries, err := store.Recent(10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Source != alarmSourceRule {
+		t.Fatalf("expected an empty source to default to rule, got %+v", entries)
+	}
+}
+
 // Rule alarms advertise the one action the engine has, so the drawer renders
 // an Acknowledge button for them and no Silence button.
 func TestRuleDrivenAlarmsAdvertiseAcknowledgeOnly(t *testing.T) {

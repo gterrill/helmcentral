@@ -109,6 +109,12 @@ type alarmEvent struct {
 	Kind   string
 	Rule   alarmRule
 	Status alarmStatus
+
+	// Source distinguishes a bus notification (alarmSourceSignalK) from a
+	// locally evaluated rule. Empty means rule-sourced, so every existing
+	// caller that builds an alarmEvent without setting it keeps working
+	// unchanged.
+	Source string
 }
 
 type alarmEngine struct {

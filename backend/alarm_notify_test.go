@@ -431,6 +431,46 @@ func TestDispatcherDiscardsDeliveriesOlderThanTheMaxAge(t *testing.T) {
 	}
 }
 
+// signalKNotifyTransport.Send writes to msg.Path (alarm_notify.go), which for
+// a bus-sourced event is the path another producer owns. Dispatching it
+// through the SignalK transport would make Helmcentral overwrite Victron's
+// own notification object -- destroying its id and status, and writing null
+// over it on clear. Precedent: heartbeatSender.send skips the same transport
+// for the mirror-image reason (alarm_watchdog.go).
+func TestDispatcherSkipsSignalKTransportForBusSourcedEvents(t *testing.T) {
+	signalk := &stubTransport{id: transportSignalK}
+	webhook := &stubTransport{id: transportWebhook}
+	dispatcher, _ := testDispatcher(t, signalk)
+	dispatcher.transports = func() []notificationTransport {
+		return []notificationTransport{signalk, webhook}
+	}
+
+	event := raisedEvent()
+	event.Source = alarmSourceSignalK
+	dispatcher.dispatch(event, "Pikorua")
+
+	if signalk.count() != 0 {
+		t.Fatalf("a bus-sourced event must never reach the SignalK transport, got %d sends", signalk.count())
+	}
+	if webhook.count() != 1 {
+		t.Fatalf("other transports must still receive it, got %d", webhook.count())
+	}
+}
+
+// A rule-sourced event (empty Source) is Helmcentral's own alarm and must
+// still reach the SignalK transport -- that publish is the whole point of
+// ADR 0038's addendum.
+func TestDispatcherStillSendsRuleSourcedEventsToSignalKTransport(t *testing.T) {
+	signalk := &stubTransport{id: transportSignalK}
+	dispatcher, _ := testDispatcher(t, signalk)
+
+	dispatcher.dispatch(raisedEvent(), "Pikorua")
+
+	if signalk.count() != 1 {
+		t.Fatalf("a rule-sourced event must still reach the SignalK transport, got %d sends", signalk.count())
+	}
+}
+
 // Disabling a transport while deliveries are pending must not throw them away:
 // re-enabling it should still deliver.
 func TestDispatcherKeepsQueuedItemsForADisabledTransport(t *testing.T) {
