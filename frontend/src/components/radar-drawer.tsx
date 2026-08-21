@@ -76,10 +76,8 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
 
     const traceMutation = (kind: string, value: string) => {
       const traceError = new Error(`[Radar Debug] iframe src mutated via ${kind}`)
-      // eslint-disable-next-line no-console
       console.warn('[Radar Debug] iframe src mutation', { kind, value, stack: traceError.stack })
       if (shouldBreak) {
-        // eslint-disable-next-line no-debugger
         debugger
       }
     }
