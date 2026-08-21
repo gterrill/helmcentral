@@ -369,6 +369,10 @@ export function App() {
   const {
     days: waveForecastDays,
     seaTemperatureF: waveSeaTemperatureF,
+    provider: waveForecastProvider,
+    isCached: waveForecastIsCached,
+    updatedAt: waveForecastUpdatedAt,
+    ttlSeconds: waveForecastTtlSeconds,
     loading: waveForecastLoading,
     error: waveForecastError,
   } = useWaveForecast(FORECAST_REFRESH_SECONDS)
@@ -779,6 +783,10 @@ export function App() {
             waveSeaTemperatureF={waveSeaTemperatureF}
             waveLoading={waveForecastLoading}
             waveError={waveForecastError}
+            waveProvider={waveForecastProvider}
+            waveIsCached={waveForecastIsCached}
+            waveUpdatedAt={waveForecastUpdatedAt}
+            waveTtlSeconds={waveForecastTtlSeconds}
           />
         )
       case 'alarms':

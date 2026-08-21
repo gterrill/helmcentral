@@ -58,6 +58,10 @@ interface ForecastDrawerProps {
   waveSeaTemperatureF?: number | null
   waveLoading?: boolean
   waveError?: string | null
+  waveProvider?: string | null
+  waveIsCached?: boolean
+  waveUpdatedAt?: string | null
+  waveTtlSeconds?: number | null
 }
 
 // Simple weather icon selector
@@ -262,27 +266,23 @@ function LegendSwatch({
   )
 }
 
-// Colors a precipitation intensity bar by Apple Weather's Light/Moderate/Heavy
-// bands (mm/hr), using progressively darker blue.
-function precipBarColor(intensityMm: number) {
-  if (intensityMm >= 7.6) return 'rgba(29,78,216,0.9)'
-  if (intensityMm >= 2.5) return 'rgba(59,130,246,0.85)'
-  return 'rgba(147,197,253,0.85)'
+// Colors a precipitation intensity bar by probability percentage.
+// Low probability fades to a soft translucent light blue, high probability is deep royal blue.
+function precipBarColor(chancePct: number | null) {
+  if (chancePct === null || chancePct <= 0) {
+    return 'rgba(59,130,246,0.2)'
+  }
+  if (chancePct < 25) {
+    return 'rgba(59,130,246,0.35)'
+  }
+  if (chancePct < 50) {
+    return 'rgba(59,130,246,0.55)'
+  }
+  if (chancePct < 75) {
+    return 'rgba(37,99,235,0.75)'
+  }
+  return 'rgba(29,78,216,0.92)'
 }
-
-// WHO UV Index scale color stops (Low/Moderate/High/Very High/Extreme),
-// used to build the UV chart's gradient fill and line.
-const UV_GRADIENT_STOPS = [
-  { value: 0, color: 'rgb(34,197,94)' },
-  { value: 2, color: 'rgb(34,197,94)' },
-  { value: 3, color: 'rgb(250,204,21)' },
-  { value: 5, color: 'rgb(250,204,21)' },
-  { value: 6, color: 'rgb(249,115,22)' },
-  { value: 7, color: 'rgb(249,115,22)' },
-  { value: 8, color: 'rgb(239,68,68)' },
-  { value: 10, color: 'rgb(239,68,68)' },
-  { value: 11, color: 'rgb(168,85,247)' },
-]
 
 // Shared axis label styling, used for every value/tick/band label across the
 // Wind, Wave, Precipitation and UV charts so they read consistently.
@@ -357,15 +357,6 @@ function uvRiskLabel(value: number): string {
   if (value >= 3) return 'Moderate'
   return 'Low'
 }
-
-// Left-axis band labels for the UV chart, positioned at each band's center value.
-const UV_BAND_LABELS = [
-  { value: 10, label: 'Extreme' },
-  { value: 8.5, label: 'Very High' },
-  { value: 6.5, label: 'High' },
-  { value: 4, label: 'Moderate' },
-  { value: 1, label: 'Low' },
-]
 
 
 export function formatRefreshAge(value: string | null | undefined, nowMs: number) {
@@ -444,13 +435,17 @@ export function ForecastDrawer({
   waveSeaTemperatureF = null,
   waveLoading = false,
   waveError = null,
+  waveProvider = null,
+  waveIsCached = false,
+  waveUpdatedAt = null,
+  waveTtlSeconds = null,
 }: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
-  const uvLineGradientId = useId()
   const windAreaGradientId = useId()
   const waveAreaGradientId = useId()
   const tempAreaGradientId = useId()
+  const uvAreaGradientId = useId()
   const detailsCardRef = useRef<HTMLDivElement>(null)
   const dayTabsRowRef = useRef<HTMLDivElement>(null)
 
@@ -585,41 +580,7 @@ export function ForecastDrawer({
 
   const precipIntensities = precipHourly.map((entry) => Math.max(0, entry.precipIntensityMm))
   const precipMax = Math.max(1, ...precipIntensities)
-  const precipChartTop = HOURLY_CHART_TOP
-  const precipChartBottom = HOURLY_CHART_BOTTOM
-  const precipChanceYFor = (value: number) => precipChartTop + (1 - value / 100) * (precipChartBottom - precipChartTop)
-  // Recharts render data: hourOfDay drives the shared numeric x-axis, and the
-  // intensity/chance values reuse the same clamped arrays the tooltip/corner
-  // labels already use, so the Bar/Line series and the manual overlay stay
-  // in perfect sync.
-  const precipChartData = useMemo(
-    () =>
-      precipHourly.map((entry) => ({
-        hourOfDay: entry.hourOfDay,
-        precipIntensityMm: Math.max(0, entry.precipIntensityMm),
-        // null (provider reported nothing for this hour) leaves a gap in the
-        // chance line rather than pinning it to the 0% baseline, which would
-        // read as a confident "no rain this hour".
-        precipChancePct: entry.precipChancePct === null ? null : Math.max(0, Math.min(100, entry.precipChancePct)),
-      })),
-    [precipHourly],
-  )
-  // Recharts' XAxis tickFormatter only receives the raw hourOfDay value, not
-  // the hourly entry - look the real API-provided `.label` text up by hour
-  // rather than re-deriving a 12-hour-clock string, so the tick text is
-  // guaranteed to match whatever the backend sends.
-  const precipLabelByHour = useMemo(() => buildLabelByHour(precipHourly), [precipHourly])
-  // Margin numbers are derived from the exact same constants the tooltip
-  // hook and manual overlay already use, so recharts' internal plot
-  // rectangle lands on precisely (hourlyChartLeft, precipChartTop) -
-  // (hourlyChartRight, precipChartBottom) in the shared 0..forecastChartWidth
-  // x 0..175 coordinate space.
-  const precipChartMargin = hourlyChartMargin(175)
   const precipBarWidth = precipHourly.length > 1 ? (hourlyChartWidth / (precipHourly.length - 1)) * 0.5 : 20
-  const precipChartConfig: ChartConfig = {
-    precipIntensityMm: { label: 'Intensity (mm/hr)', color: 'rgba(59,130,246,0.85)' },
-    precipChancePct: { label: 'Chance of precip (%)', color: 'hsl(var(--chart-gust) / 0.85)' },
-  }
 
   const cloudTemps = cloudHourly.map((entry) => displayTemp(entry.temperatureF))
   const cloudTempMax = cloudTemps.length > 0 ? Math.max(...cloudTemps) : 0
@@ -650,7 +611,6 @@ export function ForecastDrawer({
   const uvValues = uvHourly.map((entry) => Math.max(0, entry.uvIndex))
   const uvIndex = Math.round(Math.max(0, ...uvValues))
   const uvMax = Math.max(11, ...uvValues)
-  const uvYFor = (value: number) => cloudChartTop + (1 - value / uvMax) * (cloudChartBottom - cloudChartTop)
   const uvProtectionIndices = useMemo(
     () =>
       uvHourly.reduce<number[]>((acc, entry, idx) => {
@@ -662,45 +622,66 @@ export function ForecastDrawer({
   const uvProtectionStart = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[0]].label : null
   const uvProtectionEnd = uvProtectionIndices.length > 0 ? uvHourly[uvProtectionIndices[uvProtectionIndices.length - 1]].label : null
 
-  // Recharts render data for the temperature Area - displayTemp-converted
-  // (metric/imperial) so the plotted values match cloudTemps/cloudYFor
-  // exactly, since recharts can't perform that unit conversion itself.
-  const cloudChartData = useMemo(
-    () =>
-      cloudHourly.map((entry) => ({
-        hourOfDay: entry.hourOfDay,
-        displayTemperature: unit === 'metric' ? fahrenheitToCelsius(entry.temperatureF) : entry.temperatureF,
-      })),
-    [cloudHourly, unit],
-  )
-  // UV points have no hourOfDay of their own (WeatherHourlyUVPoint only
-  // carries label/uvIndex) - they're aligned to the cloud chart's hourly
-  // array purely by array position, so idx doubles as hourOfDay here (see
-  // the UV tooltip marker below, which is the one hourlyXForHour call site
-  // that deliberately keeps using activeIndex instead of a real hourOfDay).
-  const uvChartData = useMemo(
-    () => uvHourly.map((entry, idx) => ({ hourOfDay: idx, uvIndex: Math.max(0, entry.uvIndex) })),
-    [uvHourly],
-  )
+  // Recharts render data for the merged Cloud, Temperature & Precipitation chart.
+  // Combines temperature (displayTemp-converted), UV index, and precipitation intensity/chance
+  // on a shared hourOfDay axis.
+  const cloudChartData = useMemo(() => {
+    return Array.from({ length: 24 }, (_, hour) => {
+      const cloudEntry = cloudHourly.find((c) => c.hourOfDay === hour) ?? cloudHourly[hour]
+      const precipEntry = precipHourly.find((p) => p.hourOfDay === hour) ?? precipHourly[hour]
+      const uvEntry = uvHourly[hour]
+
+      const temperatureF = cloudEntry?.temperatureF ?? -1
+      const displayTemperature =
+        temperatureF >= 0 ? (unit === 'metric' ? fahrenheitToCelsius(temperatureF) : temperatureF) : null
+      const precipIntensityMm = precipEntry ? Math.max(0, precipEntry.precipIntensityMm) : 0
+      const precipChancePct =
+        precipEntry && precipEntry.precipChancePct !== null
+          ? Math.max(0, Math.min(100, precipEntry.precipChancePct))
+          : null
+      const uvVal = uvEntry ? Math.max(0, uvEntry.uvIndex) : 0
+
+      return {
+        hourOfDay: hour,
+        displayTemperature,
+        precipIntensityMm,
+        precipChancePct,
+        uvIndex: uvVal,
+      }
+    })
+  }, [cloudHourly, precipHourly, uvHourly, unit])
+
   // Recharts' XAxis tickFormatter only receives the raw hourOfDay value, not
   // the hourly entry - look the real API-provided `.label` text up by hour
   // rather than re-deriving a 12-hour-clock string.
-  const cloudLabelByHour = useMemo(() => buildLabelByHour(cloudHourly), [cloudHourly])
+  const cloudLabelByHour = useMemo(() => {
+    const labelMap = buildLabelByHour(cloudHourly)
+    if (labelMap.size === 0) {
+      return buildLabelByHour(precipHourly)
+    }
+    return labelMap
+  }, [cloudHourly, precipHourly])
+
   const cloudChartMargin = hourlyChartMargin(175)
   const cloudChartConfig: ChartConfig = {
     displayTemperature: { label: `Temperature (${tempUnit})`, color: 'hsl(var(--chart-temp) / 0.9)' },
-    uvIndex: { label: 'UV Index', color: 'rgb(249,115,22)' },
+    precipIntensityMm: { label: 'Precipitation (mm/hr)', color: 'rgba(59,130,246,0.85)' },
+    uvIndex: { label: 'UV Index', color: 'rgb(250,204,21)' },
   }
 
   const windTooltip = useChartTooltip(windHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
   const waveTooltip = useChartTooltip(waveHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
-  const precipTooltip = useChartTooltip(precipHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
-  const cloudTooltip = useChartTooltip(cloudHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
+  const cloudTooltip = useChartTooltip(
+    Math.max(cloudHourly.length, precipHourly.length),
+    selectedDayIndex,
+    hourlyChartLeft,
+    hourlyChartRight,
+  )
 
   const windTooltipEntry = windTooltip.activeIndex === null ? null : windHourly[windTooltip.activeIndex] ?? null
   const waveTooltipEntry = waveTooltip.activeIndex === null ? null : waveHourly[waveTooltip.activeIndex] ?? null
-  const precipTooltipEntry = precipTooltip.activeIndex === null ? null : precipHourly[precipTooltip.activeIndex] ?? null
   const cloudTooltipEntry = cloudTooltip.activeIndex === null ? null : cloudHourly[cloudTooltip.activeIndex] ?? null
+  const precipTooltipEntry = cloudTooltip.activeIndex === null ? null : precipHourly[cloudTooltip.activeIndex] ?? null
   const uvTooltipEntry = cloudTooltip.activeIndex === null ? null : uvHourly[cloudTooltip.activeIndex] ?? null
 
   if (loading && !hasForecast) {
@@ -864,9 +845,18 @@ export function ForecastDrawer({
             </div>
 
             <div ref={chartCardRef} className="rounded-md border bg-card/70 p-2">
-              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <Cloud size={13} className="text-gauge-secondary" /> Cloud & Temperature
-              </h4>
+              <div className="mb-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+                <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <Cloud size={13} className="text-gauge-secondary" /> Cloud, Temperature & Rain
+                </h4>
+                {(isCached || updatedAt) && (
+                  <p data-testid="forecast-refresh-meta" className="text-[11px] text-muted-foreground">
+                    {provider ? `Data: ${provider} · ` : ''}
+                    {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
+                    {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 60)}m` : ''}
+                  </p>
+                )}
+              </div>
               {cloudHourly.length > 0 ? (
                 <>
                   <p className="mb-2 text-base text-foreground/80">
@@ -874,13 +864,16 @@ export function ForecastDrawer({
                       ? `Sun protection recommended from ${uvProtectionStart} to ${uvProtectionEnd}.`
                       : 'No sun protection needed.'}
                   </p>
+                  {selectedDay.precipitationSummary && (
+                    <p className="mb-2 text-base text-foreground/80">{selectedDay.precipitationSummary}</p>
+                  )}
                   <div className="relative">
                   {cloudTooltipEntry && (
                     <ChartTooltipBubble
                       pixelX={cloudTooltip.tooltipPixelX ?? 0}
                       time={cloudTooltipEntry.label}
                       primary={`${Math.round(displayTemp(cloudTooltipEntry.temperatureF))}${tempUnit}`}
-                      secondary={cloudTooltipEntry.condition}
+                      secondary={`${cloudTooltipEntry.condition}${precipTooltipEntry && precipTooltipEntry.precipIntensityMm > 0 ? ` · ${precipTooltipEntry.precipIntensityMm.toFixed(1)} mm/hr (${precipTooltipEntry.precipChancePct !== null ? `${Math.round(precipTooltipEntry.precipChancePct)}%` : '—'} chance)` : ''}`}
                       tertiary={uvTooltipEntry ? `UV ${Math.round(uvTooltipEntry.uvIndex)} · ${uvRiskLabel(uvTooltipEntry.uvIndex)}` : undefined}
                     />
                   )}
@@ -889,7 +882,7 @@ export function ForecastDrawer({
                     className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
                     style={{ width: forecastChartWidth }}
                   >
-                    <ComposedChart width={forecastChartWidth} height={175} margin={cloudChartMargin}>
+                    <ComposedChart width={forecastChartWidth} height={175} data={cloudChartData} margin={cloudChartMargin}>
                       <XAxis
                         dataKey="hourOfDay"
                         type="number"
@@ -905,9 +898,37 @@ export function ForecastDrawer({
                       />
                       <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
                       <YAxis domain={[cloudTempMin, cloudTempMin + cloudTempRange]} hide />
+                      <YAxis yAxisId="precip" domain={[0, precipMax]} orientation="right" hide />
                       <YAxis yAxisId="uv" domain={[0, uvMax]} hide />
+                      <defs>
+                        <linearGradient id={tempAreaGradientId} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.28" />
+                          <stop offset="100%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.02" />
+                        </linearGradient>
+                        <linearGradient id={uvAreaGradientId} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="rgb(250,204,21)" stopOpacity="0.30" />
+                          <stop offset="100%" stopColor="rgb(250,204,21)" stopOpacity="0.02" />
+                        </linearGradient>
+                      </defs>
                       <Area
-                        data={cloudChartData}
+                        dataKey="uvIndex"
+                        yAxisId="uv"
+                        type="monotone"
+                        isAnimationActive={false}
+                        dot={false}
+                        stroke="none"
+                        fill={`url(#${uvAreaGradientId})`}
+                      />
+                      <Bar dataKey="precipIntensityMm" yAxisId="precip" barSize={precipBarWidth} isAnimationActive={false}>
+                        {cloudChartData.map((entry, idx) => (
+                          <Cell
+                            key={idx}
+                            data-testid="forecast-precip-bar"
+                            fill={precipBarColor(entry.precipChancePct)}
+                          />
+                        ))}
+                      </Bar>
+                      <Area
                         dataKey="displayTemperature"
                         type="monotone"
                         isAnimationActive={false}
@@ -915,16 +936,6 @@ export function ForecastDrawer({
                         stroke={cloudChartConfig.displayTemperature.color}
                         strokeWidth={2.4}
                         fill={`url(#${tempAreaGradientId})`}
-                      />
-                      <Line
-                        data={uvChartData}
-                        dataKey="uvIndex"
-                        yAxisId="uv"
-                        type="monotone"
-                        isAnimationActive={false}
-                        dot={false}
-                        stroke={`url(#${uvLineGradientId})`}
-                        strokeWidth={2}
                       />
                       {cloudMinIdx >= 0 && (
                         <ReferenceDot
@@ -964,18 +975,16 @@ export function ForecastDrawer({
                           <stop offset="0%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.28" />
                           <stop offset="100%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.02" />
                         </linearGradient>
-                        <linearGradient id={uvLineGradientId} gradientUnits="userSpaceOnUse" x1={0} y1={uvYFor(0)} x2={0} y2={uvYFor(uvMax)}>
-                          {UV_GRADIENT_STOPS.map((stop) => (
-                            <stop key={stop.value} offset={stop.value / uvMax} stopColor={stop.color} stopOpacity="0.9" />
-                          ))}
+                        <linearGradient id={uvAreaGradientId} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="rgb(250,204,21)" stopOpacity="0.30" />
+                          <stop offset="100%" stopColor="rgb(250,204,21)" stopOpacity="0.02" />
                         </linearGradient>
                       </defs>
 
                       <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMax)}{tempUnit}</text>
                       <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMin)}{tempUnit}</text>
-                      {UV_BAND_LABELS.map((band) => (
-                        <text key={band.label} x={forecastChartWidth - 6} y={uvYFor(band.value)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{band.label}</text>
-                      ))}
+                      <text x={forecastChartWidth - 6} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)}mm</text>
+                      <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0mm</text>
                       <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
                       {cloudTooltipEntry && cloudTooltipEntry.hourOfDay >= 0 && (
@@ -983,17 +992,6 @@ export function ForecastDrawer({
                           x={hourlyXForHour(cloudTooltipEntry.hourOfDay)}
                           y={cloudYFor(displayTemp(cloudTooltipEntry.temperatureF))}
                           color="hsl(var(--chart-temp) / 0.95)"
-                        />
-                      )}
-                      {uvTooltipEntry && (
-                        <ChartTooltipMarker
-                          // UV has no real per-entry hourOfDay (see uvChartData above) -
-                          // its own series is keyed on array index, so activeIndex IS
-                          // the real domain value here, unlike the other 4 marker call
-                          // sites above which look up a genuine hourOfDay.
-                          x={hourlyXForHour(cloudTooltip.activeIndex ?? 0)}
-                          y={uvYFor(Math.max(0, uvTooltipEntry.uvIndex))}
-                          color="rgb(249,115,22)"
                         />
                       )}
                     </svg>
@@ -1012,6 +1010,9 @@ export function ForecastDrawer({
                     ))}
                   </div>
                   </div>
+                  <p data-testid="forecast-cloud-legend" className="mt-1 text-[10px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={cloudChartConfig.displayTemperature.color ?? 'currentColor'} strokeWidth={2.4} /> Temp ({tempUnit})</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={cloudChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Rain (mm/hr · opacity = probability)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color="rgba(250,204,21,0.5)" /> UV background</span>
+                  </p>
                 </>
               ) : (
                 <ChartUnavailableMessage testId="forecast-cloud-unavailable" message="Cloud & temperature forecast unavailable for this day" />
@@ -1143,16 +1144,18 @@ export function ForecastDrawer({
             </div>
 
             <div className="mt-3 rounded-md border bg-card/70 p-2">
-              <h4 className="mb-2 flex items-center justify-between gap-1.5">
-                <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              <div className="mb-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+                <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   <Waves size={13} className="text-gauge-secondary" /> Wave (m)
-                </span>
-                {waveSeaTemperatureF !== null && (
-                  <span className="text-[11px] text-muted-foreground">
-                    Sea {Math.round(displayTemp(waveSeaTemperatureF))}{tempUnit}
-                  </span>
+                </h4>
+                {(waveIsCached || waveUpdatedAt) && (
+                  <p data-testid="forecast-wave-refresh-meta" className="text-[11px] text-muted-foreground">
+                    {waveProvider ? `Data: ${waveProvider} · ` : ''}
+                    {waveIsCached ? 'cached' : 'live'} · updated {formatRefreshAge(waveUpdatedAt, Date.now())}
+                    {waveTtlSeconds ? ` · refreshes every ${Math.round(waveTtlSeconds / 3600)}h` : ''}
+                  </p>
                 )}
-              </h4>
+              </div>
               {waveLoading ? (
                 <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-loading">
                   Loading wave forecast...
@@ -1161,9 +1164,17 @@ export function ForecastDrawer({
                 <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
               ) : waveHourly.length > 0 ? (
                 <>
-                  {selectedWaveDay?.waveSummary && (
-                    <p className="mb-2 text-base text-foreground/80">{selectedWaveDay.waveSummary}</p>
-                  )}
+                  {(() => {
+                    const baseSummary = selectedWaveDay?.waveSummary
+                    if (!baseSummary) return null
+                    if (waveSeaTemperatureF === null) {
+                      return <p className="mb-2 text-base text-foreground/80">{baseSummary}</p>
+                    }
+                    const seaTempDisplay = `${Math.round(displayTemp(waveSeaTemperatureF))}${tempUnit}`
+                    const trimmed = baseSummary.replace(/\.$/, '')
+                    const summaryWithTemp = `${trimmed} and sea surface temperature of ${seaTempDisplay}.`
+                    return <p className="mb-2 text-base text-foreground/80">{summaryWithTemp}</p>
+                  })()}
                   <div className="relative">
                     {waveTooltipEntry && (
                       <ChartTooltipBubble
@@ -1289,107 +1300,7 @@ export function ForecastDrawer({
               )}
             </div>
 
-            <div className="mt-3 rounded-md border bg-card/70 p-2">
-              <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                <CloudRain size={13} className="text-gauge-secondary" /> Precipitation (mm/hr)
-              </h4>
-              {precipHourly.length > 0 ? (
-                <>
-                  {selectedDay.precipitationSummary && (
-                    <p className="mb-2 text-base text-foreground/80">{selectedDay.precipitationSummary}</p>
-                  )}
-                  <div className="relative">
-                    {precipTooltipEntry && (
-                      <ChartTooltipBubble
-                        pixelX={precipTooltip.tooltipPixelX ?? 0}
-                        time={precipTooltipEntry.label}
-                        primary={precipTooltipEntry.precipChancePct === null ? 'Chance unavailable' : `${Math.round(precipTooltipEntry.precipChancePct)}% chance`}
-                        secondary={`${precipTooltipEntry.precipIntensityMm.toFixed(1)} mm/hr`}
-                      />
-                    )}
-                    <div
-                      data-testid="forecast-precip-chart"
-                      className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
-                      style={{ width: forecastChartWidth }}
-                    >
-                      <ComposedChart width={forecastChartWidth} height={175} data={precipChartData} margin={precipChartMargin}>
-                        <XAxis
-                          dataKey="hourOfDay"
-                          type="number"
-                          domain={[0, 23]}
-                          allowDataOverflow
-                          ticks={[0, 6, 12, 18]}
-                          tickFormatter={(value: number) => precipLabelByHour.get(value) ?? ''}
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fontSize: Number(AXIS_LABEL_FONT_SIZE), fill: AXIS_LABEL_COLOR }}
-                          height={RECHARTS_XAXIS_HEIGHT}
-                        />
-                        <YAxis domain={[0, precipMax]} hide />
-                        <YAxis yAxisId="chance" domain={[0, 100]} orientation="right" hide />
-                        <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
-                        <Bar dataKey="precipIntensityMm" barSize={precipBarWidth} isAnimationActive={false}>
-                          {precipChartData.map((entry, idx) => (
-                            <Cell key={idx} data-testid="forecast-precip-bar" fill={precipBarColor(entry.precipIntensityMm)} />
-                          ))}
-                        </Bar>
-                        <Line
-                          dataKey="precipChancePct"
-                          yAxisId="chance"
-                          type="monotone"
-                          dot={false}
-                          isAnimationActive={false}
-                          stroke={precipChartConfig.precipChancePct.color}
-                          strokeWidth={2.4}
-                        />
-                      </ComposedChart>
-
-                      <svg
-                        ref={precipTooltip.svgRef}
-                        viewBox={`0 0 ${forecastChartWidth} 175`}
-                        preserveAspectRatio="none"
-                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
-                        onPointerDown={precipTooltip.onPointerDown}
-                        onPointerMove={precipTooltip.onPointerMove}
-                        onPointerLeave={precipTooltip.onPointerLeave}
-                      >
-                        <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)}</text>
-                        <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0</text>
-                        <text x={forecastChartWidth - 6} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>100%</text>
-                        <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0%</text>
-                        <line x1={hourlyChartLeft} y1={precipChartBottom} x2={hourlyChartRight} y2={precipChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
-
-                        {precipTooltipEntry && precipTooltipEntry.hourOfDay >= 0 && precipTooltipEntry.precipChancePct !== null && (
-                          <ChartTooltipMarker
-                            x={hourlyXForHour(precipTooltipEntry.hourOfDay)}
-                            y={precipChanceYFor(Math.max(0, Math.min(100, precipTooltipEntry.precipChancePct)))}
-                            color="hsl(var(--chart-gust) / 0.9)"
-                          />
-                        )}
-                      </svg>
-                    </div>
-                  </div>
-                  <p data-testid="forecast-precip-legend" className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={precipChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Intensity (mm/hr)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={precipChartConfig.precipChancePct.color ?? 'currentColor'} strokeWidth={2.4} /> Chance of precip (%)</span>
-                  </p>
-                </>
-              ) : (
-                <ChartUnavailableMessage testId="forecast-precip-unavailable" message="Precipitation forecast unavailable for this day" />
-              )}
-            </div>
-
             <ForecastTideSection isImperial={unit === 'imperial'} dayOffset={selectedDayIndex} />
-
-            {/* Without this the provider's stale-on-error cache is invisible:
-                a days-old forecast renders exactly like a live one. Mirrors
-                the tide section's line so both read the same way. */}
-            {(isCached || updatedAt) && (
-              <p data-testid="forecast-refresh-meta" className="mt-1 text-xs text-muted-foreground">
-                {provider ? `Data: ${provider} · ` : ''}
-                {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
-                {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 60)}m` : ''}
-              </p>
-            )}
 
           </div>
         </div>

@@ -381,6 +381,45 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getAllByText('6.0s').length).toBeGreaterThan(0)
   })
 
+  it('includes sea surface temperature in the wave summary when available', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay()]}
+        waveSeaTemperatureF={70} // 70°F -> 21°C
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(
+      screen.getByText('Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec and sea surface temperature of 21°C.'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows wave provider, cache state and refresh age for the wave card', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay()]}
+        loading={false}
+        error={null}
+        unit="metric"
+        waveProvider="open-meteo-marine"
+        waveIsCached
+        waveUpdatedAt="2026-06-14T10:00:00Z"
+        waveTtlSeconds={3600}
+      />,
+    )
+
+    const meta = screen.getByTestId('forecast-wave-refresh-meta')
+    expect(meta).toHaveTextContent('open-meteo-marine')
+    expect(meta).toHaveTextContent('cached')
+    expect(meta).toHaveTextContent('2 hours ago')
+    expect(meta).toHaveTextContent('refreshes every 1h')
+  })
+
   it('uses 6-hour-block labels on the wave chart', () => {
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 
@@ -504,10 +543,10 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.queryByTestId('forecast-wave-error')).not.toBeInTheDocument()
   })
 
-  it('renders the precipitation graph with bars for the selected day', () => {
+  it('renders the cloud, temperature, and precipitation graph with bars for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByTestId('forecast-precip-chart')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-cloud-chart')).toBeInTheDocument()
     expect(screen.getAllByTestId('forecast-precip-bar').length).toBeGreaterThan(0)
   })
 
@@ -544,23 +583,9 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByText('Slight chance of rain after 5PM.')).toBeInTheDocument()
   })
 
-  it('uses 6-hour-block labels on the precipitation chart', () => {
-    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
-
-    const chart = screen.getByTestId('forecast-precip-chart')
-    expect(within(chart).getByText('12AM')).toBeInTheDocument()
-    expect(within(chart).getByText('6AM')).toBeInTheDocument()
-    expect(within(chart).getByText('12PM')).toBeInTheDocument()
-    expect(within(chart).getByText('6PM')).toBeInTheDocument()
-  })
-
-  // Pins the recharts-backed bar rendering to the exact same visual output as
-  // the hand-rolled <rect> loop it replaces: one bar per hour with a
-  // non-zero intensity (zero-intensity hours render nothing, same as
-  // today), each colored independently by precipBarColor's Light/Moderate/
-  // Heavy bands - not a single shared fill for the whole series.
-  it('renders one precipitation bar per non-zero hourly reading, each colored by its own intensity band', () => {
-    const hourlyPrecip = buildHourlyPrecip().map((entry, idx) => (idx === 18 ? { ...entry, precipIntensityMm: 8.2 } : entry))
+  // Pins the recharts-backed bar rendering: each bar is colored by its probability gradient
+  it('renders one precipitation bar per non-zero hourly reading, colored by probability gradient', () => {
+    const hourlyPrecip = buildHourlyPrecip().map((entry, idx) => (idx === 18 ? { ...entry, precipIntensityMm: 8.2, precipChancePct: 90 } : entry))
 
     render(
       <ForecastDrawer
@@ -572,47 +597,23 @@ describe('ForecastDrawer refresh age', () => {
     )
 
     const bars = screen.getAllByTestId('forecast-precip-bar')
-    // buildHourlyPrecip only gives non-zero intensity every 6th hour (4 of 24).
+    // buildHourlyPrecip gives non-zero intensity every 6th hour (4 of 24: idx 0, 6, 12, 18).
     expect(bars).toHaveLength(4)
-    // idx 0 -> 1.5mm/hr (Light band), idx 18 -> overridden to 8.2mm/hr (Heavy band).
-    expect(bars[0]).toHaveAttribute('fill', 'rgba(147,197,253,0.85)')
-    expect(bars[3]).toHaveAttribute('fill', 'rgba(29,78,216,0.9)')
+    // idx 0 -> chance = 0% -> rgba(59,130,246,0.2)
+    expect(bars[0]).toHaveAttribute('fill', 'rgba(59,130,246,0.2)')
+    // idx 18 -> chance = 90% -> rgba(29,78,216,0.92)
+    expect(bars[3]).toHaveAttribute('fill', 'rgba(29,78,216,0.92)')
   })
 
-  it('shows an unavailable message when a day has no precipitation forecast', () => {
-    render(
-      <ForecastDrawer
-        forecast={[buildDay({ hourlyPrecip: [] })]}
-        loading={false}
-        error={null}
-        unit="metric"
-      />,
-    )
-
-    expect(screen.getByTestId('forecast-wind-chart')).toBeInTheDocument()
-    expect(screen.queryByTestId('forecast-precip-chart')).not.toBeInTheDocument()
-    expect(screen.getByTestId('forecast-precip-unavailable')).toBeInTheDocument()
-  })
-
-  it('plots UV as a second series on the cloud & temperature chart, with a sun protection recommendation', () => {
+  it('shows UV as a background gradient and displays sun protection recommendation', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
     const chart = screen.getByTestId('forecast-cloud-chart')
-    // Temperature + UV curves share the same chart now, instead of UV having
-    // its own standalone chart. Both are recharts <Area>/<Line> series, which
-    // (unlike the hand-rolled <polyline> this replaces) always render as SVG
-    // <path> elements - see recharts' shared Curve component.
-    expect(chart.querySelectorAll('path.recharts-curve').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Sun protection recommended from 7AM to 5PM.')).toBeInTheDocument()
-  })
-
-  it('strokes the UV series with the multi-stop UV gradient', () => {
-    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
-
-    const chart = screen.getByTestId('forecast-cloud-chart')
-    const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
-    const gradientStroked = curves.some((path) => (path.getAttribute('stroke') ?? '').startsWith('url(#'))
-    expect(gradientStroked).toBe(true)
+    const uvAreaFills = chart.querySelectorAll('path.recharts-area-area')
+    // One for UV area background and one for temperature area
+    expect(uvAreaFills.length).toBe(2)
+    expect(Array.from(uvAreaFills).every((fill) => fill.getAttribute('fill')?.startsWith('url(#'))).toBe(true)
   })
 
   // Task 3 (visual polish): the Wind/Wave/Temperature Area fills should fade
@@ -653,7 +654,6 @@ describe('ForecastDrawer refresh age', () => {
   it.each([
     ['forecast-wind-chart'],
     ['forecast-wave-chart'],
-    ['forecast-precip-chart'],
     ['forecast-cloud-chart'],
   ])('renders faint horizontal gridlines using the chart-grid token on %s', (testId) => {
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
@@ -670,7 +670,7 @@ describe('ForecastDrawer refresh age', () => {
     expect(verticalLines.length).toBe(0)
   })
 
-  // Task 5 (visual polish): the wind/wave/precip legends used to fake a solid
+  // Task 5 (visual polish): the wind/wave/cloud legends used to fake a solid
   // vs. dashed line with text characters (an em-dash / hyphens), which don't
   // track the real series' color or strokeDasharray. They should now draw a
   // real inline <svg><line> swatch instead.
@@ -706,20 +706,18 @@ describe('ForecastDrawer refresh age', () => {
     expect(swellSwatch).toHaveAttribute('stroke-dasharray', '2 3')
   })
 
-  it('draws a real bar swatch and a real line swatch in the precipitation legend, not text-character fakes', () => {
+  it('draws a real line swatch and bar swatch in the cloud & temperature legend', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    const legend = screen.getByTestId('forecast-precip-legend')
-    expect(legend.textContent).not.toMatch(/▮|— Chance/)
-
+    const legend = screen.getByTestId('forecast-cloud-legend')
     expect(legend.querySelector('svg rect')).toBeTruthy()
     const swatchLines = Array.from(legend.querySelectorAll('svg line'))
-    const chanceSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-gust) / 0.85)')
-    expect(chanceSwatch).toBeTruthy()
+    const tempSwatch = swatchLines.find((line) => line.getAttribute('stroke') === 'hsl(var(--chart-temp) / 0.9)')
+    expect(tempSwatch).toBeTruthy()
   })
 
   // Task 6 (visual polish): the topmost Y-axis tick on the Wind/Wave/
-  // Precipitation charts used to append its unit only on that one tick (e.g.
+  // charts used to append its unit only on that one tick (e.g.
   // "40 kts"), which can run past the plot's left gutter at fontSize 10. The
   // unit now lives in the chart's <h4> header instead, and every tick
   // (including the topmost) renders as a bare number.
@@ -741,14 +739,6 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByText('Wave (m)')).toBeInTheDocument()
     const chart = screen.getByTestId('forecast-wave-chart')
     expect(Array.from(chart.querySelectorAll('text')).some((el) => /\bm\b/.test(el.textContent ?? ''))).toBe(false)
-  })
-
-  it('moves the precipitation chart max-tick unit into the header instead of the tick label', () => {
-    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
-
-    expect(screen.getByText('Precipitation (mm/hr)')).toBeInTheDocument()
-    const chart = screen.getByTestId('forecast-precip-chart')
-    expect(Array.from(chart.querySelectorAll('text')).some((el) => /mm\/hr/.test(el.textContent ?? ''))).toBe(false)
   })
 
   it('still renders the cloud & temperature chart when a day has no UV forecast', () => {

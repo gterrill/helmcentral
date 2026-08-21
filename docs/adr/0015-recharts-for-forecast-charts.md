@@ -85,12 +85,21 @@ That approach rests on a fact worth recording, because it is not obvious and the
 
 The margin contract and `allowDataOverflow` are untouched, and **no pixel-exactness assertion changed value**. But several of those tests locate the element they then measure *by its literal colour string* — `curves.find((path) => path.getAttribute('stroke') === 'rgba(37,99,235,0.95)')`, and a `path.recharts-curve[stroke="..."]` selector feeding the wind pixel assertion. Tokenising the colours necessarily changed those selectors, which is worth flagging as a general property of this suite rather than an incident: colour is currently load-bearing as a *test selector*, so any future palette change forces test edits that look alarming but are mechanical. In jsdom the attribute value stays the literal string `hsl(var(--chart-wind) / 0.95)` — CSS variables never resolve there — so selecting on the token text works exactly as selecting on the rgba text did. A `data-series` attribute per series would decouple this properly; that is not done here.
 
-Verified with the full suite green (566 tests), a clean strict-`tsc` build, and a real-browser pass in **both** themes — the dark case being the one that could not previously have been correct, since a hardcoded `rgba()` has no way to respond to the `.dark` class. Cost is +560 bytes gzipped.
+Verified with the full suite green (568 tests), a clean strict-`tsc` build, and a real-browser pass in **both** themes — the dark case being the one that could not previously have been correct, since a hardcoded `rgba()` has no way to respond to the `.dark` class. Cost is +560 bytes gzipped.
+
+## Addendum (third follow-up): Merged Precipitation & UV Background into Cloud & Temperature Chart
+
+To improve glanceability and reduce vertical layout clutter in the daily forecast panel, the standalone **Precipitation** chart was merged into the **Cloud & Temperature** chart, reducing the daily weather chart stack from 4 cards down to 3 (Cloud/Temp/Rain, Wind, Wave + Tide section).
+
+Key changes:
+- **Precipitation Bars**: Hourly rain intensity is rendered as vertical column bars (`<Bar dataKey="precipIntensityMm">`) plotted against the right Y-axis. Bar opacity and saturation scale continuously with precipitation probability (faint translucent light-blue for low probability up to deep royal blue for high probability).
+- **UV Background Area**: UV index is rendered as a soft yellow/amber background gradient fill (`<Area dataKey="uvIndex" fill="url(#uv-gradient)">`) rather than an overlapping foreground line, avoiding visual collision with the temperature curve and rain bars.
+- **Combined Tooltip & Legend**: Scrubber tooltips display temperature, condition, precipitation rate/probability, and UV index simultaneously. The legend reflects Temperature line, Rain probability bar, and UV background.
 
 ## Consequences
 
 Positive:
-- All five forecast charts now render their data series (bars/areas/lines), axis gridlines, and reference markers through recharts, adopting the same shadcn convention the rest of the app already follows, while the pointer-tracking tooltip, wind barbs, wave-direction arrows, and cloud-icon overlay — none of which have a recharts equivalent, or in the tooltip's case an equivalent whose behavior this app actually wants — are completely unchanged.
+- All four forecast charts now render their data series (bars/areas/lines), axis gridlines, and reference markers through recharts, adopting the same shadcn convention the rest of the app already follows, while the pointer-tracking tooltip, wind barbs, wave-direction arrows, and cloud-icon overlay — none of which have a recharts equivalent, or in the tooltip's case an equivalent whose behavior this app actually wants — are completely unchanged.
 - The margin-matching strategy meant zero changes to any existing pixel-math constant (`hourlyChartLeft`/`*ChartTop`/`*ChartBottom`/`xFor`/`yFor`), and zero changes to `useChartTooltip`, `ChartTooltipBubble`/`ChartTooltipMarker`, `WindBarb`, or `WaveDirectionArrow`.
 - Test coverage grew alongside the migration (test-first per chart): new assertions pin the recharts-specific rendering details most at risk of silently regressing — per-bar intensity-band coloring surviving the `<Cell>` boundary, the UV line's gradient `stroke` surviving the `<Line>` boundary, solid-vs-dashed line styling per series, and (for Tide) the exact pixel placement the identity-domain trick depends on.
 

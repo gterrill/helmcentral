@@ -62,9 +62,19 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
 
   return (
     <div className="mt-3 rounded-md border bg-card/70 p-2">
-      <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-        <Waves size={13} className="text-gauge-secondary" /> Tide
-      </h4>
+      <div className="mb-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+        <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <Waves size={13} className="text-gauge-secondary" /> Tide
+        </h4>
+        {(isCached || updatedAt) && (
+          <p className="text-[11px] text-muted-foreground">
+            Data: {tideProviders.find((p) => p.id === tideProvider)?.name || tideProvider}
+            {' · '}
+            {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
+            {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}
+          </p>
+        )}
+      </div>
 
       {settingsLoading ? (
         <p className="py-6 text-center text-xs text-muted-foreground">Loading tide settings...</p>
@@ -132,15 +142,6 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
             <TideChart chart={chart} isImperial={isImperial} windowStart={windowStart} windowEnd={windowEnd} />
           ) : (
             <p className="py-6 text-center text-xs text-muted-foreground">No tide data available</p>
-          )}
-
-          {(isCached || updatedAt) && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Data: {tideProviders.find((p) => p.id === tideProvider)?.name || tideProvider}
-              {' · '}
-              {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
-              {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}
-            </p>
           )}
 
           {saving && <p className="mt-1 text-xs text-muted-foreground">Saving station...</p>}
