@@ -29,6 +29,6 @@ describe('frontend toolchain', () => {
     // Vite supports `latest` and `previous` only; 5.x and 6.x are both EOL,
     // and the path-traversal advisory GHSA-4w7w-66w2-5vf9 (<=6.4.1) has no
     // fixed 5.x release to move to.
-    expect(majorOf(packageJson.devDependencies?.vite)).toBeGreaterThanOrEqual(7)
+    expect(majorOf(packageJson.devDependencies?.vite)).toBeGreaterThanOrEqual(8)
   })
 })

@@ -61,6 +61,13 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     target: 'ES2020',
+    // Vite 8 minifies CSS with lightningcss, which takes browser versions
+    // rather than a JS language target — `target: 'ES2020'` above is not a
+    // value it accepts, and leaving it to inherit fails the build outright
+    // with `Unsupported target "ES2020"`. These versions encode the Baseline
+    // 2024 target that AGENTS.md sets for this project, so authored CSS is
+    // downlevelled no further than that floor. It drops Safari below 16.4.
+    cssTarget: ['chrome111', 'edge111', 'firefox111', 'safari16.4'],
     outDir: 'dist',
   },
   test: {

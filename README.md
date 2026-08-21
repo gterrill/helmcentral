@@ -88,6 +88,12 @@ edit by hand.
   | [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) | Generator and advanced electrical state (Victron GX devices) |
   | [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) | Optional — only for InfluxDB-backed history |
 
+- **A browser on Baseline 2024 or newer** to view the dashboard: Chrome/Edge
+  111+, Firefox 111+, Safari 16.4+ (so iPadOS/iOS 16.4+ on a helm tablet).
+  Older devices are out of support — the shipped CSS is not downlevelled past
+  that floor
+  ([ADR 0046](docs/adr/0046-frontend-build-toolchain-and-css-browser-floor.md)).
+
 That's it. Telemetry history is in-memory by default; InfluxDB is an opt-in
 enhancement for longer retention, not a requirement.
 
