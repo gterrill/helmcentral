@@ -2,13 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// Vite 7 requires node ^20.19.0 || >=22.12.0. The production image builds and
-// serves the dashboard itself, so if its base image drops below that floor the
-// break shows up as a failed release build, not as anything a dev would notice
-// locally — the dev container is on node 20. Pin the two together here.
-const dockerfile = readFileSync(resolve('Dockerfile'), 'utf8')
+// Vite 7 requires node ^20.19.0 || >=22.12.0. Two images build the frontend and
+// neither is exercised by a normal dev loop, so a base image below that floor
+// breaks somewhere a developer will not notice locally:
+//
+//   - ../Dockerfile        the release image, built by the Release workflow
+//   - ./frontend/Dockerfile  the `frontend` service of compose's prod profile
+//
+// Pin both against the vite major here.
 const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as {
   devDependencies?: Record<string, string>
+}
+
+const dockerfiles = {
+  'Dockerfile (release image)': readFileSync(resolve('..', 'Dockerfile'), 'utf8'),
+  'frontend/Dockerfile (compose prod)': readFileSync(resolve('Dockerfile'), 'utf8'),
 }
 
 function majorOf(range: string | undefined) {
@@ -17,8 +25,8 @@ function majorOf(range: string | undefined) {
 }
 
 describe('frontend toolchain', () => {
-  it('builds on a node new enough for the pinned vite', () => {
-    const bases = [...dockerfile.matchAll(/^FROM\s+node:(\d+)/gm)].map((m) => Number(m[1]))
+  it.each(Object.entries(dockerfiles))('%s builds on a node new enough for the pinned vite', (_name, contents) => {
+    const bases = [...contents.matchAll(/^FROM\s+(?:--platform=\S+\s+)?node:(\d+)/gm)].map((m) => Number(m[1]))
     expect(bases.length).toBeGreaterThan(0)
     for (const major of bases) {
       expect(major).toBeGreaterThanOrEqual(20)
