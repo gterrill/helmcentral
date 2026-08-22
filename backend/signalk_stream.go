@@ -12,9 +12,50 @@ import (
 	"github.com/coder/websocket"
 )
 
-// subscribe=all rather than the default self: nearby-vessels reads other
-// vessels' contexts, which a self-only subscription never delivers.
-const signalKStreamPath = "/signalk/v1/stream?subscribe=all"
+// subscribe=none, then an explicit subscription sent on connect (see
+// streamSubscription). The server's built-in modes are all-or-nothing on rate:
+// subscribe=all measured at ~333 frames/s against the live boat, with
+// navigation.headingMagnetic alone at 40Hz. Every frame costs a websocket read
+// and a json.Unmarshal — together 70% of this process's CPU — and is then
+// overwritten before anything reads it, because nothing here consumes faster
+// than 1Hz (alarm evaluator 1s, anchor drag 5s, SSE telemetry stream 1s).
+// Asking for what we actually use is the only way to say that.
+const signalKStreamPath = "/signalk/v1/stream?subscribe=none"
+
+// streamSubscription is sent immediately after the handshake. It caps the rate
+// without narrowing coverage:
+//
+//   - context vessels.* keeps other vessels, which nearby-vessels needs. They
+//     are only ~2.3% of frame volume, so narrowing to vessels.self would cost
+//     that feature everything and save almost nothing.
+//   - path "*" keeps every path, including any the operator has mapped to a
+//     widget in settings.yaml. Only the rate is capped, never the coverage.
+//   - policy instant with minPeriod still delivers a change as soon as it
+//     happens, just no more than once per second per path. policy fixed was
+//     measured slower to no benefit (210 frames/s against instant's 159).
+const streamSubscribeMinPeriodMS = 1000
+
+type signalKSubscribeEntry struct {
+	Path      string `json:"path"`
+	Policy    string `json:"policy"`
+	MinPeriod int    `json:"minPeriod"`
+}
+
+type signalKSubscribeMessage struct {
+	Context   string                  `json:"context"`
+	Subscribe []signalKSubscribeEntry `json:"subscribe"`
+}
+
+func streamSubscription() signalKSubscribeMessage {
+	return signalKSubscribeMessage{
+		Context: "vessels.*",
+		Subscribe: []signalKSubscribeEntry{{
+			Path:      "*",
+			Policy:    "instant",
+			MinPeriod: streamSubscribeMinPeriodMS,
+		}},
+	}
+}
 
 const (
 	defaultStreamMinBackoff = 1 * time.Second
@@ -125,6 +166,19 @@ func (c *signalKStreamClient) connectOnce(ctx context.Context, streamURL, httpBa
 		return err
 	}
 	defer conn.CloseNow()
+
+	// Sent before marking connected: with subscribe=none the server sends
+	// nothing until it arrives, so a failure here is a dead stream, not a
+	// degraded one. Surface it rather than sitting silently on an idle socket
+	// — the signalk-stream watchdog would eventually fire, but the reason
+	// belongs in the log at the point it happened.
+	subscription, err := json.Marshal(streamSubscription())
+	if err != nil {
+		return fmt.Errorf("signalk stream: encoding subscription: %w", err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, subscription); err != nil {
+		return fmt.Errorf("signalk stream: sending subscription: %w", err)
+	}
 
 	c.snapshot.setConnected(true)
 	defer c.snapshot.setConnected(false)

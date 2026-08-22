@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,16 +92,16 @@ func snapshotDepth(snapshot *signalKSnapshot) float64 {
 	return lookupNumber(tree, "environment", "depth", "belowTransducer", "value")
 }
 
-func TestBuildSignalKStreamURLMapsSchemeAndAppendsSubscribeAll(t *testing.T) {
+func TestBuildSignalKStreamURLMapsSchemeAndDisablesImplicitSubscription(t *testing.T) {
 	cases := []struct {
 		name    string
 		address string
 		port    int
 		want    string
 	}{
-		{"bare host and port", "100.103.214.1", 3000, "ws://100.103.214.1:3000/signalk/v1/stream?subscribe=all"},
-		{"http prefixed address", "http://boat.local:3000", 0, "ws://boat.local:3000/signalk/v1/stream?subscribe=all"},
-		{"https prefixed address becomes wss", "https://boat.local", 0, "wss://boat.local/signalk/v1/stream?subscribe=all"},
+		{"bare host and port", "100.103.214.1", 3000, "ws://100.103.214.1:3000/signalk/v1/stream?subscribe=none"},
+		{"http prefixed address", "http://boat.local:3000", 0, "ws://boat.local:3000/signalk/v1/stream?subscribe=none"},
+		{"https prefixed address becomes wss", "https://boat.local", 0, "wss://boat.local/signalk/v1/stream?subscribe=none"},
 	}
 
 	for _, tc := range cases {
@@ -108,15 +109,6 @@ func TestBuildSignalKStreamURLMapsSchemeAndAppendsSubscribeAll(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
 		}
-	}
-}
-
-// subscribe=all rather than self is load-bearing: nearby-vessels reads other
-// vessels' contexts, which a self-only subscription never delivers.
-func TestBuildSignalKStreamURLSubscribesToAllContexts(t *testing.T) {
-	got := buildSignalKStreamURL("boat.local", 3000)
-	if !strings.Contains(got, "subscribe=all") {
-		t.Fatalf("stream URL must subscribe to all contexts, got %q", got)
 	}
 }
 
@@ -320,4 +312,85 @@ func TestStreamDeltaReachesVesselStateFetcher(t *testing.T) {
 		state, err := fetchSignalKVesselState()
 		return err == nil && state.Depth == 8.75
 	})
+}
+
+// The server pushes far faster than anything here consumes: measured against
+// the live boat, subscribe=all delivers ~333 frames/s, with
+// navigation.headingMagnetic alone arriving at 40Hz. Every one of those frames
+// costs a websocket read and a json.Unmarshal — together 70% of the backend's
+// CPU — and is then overwritten before it is read, because the alarm evaluator
+// ticks at 1s, anchor drag at 5s, and the SSE telemetry stream at 1s. Nothing
+// in the process consumes faster than 1Hz.
+//
+// So the client subscribes explicitly and rate-limits to 1Hz per path, rather
+// than taking the firehose and throwing most of it away.
+func TestStreamClientSubscribesWithRateLimit(t *testing.T) {
+	received := make(chan string, 1)
+	stub := newStreamStub(func(ctx context.Context, c *websocket.Conn, _ int) {
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			return
+		}
+		select {
+		case received <- string(data):
+		default:
+		}
+		<-ctx.Done()
+	})
+	defer stub.close()
+
+	client := testStreamClient(newSignalKSnapshot())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go client.connectOnce(ctx, stub.wsURL(), "")
+
+	var raw string
+	select {
+	case raw = <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("client never sent a subscription message")
+	}
+
+	var msg struct {
+		Context   string `json:"context"`
+		Subscribe []struct {
+			Path      string `json:"path"`
+			Policy    string `json:"policy"`
+			MinPeriod int    `json:"minPeriod"`
+		} `json:"subscribe"`
+	}
+	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
+		t.Fatalf("subscription message is not valid JSON: %v (%q)", err, raw)
+	}
+
+	// vessels.*, not vessels.self: nearby-vessels reads other vessels'
+	// contexts. They are only 2.3% of frame volume, so narrowing the context
+	// would cost that feature everything and save almost nothing.
+	if msg.Context != "vessels.*" {
+		t.Fatalf("context = %q, want vessels.* so other vessels still arrive", msg.Context)
+	}
+	if len(msg.Subscribe) != 1 {
+		t.Fatalf("want exactly one subscription entry, got %d", len(msg.Subscribe))
+	}
+	entry := msg.Subscribe[0]
+	// path "*" keeps every path, including any the operator has mapped to a
+	// widget in settings.yaml. Only the rate is capped, never the coverage.
+	if entry.Path != "*" {
+		t.Fatalf("path = %q, want * so no configured path is dropped", entry.Path)
+	}
+	if entry.Policy != "instant" {
+		t.Fatalf("policy = %q, want instant so changes still arrive promptly", entry.Policy)
+	}
+	if entry.MinPeriod != 1000 {
+		t.Fatalf("minPeriod = %d, want 1000 to match the 1s consumption rate", entry.MinPeriod)
+	}
+}
+
+// subscribe=none is what makes the explicit subscription authoritative; left
+// at all, the server firehoses regardless of what we then ask for.
+func TestBuildSignalKStreamURLDisablesImplicitSubscription(t *testing.T) {
+	got := buildSignalKStreamURL("boat.local", 3000)
+	if !strings.Contains(got, "subscribe=none") {
+		t.Fatalf("stream URL must disable implicit subscription, got %q", got)
+	}
 }
