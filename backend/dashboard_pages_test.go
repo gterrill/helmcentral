@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -622,6 +623,102 @@ func TestDashboardPages_MigrationHandlesNeitherFile(t *testing.T) {
 	// Verify the pages file now exists, persisting the default page.
 	if _, err := os.Stat(pagesPath); os.IsNotExist(err) {
 		t.Fatal("expected pages file to be created for the default page")
+	}
+}
+
+// --- Retired widget ids (ADR 0047) --------------------------------------------
+
+// A saved page from a previous release may still carry "rode-scope" — the
+// retired Rode & Scope tile's widget id. validateDashboardWidgets rejects any
+// unknown id and would 400 the *entire* PATCH, so an install with a stale id
+// in its saved layout would be unable to save any layout change at all.
+// loadDashboardPages must strip retired ids on load and rewrite the file, so
+// the id can never be seen by validateDashboardWidgets again.
+func TestDashboardPages_RetiredWidgetIDStrippedOnLoad(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	pageID := uuid.NewString()
+	now := time.Now().UTC()
+	saved := dashboardPagesFile{
+		Pages: []*dashboardPageData{
+			{
+				ID:   pageID,
+				Name: "Anchored",
+				Widgets: []dashboardLayoutItem{
+					{ID: "anchor-watch", X: 4, Y: 3, W: 4, H: 8},
+					{ID: "rode-scope", X: 4, Y: 11, W: 4, H: 6},
+					{ID: "tanks", X: 4, Y: 17, W: 4, H: 4},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	}
+	savedBytes, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatalf("failed to marshal saved pages: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, savedBytes, 0o644); err != nil {
+		t.Fatalf("failed to write pages file: %v", err)
+	}
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	page, ok := dashboardPagesState[pageID]
+	dashboardPagesMu.RUnlock()
+	if !ok {
+		t.Fatal("expected page to load")
+	}
+	if len(page.Widgets) != 2 {
+		t.Fatalf("expected rode-scope stripped leaving 2 widgets, got %d: %+v", len(page.Widgets), page.Widgets)
+	}
+	for _, w := range page.Widgets {
+		if w.ID == "rode-scope" {
+			t.Fatal("expected rode-scope to be stripped from loaded widgets")
+		}
+	}
+
+	// The stripped state must be persisted back to disk, not just held in memory,
+	// so a restart doesn't resurrect the retired id.
+	onDiskBytes, err := os.ReadFile(pagesPath)
+	if err != nil {
+		t.Fatalf("failed to read pages file after load: %v", err)
+	}
+	var onDisk dashboardPagesFile
+	if err := json.Unmarshal(onDiskBytes, &onDisk); err != nil {
+		t.Fatalf("failed to parse pages file after load: %v", err)
+	}
+	if len(onDisk.Pages) != 1 || len(onDisk.Pages[0].Widgets) != 2 {
+		t.Fatalf("expected persisted file to have rode-scope stripped, got %+v", onDisk.Pages)
+	}
+
+	// A subsequent PATCH must now succeed — this is the actual bug being fixed:
+	// validateDashboardWidgets previously rejected the whole PATCH because the
+	// saved page still contained the unknown "rode-scope" id.
+	e := echo.New()
+	newWidgets := []dashboardLayoutItem{
+		{ID: "anchor-watch", X: 0, Y: 0, W: 4, H: 8},
+		{ID: "tanks", X: 4, Y: 0, W: 4, H: 4},
+	}
+	body, err := json.Marshal(map[string]any{"widgets": newWidgets})
+	if err != nil {
+		t.Fatalf("failed to marshal patch body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/api/dashboard-pages/"+pageID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(pageID)
+
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patch handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected PATCH to succeed with status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

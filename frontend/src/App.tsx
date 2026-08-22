@@ -26,7 +26,6 @@ import { ForecastWarningsBanner } from '@/components/forecast-warnings-banner'
 import { AlarmBanner } from '@/components/alarm-banner'
 import { AlarmsDrawer } from '@/components/alarms-drawer'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
-import { RodeScopeTile } from '@/components/rode-scope-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
 import {
@@ -590,21 +589,6 @@ export function App() {
             onFullscreen={() => setActivePanel('anchor-watch')}
           />
         )
-      case 'rode-scope':
-        return (
-          <RodeScopeTile
-            anchorState={anchorWatch.anchorState}
-            gnssCritical={anchorWatch.gnssCritical}
-            rodeDeployedM={anchorWatch.rodeDeployedM}
-            seaState={anchorWatch.seaState}
-            seabedType={anchorWatch.seabedType}
-            depthM={depth}
-            windKts={windSpeedApparentKts}
-            isImperial={isImperialDistance}
-            anchorConfig={anchorConfig}
-            onUpdate={anchorWatch.updateRodeAndConditions}
-          />
-        )
       case 'tanks':
         return <TanksTile tanks={tanks} loading={tanksLoading} />
       case 'route':
@@ -837,51 +821,54 @@ export function App() {
           />
         )
       case 'anchor-watch':
-        return anchorWatch.anchorLat !== null && anchorWatch.anchorLon !== null
-          ? (
-            <AnchorWatchDrawer
-              vesselLat={latitude ?? anchorWatch.anchorLat}
-              vesselLon={longitude ?? anchorWatch.anchorLon}
-              vesselHeadingDeg={headingTrue}
-              anchorLat={anchorWatch.anchorLat}
-              anchorLon={anchorWatch.anchorLon}
-              radiusMeters={anchorWatch.radiusMeters}
-              depthMeters={depth}
-              currentDriftKts={currentDriftKts}
-              currentSetDeg={currentSetDeg}
-              currentDriftImpactKts={currentDriftImpactKts}
-              distanceMeters={anchorWatch.distanceMeters}
-              bearingDeg={anchorWatch.bearingDeg}
-              bowOffsetM={anchorWatch.bowOffsetM}
-              bowOffsetApplied={anchorWatch.bowOffsetApplied}
-              bowOffsetReason={anchorWatch.bowOffsetReason}
-              vesselTrail={getSelfTrail}
-              aisVessels={nearbyVessels}
-              aisTrails={getAisTrails}
-              isDarkTheme={isDarkTheme}
-              showImageryLayer={showAnchorImagery}
-              onImageryToggle={setShowAnchorImagery}
-              onAnchorReposition={anchorWatch.updatePosition}
-              onRadiusChange={anchorWatch.updateRadius}
-              onClearAnchor={anchorWatch.clearAnchor}
-              isImperial={isImperialDistance}
-              isAutoCloseArmed={isAutoCloseArmed}
-              motoringSecondsElapsed={motoringSecondsElapsed}
-            />
-          )
-          : (
-            <div className="px-6 py-8 text-center text-muted-foreground">
-              <div className="mb-4">Not monitoring</div>
-              <Button
-                className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
-                disabled={latitude === null || longitude === null}
-                onClick={handleDropAnchorHere}
-              >
-                <Anchor className="h-4 w-4" />
-                Drop
-              </Button>
-            </div>
-          )
+        return (
+          // The `?? 0` below never actually reaches the map: AnchorWatchMap only
+          // renders once anchorLat/anchorLon are non-null (isSet in the drawer),
+          // and at that point anchorWatch.anchorLat/.anchorLon are themselves
+          // non-null, so the outer `latitude ?? anchorWatch.anchorLat` already
+          // resolves. The 0 only satisfies vesselLat/vesselLon's non-null type
+          // for the (map-less) pre-drop render.
+          <AnchorWatchDrawer
+            vesselLat={latitude ?? anchorWatch.anchorLat ?? 0}
+            vesselLon={longitude ?? anchorWatch.anchorLon ?? 0}
+            vesselHeadingDeg={headingTrue}
+            anchorLat={anchorWatch.anchorLat}
+            anchorLon={anchorWatch.anchorLon}
+            radiusMeters={anchorWatch.radiusMeters}
+            depthMeters={depth}
+            currentDriftKts={currentDriftKts}
+            currentSetDeg={currentSetDeg}
+            currentDriftImpactKts={currentDriftImpactKts}
+            distanceMeters={anchorWatch.distanceMeters}
+            bearingDeg={anchorWatch.bearingDeg}
+            bowOffsetM={anchorWatch.bowOffsetM}
+            bowOffsetApplied={anchorWatch.bowOffsetApplied}
+            bowOffsetReason={anchorWatch.bowOffsetReason}
+            vesselTrail={getSelfTrail}
+            aisVessels={nearbyVessels}
+            aisTrails={getAisTrails}
+            isDarkTheme={isDarkTheme}
+            showImageryLayer={showAnchorImagery}
+            onImageryToggle={setShowAnchorImagery}
+            onAnchorReposition={anchorWatch.updatePosition}
+            onRadiusChange={anchorWatch.updateRadius}
+            onClearAnchor={anchorWatch.clearAnchor}
+            isImperial={isImperialDistance}
+            isAutoCloseArmed={isAutoCloseArmed}
+            motoringSecondsElapsed={motoringSecondsElapsed}
+            onDropAnchor={handleDropAnchorHere}
+            canDrop={latitude !== null && longitude !== null}
+            anchorState={anchorWatch.anchorState}
+            rodeDeployedM={anchorWatch.rodeDeployedM}
+            seaState={anchorWatch.seaState}
+            seabedType={anchorWatch.seabedType}
+            windSpeedApparentKts={windSpeedApparentKts}
+            maxGustKts={maxGustKts}
+            tide={tide}
+            anchorConfig={anchorConfig}
+            onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
+          />
+        )
       default:
         return null
     }

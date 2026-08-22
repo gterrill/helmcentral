@@ -150,7 +150,7 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
         { id: 'position', x: 0, y: 18, w: 4, h: 5 },
         { id: 'today-now', x: 0, y: 23, w: 4, h: 5 },
         { id: 'anchor-watch', x: 4, y: 3, w: 4, h: 8 },
-        { id: 'rode-scope', x: 4, y: 11, w: 4, h: 6 },
+        { id: 'solar', x: 4, y: 11, w: 4, h: 6 },
         { id: 'tanks', x: 4, y: 17, w: 4, h: 4 },
         { id: 'route', x: 4, y: 21, w: 4, h: 4 },
         { id: 'nearby-vessels', x: 4, y: 25, w: 4, h: 5 },

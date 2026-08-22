@@ -45,6 +45,25 @@ const baseProps = {
   isImperial: false,
   isAutoCloseArmed: false,
   motoringSecondsElapsed: 0,
+  onDropAnchor: () => undefined,
+  canDrop: true,
+  anchorState: 'set' as const,
+  rodeDeployedM: 0,
+  seaState: 'calm' as const,
+  seabedType: 'sand' as const,
+  windSpeedApparentKts: null,
+  maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null },
+  tide: null,
+  anchorConfig: {
+    bowRollerHeightM: 1,
+    chainSizeMm: 10,
+    chainOnboardM: 50,
+    hullType: 'power_cat' as const,
+    windageAreaM2: 20,
+    gpsFromBowM: 2,
+    loaM: 10,
+  },
+  onUpdateRodeAndConditions: async () => undefined,
 }
 
 // Test 9: the drawer shows the corrected-by-d readout when the backend

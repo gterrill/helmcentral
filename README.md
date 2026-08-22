@@ -205,11 +205,14 @@ reachable, so that way out always works. Full design:
 
 ## What's on the dashboard
 
-Seventeen built-in widgets: Vessel, Apparent Wind, Depth & Tide, Position,
-Today & Now, Anchor Watch, Rode & Scope, Tanks, Route, Nearby Vessels,
-Battery & Power, Solar, Alternator, Generator, Switches, Hot Water, and
-Autopilot. Plus embed tiles, which put any URL (a Grafana panel, a camera
-feed) in the grid — the windrose in the screenshot above is one.
+Sixteen built-in widgets: Vessel, Apparent Wind, Depth & Tide, Position,
+Today & Now, Anchor Watch, Tanks, Route, Nearby Vessels, Battery & Power,
+Solar, Alternator, Generator, Switches, Hot Water, and Autopilot. Plus embed
+tiles, which put any URL (a Grafana panel, a camera feed) in the grid — the
+windrose in the screenshot above is one. Anchor Watch also hosts a Rode
+Planner sidebar — pay-out and swing-radius planning against tide-corrected
+depth and gust-seeded wind, usable before the anchor is even down
+([ADR 0047](docs/adr/0047-rode-planner-replaces-rode-scope-tile.md)).
 
 Arrange them yourself: toggle layout mode in the header, then drag, resize, or
 remove widgets and add them back from a picker. Layouts are named **pages** you

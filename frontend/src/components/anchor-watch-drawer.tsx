@@ -1,13 +1,21 @@
-import { AnchorWatchMap } from '@/components/anchor-watch-map'
+import { Anchor } from 'lucide-react'
+import type { AnchorConfig } from '@/config/app-config'
+import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-server-trails'
+import type { TideToday } from '@/hooks/use-tide-today'
+import type { GustWindow } from '@/lib/gust-windows'
+import type { SeabedType, SeaState } from '@/lib/catenary'
+import { AnchorRodePlanner } from '@/components/anchor-rode-planner'
+import { AnchorWatchMap } from '@/components/anchor-watch-map'
+import { Button } from '@/components/ui/button'
 
 interface AnchorWatchDrawerProps {
   vesselLat: number
   vesselLon: number
   vesselHeadingDeg: number | null
-  anchorLat: number
-  anchorLon: number
+  anchorLat: number | null
+  anchorLon: number | null
   radiusMeters: number
   depthMeters: number | null
   currentDriftKts: number | null
@@ -31,6 +39,17 @@ interface AnchorWatchDrawerProps {
   isImperial: boolean
   isAutoCloseArmed: boolean
   motoringSecondsElapsed: number
+  onDropAnchor: () => void
+  canDrop: boolean
+  anchorState: AnchorWatchState
+  rodeDeployedM: number
+  seaState: SeaState
+  seabedType: SeabedType
+  windSpeedApparentKts: number | null
+  maxGustKts: Record<GustWindow, number | null>
+  tide: TideToday | null
+  anchorConfig: AnchorConfig
+  onUpdateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
 }
 
 export function AnchorWatchDrawer({
@@ -61,7 +80,20 @@ export function AnchorWatchDrawer({
   isImperial,
   isAutoCloseArmed,
   motoringSecondsElapsed,
+  onDropAnchor,
+  canDrop,
+  anchorState,
+  rodeDeployedM,
+  seaState,
+  seabedType,
+  windSpeedApparentKts,
+  maxGustKts,
+  tide,
+  anchorConfig,
+  onUpdateRodeAndConditions,
 }: AnchorWatchDrawerProps) {
+  const isSet = anchorLat !== null && anchorLon !== null
+
   return (
     <div className="flex h-full flex-col gap-3">
       {isAutoCloseArmed && (
@@ -83,34 +115,66 @@ export function AnchorWatchDrawer({
           Anchor point not bow-corrected — no heading from SignalK.
         </div>
       )}
-      <div className="flex-1 rounded-xl border bg-background/70">
-        <AnchorWatchMap
-          vesselLat={vesselLat}
-          vesselLon={vesselLon}
-          vesselHeadingDeg={vesselHeadingDeg}
-          anchorLat={anchorLat}
-          anchorLon={anchorLon}
-          radiusMeters={radiusMeters}
-          depthMeters={depthMeters}
-          currentDriftKts={currentDriftKts}
-          currentSetDeg={currentSetDeg}
-          currentDriftImpactKts={currentDriftImpactKts}
-          distanceMeters={distanceMeters}
-          bearingDeg={bearingDeg}
+
+      <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+        <div className="min-w-0 flex-1 rounded-xl border bg-background/70">
+          {isSet ? (
+            <AnchorWatchMap
+              vesselLat={vesselLat}
+              vesselLon={vesselLon}
+              vesselHeadingDeg={vesselHeadingDeg}
+              anchorLat={anchorLat}
+              anchorLon={anchorLon}
+              radiusMeters={radiusMeters}
+              depthMeters={depthMeters}
+              currentDriftKts={currentDriftKts}
+              currentSetDeg={currentSetDeg}
+              currentDriftImpactKts={currentDriftImpactKts}
+              distanceMeters={distanceMeters}
+              bearingDeg={bearingDeg}
+              isImperial={isImperial}
+              vesselTrail={vesselTrail}
+              aisVessels={aisVessels}
+              aisTrails={aisTrails}
+              isDarkTheme={isDarkTheme}
+              showImageryLayer={showImageryLayer}
+              onImageryToggle={onImageryToggle}
+              onAnchorReposition={onAnchorReposition}
+              onRadiusChange={onRadiusChange}
+              onClearAnchor={onClearAnchor}
+              className="h-full w-full"
+            />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center px-6 py-8 text-center text-muted-foreground">
+              <div className="mb-4">Not monitoring</div>
+              <Button
+                className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
+                disabled={!canDrop}
+                onClick={onDropAnchor}
+              >
+                <Anchor className="h-4 w-4" />
+                Drop
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <AnchorRodePlanner
+          anchorState={anchorState}
+          rodeDeployedM={rodeDeployedM}
+          seaState={seaState}
+          seabedType={seabedType}
+          depthM={depthMeters}
+          windSpeedApparentKts={windSpeedApparentKts}
+          maxGustKts={maxGustKts}
+          tide={tide}
           isImperial={isImperial}
-          vesselTrail={vesselTrail}
-          aisVessels={aisVessels}
-          aisTrails={aisTrails}
-          isDarkTheme={isDarkTheme}
-          showImageryLayer={showImageryLayer}
-          onImageryToggle={onImageryToggle}
-          onAnchorReposition={onAnchorReposition}
-          onRadiusChange={onRadiusChange}
-          onClearAnchor={onClearAnchor}
-          className="h-full w-full"
+          anchorConfig={anchorConfig}
+          bowOffsetM={bowOffsetM}
+          onUpdateRodeAndConditions={onUpdateRodeAndConditions}
+          onApplyAlarmRadius={async (radius) => onRadiusChange(radius)}
         />
       </div>
     </div>
   )
 }
-

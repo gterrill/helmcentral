@@ -35,7 +35,6 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'depth-tide': { minW: 2, minH: 4 },
   'position': { minW: 2, minH: 3 },
   'today-now': { minW: 2, minH: 4 },
-  'rode-scope': { minW: 2, minH: 4 },
   'tanks': { minW: 2, minH: 3 },
   'route': { minW: 2, minH: 3 },
   'nearby-vessels': { minW: 2, minH: 3 },

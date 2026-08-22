@@ -23,7 +23,6 @@ var validDashboardWidgetIDs = map[string]bool{
 	"position":       true,
 	"today-now":      true,
 	"anchor-watch":   true,
-	"rode-scope":     true,
 	"tanks":          true,
 	"route":          true,
 	"nearby-vessels": true,
@@ -35,6 +34,11 @@ var validDashboardWidgetIDs = map[string]bool{
 	"hot-water":      true,
 	"autopilot":      true,
 }
+
+// Widget ids that existed in a previous release and have been retired. Saved
+// pages are stripped of them on load and rewritten, so a stale id can never
+// fail validateDashboardWidgets on the next PATCH. See ADR 0047.
+var retiredDashboardWidgetIDs = map[string]bool{"rode-scope": true}
 
 const dashboardLayoutMaxCoord = 1000
 
@@ -117,7 +121,6 @@ var defaultDashboardLayout = []dashboardLayoutItem{
 	{ID: "position", X: 0, Y: 18, W: 4, H: 5},
 	{ID: "today-now", X: 0, Y: 23, W: 4, H: 5},
 	{ID: "anchor-watch", X: 4, Y: 3, W: 4, H: 8},
-	{ID: "rode-scope", X: 4, Y: 11, W: 4, H: 6},
 	{ID: "tanks", X: 4, Y: 17, W: 4, H: 4},
 	{ID: "route", X: 4, Y: 21, W: 4, H: 4},
 	{ID: "nearby-vessels", X: 4, Y: 25, W: 4, H: 5},
@@ -230,6 +233,22 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 	return ""
 }
 
+// stripRetiredWidgets removes any widget whose id is in retiredDashboardWidgetIDs,
+// reporting whether anything was actually removed so the caller only rewrites
+// the file when there's a real change to persist.
+func stripRetiredWidgets(widgets []dashboardLayoutItem) ([]dashboardLayoutItem, bool) {
+	changed := false
+	kept := make([]dashboardLayoutItem, 0, len(widgets))
+	for _, w := range widgets {
+		if retiredDashboardWidgetIDs[w.ID] {
+			changed = true
+			continue
+		}
+		kept = append(kept, w)
+	}
+	return kept, changed
+}
+
 // loadDashboardPages loads pages from the new format, or migrates from the legacy single-layout format.
 // Migration logic:
 // 1. Try reading the new pages file. If it exists and parses, use it. Done.
@@ -247,8 +266,18 @@ func loadDashboardPages() {
 		// New file exists, try to parse it
 		var loaded dashboardPagesFile
 		if err := json.Unmarshal(data, &loaded); err == nil {
+			anyStripped := false
 			for _, p := range loaded.Pages {
+				if kept, changed := stripRetiredWidgets(p.Widgets); changed {
+					p.Widgets = kept
+					anyStripped = true
+				}
 				dashboardPagesState[p.ID] = p
+			}
+			if anyStripped {
+				if err := saveDashboardPagesLocked(); err != nil {
+					log.Printf("Failed to persist dashboard pages after stripping retired widget ids: %v", err)
+				}
 			}
 			return
 		}
