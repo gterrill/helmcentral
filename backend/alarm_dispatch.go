@@ -78,11 +78,20 @@ func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string) {
 	defer cancel()
 
 	for _, transport := range selected {
+		// This transition supersedes anything still queued for the same rule.
+		// Dropping first means a failure below re-queues only the newest one.
+		if dropped, err := d.store.DropQueuedForRule(transport.ID(), event.Rule.ID); err != nil {
+			log.Printf("alarm notify: could not drop superseded %s deliveries for %q: %v", transport.ID(), event.Rule.Label, err)
+		} else if dropped > 0 {
+			log.Printf("alarm notify: dropped %d queued %s delivery(s) for %q, superseded by this %s",
+				dropped, transport.ID(), event.Rule.Label, event.Kind)
+		}
+
 		if err := transport.Send(ctx, msg); err != nil {
 			// Loud, per the fallback policy: a retry that happens silently is
 			// indistinguishable from one that never happened.
 			log.Printf("alarm notify: %s failed for %q, queued for retry: %v", transport.ID(), event.Rule.Label, err)
-			if queueErr := d.store.Enqueue(transport.ID(), payload, d.now().Add(notifyMinBackoff)); queueErr != nil {
+			if queueErr := d.store.Enqueue(transport.ID(), event.Rule.ID, payload, d.now().Add(notifyMinBackoff)); queueErr != nil {
 				log.Printf("alarm notify: could not queue %s: %v", transport.ID(), queueErr)
 			}
 			continue

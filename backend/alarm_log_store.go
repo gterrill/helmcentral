@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -220,20 +221,32 @@ type queuedNotification struct {
 }
 
 func (s *alarmLogStore) ensureQueueTable() error {
-	_, err := s.db.Exec(`
+	if _, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS notification_queue (
 			id              TEXT PRIMARY KEY,
 			transport       TEXT NOT NULL,
+			rule_id         TEXT NOT NULL DEFAULT '',
 			payload         BLOB NOT NULL,
 			attempts        INTEGER NOT NULL DEFAULT 0,
 			next_attempt_at INTEGER NOT NULL,
 			created_at      INTEGER NOT NULL,
 			last_error      TEXT NOT NULL DEFAULT ''
-		)`)
-	return err
+		)`); err != nil {
+		return err
+	}
+
+	// rule_id arrived after the table shipped, and it is what lets a newer
+	// transition supersede an older queued one. Databases created before it
+	// carry rows with the default empty rule, which supersede nothing -- they
+	// drain on their own within notifyMaxAge.
+	if _, err := s.db.Exec(`ALTER TABLE notification_queue ADD COLUMN rule_id TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	return nil
 }
 
-func (s *alarmLogStore) Enqueue(transport string, payload []byte, dueAt time.Time) error {
+func (s *alarmLogStore) Enqueue(transport, ruleID string, payload []byte, dueAt time.Time) error {
 	if s == nil {
 		return nil
 	}
@@ -241,13 +254,36 @@ func (s *alarmLogStore) Enqueue(transport string, payload []byte, dueAt time.Tim
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(
-		`INSERT INTO notification_queue (id, transport, payload, attempts, next_attempt_at, created_at)
-		 VALUES (?, ?, ?, 0, ?, ?)`,
-		uuid.NewString(), transport, payload, dueAt.UTC().Unix(), time.Now().UTC().Unix())
+		`INSERT INTO notification_queue (id, transport, rule_id, payload, attempts, next_attempt_at, created_at)
+		 VALUES (?, ?, ?, ?, 0, ?, ?)`,
+		uuid.NewString(), transport, ruleID, payload, dueAt.UTC().Unix(), time.Now().UTC().Unix())
 	if err != nil {
 		return fmt.Errorf("enqueue notification: %w", err)
 	}
 	return nil
+}
+
+// DropQueuedForRule discards deliveries a newer transition has made obsolete.
+//
+// A notification states what a rule's state is now, so an older queued one is
+// not late news, it is wrong news: delivered after the transition that replaced
+// it, it overwrites the current state with a stale one. On the SignalK
+// transport that is unrecoverable without another transition, because the bus
+// holds the notification object rather than a stream of events -- a queued
+// raise landing after its clear leaves a false alarm nothing will clear again.
+func (s *alarmLogStore) DropQueuedForRule(transport, ruleID string) (int64, error) {
+	if s == nil || ruleID == "" {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`DELETE FROM notification_queue WHERE transport = ? AND rule_id = ?`, transport, ruleID)
+	if err != nil {
+		return 0, fmt.Errorf("drop superseded notifications: %w", err)
+	}
+	return result.RowsAffected()
 }
 
 // DueNotifications returns queued deliveries whose backoff has elapsed.

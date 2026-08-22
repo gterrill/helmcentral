@@ -511,3 +511,64 @@ func TestBuildTransportsIncludesWebPushWhenEnabled(t *testing.T) {
 		t.Fatalf("a disabled web push transport must not be built, got %+v", got)
 	}
 }
+
+func clearedEvent() alarmEvent {
+	rule := validRule()
+	rule.ID = "rule-1"
+	return alarmEvent{
+		Kind:   alarmEventCleared,
+		Rule:   rule,
+		Status: alarmStatus{RuleID: "rule-1", State: alarmStateNormal, Message: "House bank recovered"},
+	}
+}
+
+// The failure this pins was observed on the boat: the stream watchdog raised
+// while SignalK was unreachable, so the raise queued; the stream came back, the
+// clear went out, and one drain tick later the queued raise landed on top of it
+// and left a false alarm on the bus that nothing would ever clear again.
+//
+// A transition is a statement about a rule's state *now*, so a newer one makes
+// every older queued one obsolete, whatever the transport.
+func TestDispatcherDropsAQueuedTransitionSupersededByANewerOne(t *testing.T) {
+	transport := &stubTransport{id: transportSignalK, fail: true}
+	dispatcher, store := testDispatcher(t, transport)
+
+	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	if depth, _ := store.QueueDepth(); depth != 1 {
+		t.Fatalf("a failed raise must be queued, depth %d", depth)
+	}
+
+	// The stream recovers and the clear is delivered.
+	transport.setFail(false)
+	dispatcher.dispatch(clearedEvent(), "Pikorua")
+
+	if depth, _ := store.QueueDepth(); depth != 0 {
+		t.Fatalf("the clear supersedes the queued raise, depth %d", depth)
+	}
+
+	// Past the backoff, nothing stale may be redelivered on top of the clear.
+	dispatcher.now = func() time.Time { return alarmNow.Add(notifyMinBackoff + time.Second) }
+	dispatcher.drain(context.Background())
+
+	if transport.count() != 1 {
+		t.Fatalf("only the clear may reach the transport, got %d sends", transport.count())
+	}
+}
+
+// Superseding is per rule: an unrelated alarm still waiting on the queue is
+// nobody's business but its own.
+func TestDispatcherLeavesQueuedTransitionsForOtherRulesAlone(t *testing.T) {
+	transport := &stubTransport{id: transportWebhook, fail: true}
+	dispatcher, store := testDispatcher(t, transport)
+
+	dispatcher.dispatch(raisedEvent(), "Pikorua")
+
+	other := raisedEvent()
+	other.Rule.ID = "rule-2"
+	other.Status.RuleID = "rule-2"
+	dispatcher.dispatch(other, "Pikorua")
+
+	if depth, _ := store.QueueDepth(); depth != 2 {
+		t.Fatalf("two rules must hold two queued deliveries, depth %d", depth)
+	}
+}

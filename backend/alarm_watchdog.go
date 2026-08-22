@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -25,13 +26,21 @@ const (
 	defaultStreamSilenceSeconds = 120
 	watchdogCheckInterval       = 15 * time.Second
 	heartbeatCheckInterval      = 1 * time.Minute
+
+	// watchdogReconcileGrace is how long the bus is given to catch up with a
+	// transition before a disagreement counts as real. A published clear travels
+	// to the server and back through the delta stream, so the bus lags by a
+	// round trip; without this the watchdog would republish a clear that is
+	// merely in flight.
+	watchdogReconcileGrace = 90 * time.Second
 )
 
 type streamWatchdog struct {
 	snapshot     *signalKSnapshot
 	silenceAfter time.Duration
 
-	raised bool
+	raised           bool
+	lastTransitionAt time.Time
 }
 
 func newStreamWatchdog(snapshot *signalKSnapshot, silenceAfter time.Duration) *streamWatchdog {
@@ -53,32 +62,8 @@ func watchdogSilenceAfter(config watchdogConfig) time.Duration {
 	return time.Duration(config.StreamSilenceSeconds) * time.Second
 }
 
-// check reports a transition, if any. Like the rule engine it is edge-triggered:
-// a persistently dead stream produces one alarm, not one per tick.
-func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
-	connected, lastMessage := w.snapshot.status()
-
-	silent := !connected
-	var silence time.Duration
-	if !lastMessage.IsZero() {
-		silence = now.Sub(lastMessage)
-		if silence > w.silenceAfter {
-			silent = true
-		}
-	}
-
-	// Before the first message there is nothing to judge — a server that has
-	// not finished starting is not an outage.
-	if lastMessage.IsZero() && !w.raised {
-		return alarmEvent{}, false
-	}
-
-	if silent == w.raised {
-		return alarmEvent{}, false
-	}
-	w.raised = silent
-
-	rule := alarmRule{
+func watchdogRule() alarmRule {
+	return alarmRule{
 		ID:      watchdogRuleID,
 		Enabled: true,
 		Label:   "SignalK stream",
@@ -86,12 +71,45 @@ func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
 		State:   alarmStateAlarm,
 		Methods: []string{"visual", "sound"},
 	}
+}
+
+// silence reports whether the stream currently counts as dead and how long it
+// has been quiet. judged is false before the first message, when there is
+// nothing to judge — a server that has not finished starting is not an outage.
+func (w *streamWatchdog) silence(now time.Time) (silent bool, quiet time.Duration, judged bool) {
+	connected, lastMessage := w.snapshot.status()
+
+	silent = !connected
+	if !lastMessage.IsZero() {
+		quiet = now.Sub(lastMessage)
+		if quiet > w.silenceAfter {
+			silent = true
+		}
+	}
+	return silent, quiet, !lastMessage.IsZero()
+}
+
+// check reports a transition, if any. Like the rule engine it is edge-triggered:
+// a persistently dead stream produces one alarm, not one per tick.
+func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
+	silent, quiet, judged := w.silence(now)
+
+	if !judged && !w.raised {
+		return alarmEvent{}, false
+	}
+
+	if silent == w.raised {
+		return alarmEvent{}, false
+	}
+	w.raised = silent
+	w.lastTransitionAt = now
 
 	if silent {
 		message := "SignalK stream is not connected"
-		if silence > 0 {
-			message = fmt.Sprintf("No SignalK data for %s", silence.Round(time.Second))
+		if quiet > 0 {
+			message = fmt.Sprintf("No SignalK data for %s", quiet.Round(time.Second))
 		}
+		rule := watchdogRule()
 		return alarmEvent{
 			Kind: alarmEventRaised,
 			Rule: rule,
@@ -107,6 +125,11 @@ func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
 		}, true
 	}
 
+	return w.clearEvent("SignalK stream recovered"), true
+}
+
+func (w *streamWatchdog) clearEvent(message string) alarmEvent {
+	rule := watchdogRule()
 	return alarmEvent{
 		Kind: alarmEventCleared,
 		Rule: rule,
@@ -116,9 +139,52 @@ func (w *streamWatchdog) check(now time.Time) (alarmEvent, bool) {
 			Path:    rule.Path,
 			Phase:   alarmPhaseNormal,
 			State:   alarmStateNormal,
-			Message: "SignalK stream recovered",
+			Message: message,
 		},
-	}, true
+	}
+}
+
+// publishedLive reports whether the bus still carries Helmcentral's own
+// watchdog notification in a raised state, as seen coming back off the stream.
+func (w *streamWatchdog) publishedLive() bool {
+	value, ok := notificationValueAt(w.snapshot, strings.TrimPrefix(watchdogPath, notificationsRoot+"."))
+	return ok && notificationValueIsLive(value)
+}
+
+// reconcile repairs a published state that no longer matches reality.
+//
+// check takes its edges from w.raised, which lives only in memory, but what it
+// publishes is a notification object on the SignalK bus that outlives this
+// process. When a clear is lost — a write dropped while the server was
+// unreachable, a stale queued raise landing on top of it, a restart while an
+// alarm was open — the two disagree, and because the edge has already been
+// taken nothing will ever emit that clear again. The boat is left showing an
+// alarm no condition supports and no code path can retract, which is precisely
+// the trusted-and-silently-wrong failure this package exists to prevent.
+//
+// Only the clearing direction is reconciled. Republishing a clear is idempotent,
+// so the worst case is a redundant one; republishing a raise on a disagreement
+// would instead let a lagging bus manufacture alarms out of nothing.
+func (w *streamWatchdog) reconcile(now time.Time) (alarmEvent, bool) {
+	if w.raised {
+		return alarmEvent{}, false
+	}
+
+	silent, _, judged := w.silence(now)
+	if silent || !judged {
+		return alarmEvent{}, false
+	}
+
+	if !w.lastTransitionAt.IsZero() && now.Sub(w.lastTransitionAt) < watchdogReconcileGrace {
+		return alarmEvent{}, false
+	}
+
+	if !w.publishedLive() {
+		return alarmEvent{}, false
+	}
+
+	w.lastTransitionAt = now
+	return w.clearEvent("SignalK stream is healthy; clearing a stale alarm left on the bus"), true
 }
 
 func startStreamWatchdog(ctx context.Context, interval time.Duration) {
@@ -136,8 +202,13 @@ func startStreamWatchdog(ctx context.Context, interval time.Duration) {
 			// restart, including a reset back to the default.
 			watchdog.silenceAfter = watchdogSilenceAfter(getAlarmTransports().Watchdog)
 
-			if event, ok := watchdog.check(now.UTC()); ok {
-				recordAlarmEvent(event, now.UTC())
+			at := now.UTC()
+			event, ok := watchdog.check(at)
+			if !ok {
+				event, ok = watchdog.reconcile(at)
+			}
+			if ok {
+				recordAlarmEvent(event, at)
 			}
 		}
 	}

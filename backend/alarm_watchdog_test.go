@@ -198,3 +198,115 @@ func TestWatchdogSilenceAfterTreatsZeroAsDefault(t *testing.T) {
 		t.Fatalf("configured value: got %s, want 30s", got)
 	}
 }
+
+// feedStream delivers one ordinary delta, the way a healthy stream keeps the
+// snapshot's lastMessage moving.
+func feedStream(snapshot *signalKSnapshot, at time.Time, depth float64) {
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "environment.depth.belowTransducer", Value: depth}}}},
+	}, at)
+}
+
+// raiseWatchdogNotification puts Helmcentral's own watchdog notification on the
+// snapshot in the raised state, the way it arrives back off the bus.
+func raiseWatchdogNotification(snapshot *signalKSnapshot, at time.Time) {
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  watchdogPath,
+			Value: map[string]any{"state": alarmStateAlarm, "message": "No SignalK data for 8m52s"},
+		}}}},
+	}, at)
+}
+
+// The failure this pins was seen on the boat: a raise queued while SignalK was
+// unreachable landed one drain tick after the clear, so the bus kept an alarm
+// the watchdog had already decided was over. Because the edge had been taken,
+// nothing would ever emit that clear again and the dashboard showed a false
+// alarm indefinitely.
+func TestWatchdogClearsAStaleNotificationLeftOnTheBus(t *testing.T) {
+	snapshot := connectedSnapshot(alarmNow)
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	// The stream is healthy and the watchdog agrees, but the bus disagrees.
+	raiseWatchdogNotification(snapshot, alarmNow)
+	if _, ok := watchdog.check(alarmNow.Add(10 * time.Second)); ok {
+		t.Fatalf("a live stream must not produce a transition")
+	}
+
+	event, ok := watchdog.reconcile(alarmNow.Add(10 * time.Second))
+	if !ok || event.Kind != alarmEventCleared {
+		t.Fatalf("a stale notification on the bus must be cleared, got %+v", event)
+	}
+	if event.Status.State != alarmStateNormal {
+		t.Fatalf("state: got %q, want %q", event.Status.State, alarmStateNormal)
+	}
+}
+
+// Reconciling must not undo the watchdog's own work: while it believes the
+// stream is dead, the notification on the bus is correct.
+func TestWatchdogDoesNotReconcileAwayALiveAlarm(t *testing.T) {
+	snapshot := connectedSnapshot(alarmNow)
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	if _, ok := watchdog.check(alarmNow.Add(2 * time.Minute)); !ok {
+		t.Fatalf("expected the outage to raise")
+	}
+	raiseWatchdogNotification(snapshot, alarmNow)
+
+	if event, ok := watchdog.reconcile(alarmNow.Add(3 * time.Minute)); ok {
+		t.Fatalf("a genuinely raised alarm must survive reconciliation, got %+v", event)
+	}
+}
+
+// A clear travels to the server and back through the delta stream, so the bus
+// lags a transition by a round trip. Without a grace period the watchdog would
+// keep republishing a clear that is merely in flight.
+func TestWatchdogDoesNotReconcileWhileAClearIsStillInFlight(t *testing.T) {
+	snapshot := connectedSnapshot(alarmNow)
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	if _, ok := watchdog.check(alarmNow.Add(2 * time.Minute)); !ok {
+		t.Fatalf("expected the outage to raise")
+	}
+	raiseWatchdogNotification(snapshot, alarmNow)
+
+	// Data resumes, the watchdog clears, but the bus has not caught up yet.
+	recovered := alarmNow.Add(3 * time.Minute)
+	feedStream(snapshot, recovered, 3.1)
+
+	event, ok := watchdog.check(recovered)
+	if !ok || event.Kind != alarmEventCleared {
+		t.Fatalf("expected the recovery to clear, got %+v", event)
+	}
+
+	soon := recovered.Add(watchdogCheckInterval)
+	feedStream(snapshot, soon, 3.2)
+	if _, ok := watchdog.reconcile(soon); ok {
+		t.Fatalf("a clear still in flight must not be republished")
+	}
+
+	later := recovered.Add(watchdogReconcileGrace + time.Second)
+	feedStream(snapshot, later, 3.3)
+	if _, ok := watchdog.reconcile(later); !ok {
+		t.Fatalf("past the grace period a bus that still disagrees must be repaired")
+	}
+}
+
+// Before the first message there is nothing to judge, so a notification found
+// on the bus at startup is not yet known to be stale.
+func TestWatchdogDoesNotReconcileBeforeTheStreamHasSaidAnything(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setConnected(true)
+	snapshot.setSelfContext("vessels.self")
+	raiseWatchdogNotification(snapshot, alarmNow)
+	// applyDelta stamps lastMessage, so wind it back to "nothing judged yet".
+	snapshot.lastMessage = time.Time{}
+
+	watchdog := newStreamWatchdog(snapshot, time.Minute)
+
+	if _, ok := watchdog.reconcile(alarmNow.Add(time.Hour)); ok {
+		t.Fatalf("a stream that has never spoken cannot prove a notification stale")
+	}
+}
