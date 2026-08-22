@@ -289,6 +289,7 @@ export function App() {
 
   const {
     depth,
+    vesselLengthOverallM,
     currentDriftKts,
     currentSetDeg,
     currentDriftImpactKts,
@@ -866,6 +867,7 @@ export function App() {
             maxGustKts={maxGustKts}
             tide={tide}
             anchorConfig={anchorConfig}
+            vesselLengthOverallM={vesselLengthOverallM}
             onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
           />
         )

@@ -7,6 +7,7 @@ interface VesselState {
   status: string
   datetime: string
   depth: number
+  length_overall_m: number | null
   current_drift_kts: number
   current_set_deg: number
   current_drift_impact_kts: number | null
@@ -39,6 +40,10 @@ interface VesselState {
 // (ADR 0037), over a stream shared with the other telemetry hooks.
 export function useVesselState() {
   const [depth, setDepth] = useState<number | null>(null)
+  // The Rode Planner's swing radius fallback source when settings.anchor.loa_m
+  // is unset (ADR 0047). Backend already nils this out when unpublished, so
+  // no >= 0 guard is needed here, unlike the sentinel-bearing fields below.
+  const [vesselLengthOverallM, setVesselLengthOverallM] = useState<number | null>(null)
   const [currentDriftKts, setCurrentDriftKts] = useState<number | null>(null)
   const [currentSetDeg, setCurrentSetDeg] = useState<number | null>(null)
   const [currentDriftImpactKts, setCurrentDriftImpactKts] = useState<number | null>(null)
@@ -79,6 +84,8 @@ export function useVesselState() {
       } else {
         setDepth(null)
       }
+
+      setVesselLengthOverallM(typeof data.length_overall_m === 'number' ? data.length_overall_m : null)
 
       setCurrentDriftKts(typeof data.current_drift_kts === 'number' && data.current_drift_kts >= 0 ? data.current_drift_kts : null)
       setCurrentSetDeg(typeof data.current_set_deg === 'number' && data.current_set_deg >= 0 ? data.current_set_deg : null)
@@ -134,6 +141,7 @@ export function useVesselState() {
 
   return {
     depth,
+    vesselLengthOverallM,
     currentDriftKts,
     currentSetDeg,
     currentDriftImpactKts,

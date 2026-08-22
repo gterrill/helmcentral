@@ -49,6 +49,7 @@ interface AnchorWatchDrawerProps {
   maxGustKts: Record<GustWindow, number | null>
   tide: TideToday | null
   anchorConfig: AnchorConfig
+  vesselLengthOverallM: number | null
   onUpdateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
 }
 
@@ -90,6 +91,7 @@ export function AnchorWatchDrawer({
   maxGustKts,
   tide,
   anchorConfig,
+  vesselLengthOverallM,
   onUpdateRodeAndConditions,
 }: AnchorWatchDrawerProps) {
   const isSet = anchorLat !== null && anchorLon !== null
@@ -171,6 +173,7 @@ export function AnchorWatchDrawer({
           isImperial={isImperial}
           anchorConfig={anchorConfig}
           bowOffsetM={bowOffsetM}
+          vesselLengthOverallM={vesselLengthOverallM}
           onUpdateRodeAndConditions={onUpdateRodeAndConditions}
           onApplyAlarmRadius={async (radius) => onRadiusChange(radius)}
         />

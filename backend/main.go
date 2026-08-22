@@ -36,10 +36,15 @@ var (
 var gustWindowLadder = []string{"10m", "30m", "1h", "24h"}
 
 type vesselStateData struct {
-	Name                        string
-	Status                      string
-	Datetime                    time.Time
-	Depth                       float64
+	Name     string
+	Status   string
+	Datetime time.Time
+	Depth    float64
+	// LengthOverallM is the vessel's LOA read from SignalK's design.length
+	// branch (ADR 0047). It carries the lookupNumber -1 sentinel when
+	// unpublished; buildVesselStatePayload nils it out rather than letting
+	// -1 leak into the API response.
+	LengthOverallM              float64
 	CurrentDriftKts             float64
 	CurrentSetDeg               float64
 	CurrentDriftImpactKts       *float64
@@ -564,6 +569,7 @@ func buildVesselStatePayload() map[string]any {
 		Status:               getEnv("VESSEL_STATUS", "At Anchor"),
 		Datetime:             time.Now().UTC(),
 		Depth:                -1,
+		LengthOverallM:       -1,
 		CurrentDriftKts:      -1,
 		CurrentSetDeg:        -1,
 		Latitude:             -1,
@@ -627,12 +633,21 @@ func buildVesselStatePayload() map[string]any {
 		vesselPrefix = "M/V"
 	}
 
+	// No masking fallback: an unpublished LOA must reach the frontend as
+	// JSON null, not the internal lookupNumber -1 sentinel, which could be
+	// mistaken for a real (negative) length.
+	var lengthOverallM any
+	if state.LengthOverallM > 0 {
+		lengthOverallM = state.LengthOverallM
+	}
+
 	return map[string]any{
 		"name":                           state.Name,
 		"vessel_prefix":                  vesselPrefix,
 		"status":                         state.Status,
 		"datetime":                       state.Datetime.Format(time.RFC3339),
 		"depth":                          state.Depth,
+		"length_overall_m":               lengthOverallM,
 		"current_drift_kts":              state.CurrentDriftKts,
 		"current_set_deg":                state.CurrentSetDeg,
 		"current_drift_impact_kts":       state.CurrentDriftImpactKts,

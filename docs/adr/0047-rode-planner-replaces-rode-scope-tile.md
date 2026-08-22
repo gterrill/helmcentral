@@ -106,11 +106,39 @@ authoritative but is short by a boat length, and "Apply as alarm radius" would
 then *shrink* an existing, correct alarm circle — on the development boat, from
 75 m to 39 m. A too-small anchor alarm is a safety defect, not a cosmetic one.
 
-So when `loaM <= 0` the planner emits no swing figure, shows an amber prompt to
-set LOA in Settings, and disables "Apply as alarm radius". This is the same
-reasoning as the badge rule above and follows the repo's fallback policy: a
-missing required input is surfaced, never silently defaulted to a value that
-makes the output wrong.
+**LOA now has two possible sources, resolved in a fixed precedence order:**
+
+1. `anchor.loa_m` from settings, when `> 0` — an explicit operator override,
+   and always wins when present.
+2. Otherwise, SignalK's `design.length.overall`, when `> 0`. The backend reads
+   it at `backend/signalk.go` next to the existing `design.name` lookup,
+   trying the REST full-tree shape `design.length.value.overall` first and
+   falling back to the bare `design.length.overall` — the same two-step
+   pattern already used for `environment.depth.belowTransducer`. It reaches
+   the frontend via `/api/vessel-state`'s `length_overall_m` field (`null`,
+   never the internal `-1` lookup sentinel, when unpublished) and
+   `useVesselState()`'s `vesselLengthOverallM`.
+3. Otherwise, unresolved — same as before.
+
+Only when both sources are absent does the planner emit no swing figure, show
+the amber prompt to set LOA in Settings, and disable "Apply as alarm radius".
+This is the same reasoning as the badge rule above and follows the repo's
+fallback policy: a missing required input is surfaced, never silently
+defaulted to a value that makes the output wrong. Once LOA resolves from
+either source, the planner labels which one won directly in the UI (e.g. "LOA
+17.9 m from SignalK" vs "LOA 12 m from settings"), the same way the wind field
+already labels its seed source — the operator must always be able to see
+which input is driving the alarm radius, not just that one was found.
+
+**This is deliberately *not* the pattern for `gps_from_bow_m`.** SignalK does
+publish a bow-offset-shaped path (`sensors.ais.fromBow`), but on the
+development boat it carries a different `$source` (`Vesper_Cortex.AI`) than
+`navigation.position` does (`WLN10.GP`) — a different antenna, whose offset
+from the GPS fix is not the offset this field means. Adopting it would
+silently shift every anchor drop. LOA has no equivalent trap: a vessel's
+length overall does not depend on which sensor reported it, so SignalK is a
+safe fallback here in a way it is not for `gps_from_bow_m`, which stays
+manual-only.
 
 ## Consequences
 

@@ -33,6 +33,9 @@ export interface AnchorRodePlannerProps {
   isImperial: boolean
   anchorConfig: AnchorConfig
   bowOffsetM: number
+  // SignalK's design.length.overall (ADR 0047). Null when unpublished — this
+  // is the LOA fallback source when settings.anchor.loa_m is unset (0).
+  vesselLengthOverallM: number | null
   onUpdateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
   onApplyAlarmRadius: (radiusMeters: number) => Promise<void>
 }
@@ -79,6 +82,7 @@ export function AnchorRodePlanner({
   isImperial,
   anchorConfig,
   bowOffsetM,
+  vesselLengthOverallM,
   onUpdateRodeAndConditions,
   onApplyAlarmRadius,
 }: AnchorRodePlannerProps) {
@@ -129,9 +133,24 @@ export function AnchorRodePlanner({
   // to 0 and is genuinely unset on real installs, so treating it as zero would
   // report a circle smaller than the boat and let "Apply as alarm radius" shrink
   // a correct alarm circle. Surface the missing input instead of computing with it.
-  const loaConfigured = anchorConfig.loaM > 0
-  const swingRadiusM = plan !== null && loaConfigured
-    ? plan.recommendedRodeM + bowOffsetM + anchorConfig.loaM
+  //
+  // LOA precedence (ADR 0047): an explicit settings.anchor.loa_m override always
+  // wins when set; otherwise fall back to SignalK's design.length.overall, which
+  // is unaffected by which sensor/antenna published it — unlike gps_from_bow_m,
+  // there is no equivalent trap here, so this source is safe to adopt.
+  const loaSource: 'settings' | 'signalk' | null = anchorConfig.loaM > 0
+    ? 'settings'
+    : vesselLengthOverallM !== null && vesselLengthOverallM > 0
+      ? 'signalk'
+      : null
+  const resolvedLoaM = loaSource === 'settings'
+    ? anchorConfig.loaM
+    : loaSource === 'signalk'
+      ? vesselLengthOverallM!
+      : null
+  const loaConfigured = resolvedLoaM !== null
+  const swingRadiusM = plan !== null && resolvedLoaM !== null
+    ? plan.recommendedRodeM + bowOffsetM + resolvedLoaM
     : null
 
   const handlePersist = useCallback((rodeDisplay: number, nextSeaState: SeaState, nextSeabedType: SeabedType) => {
@@ -301,6 +320,11 @@ export function AnchorRodePlanner({
                       <span>Swing {Math.round(toDisplayDistance(swingRadiusM, isImperial))} {unit}</span>
                     )}
                   </div>
+                  {resolvedLoaM !== null && loaSource !== null && (
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      LOA {Number(toDisplayDistance(resolvedLoaM, isImperial).toFixed(1))} {unit} from {loaSource === 'settings' ? 'settings' : 'SignalK'}
+                    </p>
+                  )}
                   {!loaConfigured && (
                     <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-500">
                       Set boat length (LOA) in Settings → Anchor to get a swing radius.

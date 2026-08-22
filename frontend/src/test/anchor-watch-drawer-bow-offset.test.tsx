@@ -63,6 +63,7 @@ const baseProps = {
     gpsFromBowM: 2,
     loaM: 10,
   },
+  vesselLengthOverallM: null,
   onUpdateRodeAndConditions: async () => undefined,
 }
 

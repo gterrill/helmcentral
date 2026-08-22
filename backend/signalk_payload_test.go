@@ -155,3 +155,57 @@ func TestFetchSignalKVesselStateReportsCriticalWhenStreamHasNoData(t *testing.T)
 		t.Fatalf("GNSS validation state: got %q, want %q", state.GNSSValidationState, "critical")
 	}
 }
+
+// The Rode Planner's swing radius needs the boat's LOA (ADR 0047). SignalK
+// publishes it at design.length.overall, but the REST full-tree shape nests
+// it one level deeper as design.length.value.overall - the same two-step
+// value-then-bare lookup already used for environment.depth.belowTransducer
+// above.
+func TestFetchSignalKVesselState_ReadsLengthOverallFromDesignLengthValueOverall(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{"design": {"length": {"value": {"overall": 17.9}}}}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: unexpected error %v", err)
+	}
+	if state.LengthOverallM != 17.9 {
+		t.Fatalf("length overall: got %v, want 17.9", state.LengthOverallM)
+	}
+}
+
+func TestFetchSignalKVesselState_FallsBackToBareDesignLengthOverall(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{"design": {"length": {"overall": 18.2}}}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: unexpected error %v", err)
+	}
+	if state.LengthOverallM != 18.2 {
+		t.Fatalf("length overall (bare shape fallback): got %v, want 18.2", state.LengthOverallM)
+	}
+}
+
+// No masking fallback: when the path is absent entirely, LengthOverallM must
+// stay at the lookupNumber sentinel (-1), not silently become 0 - a real LOA
+// of 0 would make the planner compute a swing radius short by a boat length
+// (ADR 0047 "Swing radius refuses to compute when LOA is unset").
+func TestFetchSignalKVesselState_LengthOverallAbsentStaysAtSentinel(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{"navigation": {}}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: unexpected error %v", err)
+	}
+	if state.LengthOverallM != -1 {
+		t.Fatalf("length overall: got %v, want sentinel -1 (not published)", state.LengthOverallM)
+	}
+}

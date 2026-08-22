@@ -571,7 +571,7 @@ func criticalVesselState(state vesselStateData, reason string) vesselStateData {
 }
 
 func fetchSignalKVesselState() (vesselStateData, error) {
-	state := vesselStateData{Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, Latitude: -1, Longitude: -1, HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1}
+	state := vesselStateData{Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, LengthOverallM: -1, Latitude: -1, Longitude: -1, HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1}
 
 	// A stream outage lands here the same way an unreachable REST server does,
 	// so the position freezes at the last trusted fix rather than reading as a
@@ -582,6 +582,15 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	}
 
 	state.Name = strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name")))
+
+	// ADR 0047: the Rode Planner's swing radius needs the boat's LOA. The
+	// REST full tree nests it under a "value" wrapper; some sources publish
+	// the bare path instead - same two-step pattern as environment.depth
+	// below.
+	state.LengthOverallM = lookupNumber(payload, "design", "length", "value", "overall")
+	if state.LengthOverallM == -1 {
+		state.LengthOverallM = lookupNumber(payload, "design", "length", "overall")
+	}
 
 	state.Status = firstNonEmptyString(lookupString(payload, "navigation", "state", "value"), lookupString(payload, "navigation", "state"))
 	if state.Status == "" {

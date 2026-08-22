@@ -37,6 +37,7 @@ function baseProps(overrides: Partial<AnchorRodePlannerProps> = {}): AnchorRodeP
       loaM: 12,
     },
     bowOffsetM: 2,
+    vesselLengthOverallM: null,
     onUpdateRodeAndConditions: vi.fn().mockResolvedValue(undefined),
     onApplyAlarmRadius: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -224,5 +225,73 @@ describe('AnchorRodePlanner — LOA not configured', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(screen.queryByText(/^Swing \d/)).toBeNull()
+  })
+
+  it('still warns and disables when SignalK also has no LOA', () => {
+    const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
+    const props = baseProps()
+    renderPlanner({
+      onApplyAlarmRadius,
+      anchorConfig: { ...props.anchorConfig, loaM: 0 },
+      vesselLengthOverallM: null,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getByText(/boat length/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /apply as alarm radius/i })).toBeDisabled()
+    expect(screen.queryByText(/^Swing \d/)).toBeNull()
+  })
+})
+
+// LOA can now also come from SignalK's design.length.overall (ADR 0047), since
+// gpsFromBowM-style manual-only handling isn't appropriate here: unlike
+// gps_from_bow_m, LOA doesn't depend on which sensor/antenna published it.
+// Settings remains an explicit operator override and must still win when set.
+describe('AnchorRodePlanner — LOA source precedence (settings vs SignalK)', () => {
+  it('prefers settings LOA over SignalK when both are present', () => {
+    const props = baseProps()
+    renderPlanner({
+      anchorConfig: { ...props.anchorConfig, loaM: 12 },
+      vesselLengthOverallM: 17.9,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getByText(/LOA 12 m from settings/i)).toBeInTheDocument()
+    expect(screen.queryByText(/from signalk/i)).toBeNull()
+  })
+
+  it('falls back to SignalK LOA when settings LOA is 0', () => {
+    const props = baseProps()
+    renderPlanner({
+      anchorConfig: { ...props.anchorConfig, loaM: 0 },
+      vesselLengthOverallM: 17.9,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getByText(/LOA 17\.9 m from SignalK/i)).toBeInTheDocument()
+    expect(screen.queryByText(/from settings/i)).toBeNull()
+  })
+
+  it('shows a swing radius and enables Apply as alarm radius using SignalK-only LOA', async () => {
+    const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
+    const props = baseProps()
+    renderPlanner({
+      onApplyAlarmRadius,
+      anchorConfig: { ...props.anchorConfig, loaM: 0 },
+      vesselLengthOverallM: 17.9,
+      bowOffsetM: 2,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getByText(/^Swing \d/)).toBeInTheDocument()
+    expect(screen.queryByText(/boat length/i)).toBeNull()
+
+    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    expect(apply).not.toBeDisabled()
+    fireEvent.click(apply)
+
+    await waitFor(() => expect(onApplyAlarmRadius).toHaveBeenCalledTimes(1))
+    const [radiusMeters] = onApplyAlarmRadius.mock.calls[0]
+    expect(radiusMeters).toBeGreaterThan(2 + 17.9) // includes bow offset + SignalK LOA at minimum
   })
 })
