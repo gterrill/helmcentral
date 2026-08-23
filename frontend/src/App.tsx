@@ -394,7 +394,7 @@ export function App() {
   const { getSelfTrail, getAisTrails } = useServerTrails(5000)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
   const depthTrend = useDepthTrend('3h', 60)
-  const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
+  const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
   const autopilot = useAutopilot()
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
@@ -657,7 +657,7 @@ export function App() {
           />
         )
       case 'czone-switches':
-        return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} readOnly={!canWrite} />
+        return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} error={czoneError} readOnly={!canWrite} />
       case 'autopilot':
         return (
           <AutopilotTile

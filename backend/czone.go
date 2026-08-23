@@ -8,19 +8,23 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
-// validSwitchIDRegexp ensures switch IDs like "banks.1.1" cannot contain path traversal characters.
-var validSwitchIDRegexp = regexp.MustCompile(`^[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*$`)
+// validSwitchIDRegexp ensures switch IDs like "bank.0.2" or "venus-0" cannot
+// contain path traversal characters. Segments stay non-empty and
+// alphanumeric-plus-hyphen, so a bare ".." segment remains impossible.
+var validSwitchIDRegexp = regexp.MustCompile(`^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$`)
 
 type czoneSwitch struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"display_name"`
-	State       int    `json:"state"` // 0 = off, 1 = on
+	State       int    `json:"state"`    // 0 = off, 1 = on
+	Writable    bool   `json:"writable"` // meta.supportsPut: never claim a control works when the metadata doesn't say so
 }
 
 func getCZoneSwitchesHandler(c echo.Context) error {
@@ -67,7 +71,9 @@ func putCZoneSwitchStateHandler(c echo.Context) error {
 
 	signalkURL := buildSignalKURL(address, port)
 
-	// Convert id "banks.1.1" → path component "banks/1/1".
+	// The wire ID is exactly the dotted SignalK sub-path (e.g. "bank.0.2",
+	// "venus-0", "gx.gxInternalRelay1"), so this is a straight dot-to-slash
+	// conversion: "bank.0.2" → "bank/0/2".
 	pathSuffix := strings.ReplaceAll(id, ".", "/")
 	path := fmt.Sprintf("/signalk/v1/api/vessels/self/electrical/switches/%s/state", pathSuffix)
 
@@ -104,55 +110,130 @@ func fetchSignalKSwitches(signalkURL string, switchesPath string) ([]czoneSwitch
 	}
 
 	switches := make([]czoneSwitch, 0)
+	walkSwitchTree(payload, "", &switches)
 
-	banksMap, ok := payload["banks"].(map[string]any)
-	if !ok {
-		return switches, nil
+	if len(switches) == 0 {
+		keys := make([]string, 0, len(payload))
+		for key := range payload {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return nil, fmt.Errorf("electrical/switches payload has no recognisable switch node (keys present: %s)", strings.Join(keys, ", "))
 	}
 
-	bankIDs := make([]string, 0, len(banksMap))
-	for bankID := range banksMap {
-		bankIDs = append(bankIDs, bankID)
-	}
-	sort.Strings(bankIDs)
+	return switches, nil
+}
 
-	for _, bankID := range bankIDs {
-		bank, ok := banksMap[bankID].(map[string]any)
+// walkSwitchTree recursively walks the electrical/switches subtree in
+// deterministic order, emitting a czoneSwitch for every node whose "state"
+// leaf parseSwitchState can read, and recursing into every node that can't.
+// This naturally yields ids like "bank.0.2", "venus-0", and
+// "gx.gxInternalRelay1" from one generic walk, without hand-coding each
+// vendor's shape (CZone banks, Venus relays, GX internal relays, ...).
+func walkSwitchTree(node map[string]any, prefix string, out *[]czoneSwitch) {
+	childIDs := make([]string, 0, len(node))
+	for key, val := range node {
+		if _, ok := val.(map[string]any); ok {
+			childIDs = append(childIDs, key)
+		}
+	}
+	sortIDsNumerically(childIDs, func(id string) (float64, bool) {
+		child, ok := node[id].(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		return circuitOrderKey(id, child)
+	})
+
+	for _, id := range childIDs {
+		child, ok := node[id].(map[string]any)
 		if !ok {
 			continue
 		}
 
-		circuitIDs := make([]string, 0, len(bank))
-		for circuitID := range bank {
-			circuitIDs = append(circuitIDs, circuitID)
+		fullID := id
+		if prefix != "" {
+			fullID = prefix + "." + id
 		}
-		sort.Strings(circuitIDs)
 
-		for _, circuitID := range circuitIDs {
-			circuit, ok := bank[circuitID].(map[string]any)
-			if !ok {
-				continue
-			}
-
-			state := parseSwitchState(circuit)
-			if state == -1 {
-				continue
-			}
-
-			displayName := lookupString(circuit, "meta", "displayName")
-			if displayName == "" {
-				displayName = fmt.Sprintf("Bank %s Circuit %s", bankID, circuitID)
-			}
-
-			switches = append(switches, czoneSwitch{
-				ID:          fmt.Sprintf("banks.%s.%s", bankID, circuitID),
-				DisplayName: displayName,
-				State:       state,
-			})
+		state := parseSwitchState(child)
+		if state == -1 {
+			// Not a switch value node itself — recurse to look for switches
+			// beneath it (e.g. a bank, or the gx container).
+			walkSwitchTree(child, fullID, out)
+			continue
 		}
+
+		// meta is nested INSIDE the "state" value node (state.meta), not a
+		// sibling of "state" — confirmed against the live vessel: the only
+		// key under a switch node is "state", and state.meta carries
+		// displayName/supportsPut.
+		displayName := lookupString(child, "state", "meta", "displayName")
+		if displayName == "" {
+			displayName = defaultSwitchDisplayName(fullID, id)
+		}
+		writable, _ := lookupBool(child, "state", "meta", "supportsPut")
+
+		*out = append(*out, czoneSwitch{
+			ID:          fullID,
+			DisplayName: displayName,
+			State:       state,
+			Writable:    writable,
+		})
 	}
+}
 
-	return switches, nil
+// defaultSwitchDisplayName is the fallback used when meta.displayName is
+// absent. "Bank N Circuit M" only makes sense for CZone bank circuits;
+// anything else (venus-0, gx.gxInternalRelay1, ...) falls back to its own
+// last path segment rather than an invented decorative name.
+func defaultSwitchDisplayName(fullID string, lastSegment string) string {
+	parts := strings.Split(fullID, ".")
+	if len(parts) == 3 && parts[0] == "bank" {
+		return fmt.Sprintf("Bank %s Circuit %s", parts[1], parts[2])
+	}
+	return lastSegment
+}
+
+// sortIDsNumerically sorts ids in place using key for the primary numeric
+// comparison, falling back to a plain string comparison when key is
+// unavailable for either id, or when both keys agree — so IDs that aren't
+// numeric, and ties, still sort deterministically.
+func sortIDsNumerically(ids []string, key func(id string) (float64, bool)) {
+	sort.SliceStable(ids, func(i, j int) bool {
+		ki, oki := key(ids[i])
+		kj, okj := key(ids[j])
+		if oki && okj && ki != kj {
+			return ki < kj
+		}
+		return ids[i] < ids[j]
+	})
+}
+
+// numericID parses a bank/circuit ID as an integer for numeric sorting. ok is
+// false for a non-numeric ID, in which case the caller falls back to string
+// comparison.
+func numericID(id string) (float64, bool) {
+	n, err := strconv.Atoi(id)
+	if err != nil {
+		return 0, false
+	}
+	return float64(n), true
+}
+
+// circuitOrderKey returns the sort key for a node at any level of the switch
+// tree walk: the installer's configured display sequence (order.value,
+// sharing the identical nested {"value": N} shape parseSwitchState reads for
+// "state"), when present — currently only CZone bank circuits carry one.
+// CZone installs with Third Party Mode enabled can have a panel order that
+// diverges from the bus index, so order.value must win over the ID when both
+// are present. Falls back to the node's own ID parsed as an integer when no
+// order leaf is present (which is every non-bank-circuit node).
+func circuitOrderKey(id string, circuit map[string]any) (float64, bool) {
+	if order := lookupNumber(circuit, "order", "value"); order != -1 {
+		return order, true
+	}
+	return numericID(id)
 }
 
 // parseSwitchState extracts an on/off integer (1/0) from a SignalK switch circuit
