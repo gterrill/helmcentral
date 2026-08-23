@@ -1,6 +1,7 @@
 import { Anchor } from 'lucide-react'
 import type { AnchorConfig } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
+import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
@@ -36,6 +37,9 @@ interface AnchorWatchDrawerProps {
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
   onClearAnchor: () => void
+  placemarks?: AnchorPlacemark[]
+  onPlacemarkCreate?: (lat: number, lon: number) => void
+  onPlacemarkRemove?: (id: string) => void
   isImperial: boolean
   isAutoCloseArmed: boolean
   motoringSecondsElapsed: number
@@ -78,6 +82,9 @@ export function AnchorWatchDrawer({
   onAnchorReposition,
   onRadiusChange,
   onClearAnchor,
+  placemarks,
+  onPlacemarkCreate,
+  onPlacemarkRemove,
   isImperial,
   isAutoCloseArmed,
   motoringSecondsElapsed,
@@ -144,6 +151,9 @@ export function AnchorWatchDrawer({
               onAnchorReposition={onAnchorReposition}
               onRadiusChange={onRadiusChange}
               onClearAnchor={onClearAnchor}
+              placemarks={placemarks}
+              onPlacemarkCreate={onPlacemarkCreate}
+              onPlacemarkRemove={onPlacemarkRemove}
               className="h-full w-full"
             />
           ) : (

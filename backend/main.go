@@ -300,6 +300,7 @@ func main() {
 	registerStaticHandler(e)
 
 	loadAnchorWatch()
+	loadAnchorPlacemarks()
 	loadRoutes()
 	loadDashboardPages()
 	// All vessel data arrives over the SignalK delta stream (ADR 0037). There
@@ -375,6 +376,7 @@ func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []a
 		{http.MethodGet, "/api/tide-nearest", tierRead, tideNearestHandler},
 		{http.MethodGet, "/api/place-name", tierRead, placeName},
 		{http.MethodGet, "/api/anchor-watch", tierRead, getAnchorWatch},
+		{http.MethodGet, "/api/anchor-watch/placemarks", tierRead, listPlacemarksHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/self", tierRead, getSelfTrailHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/ais/:id", tierRead, getAISTrailHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/ais", tierRead, getAllAISTrailsHandler},
@@ -404,6 +406,8 @@ func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []a
 		{http.MethodPost, "/api/anchor-watch", tierWrite, setAnchorWatch},
 		{http.MethodPatch, "/api/anchor-watch", tierWrite, patchAnchorWatch},
 		{http.MethodDelete, "/api/anchor-watch", tierWrite, deleteAnchorWatch},
+		{http.MethodPost, "/api/anchor-watch/placemarks", tierWrite, createPlacemarkHandler},
+		{http.MethodDelete, "/api/anchor-watch/placemarks/:id", tierWrite, deletePlacemarkHandler},
 		{http.MethodPost, "/api/dashboard-pages", tierWrite, createDashboardPageHandler},
 		{http.MethodPatch, "/api/dashboard-pages/:id", tierWrite, patchDashboardPageHandler},
 		{http.MethodDelete, "/api/dashboard-pages/:id", tierWrite, deleteDashboardPageHandler},

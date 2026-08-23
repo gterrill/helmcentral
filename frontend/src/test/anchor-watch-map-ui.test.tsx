@@ -53,8 +53,8 @@ const defaultAisVessels: NearbyVessel[] = [
   { id: 'urn:mrn:imo:mmsi:100000001', name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_m: 61, age_seconds: 5 },
 ]
 
-function renderMap(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
-  return render(
+function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
+  return (
     <AnchorWatchMap
       vesselLat={-25.2939}
       vesselLon={152.9103}
@@ -79,8 +79,12 @@ function renderMap(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Pa
       onRadiusChange={() => undefined}
       onClearAnchor={() => undefined}
       {...overrides}
-    />,
+    />
   )
+}
+
+function renderMap(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
+  return render(mapElement(aisVessels, overrides))
 }
 
 describe('AnchorWatchMap controls and AIS selection', () => {
@@ -95,23 +99,41 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     expect(screen.getByTestId('anchor-watch-metrics').style.zIndex).toBe('2000')
   })
 
-  it('expands a clicked AIS vessel for three seconds and shows distance and bearing', () => {
+  it('expands a clicked AIS vessel for three seconds, and keeps its range on show', () => {
     vi.useFakeTimers()
 
     renderMap()
 
-    fireEvent.click(screen.getByRole('button', { name: 'AIS vessel: SPLURGE' }))
-
+    // Range and bearing are always on, the same as a placemark's — you
+    // should not have to tap a vessel to find out how close it is.
     expect(screen.getByText('0 m · 0°')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'AIS vessel: SPLURGE' }))
     expect(document.querySelector('.h-11.w-11')).not.toBeNull()
 
     act(() => {
       vi.advanceTimersByTime(3000)
     })
 
-    expect(screen.queryByText('0 m · 0°')).not.toBeInTheDocument()
+    // Only the expansion is transient; the range stays put.
+    expect(document.querySelector('.h-11.w-11')).toBeNull()
+    expect(screen.getByText('0 m · 0°')).toBeInTheDocument()
 
     vi.useRealTimers()
+  })
+
+  it('updates an AIS vessel range as the boats move, rather than freezing it', () => {
+    // ~100m north of us, then ~150m north: the number has to follow, the
+    // same way a placemark's does.
+    const vesselAt = (lat: number) => [
+      { id: 'urn:mrn:imo:mmsi:100000001', name: 'SPLURGE', lat, lon: 152.9103, range_m: 0, age_seconds: 5 },
+    ]
+
+    const { rerender } = renderMap(vesselAt(-25.29300))
+    expect(screen.getByText('100 m · 0°')).toBeInTheDocument()
+
+    rerender(mapElement(vesselAt(-25.29255)))
+    expect(screen.getByText('150 m · 0°')).toBeInTheDocument()
   })
 
   it('rotates the Current arrow to point in the set direction, matching the Wind tile Set arrow', () => {
@@ -156,9 +178,9 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     expect(screen.getByTestId('layer-openseamap-layer').dataset.beforeId).toBe('alarm-circle-fill')
   })
 
-  // Regression test: selection previously matched on transient?.label ===
-  // vessel.name, so two vessels sharing a name both lit up as "selected"
-  // when either was clicked. Selection now compares on vessel.id instead.
+  // Regression test: selection previously matched on a label that carried
+  // the vessel's name, so two vessels sharing a name both lit up as
+  // "selected" when either was clicked. Selection compares on vessel.id.
   it('selects only the clicked marker when two AIS vessels share a name', () => {
     vi.useFakeTimers()
 
@@ -172,10 +194,11 @@ describe('AnchorWatchMap controls and AIS selection', () => {
 
     fireEvent.click(buttons[0])
 
-    // Exactly one marker shows the selected (ring-2, larger) styling, and
-    // the transient distance/bearing readout appears exactly once.
+    // Exactly one marker shows the selected (ring-2, larger) styling. Both
+    // still show their own range, which was never selection-dependent.
     expect(document.querySelectorAll('.h-11.w-11.ring-2')).toHaveLength(1)
     expect(screen.getAllByText('0 m · 0°')).toHaveLength(1)
+    expect(screen.getByText('141 m · 150°')).toBeInTheDocument()
 
     vi.useRealTimers()
   })

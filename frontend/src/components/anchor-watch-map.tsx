@@ -3,7 +3,8 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, ArrowUp, CircleStop, Crosshair, Expand, MapPin, Minus, Plus, Satellite, Ship } from 'lucide-react'
+import { Anchor, ArrowUp, CircleStop, Crosshair, Expand, MapPin, Minus, Plus, Satellite, Ship, X } from 'lucide-react'
+import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
@@ -109,20 +110,12 @@ const NUDGE_METERS = 1.0
 
 type EditMode = 'none' | 'reposition' | 'radius'
 
-interface TransientInfo {
+// A map click that hasn't been committed to a placemark yet — the tooltip
+// offering range, bearing and a Pin button. Unlike the AIS selection
+// highlight it has no expiry: it must sit still long enough to be clicked.
+interface PinCandidate {
   lat: number
   lon: number
-  distanceM: number
-  bearing: number
-  label: string
-  // vesselId identifies which AIS marker is selected, independent of label.
-  // label carries display text and doubles as the 'pin' sentinel (see the
-  // transient-pin render below), so two vessels sharing a name previously
-  // both matched transient?.label === vessel.name and lit up together -
-  // vesselId is the field selection actually compares on. Unset for a plain
-  // map-click pin, which has no vessel to select.
-  vesselId?: string
-  expiresMs: number
 }
 
 export interface AnchorWatchMapProps {
@@ -149,6 +142,10 @@ export interface AnchorWatchMapProps {
   onRadiusChange: (radiusMeters: number) => void
   onClearAnchor: () => void
   onFullscreen?: () => void
+  // Session-bound pins shared across every client watching this anchorage.
+  placemarks?: AnchorPlacemark[]
+  onPlacemarkCreate?: (lat: number, lon: number) => void
+  onPlacemarkRemove?: (id: string) => void
   className?: string
 }
 
@@ -176,6 +173,9 @@ export function AnchorWatchMap({
   onRadiusChange,
   onClearAnchor,
   onFullscreen,
+  placemarks = [],
+  onPlacemarkCreate,
+  onPlacemarkRemove,
   className,
 }: AnchorWatchMapProps) {
   const mapRef = useRef<MapRef | null>(null)
@@ -183,8 +183,12 @@ export function AnchorWatchMap({
   const [ghostAnchor, setGhostAnchor] = useState<{ lat: number; lon: number } | null>(null)
   const [liveRadius, setLiveRadius] = useState<number | null>(null)
   const originalRadiusRef = useRef<number>(radiusMeters)
-  const [transient, setTransient] = useState<TransientInfo | null>(null)
-  const transientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Which AIS marker is drawn enlarged. Selection is by id, not name: two
+  // vessels sharing a name previously both lit up when either was clicked.
+  const [selectedVesselId, setSelectedVesselId] = useState<string | null>(null)
+  const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [pinCandidate, setPinCandidate] = useState<PinCandidate | null>(null)
+  const [selectedPlacemarkId, setSelectedPlacemarkId] = useState<string | null>(null)
   const suppressNextMapClickRef = useRef(false)
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
   const [motoringPoints, setMotoringPoints] = useState<TrailPoint[]>([])
@@ -209,11 +213,12 @@ export function AnchorWatchMap({
     return () => clearInterval(timer)
   }, [])
 
-  // Dismiss transient info after 3 seconds
-  const showTransient = useCallback((info: Omit<TransientInfo, 'expiresMs'>) => {
-    if (transientTimerRef.current) clearTimeout(transientTimerRef.current)
-    setTransient({ ...info, expiresMs: Date.now() + 3000 })
-    transientTimerRef.current = setTimeout(() => setTransient(null), 3000)
+  // Collapse the enlarged marker after 3 seconds. Only the highlight is
+  // transient — every marker's range stays on show permanently.
+  const selectVessel = useCallback((id: string) => {
+    if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current)
+    setSelectedVesselId(id)
+    selectionTimerRef.current = setTimeout(() => setSelectedVesselId(null), 3000)
   }, [])
 
   // Derived display radius (live during resize, else stored)
@@ -226,7 +231,7 @@ export function AnchorWatchMap({
     : bearingDegProp
   const showRepositionBreadcrumbs = editMode === 'reposition'
   const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
-  const formatTransientDistance = useCallback(
+  const formatRange = useCallback(
     (distanceM: number) => {
       if (isImperial) {
         return `${Math.round(distanceM * 3.28084)} ft`
@@ -371,13 +376,63 @@ export function AnchorWatchMap({
         return
       }
       if (editMode !== 'none') return
+      // Unoccupied water: offer to pin it. Markers (AIS, anchor, self
+      // vessel, placemarks) all set suppressNextMapClickRef, so a click
+      // that reaches here landed on open chart.
       const { lat, lng } = e.lngLat
-      const dist = Math.round(haversineMeters(vesselLat, vesselLon, lat, lng))
-      const bearing = Math.round(bearingDeg(vesselLat, vesselLon, lat, lng))
-      showTransient({ lat, lon: lng, distanceM: dist, bearing, label: 'pin' })
+      setSelectedPlacemarkId(null)
+      setPinCandidate({ lat, lon: lng })
     },
-    [editMode, ghostAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor, vesselLat, vesselLon, showTransient],
+    [editMode, ghostAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor],
   )
+
+  // ── Placemarks ───────────────────────────────────────────────────────────
+  // Entering an edit mode takes over the map click ("Tap map to place
+  // anchor"), so any open pin tooltip or selected pin would be stranded —
+  // and its Pin/Remove buttons unreachable behind the edit overlay.
+  useEffect(() => {
+    if (editMode !== 'none') {
+      setPinCandidate(null)
+      setSelectedPlacemarkId(null)
+    }
+  }, [editMode])
+
+  // Both tooltip buttons sit inside the map, so their clicks also reach
+  // maplibre's own handler — which would immediately reopen the tooltip
+  // under the button just pressed. Suppress that follow-on click the same
+  // way the AIS and placemark markers do.
+  const handleConfirmPin = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    suppressNextMapClickRef.current = true
+    if (!pinCandidate) return
+    onPlacemarkCreate?.(pinCandidate.lat, pinCandidate.lon)
+    setPinCandidate(null)
+  }, [pinCandidate, onPlacemarkCreate])
+
+  const handleDismissPin = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    suppressNextMapClickRef.current = true
+    setPinCandidate(null)
+  }, [])
+
+  const handleSelfVesselClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    suppressNextMapClickRef.current = true
+  }, [])
+
+  const handlePlacemarkClick = useCallback((e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    suppressNextMapClickRef.current = true
+    setPinCandidate(null)
+    setSelectedPlacemarkId((current) => (current === id ? null : id))
+  }, [])
+
+  const handleRemovePlacemark = useCallback((e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    suppressNextMapClickRef.current = true
+    onPlacemarkRemove?.(id)
+    setSelectedPlacemarkId(null)
+  }, [onPlacemarkRemove])
 
   // ── Map mouse move handler (for radius drag) ─────────────────────────────
   const handleMouseMove = useCallback(
@@ -527,12 +582,11 @@ export function AnchorWatchMap({
     (e: React.MouseEvent, vessel: NearbyVessel) => {
       e.stopPropagation()
       suppressNextMapClickRef.current = true
-      if (vessel.lat === undefined || vessel.lon === undefined) return
-      const dist = Math.round(haversineMeters(vesselLat, vesselLon, vessel.lat, vessel.lon))
-      const bearing = Math.round(bearingDeg(vesselLat, vesselLon, vessel.lat, vessel.lon))
-      showTransient({ lat: vessel.lat, lon: vessel.lon, distanceM: dist, bearing, label: vessel.name, vesselId: vessel.id })
+      setPinCandidate(null)
+      setSelectedPlacemarkId(null)
+      selectVessel(vessel.id)
     },
-    [vesselLat, vesselLon, showTransient],
+    [selectVessel],
   )
 
   const confirmAnchorReposition = useCallback(() => {
@@ -784,7 +838,12 @@ export function AnchorWatchMap({
         {/* AIS vessel markers */}
         {aisVessels.map((vessel) => {
           if (vessel.lat === undefined || vessel.lon === undefined) return null
-          const isSelected = transient?.vesselId === vessel.id
+          const isSelected = selectedVesselId === vessel.id
+          // Recomputed from the live fix on every render, like a placemark's
+          // — vessel.range_m is only as fresh as the last AIS poll, and it
+          // ignores our own movement between polls.
+          const distanceM = Math.round(haversineMeters(vesselLat, vesselLon, vessel.lat, vessel.lon))
+          const bearing = Math.round(bearingDeg(vesselLat, vesselLon, vessel.lat, vessel.lon))
           return (
             <Marker
               key={vessel.id}
@@ -815,11 +874,9 @@ export function AnchorWatchMap({
                   </div>
                   <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
                     <div className="truncate">{vessel.name}</div>
-                    {isSelected && transient && (
-                      <div className="whitespace-nowrap text-[9px] font-medium tracking-normal">
-                        {formatTransientDistance(transient.distanceM)} · {Math.round(transient.bearing)}°
-                      </div>
-                    )}
+                    <div className="whitespace-nowrap text-[9px] font-medium tracking-normal">
+                      {formatRange(distanceM)} · {bearing}°
+                    </div>
                   </div>
                 </div>
               </button>
@@ -832,6 +889,10 @@ export function AnchorWatchMap({
           <div
             className="flex items-center justify-center"
             style={{ width: 40, height: 40 }}
+            // Marker elements sit inside the canvas container, so a click
+            // here still reaches the map handler. Swallow it: the boat's own
+            // icon is not a place you'd pin, and the range would read 0.
+            onClick={handleSelfVesselClick}
           >
             <div style={{
               transform: `${vesselHeadingDeg !== null ? `rotate(${vesselHeadingDeg}deg) ` : ''}scale(${markerScale})`,
@@ -883,27 +944,90 @@ export function AnchorWatchMap({
           </button>
         </Marker>
 
-        {/* Transient pin */}
-        {transient?.label === 'pin' && (
-          <Marker latitude={transient.lat} longitude={transient.lon}>
-            <div
-              className="pointer-events-none flex flex-col items-center"
-              style={{
-                opacity: 1,
-                transition: 'opacity 300ms ease-out',
-              }}
-            >
-              {transient.label === 'pin' ? (
-                <MapPin className="h-6 w-6 text-white drop-shadow-lg" />
-              ) : (
-                <Ship className="h-5 w-5 text-amber-300 drop-shadow" />
-              )}
-              <div className="mt-1 rounded bg-black/70 px-2 py-0.5 text-center">
-                <p className="font-mono text-[11px] text-white">
-                  {formatTransientDistance(transient.distanceM)}{' '}
-                  {Math.round(transient.bearing)}°
-                </p>
-                <p className="font-mono text-[9px] uppercase text-amber-300">{transient.label}</p>
+        {/* Session placemarks — bombies, shoreline, anything worth watching
+            the swing against. Range and bearing are recomputed from the live
+            vessel fix on every render, so they close up as the boat drifts
+            towards the hazard. */}
+        {placemarks.map((pm) => {
+          const distanceM = Math.round(haversineMeters(vesselLat, vesselLon, pm.lat, pm.lon))
+          const bearing = Math.round(bearingDeg(vesselLat, vesselLon, pm.lat, pm.lon))
+          const isSelected = selectedPlacemarkId === pm.id
+          return (
+            <Marker key={pm.id} latitude={pm.lat} longitude={pm.lon} style={{ zIndex: isSelected ? 1100 : 900 }}>
+              <div className="flex flex-col items-center" data-testid={`placemark-${pm.id}`}>
+                <button
+                  className="flex flex-col items-center"
+                  style={{ minWidth: 40, minHeight: 40 }}
+                  aria-label={pm.label ? `Placemark: ${pm.label}` : 'Placemark'}
+                  onClick={(e) => handlePlacemarkClick(e, pm.id)}
+                >
+                  <div
+                    style={{
+                      transform: `scale(${markerScale * (isSelected ? 1.25 : 1)})`,
+                      transformOrigin: 'bottom center',
+                      transition: 'transform 150ms ease-out',
+                    }}
+                  >
+                    <MapPin
+                      className={cn(
+                        'h-6 w-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]',
+                        isSelected ? 'text-fuchsia-300' : 'text-fuchsia-400',
+                      )}
+                    />
+                  </div>
+                  {/* Same treatment as an AIS vessel's label — shadowed
+                      text, no plate. Persistent map labels are drawn this
+                      way so a crowded anchorage doesn't fill up with opaque
+                      boxes; only interactive controls (the Pin tooltip, the
+                      Remove button) get a solid background. */}
+                  <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-fuchsia-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                    {pm.label && <div className="truncate">{pm.label}</div>}
+                    <div className="whitespace-nowrap text-[9px] font-medium tracking-normal text-white">
+                      {formatRange(distanceM)} · {bearing}°
+                    </div>
+                  </div>
+                </button>
+                {isSelected && (
+                  <button
+                    onClick={(e) => handleRemovePlacemark(e, pm.id)}
+                    className="mt-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur hover:bg-white/25 active:scale-95"
+                    style={{ transition: 'background-color 150ms ease-out' }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </Marker>
+          )
+        })}
+
+        {/* Pin candidate — the tooltip raised by clicking open water. It has
+            no expiry: it must survive long enough to be clicked. */}
+        {pinCandidate && (
+          <Marker latitude={pinCandidate.lat} longitude={pinCandidate.lon} style={{ zIndex: 1200 }}>
+            <div className="flex flex-col items-center" data-testid="pin-candidate">
+              <MapPin className="h-6 w-6 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" />
+              <div className="mt-1 flex items-center gap-1.5 rounded-full bg-black/80 py-1 pl-2.5 pr-1 backdrop-blur">
+                <span className="whitespace-nowrap font-mono text-[11px] text-white">
+                  {formatRange(Math.round(haversineMeters(vesselLat, vesselLon, pinCandidate.lat, pinCandidate.lon)))}
+                  {' · '}
+                  {Math.round(bearingDeg(vesselLat, vesselLon, pinCandidate.lat, pinCandidate.lon))}°
+                </span>
+                <button
+                  onClick={handleConfirmPin}
+                  className="rounded-full bg-fuchsia-500/90 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-fuchsia-400 active:scale-95"
+                  style={{ transition: 'background-color 150ms ease-out' }}
+                >
+                  Pin
+                </button>
+                <button
+                  onClick={handleDismissPin}
+                  aria-label="Dismiss"
+                  className="flex h-5 w-5 items-center justify-center rounded-full text-white/60 hover:bg-white/15 hover:text-white"
+                  style={{ transition: 'background-color 150ms ease-out' }}
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </div>
             </div>
           </Marker>

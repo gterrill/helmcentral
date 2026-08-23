@@ -427,6 +427,9 @@ func deleteAnchorWatch(c echo.Context) error {
 	selfTrail = nil
 	trailMu.Unlock()
 
+	// Placemarks are bound to the anchoring session, so they end with it.
+	clearPlacemarks()
+
 	_ = os.Remove(anchorWatchFilePath())
 
 	return c.JSON(http.StatusOK, map[string]any{"active": false})

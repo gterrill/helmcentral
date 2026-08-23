@@ -7,6 +7,7 @@ import { findAnchorDragAlarm, useAlarms } from '@/hooks/use-alarms'
 import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
 import { primeAudioContextForAlarm } from '@/lib/audio-utils'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
+import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 
@@ -27,6 +28,9 @@ interface AnchorWatchTileProps {
   showImageryLayer: boolean
   onImageryToggle: (enabled: boolean) => void
   onFullscreen: () => void
+  placemarks?: AnchorPlacemark[]
+  onPlacemarkCreate?: (lat: number, lon: number) => void
+  onPlacemarkRemove?: (id: string) => void
 }
 
 export const AnchorWatchTile = memo(function AnchorWatchTile({
@@ -46,6 +50,9 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   showImageryLayer,
   onImageryToggle,
   onFullscreen,
+  placemarks,
+  onPlacemarkCreate,
+  onPlacemarkRemove,
 }: AnchorWatchTileProps) {
   const {
     anchorState,
@@ -149,6 +156,9 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
           onRadiusChange={updateRadius}
           onClearAnchor={clearAnchor}
           onFullscreen={onFullscreen}
+          placemarks={placemarks}
+          onPlacemarkCreate={onPlacemarkCreate}
+          onPlacemarkRemove={onPlacemarkRemove}
           className="h-64 rounded-lg"
         />
       </div>

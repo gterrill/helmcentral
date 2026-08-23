@@ -212,7 +212,11 @@ tiles, which put any URL (a Grafana panel, a camera feed) in the grid — the
 windrose in the screenshot above is one. Anchor Watch also hosts a Rode
 Planner sidebar — pay-out and swing-radius planning against tide-corrected
 depth and gust-seeded wind, usable before the anchor is even down
-([ADR 0047](docs/adr/0047-rode-planner-replaces-rode-scope-tile.md)).
+([ADR 0047](docs/adr/0047-rode-planner-replaces-rode-scope-tile.md)). Its map
+takes pins: click open water to mark a bombie or the nearest shoreline and
+watch the range close as you swing. Pins are shared across every device
+watching the anchorage and expire with the anchoring
+([ADR 0048](docs/adr/0048-session-bound-anchor-placemarks.md)).
 
 Arrange them yourself: toggle layout mode in the header, then drag, resize, or
 remove widgets and add them back from a picker. Layouts are named **pages** you

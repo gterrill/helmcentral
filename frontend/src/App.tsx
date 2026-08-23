@@ -61,6 +61,7 @@ import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useSolarState } from '@/hooks/use-solar-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
+import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
 import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
@@ -406,6 +407,11 @@ export function App() {
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
 
+  // One poller for the whole app: the tile and the fullscreen drawer both
+  // draw the same session's pins, and each running its own would double the
+  // request rate for identical data.
+  const { placemarks, createPlacemark, removePlacemark } = useAnchorPlacemarks(hasActiveAnchorWatch)
+
   // Settings hosts Secrets as a subsection (settings-page.tsx), so hiding
   // this one nav item covers both per ADR 0040's tier table — there is no
   // separate top-level Secrets entry to hide independently.
@@ -588,6 +594,9 @@ export function App() {
             showImageryLayer={showAnchorImagery}
             onImageryToggle={setShowAnchorImagery}
             onFullscreen={() => setActivePanel('anchor-watch')}
+            placemarks={placemarks}
+            onPlacemarkCreate={createPlacemark}
+            onPlacemarkRemove={removePlacemark}
           />
         )
       case 'tanks':
@@ -830,6 +839,9 @@ export function App() {
           // resolves. The 0 only satisfies vesselLat/vesselLon's non-null type
           // for the (map-less) pre-drop render.
           <AnchorWatchDrawer
+            placemarks={placemarks}
+            onPlacemarkCreate={createPlacemark}
+            onPlacemarkRemove={removePlacemark}
             vesselLat={latitude ?? anchorWatch.anchorLat ?? 0}
             vesselLon={longitude ?? anchorWatch.anchorLon ?? 0}
             vesselHeadingDeg={headingTrue}
