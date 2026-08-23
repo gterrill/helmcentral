@@ -22,6 +22,12 @@ export interface AlarmRule {
   methods: string[]
   notify: string[] | null
   escalate_after_seconds: number
+  /**
+   * True for a rule derived from a gauge zone (ADR 0050). It has no stored
+   * counterpart, so it cannot be edited or deleted here — the threshold lives
+   * on the gauge that owns the zone.
+   */
+  derived?: boolean
   created_at?: string
   updated_at?: string
 }

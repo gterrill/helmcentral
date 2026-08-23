@@ -198,20 +198,34 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
                     {!rule.enabled && (
                       <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Disabled</span>
                     )}
+                    {rule.derived && (
+                      <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        From a gauge zone
+                      </span>
+                    )}
                   </p>
                   <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     {rule.path} · {rule.op} {rule.op === 'stale' ? `${rule.stale_after_seconds}s` : rule.value} ·{' '}
                     <span className={stateClass(rule.state)}>{rule.state}</span>
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => startEdit(rule)} aria-label={`Edit ${rule.label}`}>
-                    <Pencil className="size-3.5" />
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void deleteRule(rule.id)} aria-label={`Delete ${rule.label}`}>
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </div>
+                {/* A derived rule is edited by editing the gauge zone it comes
+                    from, so offering controls that would only 400 is worse
+                    than offering none. */}
+                {rule.derived ? (
+                  <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    Edit on the gauge
+                  </span>
+                ) : (
+                  <div className="flex shrink-0 gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => startEdit(rule)} aria-label={`Edit ${rule.label}`}>
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void deleteRule(rule.id)} aria-label={`Delete ${rule.label}`}>
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

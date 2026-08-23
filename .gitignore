@@ -33,7 +33,11 @@ backend/dist/*
 settings.yaml
 .claude/settings.json
 /backend-data/
-/plugins/
+# Built plugin binaries are deployed here, not authored here — the .wasm
+# sources live in docs/examples/*-plugins/. Engine profiles (ADR 0053) are the
+# exception: hand-authored JSON with no build step, so they are tracked.
+/plugins/*
+!/plugins/engine-profiles/
 # Scratch notes kept across branches, not part of any change
 /temp.md
 

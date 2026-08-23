@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -39,7 +40,9 @@ func evaluateAlarmsOnce(now time.Time) {
 	// Deliberately no early return on an empty rule set: evaluate is also what
 	// drops statuses for rules that have been deleted or disabled, so skipping
 	// it would leave the last deleted rule's alarm stuck active forever.
-	rules := listAlarmRules()
+	// Stored rules plus the ones derived from gauge zones (ADR 0050), so a red
+	// band on a gauge is the alarm rather than merely looking like one.
+	rules := append(listAlarmRules(), zoneDerivedAlarmRules()...)
 
 	events := globalAlarmEngine.evaluate(rules, snapshotAlarmReader(globalSignalKSnapshot), now)
 	for _, event := range events {
@@ -128,7 +131,45 @@ func worstAlarmState() string {
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
 func listAlarmRulesHandler(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]any{"rules": listAlarmRules()})
+	// Derived rules are listed alongside stored ones so the drawer can show
+	// what is actually being evaluated, flagged so it can render them
+	// read-only and point back at the gauge that owns the threshold.
+	rules := listAlarmRules()
+	out := make([]map[string]any, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, alarmRulePayload(rule, false))
+	}
+	for _, rule := range zoneDerivedAlarmRules() {
+		out = append(out, alarmRulePayload(rule, true))
+	}
+	return c.JSON(http.StatusOK, map[string]any{"rules": out})
+}
+
+// alarmRulePayload marshals a rule with the `derived` flag the frontend keys
+// its read-only treatment off.
+func alarmRulePayload(rule alarmRule, derived bool) map[string]any {
+	encoded, err := json.Marshal(rule)
+	if err != nil {
+		return map[string]any{"id": rule.ID, "derived": derived}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(encoded, &out); err != nil {
+		return map[string]any{"id": rule.ID, "derived": derived}
+	}
+	out["derived"] = derived
+	return out
+}
+
+// A derived rule has no stored counterpart, so editing one by id would either
+// 404 or create a shadow rule that the derivation immediately duplicates. The
+// threshold lives on the gauge; that is where it is changed.
+func rejectDerivedAlarmRuleID(c echo.Context) error {
+	if isZoneDerivedAlarmRuleID(c.Param("id")) {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "this alarm comes from a gauge zone; edit the zone on the gauge instead",
+		})
+	}
+	return nil
 }
 
 func createAlarmRuleHandler(c echo.Context) error {
@@ -145,6 +186,9 @@ func createAlarmRuleHandler(c echo.Context) error {
 }
 
 func updateAlarmRuleHandler(c echo.Context) error {
+	if err := rejectDerivedAlarmRuleID(c); err != nil {
+		return err
+	}
 	var rule alarmRule
 	if err := c.Bind(&rule); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
@@ -158,6 +202,9 @@ func updateAlarmRuleHandler(c echo.Context) error {
 }
 
 func deleteAlarmRuleHandler(c echo.Context) error {
+	if err := rejectDerivedAlarmRuleID(c); err != nil {
+		return err
+	}
 	if err := deleteAlarmRule(c.Param("id")); err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}

@@ -3,6 +3,7 @@ import { memo, useId } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
+import { useTelemetryHistory, type TelemetryHistoryPoint } from '@/hooks/use-telemetry-history'
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { formatQuantity, convertFromSI, unitOption } from '@/lib/quantities'
 
@@ -20,6 +21,11 @@ function zoneColorFor(state: GaugeZone['state']): string {
       return 'hsl(38 92% 50%)'
     case 'alert':
       return 'hsl(43 96% 56%)'
+    case 'normal':
+      // Green for "operating correctly", completing the colour language the
+      // lamp strip already speaks (ADR 0052). It was the border colour, which
+      // made an advisory band invisible — advice you cannot see is not advice.
+      return 'hsl(142 71% 45%)'
     default:
       return 'hsl(var(--border))'
   }
@@ -47,6 +53,54 @@ function activeZone(value: number | null, zones: GaugeZone[] | undefined): Gauge
   return hit ? hit.state : null
 }
 
+/**
+ * How much room a gauge has. `full` is a gauge alone in its own tile; `compact`
+ * is one member of a gauge group (ADR 0049), where the group tile supplies the
+ * single border and N nested ones would just be noise.
+ */
+export type GaugeDensity = 'full' | 'compact'
+
+const SHELL: Record<GaugeDensity, string> = {
+  full: 'rounded-md border bg-background/60 px-3 py-3',
+  compact: '',
+}
+
+interface GaugeBodyProps {
+  config: GaugeWidgetConfig
+  /** Raw SI value from SignalK, or null when the path is absent. */
+  value: number | null
+  density?: GaugeDensity
+}
+
+/**
+ * One gauge's readout, without a tile around it.
+ *
+ * Split out of GaugeTile so a gauge group can render N of these inside one
+ * Tile without forking the four display kinds. AGENTS.md's "no new primitives"
+ * rule governs bespoke domain tiles; ADR 0039 carved it open for generic
+ * user-configurable renderers, and ADR 0049 widens that carve-out to cover a
+ * renderer shared between the standalone and grouped cases.
+ */
+export function GaugeBody({ config, value, density = 'full' }: GaugeBodyProps) {
+  const unit = unitOption(config.quantity, config.unit)
+  const text = formatQuantity(value, config.quantity, config.unit, config.decimals)
+  const converted = value === null ? null : convertFromSI(value, config.quantity, config.unit)
+  const zone = activeZone(converted, config.zones)
+
+  switch (config.display) {
+    case 'radial':
+      return <RadialGauge value={converted} zone={zone} config={config} text={text} unitLabel={unit.label} density={density} />
+    case 'bar':
+      return <BarGauge value={converted} zone={zone} config={config} text={text} unitLabel={unit.label} density={density} />
+    case 'lamp':
+      return <LampGauge value={converted} zone={zone} text={text} density={density} />
+    case 'trend':
+      return <TrendGauge zone={zone} config={config} text={text} unitLabel={unit.label} density={density} />
+    default:
+      return <NumericGauge zone={zone} text={text} unitLabel={unit.label} density={density} />
+  }
+}
+
 interface GaugeTileProps {
   config: GaugeWidgetConfig
   /** Raw SI value from SignalK, or null when the path is absent. */
@@ -56,11 +110,6 @@ interface GaugeTileProps {
 }
 
 export const GaugeTile = memo(function GaugeTile({ config, value, editing, onConfigure }: GaugeTileProps) {
-  const unit = unitOption(config.quantity, config.unit)
-  const text = formatQuantity(value, config.quantity, config.unit, config.decimals)
-  const converted = value === null ? null : convertFromSI(value, config.quantity, config.unit)
-  const zone = activeZone(converted, config.zones)
-
   const title = config.label.trim() || config.path
 
   return (
@@ -75,14 +124,7 @@ export const GaugeTile = memo(function GaugeTile({ config, value, editing, onCon
         ) : undefined
       }
     >
-      {config.display === 'radial' && (
-        <RadialGauge value={converted} zone={zone} config={config} text={text} unitLabel={unit.label} />
-      )}
-      {config.display === 'bar' && (
-        <BarGauge value={converted} zone={zone} config={config} text={text} unitLabel={unit.label} />
-      )}
-      {config.display === 'lamp' && <LampGauge value={converted} zone={zone} text={text} />}
-      {config.display === 'numeric' && <NumericGauge zone={zone} text={text} unitLabel={unit.label} />}
+      <GaugeBody config={config} value={value} />
     </Tile>
   )
 })
@@ -102,24 +144,25 @@ function Readout({ text, unitLabel, zone, size }: { text: string | null; unitLab
   )
 }
 
-function NumericGauge({ text, unitLabel, zone }: { text: string | null; unitLabel: string; zone: GaugeZone['state'] | null }) {
+function NumericGauge({ text, unitLabel, zone, density }: { text: string | null; unitLabel: string; zone: GaugeZone['state'] | null; density: GaugeDensity }) {
   return (
-    <div className="rounded-md border bg-background/60 px-3 py-3">
-      <Readout text={text} unitLabel={unitLabel} zone={zone} size="text-4xl" />
+    <div className={SHELL[density]}>
+      <Readout text={text} unitLabel={unitLabel} zone={zone} size={density === 'compact' ? 'text-2xl' : 'text-4xl'} />
     </div>
   )
 }
 
-function LampGauge({ value, zone, text }: { value: number | null; zone: GaugeZone['state'] | null; text: string | null }) {
+function LampGauge({ value, zone, text, density }: { value: number | null; zone: GaugeZone['state'] | null; text: string | null; density: GaugeDensity }) {
   const lit = value !== null && value !== 0
   const color = zone ? zoneColorFor(zone) : lit ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))'
+  const compact = density === 'compact'
 
   return (
-    <div className="flex items-center gap-3 rounded-md border bg-background/60 px-3 py-3">
-      <svg viewBox="0 0 24 24" className="h-8 w-8 shrink-0" aria-hidden="true">
+    <div className={`flex items-center gap-3 ${SHELL[density]}`}>
+      <svg viewBox="0 0 24 24" className={compact ? 'h-6 w-6 shrink-0' : 'h-8 w-8 shrink-0'} aria-hidden="true">
         <circle cx="12" cy="12" r="9" fill={color} opacity={lit ? 1 : 0.25} />
       </svg>
-      <span className="font-display text-2xl tabular-nums leading-none text-gauge-primary">
+      <span className={`font-display ${compact ? 'text-xl' : 'text-2xl'} tabular-nums leading-none text-gauge-primary`}>
         {text === null ? '--' : lit ? 'ON' : 'OFF'}
       </span>
     </div>
@@ -137,19 +180,20 @@ function clampFraction(value: number | null, min: number, max: number): number |
   return Math.max(0, Math.min(1, (value - min) / (max - min)))
 }
 
-function BarGauge({ value, zone, config, text, unitLabel }: {
+function BarGauge({ value, zone, config, text, unitLabel, density }: {
   value: number | null
   zone: GaugeZone['state'] | null
   config: GaugeWidgetConfig
   text: string | null
   unitLabel: string
+  density: GaugeDensity
 }) {
   const { min, max } = rangeFor(config)
   const fraction = clampFraction(value, min, max)
 
   return (
-    <div className="rounded-md border bg-background/60 px-3 py-3">
-      <Readout text={text} unitLabel={unitLabel} zone={zone} size="text-3xl" />
+    <div className={SHELL[density]}>
+      <Readout text={text} unitLabel={unitLabel} zone={zone} size={density === 'compact' ? 'text-xl' : 'text-3xl'} />
       <svg viewBox="0 0 100 8" preserveAspectRatio="none" className="mt-2 w-full" height="8" aria-hidden="true">
         <rect x="0" y="2" width="100" height="4" rx="2" fill="hsl(var(--muted))" />
         {(config.zones ?? []).map((z, index) => {
@@ -174,12 +218,13 @@ function BarGauge({ value, zone, config, text, unitLabel }: {
  * that precedent, and ADR 0012 makes a point of the dashboard having no chart
  * library. A 240-degree arc is the marine instrument convention.
  */
-function RadialGauge({ value, zone, config, text, unitLabel }: {
+function RadialGauge({ value, zone, config, text, unitLabel, density }: {
   value: number | null
   zone: GaugeZone['state'] | null
   config: GaugeWidgetConfig
   text: string | null
   unitLabel: string
+  density: GaugeDensity
 }) {
   const gradientId = useId()
   const { min, max } = rangeFor(config)
@@ -204,8 +249,8 @@ function RadialGauge({ value, zone, config, text, unitLabel }: {
   }
 
   return (
-    <div className="flex flex-col items-center rounded-md border bg-background/60 px-3 py-3">
-      <svg viewBox="0 0 100 74" className="w-full max-w-[180px]" aria-hidden="true">
+    <div className={`flex flex-col items-center ${SHELL[density]}`}>
+      <svg viewBox="0 0 100 74" className={density === 'compact' ? 'w-full max-w-[120px]' : 'w-full max-w-[180px]'} aria-hidden="true">
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.7" />
@@ -232,7 +277,85 @@ function RadialGauge({ value, zone, config, text, unitLabel }: {
         )}
       </svg>
 
-      <Readout text={text} unitLabel={unitLabel} zone={zone} size="text-3xl" />
+      <Readout text={text} unitLabel={unitLabel} zone={zone} size={density === 'compact' ? 'text-xl' : 'text-3xl'} />
+    </div>
+  )
+}
+
+/**
+ * A sparkline over an arbitrary path's history (ADR 0051).
+ *
+ * The live reading stays the hero number and the line is secondary, per
+ * AGENTS.md's rule that trend presentation stays behind the real-time readout.
+ * Hand-rolled SVG following depth-sparkline.tsx, since the dashboard carries no
+ * chart library.
+ */
+function TrendGauge({ zone, config, text, unitLabel, density }: {
+  zone: GaugeZone['state'] | null
+  config: GaugeWidgetConfig
+  text: string | null
+  unitLabel: string
+  density: GaugeDensity
+}) {
+  const window = config.window ?? '3h'
+  const { points, error } = useTelemetryHistory(config.path, window, config.path.trim() !== '')
+
+  return (
+    <div className={SHELL[density]}>
+      <Readout text={text} unitLabel={unitLabel} zone={zone} size={density === 'compact' ? 'text-xl' : 'text-3xl'} />
+      {error ? (
+        // Never an empty chart: a flat line drawn because no database exists
+        // reads exactly like a sensor holding steady.
+        <p className="mt-2 text-[10px] uppercase tracking-wider text-muted-foreground">{error}</p>
+      ) : (
+        <TrendLine points={points} config={config} window={window} />
+      )}
+    </div>
+  )
+}
+
+function TrendLine({ points, config, window }: {
+  points: TelemetryHistoryPoint[]
+  config: GaugeWidgetConfig
+  window: string
+}) {
+  if (points.length < 2) {
+    return (
+      <p className="mt-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Collecting history · {window}
+      </p>
+    )
+  }
+
+  const converted = points.map((p) => convertFromSI(p.value, config.quantity, config.unit))
+  // The gauge's own scale when it has one, so a trend and a dial of the same
+  // path agree; otherwise the data's own range with a little headroom.
+  const min = config.min ?? Math.min(...converted)
+  const rawMax = config.max ?? Math.max(...converted)
+  const max = rawMax > min ? rawMax : min + 1
+
+  const width = 100
+  const height = 28
+  const x = (index: number) => (index / (converted.length - 1)) * width
+  const y = (value: number) => height - Math.max(0, Math.min(1, (value - min) / (max - min))) * height
+
+  const d = converted.map((v, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(2)} ${y(v).toFixed(2)}`).join(' ')
+
+  return (
+    <div className="mt-2">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="w-full" height={height} aria-hidden="true">
+        {(config.zones ?? []).map((z, index) => {
+          const top = y(Math.max(z.from, z.to))
+          const bottom = y(Math.min(z.from, z.to))
+          return (
+            <rect key={index} x="0" y={top} width={width} height={Math.max(0, bottom - top)}
+              fill={zoneColorFor(z.state)} opacity="0.18" />
+          )
+        })}
+        <path data-testid="gauge-trend-line" d={d} fill="none" stroke="hsl(var(--primary))" strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{window}</span>
     </div>
   )
 }

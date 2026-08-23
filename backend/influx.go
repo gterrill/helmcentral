@@ -119,6 +119,65 @@ func queryInfluxMaxWindGustKtsForWindow(queryAPI api.QueryAPI, bucket, measureme
 	return math.Round((maxMS*metersPerSecondToKnots)*10) / 10
 }
 
+// queryInfluxPathTrend reads any SignalK path's history. The
+// signalk-to-influxdb-v2 plugin writes the path as the measurement name, so
+// this is the depth query with the measurement as a parameter (ADR 0051).
+//
+// Unlike queryInfluxDepthTrend it returns an error rather than nil, because
+// its caller has to tell an empty series apart from a failed query.
+func queryInfluxPathTrend(path, window string) ([]telemetryPoint, error) {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return nil, fmt.Errorf("influxdb is not configured")
+	}
+	defer client.Close()
+
+	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+
+	flux := fmt.Sprintf(
+		`from(bucket: %q) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> aggregateWindow(every: %s, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucket, window, path, field, influxTrendResolution(window),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	var points []telemetryPoint
+	for result.Next() {
+		rec := result.Record()
+		v, ok := rec.Value().(float64)
+		if !ok {
+			continue
+		}
+		points = append(points, telemetryPoint{Timestamp: rec.Time(), Value: v})
+	}
+	if result.Err() != nil {
+		return nil, result.Err()
+	}
+	return points, nil
+}
+
+// influxTrendResolution keeps a long window from returning thousands of points
+// for a sparkline a few hundred pixels wide.
+func influxTrendResolution(window string) string {
+	switch window {
+	case "1h":
+		return "1m"
+	case "3h", "6h":
+		return "5m"
+	case "24h":
+		return "15m"
+	default:
+		return "1h"
+	}
+}
+
 func queryInfluxDepthTrend(window string) []depthTrendPoint {
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {

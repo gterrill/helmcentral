@@ -991,3 +991,305 @@ func TestGaugeBoundPathsDeduplicatesAcrossPages(t *testing.T) {
 		t.Fatalf("expected sorted unique paths, got %v", paths)
 	}
 }
+
+// ── gauge group widget (ADR 0049) ────────────────────────────────────────────
+
+func gaugeGroupWidget(id string, config *dashboardGaugeGroupConfig) dashboardLayoutItem {
+	return dashboardLayoutItem{ID: id, X: 0, Y: 0, W: 6, H: 8, GaugeGroup: config}
+}
+
+func validGaugeGroupConfig() *dashboardGaugeGroupConfig {
+	return &dashboardGaugeGroupConfig{
+		Title: "Port",
+		Gauges: []dashboardGaugeConfig{
+			{Path: "propulsion.port.revolutions", Label: "RPM", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+			{Path: "propulsion.port.oilPressure", Label: "Oil", Display: "bar", Quantity: "pressure", Unit: "psi"},
+		},
+	}
+}
+
+func TestValidateGaugeGroupAcceptsAWellFormedGroup(t *testing.T) {
+	widget := gaugeGroupWidget("gauge-group:abcd1234", validGaugeGroupConfig())
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg != "" {
+		t.Fatalf("expected a valid gauge group to be accepted, got %q", msg)
+	}
+}
+
+func TestValidateGaugeGroupRejectsBadInput(t *testing.T) {
+	tooMany := validGaugeGroupConfig()
+	tooMany.Gauges = make([]dashboardGaugeConfig, gaugeGroupMaxGauges+1)
+	for i := range tooMany.Gauges {
+		tooMany.Gauges[i] = dashboardGaugeConfig{Path: "a.b", Display: "numeric"}
+	}
+
+	blankPath := validGaugeGroupConfig()
+	blankPath.Gauges[1].Path = "   "
+
+	badDisplay := validGaugeGroupConfig()
+	badDisplay.Gauges[0].Display = "hologram"
+
+	invertedRange := validGaugeGroupConfig()
+	low, high := 100.0, 10.0
+	invertedRange.Gauges[0].Min, invertedRange.Gauges[0].Max = &low, &high
+
+	badZone := validGaugeGroupConfig()
+	badZone.Gauges[0].Zones = []gaugeZone{{From: 0, To: 10, State: "spicy"}}
+
+	longTitle := validGaugeGroupConfig()
+	longTitle.Title = strings.Repeat("x", gaugeGroupTitleMaxLen+1)
+
+	zeroColumns := validGaugeGroupConfig()
+	zero := 0
+	zeroColumns.Columns = &zero
+
+	emptyGauges := validGaugeGroupConfig()
+	emptyGauges.Gauges = nil
+
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"short token", gaugeGroupWidget("gauge-group:abc", validGaugeGroupConfig())},
+		{"missing config", gaugeGroupWidget("gauge-group:abcd1234", nil)},
+		{"no gauges", gaugeGroupWidget("gauge-group:abcd1234", emptyGauges)},
+		{"too many gauges", gaugeGroupWidget("gauge-group:abcd1234", tooMany)},
+		{"blank member path", gaugeGroupWidget("gauge-group:abcd1234", blankPath)},
+		{"unknown member display", gaugeGroupWidget("gauge-group:abcd1234", badDisplay)},
+		{"inverted member range", gaugeGroupWidget("gauge-group:abcd1234", invertedRange)},
+		{"unknown member zone state", gaugeGroupWidget("gauge-group:abcd1234", badZone)},
+		{"title too long", gaugeGroupWidget("gauge-group:abcd1234", longTitle)},
+		{"zero columns", gaugeGroupWidget("gauge-group:abcd1234", zeroColumns)},
+	}
+
+	for _, tc := range cases {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			t.Fatalf("%s: expected rejection", tc.name)
+		}
+	}
+}
+
+// Reject rather than silently drop, matching the embed and gauge precedent.
+func TestValidateDashboardWidgetsRejectsMismatchedGroupConfig(t *testing.T) {
+	group := validGaugeGroupConfig()
+
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"group config on a builtin", dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4, GaugeGroup: group}},
+		{"group config on a gauge", dashboardLayoutItem{ID: "gauge:abcd1234", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig(), GaugeGroup: group}},
+		{"group config on an embed", dashboardLayoutItem{ID: "embed:abcd1234", X: 0, Y: 0, W: 4, H: 4, Embed: &dashboardEmbedConfig{URL: "https://grafana.local/a"}, GaugeGroup: group}},
+		{"gauge config on a group", dashboardLayoutItem{ID: "gauge-group:abcd1234", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig(), GaugeGroup: group}},
+		{"embed config on a group", dashboardLayoutItem{ID: "gauge-group:abcd1234", X: 0, Y: 0, W: 4, H: 4, Embed: &dashboardEmbedConfig{URL: "https://grafana.local/a"}, GaugeGroup: group}},
+	}
+
+	for _, tc := range cases {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			t.Fatalf("%s: expected rejection", tc.name)
+		}
+	}
+}
+
+// The highest-risk omission: a group whose paths are never collected renders
+// the structural dash forever, with nothing in any log to say why.
+func TestGaugeBoundPathsIncludesGroupMembers(t *testing.T) {
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{
+		"a": {ID: "a", Widgets: []dashboardLayoutItem{
+			gaugeWidget("gauge:aaaa1111", &dashboardGaugeConfig{Path: "propulsion.port.oilPressure", Display: "radial"}),
+			gaugeGroupWidget("gauge-group:bbbb2222", &dashboardGaugeGroupConfig{
+				Title: "Port",
+				Gauges: []dashboardGaugeConfig{
+					// Shared with the standalone gauge above: one subscription, not two.
+					{Path: "propulsion.port.oilPressure", Display: "bar"},
+					{Path: "propulsion.port.revolutions", Display: "radial"},
+					{Path: "  environment.depth.belowTransducer  ", Display: "numeric"},
+				},
+			}),
+		}},
+	}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+
+	paths := gaugeBoundPaths()
+	want := []string{"environment.depth.belowTransducer", "propulsion.port.oilPressure", "propulsion.port.revolutions"}
+	if len(paths) != len(want) {
+		t.Fatalf("expected %v, got %v", want, paths)
+	}
+	for i, p := range want {
+		if paths[i] != p {
+			t.Fatalf("expected sorted unique paths %v, got %v", want, paths)
+		}
+	}
+}
+
+func TestDashboardPages_GaugeGroupSurvivesReload(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	page := createTestDashboardPage(t, "Engines", []dashboardLayoutItem{
+		gaugeGroupWidget("gauge-group:abcd1234", validGaugeGroupConfig()),
+	})
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	reloaded, ok := dashboardPagesState[page.ID]
+	dashboardPagesMu.RUnlock()
+	if !ok {
+		t.Fatal("expected the page to survive a reload")
+	}
+	if len(reloaded.Widgets) != 1 || reloaded.Widgets[0].GaugeGroup == nil {
+		t.Fatalf("expected the gauge group config to survive, got %+v", reloaded.Widgets)
+	}
+	group := reloaded.Widgets[0].GaugeGroup
+	if group.Title != "Port" || len(group.Gauges) != 2 {
+		t.Fatalf("expected the group's title and members to survive, got %+v", group)
+	}
+	if group.Gauges[1].Path != "propulsion.port.oilPressure" {
+		t.Fatalf("expected member paths to survive in order, got %+v", group.Gauges)
+	}
+}
+
+// omitempty keeps existing dashboard-pages.json files byte-identical.
+func TestDashboardLayoutItem_OmitsGaugeGroupKeyWhenAbsent(t *testing.T) {
+	encoded, err := json.Marshal(dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4})
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "gaugeGroup") {
+		t.Fatalf("expected no gaugeGroup key on a widget without one, got %s", encoded)
+	}
+}
+
+// ── lamp strip widget (ADR 0052) ─────────────────────────────────────────────
+
+func lampStripWidget(id string, config *dashboardLampStripConfig) dashboardLayoutItem {
+	return dashboardLayoutItem{ID: id, X: 0, Y: 0, W: 12, H: 3, Lamps: config}
+}
+
+func validLampStripConfig() *dashboardLampStripConfig {
+	return &dashboardLampStripConfig{
+		Title: "Status",
+		Lamps: []dashboardLamp{
+			{Path: "electrical.generator.state", Label: "GEN"},
+			{Path: "propulsion.wing.revolutions", Label: "WING"},
+		},
+		ShowCheck: true,
+	}
+}
+
+func TestValidateLampStripAcceptsAWellFormedStrip(t *testing.T) {
+	widget := lampStripWidget("lamps:abcd1234", validLampStripConfig())
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg != "" {
+		t.Fatalf("expected a valid lamp strip to be accepted, got %q", msg)
+	}
+}
+
+// A strip with no lamps but a CHK indicator is legitimate: the rollup alone is
+// a useful thing to pin to a page.
+func TestValidateLampStripAcceptsCheckOnlyStrip(t *testing.T) {
+	config := &dashboardLampStripConfig{Title: "Status", ShowCheck: true}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{lampStripWidget("lamps:abcd1234", config)}); msg != "" {
+		t.Fatalf("expected a check-only strip to be accepted, got %q", msg)
+	}
+}
+
+func TestValidateLampStripRejectsBadInput(t *testing.T) {
+	tooMany := validLampStripConfig()
+	tooMany.Lamps = make([]dashboardLamp, lampStripMaxLamps+1)
+	for i := range tooMany.Lamps {
+		tooMany.Lamps[i] = dashboardLamp{Path: "a.b", Label: "X"}
+	}
+
+	blankPath := validLampStripConfig()
+	blankPath.Lamps[1].Path = "  "
+
+	empty := &dashboardLampStripConfig{Title: "Status"}
+
+	longTitle := validLampStripConfig()
+	longTitle.Title = strings.Repeat("x", gaugeGroupTitleMaxLen+1)
+
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"short token", lampStripWidget("lamps:abc", validLampStripConfig())},
+		{"missing config", lampStripWidget("lamps:abcd1234", nil)},
+		{"no lamps and no check", lampStripWidget("lamps:abcd1234", empty)},
+		{"too many lamps", lampStripWidget("lamps:abcd1234", tooMany)},
+		{"blank lamp path", lampStripWidget("lamps:abcd1234", blankPath)},
+		{"title too long", lampStripWidget("lamps:abcd1234", longTitle)},
+	}
+
+	for _, tc := range cases {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			t.Fatalf("%s: expected rejection", tc.name)
+		}
+	}
+}
+
+func TestValidateDashboardWidgetsRejectsMismatchedLampConfig(t *testing.T) {
+	lamps := validLampStripConfig()
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"lamps on a builtin", dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4, Lamps: lamps}},
+		{"lamps on a gauge", dashboardLayoutItem{ID: "gauge:abcd1234", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig(), Lamps: lamps}},
+		{"lamps on a group", dashboardLayoutItem{ID: "gauge-group:abcd1234", X: 0, Y: 0, W: 4, H: 4, GaugeGroup: validGaugeGroupConfig(), Lamps: lamps}},
+		{"gauge config on a strip", dashboardLayoutItem{ID: "lamps:abcd1234", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig(), Lamps: lamps}},
+	}
+
+	for _, tc := range cases {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			t.Fatalf("%s: expected rejection", tc.name)
+		}
+	}
+}
+
+// The third time this walker has had to learn about a new widget. Miss it and
+// every lamp is permanently dark, with nothing in any log to say why.
+func TestGaugeBoundPathsIncludesLampPaths(t *testing.T) {
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{
+		"a": {ID: "a", Widgets: []dashboardLayoutItem{
+			gaugeWidget("gauge:aaaa1111", &dashboardGaugeConfig{Path: "propulsion.port.oilPressure", Display: "radial"}),
+			lampStripWidget("lamps:bbbb2222", &dashboardLampStripConfig{
+				Title: "Status",
+				Lamps: []dashboardLamp{
+					{Path: "electrical.generator.state", Label: "GEN"},
+					// Shared with the gauge above: one subscription, not two.
+					{Path: "propulsion.port.oilPressure", Label: "OIL"},
+				},
+			}),
+		}},
+	}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+
+	paths := gaugeBoundPaths()
+	want := []string{"electrical.generator.state", "propulsion.port.oilPressure"}
+	if len(paths) != len(want) || paths[0] != want[0] || paths[1] != want[1] {
+		t.Fatalf("expected %v, got %v", want, paths)
+	}
+}
+
+func TestDashboardLayoutItem_OmitsLampsKeyWhenAbsent(t *testing.T) {
+	encoded, err := json.Marshal(dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4})
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "lamps") {
+		t.Fatalf("expected no lamps key on a widget without one, got %s", encoded)
+	}
+}

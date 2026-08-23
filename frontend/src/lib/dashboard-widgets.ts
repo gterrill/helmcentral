@@ -26,10 +26,25 @@ export type BuiltinWidgetId = typeof DASHBOARD_WIDGET_IDS[number]
  */
 export const EMBED_WIDGET_ID_PREFIX = 'embed:'
 export const GAUGE_WIDGET_ID_PREFIX = 'gauge:'
+/**
+ * Gauge groups (ADR 0049) are the third multi-instance widget: a named cluster
+ * of gauges in one tile. Note this prefix is not a prefix of `gauge:` and
+ * `gauge:` is not a prefix of it, so the two id checks never overlap.
+ */
+export const GAUGE_GROUP_WIDGET_ID_PREFIX = 'gauge-group:'
+/** Lamp strips (ADR 0052) — the indicator ribbon, as a placeable widget. */
+export const LAMP_STRIP_WIDGET_ID_PREFIX = 'lamps:'
 export type EmbedWidgetId = `${typeof EMBED_WIDGET_ID_PREFIX}${string}`
 export type GaugeWidgetId = `${typeof GAUGE_WIDGET_ID_PREFIX}${string}`
+export type GaugeGroupWidgetId = `${typeof GAUGE_GROUP_WIDGET_ID_PREFIX}${string}`
+export type LampStripWidgetId = `${typeof LAMP_STRIP_WIDGET_ID_PREFIX}${string}`
 
-export type DashboardWidgetId = BuiltinWidgetId | EmbedWidgetId | GaugeWidgetId
+export type DashboardWidgetId =
+  | BuiltinWidgetId
+  | EmbedWidgetId
+  | GaugeWidgetId
+  | GaugeGroupWidgetId
+  | LampStripWidgetId
 
 export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'vessel': 'Vessel',
@@ -55,7 +70,10 @@ export interface EmbedWidgetConfig {
   url: string
 }
 
-export type GaugeDisplay = 'numeric' | 'radial' | 'bar' | 'lamp'
+export type GaugeDisplay = 'numeric' | 'radial' | 'bar' | 'lamp' | 'trend'
+
+/** Windows the history endpoint allows; mirrors telemetryHistoryWindows in Go. */
+export const GAUGE_TREND_WINDOWS = ['1h', '3h', '6h', '24h', '7d'] as const
 
 /** A band of the range coloured by alarm severity (ADR 0038's vocabulary). */
 export interface GaugeZone {
@@ -75,7 +93,49 @@ export interface GaugeWidgetConfig {
   min?: number
   max?: number
   zones?: GaugeZone[]
+  /** History window; `trend` only (ADR 0051). */
+  window?: string
 }
+
+/**
+ * A named cluster of gauges rendered as one tile (ADR 0049).
+ *
+ * Members are `GaugeWidgetConfig` verbatim, so the renderers, the unit
+ * conversion and the backend's per-gauge validation are shared rather than
+ * forked for the grouped case.
+ */
+export interface GaugeGroupWidgetConfig {
+  title: string
+  /** Columns inside the tile; undefined derives a count from the member count. */
+  columns?: number
+  gauges: GaugeWidgetConfig[]
+}
+
+/** One indicator lamp bound to a path. */
+export interface LampConfig {
+  path: string
+  label: string
+  /** Lights when the value is zero or absent, for a signal whose healthy state is off. */
+  invert?: boolean
+}
+
+/**
+ * A dense row of indicator lamps plus an optional CHK rollup (ADR 0052) — the
+ * N2KView indicator ribbon, placed per page and duplicated onto the others.
+ */
+export interface LampStripWidgetConfig {
+  title: string
+  lamps: LampConfig[]
+  showCheck?: boolean
+}
+
+export const LAMP_STRIP_MAX_LAMPS = 16
+export const LAMP_LABEL_MAX_LENGTH = 12
+
+/** Caps mirroring gaugeGroupMaxGauges / gaugeGroupTitleMaxLen in backend/dashboard_pages.go. */
+export const GAUGE_GROUP_MAX_GAUGES = 12
+export const GAUGE_GROUP_TITLE_MAX_LENGTH = 48
+export const GAUGE_GROUP_MAX_COLUMNS = 4
 
 export interface DashboardLayoutItem {
   id: DashboardWidgetId
@@ -87,6 +147,10 @@ export interface DashboardLayoutItem {
   embed?: EmbedWidgetConfig
   /** Present only on `gauge:` widgets; the backend rejects it on any other id. */
   gauge?: GaugeWidgetConfig
+  /** Present only on `gauge-group:` widgets; the backend rejects it elsewhere. */
+  gaugeGroup?: GaugeGroupWidgetConfig
+  /** Present only on `lamps:` widgets; the backend rejects it elsewhere. */
+  lamps?: LampStripWidgetConfig
 }
 
 /** Length caps mirroring embedURLMaxLen / embedTitleMaxLen in backend/dashboard_pages.go. */
@@ -152,6 +216,106 @@ export function newGaugeWidgetId(existing: readonly DashboardLayoutItem[]): Gaug
   }
 }
 
+export function isGaugeGroupWidgetId(id: string): id is GaugeGroupWidgetId {
+  return id.startsWith(GAUGE_GROUP_WIDGET_ID_PREFIX)
+}
+
+/** Mints a gauge group id. Same reasoning as newEmbedWidgetId, including why not crypto.randomUUID. */
+export function newGaugeGroupWidgetId(existing: readonly DashboardLayoutItem[]): GaugeGroupWidgetId {
+  for (;;) {
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10).padEnd(8, '0')}`
+    const id: GaugeGroupWidgetId = `${GAUGE_GROUP_WIDGET_ID_PREFIX}${token}`
+    if (!existing.some((w) => w.id === id)) return id
+  }
+}
+
+export function isLampStripWidgetId(id: string): id is LampStripWidgetId {
+  return id.startsWith(LAMP_STRIP_WIDGET_ID_PREFIX)
+}
+
+/** Mints a lamp strip id. Same reasoning as newEmbedWidgetId. */
+export function newLampStripWidgetId(existing: readonly DashboardLayoutItem[]): LampStripWidgetId {
+  for (;;) {
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10).padEnd(8, '0')}`
+    const id: LampStripWidgetId = `${LAMP_STRIP_WIDGET_ID_PREFIX}${token}`
+    if (!existing.some((w) => w.id === id)) return id
+  }
+}
+
+/** True for the widget kinds whose ids carry a per-instance token. */
+export function isMultiInstanceWidgetId(id: string): boolean {
+  return isEmbedWidgetId(id) || isGaugeWidgetId(id) || isGaugeGroupWidgetId(id) || isLampStripWidgetId(id)
+}
+
+/**
+ * Copies a multi-instance widget under a fresh id, or returns null for a
+ * builtin — builtins are one per page, so there is nothing to duplicate.
+ *
+ * The copy is deep: a shallow one would leave both tiles sharing the same
+ * `gauges` array, and retargeting the copy would silently rewrite the original.
+ */
+export function duplicateWidget(
+  widget: DashboardLayoutItem,
+  existing: readonly DashboardLayoutItem[],
+): DashboardLayoutItem | null {
+  if (isLampStripWidgetId(widget.id)) {
+    return {
+      ...widget,
+      id: newLampStripWidgetId(existing),
+      lamps: widget.lamps
+        ? { ...widget.lamps, lamps: widget.lamps.lamps.map((lamp) => ({ ...lamp })) }
+        : undefined,
+    }
+  }
+  if (isGaugeGroupWidgetId(widget.id)) {
+    return {
+      ...widget,
+      id: newGaugeGroupWidgetId(existing),
+      gaugeGroup: widget.gaugeGroup ? cloneGaugeGroup(widget.gaugeGroup) : undefined,
+    }
+  }
+  if (isGaugeWidgetId(widget.id)) {
+    return {
+      ...widget,
+      id: newGaugeWidgetId(existing),
+      gauge: widget.gauge ? cloneGauge(widget.gauge) : undefined,
+    }
+  }
+  if (isEmbedWidgetId(widget.id)) {
+    return {
+      ...widget,
+      id: newEmbedWidgetId(existing),
+      embed: widget.embed ? { ...widget.embed } : undefined,
+    }
+  }
+  return null
+}
+
+function cloneGauge(gauge: GaugeWidgetConfig): GaugeWidgetConfig {
+  return { ...gauge, zones: gauge.zones?.map((zone) => ({ ...zone })) }
+}
+
+function cloneGaugeGroup(group: GaugeGroupWidgetConfig): GaugeGroupWidgetConfig {
+  return { ...group, gauges: group.gauges.map(cloneGauge) }
+}
+
+/**
+ * Retargets a group's paths in one pass — the point of duplicating a tile.
+ * Copy "Port", replace `port` with `starboard`, and five gauges move to the
+ * other engine without five rounds of retyping.
+ *
+ * Paths only. Labels are left alone deliberately: "Port RPM" is a two-word
+ * edit, while a wrong bulk label rewrite is silent and easy to miss.
+ */
+export function rewriteGaugePaths(
+  gauges: readonly GaugeWidgetConfig[],
+  from: string,
+  to: string,
+): GaugeWidgetConfig[] {
+  if (from === '') return gauges.map(cloneGauge)
+  return gauges.map((gauge) => ({ ...cloneGauge(gauge), path: gauge.path.split(from).join(to) }))
+}
+
 /**
  * Re-applies the grid's geometry to the persisted widget list.
  *
@@ -176,6 +340,12 @@ export function mergeLayoutGeometry(
 export function widgetDisplayName(widget: DashboardLayoutItem): string {
   if (isEmbedWidgetId(widget.id)) {
     return widget.embed?.title.trim() || 'Embed'
+  }
+  if (isLampStripWidgetId(widget.id)) {
+    return widget.lamps?.title.trim() || 'Indicators'
+  }
+  if (isGaugeGroupWidgetId(widget.id)) {
+    return widget.gaugeGroup?.title.trim() || 'Gauges'
   }
   if (isGaugeWidgetId(widget.id)) {
     return widget.gauge?.label.trim() || widget.gauge?.path || 'Gauge'

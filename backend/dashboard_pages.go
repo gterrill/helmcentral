@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -61,7 +62,51 @@ const (
 
 // Display kinds a gauge can render as.
 var validGaugeDisplays = map[string]bool{
-	"numeric": true, "radial": true, "bar": true, "lamp": true,
+	"numeric": true, "radial": true, "bar": true, "lamp": true, "trend": true,
+}
+
+// Gauge groups (ADR 0049) are the third multi-instance widget type. A group is
+// a named cluster of gauges in one tile — "Port" holding RPM, oil pressure and
+// exhaust temperature — built once and then duplicated for the other engine.
+const gaugeGroupWidgetIDPrefix = "gauge-group:"
+
+const (
+	gaugeGroupTitleMaxLen = 48
+	gaugeGroupMaxGauges   = 12
+	gaugeGroupMaxColumns  = 4
+)
+
+// dashboardGaugeGroupConfig reuses dashboardGaugeConfig unchanged, so the
+// per-gauge validation and the bound-path walker are shared, not forked.
+// Lamp strips (ADR 0052) are the fourth multi-instance widget: a dense row of
+// indicator lamps plus an optional CHK rollup, pinned to each page the way
+// N2KView's indicator ribbon is repeated across every display.
+const lampStripWidgetIDPrefix = "lamps:"
+
+const (
+	lampStripMaxLamps    = 16
+	lampStripLabelMaxLen = 12
+)
+
+type dashboardLamp struct {
+	Path  string `json:"path"`
+	Label string `json:"label"`
+	// Invert lights the lamp when the value is zero or absent, for a signal
+	// whose healthy state is "off" (a bilge float, a fault line).
+	Invert bool `json:"invert,omitempty"`
+}
+
+type dashboardLampStripConfig struct {
+	Title string          `json:"title"`
+	Lamps []dashboardLamp `json:"lamps"`
+	// ShowCheck appends the CHK rollup, coloured by the worst active alarm.
+	ShowCheck bool `json:"showCheck,omitempty"`
+}
+
+type dashboardGaugeGroupConfig struct {
+	Title   string                 `json:"title"`
+	Columns *int                   `json:"columns,omitempty"`
+	Gauges  []dashboardGaugeConfig `json:"gauges"`
 }
 
 const (
@@ -79,6 +124,10 @@ type dashboardLayoutItem struct {
 	H     int                   `json:"h"`
 	Embed *dashboardEmbedConfig `json:"embed,omitempty"`
 	Gauge *dashboardGaugeConfig `json:"gauge,omitempty"`
+	// Present only on `gauge-group:` widgets; rejected on any other id.
+	GaugeGroup *dashboardGaugeGroupConfig `json:"gaugeGroup,omitempty"`
+	// Present only on `lamps:` widgets; rejected on any other id.
+	Lamps *dashboardLampStripConfig `json:"lamps,omitempty"`
 }
 
 // dashboardGaugeConfig binds one widget to one SignalK path. Like the embed
@@ -172,6 +221,12 @@ func validateEmbedWidget(w dashboardLayoutItem) string {
 	if !embedWidgetTokenPattern.MatchString(token) {
 		return "invalid embed widget id: " + w.ID
 	}
+	if w.GaugeGroup != nil {
+		return "gauge group config not allowed on embed widget: " + w.ID
+	}
+	if w.Lamps != nil {
+		return "lamp config not allowed on embed widget: " + w.ID
+	}
 	if w.Embed == nil {
 		return "embed widget requires embed config: " + w.ID
 	}
@@ -196,6 +251,14 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 			if msg := validateEmbedWidget(w); msg != "" {
 				return msg
 			}
+		} else if strings.HasPrefix(w.ID, lampStripWidgetIDPrefix) {
+			if msg := validateLampStripWidget(w); msg != "" {
+				return msg
+			}
+		} else if strings.HasPrefix(w.ID, gaugeGroupWidgetIDPrefix) {
+			if msg := validateGaugeGroupWidget(w); msg != "" {
+				return msg
+			}
 		} else if strings.HasPrefix(w.ID, gaugeWidgetIDPrefix) {
 			if msg := validateGaugeWidget(w); msg != "" {
 				return msg
@@ -211,6 +274,12 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 			}
 			if w.Gauge != nil {
 				return "gauge config not allowed on widget id: " + w.ID
+			}
+			if w.GaugeGroup != nil {
+				return "gauge group config not allowed on widget id: " + w.ID
+			}
+			if w.Lamps != nil {
+				return "lamp config not allowed on widget id: " + w.ID
 			}
 		}
 		// Embed tokens are unique per instance, so the duplicate check below
@@ -503,35 +572,139 @@ func validateGaugeWidget(w dashboardLayoutItem) string {
 	if w.Embed != nil {
 		return "embed config not allowed on gauge widget: " + w.ID
 	}
+	if w.GaugeGroup != nil {
+		return "gauge group config not allowed on gauge widget: " + w.ID
+	}
+	if w.Lamps != nil {
+		return "lamp config not allowed on gauge widget: " + w.ID
+	}
 	if w.Gauge == nil {
 		return "gauge widget requires gauge config: " + w.ID
 	}
+	return validateGaugeConfig(*w.Gauge, w.ID)
+}
 
-	path := strings.TrimSpace(w.Gauge.Path)
+// validateGaugeConfig holds the rules for a single bound gauge, whether it is a
+// standalone `gauge:` widget or one member of a `gauge-group:` cluster. ctx
+// names the offending widget so a rejection points somewhere useful.
+func validateGaugeConfig(g dashboardGaugeConfig, ctx string) string {
+	path := strings.TrimSpace(g.Path)
 	if path == "" {
-		return "gauge widget requires a SignalK path: " + w.ID
+		return "gauge widget requires a SignalK path: " + ctx
 	}
 	if len(path) > gaugePathMaxLen {
-		return "gauge path too long: " + w.ID
+		return "gauge path too long: " + ctx
 	}
-	if len(w.Gauge.Label) > gaugeLabelMaxLen {
-		return "gauge label too long: " + w.ID
+	if len(g.Label) > gaugeLabelMaxLen {
+		return "gauge label too long: " + ctx
 	}
-	if !validGaugeDisplays[w.Gauge.Display] {
-		return "unknown gauge display: " + w.Gauge.Display
+	if !validGaugeDisplays[g.Display] {
+		return "unknown gauge display: " + g.Display
 	}
-	if w.Gauge.Min != nil && w.Gauge.Max != nil && *w.Gauge.Min >= *w.Gauge.Max {
-		return "gauge min must be below max: " + w.ID
+	if g.Min != nil && g.Max != nil && *g.Min >= *g.Max {
+		return "gauge min must be below max: " + ctx
 	}
-	for _, zone := range w.Gauge.Zones {
+	for i, zone := range g.Zones {
 		if _, ok := alarmStateRank[zone.State]; !ok {
 			return "unknown gauge zone state: " + zone.State
+		}
+		if zone.State == alarmStateNormal {
+			continue
+		}
+		// A zone is the alarm (ADR 0050), so a band that cannot become a
+		// threshold is rejected here rather than silently never firing.
+		if _, err := gaugeZoneRule("validate", g, zone, i); err != nil {
+			return fmt.Sprintf("gauge zone %d cannot raise an alarm (%v): %s", i+1, err, ctx)
 		}
 	}
 	return ""
 }
 
-// gaugeBoundPaths returns every SignalK path any gauge on any page is bound to.
+// validateLampStripWidget guards the fourth operator-configured widget.
+//
+// A strip with no lamps but ShowCheck set is fine — the rollup alone is a
+// useful thing to pin to a page — but a strip with neither renders nothing at
+// all, which is a mistake rather than a choice.
+func validateLampStripWidget(w dashboardLayoutItem) string {
+	token := strings.TrimPrefix(w.ID, lampStripWidgetIDPrefix)
+	if !embedWidgetTokenPattern.MatchString(token) {
+		return "invalid lamp strip widget id: " + w.ID
+	}
+	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil {
+		return "only lamp config is allowed on a lamp strip widget: " + w.ID
+	}
+	if w.Lamps == nil {
+		return "lamp strip widget requires lamps config: " + w.ID
+	}
+	if len(w.Lamps.Title) > gaugeGroupTitleMaxLen {
+		return "lamp strip title too long: " + w.ID
+	}
+	if len(w.Lamps.Lamps) == 0 && !w.Lamps.ShowCheck {
+		return "lamp strip needs at least one lamp or the check indicator: " + w.ID
+	}
+	if len(w.Lamps.Lamps) > lampStripMaxLamps {
+		return "lamp strip has too many lamps: " + w.ID
+	}
+	for _, lamp := range w.Lamps.Lamps {
+		path := strings.TrimSpace(lamp.Path)
+		if path == "" {
+			return "lamp requires a SignalK path: " + w.ID
+		}
+		if len(path) > gaugePathMaxLen {
+			return "lamp path too long: " + w.ID
+		}
+		if len(lamp.Label) > lampStripLabelMaxLen {
+			return "lamp label too long: " + w.ID
+		}
+	}
+	return ""
+}
+
+// validateGaugeGroupWidget guards the third operator-configured widget. Members
+// go through validateGaugeConfig, so a group can never hold a gauge a
+// standalone widget would have rejected.
+//
+// Duplicate paths within a group are deliberately allowed: the same value shown
+// twice in two units is a legitimate thing to want.
+func validateGaugeGroupWidget(w dashboardLayoutItem) string {
+	token := strings.TrimPrefix(w.ID, gaugeGroupWidgetIDPrefix)
+	if !embedWidgetTokenPattern.MatchString(token) {
+		return "invalid gauge group widget id: " + w.ID
+	}
+	if w.Embed != nil {
+		return "embed config not allowed on gauge group widget: " + w.ID
+	}
+	if w.Gauge != nil {
+		return "gauge config not allowed on gauge group widget: " + w.ID
+	}
+	if w.Lamps != nil {
+		return "lamp config not allowed on gauge group widget: " + w.ID
+	}
+	if w.GaugeGroup == nil {
+		return "gauge group widget requires gaugeGroup config: " + w.ID
+	}
+	if len(w.GaugeGroup.Title) > gaugeGroupTitleMaxLen {
+		return "gauge group title too long: " + w.ID
+	}
+	if len(w.GaugeGroup.Gauges) == 0 {
+		return "gauge group requires at least one gauge: " + w.ID
+	}
+	if len(w.GaugeGroup.Gauges) > gaugeGroupMaxGauges {
+		return "gauge group has too many gauges: " + w.ID
+	}
+	if w.GaugeGroup.Columns != nil && (*w.GaugeGroup.Columns < 1 || *w.GaugeGroup.Columns > gaugeGroupMaxColumns) {
+		return "gauge group columns out of range: " + w.ID
+	}
+	for _, g := range w.GaugeGroup.Gauges {
+		if msg := validateGaugeConfig(g, w.ID); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+// gaugeBoundPaths returns every SignalK path any gauge on any page is bound to,
+// standalone gauges and gauge-group members alike.
 // The stream uses it to push exactly those values and no more — the backend
 // already owns the page config, so no subscription protocol is needed.
 func gaugeBoundPaths() []string {
@@ -540,17 +713,36 @@ func gaugeBoundPaths() []string {
 
 	seen := map[string]bool{}
 	var paths []string
+	add := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" || seen[path] {
+			return
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+
 	for _, page := range dashboardPagesState {
 		for _, widget := range page.Widgets {
-			if widget.Gauge == nil {
-				continue
+			if widget.Gauge != nil {
+				add(widget.Gauge.Path)
 			}
-			path := strings.TrimSpace(widget.Gauge.Path)
-			if path == "" || seen[path] {
-				continue
+			// A group's members are bound paths too. Miss them and every gauge
+			// in every group renders the structural dash forever, silently.
+			if widget.GaugeGroup != nil {
+				for _, g := range widget.GaugeGroup.Gauges {
+					add(g.Path)
+				}
 			}
-			seen[path] = true
-			paths = append(paths, path)
+			// Every widget that binds a path must register here. This walker
+			// is the single point at which a bound path becomes a pushed
+			// value; omitting a widget kind leaves it permanently blank with
+			// nothing in any log to say why.
+			if widget.Lamps != nil {
+				for _, lamp := range widget.Lamps.Lamps {
+					add(lamp.Path)
+				}
+			}
 		}
 	}
 	sort.Strings(paths)

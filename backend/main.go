@@ -303,6 +303,7 @@ func main() {
 	loadAnchorPlacemarks()
 	loadRoutes()
 	loadDashboardPages()
+	loadEngineProfiles()
 	// All vessel data arrives over the SignalK delta stream (ADR 0037). There
 	// is no REST read path to fall back to: a dropped stream surfaces as an
 	// outage rather than being papered over.
@@ -388,6 +389,8 @@ func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []a
 		{http.MethodGet, "/api/tracks", tierRead, getTracksHandler},
 		{http.MethodGet, "/api/tracks/motoring", tierRead, getMotoringTrackHandler},
 		{http.MethodGet, "/api/depth-trend", tierRead, depthTrend},
+		{http.MethodGet, "/api/telemetry/history", tierRead, telemetryHistoryHandler},
+		{http.MethodGet, "/api/engine-profiles", tierRead, engineProfilesHandler},
 		{http.MethodGet, "/api/czone/switches", tierRead, getCZoneSwitchesHandler},
 		{http.MethodGet, "/api/autopilot", tierRead, getAutopilotHandler},
 		{http.MethodGet, "/api/world-imagery/:z/:x/:y", tierRead, proxyWorldImageryTileHandler(globalTileCache, worldImageryClient)},

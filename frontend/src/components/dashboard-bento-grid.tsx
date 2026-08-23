@@ -3,10 +3,10 @@ import GridLayout, { WidthProvider, type LayoutItem } from 'react-grid-layout/le
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import '@/styles/dashboard-bento-grid.css'
-import { GripVertical, X } from 'lucide-react'
+import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
-import { isGaugeWidgetId, isEmbedWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
@@ -25,6 +25,12 @@ const NARROW_FULL_SPAN_MIN_W = GRID_COLUMNS / 2
 const GAUGE_WIDGET_CONSTRAINTS = { minW: 2, minH: 4 }
 
 const EMBED_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
+
+// A cluster needs the room a single gauge does not.
+const GAUGE_GROUP_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
+
+// A ribbon is wide and short by nature.
+const LAMP_STRIP_WIDGET_CONSTRAINTS = { minW: 3, minH: 2 }
 
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
@@ -52,10 +58,12 @@ export interface DashboardBentoGridProps {
   // per-instance config alongside their position.
   renderWidget: (widget: DashboardLayoutItem) => React.ReactNode
   onRemoveWidget: (id: DashboardWidgetId) => void
+  // Only the token-id kinds can be duplicated; builtins are one per page.
+  onDuplicateWidget: (id: DashboardWidgetId) => void
   onLayoutSettle: (next: DashboardLayoutItem[]) => void
 }
 
-export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onLayoutSettle }: DashboardBentoGridProps) {
+export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle }: DashboardBentoGridProps) {
   // Below `lg`, render a plain reflowed stack instead of the RGL grid — never both at once.
   // Toggling between them via CSS (rather than this JS media query) would mount both layouts
   // simultaneously, leaving duplicate DOM nodes per widget: wasted render cost for real users,
@@ -69,7 +77,15 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       y: w.y,
       w: w.w,
       h: w.h,
-      ...(isEmbedWidgetId(w.id) ? EMBED_WIDGET_CONSTRAINTS : isGaugeWidgetId(w.id) ? GAUGE_WIDGET_CONSTRAINTS : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
+      ...(isLampStripWidgetId(w.id)
+        ? LAMP_STRIP_WIDGET_CONSTRAINTS
+        : isEmbedWidgetId(w.id)
+        ? EMBED_WIDGET_CONSTRAINTS
+        : isGaugeGroupWidgetId(w.id)
+          ? GAUGE_GROUP_WIDGET_CONSTRAINTS
+          : isGaugeWidgetId(w.id)
+            ? GAUGE_WIDGET_CONSTRAINTS
+            : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
     })),
     [widgets],
   )
@@ -136,6 +152,16 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               >
                 <X className="h-3.5 w-3.5" />
               </button>
+              {isMultiInstanceWidgetId(w.id) && (
+                <button
+                  type="button"
+                  onClick={() => onDuplicateWidget(w.id)}
+                  className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+                  aria-label={`Duplicate ${widgetDisplayName(w)} widget`}
+                >
+                  <Copy className="h-3 w-3" />
+                </button>
+              )}
               <div className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm active:cursor-grabbing">
                 <GripVertical className="h-3.5 w-3.5" />
               </div>

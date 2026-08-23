@@ -86,19 +86,31 @@ import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import {
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_WIDGET_LABELS,
+  duplicateWidget,
   isEmbedWidgetId,
+  isGaugeGroupWidgetId,
   isGaugeWidgetId,
+  isLampStripWidgetId,
   newEmbedWidgetId,
+  newGaugeGroupWidgetId,
   newGaugeWidgetId,
+  newLampStripWidgetId,
   type DashboardLayoutItem,
   type DashboardWidgetId,
   type EmbedWidgetConfig,
+  type GaugeGroupWidgetConfig,
+  type LampStripWidgetConfig,
   type GaugeWidgetConfig,
 } from '@/lib/dashboard-widgets'
 import { EmbedTile } from '@/components/embed-tile'
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
 import { GaugeTile } from '@/components/gauge-tile'
+import { GaugeGroupConfigDialog } from '@/components/gauge-group-config-dialog'
+import { GaugeGroupTile } from '@/components/gauge-group-tile'
+import { EngineProfileDialog } from '@/components/engine-profile-dialog'
+import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
+import { LampStripTile } from '@/components/lamp-strip-tile'
 import { useGaugeValues } from '@/hooks/use-gauge-values'
 import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
@@ -178,6 +190,11 @@ export function App() {
   // Same pattern as embedDraft: a freshly added gauge exists only here until it
   // is given a path, since the backend rejects one without.
   const [gaugeDraft, setGaugeDraft] = useState<DashboardLayoutItem | null>(null)
+  // Same again for a gauge group (ADR 0049): the backend rejects an empty one,
+  // so a new group has no business reaching it until it holds a bound gauge.
+  const [gaugeGroupDraft, setGaugeGroupDraft] = useState<DashboardLayoutItem | null>(null)
+  const [lampStripDraft, setLampStripDraft] = useState<DashboardLayoutItem | null>(null)
+  const [engineProfileOpen, setEngineProfileOpen] = useState(false)
   const gaugeValues = useGaugeValues()
   const [settingsDirty, setSettingsDirty] = useState(false)
   const settingsPageRef = useRef<SettingsPageHandle>(null)
@@ -320,7 +337,7 @@ export function App() {
     source: vesselStateSource,
   } = useVesselState()
 
-  const { alarms, acknowledge: acknowledgeAlarm, silence: silenceAlarm } = useAlarms()
+  const { alarms, worst: worstAlarmState, acknowledge: acknowledgeAlarm, silence: silenceAlarm } = useAlarms()
   // Only for deciding whether to offer SignalK discovery. Gated on `loading`
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
@@ -477,6 +494,98 @@ export function App() {
     setGaugeDraft(null)
   }, [activePage, effectiveWidgets, gaugeDraft, updatePage])
 
+  // Wider and taller than a single gauge: a cluster needs the room.
+  const handleAddGaugeGroup = useCallback(() => {
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    setGaugeGroupDraft({
+      id: newGaugeGroupWidgetId(effectiveWidgets),
+      x: 0,
+      y: maxY,
+      w: 6,
+      h: 8,
+      gaugeGroup: { title: '', gauges: [{ path: '', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' }] },
+    })
+  }, [effectiveWidgets])
+
+  const handleSaveGaugeGroup = useCallback((gaugeGroup: GaugeGroupWidgetConfig) => {
+    if (!activePage || !gaugeGroupDraft) return
+    const id = gaugeGroupDraft.id
+    if (effectiveWidgets.some((w) => w.id === id)) {
+      void updatePage(activePage.id, {
+        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, gaugeGroup } : w)),
+      })
+    } else {
+      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...gaugeGroupDraft, gaugeGroup }] })
+    }
+    setGaugeGroupDraft(null)
+  }, [activePage, effectiveWidgets, gaugeGroupDraft, updatePage])
+
+  /**
+   * An engine profile lands as an ordinary gauge group (ADR 0053) — already
+   * configured, and saved straight away rather than held as a draft, because
+   * unlike a blank tile it is valid the moment it is built.
+   */
+  const handleApplyEngineProfile = useCallback((title: string, gauges: GaugeWidgetConfig[]) => {
+    if (!activePage) return
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    void updatePage(activePage.id, {
+      widgets: [...effectiveWidgets, {
+        id: newGaugeGroupWidgetId(effectiveWidgets),
+        x: 0, y: maxY, w: 6, h: 8,
+        gaugeGroup: { title, gauges },
+      }],
+    })
+    setEngineProfileOpen(false)
+  }, [activePage, effectiveWidgets, updatePage])
+
+  // Wide and short: a ribbon spans the page rather than occupying a cell.
+  const handleAddLampStrip = useCallback(() => {
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    setLampStripDraft({
+      id: newLampStripWidgetId(effectiveWidgets),
+      x: 0,
+      y: maxY,
+      w: 12,
+      h: 3,
+      lamps: { title: 'Status', lamps: [{ path: '', label: '' }], showCheck: true },
+    })
+  }, [effectiveWidgets])
+
+  const handleSaveLampStrip = useCallback((lamps: LampStripWidgetConfig) => {
+    if (!activePage || !lampStripDraft) return
+    const id = lampStripDraft.id
+    if (effectiveWidgets.some((w) => w.id === id)) {
+      void updatePage(activePage.id, {
+        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, lamps } : w)),
+      })
+    } else {
+      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...lampStripDraft, lamps }] })
+    }
+    setLampStripDraft(null)
+  }, [activePage, effectiveWidgets, lampStripDraft, updatePage])
+
+  /**
+   * Copies a tile and opens the copy's config straight away — the copy exists
+   * to be retargeted, so making that the immediate next step is the point.
+   * Persisted first: unlike a fresh draft, a duplicate is already valid.
+   */
+  const handleDuplicateWidget = useCallback((id: DashboardWidgetId) => {
+    if (!activePage) return
+    const source = effectiveWidgets.find((w) => w.id === id)
+    if (!source) return
+    const copy = duplicateWidget(source, effectiveWidgets)
+    if (!copy) return
+
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    const placed = { ...copy, x: 0, y: maxY }
+    void updatePage(activePage.id, { widgets: [...effectiveWidgets, placed] })
+
+    if (isLampStripWidgetId(placed.id)) setLampStripDraft(placed)
+    else if (isGaugeGroupWidgetId(placed.id)) setGaugeGroupDraft(placed)
+    else if (isGaugeWidgetId(placed.id)) setGaugeDraft(placed)
+    else if (isEmbedWidgetId(placed.id)) setEmbedDraft(placed)
+  }, [activePage, effectiveWidgets, updatePage])
+
   const handleSaveEmbed = useCallback((id: DashboardWidgetId, embed: EmbedWidgetConfig) => {
     if (!activePage) return
     if (effectiveWidgets.some((w) => w.id === id)) {
@@ -499,6 +608,32 @@ export function App() {
   // this case.
   const renderWidget = (widget: DashboardLayoutItem): ReactNode => {
     const { id } = widget
+    if (isLampStripWidgetId(id)) {
+      if (!widget.lamps) return null
+      return (
+        <LampStripTile
+          config={widget.lamps}
+          values={gaugeValues}
+          worstAlarmState={worstAlarmState}
+          editing={layoutEditing}
+          onConfigure={() => setLampStripDraft(widget)}
+          onOpenAlarms={() => requestNavigate('alarms', () => setActivePanel('alarms'))}
+        />
+      )
+    }
+
+    if (isGaugeGroupWidgetId(id)) {
+      if (!widget.gaugeGroup) return null
+      return (
+        <GaugeGroupTile
+          config={widget.gaugeGroup}
+          values={gaugeValues}
+          editing={layoutEditing}
+          onConfigure={() => setGaugeGroupDraft(widget)}
+        />
+      )
+    }
+
     if (isGaugeWidgetId(id)) {
       if (!widget.gauge) return null
       return (
@@ -698,6 +833,7 @@ export function App() {
         editing={layoutEditing}
         renderWidget={renderWidget}
         onRemoveWidget={handleRemoveWidget}
+        onDuplicateWidget={handleDuplicateWidget}
         onLayoutSettle={handleLayoutSettle}
       />
 
@@ -731,6 +867,27 @@ export function App() {
               </button>
               <button
                 type="button"
+                onClick={() => setEngineProfileOpen(true)}
+                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                From engine profile…
+              </button>
+              <button
+                type="button"
+                onClick={handleAddLampStrip}
+                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                Indicators…
+              </button>
+              <button
+                type="button"
+                onClick={handleAddGaugeGroup}
+                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                Gauge Group…
+              </button>
+              <button
+                type="button"
                 onClick={handleAddEmbed}
                 className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
@@ -745,6 +902,24 @@ export function App() {
         widget={gaugeDraft}
         onCancel={() => setGaugeDraft(null)}
         onSave={handleSaveGauge}
+      />
+
+      <GaugeGroupConfigDialog
+        widget={gaugeGroupDraft}
+        onCancel={() => setGaugeGroupDraft(null)}
+        onSave={handleSaveGaugeGroup}
+      />
+
+      <EngineProfileDialog
+        open={engineProfileOpen}
+        onCancel={() => setEngineProfileOpen(false)}
+        onApply={handleApplyEngineProfile}
+      />
+
+      <LampStripConfigDialog
+        widget={lampStripDraft}
+        onCancel={() => setLampStripDraft(null)}
+        onSave={handleSaveLampStrip}
       />
 
       <EmbedConfigDialog

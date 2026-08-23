@@ -2,9 +2,27 @@
 
 ## Status
 
-Proposed
+**Superseded by [ADR 0053](0053-engine-profiles.md).** Never implemented.
 
-This records a design ahead of its implementation, so the plugin contract can be
+Two things this ADR rests on turned out not to hold. Its scope boundary assumed
+maintenance records would live in a separate application (HelmLocker); HelmLocker is
+inventory management only, so Helmcentral owns maintenance and service history. And its
+central technical objection — that a service reminder cannot be an alarm because
+"runtime is monotonic, so such a rule fires once at the threshold and can never clear" —
+was answered by [ADR 0050](0050-gauge-zones-as-the-alarm-source.md), which introduced
+rules derived from config the backend owns and re-evaluated each tick: a rule of
+`runTime above (last_completed_hours + interval)` clears and re-arms because logging
+work moves the threshold, not because the value falls back.
+
+Service intervals now live in the engine profile JSON alongside that engine's gauges,
+since both answer the same question. What survives from this ADR: the host derives what
+is due, there is no default provider, and a completion record stops at the fact that
+work happened. This document is kept for the reasoning, particularly the alternatives
+section, whose data-format entry anticipated its own reversal.
+
+The original status follows.
+
+*Proposed.* This records a design ahead of its implementation, so the plugin contract can be
 reviewed before an implementation freezes it. It rests on a scope boundary stated in
 Context: maintenance and inventory *records* stay outside Helmcentral.
 

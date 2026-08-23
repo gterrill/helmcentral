@@ -1,0 +1,182 @@
+{
+  "id": "cummins-qsb67-550",
+  "name": "Cummins QSB 6.7 550",
+  "manufacturer": "Cummins",
+  "model": "QSB 6.7",
+  "rating_hp": 550,
+  "source": "Seaboard Marine (sbmar.com) — advisory operating ranges, NOT factory alarm setpoints",
+  "notes": "Cummins does not publish QSB 6.7 setpoints; they are in the operator's manual and QuickServe. Every band here is a green advisory range with a citation, and raises no alarm. The warn and alarm thresholds are deliberately unset — fill them from your manual and they become real alarms.",
+  "gauges": [
+    {
+      "path_suffix": "revolutions",
+      "label": "RPM",
+      "display": "radial",
+      "quantity": "frequency",
+      "unit": "rpm",
+      "min": 0,
+      "max": 3000,
+      "decimals": 0,
+      "zones": [
+        {
+          "direction": "above",
+          "threshold": null,
+          "state": "warn",
+          "note": "Overspeed warning — from your manual. Rated speed is 2600 rpm."
+        }
+      ]
+    },
+    {
+      "path_suffix": "oilPressure",
+      "label": "Oil Press",
+      "display": "radial",
+      "quantity": "pressure",
+      "unit": "psi",
+      "min": 0,
+      "max": 100,
+      "zones": [
+        {
+          "direction": "above",
+          "threshold": 40,
+          "state": "normal",
+          "source": "sbmar.com: 40-80 psi at medium to high RPM is average; 10-20 psi at hot idle is normal"
+        },
+        {
+          "direction": "below",
+          "threshold": null,
+          "state": "warn",
+          "note": "Low oil pressure warning — from your manual"
+        },
+        {
+          "direction": "below",
+          "threshold": null,
+          "state": "alarm",
+          "note": "Low oil pressure alarm / derate point — from your manual"
+        }
+      ]
+    },
+    {
+      "path_suffix": "coolantTemperature",
+      "label": "Coolant",
+      "display": "radial",
+      "quantity": "temperature",
+      "unit": "C",
+      "min": 0,
+      "max": 120,
+      "zones": [
+        {
+          "direction": "below",
+          "threshold": 85,
+          "state": "normal",
+          "source": "sbmar.com: operating coolant range when all is right is 160F to 185F (71-85C)"
+        },
+        {
+          "direction": "above",
+          "threshold": null,
+          "state": "warn",
+          "note": "High coolant temperature warning — from your manual"
+        },
+        {
+          "direction": "above",
+          "threshold": null,
+          "state": "alarm",
+          "note": "Overheat alarm / derate point — from your manual"
+        }
+      ]
+    },
+    {
+      "path_suffix": "boostPressure",
+      "label": "Boost",
+      "display": "bar",
+      "quantity": "pressure",
+      "unit": "psi",
+      "min": 0,
+      "max": 40
+    },
+    {
+      "path_suffix": "exhaustTemperature",
+      "label": "Exhaust",
+      "display": "bar",
+      "quantity": "temperature",
+      "unit": "C",
+      "min": 0,
+      "max": 600,
+      "zones": [
+        {
+          "direction": "above",
+          "threshold": null,
+          "state": "warn",
+          "note": "High exhaust temperature — from your manual"
+        }
+      ]
+    },
+    {
+      "path_suffix": "oilTemperature",
+      "label": "Oil Temp",
+      "display": "numeric",
+      "quantity": "temperature",
+      "unit": "C",
+      "min": 0,
+      "max": 140,
+      "zones": [
+        {
+          "direction": "below",
+          "threshold": 104,
+          "state": "normal",
+          "source": "sbmar.com: oil temp typically runs 20-40F above coolant; 180F-220F (82-104C) is ideal"
+        }
+      ]
+    },
+    {
+      "path_suffix": "runTime",
+      "label": "Hours",
+      "display": "numeric",
+      "quantity": "duration",
+      "unit": "h",
+      "decimals": 0
+    }
+  ],
+  "service": [
+    {
+      "id": "engine-oil",
+      "description": "Engine oil and filter change",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "fuel-filter",
+      "description": "Fuel filter / water separator element",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "coolant",
+      "description": "Coolant replacement or SCA check",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "raw-water-impeller",
+      "description": "Raw water pump impeller",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "air-filter",
+      "description": "Air filter element",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "zincs",
+      "description": "Heat exchanger zinc anodes",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    }
+  ]
+}

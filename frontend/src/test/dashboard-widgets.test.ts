@@ -4,10 +4,15 @@ import {
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_WIDGET_LABELS,
   EMBED_WIDGET_ID_PREFIX,
+  duplicateWidget,
   isEmbedWidgetId,
+  isGaugeGroupWidgetId,
+  isGaugeWidgetId,
   isValidEmbedUrl,
   mergeLayoutGeometry,
   newEmbedWidgetId,
+  newGaugeGroupWidgetId,
+  rewriteGaugePaths,
   widgetDisplayName,
   type DashboardLayoutItem,
 } from '@/lib/dashboard-widgets'
@@ -161,5 +166,116 @@ describe('mergeLayoutGeometry', () => {
     const result = mergeLayoutGeometry(widgets, geometry)
 
     expect(result).toEqual([{ id: 'wind', x: 1, y: 1, w: 4, h: 6 }])
+  })
+})
+
+describe('gauge group ids (ADR 0049)', () => {
+  test('a gauge group id is not mistaken for a gauge id', () => {
+    expect(isGaugeGroupWidgetId('gauge-group:m1x8abcd')).toBe(true)
+    expect(isGaugeWidgetId('gauge-group:m1x8abcd')).toBe(false)
+    expect(isGaugeGroupWidgetId('gauge:m1x8abcd')).toBe(false)
+  })
+
+  test('rejects every builtin widget id', () => {
+    for (const id of DASHBOARD_WIDGET_IDS) {
+      expect(isGaugeGroupWidgetId(id)).toBe(false)
+    }
+  })
+
+  test('mints ids unique within the page', () => {
+    const existing: DashboardLayoutItem[] = []
+    for (let i = 0; i < 20; i += 1) {
+      existing.push({ id: newGaugeGroupWidgetId(existing), x: 0, y: 0, w: 6, h: 8 })
+    }
+    expect(new Set(existing.map((w) => w.id)).size).toBe(20)
+  })
+
+  test('names a group by its title, falling back to a structural label', () => {
+    const widget: DashboardLayoutItem = {
+      id: 'gauge-group:m1x8abcd', x: 0, y: 0, w: 6, h: 8,
+      gaugeGroup: { title: 'Port', gauges: [] },
+    }
+    expect(widgetDisplayName(widget)).toBe('Port')
+    expect(widgetDisplayName({ ...widget, gaugeGroup: { title: '  ', gauges: [] } })).toBe('Gauges')
+  })
+})
+
+describe('duplicateWidget', () => {
+  const group: DashboardLayoutItem = {
+    id: 'gauge-group:m1x8abcd', x: 2, y: 4, w: 6, h: 8,
+    gaugeGroup: {
+      title: 'Port',
+      gauges: [
+        { path: 'propulsion.port.revolutions', label: 'RPM', display: 'radial', quantity: 'frequency', unit: 'rpm', zones: [{ from: 3000, to: 4000, state: 'alarm' }] },
+      ],
+    },
+  }
+
+  test('mints a fresh id and keeps the config', () => {
+    const copy = duplicateWidget(group, [group])
+    expect(copy).not.toBeNull()
+    expect(copy!.id).not.toBe(group.id)
+    expect(isGaugeGroupWidgetId(copy!.id)).toBe(true)
+    expect(copy!.gaugeGroup?.title).toBe('Port')
+    expect(copy!.gaugeGroup?.gauges).toHaveLength(1)
+  })
+
+  test('deep-copies, so editing the copy never edits the original', () => {
+    const copy = duplicateWidget(group, [group])!
+    copy.gaugeGroup!.gauges[0].path = 'propulsion.starboard.revolutions'
+    copy.gaugeGroup!.gauges[0].zones![0].state = 'warn'
+    copy.gaugeGroup!.gauges.push({ path: 'a.b', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' })
+
+    expect(group.gaugeGroup!.gauges).toHaveLength(1)
+    expect(group.gaugeGroup!.gauges[0].path).toBe('propulsion.port.revolutions')
+    expect(group.gaugeGroup!.gauges[0].zones![0].state).toBe('alarm')
+  })
+
+  test('duplicates gauges and embeds too', () => {
+    const gauge: DashboardLayoutItem = {
+      id: 'gauge:m1x8abcd', x: 0, y: 0, w: 3, h: 6,
+      gauge: { path: 'a.b', label: 'A', display: 'numeric', quantity: 'raw', unit: 'raw' },
+    }
+    const embed: DashboardLayoutItem = {
+      id: 'embed:m1x8abcd', x: 0, y: 0, w: 6, h: 8,
+      embed: { title: 'Grafana', url: 'https://grafana.local/a' },
+    }
+    expect(duplicateWidget(gauge, [gauge])?.gauge?.path).toBe('a.b')
+    expect(duplicateWidget(embed, [embed])?.embed?.url).toBe('https://grafana.local/a')
+  })
+
+  test('refuses a builtin, which is one-per-page', () => {
+    expect(duplicateWidget({ id: 'wind', x: 0, y: 0, w: 4, h: 8 }, [])).toBeNull()
+  })
+})
+
+describe('rewriteGaugePaths', () => {
+  const gauges = [
+    { path: 'propulsion.port.revolutions', label: 'Port RPM', display: 'radial' as const, quantity: 'frequency', unit: 'rpm' },
+    { path: 'propulsion.port.oilPressure', label: 'Port oil', display: 'bar' as const, quantity: 'pressure', unit: 'psi' },
+    { path: 'environment.depth.belowTransducer', label: 'Depth', display: 'numeric' as const, quantity: 'length', unit: 'ft' },
+  ]
+
+  test('rewrites matching paths and leaves labels alone', () => {
+    const next = rewriteGaugePaths(gauges, 'port', 'starboard')
+    expect(next[0].path).toBe('propulsion.starboard.revolutions')
+    expect(next[1].path).toBe('propulsion.starboard.oilPressure')
+    expect(next[2].path).toBe('environment.depth.belowTransducer')
+    expect(next[0].label).toBe('Port RPM')
+  })
+
+  test('replaces every occurrence, not just the first', () => {
+    const next = rewriteGaugePaths([{ ...gauges[0], path: 'a.port.b.port' }], 'port', 'stbd')
+    expect(next[0].path).toBe('a.stbd.b.stbd')
+  })
+
+  test('is a no-op when the search text is blank or absent', () => {
+    expect(rewriteGaugePaths(gauges, '', 'starboard')).toEqual(gauges)
+    expect(rewriteGaugePaths(gauges, 'nothing-matches', 'x')).toEqual(gauges)
+  })
+
+  test('does not mutate the input', () => {
+    rewriteGaugePaths(gauges, 'port', 'starboard')
+    expect(gauges[0].path).toBe('propulsion.port.revolutions')
   })
 })

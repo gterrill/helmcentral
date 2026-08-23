@@ -58,6 +58,7 @@ describe('dragging a widget on a page that also has an embed widget', () => {
         editing
         renderWidget={(w) => <div>{w.id}</div>}
         onRemoveWidget={() => {}}
+      onDuplicateWidget={() => {}}
         onLayoutSettle={onLayoutSettle}
       />,
     )

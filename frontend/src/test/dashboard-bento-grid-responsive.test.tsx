@@ -24,6 +24,7 @@ function renderGrid(editing = false) {
       editing={editing}
       renderWidget={(w) => <div data-testid={`widget-${w.id}`}>{w.id}</div>}
       onRemoveWidget={() => {}}
+      onDuplicateWidget={() => {}}
       onLayoutSettle={() => {}}
     />,
   )
@@ -101,6 +102,7 @@ describe('crossing the breakpoint', () => {
         editing={false}
         renderWidget={(w) => <div data-testid={`widget-${w.id}`}>{w.id}</div>}
         onRemoveWidget={() => {}}
+      onDuplicateWidget={() => {}}
         onLayoutSettle={() => {}}
       />,
     )
