@@ -205,7 +205,7 @@ func busNotificationEvent(kind string, status alarmStatus) alarmEvent {
 // notification at a path some local rule also owns is not reported -- which is
 // the right way round: a missed duplicate beats a self-inflicted alarm loop.
 func ownedNotificationPaths() map[string]bool {
-	owned := map[string]bool{watchdogPath: true}
+	owned := map[string]bool{watchdogPath: true, collisionProfilePath: true}
 	for _, rule := range listAlarmRules() {
 		owned[notificationsRoot+"."+strings.TrimPrefix(rule.Path, notificationsRoot+".")] = true
 	}

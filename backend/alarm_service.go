@@ -20,6 +20,12 @@ const alarmEvaluationInterval = 1 * time.Second
 var globalAlarmEngine = newAlarmEngine()
 var globalBusNotificationWatcher = newBusNotificationWatcher(globalSignalKSnapshot)
 
+// globalCollisionProfileSyncer keeps the AIS target prioritizer's active
+// profile in step with navigation.state (ADR 0058). It is edge-triggered on
+// that state, so the HTTP round trip happens a handful of times a day rather
+// than on every tick.
+var globalCollisionProfileSyncer = newCollisionProfileSyncer(globalSignalKSnapshot)
+
 // startAlarmEvaluator runs the rule engine against the delta-stream snapshot
 // until ctx is cancelled, persisting every transition to the alarm log.
 func startAlarmEvaluator(ctx context.Context, interval time.Duration) {
@@ -55,6 +61,11 @@ func evaluateAlarmsOnce(now time.Time) {
 	// must never be left watching a stale snapshot object.
 	globalBusNotificationWatcher.snapshot = globalSignalKSnapshot
 	for _, event := range globalBusNotificationWatcher.check(now) {
+		recordAlarmEvent(event, now)
+	}
+
+	globalCollisionProfileSyncer.snapshot = globalSignalKSnapshot
+	for _, event := range globalCollisionProfileSyncer.check(now) {
 		recordAlarmEvent(event, now)
 	}
 }
