@@ -1437,7 +1437,15 @@ func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now 
 			sogKnots = &knots
 		}
 
-		vessels = append(vessels, nearbyVessel{ID: vesselID, Name: strings.ToUpper(name), Mmsi: mmsi, RangeM: rangeMeters, AgeSeconds: ageSeconds, SogKnots: sogKnots, Lat: latitude, Lon: longitude, PositionSeen: positionSeen})
+		figures := collisionFiguresFor(vesselMap)
+
+		vessels = append(vessels, nearbyVessel{
+			ID: vesselID, Name: strings.ToUpper(name), Mmsi: mmsi,
+			RangeM: rangeMeters, AgeSeconds: ageSeconds, SogKnots: sogKnots,
+			Lat: latitude, Lon: longitude, PositionSeen: positionSeen,
+			CpaM: figures.CpaM, TcpaSeconds: figures.TcpaSeconds, BearingRad: figures.BearingRad,
+			CollisionAlarmType: figures.AlarmType, CollisionAlarmState: figures.AlarmState,
+		})
 	}
 
 	sort.Slice(vessels, func(i int, j int) bool { return vessels[i].RangeM < vessels[j].RangeM })

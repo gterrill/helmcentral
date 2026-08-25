@@ -108,12 +108,19 @@ func activeAlarms() []alarmStatus {
 	combined := make([]alarmStatus, 0)
 	combined = append(combined, globalAlarmEngine.active()...)
 	combined = append(combined, signalKNotifications(globalSignalKSnapshot)...)
+	combined = append(combined, signalKCollisionNotifications(globalSignalKSnapshot)...)
 
 	sort.Slice(combined, func(i, j int) bool {
 		if alarmStateRank[combined[i].State] != alarmStateRank[combined[j].State] {
 			return alarmStateRank[combined[i].State] > alarmStateRank[combined[j].State]
 		}
-		return combined[i].Path < combined[j].Path
+		// Every collision alarm shares one path, so path alone leaves two
+		// targets in an order sort.Slice is free to shuffle between polls.
+		// The rule id carries the vessel and is unique by construction.
+		if combined[i].Path != combined[j].Path {
+			return combined[i].Path < combined[j].Path
+		}
+		return combined[i].RuleID < combined[j].RuleID
 	})
 	return combined
 }

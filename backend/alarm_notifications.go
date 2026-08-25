@@ -245,9 +245,15 @@ func actOnSignalKNotification(snapshot *signalKSnapshot, path, action string, no
 		return alarmStatus{}, fmt.Errorf("%w: %s.%s", errNotificationNotLive, notificationsRoot, path)
 	}
 
-	status, live := notificationStatus(value, strings.Split(path, "."))
+	branch, vesselID := splitNotificationVessel(path)
+	status, live := notificationStatus(value, strings.Split(branch, "."))
 	if !live {
 		return alarmStatus{}, fmt.Errorf("%w: %s.%s", errNotificationNotLive, notificationsRoot, path)
+	}
+	// Restored so the status handed back matches the rule id the caller acted
+	// on. Without it the frontend cannot reconcile the two.
+	if vesselID != "" {
+		status.RuleID += notificationVesselSeparator + vesselID
 	}
 	if status.State == alarmStateEmergency {
 		return alarmStatus{}, fmt.Errorf("%w: %s.%s", errNotificationEmergency, notificationsRoot, path)
@@ -297,12 +303,20 @@ func postSignalKNotificationAction(id, action string) error {
 
 // notificationValueAt walks the snapshot to one notification leaf's value.
 func notificationValueAt(snapshot *signalKSnapshot, path string) (map[string]any, bool) {
+	// A collision notification is raised on the AIS target's own context rather
+	// than on self, and carries that vessel in its rule id (ADR 0057). Every
+	// other notification comes back with an empty vessel and reads self.
+	branch, vesselID := splitNotificationVessel(path)
+
 	node := snapshot.selfTree()
+	if vesselID != "" {
+		node = snapshot.treeFor(vesselContextPrefix + vesselID)
+	}
 	if node == nil {
 		return nil, false
 	}
 
-	for _, segment := range append([]string{notificationsRoot}, strings.Split(path, ".")...) {
+	for _, segment := range append([]string{notificationsRoot}, strings.Split(branch, ".")...) {
 		child, ok := node[segment].(map[string]any)
 		if !ok {
 			return nil, false

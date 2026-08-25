@@ -67,8 +67,14 @@ func (w *busNotificationWatcher) check(now time.Time) []alarmEvent {
 
 	owned := ownedNotificationPaths()
 
+	// Collision alarms are raised on the AIS targets' own contexts, which the
+	// self walk never reaches (ADR 0057). Without them here a CPA alarm is
+	// visible only in the live list: no push, no log row, no trace afterwards.
+	busStatuses := signalKNotifications(w.snapshot)
+	busStatuses = append(busStatuses, signalKCollisionNotifications(w.snapshot)...)
+
 	live := map[string]alarmStatus{}
-	for _, status := range signalKNotifications(w.snapshot) {
+	for _, status := range busStatuses {
 		// Path ownership is the guard against re-ingesting Helmcentral's own
 		// alarms. Commit 7d8ffb3 made Helmcentral publish its own rule and
 		// watchdog alarms onto notifications.* (signalk_publish.go); without

@@ -923,6 +923,20 @@ type nearbyVessel struct {
 	SeenCount  int      `json:"seen_count"`
 	LastSeenAt string   `json:"last_seen_at,omitempty"`
 
+	// AIS collision figures from signalk-ais-target-prioritizer (ADR 0057),
+	// all optional. A target that is opening rather than closing carries a
+	// bearing but no CPA at all, and with the plugin uninstalled a target
+	// carries none of them - hence pointers, so "not computed" stays
+	// distinguishable from a closest approach of zero.
+	//
+	// BearingRad is radians, converted on ingest from the degrees the plugin
+	// actually publishes (collisionBearingRadians).
+	CpaM                *float64 `json:"cpa_m,omitempty"`
+	TcpaSeconds         *float64 `json:"tcpa_seconds,omitempty"`
+	BearingRad          *float64 `json:"bearing_rad,omitempty"`
+	CollisionAlarmType  string   `json:"collision_alarm_type,omitempty"`
+	CollisionAlarmState string   `json:"collision_alarm_state,omitempty"`
+
 	// PositionSeen is the delta receive time this vessel's position was
 	// last refreshed at (see fetchSignalKNearbyVessels), threaded through to
 	// recordNearbyVesselContacts -> recordContactIfNew so its confirmation
