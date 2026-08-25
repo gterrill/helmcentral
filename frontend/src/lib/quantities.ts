@@ -8,6 +8,10 @@
  */
 
 export type QuantityId =
+  | 'fuelEconomy'
+  | 'power'
+  | 'potential'
+  | 'current'
   | 'pressure'
   | 'temperature'
   | 'volumetricFlow'
@@ -115,6 +119,39 @@ export const QUANTITIES: Quantity[] = [
       { id: 'm', label: 'm', fromSI: identity, decimals: 1 },
       { id: 'ft', label: 'ft', fromSI: (v) => v * 3.28084, decimals: 1 },
     ],
+  },
+  {
+    // SignalK states fuel economy as distance per unit volume, in metres per
+    // cubic metre — and per engine, not per vessel.
+    id: 'fuelEconomy',
+    label: 'Fuel economy',
+    siUnit: 'm/m3',
+    units: [
+      { id: 'nmpl', label: 'nm/L', fromSI: (v) => v / 1852000, decimals: 2 },
+      { id: 'nmpg', label: 'nm/gal', fromSI: (v) => (v * 3.785411784) / 1852000, decimals: 2 },
+      { id: 'm/m3', label: 'm/m³', fromSI: identity, decimals: 0 },
+    ],
+  },
+  {
+    id: 'power',
+    label: 'Power',
+    siUnit: 'W',
+    units: [
+      { id: 'kW', label: 'kW', fromSI: (v) => v / 1000, decimals: 2 },
+      { id: 'W', label: 'W', fromSI: identity, decimals: 0 },
+    ],
+  },
+  {
+    id: 'potential',
+    label: 'Voltage',
+    siUnit: 'V',
+    units: [{ id: 'V', label: 'V', fromSI: identity, decimals: 1 }],
+  },
+  {
+    id: 'current',
+    label: 'Current',
+    siUnit: 'A',
+    units: [{ id: 'A', label: 'A', fromSI: identity, decimals: 1 }],
   },
   {
     id: 'frequency',

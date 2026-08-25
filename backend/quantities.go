@@ -85,6 +85,18 @@ var siQuantities = []siQuantity{
 		identityUnit("m"),
 		linear("ft", 3.28084),
 	}},
+	// Distance per unit volume, which is how SignalK states fuel economy.
+	{ID: "fuelEconomy", Units: []siUnitOption{
+		linear("nmpl", 1.0/1852000),
+		linear("nmpg", 3.785411784/1852000),
+		identityUnit("m/m3"),
+	}},
+	{ID: "power", Units: []siUnitOption{
+		linear("kW", 1.0/1000),
+		identityUnit("W"),
+	}},
+	{ID: "potential", Units: []siUnitOption{identityUnit("V")}},
+	{ID: "current", Units: []siUnitOption{identityUnit("A")}},
 	{ID: "frequency", Units: []siUnitOption{
 		// SignalK publishes revolutions in Hz; every tachometer shows RPM.
 		linear("rpm", 60),

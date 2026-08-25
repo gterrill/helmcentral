@@ -71,3 +71,61 @@ func TestConvertToSIRoundTripsFromSI(t *testing.T) {
 		}
 	}
 }
+
+// SignalK publishes electrical readings in volts, amps and watts. Without
+// these a generator's output renders as a bare number with no unit.
+func TestConvertToSIElectricalQuantities(t *testing.T) {
+	cases := []struct {
+		name     string
+		quantity string
+		unit     string
+		display  float64
+		si       float64
+	}{
+		{"kilowatts to watts", "power", "kW", 13.5, 13500},
+		{"watts are already SI", "power", "W", 7564, 7564},
+		{"volts are already SI", "potential", "V", 232, 232},
+		{"amps are already SI", "current", "A", 39, 39},
+	}
+
+	for _, tc := range cases {
+		got, err := convertToSI(tc.display, tc.quantity, tc.unit)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if math.Abs(got-tc.si) > math.Abs(tc.si)*1e-9+1e-9 {
+			t.Fatalf("%s: expected %v, got %v", tc.name, tc.si, got)
+		}
+	}
+}
+
+/*
+SignalK publishes propulsion.<id>.fuel.economy in metres per cubic metre.
+
+Verified against a live vessel rather than read off a spec: at 10.21 kn with
+that engine burning 23.9 L/h, SOG over burn gives 0.4272 nm/L and the published
+792950.7 converts to 0.4281 — a 0.2% match, which settles both the unit and
+that the figure is per-engine, not per-vessel.
+*/
+func TestConvertToSIFuelEconomy(t *testing.T) {
+	cases := []struct {
+		name    string
+		unit    string
+		display float64
+		si      float64
+	}{
+		{"nautical miles per litre", "nmpl", 0.4281, 792841.2},
+		{"nautical miles per US gallon", "nmpg", 1.6205, 792824.0},
+		{"metres per cubic metre are already SI", "m/m3", 792950.7, 792950.7},
+	}
+
+	for _, tc := range cases {
+		got, err := convertToSI(tc.display, "fuelEconomy", tc.unit)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if math.Abs(got-tc.si) > 200 {
+			t.Fatalf("%s: expected about %v, got %v", tc.name, tc.si, got)
+		}
+	}
+}

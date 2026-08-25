@@ -6,7 +6,7 @@ import '@/styles/dashboard-bento-grid.css'
 import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
-import { isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
@@ -31,6 +31,9 @@ const GAUGE_GROUP_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
 
 // A ribbon is wide and short by nature.
 const LAMP_STRIP_WIDGET_CONSTRAINTS = { minW: 3, minH: 2 }
+
+// The cluster canvas is 460x300, so anything narrower just scales it down.
+const CLUSTER_WIDGET_CONSTRAINTS = { minW: 4, minH: 9 }
 
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
@@ -77,7 +80,9 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       y: w.y,
       w: w.w,
       h: w.h,
-      ...(isLampStripWidgetId(w.id)
+      ...(isClusterWidgetId(w.id)
+        ? CLUSTER_WIDGET_CONSTRAINTS
+        : isLampStripWidgetId(w.id)
         ? LAMP_STRIP_WIDGET_CONSTRAINTS
         : isEmbedWidgetId(w.id)
         ? EMBED_WIDGET_CONSTRAINTS

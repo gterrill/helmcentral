@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -211,6 +212,96 @@ func TestBundledProfilesShipNoAlarmThresholds(t *testing.T) {
 					t.Fatalf("%s/%s: an advisory band must cite its source", profile.ID, gauge.PathSuffix)
 				}
 			}
+		}
+	}
+}
+
+/*
+Every bundled suffix must resolve against a real vessel.
+
+The first version of the Cummins profile shipped `coolantTemperature`,
+`oilTemperature` and `exhaustTemperature` — none of which that engine
+publishes. It applied cleanly and produced three permanently dashed gauges,
+which is the structural dash doing its job about a mistake in a file we wrote.
+
+The fixture is a captured path list, not an assumed one. The assertion is
+prefix-agnostic: a profile passes when there is at least one instance under
+which every one of its suffixes resolves, which is exactly what applying it to
+that instance would do.
+*/
+func TestBundledProfileSuffixesResolveAgainstTheVessel(t *testing.T) {
+	published := []string{
+		// propulsion, per engine
+		"propulsion.port.alternatorVoltage",
+		"propulsion.port.boostPressure",
+		"propulsion.port.engineLoad",
+		"propulsion.port.engineTorque",
+		"propulsion.port.fuel.economy",
+		"propulsion.port.fuel.rate",
+		"propulsion.port.oilPressure",
+		"propulsion.port.revolutions",
+		"propulsion.port.runTime",
+		"propulsion.port.state",
+		"propulsion.port.temperature",
+		"propulsion.port.transmission.oilPressure",
+		"propulsion.port.transmission.oilTemperature",
+		// AC circuits, either of which may be the genset
+		"electrical.ac.0.phase.A.current",
+		"electrical.ac.0.phase.A.frequency",
+		"electrical.ac.0.phase.A.lineNeutralVoltage",
+		"electrical.ac.0.phase.A.realPower",
+		"electrical.ac.0.total.realPower",
+		"electrical.ac.1.phase.A.current",
+		"electrical.ac.1.phase.A.frequency",
+		"electrical.ac.1.phase.A.lineNeutralVoltage",
+		"electrical.ac.1.phase.A.realPower",
+		"electrical.ac.1.total.realPower",
+	}
+
+	// Every instance prefix each suffix could hang off.
+	prefixesFor := func(suffix string) map[string]bool {
+		out := map[string]bool{}
+		for _, path := range published {
+			if strings.HasSuffix(path, "."+suffix) {
+				out[strings.TrimSuffix(path, "."+suffix)] = true
+			}
+		}
+		return out
+	}
+
+	t.Setenv("ENGINE_PROFILES_DIR", "../plugins/engine-profiles")
+	loadEngineProfiles()
+
+	profiles, problems := engineProfiles()
+	if len(problems) != 0 {
+		t.Fatalf("bundled profiles must load clean, got %+v", problems)
+	}
+	if len(profiles) == 0 {
+		t.Fatal("expected at least one bundled profile")
+	}
+
+	for _, profile := range profiles {
+		var shared map[string]bool
+		for _, gauge := range profile.Gauges {
+			found := prefixesFor(gauge.PathSuffix)
+			if len(found) == 0 {
+				t.Errorf("%s: suffix %q resolves to nothing this vessel publishes",
+					profile.ID, gauge.PathSuffix)
+				shared = nil
+				break
+			}
+			if shared == nil {
+				shared = found
+				continue
+			}
+			for prefix := range shared {
+				if !found[prefix] {
+					delete(shared, prefix)
+				}
+			}
+		}
+		if shared != nil && len(shared) == 0 {
+			t.Errorf("%s: no single instance publishes every one of its suffixes", profile.ID)
 		}
 	}
 }

@@ -186,3 +186,25 @@ func TestAlarmRuleHandlersRefuseDerivedIDs(t *testing.T) {
 		t.Fatalf("expected 400 deleting a derived rule, got %d", rec.Code)
 	}
 }
+
+// A cluster slot's zones must alarm like any other gauge's, or ADR 0050's
+// whole point — that a red band is the alarm — holds everywhere but here.
+func TestZoneDerivedAlarmRulesCoversClusterSlots(t *testing.T) {
+	ring := *zoneGaugeConfig(0, 100, gaugeZone{From: 0, To: 15, State: alarmStateAlarm})
+	corner := *zoneGaugeConfig(0, 100, gaugeZone{From: 90, To: 100, State: alarmStateWarn})
+
+	withPages(t, dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10,
+		Cluster: &dashboardClusterConfig{
+			Title:   "Port",
+			Ring:    ring,
+			Centre:  dashboardGaugeConfig{Path: "propulsion.port.fuel.rate", Display: "numeric", Quantity: "raw", Unit: "raw"},
+			Corners: []dashboardClusterCorner{{Label: "Oil", Rows: []dashboardGaugeConfig{corner}}},
+		},
+	})
+
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 2 {
+		t.Fatalf("expected a rule from the ring and one from the corner row, got %d: %+v", len(rules), rules)
+	}
+}

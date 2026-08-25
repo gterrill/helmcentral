@@ -90,15 +90,18 @@ import {
   isEmbedWidgetId,
   isGaugeGroupWidgetId,
   isGaugeWidgetId,
+  isClusterWidgetId,
   isLampStripWidgetId,
   newEmbedWidgetId,
   newGaugeGroupWidgetId,
   newGaugeWidgetId,
+  newClusterWidgetId,
   newLampStripWidgetId,
   type DashboardLayoutItem,
   type DashboardWidgetId,
   type EmbedWidgetConfig,
   type GaugeGroupWidgetConfig,
+  type EngineClusterConfig,
   type LampStripWidgetConfig,
   type GaugeWidgetConfig,
 } from '@/lib/dashboard-widgets'
@@ -108,6 +111,8 @@ import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
 import { GaugeTile } from '@/components/gauge-tile'
 import { GaugeGroupConfigDialog } from '@/components/gauge-group-config-dialog'
 import { GaugeGroupTile } from '@/components/gauge-group-tile'
+import { EngineClusterConfigDialog } from '@/components/engine-cluster-config-dialog'
+import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import { EngineProfileDialog } from '@/components/engine-profile-dialog'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
 import { LampStripTile } from '@/components/lamp-strip-tile'
@@ -195,6 +200,7 @@ export function App() {
   const [gaugeGroupDraft, setGaugeGroupDraft] = useState<DashboardLayoutItem | null>(null)
   const [lampStripDraft, setLampStripDraft] = useState<DashboardLayoutItem | null>(null)
   const [engineProfileOpen, setEngineProfileOpen] = useState(false)
+  const [clusterDraft, setClusterDraft] = useState<DashboardLayoutItem | null>(null)
   const gaugeValues = useGaugeValues()
   const [settingsDirty, setSettingsDirty] = useState(false)
   const settingsPageRef = useRef<SettingsPageHandle>(null)
@@ -538,6 +544,35 @@ export function App() {
     setEngineProfileOpen(false)
   }, [activePage, effectiveWidgets, updatePage])
 
+  // Tall: the canvas is 460x300 plus the tile chrome.
+  const handleAddCluster = useCallback(() => {
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    setClusterDraft({
+      id: newClusterWidgetId(effectiveWidgets),
+      x: 0, y: maxY, w: 6, h: 7,
+      cluster: {
+        title: '',
+        skin: 'instrument',
+        ring: { path: '', label: 'RPM', display: 'radial', quantity: 'raw', unit: 'raw' },
+        centre: { path: '', label: 'Hours', display: 'numeric', quantity: 'raw', unit: 'raw' },
+        corners: [],
+      },
+    })
+  }, [effectiveWidgets])
+
+  const handleSaveCluster = useCallback((cluster: EngineClusterConfig) => {
+    if (!activePage || !clusterDraft) return
+    const id = clusterDraft.id
+    if (effectiveWidgets.some((w) => w.id === id)) {
+      void updatePage(activePage.id, {
+        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, cluster } : w)),
+      })
+    } else {
+      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...clusterDraft, cluster }] })
+    }
+    setClusterDraft(null)
+  }, [activePage, effectiveWidgets, clusterDraft, updatePage])
+
   // Wide and short: a ribbon spans the page rather than occupying a cell.
   const handleAddLampStrip = useCallback(() => {
     const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
@@ -580,7 +615,8 @@ export function App() {
     const placed = { ...copy, x: 0, y: maxY }
     void updatePage(activePage.id, { widgets: [...effectiveWidgets, placed] })
 
-    if (isLampStripWidgetId(placed.id)) setLampStripDraft(placed)
+    if (isClusterWidgetId(placed.id)) setClusterDraft(placed)
+    else if (isLampStripWidgetId(placed.id)) setLampStripDraft(placed)
     else if (isGaugeGroupWidgetId(placed.id)) setGaugeGroupDraft(placed)
     else if (isGaugeWidgetId(placed.id)) setGaugeDraft(placed)
     else if (isEmbedWidgetId(placed.id)) setEmbedDraft(placed)
@@ -608,6 +644,18 @@ export function App() {
   // this case.
   const renderWidget = (widget: DashboardLayoutItem): ReactNode => {
     const { id } = widget
+    if (isClusterWidgetId(id)) {
+      if (!widget.cluster) return null
+      return (
+        <EngineClusterTile
+          config={widget.cluster}
+          values={gaugeValues}
+          editing={layoutEditing}
+          onConfigure={() => setClusterDraft(widget)}
+        />
+      )
+    }
+
     if (isLampStripWidgetId(id)) {
       if (!widget.lamps) return null
       return (
@@ -867,6 +915,13 @@ export function App() {
               </button>
               <button
                 type="button"
+                onClick={handleAddCluster}
+                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                Engine Cluster…
+              </button>
+              <button
+                type="button"
                 onClick={() => setEngineProfileOpen(true)}
                 className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
@@ -908,6 +963,12 @@ export function App() {
         widget={gaugeGroupDraft}
         onCancel={() => setGaugeGroupDraft(null)}
         onSave={handleSaveGaugeGroup}
+      />
+
+      <EngineClusterConfigDialog
+        widget={clusterDraft}
+        onCancel={() => setClusterDraft(null)}
+        onSave={handleSaveCluster}
       />
 
       <EngineProfileDialog

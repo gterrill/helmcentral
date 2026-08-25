@@ -83,3 +83,45 @@ describe('formatting', () => {
     expect(formatQuantity(0, 'volumetricFlow', 'Lph')).toBe('0.0')
   })
 })
+
+// SignalK publishes electrical readings in W, V and A. Without these a
+// generator's output rendered as a bare number with no unit at all.
+describe('electrical quantities', () => {
+  it('formats power in kilowatts', () => {
+    expect(formatQuantity(7564, 'power', 'kW')).toBe('7.56')
+    expect(formatQuantity(13500, 'power', 'kW', 1)).toBe('13.5')
+    expect(formatQuantity(7564, 'power', 'W')).toBe('7564')
+  })
+
+  it('passes volts and amps through', () => {
+    expect(formatQuantity(232, 'potential', 'V', 0)).toBe('232')
+    expect(formatQuantity(39, 'current', 'A', 0)).toBe('39')
+  })
+
+  it('infers each from SignalK meta units', () => {
+    expect(quantityForSIUnit('W').id).toBe('power')
+    expect(quantityForSIUnit('V').id).toBe('potential')
+    expect(quantityForSIUnit('A').id).toBe('current')
+  })
+
+  // Absent stays absent, the same rule every other quantity follows.
+  it('formats an absent electrical reading to null', () => {
+    expect(formatQuantity(null, 'power', 'kW')).toBeNull()
+  })
+})
+
+describe('fuel economy', () => {
+  // 792950.7 m/m³ is what the vessel published at 10.21 kn burning 23.9 L/h on
+  // that engine, which works out to 0.427 nm/L the long way round.
+  it('converts metres per cubic metre to nautical miles per litre', () => {
+    expect(formatQuantity(792950.7, 'fuelEconomy', 'nmpl')).toBe('0.43')
+  })
+
+  it('converts to nautical miles per US gallon', () => {
+    expect(formatQuantity(792950.7, 'fuelEconomy', 'nmpg')).toBe('1.62')
+  })
+
+  it('infers the quantity from SignalK meta units', () => {
+    expect(quantityForSIUnit('m/m3').id).toBe('fuelEconomy')
+  })
+})

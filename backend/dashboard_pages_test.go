@@ -1293,3 +1293,222 @@ func TestDashboardLayoutItem_OmitsLampsKeyWhenAbsent(t *testing.T) {
 		t.Fatalf("expected no lamps key on a widget without one, got %s", encoded)
 	}
 }
+
+// ── engine cluster widget (ADR 0054) ─────────────────────────────────────────
+
+func clusterWidget(id string, config *dashboardClusterConfig) dashboardLayoutItem {
+	return dashboardLayoutItem{ID: id, X: 0, Y: 0, W: 6, H: 10, Cluster: config}
+}
+
+func validClusterConfig() *dashboardClusterConfig {
+	return &dashboardClusterConfig{
+		Title:  "Port",
+		Skin:   "instrument",
+		Ring:   dashboardGaugeConfig{Path: "propulsion.port.revolutions", Label: "RPM", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+		Centre: dashboardGaugeConfig{Path: "propulsion.port.fuel.rate", Label: "Fuel", Display: "numeric", Quantity: "volumetricFlow", Unit: "Lph"},
+		Corners: []dashboardClusterCorner{
+			{Label: "Oil", Rows: []dashboardGaugeConfig{
+				{Path: "propulsion.port.oilPressure", Label: "Oil", Display: "numeric", Quantity: "pressure", Unit: "psi"},
+			}},
+			{Label: "Temps", Rows: []dashboardGaugeConfig{
+				{Path: "propulsion.port.temperature", Label: "Coolant", Display: "numeric", Quantity: "temperature", Unit: "C"},
+				{Path: "propulsion.0.exhaustTemperature", Label: "Exhaust", Display: "numeric", Quantity: "temperature", Unit: "C"},
+			}},
+		},
+	}
+}
+
+func TestValidateClusterAcceptsAWellFormedCluster(t *testing.T) {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", validClusterConfig())}); msg != "" {
+		t.Fatalf("expected a valid cluster to be accepted, got %q", msg)
+	}
+}
+
+func TestValidateClusterRejectsBadInput(t *testing.T) {
+	noRing := validClusterConfig()
+	noRing.Ring = dashboardGaugeConfig{}
+
+	badSkin := validClusterConfig()
+	badSkin.Skin = "neon"
+
+	tooManyCorners := validClusterConfig()
+	tooManyCorners.Corners = make([]dashboardClusterCorner, clusterMaxCorners+1)
+	for i := range tooManyCorners.Corners {
+		tooManyCorners.Corners[i] = dashboardClusterCorner{Label: "X", Rows: []dashboardGaugeConfig{
+			{Path: "a.b", Display: "numeric", Quantity: "raw", Unit: "raw"},
+		}}
+	}
+
+	emptyCorner := validClusterConfig()
+	emptyCorner.Corners = []dashboardClusterCorner{{Label: "Empty"}}
+
+	badRow := validClusterConfig()
+	badRow.Corners[0].Rows[0].Display = "hologram"
+
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"short token", clusterWidget("cluster:abc", validClusterConfig())},
+		{"missing config", clusterWidget("cluster:abcd1234", nil)},
+		{"ring with no path", clusterWidget("cluster:abcd1234", noRing)},
+		{"unknown skin", clusterWidget("cluster:abcd1234", badSkin)},
+		{"too many corners", clusterWidget("cluster:abcd1234", tooManyCorners)},
+		{"corner with no rows", clusterWidget("cluster:abcd1234", emptyCorner)},
+		{"bad row", clusterWidget("cluster:abcd1234", badRow)},
+	}
+
+	for _, tc := range cases {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			t.Fatalf("%s: expected rejection", tc.name)
+		}
+	}
+}
+
+func TestValidateDashboardWidgetsRejectsMismatchedClusterConfig(t *testing.T) {
+	cluster := validClusterConfig()
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"cluster on a builtin", dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4, Cluster: cluster}},
+		{"cluster on a gauge", dashboardLayoutItem{ID: "gauge:abcd1234", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig(), Cluster: cluster}},
+		{"gauge on a cluster", dashboardLayoutItem{ID: "cluster:abcd1234", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig(), Cluster: cluster}},
+	}
+	for _, tc := range cases {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			t.Fatalf("%s: expected rejection", tc.name)
+		}
+	}
+}
+
+// Fifth widget kind to need this walker. Miss it and every reading in the
+// cluster is a dash, with nothing in any log to say why.
+func TestGaugeBoundPathsIncludesClusterSlots(t *testing.T) {
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{
+		"a": {ID: "a", Widgets: []dashboardLayoutItem{clusterWidget("cluster:abcd1234", validClusterConfig())}},
+	}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+
+	want := []string{
+		"propulsion.0.exhaustTemperature",
+		"propulsion.port.fuel.rate",
+		"propulsion.port.oilPressure",
+		"propulsion.port.revolutions",
+		"propulsion.port.temperature",
+	}
+	paths := gaugeBoundPaths()
+	if len(paths) != len(want) {
+		t.Fatalf("expected ring, centre and every corner row: %v, got %v", want, paths)
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, paths)
+		}
+	}
+}
+
+// Icons are an allowlist mirroring CLUSTER_ICONS in the frontend, so a saved
+// config can never name a component that does not exist.
+func TestValidateClusterRejectsUnknownIcons(t *testing.T) {
+	badCorner := validClusterConfig()
+	badCorner.Corners[0].Icon = "aubergine"
+
+	badCentre := validClusterConfig()
+	badCentre.CentreIcon = "aubergine"
+
+	for name, config := range map[string]*dashboardClusterConfig{
+		"corner icon": badCorner,
+		"centre icon": badCentre,
+	} {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", config)}); msg == "" {
+			t.Fatalf("%s: expected rejection", name)
+		}
+	}
+
+	// Absent is fine: the renderer infers one from what the slot measures.
+	ok := validClusterConfig()
+	ok.Corners[0].Icon = "cog"
+	ok.CentreIcon = ""
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", ok)}); msg != "" {
+		t.Fatalf("expected a known icon and an absent one to be accepted, got %q", msg)
+	}
+}
+
+/*
+Go's JSON decoder drops unknown keys silently, so a field missing from
+dashboardGaugeConfig is discarded on every save with no error anywhere. Four
+were: ringStyle, readout and labelDivisor (ADR 0054) and window (ADR 0051),
+which meant a trend gauge always fell back to its default window and an
+instrument ring never got its divided scale.
+*/
+func TestGaugeConfigRoundTripsEveryRenderedField(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	raw := `{
+	  "path": "propulsion.port.revolutions", "label": "RPM", "display": "radial",
+	  "quantity": "frequency", "unit": "rpm", "decimals": 0,
+	  "min": 0, "max": 3000,
+	  "ringStyle": "instrument", "readout": "inside", "labelDivisor": 100,
+	  "window": "24h",
+	  "zones": [{"from": 2600, "to": 3000, "state": "warn"}]
+	}`
+	var gauge dashboardGaugeConfig
+	if err := json.Unmarshal([]byte(raw), &gauge); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	page := createTestDashboardPage(t, "Engines", []dashboardLayoutItem{
+		gaugeWidget("gauge:abcd1234", &gauge),
+	})
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	reloaded := dashboardPagesState[page.ID]
+	dashboardPagesMu.RUnlock()
+
+	got := reloaded.Widgets[0].Gauge
+	if got.RingStyle != "instrument" {
+		t.Errorf("ringStyle did not survive: %q", got.RingStyle)
+	}
+	if got.Readout != "inside" {
+		t.Errorf("readout did not survive: %q", got.Readout)
+	}
+	if got.LabelDivisor == nil || *got.LabelDivisor != 100 {
+		t.Errorf("labelDivisor did not survive: %v", got.LabelDivisor)
+	}
+	if got.Window != "24h" {
+		t.Errorf("window did not survive: %q", got.Window)
+	}
+}
+
+func TestValidateGaugeConfigRejectsUnknownRingOptions(t *testing.T) {
+	for name, mutate := range map[string]func(*dashboardGaugeConfig){
+		"ring style": func(g *dashboardGaugeConfig) { g.RingStyle = "neon" },
+		"readout":    func(g *dashboardGaugeConfig) { g.Readout = "sideways" },
+		"window":     func(g *dashboardGaugeConfig) { g.Window = "99y" },
+	} {
+		config := validGaugeConfig()
+		mutate(config)
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+			t.Fatalf("%s: expected rejection", name)
+		}
+	}
+}
+
+// A divisor of zero would divide the scale labels by nothing.
+func TestValidateGaugeConfigRejectsANonPositiveLabelDivisor(t *testing.T) {
+	config := validGaugeConfig()
+	zero := 0.0
+	config.LabelDivisor = &zero
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+		t.Fatal("expected a zero label divisor to be rejected")
+	}
+}

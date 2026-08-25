@@ -28,7 +28,8 @@ import { unitOption } from '@/lib/quantities'
 interface EngineProfileDialogProps {
   open: boolean
   onCancel: () => void
-  onApply: (title: string, gauges: GaugeWidgetConfig[]) => void
+  /** Suffixes are passed alongside so a dotted one matches as a whole. */
+  onApply: (title: string, gauges: GaugeWidgetConfig[], suffixes: string[]) => void
   /** Set when applying to a group that already exists, to reword the action. */
   applyLabel?: string
   /**
@@ -69,8 +70,9 @@ export function EngineProfileDialog({
   // A tile being edited names its own engine; the published paths are only a
   // fallback for a tile that has none yet.
   const seededPrefix = useMemo(
-    () => (existingGauges ? commonInstancePrefix(existingGauges) : null) ?? candidates[0] ?? '',
-    [existingGauges, candidates],
+    () => (existingGauges && profile ? commonInstancePrefix(existingGauges, profile.gauges.map((g) => g.path_suffix)) : null)
+      ?? candidates[0] ?? '',
+    [existingGauges, candidates, profile],
   )
 
   useEffect(() => {
@@ -84,7 +86,11 @@ export function EngineProfileDialog({
   // What applying will actually do to the tile that is already there.
   const change = useMemo(() => {
     if (!profile || !existingGauges) return null
-    const { updated, added } = mergeGaugeSettingsBySuffix(existingGauges, profileToGauges(profile, instance))
+    const { updated, added } = mergeGaugeSettingsBySuffix(
+      existingGauges,
+      profileToGauges(profile, instance),
+      profile.gauges.map((g) => g.path_suffix),
+    )
     return { updated, added }
   }, [profile, existingGauges, instance])
   const canApply = profile !== undefined && instance.trim() !== '' && title.trim() !== ''
@@ -193,7 +199,11 @@ export function EngineProfileDialog({
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           <Button
             disabled={!canApply}
-            onClick={() => profile && onApply(title.trim(), profileToGauges(profile, instance))}
+            onClick={() => profile && onApply(
+              title.trim(),
+              profileToGauges(profile, instance),
+              profile.gauges.map((g) => g.path_suffix),
+            )}
           >
             {applyLabel}
           </Button>

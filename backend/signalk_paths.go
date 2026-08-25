@@ -92,11 +92,22 @@ func unitsFor(node map[string]any) string {
 }
 
 func signalKPathsHandler(c echo.Context) error {
-	tree := globalSignalKSnapshot.selfTree()
-	if tree == nil {
-		return c.JSON(http.StatusOK, map[string]any{"paths": []signalKPath{}})
+	paths := []signalKPath{}
+	if tree := globalSignalKSnapshot.selfTree(); tree != nil {
+		paths = collectSignalKPaths(tree)
 	}
-	return c.JSON(http.StatusOK, map[string]any{"paths": collectSignalKPaths(tree)})
+
+	// Derived paths are listed alongside the published ones, or an operator
+	// has no way to find something to bind that the vessel never announces.
+	for _, derived := range derivedPathIDs {
+		entry := signalKPath{Path: derived, Units: derivedPathUnits[derived]}
+		if value := derivedPathValues()[derived]; value != nil {
+			entry.Value = value
+		}
+		paths = append(paths, entry)
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"paths": paths})
 }
 
 // buildGaugeValuesPayload pushes the current value of every path a gauge is
@@ -106,9 +117,22 @@ func buildGaugeValuesPayload() map[string]any {
 	paths := gaugeBoundPaths()
 	values := make(map[string]any, len(paths))
 
+	derived := derivedPathValues()
+
 	if len(paths) > 0 {
 		read := snapshotAlarmReader(globalSignalKSnapshot)
 		for _, path := range paths {
+			// A derived path is computed rather than looked up, but rides the
+			// same event so every widget binds it the same way.
+			if isDerivedPath(path) {
+				if value := derived[path]; value != nil {
+					values[path] = *value
+				} else {
+					values[path] = nil
+				}
+				continue
+			}
+
 			sample := read(path)
 			if !sample.Present {
 				// Absent stays absent: a gauge must render the structural dash

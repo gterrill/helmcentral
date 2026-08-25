@@ -34,10 +34,13 @@ export const GAUGE_WIDGET_ID_PREFIX = 'gauge:'
 export const GAUGE_GROUP_WIDGET_ID_PREFIX = 'gauge-group:'
 /** Lamp strips (ADR 0052) — the indicator ribbon, as a placeable widget. */
 export const LAMP_STRIP_WIDGET_ID_PREFIX = 'lamps:'
+/** Engine clusters (ADR 0054) — a ticked ring with mask-cut corner cards. */
+export const CLUSTER_WIDGET_ID_PREFIX = 'cluster:'
 export type EmbedWidgetId = `${typeof EMBED_WIDGET_ID_PREFIX}${string}`
 export type GaugeWidgetId = `${typeof GAUGE_WIDGET_ID_PREFIX}${string}`
 export type GaugeGroupWidgetId = `${typeof GAUGE_GROUP_WIDGET_ID_PREFIX}${string}`
 export type LampStripWidgetId = `${typeof LAMP_STRIP_WIDGET_ID_PREFIX}${string}`
+export type ClusterWidgetId = `${typeof CLUSTER_WIDGET_ID_PREFIX}${string}`
 
 export type DashboardWidgetId =
   | BuiltinWidgetId
@@ -45,6 +48,7 @@ export type DashboardWidgetId =
   | GaugeWidgetId
   | GaugeGroupWidgetId
   | LampStripWidgetId
+  | ClusterWidgetId
 
 export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'vessel': 'Vessel',
@@ -95,6 +99,12 @@ export interface GaugeWidgetConfig {
   zones?: GaugeZone[]
   /** History window; `trend` only (ADR 0051). */
   window?: string
+  /** `radial` only: `plain` is the bare arc, `instrument` adds ticks and a scale (ADR 0054). */
+  ringStyle?: 'plain' | 'instrument'
+  /** `radial` only: where the reading sits relative to the ring. */
+  readout?: 'below' | 'inside'
+  /** `instrument` rings only: divides the scale numbers, e.g. 100 for RPM. */
+  labelDivisor?: number
 }
 
 /**
@@ -129,6 +139,35 @@ export interface LampStripWidgetConfig {
   showCheck?: boolean
 }
 
+/** One corner card. Rows let a card stack several readings, as the temps box does. */
+export interface ClusterCorner {
+  label: string
+  /** A name from CLUSTER_ICONS; inferred from the first row when unset. */
+  icon?: string
+  rows: GaugeWidgetConfig[]
+}
+
+/**
+ * An engine cluster (ADR 0054): a ticked ring with the primary reading inside
+ * it and up to four mask-cut cards in the corners.
+ *
+ * Every slot is a GaugeWidgetConfig verbatim — the decision that made gauge
+ * groups cheap, so zones, units and scales all work per slot unchanged.
+ */
+export interface EngineClusterConfig {
+  title: string
+  /** `instrument` keeps the tile dark whatever the app theme is. */
+  skin?: 'default' | 'instrument'
+  ring: GaugeWidgetConfig
+  centre: GaugeWidgetConfig
+  /** A name from CLUSTER_ICONS; inferred from the centre slot when unset. */
+  centreIcon?: string
+  corners: ClusterCorner[]
+}
+
+export const CLUSTER_MAX_CORNERS = 4
+export const CLUSTER_MAX_CORNER_ROWS = 4
+
 export const LAMP_STRIP_MAX_LAMPS = 16
 export const LAMP_LABEL_MAX_LENGTH = 12
 
@@ -151,6 +190,8 @@ export interface DashboardLayoutItem {
   gaugeGroup?: GaugeGroupWidgetConfig
   /** Present only on `lamps:` widgets; the backend rejects it elsewhere. */
   lamps?: LampStripWidgetConfig
+  /** Present only on `cluster:` widgets; the backend rejects it elsewhere. */
+  cluster?: EngineClusterConfig
 }
 
 /** Length caps mirroring embedURLMaxLen / embedTitleMaxLen in backend/dashboard_pages.go. */
@@ -229,6 +270,19 @@ export function newGaugeGroupWidgetId(existing: readonly DashboardLayoutItem[]):
   }
 }
 
+export function isClusterWidgetId(id: string): id is ClusterWidgetId {
+  return id.startsWith(CLUSTER_WIDGET_ID_PREFIX)
+}
+
+/** Mints a cluster id. Same reasoning as newEmbedWidgetId. */
+export function newClusterWidgetId(existing: readonly DashboardLayoutItem[]): ClusterWidgetId {
+  for (;;) {
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10).padEnd(8, '0')}`
+    const id: ClusterWidgetId = `${CLUSTER_WIDGET_ID_PREFIX}${token}`
+    if (!existing.some((w) => w.id === id)) return id
+  }
+}
+
 export function isLampStripWidgetId(id: string): id is LampStripWidgetId {
   return id.startsWith(LAMP_STRIP_WIDGET_ID_PREFIX)
 }
@@ -244,7 +298,8 @@ export function newLampStripWidgetId(existing: readonly DashboardLayoutItem[]): 
 
 /** True for the widget kinds whose ids carry a per-instance token. */
 export function isMultiInstanceWidgetId(id: string): boolean {
-  return isEmbedWidgetId(id) || isGaugeWidgetId(id) || isGaugeGroupWidgetId(id) || isLampStripWidgetId(id)
+  return isEmbedWidgetId(id) || isGaugeWidgetId(id) || isGaugeGroupWidgetId(id)
+    || isLampStripWidgetId(id) || isClusterWidgetId(id)
 }
 
 /**
@@ -258,6 +313,13 @@ export function duplicateWidget(
   widget: DashboardLayoutItem,
   existing: readonly DashboardLayoutItem[],
 ): DashboardLayoutItem | null {
+  if (isClusterWidgetId(widget.id)) {
+    return {
+      ...widget,
+      id: newClusterWidgetId(existing),
+      cluster: widget.cluster ? structuredClone(widget.cluster) : undefined,
+    }
+  }
   if (isLampStripWidgetId(widget.id)) {
     return {
       ...widget,
@@ -340,6 +402,9 @@ export function mergeLayoutGeometry(
 export function widgetDisplayName(widget: DashboardLayoutItem): string {
   if (isEmbedWidgetId(widget.id)) {
     return widget.embed?.title.trim() || 'Embed'
+  }
+  if (isClusterWidgetId(widget.id)) {
+    return widget.cluster?.title.trim() || 'Engine'
   }
   if (isLampStripWidgetId(widget.id)) {
     return widget.lamps?.title.trim() || 'Indicators'

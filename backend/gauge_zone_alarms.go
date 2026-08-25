@@ -169,6 +169,20 @@ func zoneDerivedAlarmRules() []alarmRule {
 					collect(widget.ID, i, gauge)
 				}
 			}
+			// A cluster slot's zones alarm like any other gauge's. The index
+			// space is flat and stable: ring, centre, then corner rows in
+			// order, so ids survive a restart.
+			if widget.Cluster != nil {
+				collect(widget.ID, 0, widget.Cluster.Ring)
+				collect(widget.ID, 1, widget.Cluster.Centre)
+				index := 2
+				for _, corner := range widget.Cluster.Corners {
+					for _, row := range corner.Rows {
+						collect(widget.ID, index, row)
+						index++
+					}
+				}
+			}
 		}
 	}
 

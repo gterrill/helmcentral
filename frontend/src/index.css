@@ -44,6 +44,41 @@
     --sidebar-ring: var(--secondary);
   }
 
+  /*
+   * The instrument skin (ADR 0054). A real MFD is dark whatever time it is, so
+   * this is opt-in per tile and independent of the app theme.
+   *
+   * It redefines the same token names every component already consumes, so
+   * Tile, DialRing and every readout re-skin with no per-component branching.
+   * Alert red and amber are deliberately absent: a warning has to look like a
+   * warning in either skin.
+   */
+  [data-skin="instrument"] {
+    --background: 222 47% 8%;
+    --foreground: 199 30% 92%;
+    --card: 222 47% 8%;
+    /* Every -foreground pair has to be redefined, not just --foreground. A
+       token left out falls through to the light theme: --card-foreground did,
+       and the tile's config button inherits it, so the gear rendered in
+       near-black on a near-black card and looked absent. */
+    --card-foreground: 199 30% 92%;
+    --popover: 222 45% 11%;
+    --popover-foreground: 199 30% 92%;
+    --primary: 199 89% 60%;
+    --primary-foreground: 222 47% 8%;
+    --secondary: 205 32% 18%;
+    --secondary-foreground: 199 30% 92%;
+    --muted: 205 32% 18%;
+    --muted-foreground: 205 20% 62%;
+    --accent: 205 32% 18%;
+    --accent-foreground: 199 30% 92%;
+    --border: 205 30% 24%;
+    --input: 205 30% 24%;
+    --ring: 199 89% 60%;
+    --gauge-primary: 199 89% 62%;
+    --gauge-secondary: 199 60% 48%;
+  }
+
   .dark {
     --background: 0 0% 0%;
     --foreground: 0 0% 100%;

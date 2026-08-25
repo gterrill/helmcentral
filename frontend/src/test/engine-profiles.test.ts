@@ -162,9 +162,10 @@ describe('mergeGaugeSettingsBySuffix', () => {
     { path: 'propulsion.stbd.rudderAngle', label: 'Rudder', display: 'numeric' as const, quantity: 'raw', unit: 'raw' },
   ]
   const incoming = () => profileToGauges(profile, 'propulsion.stbd')
+  const suffixes = profile.gauges.map((g) => g.path_suffix)
 
   test('copies settings onto matching gauges, keeping path and label', () => {
-    const { gauges } = mergeGaugeSettingsBySuffix(existing, incoming())
+    const { gauges } = mergeGaugeSettingsBySuffix(existing, incoming(), suffixes)
 
     expect(gauges[0]).toMatchObject({ quantity: 'pressure', unit: 'psi', min: 0, max: 100, display: 'radial' })
     expect(gauges[0].path).toBe('propulsion.stbd.oilPressure')
@@ -172,7 +173,7 @@ describe('mergeGaugeSettingsBySuffix', () => {
   })
 
   test('leaves unmatched gauges alone and does not mutate', () => {
-    const { gauges } = mergeGaugeSettingsBySuffix(existing, incoming())
+    const { gauges } = mergeGaugeSettingsBySuffix(existing, incoming(), suffixes)
     expect(gauges[1]).toEqual(existing[1])
     expect(existing[0].quantity).toBe('raw')
   })
@@ -183,7 +184,7 @@ describe('mergeGaugeSettingsBySuffix', () => {
    * missing, which is the opposite of what a profile is for.
    */
   test('appends gauges the profile has and the tile does not', () => {
-    const { gauges } = mergeGaugeSettingsBySuffix(existing, incoming())
+    const { gauges } = mergeGaugeSettingsBySuffix(existing, incoming(), suffixes)
 
     expect(gauges.map((g) => g.path)).toEqual([
       'propulsion.stbd.oilPressure',
@@ -194,13 +195,13 @@ describe('mergeGaugeSettingsBySuffix', () => {
   })
 
   test('reports how many were updated and how many added', () => {
-    const { updated, added } = mergeGaugeSettingsBySuffix(existing, incoming())
+    const { updated, added } = mergeGaugeSettingsBySuffix(existing, incoming(), suffixes)
     expect(updated).toBe(1)
     expect(added).toBe(1)
   })
 
   test('appends everything when the tile is empty', () => {
-    const { gauges, updated, added } = mergeGaugeSettingsBySuffix([], incoming())
+    const { gauges, updated, added } = mergeGaugeSettingsBySuffix([], incoming(), suffixes)
     expect(gauges).toHaveLength(2)
     expect(updated).toBe(0)
     expect(added).toBe(2)
@@ -208,7 +209,7 @@ describe('mergeGaugeSettingsBySuffix', () => {
 
   test('adds nothing when the tile already covers the profile', () => {
     const full = incoming()
-    const { gauges, updated, added } = mergeGaugeSettingsBySuffix(full, full)
+    const { gauges, updated, added } = mergeGaugeSettingsBySuffix(full, full, suffixes)
     expect(gauges).toHaveLength(2)
     expect(updated).toBe(2)
     expect(added).toBe(0)
@@ -225,20 +226,151 @@ describe('commonInstancePrefix', () => {
     expect(commonInstancePrefix([
       { path: 'propulsion.port.oilPressure', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' },
       { path: 'propulsion.port.coolantTemperature', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' },
-    ])).toBe('propulsion.port')
+    ], ['oilPressure', 'coolantTemperature'])).toBe('propulsion.port')
   })
 
   test('is null when the gauges do not agree', () => {
     expect(commonInstancePrefix([
       { path: 'propulsion.port.oilPressure', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' },
       { path: 'tanks.fuel.0.currentLevel', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' },
-    ])).toBeNull()
+    ], ['oilPressure', 'currentLevel'])).toBeNull()
   })
 
   test('is null for an empty or blank-path tile', () => {
-    expect(commonInstancePrefix([])).toBeNull()
+    expect(commonInstancePrefix([], ['oilPressure'])).toBeNull()
     expect(commonInstancePrefix([
       { path: '', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' },
-    ])).toBeNull()
+    ], ['oilPressure'])).toBeNull()
+  })
+})
+
+/**
+ * transmission.oilTemperature is a two-segment suffix. Matching on the last
+ * dotted segment alone makes it collide with any other *.oilTemperature — and
+ * on this vessel the gearbox temp is the only oil temp there is, so a collision
+ * would silently point a gauge at the wrong sensor.
+ */
+describe('dotted path suffixes', () => {
+  const dotted: EngineProfile = {
+    id: 'dotted', name: 'Dotted',
+    gauges: [
+      { path_suffix: 'transmission.oilTemperature', label: 'Gearbox', display: 'numeric', quantity: 'temperature', unit: 'C' },
+      { path_suffix: 'fuel.rate', label: 'Fuel', display: 'numeric', quantity: 'volumetricFlow', unit: 'Lph' },
+    ],
+  }
+
+  test('composes a dotted suffix onto the instance prefix', () => {
+    expect(profileToGauges(dotted, 'propulsion.port').map((g) => g.path)).toEqual([
+      'propulsion.port.transmission.oilTemperature',
+      'propulsion.port.fuel.rate',
+    ])
+  })
+
+  test('matches the whole suffix, not just its last segment', () => {
+    const existing = [
+      { path: 'propulsion.port.transmission.oilTemperature', label: 'Gearbox', display: 'numeric' as const, quantity: 'raw', unit: 'raw' },
+      // Same final segment, different sensor. Must not take the gearbox settings.
+      { path: 'propulsion.port.oilTemperature', label: 'Engine oil', display: 'numeric' as const, quantity: 'raw', unit: 'raw' },
+    ]
+    const { gauges } = mergeGaugeSettingsBySuffix(
+      existing,
+      profileToGauges(dotted, 'propulsion.port'),
+      dotted.gauges.map((g) => g.path_suffix),
+    )
+
+    expect(gauges[0].quantity).toBe('temperature')
+    expect(gauges[1].quantity).toBe('raw')
+  })
+
+  test('derives the instance prefix past a dotted suffix', () => {
+    expect(instancePrefixCandidates(dotted, [
+      { path: 'propulsion.port.transmission.oilTemperature' },
+      { path: 'propulsion.starboard.fuel.rate' },
+    ])).toEqual(['propulsion.port', 'propulsion.starboard'])
+  })
+
+  test('does not append a gauge the tile already has under a dotted suffix', () => {
+    const existing = [
+      { path: 'propulsion.port.fuel.rate', label: 'Fuel', display: 'numeric' as const, quantity: 'raw', unit: 'raw' },
+    ]
+    const { added } = mergeGaugeSettingsBySuffix(
+      existing,
+      profileToGauges(dotted, 'propulsion.port'),
+      dotted.gauges.map((g) => g.path_suffix),
+    )
+    expect(added).toBe(1)
+  })
+})
+
+/**
+ * Both of these were found by screenshotting the cluster dialog, which seeded
+ * its engine instance to `electrical.alternator.0`.
+ */
+describe('instance seeding against a real vessel', () => {
+  const engine: EngineProfile = {
+    id: 'e', name: 'E',
+    gauges: [
+      { path_suffix: 'revolutions', label: 'RPM', display: 'radial', quantity: 'frequency', unit: 'rpm' },
+      { path_suffix: 'oilPressure', label: 'Oil', display: 'numeric', quantity: 'pressure', unit: 'psi' },
+      { path_suffix: 'temperature', label: 'Coolant', display: 'numeric', quantity: 'temperature', unit: 'C' },
+      { path_suffix: 'transmission.oilTemperature', label: 'Gearbox', display: 'numeric', quantity: 'temperature', unit: 'C' },
+    ],
+  }
+
+  // `temperature` alone is published by alternators, batteries, chargers and
+  // the outside air. Ranking alphabetically hands the engine slot to whichever
+  // sorts first, which on this vessel is an alternator.
+  test('ranks an instance by how much of the profile it satisfies', () => {
+    expect(instancePrefixCandidates(engine, [
+      { path: 'electrical.alternator.0.temperature' },
+      { path: 'electrical.batteries.0.temperature' },
+      { path: 'environment.outside.temperature' },
+      { path: 'propulsion.port.revolutions' },
+      { path: 'propulsion.port.oilPressure' },
+      { path: 'propulsion.port.temperature' },
+      { path: 'propulsion.starboard.revolutions' },
+    ])[0]).toBe('propulsion.port')
+  })
+
+  test('still lists the weaker matches, just not first', () => {
+    const candidates = instancePrefixCandidates(engine, [
+      { path: 'electrical.alternator.0.temperature' },
+      { path: 'propulsion.port.revolutions' },
+      { path: 'propulsion.port.oilPressure' },
+    ])
+    expect(candidates[0]).toBe('propulsion.port')
+    expect(candidates).toContain('electrical.alternator.0')
+  })
+
+  // A one-for-one tie carries no signal about which is the engine, so it falls
+  // back to a stable alphabetical order rather than special-casing a tree.
+  test('falls back to alphabetical when two instances match equally', () => {
+    expect(instancePrefixCandidates(engine, [
+      { path: 'electrical.alternator.0.temperature' },
+      { path: 'propulsion.port.revolutions' },
+    ])).toEqual(['electrical.alternator.0', 'propulsion.port'])
+  })
+
+  test('breaks a tie alphabetically, so port precedes starboard', () => {
+    const paths = ['propulsion.starboard', 'propulsion.port'].flatMap((p) => [
+      { path: `${p}.revolutions` }, { path: `${p}.oilPressure` },
+    ])
+    expect(instancePrefixCandidates(engine, paths)).toEqual(['propulsion.port', 'propulsion.starboard'])
+  })
+
+  // Stripping the last dotted segment turns propulsion.port.transmission.
+  // oilTemperature into propulsion.port.transmission, which disagrees with the
+  // other slots, so the whole thing gave up and fell back to the candidates.
+  test('finds the shared prefix even when a slot has a dotted suffix', () => {
+    const slots = profileToGauges(engine, 'propulsion.port')
+    expect(commonInstancePrefix(slots, engine.gauges.map((g) => g.path_suffix))).toBe('propulsion.port')
+  })
+
+  test('is still null when the slots genuinely disagree', () => {
+    const slots = [
+      ...profileToGauges(engine, 'propulsion.port').slice(0, 2),
+      ...profileToGauges(engine, 'propulsion.starboard').slice(2),
+    ]
+    expect(commonInstancePrefix(slots, engine.gauges.map((g) => g.path_suffix))).toBeNull()
   })
 })

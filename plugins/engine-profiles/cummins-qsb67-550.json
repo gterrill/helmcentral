@@ -4,8 +4,8 @@
   "manufacturer": "Cummins",
   "model": "QSB 6.7",
   "rating_hp": 550,
-  "source": "Seaboard Marine (sbmar.com) — advisory operating ranges, NOT factory alarm setpoints",
-  "notes": "Cummins does not publish QSB 6.7 setpoints; they are in the operator's manual and QuickServe. Every band here is a green advisory range with a citation, and raises no alarm. The warn and alarm thresholds are deliberately unset — fill them from your manual and they become real alarms.",
+  "source": "Seaboard Marine (sbmar.com) \u2014 advisory operating ranges, NOT factory alarm setpoints",
+  "notes": "Cummins does not publish QSB 6.7 setpoints; they are in the operator's manual and QuickServe. Every band here is a green advisory range with a citation, and raises no alarm. The warn and alarm thresholds are deliberately unset - fill them from your manual and they become real alarms. Path suffixes were verified against a live QSB 6.7 vessel: the engine temperature is `temperature` (not `coolantTemperature`), the only oil temperature is the gearbox's `transmission.oilTemperature`, and exhaust temperature is published under `propulsion.0`/`propulsion.1` rather than the engine node, so no suffix can reach it - add it by hand. propulsion.<id>.fuel.economy is deliberately not included: it is per engine, so on a twin it reads roughly twice the boat's actual figure. Bind helmcentral.propulsion.fuelEconomy for the vessel's own economy instead.",
   "gauges": [
     {
       "path_suffix": "revolutions",
@@ -21,9 +21,19 @@
           "direction": "above",
           "threshold": null,
           "state": "warn",
-          "note": "Overspeed warning — from your manual. Rated speed is 2600 rpm."
+          "note": "Overspeed warning \u2014 from your manual. Rated speed is 2600 rpm."
         }
       ]
+    },
+    {
+      "path_suffix": "fuel.rate",
+      "label": "Fuel Flow",
+      "display": "numeric",
+      "quantity": "volumetricFlow",
+      "unit": "Lph",
+      "min": 0,
+      "max": 120,
+      "decimals": 1
     },
     {
       "path_suffix": "oilPressure",
@@ -44,18 +54,27 @@
           "direction": "below",
           "threshold": null,
           "state": "warn",
-          "note": "Low oil pressure warning — from your manual"
+          "note": "Low oil pressure warning \u2014 from your manual"
         },
         {
           "direction": "below",
           "threshold": null,
           "state": "alarm",
-          "note": "Low oil pressure alarm / derate point — from your manual"
+          "note": "Low oil pressure alarm / derate point \u2014 from your manual"
         }
       ]
     },
     {
-      "path_suffix": "coolantTemperature",
+      "path_suffix": "boostPressure",
+      "label": "Boost",
+      "display": "bar",
+      "quantity": "pressure",
+      "unit": "psi",
+      "min": 0,
+      "max": 40
+    },
+    {
+      "path_suffix": "temperature",
       "label": "Coolant",
       "display": "radial",
       "quantity": "temperature",
@@ -73,58 +92,50 @@
           "direction": "above",
           "threshold": null,
           "state": "warn",
-          "note": "High coolant temperature warning — from your manual"
+          "note": "High coolant temperature warning \u2014 from your manual"
         },
         {
           "direction": "above",
           "threshold": null,
           "state": "alarm",
-          "note": "Overheat alarm / derate point — from your manual"
+          "note": "Overheat alarm / derate point \u2014 from your manual"
         }
       ]
     },
     {
-      "path_suffix": "boostPressure",
-      "label": "Boost",
-      "display": "bar",
-      "quantity": "pressure",
-      "unit": "psi",
-      "min": 0,
-      "max": 40
-    },
-    {
-      "path_suffix": "exhaustTemperature",
-      "label": "Exhaust",
-      "display": "bar",
+      "path_suffix": "transmission.oilTemperature",
+      "label": "Gearbox",
+      "display": "numeric",
       "quantity": "temperature",
       "unit": "C",
       "min": 0,
-      "max": 600,
+      "max": 120,
       "zones": [
         {
           "direction": "above",
           "threshold": null,
           "state": "warn",
-          "note": "High exhaust temperature — from your manual"
+          "note": "High gearbox oil temperature - from your transmission manual"
         }
       ]
     },
     {
-      "path_suffix": "oilTemperature",
-      "label": "Oil Temp",
+      "path_suffix": "transmission.oilPressure",
+      "label": "Gear Press",
       "display": "numeric",
-      "quantity": "temperature",
-      "unit": "C",
+      "quantity": "pressure",
+      "unit": "psi",
       "min": 0,
-      "max": 140,
-      "zones": [
-        {
-          "direction": "below",
-          "threshold": 104,
-          "state": "normal",
-          "source": "sbmar.com: oil temp typically runs 20-40F above coolant; 180F-220F (82-104C) is ideal"
-        }
-      ]
+      "max": 500
+    },
+    {
+      "path_suffix": "engineLoad",
+      "label": "Load",
+      "display": "bar",
+      "quantity": "ratio",
+      "unit": "percent",
+      "min": 0,
+      "max": 100
     },
     {
       "path_suffix": "runTime",

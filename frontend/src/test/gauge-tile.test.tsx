@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { GaugeTile } from '@/components/gauge-tile'
+import { GaugeTile, majorStepFor } from '@/components/gauge-tile'
 import type { GaugeDisplay, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 
 function config(overrides: Partial<GaugeWidgetConfig> = {}): GaugeWidgetConfig {
@@ -154,5 +154,38 @@ describe('healthy zones (ADR 0053)', () => {
     expect(readout.className).toContain('text-gauge-primary')
     expect(readout.className).not.toContain('red')
     expect(readout.className).not.toContain('amber')
+  })
+})
+
+describe('instrument ring style (ADR 0054)', () => {
+  const instrument = config({
+    display: 'radial', ringStyle: 'instrument', min: 0, max: 3000,
+    quantity: 'frequency', unit: 'rpm', decimals: 0, labelDivisor: 100,
+  })
+
+  test('draws ticks and a divided scale', () => {
+    const { container } = render(
+      <GaugeTile config={instrument} value={11.638} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelectorAll('[data-tick="major"]').length).toBeGreaterThan(2)
+    // A divided scale has to say so, or 0/10/20/30 is just wrong.
+    expect(screen.getByText('RPM x100')).toBeInTheDocument()
+    // 11.638 Hz is 698 RPM — the live idle reading.
+    expect(screen.getByText('698')).toBeInTheDocument()
+  })
+
+  // Every gauge configured before this option existed must render as it did.
+  test('leaves the plain arc alone by default', () => {
+    const { container } = render(
+      <GaugeTile config={config({ display: 'radial', min: 0, max: 100 })} value={241325} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelectorAll('[data-tick]')).toHaveLength(0)
+    expect(screen.getByText('35.0')).toBeInTheDocument()
+  })
+
+  test('picks round major steps rather than arbitrary ones', () => {
+    expect(majorStepFor(0, 3000)).toBe(500)
+    expect(majorStepFor(0, 100)).toBe(20)
+    expect(majorStepFor(0, 1)).toBe(0.2)
   })
 })

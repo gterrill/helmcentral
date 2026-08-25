@@ -3,6 +3,7 @@ import { memo, useId } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
+import { DialRing } from '@/components/ui/dial-ring'
 import { useTelemetryHistory, type TelemetryHistoryPoint } from '@/hooks/use-telemetry-history'
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { formatQuantity, convertFromSI, unitOption } from '@/lib/quantities'
@@ -169,6 +170,20 @@ function LampGauge({ value, zone, text, density }: { value: number | null; zone:
   )
 }
 
+/**
+ * A major tick roughly every tenth of the scale, snapped to a round number so
+ * the labels read as 0/500/1000 rather than 0/317/634.
+ */
+export function majorStepFor(min: number, max: number): number {
+  const span = Math.max(1e-9, max - min)
+  const rough = span / 6
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))
+  for (const multiple of [1, 2, 2.5, 5, 10]) {
+    if (magnitude * multiple >= rough) return magnitude * multiple
+  }
+  return magnitude * 10
+}
+
 function rangeFor(config: GaugeWidgetConfig): { min: number; max: number } {
   const min = config.min ?? 0
   const max = config.max ?? 100
@@ -226,8 +241,39 @@ function RadialGauge({ value, zone, config, text, unitLabel, density }: {
   unitLabel: string
   density: GaugeDensity
 }) {
+  // Hoisted above the instrument branch below: a hook after a conditional
+  // return changes hook order between renders.
   const gradientId = useId()
   const { min, max } = rangeFor(config)
+
+  // The ticked ring, when asked for. The bare arc below stays the default so
+  // every gauge that predates ADR 0054 renders exactly as it did.
+  if (config.ringStyle === 'instrument') {
+    // The divisor rides the unit, so a scale reading 0/10/20/30 always says
+    // what it is divided by. Without it the numbers are simply wrong.
+    const scaledUnit = config.labelDivisor ? `${unitLabel} x${config.labelDivisor}`.trim() : unitLabel
+    const readout = (
+      <Readout text={text} unitLabel={scaledUnit} zone={zone}
+        size={density === 'compact' ? 'text-xl' : 'text-3xl'} />
+    )
+    return (
+      <div className={`flex flex-col items-center ${SHELL[density]}`}>
+        <DialRing
+          value={value}
+          min={min}
+          max={max}
+          majorStep={majorStepFor(min, max)}
+          labelDivisor={config.labelDivisor}
+          zones={config.zones}
+          className={density === 'compact' ? 'w-full max-w-[150px]' : 'w-full max-w-[220px]'}
+        >
+          {config.readout !== 'below' && readout}
+        </DialRing>
+        {config.readout === 'below' && readout}
+      </div>
+    )
+  }
+
   const fraction = clampFraction(value, min, max)
 
   const startAngle = 150

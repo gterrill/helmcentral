@@ -118,14 +118,26 @@ export function applyProfileToGauges(
   profile: EngineProfile,
 ): GaugeWidgetConfig[] {
   return gauges.map((gauge) => {
-    const match = profile.gauges.find((candidate) => gauge.path.endsWith(`.${candidate.path_suffix}`))
+    const suffix = matchBySuffix(gauge.path, profile.gauges.map((g) => g.path_suffix))
+    const match = suffix === null ? undefined : profile.gauges.find((c) => c.path_suffix === suffix)
     if (!match) return gauge
     return { ...gauge, ...gaugeSettingsFor(match) }
   })
 }
 
-function suffixOf(path: string): string {
-  return path.split('.').slice(-1)[0]
+/**
+ * The declared suffix `path` ends with, longest first.
+ *
+ * Splitting on the last dotted segment is not good enough: this vessel's only
+ * oil temperature is `transmission.oilTemperature`, and a last-segment match
+ * would happily bind it to a bare `oilTemperature` gauge — the wrong sensor,
+ * silently.
+ */
+function matchBySuffix(path: string, suffixes: readonly string[]): string | null {
+  for (const suffix of [...suffixes].sort((a, b) => b.length - a.length)) {
+    if (path === suffix || path.endsWith(`.${suffix}`)) return suffix
+  }
+  return null
 }
 
 /** Everything about a gauge except the operator's own path and label. */
@@ -156,36 +168,56 @@ export interface MergedGauges {
 export function mergeGaugeSettingsBySuffix(
   existing: readonly GaugeWidgetConfig[],
   incoming: readonly GaugeWidgetConfig[],
+  /**
+   * The suffixes the profile declared, positionally matching `incoming`.
+   *
+   * Required rather than derived: nothing in a composed path says where the
+   * instance ends and the suffix begins, so guessing the last segment binds
+   * the gearbox sensor to a bare `oilTemperature` gauge without complaining.
+   */
+  suffixes: readonly string[],
 ): MergedGauges {
-  const bySuffix = new Map(incoming.map((gauge) => [suffixOf(gauge.path), gauge]))
-  const covered = new Set(existing.map((gauge) => suffixOf(gauge.path)))
+  const bySuffix = new Map<string, GaugeWidgetConfig>()
+  incoming.forEach((gauge, index) => bySuffix.set(suffixes[index] ?? '', gauge))
 
+  const covered = new Set<string>()
   let updated = 0
+
   const merged = existing.map((gauge) => {
-    const match = bySuffix.get(suffixOf(gauge.path))
+    const suffix = matchBySuffix(gauge.path, suffixes)
+    const match = suffix === null ? undefined : bySuffix.get(suffix)
     if (!match) return gauge
+    covered.add(suffix!)
     updated += 1
     return { ...gauge, ...settingsOnly(match) }
   })
 
-  const additions = incoming.filter((gauge) => !covered.has(suffixOf(gauge.path)))
+  const additions = incoming.filter((_, index) => !covered.has(suffixes[index] ?? ''))
   return { gauges: [...merged, ...additions.map((gauge) => ({ ...gauge }))], updated, added: additions.length }
 }
 
 /**
  * The instance prefix a tile's gauges share, or null if they do not agree.
  *
- * When applying a profile to an existing tile this is where the prefix comes
- * from — not from whatever the server happens to publish first, which would
- * append starboard gauges to the Port tile.
+ * Suffix-aware, because it has to be: stripping the last dotted segment turns
+ * `propulsion.port.transmission.oilTemperature` into
+ * `propulsion.port.transmission`, which disagrees with every other slot and
+ * makes the whole thing give up and fall back to a guess.
  */
-export function commonInstancePrefix(gauges: readonly GaugeWidgetConfig[]): string | null {
-  const prefixes = new Set(
-    gauges
-      .map((gauge) => gauge.path.trim())
-      .filter((path) => path.includes('.'))
-      .map((path) => path.slice(0, path.lastIndexOf('.'))),
-  )
+export function commonInstancePrefix(
+  gauges: readonly GaugeWidgetConfig[],
+  suffixes: readonly string[],
+): string | null {
+  const prefixes = new Set<string>()
+
+  for (const gauge of gauges) {
+    const path = gauge.path.trim()
+    if (path === '') continue
+    const suffix = matchBySuffix(path, suffixes)
+    if (suffix === null || path.length <= suffix.length) return null
+    prefixes.add(path.slice(0, path.length - suffix.length - 1))
+  }
+
   return prefixes.size === 1 ? [...prefixes][0] : null
 }
 
@@ -216,14 +248,20 @@ export function instancePrefixCandidates(
   paths: readonly { path: string }[],
 ): string[] {
   const suffixes = profile.gauges.map((g) => g.path_suffix)
-  const found = new Set<string>()
+  const hits = new Map<string, number>()
 
   for (const { path } of paths) {
-    for (const suffix of suffixes) {
-      if (path.endsWith(`.${suffix}`)) {
-        found.add(path.slice(0, path.length - suffix.length - 1))
-      }
-    }
+    const suffix = matchBySuffix(path, suffixes)
+    if (suffix === null || path.length <= suffix.length) continue
+    const prefix = path.slice(0, path.length - suffix.length - 1)
+    hits.set(prefix, (hits.get(prefix) ?? 0) + 1)
   }
-  return [...found].sort()
+
+  // Ranked by how much of the profile each instance actually satisfies, not
+  // alphabetically. `temperature` on its own is published by alternators,
+  // batteries, chargers and the outside air, so sorting by name handed the
+  // engine slot to whichever sorted first — an alternator, on this vessel.
+  return [...hits.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([prefix]) => prefix)
 }

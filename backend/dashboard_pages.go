@@ -65,6 +65,9 @@ var validGaugeDisplays = map[string]bool{
 	"numeric": true, "radial": true, "bar": true, "lamp": true, "trend": true,
 }
 
+var validGaugeRingStyles = map[string]bool{"": true, "plain": true, "instrument": true}
+var validGaugeReadouts = map[string]bool{"": true, "below": true, "inside": true}
+
 // Gauge groups (ADR 0049) are the third multi-instance widget type. A group is
 // a named cluster of gauges in one tile — "Port" holding RPM, oil pressure and
 // exhaust temperature — built once and then duplicated for the other engine.
@@ -103,6 +106,47 @@ type dashboardLampStripConfig struct {
 	ShowCheck bool `json:"showCheck,omitempty"`
 }
 
+// Engine clusters (ADR 0054) are the fifth multi-instance widget: a ticked ring
+// with the primary reading inside it and mask-cut cards in the corners, the
+// layout wind-tile.tsx established and a marine MFD uses.
+const clusterWidgetIDPrefix = "cluster:"
+
+const (
+	clusterMaxCorners    = 4
+	clusterMaxCornerRows = 4
+)
+
+var validClusterSkins = map[string]bool{"": true, "default": true, "instrument": true}
+
+// A closed set, mirroring CLUSTER_ICONS in frontend/src/lib/cluster-icons.ts.
+// An allowlist rather than any lucide name, so a saved config can never point
+// at a component that does not exist.
+var validClusterIcons = map[string]bool{
+	"":            true,
+	"thermometer": true, "cog": true, "rabbit": true, "clock": true,
+	"fuel": true, "gauge": true, "zap": true, "waves": true, "activity": true,
+}
+
+// dashboardClusterCorner is one corner card. Rows let a single card stack
+// several readings, which is how the temperatures share one box.
+type dashboardClusterCorner struct {
+	Label string                 `json:"label"`
+	Icon  string                 `json:"icon,omitempty"`
+	Rows  []dashboardGaugeConfig `json:"rows"`
+}
+
+// dashboardClusterConfig reuses dashboardGaugeConfig for every slot, the same
+// decision that made gauge groups cheap: zones, units and scales all work per
+// slot with no new machinery.
+type dashboardClusterConfig struct {
+	Title      string                   `json:"title"`
+	Skin       string                   `json:"skin,omitempty"`
+	Ring       dashboardGaugeConfig     `json:"ring"`
+	Centre     dashboardGaugeConfig     `json:"centre"`
+	CentreIcon string                   `json:"centreIcon,omitempty"`
+	Corners    []dashboardClusterCorner `json:"corners,omitempty"`
+}
+
 type dashboardGaugeGroupConfig struct {
 	Title   string                 `json:"title"`
 	Columns *int                   `json:"columns,omitempty"`
@@ -128,6 +172,8 @@ type dashboardLayoutItem struct {
 	GaugeGroup *dashboardGaugeGroupConfig `json:"gaugeGroup,omitempty"`
 	// Present only on `lamps:` widgets; rejected on any other id.
 	Lamps *dashboardLampStripConfig `json:"lamps,omitempty"`
+	// Present only on `cluster:` widgets; rejected on any other id.
+	Cluster *dashboardClusterConfig `json:"cluster,omitempty"`
 }
 
 // dashboardGaugeConfig binds one widget to one SignalK path. Like the embed
@@ -143,6 +189,17 @@ type dashboardGaugeConfig struct {
 	Min      *float64    `json:"min,omitempty"`
 	Max      *float64    `json:"max,omitempty"`
 	Zones    []gaugeZone `json:"zones,omitempty"`
+
+	// Every field the renderer reads has to live here. Go's JSON decoder drops
+	// unknown keys without complaint, so one missing from this struct is
+	// silently discarded on save and the widget quietly renders its default.
+	//
+	// Window is the trend history window (ADR 0051); the rest shape an
+	// instrument ring (ADR 0054).
+	Window       string   `json:"window,omitempty"`
+	RingStyle    string   `json:"ringStyle,omitempty"`
+	Readout      string   `json:"readout,omitempty"`
+	LabelDivisor *float64 `json:"labelDivisor,omitempty"`
 }
 
 // gaugeZone colours a band of the range by alarm severity, reusing the same
@@ -227,6 +284,9 @@ func validateEmbedWidget(w dashboardLayoutItem) string {
 	if w.Lamps != nil {
 		return "lamp config not allowed on embed widget: " + w.ID
 	}
+	if w.Cluster != nil {
+		return "cluster config not allowed on embed widget: " + w.ID
+	}
 	if w.Embed == nil {
 		return "embed widget requires embed config: " + w.ID
 	}
@@ -249,6 +309,10 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 	for _, w := range widgets {
 		if strings.HasPrefix(w.ID, embedWidgetIDPrefix) {
 			if msg := validateEmbedWidget(w); msg != "" {
+				return msg
+			}
+		} else if strings.HasPrefix(w.ID, clusterWidgetIDPrefix) {
+			if msg := validateClusterWidget(w); msg != "" {
 				return msg
 			}
 		} else if strings.HasPrefix(w.ID, lampStripWidgetIDPrefix) {
@@ -280,6 +344,9 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 			}
 			if w.Lamps != nil {
 				return "lamp config not allowed on widget id: " + w.ID
+			}
+			if w.Cluster != nil {
+				return "cluster config not allowed on widget id: " + w.ID
 			}
 		}
 		// Embed tokens are unique per instance, so the duplicate check below
@@ -578,6 +645,9 @@ func validateGaugeWidget(w dashboardLayoutItem) string {
 	if w.Lamps != nil {
 		return "lamp config not allowed on gauge widget: " + w.ID
 	}
+	if w.Cluster != nil {
+		return "cluster config not allowed on gauge widget: " + w.ID
+	}
 	if w.Gauge == nil {
 		return "gauge widget requires gauge config: " + w.ID
 	}
@@ -604,6 +674,18 @@ func validateGaugeConfig(g dashboardGaugeConfig, ctx string) string {
 	if g.Min != nil && g.Max != nil && *g.Min >= *g.Max {
 		return "gauge min must be below max: " + ctx
 	}
+	if !validGaugeRingStyles[g.RingStyle] {
+		return "unknown gauge ring style: " + g.RingStyle
+	}
+	if !validGaugeReadouts[g.Readout] {
+		return "unknown gauge readout: " + g.Readout
+	}
+	if g.LabelDivisor != nil && *g.LabelDivisor <= 0 {
+		return "gauge label divisor must be positive: " + ctx
+	}
+	if g.Window != "" && !validTelemetryHistoryWindow(g.Window) {
+		return "unknown gauge history window: " + g.Window
+	}
 	for i, zone := range g.Zones {
 		if _, ok := alarmStateRank[zone.State]; !ok {
 			return "unknown gauge zone state: " + zone.State
@@ -620,6 +702,55 @@ func validateGaugeConfig(g dashboardGaugeConfig, ctx string) string {
 	return ""
 }
 
+// validateClusterWidget guards the fifth operator-configured widget.
+func validateClusterWidget(w dashboardLayoutItem) string {
+	token := strings.TrimPrefix(w.ID, clusterWidgetIDPrefix)
+	if !embedWidgetTokenPattern.MatchString(token) {
+		return "invalid cluster widget id: " + w.ID
+	}
+	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil || w.Lamps != nil {
+		return "only cluster config is allowed on a cluster widget: " + w.ID
+	}
+	if w.Cluster == nil {
+		return "cluster widget requires cluster config: " + w.ID
+	}
+	if len(w.Cluster.Title) > gaugeGroupTitleMaxLen {
+		return "cluster title too long: " + w.ID
+	}
+	if !validClusterSkins[w.Cluster.Skin] {
+		return "unknown cluster skin: " + w.Cluster.Skin
+	}
+	if !validClusterIcons[w.Cluster.CentreIcon] {
+		return "unknown cluster icon: " + w.Cluster.CentreIcon
+	}
+	if msg := validateGaugeConfig(w.Cluster.Ring, w.ID+" ring"); msg != "" {
+		return msg
+	}
+	if msg := validateGaugeConfig(w.Cluster.Centre, w.ID+" centre"); msg != "" {
+		return msg
+	}
+	if len(w.Cluster.Corners) > clusterMaxCorners {
+		return "cluster has too many corners: " + w.ID
+	}
+	for i, corner := range w.Cluster.Corners {
+		if !validClusterIcons[corner.Icon] {
+			return "unknown cluster icon: " + corner.Icon
+		}
+		if len(corner.Rows) == 0 {
+			return fmt.Sprintf("cluster corner %d has no rows: %s", i+1, w.ID)
+		}
+		if len(corner.Rows) > clusterMaxCornerRows {
+			return fmt.Sprintf("cluster corner %d has too many rows: %s", i+1, w.ID)
+		}
+		for _, row := range corner.Rows {
+			if msg := validateGaugeConfig(row, w.ID); msg != "" {
+				return msg
+			}
+		}
+	}
+	return ""
+}
+
 // validateLampStripWidget guards the fourth operator-configured widget.
 //
 // A strip with no lamps but ShowCheck set is fine — the rollup alone is a
@@ -630,7 +761,7 @@ func validateLampStripWidget(w dashboardLayoutItem) string {
 	if !embedWidgetTokenPattern.MatchString(token) {
 		return "invalid lamp strip widget id: " + w.ID
 	}
-	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil {
+	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil || w.Cluster != nil {
 		return "only lamp config is allowed on a lamp strip widget: " + w.ID
 	}
 	if w.Lamps == nil {
@@ -679,6 +810,9 @@ func validateGaugeGroupWidget(w dashboardLayoutItem) string {
 	}
 	if w.Lamps != nil {
 		return "lamp config not allowed on gauge group widget: " + w.ID
+	}
+	if w.Cluster != nil {
+		return "cluster config not allowed on gauge group widget: " + w.ID
 	}
 	if w.GaugeGroup == nil {
 		return "gauge group widget requires gaugeGroup config: " + w.ID
@@ -741,6 +875,15 @@ func gaugeBoundPaths() []string {
 			if widget.Lamps != nil {
 				for _, lamp := range widget.Lamps.Lamps {
 					add(lamp.Path)
+				}
+			}
+			if widget.Cluster != nil {
+				add(widget.Cluster.Ring.Path)
+				add(widget.Cluster.Centre.Path)
+				for _, corner := range widget.Cluster.Corners {
+					for _, row := range corner.Rows {
+						add(row.Path)
+					}
 				}
 			}
 		}

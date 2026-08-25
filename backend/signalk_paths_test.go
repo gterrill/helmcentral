@@ -1,7 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 )
 
 func pathsFrom(t *testing.T, body string) []signalKPath {
@@ -129,5 +134,63 @@ func TestCollectSignalKPathsHandlesStringValues(t *testing.T) {
 func TestCollectSignalKPathsEmptyTree(t *testing.T) {
 	if paths := collectSignalKPaths(map[string]any{}); len(paths) != 0 {
 		t.Fatalf("expected no paths, got %v", pathNames(paths))
+	}
+}
+
+// A derived path has to reach the browser through the same stream as any other
+// bound path, or nothing can render it.
+func TestGaugeValuesPayloadCarriesDerivedPaths(t *testing.T) {
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{
+		"a": {ID: "a", Widgets: []dashboardLayoutItem{
+			gaugeWidget("gauge:aaaa1111", &dashboardGaugeConfig{
+				Path: vesselFuelEconomyPath, Display: "numeric", Quantity: "fuelEconomy", Unit: "nmpl",
+			}),
+		}},
+	}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+
+	payload := buildGaugeValuesPayload()
+	values, ok := payload["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected payload shape: %+v", payload)
+	}
+	if _, present := values[vesselFuelEconomyPath]; !present {
+		t.Fatalf("expected the derived path in the payload, got keys %v", values)
+	}
+}
+
+// It also has to be findable, or an operator cannot bind it in the first place.
+func TestSignalKPathsHandlerListsDerivedPaths(t *testing.T) {
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	if err := signalKPathsHandler(e.NewContext(httptest.NewRequest(http.MethodGet, "/api/signalk/paths", nil), rec)); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var body struct {
+		Paths []signalKPath `json:"paths"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	found := false
+	for _, p := range body.Paths {
+		if p.Path == vesselFuelEconomyPath {
+			found = true
+			if p.Units != "m/m3" {
+				t.Errorf("expected the derived path to declare its units, got %q", p.Units)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected %q among the listed paths", vesselFuelEconomyPath)
 	}
 }

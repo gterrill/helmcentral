@@ -232,10 +232,10 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupC
           applyLabel="Apply to these gauges"
           existingGauges={config.gauges}
           onCancel={() => setProfileOpen(false)}
-          onApply={(_title, profileGauges) => {
+          onApply={(_title, profileGauges, suffixes) => {
             setConfig((current) => ({
               ...current,
-              gauges: mergeGaugeSettingsBySuffix(current.gauges, profileGauges).gauges,
+              gauges: mergeGaugeSettingsBySuffix(current.gauges, profileGauges, suffixes).gauges,
             }))
             setProfileOpen(false)
           }}

@@ -1,0 +1,151 @@
+{
+  "id": "cummins-onan-13-5kw-60hz",
+  "name": "Cummins Onan 13.5 kW 60 Hz",
+  "manufacturer": "Cummins Onan",
+  "model": "13.5 kW 1Ph 60 Hz marine genset",
+  "source": "Nameplate: 13.5 kW / 13.5 kVA, 1-phase, 60 Hz, 24 V DC control. Scales are derived from the nameplate; it gives ratings, not alarm setpoints.",
+  "notes": "Apply this to the AC circuit the generator feeds, not to electrical.generator.0 \u2014 that node carries only start/stop control and state. Check which circuit is the genset before trusting the readings: a vessel with shore power and an inverter publishes several electrical.ac.N circuits and nothing in the tree says which is which. Runtime, state and hours live under electrical.generator.0 and have to be added by hand for the same reason. Every warning and alarm threshold here is unset: Onan does not publish them, and the genset's own control panel is where its setpoints are configured.",
+  "gauges": [
+    {
+      "path_suffix": "total.realPower",
+      "label": "Load",
+      "display": "radial",
+      "quantity": "power",
+      "unit": "kW",
+      "min": 0,
+      "max": 13.5,
+      "decimals": 2,
+      "zones": [
+        {
+          "direction": "below",
+          "threshold": 13.5,
+          "state": "normal",
+          "source": "Nameplate rating 13.5 kW / 13.5 kVA at 1.0 power factor"
+        },
+        {
+          "direction": "below",
+          "threshold": null,
+          "state": "warn",
+          "note": "Sustained light loading wet-stacks a diesel genset. The floor below which that starts is in the Onan operator manual."
+        }
+      ]
+    },
+    {
+      "path_suffix": "phase.A.lineNeutralVoltage",
+      "label": "Voltage",
+      "display": "numeric",
+      "quantity": "potential",
+      "unit": "V",
+      "min": 0,
+      "max": 260,
+      "decimals": 0,
+      "zones": [
+        {
+          "direction": "above",
+          "threshold": null,
+          "state": "warn",
+          "note": "Over-voltage trip \u2014 from the genset control panel setpoints"
+        },
+        {
+          "direction": "below",
+          "threshold": null,
+          "state": "warn",
+          "note": "Under-voltage trip \u2014 from the genset control panel setpoints"
+        }
+      ]
+    },
+    {
+      "path_suffix": "phase.A.current",
+      "label": "Current",
+      "display": "bar",
+      "quantity": "current",
+      "unit": "A",
+      "min": 0,
+      "max": 65,
+      "decimals": 0,
+      "zones": [
+        {
+          "direction": "above",
+          "threshold": null,
+          "state": "warn",
+          "note": "Full-load amps at the nameplate rating depend on the AC voltage this set is wired for. At 232 V that is about 58 A; confirm against your own nameplate."
+        }
+      ]
+    },
+    {
+      "path_suffix": "phase.A.frequency",
+      "label": "Frequency",
+      "display": "numeric",
+      "quantity": "frequency",
+      "unit": "Hz",
+      "min": 55,
+      "max": 65,
+      "decimals": 1,
+      "zones": [
+        {
+          "direction": "above",
+          "threshold": null,
+          "state": "warn",
+          "note": "Over-frequency trip \u2014 from the genset control panel setpoints. Nominal is 60 Hz, which is 1800 rpm on a 4-pole alternator."
+        },
+        {
+          "direction": "below",
+          "threshold": null,
+          "state": "warn",
+          "note": "Under-frequency trip, the usual sign of an overloaded set \u2014 from the genset control panel setpoints"
+        }
+      ]
+    }
+  ],
+  "service": [
+    {
+      "id": "engine-oil",
+      "description": "Engine oil and filter change",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "air-filter",
+      "description": "Air filter element",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "fuel-filter",
+      "description": "Fuel filter element",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "raw-water-impeller",
+      "description": "Raw water pump impeller",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "coolant",
+      "description": "Coolant replacement",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "zincs",
+      "description": "Heat exchanger zinc anodes",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    },
+    {
+      "id": "brushes-slip-rings",
+      "description": "Generator brushes and slip rings inspection",
+      "interval_hours": null,
+      "interval_months": null,
+      "source": null
+    }
+  ]
+}
