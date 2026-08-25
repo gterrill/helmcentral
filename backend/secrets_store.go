@@ -22,7 +22,7 @@ import (
 // path.
 var knownSecretKeys = []string{
 	"SIGNALK_USERNAME", "SIGNALK_PASSWORD", "INFLUXDB_TOKEN",
-	"GEONAMES_USERNAME", "SMTP_PASSWORD", "NTFY_TOKEN", "WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY",
+	"SMTP_PASSWORD", "NTFY_TOKEN", "WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY",
 	"VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY",
 }
 
@@ -32,7 +32,7 @@ var knownSecretKeys = []string{
 // excluded - they are plugin-only and must never become globally visible
 // via os.Setenv; see the wasm_plugin.go allowlist gate instead.
 var coreEnvSecretKeys = []string{
-	"SIGNALK_USERNAME", "SIGNALK_PASSWORD", "INFLUXDB_TOKEN", "GEONAMES_USERNAME",
+	"SIGNALK_USERNAME", "SIGNALK_PASSWORD", "INFLUXDB_TOKEN",
 }
 
 func isKnownSecretKey(key string) bool {
@@ -307,7 +307,7 @@ func (s *secretsStore) All() (map[string]bool, error) {
 
 // LoadIntoEnv sets each coreEnvSecretKeys entry found in the store into the
 // process environment via os.Setenv, so trusted host Go code that reads
-// secrets via getEnv/os.Getenv (SignalK, InfluxDB, GeoNames) keeps working
+// secrets via getEnv/os.Getenv (SignalK, InfluxDB) keeps working
 // unchanged. WEATHERKIT_* (and any other knownSecretKeys not
 // in coreEnvSecretKeys) are deliberately never set here - they are
 // plugin-only and reach guests exclusively through the

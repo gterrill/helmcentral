@@ -1,0 +1,27 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-08-25T03:02:44Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "way",
+  "id": 158020262,
+  "center": {
+    "lat": -20.4447447,
+    "lon": 149.0452591
+  },
+  "tags": {
+    "name": "Lindeman Island",
+    "natural": "coastline",
+    "place": "island",
+    "source": "Protected Areas of Queensland - Boundaries Dated: 30-09-2010",
+    "wikidata": "Q6552223"
+  }
+}
+
+  ]
+}

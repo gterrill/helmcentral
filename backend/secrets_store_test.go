@@ -221,14 +221,14 @@ func TestSecretsStore_ImportFromEnv_ImportsSetKeysAndSkipsUnset(t *testing.T) {
 		os.Unsetenv(key)
 	}
 	t.Setenv("SIGNALK_USERNAME", "admin")
-	t.Setenv("GEONAMES_USERNAME", "gn-user")
+	t.Setenv("INFLUXDB_TOKEN", "token-abc")
 
 	imported, err := store.ImportFromEnv()
 	if err != nil {
 		t.Fatalf("ImportFromEnv: %v", err)
 	}
 
-	want := []string{"SIGNALK_USERNAME", "GEONAMES_USERNAME"}
+	want := []string{"SIGNALK_USERNAME", "INFLUXDB_TOKEN"}
 	sort.Strings(imported)
 	sort.Strings(want)
 	if len(imported) != len(want) {
@@ -303,7 +303,7 @@ func TestSecretsStore_All_ReflectsSetKeys(t *testing.T) {
 	if !all["SIGNALK_USERNAME"] {
 		t.Errorf("expected SIGNALK_USERNAME=true in All(), got %+v", all)
 	}
-	if all["GEONAMES_USERNAME"] {
-		t.Errorf("expected GEONAMES_USERNAME=false in All(), got %+v", all)
+	if all["INFLUXDB_TOKEN"] {
+		t.Errorf("expected INFLUXDB_TOKEN=false in All(), got %+v", all)
 	}
 }

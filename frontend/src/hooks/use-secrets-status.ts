@@ -5,7 +5,6 @@ export type SecretKey =
   | 'SIGNALK_USERNAME'
   | 'SIGNALK_PASSWORD'
   | 'INFLUXDB_TOKEN'
-  | 'GEONAMES_USERNAME'
   | 'WEATHERKIT_KEY_ID'
   | 'WEATHERKIT_TEAM_ID'
   | 'WEATHERKIT_SERVICE_ID'
@@ -15,7 +14,6 @@ export const SECRET_KEYS: SecretKey[] = [
   'SIGNALK_USERNAME',
   'SIGNALK_PASSWORD',
   'INFLUXDB_TOKEN',
-  'GEONAMES_USERNAME',
   'WEATHERKIT_KEY_ID',
   'WEATHERKIT_TEAM_ID',
   'WEATHERKIT_SERVICE_ID',
@@ -44,7 +42,7 @@ export interface UseSecretsStatusResult {
  * in-progress edit state (`values`/`touched`) plus save/clear actions for
  * every secret field across the app. Meant to be instantiated once behind a
  * context provider (see settings-form-context.tsx / secrets-status-context)
- * so the 5+ consumers across the settings page (SignalK, InfluxDB, GeoNames
+ * so the several consumers across the settings page (SignalK, InfluxDB
  * sections, and up to two provider-settings modals at once) don't each
  * independently refetch or track their own local edit state — callers
  * (the page-level "Save Settings" button, or a provider modal's own Save

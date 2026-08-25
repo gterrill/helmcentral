@@ -9,7 +9,6 @@ import { SECRET_KEYS } from '@/hooks/use-secrets-status'
 import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor-watch-options-section'
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
 import { GeneralSection } from '@/components/settings/sections/general-section'
-import { GeonamesSection } from '@/components/settings/sections/geonames-section'
 import { SecuritySection } from '@/components/settings/sections/security-section'
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
@@ -61,9 +60,9 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   const [isSavingSettings, setIsSavingSettings] = useState(false)
 
   // `touched` covers ALL secret keys tracked by useSecretsStatus — the
-  // three inline-section keys (SignalK/InfluxDB/GeoNames) AND the
-  // provider-modal-only keys (WeatherKit), whether or not that
-  // modal happens to be open right now. Any of them being touched means
+  // two inline-section keys (SignalK/InfluxDB) AND the provider-modal-only
+  // keys (WeatherKit), whether or not that modal happens to be open right
+  // now. Any of them being touched means
   // there's an in-memory edit that would be lost on navigation, so it must
   // count toward "dirty" too.
   const hasUnsavedSecrets = Object.values(touched).some(Boolean)
@@ -157,8 +156,6 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':
         return <InfluxdbSection draft={draft} onChange={handleDraftChange} />
-      case 'geonames':
-        return <GeonamesSection />
       case 'anchor-watch':
         return (
           <AnchorWatchOptionsSection

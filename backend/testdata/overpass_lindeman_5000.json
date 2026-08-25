@@ -1,0 +1,174 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-08-25T03:02:44Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 2982518203,
+  "lat": -20.4383551,
+  "lon": 149.0805441,
+  "tags": {
+    "name": "Gaibirra Island",
+    "place": "island"
+  }
+},
+{
+  "type": "node",
+  "id": 2982535013,
+  "lat": -20.4717209,
+  "lon": 149.0528895,
+  "tags": {
+    "name": "Kennedy Sound",
+    "natural": "bay"
+  }
+},
+{
+  "type": "node",
+  "id": 8375803920,
+  "lat": -20.4527241,
+  "lon": 149.0549393,
+  "tags": {
+    "name": "Plantation Bay",
+    "natural": "bay"
+  }
+},
+{
+  "type": "node",
+  "id": 8375803923,
+  "lat": -20.4349730,
+  "lon": 149.0508566,
+  "tags": {
+    "name": "Turtle Bay",
+    "natural": "bay"
+  }
+},
+{
+  "type": "way",
+  "id": 16323472,
+  "center": {
+    "lat": -20.4855283,
+    "lon": 149.0548533
+  },
+  "tags": {
+    "name": "Brush Island",
+    "natural": "coastline",
+    "place": "island",
+    "source": "PGS",
+    "wikidata": "Q21914786"
+  }
+},
+{
+  "type": "way",
+  "id": 16323670,
+  "center": {
+    "lat": -20.4812100,
+    "lon": 149.0712800
+  },
+  "tags": {
+    "name": "Shaw Island",
+    "natural": "coastline",
+    "place": "island",
+    "source": "PGS",
+    "wikidata": "Q21902583"
+  }
+},
+{
+  "type": "way",
+  "id": 104628500,
+  "center": {
+    "lat": -20.3983244,
+    "lon": 149.0302966
+  },
+  "tags": {
+    "name": "Pentecost Island",
+    "natural": "coastline",
+    "place": "island"
+  }
+},
+{
+  "type": "way",
+  "id": 104628514,
+  "center": {
+    "lat": -20.4239831,
+    "lon": 149.0323103
+  },
+  "tags": {
+    "name": "Little Lindeman Island",
+    "natural": "coastline",
+    "place": "islet"
+  }
+},
+{
+  "type": "way",
+  "id": 158020262,
+  "center": {
+    "lat": -20.4447447,
+    "lon": 149.0452591
+  },
+  "tags": {
+    "name": "Lindeman Island",
+    "natural": "coastline",
+    "place": "island",
+    "source": "Protected Areas of Queensland - Boundaries Dated: 30-09-2010",
+    "wikidata": "Q6552223"
+  }
+},
+{
+  "type": "way",
+  "id": 158020263,
+  "center": {
+    "lat": -20.4247019,
+    "lon": 149.0070447
+  },
+  "tags": {
+    "name": "Cole Island",
+    "natural": "coastline",
+    "place": "islet",
+    "source": "Bing"
+  }
+},
+{
+  "type": "way",
+  "id": 158020266,
+  "center": {
+    "lat": -20.4200379,
+    "lon": 149.0166850
+  },
+  "tags": {
+    "name": "Ann Island",
+    "natural": "coastline",
+    "place": "islet",
+    "source": "Bing"
+  }
+},
+{
+  "type": "way",
+  "id": 904097976,
+  "center": {
+    "lat": -20.4494119,
+    "lon": 149.0094210
+  },
+  "tags": {
+    "name": "Sidney Island",
+    "place": "islet"
+  }
+},
+{
+  "type": "way",
+  "id": 904097978,
+  "center": {
+    "lat": -20.4739729,
+    "lon": 149.0602167
+  },
+  "tags": {
+    "place": "islet"
+  }
+}
+
+  ]
+}

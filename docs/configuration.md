@@ -99,7 +99,7 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 
 ## Secrets
 
-SignalK credentials, `INFLUXDB_TOKEN`, `GEONAMES_USERNAME`, the
+SignalK credentials, `INFLUXDB_TOKEN`, the
 `WEATHERKIT_*` keys and the `VAPID_*` web push keys are **not** environment
 variables in normal use. They live in an AES-256-GCM encrypted SQLite store and
 are managed from the Settings UI's Secrets panel. See

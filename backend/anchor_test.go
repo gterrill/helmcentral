@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -315,3 +316,128 @@ func TestAnchorSwing_BowCorrectionRemovesTheOscillation(t *testing.T) {
 }
 
 func deg2rad(deg float64) float64 { return deg * math.Pi / 180 }
+
+// Test 7: setAnchorWatch resolves the anchorage's place name once in the
+// background (docs/adr/0056) - the immediate response must not block on an
+// Overpass round trip, and the resolved name must round-trip through
+// persistence (saveAnchorWatch/loadAnchorWatch) and both GET and PATCH.
+func TestSetAnchorWatch_ResolvesAndPinsPlaceNameAsync(t *testing.T) {
+	anchorTestEnv(t, 0)
+	seedNoHeading(t)
+	resetPlaceNameCache(t)
+	resetPlaceNameTickState(t) // the resolve guard is process-wide; don't inherit another test's in-flight flag
+
+	fetcher := &fakeOverpassFetcher{fixtures: map[int][]byte{
+		400: loadOverpassFixture(t, "overpass_goldsmith_400.json"),
+	}}
+	withFakeOverpassFetcher(t, fetcher)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat": goldsmithLat,
+		"lon": goldsmithLon,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+	if got, _ := resp["place_name"].(string); got != "" {
+		t.Fatalf("expected place_name empty in the immediate response (resolved asynchronously), got %q", got)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		anchorWatchMu.RLock()
+		defer anchorWatchMu.RUnlock()
+		return anchorWatchState != nil && anchorWatchState.PlaceName == "Goldsmith Island"
+	})
+
+	// Persisted, not just held in memory: reload from disk the way a
+	// server restart would.
+	anchorWatchMu.Lock()
+	anchorWatchState = nil
+	anchorWatchMu.Unlock()
+	loadAnchorWatch()
+
+	anchorWatchMu.RLock()
+	reloaded := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if reloaded == nil || reloaded.PlaceName != "Goldsmith Island" {
+		t.Fatalf("expected persisted place_name %q after reload, got %+v", "Goldsmith Island", reloaded)
+	}
+
+	// GET reflects the pinned name.
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/anchor-watch", nil)
+	rec := httptest.NewRecorder()
+	if err := getAnchorWatch(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("getAnchorWatch: %v", err)
+	}
+	var getResp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &getResp)
+	if got, _ := getResp["place_name"].(string); got != "Goldsmith Island" {
+		t.Fatalf("expected GET /api/anchor-watch place_name %q, got %q", "Goldsmith Island", got)
+	}
+
+	// PATCH (updating an unrelated field) must carry the pinned name
+	// through untouched.
+	patchCode, patchResp := patchAnchorWatchForTest(t, map[string]any{"sea_state": "choppy"})
+	if patchCode != http.StatusOK {
+		t.Fatalf("expected 200 from patch, got %d: %+v", patchCode, patchResp)
+	}
+	if got, _ := patchResp["place_name"].(string); got != "Goldsmith Island" {
+		t.Fatalf("expected PATCH response to carry place_name %q through, got %q", "Goldsmith Island", got)
+	}
+}
+
+// Test 8: a resolution failure (Overpass unreachable) must log explicitly
+// and leave PlaceName empty rather than caching or fabricating a blank
+// name - the regular poll tick is what retries, per AGENTS.md's fail-fast
+// policy.
+func TestSetAnchorWatch_PlaceNameResolutionFailureLeavesFieldEmpty(t *testing.T) {
+	anchorTestEnv(t, 0)
+	seedNoHeading(t)
+	resetPlaceNameCache(t)
+	resetPlaceNameTickState(t) // the resolve guard is process-wide; don't inherit another test's in-flight flag
+
+	fetcher := &fakeOverpassFetcher{errs: map[int]error{
+		400: fmt.Errorf("simulated transport failure"),
+	}}
+	withFakeOverpassFetcher(t, fetcher)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat": goldsmithLat,
+		"lon": goldsmithLon,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool { return fetcher.callCount() >= 1 })
+
+	anchorWatchMu.RLock()
+	got := anchorWatchState.PlaceName
+	anchorWatchMu.RUnlock()
+	if got != "" {
+		t.Fatalf("expected place_name to remain empty after a resolution failure, got %q", got)
+	}
+}
+
+// patchAnchorWatchForTest mirrors postAnchorWatch for the PATCH handler.
+func patchAnchorWatchForTest(t *testing.T, body map[string]any) (int, map[string]any) {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPatch, "/api/anchor-watch", strings.NewReader(string(raw)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+
+	if err := patchAnchorWatch(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	var decoded map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &decoded)
+	return rec.Code, decoded
+}

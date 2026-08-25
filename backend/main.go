@@ -151,10 +151,10 @@ func main() {
 	e.Use(corsMiddleware())
 
 	// Encrypted secrets store. Must be opened and loaded into the process
-	// environment before any provider registration below, since SignalK and
-	// GeoNames code paths read their secrets via getEnv/os.Getenv. Fail fast
-	// on open error (including a master-key mismatch against existing
-	// encrypted rows) rather than silently running with secrets unavailable.
+	// environment before any provider registration below, since SignalK
+	// code paths read their secrets via getEnv/os.Getenv. Fail fast on open
+	// error (including a master-key mismatch against existing encrypted
+	// rows) rather than silently running with secrets unavailable.
 	ss, err := newSecretsStore(secretsDBPath(), secretsKeyPath())
 	if err != nil {
 		log.Fatalf("secrets store: %v", err)

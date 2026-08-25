@@ -27,6 +27,12 @@ type anchorWatchData struct {
 	BowOffsetApplied bool      `json:"bow_offset_applied"`
 	BowOffsetReason  string    `json:"bow_offset_reason"`  // why not, when not applied
 	HeadingAtSetDeg  float64   `json:"heading_at_set_deg"` // -1 when not read
+	// PlaceName is resolved once from the anchor position (place_name.go's
+	// resolveAndPinAnchorWatchPlaceName), then pinned for the life of this
+	// watch so it stops drifting as the boat swings - see docs/adr/0056.
+	// Empty until resolution succeeds; the regular poll tick retries until
+	// it does.
+	PlaceName string `json:"place_name"`
 }
 
 type trailPoint struct {
@@ -208,6 +214,7 @@ func getAnchorWatch(c echo.Context) error {
 		"bow_offset_applied": state.BowOffsetApplied,
 		"bow_offset_reason":  state.BowOffsetReason,
 		"heading_at_set_deg": state.HeadingAtSetDeg,
+		"place_name":         state.PlaceName,
 	})
 }
 
@@ -304,6 +311,16 @@ func setAnchorWatch(c echo.Context) error {
 	selfTrail = newVesselTrail()
 	trailMu.Unlock()
 
+	// Resolve the anchorage's place name once, in the background, so the
+	// response above isn't held up by an Overpass round trip. A failure
+	// logs explicitly (inside resolveAndCachePlaceName) and leaves
+	// PlaceName empty; the regular poll tick (updateTickPlaceName) retries
+	// on every subsequent tick until it succeeds, then the name is pinned
+	// for the rest of this watch. See docs/adr/0056.
+	startPlaceNameResolve(func() {
+		resolveAndPinAnchorWatchPlaceName(aw, aw.Lat, aw.Lon)
+	})
+
 	return c.JSON(http.StatusOK, map[string]any{
 		"active":             true,
 		"lat":                aw.Lat,
@@ -317,6 +334,7 @@ func setAnchorWatch(c echo.Context) error {
 		"bow_offset_applied": aw.BowOffsetApplied,
 		"bow_offset_reason":  aw.BowOffsetReason,
 		"heading_at_set_deg": aw.HeadingAtSetDeg,
+		"place_name":         aw.PlaceName,
 	})
 }
 
@@ -375,6 +393,7 @@ func patchAnchorWatch(c echo.Context) error {
 		BowOffsetApplied: current.BowOffsetApplied,
 		BowOffsetReason:  current.BowOffsetReason,
 		HeadingAtSetDeg:  current.HeadingAtSetDeg,
+		PlaceName:        current.PlaceName,
 	}
 
 	if body.RadiusMeters != nil {
@@ -414,6 +433,7 @@ func patchAnchorWatch(c echo.Context) error {
 		"bow_offset_applied": updated.BowOffsetApplied,
 		"bow_offset_reason":  updated.BowOffsetReason,
 		"heading_at_set_deg": updated.HeadingAtSetDeg,
+		"place_name":         updated.PlaceName,
 	})
 }
 

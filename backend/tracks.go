@@ -104,7 +104,16 @@ func sampleTracks(settingsPath string) {
 			recordMotoringPoint(state.Latitude, state.Longitude)
 		}
 
-		recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath, state)
+		// Place name resolution (place_name.go) runs here, on the server's
+		// own poll tick, per docs/adr/0056 - it needs a real fix (not the
+		// -1,-1/0,0 "no data yet" sentinels the loose range check above
+		// still lets through), so it's gated separately.
+		geoname := ""
+		if hasUsableVesselPosition(state.Latitude, state.Longitude) {
+			geoname = updateTickPlaceName(state.Latitude, state.Longitude)
+		}
+
+		recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath, state, geoname)
 	}
 }
 
@@ -114,8 +123,12 @@ func sampleTracks(settingsPath string) {
 // sampling, independent of client polling), not from the /api/nearby-
 // vessels HTTP handler, which can be hit far more often by several open
 // browser tabs - recording from the handler would defeat "record once per
-// encounter."
-func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, state vesselStateData) {
+// encounter." geoname is this tick's already-resolved place name (see
+// updateTickPlaceName in place_name.go) rather than looked up again here -
+// since resolution now runs live on every tick (docs/adr/0056), a second
+// independent lookup would be redundant and the caller already knows the
+// answer.
+func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, state vesselStateData, geoname string) {
 	if globalNearbyContactStore == nil {
 		return
 	}
@@ -129,7 +142,6 @@ func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, stat
 		return
 	}
 
-	geoname := cachedPlaceName(state.Latitude, state.Longitude)
 	for _, v := range nearby {
 		key, ok := vesselContactKey(v.Mmsi)
 		if !ok {

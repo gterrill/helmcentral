@@ -7,7 +7,6 @@ export type SettingsSectionId =
   | 'boat-ui'
   | 'widgets'
   | 'influxdb'
-  | 'geonames'
   | 'anchor-watch'
   | 'security'
 
@@ -19,7 +18,6 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> 
   { id: 'anchor-watch', label: 'Anchor Watch' },
   { id: 'widgets', label: 'Widgets' },
   { id: 'security', label: 'Security' },
-  { id: 'geonames', label: 'GeoNames' },
 ]
 
 interface SettingsNavProps {

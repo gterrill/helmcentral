@@ -54,8 +54,8 @@ func TestGetSecretsSettingsHandler_ReflectsStoreState(t *testing.T) {
 	if !resp["SIGNALK_USERNAME"] {
 		t.Errorf("expected SIGNALK_USERNAME=true, got %+v", resp)
 	}
-	if resp["GEONAMES_USERNAME"] {
-		t.Errorf("expected GEONAMES_USERNAME=false, got %+v", resp)
+	if resp["INFLUXDB_TOKEN"] {
+		t.Errorf("expected INFLUXDB_TOKEN=false, got %+v", resp)
 	}
 }
 

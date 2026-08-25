@@ -192,7 +192,7 @@ Stop with `docker compose down`.
 
 Helmcentral starts with no configuration file, and **secrets are never set in
 files or environment variables**. Start with none configured, then paste SignalK
-credentials, the InfluxDB token and any GeoNames/WeatherKit keys into
+credentials, the InfluxDB token and any WeatherKit keys into
 Settings → Secrets in the running app, where they are encrypted at rest with
 AES-256-GCM ([ADR 0023](docs/adr/0023-encrypted-secrets-store.md)).
 
