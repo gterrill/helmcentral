@@ -1,7 +1,7 @@
 # ADR 0057: AIS Collision Alarms from Target Contexts
 
 ## Status
-Proposed
+Accepted
 
 Extends ADR 0038 (SignalK notifications as the alarm vocabulary).
 
