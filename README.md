@@ -459,7 +459,44 @@ helmcentral/
 - **Startup is fail-fast.** If the secrets store or a plugin-override database
   cannot be opened, the process exits rather than running degraded.
 
-Durable design decisions live in [docs/adr/](docs/adr/), 48 of them, covering
+### Why Helmcentral isn't a SignalK plugin
+
+The value SignalK brings to the table is normalization. It translates thirty years 
+of fragmented, reverse-engineered NMEA 2000 data into a single tree with documented 
+paths and standard SI units. That decoding work is solid, and there's no reason to 
+reinvent it.
+
+The problem is isolation. SignalK runs plugins in-process inside the Node runtime. 
+Any plugin can register arbitrary HTTP routes, inject spoofed delta updates, inspect 
+server configuration, or crash the event loop. That trust model works for hobbyist 
+setups, but it's too fragile for critical systems like an anchor alarm.
+
+Authorization at the wire level is also fundamentally missing. NMEA 2000 has no 
+device authentication - i.e. any node on the CAN bus can claim an address and broadcast 
+any PGN. Hardening the layer directly above an unauthenticated stream offers limited 
+protection. The boundaries that matter are:
+
+1. The write path: anything capable of engaging an autopilot or switching a CZone breaker.
+1. The network edge: the interface between the vessel's local bus and the internet.
+
+Helmcentral treats SignalK strictly as a translation layer and handles security 
+boundaries independently:
+
+- Read-only ingestion: Helmcentral consumes a single read-only delta subscription into 
+  an isolated state snapshot ([ADR 0037](docs/adr/0037-signalk-delta-stream-ingestion.md)).
+- Strict auth validation: User accounts remain in SignalK, but role resolution happens 
+  downstream. Any unrecognized role fails closed rather than falling back to permissive 
+  defaults ([ADR 0040](docs/adr/0040-signalk-delegated-authentication.md)).
+- Sandboxed extensions: Third-party provider code runs in WASM with linear-memory 
+  isolation, strict host allowlists, and hard execution timeouts 
+  ([ADR 0017](docs/adr/0017-wasm-plugin-tide-providers.md)).
+
+SignalK belongs at the sensor/data layer (not as the security boundary between 
+third-party code and physical relays).
+
+### Architecture Decision Records
+
+Durable design decisions live in [docs/adr/](docs/adr/) covering
 why each non-obvious trade-off went the way it did.
 
 ## Roadmap
