@@ -80,7 +80,7 @@ func TestSecretsStore_ReopenWithSameMasterKeyDecryptsExistingRows(t *testing.T) 
 	if err != nil {
 		t.Fatalf("newSecretsStore (1st open): %v", err)
 	}
-	if err := store1.Set("GEONAMES_USERNAME", "gn-user-123"); err != nil {
+	if err := store1.Set("INFLUXDB_TOKEN", "influx-token-123"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	if err := store1.db.Close(); err != nil {
@@ -93,11 +93,11 @@ func TestSecretsStore_ReopenWithSameMasterKeyDecryptsExistingRows(t *testing.T) 
 	}
 	t.Cleanup(func() { _ = store2.db.Close() })
 
-	value, ok, err := store2.Get("GEONAMES_USERNAME")
+	value, ok, err := store2.Get("INFLUXDB_TOKEN")
 	if err != nil {
 		t.Fatalf("Get after reopen: %v", err)
 	}
-	if !ok || value != "gn-user-123" {
+	if !ok || value != "influx-token-123" {
 		t.Fatalf("expected value to survive reopen with the same key file, got ok=%v value=%q", ok, value)
 	}
 }
@@ -111,7 +111,7 @@ func TestSecretsStore_ReopenWithWrongMasterKeyFailsFast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newSecretsStore (1st open): %v", err)
 	}
-	if err := store1.Set("GEONAMES_USERNAME", "gn-user-123"); err != nil {
+	if err := store1.Set("INFLUXDB_TOKEN", "influx-token-123"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	if err := store1.db.Close(); err != nil {
