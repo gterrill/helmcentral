@@ -114,6 +114,7 @@ const clusterWidgetIDPrefix = "cluster:"
 const (
 	clusterMaxCorners    = 4
 	clusterMaxCornerRows = 4
+	clusterMaxTelltales  = 6
 )
 
 var validClusterSkins = map[string]bool{"": true, "default": true, "instrument": true}
@@ -145,6 +146,9 @@ type dashboardClusterConfig struct {
 	Centre     dashboardGaugeConfig     `json:"centre"`
 	CentreIcon string                   `json:"centreIcon,omitempty"`
 	Corners    []dashboardClusterCorner `json:"corners,omitempty"`
+	// Readings shown as a telltale under the dial rather than a box of their
+	// own: icon, label, value, coloured by zone.
+	Telltales []dashboardGaugeConfig `json:"telltales,omitempty"`
 }
 
 type dashboardGaugeGroupConfig struct {
@@ -748,6 +752,14 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 			}
 		}
 	}
+	if len(w.Cluster.Telltales) > clusterMaxTelltales {
+		return "cluster has too many telltales: " + w.ID
+	}
+	for _, telltale := range w.Cluster.Telltales {
+		if msg := validateGaugeConfig(telltale, w.ID+" telltale"); msg != "" {
+			return msg
+		}
+	}
 	return ""
 }
 
@@ -884,6 +896,9 @@ func gaugeBoundPaths() []string {
 					for _, row := range corner.Rows {
 						add(row.Path)
 					}
+				}
+				for _, telltale := range widget.Cluster.Telltales {
+					add(telltale.Path)
 				}
 			}
 		}

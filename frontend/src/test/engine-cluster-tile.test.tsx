@@ -42,6 +42,138 @@ function renderCluster(config = port) {
 
 beforeEach(() => setViewportWidth(1440))
 
+/**
+ * Geometry. The bezel turned the dial into a solid circle, and a circle cannot
+ * be cropped the way an arc could: the old canvas stopped 40px short of the
+ * ring box's bottom, which was invisible while the lower half painted nothing
+ * and became the dial bulging out of the tile once it did.
+ */
+describe('cluster canvas geometry', () => {
+  test('gives all four boxes the same height', () => {
+    const { container } = renderCluster()
+    const heights = [0, 1, 2, 3].map((i) => {
+      const el = container.querySelector(`[data-testid="cluster-corner-${i}"]`) as HTMLElement
+      return el.style.height
+    })
+    expect(new Set(heights).size).toBe(1)
+  })
+
+  test('contains the whole dial, bezel included, inside the canvas', () => {
+    const { container } = renderCluster()
+    const canvas = container.querySelector('[data-cluster-canvas]') as HTMLElement
+    const dial = container.querySelector('[data-cluster-dial]') as HTMLElement
+
+    const overhang = parseFloat(dial.style.getPropertyValue('--dial-bezel-overhang'))
+    const top = parseFloat(dial.style.top) - overhang
+    const bottom = parseFloat(dial.style.top) + parseFloat(dial.style.height) + overhang
+
+    expect(top).toBeGreaterThanOrEqual(0)
+    expect(bottom).toBeLessThanOrEqual(parseFloat(canvas.style.height))
+  })
+
+  test('centres the dial on the block of boxes', () => {
+    const { container } = renderCluster()
+    const dial = container.querySelector('[data-cluster-dial]') as HTMLElement
+    const top = container.querySelector('[data-testid="cluster-corner-0"]') as HTMLElement
+    const bottom = container.querySelector('[data-testid="cluster-corner-2"]') as HTMLElement
+
+    const blockTop = parseFloat(top.style.top)
+    const blockBottom = parseFloat(bottom.style.top) + parseFloat(bottom.style.height)
+    const dialCentre = parseFloat(dial.style.top) + parseFloat(dial.style.height) / 2
+
+    expect(dialCentre).toBeCloseTo((blockTop + blockBottom) / 2, 0)
+  })
+})
+
+describe('temperature telltales', () => {
+  const withTelltales = (extra: Partial<typeof port> = {}) => ({
+    ...port,
+    telltales: [
+      { path: 'propulsion.port.temperature', label: 'Coolant', display: 'numeric' as const, quantity: 'temperature', unit: 'C',
+        min: 0, max: 120, zones: [{ from: 0, to: 95, state: 'normal' as const }, { from: 95, to: 120, state: 'alarm' as const }] },
+      { path: 'propulsion.port.transmission.oilTemperature', label: 'Gearbox', display: 'numeric' as const, quantity: 'temperature', unit: 'C' },
+      { path: 'propulsion.port.exhaustTemperature', label: 'Exhaust', display: 'numeric' as const, quantity: 'temperature', unit: 'C' },
+    ],
+    ...extra,
+  })
+
+  test('reads each configured telltale', () => {
+    renderCluster(withTelltales())
+    const row = screen.getByTestId('cluster-telltales')
+    expect(within(row).getByText('71.0')).toBeInTheDocument()
+    expect(within(row).getByText('37.7')).toBeInTheDocument()
+  })
+
+  /**
+   * The whole point of drawing three different symbols: without them the row is
+   * three identical thermometers and every one needs a word next to it.
+   */
+  test('gives each temperature its own symbol, and no label', () => {
+    const { container } = renderCluster(withTelltales())
+    const row = screen.getByTestId('cluster-telltales')
+    const symbols = [...container.querySelectorAll('[data-telltale-icon]')]
+      .map((el) => el.getAttribute('data-telltale-icon'))
+    expect(symbols).toEqual(['coolant', 'gearbox', 'exhaust'])
+    expect(within(row).queryByText('Coolant')).not.toBeInTheDocument()
+    expect(within(row).queryByText('Gearbox')).not.toBeInTheDocument()
+  })
+
+  /**
+   * A telltale is a warning light: grey when the engine is not turning, green
+   * while the reading sits in its normal band, red once it is over. Anything
+   * else is a number you have to read rather than a colour you can glance at.
+   */
+  test('is grey with no reading, green in band, red when too hot', () => {
+    const { container, rerender } = render(
+      <EngineClusterTile config={withTelltales()} values={{}} editing={false} onConfigure={vi.fn()} />,
+    )
+    const coolant = () => container.querySelector('[data-telltale="coolant"]')!.className
+
+    expect(coolant()).toContain('text-muted-foreground')
+
+    rerender(<EngineClusterTile config={withTelltales()} values={values} editing={false} onConfigure={vi.fn()} />)
+    expect(coolant()).toContain('text-emerald-500')
+
+    rerender(<EngineClusterTile config={withTelltales()}
+      values={{ ...values, 'propulsion.port.temperature': 380.15 }} editing={false} onConfigure={vi.fn()} />)
+    expect(coolant()).toContain('text-red-500')
+  })
+
+  /**
+   * Over the normal band is not the same as over an alarm threshold. This
+   * engine's profile leaves warn and alarm null, so every hot reading is
+   * "in no band at all", and painting that red would assert an overheat the
+   * configuration has no thresholds to detect.
+   */
+  test('is amber, not red, when it is past a band with no alarm configured', () => {
+    const { container } = render(
+      <EngineClusterTile
+        config={withTelltales({
+          telltales: [{ path: 'propulsion.port.temperature', label: 'Coolant', display: 'numeric' as const,
+            quantity: 'temperature', unit: 'C', min: 0, max: 120,
+            zones: [{ from: 0, to: 85, state: 'normal' as const }] }],
+        })}
+        values={{ ...values, 'propulsion.port.temperature': 361.15 }} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-telltale="coolant"]')!.className).toContain('text-amber-500')
+  })
+
+  // The row belongs with the hours badge inside the dial, not on a strip of its
+  // own below the boxes, so the canvas is back to the height of the box block.
+  test('sits inside the dial, under the hours notch', () => {
+    const { container } = renderCluster(withTelltales())
+    const notch = screen.getByTestId('cluster-notch')
+    const row = screen.getByTestId('cluster-telltales')
+    expect(notch.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(container.querySelector('[data-cluster-dial]')!.contains(row)).toBe(true)
+  })
+
+  test('renders no row at all when none are configured', () => {
+    renderCluster()
+    expect(screen.queryByTestId('cluster-telltales')).not.toBeInTheDocument()
+  })
+})
+
 describe('EngineClusterTile', () => {
   test('reads the ring, converted from the SI on the stream', () => {
     renderCluster()

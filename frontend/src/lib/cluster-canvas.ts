@@ -43,6 +43,18 @@ export type ClusterCanvasConfig = {
 // drawn ring along the mask's cut edge reads as a continuous border, not just 3 sides.
 const BORDER_WIDTH = 1
 
+/**
+ * How far past its own box a ring may paint before it meets the cards' cut
+ * line. A dial with a bezel is a solid circle rather than an arc on nothing,
+ * so its caller has to know this to give the disc room and to centre it.
+ *
+ * Independent of ringTop, which is what lets a layout derive its ring position
+ * from the disc size without the two defining each other.
+ */
+export function bezelOverhangFor(ringBox: number, gap: number, radiusRatio = 130 / 140): number {
+  return Math.max(0, (ringBox / 2) * radiusRatio + gap - 1 - ringBox / 2)
+}
+
 export function computeCornerMasks(cfg: ClusterCanvasConfig) {
   const { width, height, ringBox, topCardW, bottomCardW, cardH, gap, radiusRatio = 130 / 140 } = cfg
   const topCardH = cfg.topCardH ?? cardH
@@ -72,7 +84,13 @@ export function computeCornerMasks(cfg: ClusterCanvasConfig) {
     tr: mask(width - topCardW, 0),
     bl: mask(0, bottomCardTop),
     br: mask(width - bottomCardW, bottomCardTop),
-    geometry: { ringTop, topCardH, bottomCardH, bottomCardTop },
+    geometry: {
+      ringTop, topCardH, bottomCardH, bottomCardTop,
+      // How far past its own box the ring may paint before it meets the cards'
+      // cut line. A dial bezel wants exactly this, and deriving it here keeps
+      // it tracking `gap` and `radiusRatio` instead of being matched by eye.
+      bezelOverhang: bezelOverhangFor(ringBox, gap, radiusRatio),
+    },
   }
 }
 

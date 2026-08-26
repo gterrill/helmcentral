@@ -1345,6 +1345,15 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 	badRow := validClusterConfig()
 	badRow.Corners[0].Rows[0].Display = "hologram"
 
+	badTelltale := validClusterConfig()
+	badTelltale.Telltales = []dashboardGaugeConfig{{Path: "a.b", Display: "hologram", Quantity: "raw", Unit: "raw"}}
+
+	tooManyTelltales := validClusterConfig()
+	tooManyTelltales.Telltales = make([]dashboardGaugeConfig, clusterMaxTelltales+1)
+	for i := range tooManyTelltales.Telltales {
+		tooManyTelltales.Telltales[i] = dashboardGaugeConfig{Path: "a.b", Display: "numeric", Quantity: "raw", Unit: "raw"}
+	}
+
 	cases := []struct {
 		name   string
 		widget dashboardLayoutItem
@@ -1356,12 +1365,44 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 		{"too many corners", clusterWidget("cluster:abcd1234", tooManyCorners)},
 		{"corner with no rows", clusterWidget("cluster:abcd1234", emptyCorner)},
 		{"bad row", clusterWidget("cluster:abcd1234", badRow)},
+		{"bad telltale", clusterWidget("cluster:abcd1234", badTelltale)},
+		{"too many telltales", clusterWidget("cluster:abcd1234", tooManyTelltales)},
 	}
 
 	for _, tc := range cases {
 		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
+	}
+}
+
+func TestGaugeBoundPathsIncludesClusterTelltales(t *testing.T) {
+	cluster := validClusterConfig()
+	cluster.Telltales = []dashboardGaugeConfig{
+		{Path: "propulsion.port.temperature", Display: "numeric", Quantity: "temperature", Unit: "C"},
+	}
+
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{"p1": {
+		ID: "p1", Name: "Telltales",
+		Widgets: []dashboardLayoutItem{clusterWidget("cluster:abcd1234", cluster)},
+	}}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+
+	var found bool
+	for _, p := range gaugeBoundPaths() {
+		if p == "propulsion.port.temperature" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("telltale path missing from gaugeBoundPaths: %v", gaugeBoundPaths())
 	}
 }
 

@@ -70,8 +70,10 @@ describe('DialRing', () => {
 
   test('clamps a value beyond either end rather than overdrawing', () => {
     const { container } = render(<DialRing value={9999} min={0} max={100} majorStep={50} />)
-    const d = container.querySelector('[data-value-arc]')!.getAttribute('d')!
-    expect(d).not.toContain('NaN')
+    const dash = container.querySelector('[data-value-arc]')!.getAttribute('stroke-dasharray')!
+    expect(dash).not.toContain('NaN')
+    // Full scale is the whole sweep and no more: 250/360 of the circle.
+    expect(Number(dash.split(' ')[0])).toBeCloseTo(69.44, 1)
   })
 
   test('renders its children in the middle', () => {
@@ -171,5 +173,53 @@ describe('arcEndFraction', () => {
     const zone = container.querySelector('[data-zone]')!.getAttribute('d')!
     const lowest = Math.max(...zone.match(/-?\d+\.?\d*/g)!.map(Number).filter((_, i) => i % 2 === 1))
     expect(arcEndFraction(250) * 280).toBeGreaterThanOrEqual(lowest - 1)
+  })
+})
+
+
+/**
+ * The dial's chrome is token-driven so a skin can turn it on without any
+ * per-component branching. That only holds if every var it reads has a :root
+ * default: a custom property with no value makes the whole declaration
+ * invalid at computed-value time, and the property is dropped silently rather
+ * than falling back to anything. The instrument skin already taught this
+ * codebase the lesson once, with --card-foreground rendering the config gear
+ * near-black on a near-black card.
+ */
+describe('dial chrome tokens', () => {
+  test('every --dial-* var the component reads has a :root default', async () => {
+    const [fs, path] = await Promise.all([import('node:fs'), import('node:path')])
+    const read = (rel: string) => fs.readFileSync(path.resolve(process.cwd(), rel), 'utf8')
+
+    const component = read('src/components/ui/dial-ring.tsx')
+    const css = read('src/index.css')
+
+    const root = css.slice(css.indexOf(':root {'), css.indexOf('}', css.indexOf(':root {')))
+    const declared = new Set([...root.matchAll(/--([\w-]+):/g)].map((m) => m[1]))
+    const used = new Set([...component.matchAll(/var\(--(dial-[\w-]+)/g)].map((m) => m[1]))
+
+    expect(used.size).toBeGreaterThan(0)
+    expect([...used].filter((t) => !declared.has(t))).toEqual([])
+  })
+
+  /**
+   * The arc is positioned by dash offset, never by a transform on the element.
+   * objectBoundingBox gradient coordinates live in the element's own space, so
+   * rotating the circle drags its gradient round with it: the ramp came out
+   * reversed, brightest at zero instead of at the reading, and it changed the
+   * flat dial as well as the skinned one.
+   */
+  test('positions the arc without transforming it, so its gradient stays put', () => {
+    const { container } = render(<DialRing value={50} min={0} max={100} majorStep={50} />)
+    const arc = container.querySelector('[data-value-arc]')!
+    expect(arc.getAttribute('transform')).toBeNull()
+    // 250 degrees of sweep starting at 145 degrees round a pathLength-100 circle.
+    expect(Number(arc.getAttribute('stroke-dashoffset'))).toBeCloseTo(-40.28, 1)
+  })
+
+  test('renders the bezel and hub layers so a skin has something to paint', () => {
+    const { container } = render(<DialRing value={50} min={0} max={100} majorStep={50} />)
+    expect(container.querySelector('[data-bezel]')).not.toBeNull()
+    expect(container.querySelector('[data-hub]')).not.toBeNull()
   })
 })

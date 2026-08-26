@@ -163,10 +163,17 @@ export interface EngineClusterConfig {
   /** A name from CLUSTER_ICONS; inferred from the centre slot when unset. */
   centreIcon?: string
   corners: ClusterCorner[]
+  /**
+   * Readings that get a telltale in the strip under the dial rather than a box
+   * of their own: icon, short label, value, coloured by zone. For the ones you
+   * check by glancing for a colour, not by reading a number.
+   */
+  telltales?: GaugeWidgetConfig[]
 }
 
 export const CLUSTER_MAX_CORNERS = 4
 export const CLUSTER_MAX_CORNER_ROWS = 4
+export const CLUSTER_MAX_TELLTALES = 6
 
 export const LAMP_STRIP_MAX_LAMPS = 16
 export const LAMP_LABEL_MAX_LENGTH = 12

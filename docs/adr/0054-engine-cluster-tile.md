@@ -57,6 +57,28 @@ A real MFD is dark whatever time it is, so the skin is opt-in per tile and indep
 
 Alert red and amber are deliberately **not** redefined. A warning has to look like a warning in either skin, and a skin that could recolour an alarm state would be a skin that could hide one.
 
+The vocabulary later had to grow past colour. Recreating a helm-cluster reference meant a bezel with a lit rim and an outer bloom, a wide gradient band in place of the thin value arc, brighter and heavier ticks, and a needle that glows. None of that is expressible as an HSL triplet, and none of it belonged in a component branch on `config.skin`.
+
+So the `--dial-*` group was added: colours as triplets, radii and widths as lengths, and the bezel, its shadow and the hub wash as composite gradient and shadow recipes built out of those triplets. Composite tokens are a real extension of a vocabulary that was triplets only, but every colour inside one is still a token or a triplet, so AGENTS.md's no-hex rule holds.
+
+**Every default is inert.** `:root` carries a value for each of them that reproduces the flat dial exactly: the bezel and hub paint `none`, the band keeps the thin arc's radius and width, and each colour indirects to the token the dial already read, which is why `.dark` needs no dial tokens of its own. `DialRing` renders the chrome unconditionally and only a skin turns it on, so the light and dark themes are untouched and the radial gauge's `instrument` ring style, which draws the same dial outside any `data-skin` wrapper, is untouched with it.
+
+What made this possible without a variant prop is that SVG2 promoted `r` to a CSS property while `<line>` endpoints never became one. Drawing the track and the value arc as `pathLength="100"` circles with a dash length instead of arc paths puts their radius, width and cap in CSS, so a skin can move the band; the ticks stay in JS and do not need to move, because a band at r96 w40 lands the existing scale numbers in the middle of it and the existing major ticks along its edge.
+
+The arc is positioned with a dash offset rather than a `rotate()`. objectBoundingBox gradient coordinates are in the element's own space, so transforming the circle drags its gradient round with it. The ramp came out brightest at zero instead of at the reading, and it changed the flat dial as well as the skinned one.
+
+The hub is a vignette, not the reference's hard-rimmed disc. The reference draws a 480px dial whose scale numbers sit outside its hub, at 156 of a 240 radius. This one is a 218px tile whose numbers sit at 96 of 140 with the band running underneath them, so anything solid enough to read as a disc buries the scale, and the centre readout does not fit inside one at that radius without dropping the hero number a size or two.
+
+### 5a. Temperatures are telltales, not readouts
+
+Four boxes of one reading each keeps them the same size, which left no room for the three temperatures the old layout stacked into one corner. They became a strip under the hours notch instead, inside the wedge the 250-degree sweep leaves at the bottom of the dial, so they cost the composition nothing.
+
+A telltale is a warning light and uses that vocabulary rather than the readout one: grey when there is no reading, green while the value sits in its normal band, red once it is past an alarm. Amber covers the tiers between, and also the case that turns out to be the common one here. This engine's profile leaves its warn and alarm thresholds null, nobody having filled them in from the manual, so every reading above the normal band lands in no band at all. Red there would assert an overheat the configuration has no threshold to detect.
+
+The symbols are drawn rather than picked from the icon set, because all three readings are temperatures and the set's one thermometer made the row three identical symbols that only a word could tell apart. What separates them at 16px is silhouette, not detail: coolant is upright, the gearbox is round, exhaust is horizontal. That reads before any interior stroke does, which is what lets the labels go.
+
+They are not configurable. The three exist precisely so the row needs no labels, and a chooser would let a saved config break the one thing they are for.
+
 ### 6. Every slot is a `GaugeWidgetConfig`
 
 Ring, centre and every corner row reuse the gauge config verbatim — the decision that made ADR 0049 cheap, applied a third time. Zones, units, scales, the `GaugeFields` form and the backend's `validateGaugeConfig` all work per slot with nothing new.
@@ -76,7 +98,7 @@ Cluster slot indices are flat and stable — ring, centre, then corner rows in o
 - `wind-tile.tsx` now imports `computeCornerMasks` and `useFitScale` from `lib/cluster-canvas.ts`. Its own tests were the regression net for that extraction and passed unchanged. The corner **card** was deliberately not extracted: AGENTS.md's no-shared-KPI-primitive rule still governs card layout, and the instrument-skinned card looks nothing like the wind one.
 - Exhaust temperature has to be typed by hand per cluster. Mapping `propulsion.0` to port would bake in an ordering nothing on the bus confirms, and both nodes currently read identically.
 - Five widget kinds now carry per-instance config on the layout item. The pattern has absorbed embed, gauge, group, lamps and cluster without strain.
-- The dial has no needle. The value arc plus the centred number reads clearly at helm distance, and a needle is a lot of geometry for a second encoding of the same number.
+- The dial shipped without a needle: the value arc plus the centred number reads clearly at helm distance, and a needle looked like a lot of geometry for a second encoding of the same number. That was wrong and it was reversed shortly after. The arc says how much and the pointer says where, which is the redundancy every mechanical instrument uses and the reason a dial reads faster than a bare number at a glance. `Needle` draws a blade riding the rim rather than a full pointer pivoting at the centre, because a centre-pivoted needle crosses the readout it is meant to accompany.
 
 ## Verification
 

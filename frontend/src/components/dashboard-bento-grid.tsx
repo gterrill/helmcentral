@@ -114,7 +114,13 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
         {[...widgets].sort((a, b) => a.y - b.y || a.x - b.x).map((w) => (
           <div
             key={w.id}
-            className={cn(w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
+            // min-w-0 so a `1fr` track cannot be widened by its content. A
+            // grid column is minmax(auto, 1fr) by default, and auto resolves to
+            // min-content: the engine cluster lays out on a fixed 520px canvas
+            // that it scales down to fit, so without this the track grew to 520,
+            // the whole grid overflowed the viewport and the tile never scaled
+            // at all because the width it measured was already 520.
+            className={cn('min-w-0', w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
             // The operator's sizing intent as a floor, not a fixed height: text wraps
             // more at phone width, so a height copied straight from the desktop grid
             // would clip. Mirrors RGL's own row maths (rowHeight + margin).

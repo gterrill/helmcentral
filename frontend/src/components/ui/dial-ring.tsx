@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import { useId, type CSSProperties, type ReactNode } from 'react'
 
 import type { GaugeZone } from '@/lib/dashboard-widgets'
 
@@ -19,7 +19,8 @@ const R_OUTER = 130 // rim
 const R_MAJOR = 112 // major tick inner end
 const R_MINOR = 121 // minor tick inner end
 const R_LABEL = 96 // scale numbers
-const R_ARC = 130 // value arc centreline
+// The value arc's radius and width live in --dial-band-r / --dial-band-w
+// rather than here, so a skin can move the band without a second geometry.
 
 // A blade riding the rim rather than a full needle pivoting at the centre: a
 // centre-pivoted needle crosses the readout it is meant to accompany.
@@ -71,7 +72,10 @@ function Needle({ angle }: { angle: number }) {
         points={[[tipX, tipY], [leftX, leftY], [tailX, tailY], [rightX, rightY]]
           .map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`)
           .join(' ')}
-        fill="hsl(var(--gauge-primary))"
+        style={{
+          fill: 'hsl(var(--dial-needle))',
+          filter: 'drop-shadow(var(--dial-needle-glow))',
+        }}
       />
     </g>
   )
@@ -126,6 +130,16 @@ export function DialRing({
   const angleFor = (v: number) => start + sweep * ((v - min) / span)
   const fractionFor = (v: number) => Math.max(0, Math.min(1, (v - min) / span))
 
+  // The swept fraction of a full circle, in pathLength-100 units.
+  const sweepDash = (sweep / 360) * 100
+  // Where the sweep begins, as a negative dash offset. A circle's path starts
+  // at three o'clock, and the arc has to start at `start` instead. This is a
+  // dash offset rather than a rotate() on the element because objectBoundingBox
+  // gradient coordinates are in the element's own space: transforming the
+  // circle drags its gradient round with it, which reversed the value arc's
+  // ramp and changed how the flat dial looked as well as the skinned one.
+  const sweepStart = -(start / 360) * 100
+
   const arc = (fromV: number, toV: number, r: number) => {
     const [x1, y1] = pt(angleFor(fromV), r)
     const [x2, y2] = pt(angleFor(toV), r)
@@ -147,28 +161,56 @@ export function DialRing({
 
   return (
     <div className={`relative ${className ?? ''}`}>
-      <svg viewBox={`0 0 ${V} ${V}`} className="w-full" aria-hidden="true">
+      {/* Outside the SVG, not in it: the viewBox clips at 140 and the zone rim
+          already reaches 138.5, so there is no room for a bezel inside. The
+          overhang is the gap a caller's layout leaves around the rim. */}
+      <div
+        data-bezel=""
+        className="pointer-events-none absolute rounded-full"
+        style={{
+          inset: 'calc(-1 * var(--dial-bezel-overhang))',
+          background: 'var(--dial-bezel)',
+          boxShadow: 'var(--dial-bezel-shadow)',
+        }}
+      />
+      <svg viewBox={`0 0 ${V} ${V}`} className="relative w-full" aria-hidden="true">
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.55" />
-            <stop offset="100%" stopColor="hsl(var(--primary))" />
+            <stop offset="0%" style={{ stopColor: 'hsl(var(--dial-band-c0))', stopOpacity: 'var(--dial-band-o0)' }} />
+            <stop offset="50%" style={{ stopColor: 'hsl(var(--dial-band-c1))', stopOpacity: 'var(--dial-band-o1)' }} />
+            <stop offset="100%" style={{ stopColor: 'hsl(var(--dial-band-c2))', stopOpacity: 'var(--dial-band-o2)' }} />
           </linearGradient>
         </defs>
 
-        <path d={arc(min, max, R_ARC)} fill="none" stroke="hsl(var(--muted))" strokeWidth="3" strokeLinecap="round" />
+        {/* Drawn as a dashed circle rather than an arc path so its radius and
+            width are CSS, not baked into a `d`. SVG2 made `r` a property; line
+            endpoints never became one, which is why the ticks stay in JS. With
+            pathLength 100 the dash is a percentage of the circle whatever the
+            radius, so a skin can move the band without recomputing anything. */}
+        <circle
+          cx={C} cy={C} pathLength={100} fill="none"
+          strokeDasharray={`${sweepDash.toFixed(2)} 100`}
+          strokeDashoffset={sweepStart.toFixed(2)}
+          style={{
+            r: 'var(--dial-track-r)',
+            stroke: 'hsl(var(--dial-track))',
+            strokeWidth: 'var(--dial-track-w)',
+            strokeLinecap: 'var(--dial-band-cap)' as CSSProperties['strokeLinecap'],
+          }}
+        />
 
         {minors.map((v) => {
           const [x1, y1] = pt(angleFor(v), R_OUTER - 1)
           const [x2, y2] = pt(angleFor(v), R_MINOR)
           return <line key={`m${v}`} data-tick="minor" x1={x1} y1={y1} x2={x2} y2={y2}
-            stroke="hsl(var(--border))" strokeWidth="1.5" />
+            style={{ stroke: 'hsl(var(--dial-tick-minor))', strokeWidth: 'var(--dial-tick-minor-w)' }} />
         })}
 
         {majors.map((v) => {
           const [x1, y1] = pt(angleFor(v), R_OUTER - 1)
           const [x2, y2] = pt(angleFor(v), R_MAJOR)
           return <line key={`M${v}`} data-tick="major" x1={x1} y1={y1} x2={x2} y2={y2}
-            stroke="hsl(var(--muted-foreground))" strokeWidth="3" />
+            style={{ stroke: 'hsl(var(--dial-tick-major))', strokeWidth: 'var(--dial-tick-major-w)' }} />
         })}
 
         {/* Rim segments rather than a wash across the arc: a red band has to be
@@ -187,7 +229,11 @@ export function DialRing({
           const shown = labelDivisor ? v / labelDivisor : v
           return (
             <text key={`L${v}`} x={x} y={y} textAnchor="middle" dominantBaseline="central"
-              fontSize="14" fill="hsl(var(--muted-foreground))">
+              style={{
+                fill: 'hsl(var(--dial-label))',
+                fontSize: 'var(--dial-label-size)',
+                fontWeight: 'var(--dial-label-weight)' as CSSProperties['fontWeight'],
+              }}>
               {Number(shown.toFixed(2))}
             </text>
           )
@@ -196,18 +242,32 @@ export function DialRing({
         {/* No arc and no needle when there is no reading: a zero-length arc at
             the minimum reads as a real measurement of the minimum. */}
         {value !== null && fractionFor(value) > 0 && (
-          <path
+          <circle
             data-value-arc=""
-            d={arc(min, min + span * fractionFor(value), R_ARC)}
-            fill="none"
+            cx={C} cy={C} pathLength={100} fill="none"
+            strokeDasharray={`${(sweepDash * fractionFor(value)).toFixed(2)} 100`}
+            strokeDashoffset={sweepStart.toFixed(2)}
             stroke={`url(#${gradientId})`}
-            strokeWidth="8"
-            strokeLinecap="round"
+            style={{
+              r: 'var(--dial-band-r)',
+              strokeWidth: 'var(--dial-band-w)',
+              strokeLinecap: 'var(--dial-band-cap)' as CSSProperties['strokeLinecap'],
+            }}
           />
         )}
 
         {value !== null && <Needle angle={angleFor(min + span * fractionFor(value))} />}
+
       </svg>
+
+      {/* A DOM layer, not an SVG <circle>: `fill` takes a paint, so a CSS
+          gradient in it is invalid and the shape falls back to solid black
+          over the whole dial. Sits above the svg and below the readout. */}
+      <div
+        data-hub=""
+        className="pointer-events-none absolute inset-0 rounded-full"
+        style={{ background: 'var(--dial-hub)' }}
+      />
 
       {children && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">

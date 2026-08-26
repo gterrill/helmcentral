@@ -32,6 +32,43 @@
     --chart-swell: 258 90% 66%;
     --chart-temp: 32 95% 44%;
     --chart-grid: 214 20% 39%;
+    /*
+     * Dial chrome (ADR 0054). Every default here reproduces the flat dial
+     * exactly: the bezel and hub paint nothing, the band keeps its thin-rim
+     * radius and width, and each colour indirects to the token the dial read
+     * before, so .dark needs no dial tokens of its own. Only a skin turns any
+     * of it on.
+     *
+     * Radii and widths carry px because CSS `r` and `stroke-width` need a
+     * length; inside a viewBox one px is one user unit.
+     */
+    --dial-bezel: none;
+    --dial-bezel-shadow: none;
+    --dial-bezel-overhang: 0px;
+    --dial-hub: none;
+    --dial-track: var(--muted);
+    --dial-track-r: 130px;
+    --dial-track-w: 3px;
+    --dial-band-r: 130px;
+    --dial-band-w: 8px;
+    --dial-band-cap: round;
+    /* Three stops at 0/50/100%. 0.775 is the midpoint of the 0.55 -> 1 ramp
+       the dial used to draw with two, so this is identical, not merely close. */
+    --dial-band-c0: var(--primary);
+    --dial-band-o0: 0.55;
+    --dial-band-c1: var(--primary);
+    --dial-band-o1: 0.775;
+    --dial-band-c2: var(--primary);
+    --dial-band-o2: 1;
+    --dial-tick-major: var(--muted-foreground);
+    --dial-tick-major-w: 3px;
+    --dial-tick-minor: var(--border);
+    --dial-tick-minor-w: 1.5px;
+    --dial-label: var(--muted-foreground);
+    --dial-label-size: 14px;
+    --dial-label-weight: 400;
+    --dial-needle: var(--gauge-primary);
+    --dial-needle-glow: 0 0 0 transparent;
     --font-display: 'Geist Mono';
     --font-sans: 'Geist Sans';
     --sidebar-background: var(--card);
@@ -77,6 +114,51 @@
     --ring: 199 89% 60%;
     --gauge-primary: 199 89% 62%;
     --gauge-secondary: 199 60% 48%;
+    /*
+     * The dial chrome the flat defaults leave switched off. Widths and sizes
+     * are the reference's own, rescaled from its 480 box to the 280 viewBox:
+     * major ticks 7/480, minors 3/480, scale numbers 30/480.
+     *
+     * The band moves in to r96 w40, spanning 76-116, which is what puts the
+     * scale numbers (R_LABEL 96) in the middle of it and the ticks (R_MAJOR
+     * 112) along its outer edge, exactly as the reference has them. It is also
+     * why no tick geometry has to move: line endpoints are attributes, not CSS.
+     */
+    --dial-rim: 219 55% 75%;
+    --dial-glow: 220 71% 27%;
+    --dial-bezel: radial-gradient(circle at 50% 30%, hsl(226 40% 21%), hsl(230 60% 12%) 55%, hsl(230 57% 8%));
+    --dial-bezel-shadow:
+      inset 0 0 0 3px hsl(var(--dial-rim) / 0.30),
+      inset 0 8px 40px hsl(230 60% 3% / 0.6),
+      0 0 60px hsl(var(--dial-glow) / 0.35);
+    /* A vignette, not the reference's hard-rimmed disc. Its hub can be opaque
+       because its scale numbers sit outside it, at 156 of a 240 radius. Ours
+       sit at 96 of 140 with the band running 76-116 underneath them, so
+       anything solid enough to read as a disc buries the scale. This darkens
+       the middle enough to lift the readout off the band and is gone by r87,
+       well inside the numbers. */
+    --dial-hub: radial-gradient(circle closest-side at 50% 45%, hsl(231 51% 15% / 0.92) 0%, hsl(230 60% 11% / 0.55) 38%, transparent 62%);
+    --dial-track-w: 0px;
+    --dial-band-r: 96px;
+    --dial-band-w: 40px;
+    --dial-band-cap: butt;
+    /* Lifted off the reference's 0.03/0.30. Its gradient runs bottom-left to
+       top-right; ours has to keep the flat dial's left-to-right axis, because
+       the gradient coordinates are shared and only the stops are tokens. The
+       band still brightens up the scale, just less steeply. */
+    --dial-band-o0: 0.10;
+    --dial-band-o1: 0.38;
+    --dial-band-c2: 199 100% 95%;
+    --dial-band-o2: 0.82;
+    --dial-tick-major: 210 60% 98%;
+    --dial-tick-major-w: 4px;
+    --dial-tick-minor: 210 40% 90%;
+    --dial-tick-minor-w: 1.75px;
+    --dial-label: 0 0% 100%;
+    --dial-label-size: 17px;
+    --dial-label-weight: 600;
+    --dial-needle: 195 100% 97%;
+    --dial-needle-glow: 0 0 6px hsl(var(--primary));
   }
 
   .dark {

@@ -18,6 +18,7 @@ import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import {
   CLUSTER_MAX_CORNERS,
   CLUSTER_MAX_CORNER_ROWS,
+  CLUSTER_MAX_TELLTALES,
   type DashboardLayoutItem,
   type EngineClusterConfig,
   type GaugeWidgetConfig,
@@ -40,13 +41,19 @@ const SLOT_SUFFIXES = {
   corners: [
     { label: 'Oil', suffixes: ['oilPressure'] },
     { label: 'Boost', suffixes: ['boostPressure'] },
-    { label: 'Temps', suffixes: ['temperature', 'transmission.oilTemperature'] },
+    // Load rather than the temperatures. Four boxes of one reading each keeps
+    // them the same size, and a temperature is something you check by glancing
+    // for a colour, which is what the telltale strip is for.
+    { label: 'Load', suffixes: ['engineLoad'] },
     // Burn rate only. Economy is a vessel figure, not an engine one: SignalK's
     // per-engine fuel.economy reads roughly twice the boat's on a twin, so
     // showing it here invites range planning that is out by the number of
     // engines running (ADR 0055).
     { label: 'Fuel', suffixes: ['fuel.rate'] },
   ],
+  // Exhaust is deliberately absent: it lives under propulsion.0 rather than the
+  // engine node, so no suffix reaches it and it stays hand-typed.
+  telltales: ['temperature', 'transmission.oilTemperature'],
 } as const
 
 function blankSlot(label: string): GaugeWidgetConfig {
@@ -75,6 +82,9 @@ function clusterFromProfile(profile: EngineProfile, instance: string, title: str
       label: corner.label,
       rows: corner.suffixes.map((suffix) => pick(suffix, corner.label)),
     })),
+    // Whole degrees in a strip: a tenth of a degree of coolant is noise at a
+    // glance, and the strip is all glance.
+    telltales: SLOT_SUFFIXES.telltales.map((suffix) => ({ ...pick(suffix, 'Temp'), decimals: 0 })),
   }
 }
 
@@ -106,7 +116,9 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   // Seed from the cluster's own slots when it has any, so re-opening an
   // existing tile never proposes the other engine.
   const seeded = useMemo(() => {
-    const slots = config ? [config.ring, config.centre, ...config.corners.flatMap((c) => c.rows)] : []
+    const slots = config
+      ? [config.ring, config.centre, ...config.corners.flatMap((c) => c.rows), ...(config.telltales ?? [])]
+      : []
     const own = profile
       ? commonInstancePrefix(slots.filter((s) => s.path.trim() !== ''), profile.gauges.map((g) => g.path_suffix))
       : null
@@ -129,6 +141,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
     config.title.trim() !== '' &&
     config.ring.path.trim() !== '' &&
     config.corners.every((corner) => corner.rows.every((row) => row.path.trim() !== ''))
+    && (config.telltales ?? []).every((telltale) => telltale.path.trim() !== '')
 
   return (
     <Dialog open={widget !== null} onOpenChange={(open) => { if (!open) onCancel() }}>
@@ -270,6 +283,37 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 onClick={() => setSlot((c) => ({ ...c, corners: [...c.corners, { label: 'New', rows: [blankSlot('')] }] }))}>
                 <Plus className="size-3.5" /> Add corner
               </Button>
+
+              <div className="rounded-md border border-border p-3">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Telltales</p>
+                <FieldDescription className="mb-2">
+                  Shown as a strip under the dial: icon, label, value, coloured by zone. For the
+                  readings you check by glancing for a colour rather than reading a number.
+                </FieldDescription>
+
+                {(config.telltales ?? []).map((telltale, index) => (
+                  <div key={index} className="mb-2 border-b border-border/60 pb-2 last:border-b-0">
+                    <GaugeFields value={telltale} paths={paths} idPrefix={`cluster-telltale-${index}`}
+                      onChange={(next) => setSlot((c) => ({
+                        ...c,
+                        telltales: (c.telltales ?? []).map((t, i) => (i === index ? next : t)),
+                      }))} />
+                    <Button size="sm" variant="ghost" aria-label={`Remove telltale ${index + 1}`}
+                      onClick={() => setSlot((c) => ({
+                        ...c,
+                        telltales: (c.telltales ?? []).filter((_, i) => i !== index),
+                      }))}>
+                      <Trash2 className="size-3.5" /> Remove telltale
+                    </Button>
+                  </div>
+                ))}
+
+                <Button variant="ghost" className="w-fit"
+                  disabled={(config.telltales ?? []).length >= CLUSTER_MAX_TELLTALES}
+                  onClick={() => setSlot((c) => ({ ...c, telltales: [...(c.telltales ?? []), blankSlot('')] }))}>
+                  <Plus className="size-3.5" /> Add telltale
+                </Button>
+              </div>
             </>
           )}
         </div>
