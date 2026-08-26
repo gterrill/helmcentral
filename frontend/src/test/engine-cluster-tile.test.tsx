@@ -19,7 +19,6 @@ const values = {
 
 const port: EngineClusterConfig = {
   title: 'Port',
-  skin: 'instrument',
   ring: { path: 'propulsion.port.revolutions', label: 'RPM', display: 'radial', quantity: 'frequency', unit: 'rpm', min: 0, max: 3000, decimals: 0, labelDivisor: 100 },
   centre: { path: 'propulsion.port.runTime', label: 'Hours', display: 'numeric', quantity: 'duration', unit: 'h', decimals: 0 },
   corners: [
@@ -232,14 +231,6 @@ describe('EngineClusterTile', () => {
     expect(within(boost).queryByText('--')).not.toBeInTheDocument()
   })
 
-  test('applies the instrument skin, and not by default', () => {
-    const { container, rerender } = renderCluster()
-    expect(container.querySelector('[data-skin="instrument"]')).not.toBeNull()
-
-    rerender(<EngineClusterTile config={{ ...port, skin: 'default' }} values={values} editing={false} onConfigure={vi.fn()} />)
-    expect(container.querySelector('[data-skin="instrument"]')).toBeNull()
-  })
-
   test('offers the config button only in layout mode', () => {
     const onConfigure = vi.fn()
     const { rerender } = render(
@@ -257,33 +248,59 @@ describe('EngineClusterTile', () => {
  * The instrument skin works by redefining tokens, so a token it forgets falls
  * through to the light theme. --card-foreground did exactly that, and the
  * config gear — which inherits it — rendered near-black on a near-black card.
+ *
+ * Now that the skin can sit at page scope (rather than only on a cluster tile),
+ * every non-indirected :root token is in play, not just the -foreground ones:
+ * anything a page-level board might paint with — board chrome, dial chrome, an
+ * alarm colour — needs a skin-appropriate value or it leaks the light theme
+ * onto a dark board.
  */
 describe('instrument skin token coverage', () => {
-  test('redefines every foreground token the light theme sets', async () => {
+  test('redefines every :root token the skin does not merely inherit', async () => {
     const [fs, path] = await Promise.all([import('node:fs'), import('node:path')])
-    const css = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8')
+    const raw = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8')
+    // Strip comments first, or a token name mentioned in prose (e.g. this
+    // file's own dial-chrome commentary) reads as a declaration.
+    const css = raw.replace(/\/\*[\s\S]*?\*\//g, '')
 
     const section = (selector: string) =>
       css.slice(css.indexOf(selector), css.indexOf('}', css.indexOf(selector)))
 
-    const tokens = (block: string) =>
-      new Set([...block.matchAll(/--([\w-]+):/g)].map((m) => m[1]))
+    // name -> value, so a var() indirection (which resolves through the skin
+    // automatically, since the skin redefines what it points at) can be told
+    // apart from a token the skin actually has to restate.
+    const declarations = (block: string) =>
+      new Map([...block.matchAll(/--([\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]))
 
-    const light = tokens(section(':root {'))
-    const instrument = tokens(section('[data-skin="instrument"] {'))
+    const light = declarations(section(':root {'))
+    const instrument = declarations(section('[data-skin="instrument"] {'))
 
-    // The alert pair is deliberately shared: --destructive stays red in both
-    // skins so a warning looks like a warning, and its foreground is near-white
-    // either way. Everything else has to be redefined.
-    const shared = new Set(['destructive-foreground'])
+    // Each entry is a token the skin deliberately leaves inherited, with the
+    // reason it's safe to.
+    const ALLOWED_TO_INHERIT = new Map<string, string>([
+      ['radius', 'not colour, correct as inherited'],
+      ['font-display', 'not colour, correct as inherited'],
+      ['font-sans', 'not colour, correct as inherited'],
+      // Only forecast-drawer.tsx and tide-chart.tsx read the chart tokens, and
+      // neither renders on the bento grid — a known gap if a charting tile
+      // ever lands on a page.
+      ['chart-wind', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['chart-gust', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['chart-wave', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['chart-swell', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['chart-temp', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['chart-grid', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['dial-bezel-overhang', 'set inline per tile by the cluster, not by the skin'],
+      ['dial-track-r', "invisible under the skin's --dial-track-w: 0px"],
+    ])
 
-    const missing = [...light].filter(
-      (t) => t.endsWith('-foreground')
-        && !t.startsWith('sidebar')
-        && !shared.has(t)
-        && !instrument.has(t),
-    )
-    expect(missing).toEqual([])
+    const missing = [...light.keys()].filter((token) => {
+      if (ALLOWED_TO_INHERIT.has(token)) return false
+      if (/^var\(/.test(light.get(token)!)) return false
+      return !instrument.has(token)
+    })
+
+    expect(missing, `instrument skin does not redefine: ${missing.join(', ')}`).toEqual([])
   })
 })
 

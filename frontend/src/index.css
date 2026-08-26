@@ -46,6 +46,11 @@
     --dial-bezel-shadow: none;
     --dial-bezel-overhang: 0px;
     --dial-hub: none;
+    /* Board chrome (ADR 0060): the skinned page paints its own ground and
+       needs padding and a corner radius the unskinned page must not have.
+       Inert here so an unskinned page's layout is byte-identical to today. */
+    --board-pad: 0px;
+    --board-radius: 0px;
     --dial-track: var(--muted);
     --dial-track-r: 130px;
     --dial-track-w: 3px;
@@ -112,8 +117,17 @@
     --border: 205 30% 24%;
     --input: 205 30% 24%;
     --ring: 199 89% 60%;
+    /* Refines §5's "alert red is not reskinnable" rule rather than reversing
+       it: same hue, unmistakably an alarm, brightened only because it now
+       sits on a dark board instead of a light page (ADR 0060 §3). */
+    --destructive: 359 100% 70%;
+    --destructive-foreground: 214 96% 97%;
     --gauge-primary: 199 89% 62%;
     --gauge-secondary: 199 60% 48%;
+    /* Board chrome (ADR 0060): the skin paints the ground, so it also owns
+       the padding and radius that separate the board from the header. */
+    --board-pad: 0.75rem;
+    --board-radius: 0.75rem;
     /*
      * The dial chrome the flat defaults leave switched off. Widths and sizes
      * are the reference's own, rescaled from its 480 box to the 280 viewBox:

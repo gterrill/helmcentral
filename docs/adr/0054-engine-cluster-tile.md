@@ -51,11 +51,13 @@ Zones draw as **rim segments** rather than the translucent band across the arc t
 
 ### 5. The instrument skin redefines tokens, not components
 
-A real MFD is dark whatever time it is, so the skin is opt-in per tile and independent of the app theme.
+> **Scope superseded by ADR 0060.** The skin is now selected per dashboard page, not per tile. Everything below about *how* it works is unchanged and is what made that move a one-line change.
+
+A real MFD is dark whatever time it is, so the skin is independent of the app theme.
 
 `[data-skin="instrument"]` redefines the **same token names** every component already consumes — `--card`, `--foreground`, `--primary`, `--gauge-primary` and the rest. `Tile`, `DialRing` and every readout therefore re-skin with no per-component branching and no new props threaded anywhere. Tokens, not hex, so AGENTS.md holds.
 
-Alert red and amber are deliberately **not** redefined. A warning has to look like a warning in either skin, and a skin that could recolour an alarm state would be a skin that could hide one.
+Alert red and amber are deliberately **not** redefined. A warning has to look like a warning in either skin, and a skin that could recolour an alarm state would be a skin that could hide one. (ADR 0060 §3 refines this: at page scope the skin owns the ground under the alarm, so it now sets `--destructive` to the dark-theme red. The rule is that a red must keep reading as an alarm, and one too dim for its own background fails it.)
 
 The vocabulary later had to grow past colour. Recreating a helm-cluster reference meant a bezel with a lit rim and an outer bloom, a wide gradient band in place of the thin value arc, brighter and heavier ticks, and a needle that glows. None of that is expressible as an HSL triplet, and none of it belonged in a component branch on `config.skin`.
 

@@ -10,6 +10,7 @@ interface DashboardPageSwitcherProps {
   onCreate: () => void
   onRename: (id: string, name: string) => void
   onDelete: (id: string) => void
+  onSetSkin: (id: string, skin: 'default' | 'instrument') => void
 }
 
 export function DashboardPageSwitcher({
@@ -19,6 +20,7 @@ export function DashboardPageSwitcher({
   onCreate,
   onRename,
   onDelete,
+  onSetSkin,
 }: DashboardPageSwitcherProps) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
@@ -138,6 +140,28 @@ export function DashboardPageSwitcher({
               )}
             </div>
           ))}
+          {/* Edits the active page only (ADR 0060) — the per-page rows above
+              already carry a rename input and two icon buttons, with no room
+              for a third control, so the skin lives here instead. */}
+          {activePage && (
+            <div className="border-t pt-1 mt-1 px-2 pb-1.5">
+              {/* Names the control, not just the page: a bare page name above a
+                  select reads as "pick a page" rather than "skin for this one",
+                  and the rows above already do the picking. */}
+              <p className="mb-1 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                Skin &middot; {activePage.name}
+              </p>
+              <select
+                aria-label="Instrument skin"
+                className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                value={activePage.skin ?? 'default'}
+                onChange={(e) => onSetSkin(activePage.id, e.target.value as 'default' | 'instrument')}
+              >
+                <option value="instrument">Instrument (always dark)</option>
+                <option value="default">Follow the app theme</option>
+              </select>
+            </div>
+          )}
           <div className="border-t pt-1 mt-1">
             <button
               type="button"

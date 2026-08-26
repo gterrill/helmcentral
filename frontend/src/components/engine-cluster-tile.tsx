@@ -311,99 +311,97 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   ]
 
   return (
-    <div data-skin={config.skin === 'instrument' ? 'instrument' : undefined} className="h-full">
-      <Tile
-        title={title}
-        icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
-        titleExtra={
-          editing ? (
-            <Button size="sm" variant="ghost" onClick={onConfigure} aria-label={`Configure ${title}`}>
-              <Settings2 className="size-3.5" />
-            </Button>
-          ) : undefined
-        }
-      >
-        {/* The scaled canvas is taken out of flow by the transform, so the
-            wrapper is given its scaled height explicitly or the tile keeps a
-            gap the size of the unscaled design.
-            
-            items-start, not items-center: a transform scales paint but not
-            layout, so the child still occupies the full unscaled height here.
-            Centring it in the scaled-down wrapper pushed half the difference
-            out of the top of the tile, which is why the dial climbed out of
-            its own card at iPad width and below and stayed put above 520px,
-            where the scale is 1 and the two heights agree. */}
-        <div ref={ref} className="flex w-full items-start justify-center" style={{ height: canvasH * scale }}>
+    <Tile
+      title={title}
+      icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
+      titleExtra={
+        editing ? (
+          <Button size="sm" variant="ghost" onClick={onConfigure} aria-label={`Configure ${title}`}>
+            <Settings2 className="size-3.5" />
+          </Button>
+        ) : undefined
+      }
+    >
+      {/* The scaled canvas is taken out of flow by the transform, so the
+          wrapper is given its scaled height explicitly or the tile keeps a
+          gap the size of the unscaled design.
+          
+          items-start, not items-center: a transform scales paint but not
+          layout, so the child still occupies the full unscaled height here.
+          Centring it in the scaled-down wrapper pushed half the difference
+          out of the top of the tile, which is why the dial climbed out of
+          its own card at iPad width and below and stayed put above 520px,
+          where the scale is 1 and the two heights agree. */}
+      <div ref={ref} className="flex w-full items-start justify-center" style={{ height: canvasH * scale }}>
+        <div
+          data-cluster-canvas=""
+          // shrink-0 or the canvas is not the size it says it is. As a flex
+          // item it defaults to flex-shrink:1, so in any column narrower than
+          // the design its 520px collapsed to the column width while the
+          // corner cards kept their 520-space offsets, putting the right-hand
+          // pair outside the tile and the whole page into horizontal scroll.
+          // useFitScale is what handles narrow columns; the box itself must
+          // not also try to.
+          className="relative shrink-0"
+          style={{ width, height: canvasH, transform: `scale(${scale})`, transformOrigin: 'top center' }}
+        >
           <div
-            data-cluster-canvas=""
-            // shrink-0 or the canvas is not the size it says it is. As a flex
-            // item it defaults to flex-shrink:1, so in any column narrower than
-            // the design its 520px collapsed to the column width while the
-            // corner cards kept their 520-space offsets, putting the right-hand
-            // pair outside the tile and the whole page into horizontal scroll.
-            // useFitScale is what handles narrow columns; the box itself must
-            // not also try to.
-            className="relative shrink-0"
-            style={{ width, height: canvasH, transform: `scale(${scale})`, transformOrigin: 'top center' }}
+            data-cluster-dial=""
+            className="absolute"
+            style={{
+              left: (width - ringBox) / 2, top: ringTop, width: ringBox, height: ringBox,
+              // The dial's bezel paints into the gap the corner masks leave.
+              '--dial-bezel-overhang': `${CLUSTER_MASKS.geometry.bezelOverhang}px`,
+            } as CSSProperties}
           >
-            <div
-              data-cluster-dial=""
-              className="absolute"
-              style={{
-                left: (width - ringBox) / 2, top: ringTop, width: ringBox, height: ringBox,
-                // The dial's bezel paints into the gap the corner masks leave.
-                '--dial-bezel-overhang': `${CLUSTER_MASKS.geometry.bezelOverhang}px`,
-              } as CSSProperties}
+            <DialRing
+              value={ring.converted}
+              min={ringMin}
+              max={ringMax}
+              majorStep={majorStepFor(ringMin, ringMax)}
+              labelDivisor={config.ring.labelDivisor}
+              labelEvery={2}
+              zones={config.ring.zones}
             >
-              <DialRing
-                value={ring.converted}
-                min={ringMin}
-                max={ringMax}
-                majorStep={majorStepFor(ringMin, ringMax)}
-                labelDivisor={config.ring.labelDivisor}
-                labelEvery={2}
-                zones={config.ring.zones}
-              >
-                {/* The centre belongs to the ring reading alone. */}
-                <div data-testid="cluster-centre" className="flex flex-col items-center">
-                  <span data-testid="cluster-centre-value"
-                    className={`font-display text-5xl leading-none tracking-tight tabular-nums ${zoneTextClass(ring.zone)}`}>
-                    {ring.text ?? '--'}
-                  </span>
-                  {/* A rule between the reading and what it is measured in. It
-                      is what separates an instrument face from a number with a
-                      caption under it, and it costs one div. */}
-                  <div className="mt-1.5 h-0.5 w-[68px] bg-foreground/25" />
-                  {/* The divisor belongs with the unit it scales, not floating
-                      at the dial's foot where the notch now sits. */}
-                  <span className="mt-1.5 text-sm font-semibold uppercase tracking-[0.16em] text-foreground">
-                    {config.ring.label.trim() || ring.unit}
-                    {config.ring.labelDivisor ? ` x${config.ring.labelDivisor}` : ''}
-                  </span>
+              {/* The centre belongs to the ring reading alone. */}
+              <div data-testid="cluster-centre" className="flex flex-col items-center">
+                <span data-testid="cluster-centre-value"
+                  className={`font-display text-5xl leading-none tracking-tight tabular-nums ${zoneTextClass(ring.zone)}`}>
+                  {ring.text ?? '--'}
+                </span>
+                {/* A rule between the reading and what it is measured in. It
+                    is what separates an instrument face from a number with a
+                    caption under it, and it costs one div. */}
+                <div className="mt-1.5 h-0.5 w-[68px] bg-foreground/25" />
+                {/* The divisor belongs with the unit it scales, not floating
+                    at the dial's foot where the notch now sits. */}
+                <span className="mt-1.5 text-sm font-semibold uppercase tracking-[0.16em] text-foreground">
+                  {config.ring.label.trim() || ring.unit}
+                  {config.ring.labelDivisor ? ` x${config.ring.labelDivisor}` : ''}
+                </span>
 
-                  {/* Stacked rather than positioned against the dial: an
-                      absolutely placed badge has to dodge whatever height the
-                      readout above it happens to take. */}
-                  <span data-testid="cluster-notch"
-                    className="mt-2.5 flex items-center gap-1.5 rounded-full border bg-card/90 px-2.5 py-1">
-                    <SlotIcon name={config.centreIcon} slot={config.centre} className="size-3 shrink-0 text-gauge-secondary" />
-                    <span className="font-display text-sm leading-none tabular-nums text-gauge-secondary">
-                      {centre.text ?? '--'}
-                    </span>
-                    {centre.unit && <span className="text-[10px] text-muted-foreground">{centre.unit}</span>}
+                {/* Stacked rather than positioned against the dial: an
+                    absolutely placed badge has to dodge whatever height the
+                    readout above it happens to take. */}
+                <span data-testid="cluster-notch"
+                  className="mt-2.5 flex items-center gap-1.5 rounded-full border bg-card/90 px-2.5 py-1">
+                  <SlotIcon name={config.centreIcon} slot={config.centre} className="size-3 shrink-0 text-gauge-secondary" />
+                  <span className="font-display text-sm leading-none tabular-nums text-gauge-secondary">
+                    {centre.text ?? '--'}
                   </span>
+                  {centre.unit && <span className="text-[10px] text-muted-foreground">{centre.unit}</span>}
+                </span>
 
-                  {telltales.length > 0 && <Telltales slots={telltales} values={values} />}
-                </div>
-              </DialRing>
-            </div>
-
-            {config.corners.slice(0, CORNER_LAYOUT.length).map((corner, index) => (
-              <CornerCard key={index} index={index} corner={corner} values={values} style={cardStyles[index]} />
-            ))}
+                {telltales.length > 0 && <Telltales slots={telltales} values={values} />}
+              </div>
+            </DialRing>
           </div>
+
+          {config.corners.slice(0, CORNER_LAYOUT.length).map((corner, index) => (
+            <CornerCard key={index} index={index} corner={corner} values={values} style={cardStyles[index]} />
+          ))}
         </div>
-      </Tile>
-    </div>
+      </div>
+    </Tile>
   )
 })

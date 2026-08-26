@@ -117,7 +117,7 @@ const (
 	clusterMaxTelltales  = 6
 )
 
-var validClusterSkins = map[string]bool{"": true, "default": true, "instrument": true}
+var validPageSkins = map[string]bool{"": true, "default": true, "instrument": true}
 
 // A closed set, mirroring CLUSTER_ICONS in frontend/src/lib/cluster-icons.ts.
 // An allowlist rather than any lucide name, so a saved config can never point
@@ -141,7 +141,6 @@ type dashboardClusterCorner struct {
 // slot with no new machinery.
 type dashboardClusterConfig struct {
 	Title      string                   `json:"title"`
-	Skin       string                   `json:"skin,omitempty"`
 	Ring       dashboardGaugeConfig     `json:"ring"`
 	Centre     dashboardGaugeConfig     `json:"centre"`
 	CentreIcon string                   `json:"centreIcon,omitempty"`
@@ -243,8 +242,14 @@ var defaultDashboardLayout = []dashboardLayoutItem{
 }
 
 type dashboardPageData struct {
-	ID        string                `json:"id"`
-	Name      string                `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Selects the token set every widget on this page renders against: the
+	// app theme, or the always-dark instrument skin. Was a per-cluster-widget
+	// setting until ADR 0060 moved it here, since a page is already a mode
+	// ("Anchored", "Underway") and the skin is a property of that, not of one
+	// tile. Empty means the app theme, so an unset page needs no value.
+	Skin      string                `json:"skin,omitempty"`
 	Widgets   []dashboardLayoutItem `json:"widgets"`
 	CreatedAt time.Time             `json:"created_at"`
 	UpdatedAt time.Time             `json:"updated_at"`
@@ -500,6 +505,7 @@ func listDashboardPagesHandler(c echo.Context) error {
 func createDashboardPageHandler(c echo.Context) error {
 	var body struct {
 		Name    string                `json:"name"`
+		Skin    string                `json:"skin"`
 		Widgets []dashboardLayoutItem `json:"widgets"`
 	}
 	if err := c.Bind(&body); err != nil {
@@ -509,6 +515,9 @@ func createDashboardPageHandler(c echo.Context) error {
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is required"})
+	}
+	if !validPageSkins[body.Skin] {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown page skin: " + body.Skin})
 	}
 
 	// Handle nil slice: ensure it's an empty slice for consistency
@@ -524,6 +533,7 @@ func createDashboardPageHandler(c echo.Context) error {
 	page := &dashboardPageData{
 		ID:        uuid.NewString(),
 		Name:      name,
+		Skin:      body.Skin,
 		Widgets:   body.Widgets,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -561,16 +571,20 @@ func patchDashboardPageHandler(c echo.Context) error {
 
 	var body struct {
 		Name    *string                `json:"name"`
+		Skin    *string                `json:"skin"`
 		Widgets *[]dashboardLayoutItem `json:"widgets"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if body.Name == nil && body.Widgets == nil {
+	if body.Name == nil && body.Skin == nil && body.Widgets == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name cannot be empty"})
+	}
+	if body.Skin != nil && !validPageSkins[*body.Skin] {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown page skin: " + *body.Skin})
 	}
 	if body.Widgets != nil {
 		if msg := validateDashboardWidgets(*body.Widgets); msg != "" {
@@ -589,12 +603,16 @@ func patchDashboardPageHandler(c echo.Context) error {
 	updated := &dashboardPageData{
 		ID:        current.ID,
 		Name:      current.Name,
+		Skin:      current.Skin,
 		Widgets:   current.Widgets,
 		CreatedAt: current.CreatedAt,
 		UpdatedAt: time.Now().UTC(),
 	}
 	if body.Name != nil {
 		updated.Name = strings.TrimSpace(*body.Name)
+	}
+	if body.Skin != nil {
+		updated.Skin = *body.Skin
 	}
 	if body.Widgets != nil {
 		updated.Widgets = *body.Widgets
@@ -720,9 +738,6 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 	}
 	if len(w.Cluster.Title) > gaugeGroupTitleMaxLen {
 		return "cluster title too long: " + w.ID
-	}
-	if !validClusterSkins[w.Cluster.Skin] {
-		return "unknown cluster skin: " + w.Cluster.Skin
 	}
 	if !validClusterIcons[w.Cluster.CentreIcon] {
 		return "unknown cluster icon: " + w.Cluster.CentreIcon

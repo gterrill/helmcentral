@@ -75,7 +75,6 @@ function clusterFromProfile(profile: EngineProfile, instance: string, title: str
 
   return {
     title,
-    skin: 'instrument',
     ring,
     centre: pick(SLOT_SUFFIXES.centre, 'Hours'),
     corners: SLOT_SUFFIXES.corners.map((corner) => ({
@@ -182,7 +181,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
 
           {config && (
             <>
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor="cluster-title">Title</FieldLabel>
                   <Input id="cluster-title" value={config.title}
@@ -195,15 +194,6 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                     onChange={(e) => setSlot((c) => ({ ...c, centreIcon: e.target.value === '' ? undefined : e.target.value }))}>
                     <option value="">Auto ({iconForSlot(config.centre)})</option>
                     {CLUSTER_ICON_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="cluster-skin">Skin</FieldLabel>
-                  <select id="cluster-skin" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                    value={config.skin ?? 'default'}
-                    onChange={(e) => setSlot((c) => ({ ...c, skin: e.target.value as 'default' | 'instrument' }))}>
-                    <option value="instrument">Instrument (always dark)</option>
-                    <option value="default">Follow the app theme</option>
                   </select>
                 </Field>
               </div>

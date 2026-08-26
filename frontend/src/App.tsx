@@ -552,7 +552,6 @@ export function App() {
       x: 0, y: maxY, w: 6, h: 7,
       cluster: {
         title: '',
-        skin: 'instrument',
         ring: { path: '', label: 'RPM', display: 'radial', quantity: 'raw', unit: 'raw' },
         centre: { path: '', label: 'Hours', display: 'numeric', quantity: 'raw', unit: 'raw' },
         corners: [],
@@ -869,7 +868,18 @@ export function App() {
   }
 
   const dashboardGrid = (
-    <div className="flex flex-col gap-4">
+    // ADR 0060: the skin lives on the page, so the attribute sits on this
+    // shared root and every tile beneath it re-skins with no component
+    // changes. bg-background is a no-op while unskinned — it is exactly what
+    // body already paints in both themes — and starts doing something only
+    // once a skin redefines --background above it. The padding is a token
+    // rather than a conditional class for the same reason: a component must
+    // never branch on the skin value, only consume tokens the skin redefines.
+    <div
+      data-skin={activePage?.skin === 'instrument' ? 'instrument' : undefined}
+      className="flex flex-col gap-4 bg-background"
+      style={{ padding: 'var(--board-pad)', borderRadius: 'var(--board-radius)' }}
+    >
       {layoutEditing && (
         <div className="inline-flex w-fit items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">
           Layout Mode — Drag to rearrange
@@ -1281,6 +1291,7 @@ export function App() {
                     })
                   }}
                   onRename={(id, name) => { void updatePage(id, { name }) }}
+                  onSetSkin={(id, skin) => { void updatePage(id, { skin }) }}
                   onDelete={(id) => {
                     void deletePage(id).then((ok) => {
                       if (ok && id === activePageId) {

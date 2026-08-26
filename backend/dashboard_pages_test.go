@@ -301,6 +301,168 @@ func TestPatchDashboardPageHandler_NotFound(t *testing.T) {
 	}
 }
 
+// ── per-page skin ─────────────────────────────────────────────────────────
+//
+// The skin used to live on each cluster widget's config; it now lives on the
+// page itself and applies to the whole grid.
+
+func TestCreateDashboardPageHandler_RejectsUnknownSkin(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":    "Bad Skin",
+		"widgets": sampleDashboardWidgets(),
+		"skin":    "neon",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestDashboardPages_SkinRoundTripsThroughPostAndGet(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":    "Round Trip",
+		"widgets": sampleDashboardWidgets(),
+		"skin":    "instrument",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+	if page.Skin != "instrument" {
+		t.Fatalf("expected created page to have skin %q, got %q", "instrument", page.Skin)
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodGet, "/api/dashboard-pages/"+page.ID, nil)
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := getDashboardPageHandler(c2); err != nil {
+		t.Fatalf("getDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec2.Code)
+	}
+
+	var fetched dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("failed to parse get response: %v", err)
+	}
+	if fetched.Skin != "instrument" {
+		t.Fatalf("expected skin to round-trip through GET, got %q", fetched.Skin)
+	}
+}
+
+func TestPatchDashboardPageHandler_SkinOnlyPatchSucceeds(t *testing.T) {
+	setupDashboardPagesTest(t)
+	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	// A skin-only body has neither name nor widgets; it must not trip the
+	// "no patch fields provided" guard.
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"skin": "default",
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.Skin != "default" {
+		t.Fatalf("expected skin to be updated, got %q", updated.Skin)
+	}
+}
+
+func TestPatchDashboardPageHandler_RejectsUnknownSkin(t *testing.T) {
+	setupDashboardPagesTest(t)
+	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"skin": "neon",
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchDashboardPageHandler_PreservesSkinOnWidgetsOnlyPatch guards the
+// handler's field-by-field rebuild of the updated page. A widgets-only PATCH
+// is what every layout drag sends; if the rebuild forgets to carry Skin
+// forward from the current page, the page's skin is silently wiped on the
+// very next drag.
+func TestPatchDashboardPageHandler_PreservesSkinOnWidgetsOnlyPatch(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":    "Skinned Page",
+		"widgets": sampleDashboardWidgets(),
+		"skin":    "instrument",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+	if page.Skin != "instrument" {
+		t.Fatalf("expected created page to have skin %q, got %q", "instrument", page.Skin)
+	}
+
+	newWidgets := []dashboardLayoutItem{{ID: "route", X: 0, Y: 0, W: 8, H: 8}}
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"widgets": newWidgets,
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
+	}
+
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.Skin != "instrument" {
+		t.Fatalf("expected skin to survive a widgets-only patch, got %q", updated.Skin)
+	}
+
+	dashboardPagesMu.RLock()
+	stored := dashboardPagesState[page.ID]
+	dashboardPagesMu.RUnlock()
+	if stored.Skin != "instrument" {
+		t.Fatalf("expected stored page to retain skin after widgets-only patch, got %q", stored.Skin)
+	}
+}
+
 func TestDeleteDashboardPageHandler_DeletesAndReports404Afterward(t *testing.T) {
 	setupDashboardPagesTest(t)
 	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
@@ -1303,7 +1465,6 @@ func clusterWidget(id string, config *dashboardClusterConfig) dashboardLayoutIte
 func validClusterConfig() *dashboardClusterConfig {
 	return &dashboardClusterConfig{
 		Title:  "Port",
-		Skin:   "instrument",
 		Ring:   dashboardGaugeConfig{Path: "propulsion.port.revolutions", Label: "RPM", Display: "radial", Quantity: "frequency", Unit: "rpm"},
 		Centre: dashboardGaugeConfig{Path: "propulsion.port.fuel.rate", Label: "Fuel", Display: "numeric", Quantity: "volumetricFlow", Unit: "Lph"},
 		Corners: []dashboardClusterCorner{
@@ -1327,9 +1488,6 @@ func TestValidateClusterAcceptsAWellFormedCluster(t *testing.T) {
 func TestValidateClusterRejectsBadInput(t *testing.T) {
 	noRing := validClusterConfig()
 	noRing.Ring = dashboardGaugeConfig{}
-
-	badSkin := validClusterConfig()
-	badSkin.Skin = "neon"
 
 	tooManyCorners := validClusterConfig()
 	tooManyCorners.Corners = make([]dashboardClusterCorner, clusterMaxCorners+1)
@@ -1361,7 +1519,6 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 		{"short token", clusterWidget("cluster:abc", validClusterConfig())},
 		{"missing config", clusterWidget("cluster:abcd1234", nil)},
 		{"ring with no path", clusterWidget("cluster:abcd1234", noRing)},
-		{"unknown skin", clusterWidget("cluster:abcd1234", badSkin)},
 		{"too many corners", clusterWidget("cluster:abcd1234", tooManyCorners)},
 		{"corner with no rows", clusterWidget("cluster:abcd1234", emptyCorner)},
 		{"bad row", clusterWidget("cluster:abcd1234", badRow)},

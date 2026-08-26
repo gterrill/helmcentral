@@ -6,6 +6,8 @@ export interface DashboardPage {
   id: string
   name: string
   widgets: DashboardLayoutItem[]
+  /** `instrument` keeps the whole page dark whatever the app theme is (ADR 0060). */
+  skin?: 'default' | 'instrument'
   created_at: string
   updated_at: string
 }
@@ -76,7 +78,7 @@ export function useDashboardPages() {
 
   const updatePage = useCallback(async (
     id: string,
-    patch: Partial<Pick<DashboardPage, 'name' | 'widgets'>>,
+    patch: Partial<Pick<DashboardPage, 'name' | 'widgets' | 'skin'>>,
   ): Promise<DashboardPage | null> => {
     const res = await fetch(`/api/dashboard-pages/${id}`, {
       method: 'PATCH',

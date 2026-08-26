@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { App } from '../App'
+import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 
 // This test renders the dashboard, not the auth gate. State the precondition
 // explicitly — an install with auth.mode:none — rather than depending on what
@@ -189,36 +190,42 @@ vi.mock('@/hooks/use-app-config', () => ({
   publishAppConfigSettings: vi.fn(),
 }))
 
+// A mutable fixture (rather than a literal inline in the factory below) so the
+// dashboard-page-skin tests can flip `skin` on the active page per test without
+// a second vi.mock. Reset in beforeEach so that mutation never leaks between
+// tests — vi.mock factories must reference outer bindings prefixed "mock".
+const mockDashboardPages: DashboardPage[] = [{
+  id: 'p1',
+  name: 'Anchored',
+  widgets: [
+    { id: 'vessel', x: 0, y: 0, w: 12, h: 3 },
+    { id: 'wind', x: 0, y: 3, w: 4, h: 8 },
+    { id: 'depth-tide', x: 0, y: 11, w: 4, h: 7 },
+    { id: 'position', x: 0, y: 18, w: 4, h: 5 },
+    { id: 'today-now', x: 0, y: 23, w: 4, h: 5 },
+    { id: 'anchor-watch', x: 4, y: 3, w: 4, h: 8 },
+    { id: 'solar', x: 4, y: 11, w: 4, h: 6 },
+    { id: 'tanks', x: 4, y: 17, w: 4, h: 4 },
+    { id: 'route', x: 4, y: 21, w: 4, h: 4 },
+    { id: 'nearby-vessels', x: 4, y: 25, w: 4, h: 5 },
+    { id: 'battery-power', x: 8, y: 3, w: 4, h: 14 },
+    { id: 'alternator', x: 8, y: 17, w: 4, h: 6 },
+    { id: 'generator', x: 8, y: 23, w: 4, h: 5 },
+    { id: 'czone-switches', x: 8, y: 28, w: 4, h: 6 },
+  ],
+  created_at: '',
+  updated_at: '',
+}, {
+  id: 'p2',
+  name: 'Underway',
+  widgets: [],
+  created_at: '',
+  updated_at: '',
+}]
+
 vi.mock('@/hooks/use-dashboard-pages', () => ({
   useDashboardPages: () => ({
-    pages: [{
-      id: 'p1',
-      name: 'Anchored',
-      widgets: [
-        { id: 'vessel', x: 0, y: 0, w: 12, h: 3 },
-        { id: 'wind', x: 0, y: 3, w: 4, h: 8 },
-        { id: 'depth-tide', x: 0, y: 11, w: 4, h: 7 },
-        { id: 'position', x: 0, y: 18, w: 4, h: 5 },
-        { id: 'today-now', x: 0, y: 23, w: 4, h: 5 },
-        { id: 'anchor-watch', x: 4, y: 3, w: 4, h: 8 },
-        { id: 'solar', x: 4, y: 11, w: 4, h: 6 },
-        { id: 'tanks', x: 4, y: 17, w: 4, h: 4 },
-        { id: 'route', x: 4, y: 21, w: 4, h: 4 },
-        { id: 'nearby-vessels', x: 4, y: 25, w: 4, h: 5 },
-        { id: 'battery-power', x: 8, y: 3, w: 4, h: 14 },
-        { id: 'alternator', x: 8, y: 17, w: 4, h: 6 },
-        { id: 'generator', x: 8, y: 23, w: 4, h: 5 },
-        { id: 'czone-switches', x: 8, y: 28, w: 4, h: 6 },
-      ],
-      created_at: '',
-      updated_at: '',
-    }, {
-      id: 'p2',
-      name: 'Underway',
-      widgets: [],
-      created_at: '',
-      updated_at: '',
-    }],
+    pages: mockDashboardPages,
     loading: false,
     error: null,
     refetch: vi.fn(),
@@ -272,6 +279,9 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 describe('App sidebar navigation', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The skin tests below set this on the fixture; every other test in this
+    // file wants the pre-ADR-0060 unskinned default.
+    mockDashboardPages.forEach((page) => { delete page.skin })
   })
 
   it('shows the dashboard by default, navigates to a panel via the sidebar, and back', () => {
@@ -331,5 +341,36 @@ describe('App sidebar navigation', () => {
     // Clicking "Underway" sets the active page id to 'p2'.
     fireEvent.click(underwaySubItem)
     expect(mockSetActivePageId).toHaveBeenCalledWith('p2')
+  })
+})
+
+/**
+ * ADR 0060: the instrument skin moved from a per-cluster-widget setting to a
+ * per-dashboard-page one. `data-skin` now sits on the grid container so the
+ * whole page re-skins by inheritance, with no component changes beneath it.
+ * The active page here is always 'p1' (see mockSetActivePageId above), so
+ * these toggle `skin` on that fixture directly.
+ */
+describe('dashboard page skin (ADR 0060)', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockDashboardPages.forEach((page) => { delete page.skin })
+  })
+
+  it('skins the grid container when the active page has the instrument skin', () => {
+    mockDashboardPages[0].skin = 'instrument'
+    const { container } = render(<App />)
+    expect(container.querySelector('[data-skin="instrument"]')).not.toBeNull()
+  })
+
+  it('leaves the grid unskinned when the active page has no skin set', () => {
+    const { container } = render(<App />)
+    expect(container.querySelector('[data-skin="instrument"]')).toBeNull()
+  })
+
+  it('leaves the grid unskinned when the active page explicitly follows the app theme', () => {
+    mockDashboardPages[0].skin = 'default'
+    const { container } = render(<App />)
+    expect(container.querySelector('[data-skin="instrument"]')).toBeNull()
   })
 })

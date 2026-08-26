@@ -37,6 +37,7 @@ function renderSwitcher() {
       onCreate={vi.fn()}
       onRename={vi.fn()}
       onDelete={vi.fn()}
+      onSetSkin={vi.fn()}
     />,
   )
 }

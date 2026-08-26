@@ -156,8 +156,6 @@ export interface ClusterCorner {
  */
 export interface EngineClusterConfig {
   title: string
-  /** `instrument` keeps the tile dark whatever the app theme is. */
-  skin?: 'default' | 'instrument'
   ring: GaugeWidgetConfig
   centre: GaugeWidgetConfig
   /** A name from CLUSTER_ICONS; inferred from the centre slot when unset. */
