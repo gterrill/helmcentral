@@ -1344,6 +1344,36 @@ func readChargerInstance(payload map[string]any, index string) chargerInstanceDa
 // when stationary, so 10 minutes is ~3 missed reports.
 const nearbyVesselMaxAge = 10 * time.Minute
 
+// collisionTargetMaxAge is the cutoff for holding a CPA alarm up. Tighter than
+// nearbyVesselMaxAge on purpose: the tile lists stationary neighbours that
+// report every ~3 minutes, but a target worth alarming over is moving, and a
+// moving target reports every 5 to 30 seconds. Five minutes is a dozen missed
+// reports for the case that matters, not one. It costs nothing on the
+// stationary case either, because ADR 0058 already stops a stationary target
+// tripping this alarm in the first place.
+const collisionTargetMaxAge = 5 * time.Minute
+
+// aisTargetPositionFresh reports when a target's navigation.position last
+// arrived and whether that is recent enough to trust the rest of its tree.
+//
+// One predicate, two cutoffs. The tile aged its targets and the CPA alarm did
+// not, so a target that left range dropped off the tile while its collision
+// alarm stayed lit in the banner until the process restarted.
+//
+// Position is the reference, never the notification's own path. The
+// prioritizer writes notifications.navigation.closestApproach on a state
+// change, not on a timer, so ageing that path against itself would silently
+// clear an alarm that is still entirely valid — the target could be closing
+// steadily for half an hour on one write and this would drop it a maxAge
+// after that single write, which is a masking failure dressed up as a fix.
+func aisTargetPositionFresh(snapshot *signalKSnapshot, vesselID string, maxAge time.Duration, now time.Time) (time.Time, bool) {
+	seen := snapshot.lastSeen(vesselContextPrefix+vesselID, "navigation.position")
+	if seen.IsZero() {
+		return time.Time{}, false
+	}
+	return seen, now.Sub(seen) <= maxAge
+}
+
 const (
 	// nearbyMinRangeMeters drops this vessel itself, which SignalK may publish
 	// under a non-self context as well.
@@ -1414,17 +1444,18 @@ func fetchSignalKNearbyVessels(selfLatitude float64, selfLongitude float64, now 
 		// the field was missing or failed to parse - a masking fallback that
 		// reported a dead target as "0s ago" forever, which is exactly the
 		// case a staleness filter most needs to catch (see ADR 0042).
-		positionSeen := globalSignalKSnapshot.lastSeen(vesselContextPrefix+vesselID, "navigation.position")
-		if positionSeen.IsZero() {
-			// No position delta was ever received for this context; there is
-			// nothing to age against and the position in the tree cannot be
-			// trusted.
+		//
+		// aisTargetPositionFresh folds two failures into this one continue: no
+		// position delta ever received for this context at all (nothing to age
+		// against, so the position in the tree cannot be trusted), and a
+		// position that arrived but has since gone stale. The collision-alarm
+		// gate in collision_ais.go shares this same predicate against a
+		// tighter cutoff (ADR 0057).
+		positionSeen, fresh := aisTargetPositionFresh(globalSignalKSnapshot, vesselID, nearbyVesselMaxAge, now)
+		if !fresh {
 			continue
 		}
 		age := now.Sub(positionSeen)
-		if age > nearbyVesselMaxAge {
-			continue
-		}
 		ageSeconds := int(age.Seconds())
 		if ageSeconds < 0 {
 			ageSeconds = 0

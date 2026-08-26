@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 )
 
 // collisionNotificationBranch is the only path on another vessel's tree that
@@ -46,7 +47,14 @@ func splitNotificationVessel(path string) (branch, vesselID string) {
 // wearing a collision alarm's clothes; that condition is already visible
 // through vessel-state staleness, and routing it here would put a klaxon on the
 // wrong problem and teach the crew to distrust the CPA alarm (ADR 0057).
-func signalKCollisionNotifications(snapshot *signalKSnapshot) []alarmStatus {
+//
+// Not every vessel context ever seen is fair game, either. The snapshot never
+// evicts a context and the plugin only rewrites this notification on a state
+// change, not on a timer, so a target that stops transmitting leaves its last
+// warn/alarm node frozen in the tree forever. Without a freshness gate that
+// frozen node would outlive the target by however long this process keeps
+// running, which is the bug ADR 0057 §6 exists to close.
+func signalKCollisionNotifications(snapshot *signalKSnapshot, now time.Time) []alarmStatus {
 	vessels := snapshot.vesselsTree()
 	if len(vessels) == 0 {
 		return nil
@@ -59,6 +67,17 @@ func signalKCollisionNotifications(snapshot *signalKSnapshot) []alarmStatus {
 		// "self" is checked alongside the resolved context because some
 		// servers report self unprefixed (see setSelfContext).
 		if vesselID == self || vesselID == "self" {
+			continue
+		}
+
+		// Gate on the target's position, never on this notification's own
+		// age: the plugin writes it once on a state change and then leaves it
+		// alone for as long as the target keeps closing, so ageing the
+		// notification against itself would clear an alarm that is still
+		// entirely valid. Position keeps arriving on a timer for as long as
+		// the target is in AIS range, which is exactly the fact this gate
+		// needs (ADR 0057 §6).
+		if _, fresh := aisTargetPositionFresh(snapshot, vesselID, collisionTargetMaxAge, now); !fresh {
 			continue
 		}
 

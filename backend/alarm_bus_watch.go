@@ -71,7 +71,7 @@ func (w *busNotificationWatcher) check(now time.Time) []alarmEvent {
 	// self walk never reaches (ADR 0057). Without them here a CPA alarm is
 	// visible only in the live list: no push, no log row, no trace afterwards.
 	busStatuses := signalKNotifications(w.snapshot)
-	busStatuses = append(busStatuses, signalKCollisionNotifications(w.snapshot)...)
+	busStatuses = append(busStatuses, signalKCollisionNotifications(w.snapshot, now)...)
 
 	live := map[string]alarmStatus{}
 	for _, status := range busStatuses {

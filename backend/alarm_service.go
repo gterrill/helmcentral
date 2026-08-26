@@ -119,7 +119,17 @@ func activeAlarms() []alarmStatus {
 	combined := make([]alarmStatus, 0)
 	combined = append(combined, globalAlarmEngine.active()...)
 	combined = append(combined, signalKNotifications(globalSignalKSnapshot)...)
-	combined = append(combined, signalKCollisionNotifications(globalSignalKSnapshot)...)
+
+	// The clock is read here rather than threaded through as a parameter
+	// because activeAlarms has no caller-supplied now to thread it from:
+	// buildAlarmsPayload is handed to the SSE stream as a bare function value
+	// (vessel_state_stream.go's telemetryEmitters, build func() map[string]any),
+	// and widening that signature would ripple through worstAlarmState,
+	// alarmsHandler, startHeartbeat and five test call sites to serve this one.
+	// alarmActionHandler and buildAutopilotPayload (autopilot.go) already read
+	// time.Now() at their own call site rather than accepting it from above,
+	// so this matches the existing pattern rather than inventing a new one.
+	combined = append(combined, signalKCollisionNotifications(globalSignalKSnapshot, time.Now().UTC())...)
 
 	sort.Slice(combined, func(i, j int) bool {
 		if alarmStateRank[combined[i].State] != alarmStateRank[combined[j].State] {
