@@ -1,10 +1,13 @@
 export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 
+export type ScopeMethod = 'catenary' | 'ratio'
+
 export type AnchorConfig = {
   bowRollerHeightM: number
   chainSizeMm: number
   chainOnboardM: number
   hullType: HullType
+  scopeMethod: ScopeMethod
   windageAreaM2: number
   gpsFromBowM: number
   loaM: number
@@ -43,6 +46,7 @@ export const fallbackAnchorConfig: AnchorConfig = {
   chainSizeMm: 12,
   chainOnboardM: 150,
   hullType: 'power_cat',
+  scopeMethod: 'ratio',
   windageAreaM2: 35,
   gpsFromBowM: 0,
   loaM: 0,
@@ -59,6 +63,7 @@ export type AppConfigSettings = {
     chain_size_mm?: number
     chain_onboard_m?: number
     hull_type?: string
+    scope_method?: string
     windage_area_m2?: number
     gps_from_bow_m?: number
     loa_m?: number
@@ -66,6 +71,7 @@ export type AppConfigSettings = {
 }
 
 const HULL_TYPES: HullType[] = ['power_cat', 'sail_mono', 'power_mono', 'sail_cat']
+const SCOPE_METHODS: ScopeMethod[] = ['catenary', 'ratio']
 
 // Every field is validated rather than trusted: settings.yaml is hand-editable
 // and the endpoint will faithfully return whatever it was given. An
@@ -108,6 +114,10 @@ export function normalizeAnchorConfig(settings: AppConfigSettings | null | undef
     ? anchor.hull_type.trim().toLowerCase()
     : ''
 
+  const scopeMethod = typeof anchor?.scope_method === 'string'
+    ? anchor.scope_method.trim().toLowerCase()
+    : ''
+
   return {
     bowRollerHeightM: positiveNumber(anchor?.bow_roller_height_m, fallbackAnchorConfig.bowRollerHeightM),
     chainSizeMm: positiveNumber(anchor?.chain_size_mm, fallbackAnchorConfig.chainSizeMm),
@@ -115,6 +125,9 @@ export function normalizeAnchorConfig(settings: AppConfigSettings | null | undef
     hullType: (HULL_TYPES as string[]).includes(hullType)
       ? (hullType as HullType)
       : fallbackAnchorConfig.hullType,
+    scopeMethod: (SCOPE_METHODS as string[]).includes(scopeMethod)
+      ? (scopeMethod as ScopeMethod)
+      : fallbackAnchorConfig.scopeMethod,
     windageAreaM2: positiveNumber(anchor?.windage_area_m2, fallbackAnchorConfig.windageAreaM2),
     gpsFromBowM: nonNegativeNumber(anchor?.gps_from_bow_m, fallbackAnchorConfig.gpsFromBowM),
     loaM: positiveNumber(anchor?.loa_m, fallbackAnchorConfig.loaM),

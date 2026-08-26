@@ -183,7 +183,8 @@ vi.mock('@/hooks/use-app-config', () => ({
     ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
-      hullType: 'power_cat', windageAreaM2: 10,
+      hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
+      gpsFromBowM: 0, loaM: 0,
     },
     loaded: true,
   }),

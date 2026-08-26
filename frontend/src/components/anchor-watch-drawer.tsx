@@ -1,4 +1,4 @@
-import { Anchor } from 'lucide-react'
+import { useMemo } from 'react'
 import type { AnchorConfig } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
@@ -7,13 +7,17 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { SeabedType, SeaState } from '@/lib/catenary'
+import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
 import { AnchorRodePlanner } from '@/components/anchor-rode-planner'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
-import { Button } from '@/components/ui/button'
+import { computeScopeRecommendation } from '@/lib/rode-plan'
 
 interface AnchorWatchDrawerProps {
-  vesselLat: number
-  vesselLon: number
+  // Resolved by the caller (live fix, falling back to the anchor point), and
+  // left null only when neither is available — see the no-fix placeholder
+  // below rather than being handed a fabricated 0,0.
+  vesselLat: number | null
+  vesselLon: number | null
   vesselHeadingDeg: number | null
   anchorLat: number | null
   anchorLon: number | null
@@ -36,7 +40,7 @@ interface AnchorWatchDrawerProps {
   onImageryToggle: (enabled: boolean) => void
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
-  onClearAnchor: () => void
+  onClearAnchor: () => Promise<void> | void
   placemarks?: AnchorPlacemark[]
   onPlacemarkCreate?: (lat: number, lon: number) => void
   onPlacemarkRemove?: (id: string) => void
@@ -54,6 +58,11 @@ interface AnchorWatchDrawerProps {
   tide: TideToday | null
   anchorConfig: AnchorConfig
   vesselLengthOverallM: number | null
+  // Shared with the tile and the Rode Planner (App.tsx owns the state) so
+  // all three plan against the same forecast band. Null when there's no
+  // explicit pick — computeScopeRecommendation falls back to the live seed.
+  windBandId: string | null
+  onWindBandChange: (bandId: string) => void
   onUpdateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
 }
 
@@ -99,9 +108,28 @@ export function AnchorWatchDrawer({
   tide,
   anchorConfig,
   vesselLengthOverallM,
+  windBandId,
+  onWindBandChange,
   onUpdateRodeAndConditions,
 }: AnchorWatchDrawerProps) {
-  const isSet = anchorLat !== null && anchorLon !== null
+  // Rendered by the map's metric overlay as the Scope row, under Current
+  // (ADR 0059 §3) — shared with the tile via computeScopeRecommendation, and
+  // with the Rode Planner below via windBandId, so all three plan against
+  // the same forecast band.
+  const scopeRecommendation = useMemo(
+    () =>
+      computeScopeRecommendation({
+        depthMeters,
+        tide,
+        maxGustKts,
+        windSpeedApparentKts,
+        seaState,
+        seabedType,
+        anchorConfig,
+        selectedWindBandId: windBandId,
+      }),
+    [depthMeters, tide, maxGustKts, windSpeedApparentKts, seaState, seabedType, anchorConfig, windBandId],
+  )
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -126,49 +154,57 @@ export function AnchorWatchDrawer({
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
-        <div className="min-w-0 flex-1 rounded-xl border bg-background/70">
-          {isSet ? (
-            <AnchorWatchMap
-              vesselLat={vesselLat}
-              vesselLon={vesselLon}
-              vesselHeadingDeg={vesselHeadingDeg}
-              anchorLat={anchorLat}
-              anchorLon={anchorLon}
-              radiusMeters={radiusMeters}
-              depthMeters={depthMeters}
-              currentDriftKts={currentDriftKts}
-              currentSetDeg={currentSetDeg}
-              currentDriftImpactKts={currentDriftImpactKts}
-              distanceMeters={distanceMeters}
-              bearingDeg={bearingDeg}
-              isImperial={isImperial}
-              vesselTrail={vesselTrail}
-              aisVessels={aisVessels}
-              aisTrails={aisTrails}
-              isDarkTheme={isDarkTheme}
-              showImageryLayer={showImageryLayer}
-              onImageryToggle={onImageryToggle}
-              onAnchorReposition={onAnchorReposition}
-              onRadiusChange={onRadiusChange}
-              onClearAnchor={onClearAnchor}
-              placemarks={placemarks}
-              onPlacemarkCreate={onPlacemarkCreate}
-              onPlacemarkRemove={onPlacemarkRemove}
-              className="h-full w-full"
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <div className="min-h-0 flex-1 rounded-xl border bg-background/70">
+            {vesselLat !== null && vesselLon !== null ? (
+              <AnchorWatchMap
+                vesselLat={vesselLat}
+                vesselLon={vesselLon}
+                vesselHeadingDeg={vesselHeadingDeg}
+                anchorLat={anchorLat}
+                anchorLon={anchorLon}
+                radiusMeters={radiusMeters}
+                depthMeters={depthMeters}
+                currentDriftKts={currentDriftKts}
+                currentSetDeg={currentSetDeg}
+                currentDriftImpactKts={currentDriftImpactKts}
+                distanceMeters={distanceMeters}
+                bearingDeg={bearingDeg}
+                scopeRecommendation={scopeRecommendation}
+                isImperial={isImperial}
+                vesselTrail={vesselTrail}
+                aisVessels={aisVessels}
+                aisTrails={aisTrails}
+                isDarkTheme={isDarkTheme}
+                showImageryLayer={showImageryLayer}
+                onImageryToggle={onImageryToggle}
+                onAnchorReposition={onAnchorReposition}
+                onRadiusChange={onRadiusChange}
+                placemarks={placemarks}
+                onPlacemarkCreate={onPlacemarkCreate}
+                onPlacemarkRemove={onPlacemarkRemove}
+                className="h-full w-full"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                No GPS fix
+              </div>
+            )}
+          </div>
+
+          {/* Prominence follows state (see anchor-watch-tile.tsx): Drop is the
+              idle state's one action and gets a generous centered target; Raise
+              is a confirmed departure chore and sits compact at the trailing
+              edge rather than spanning the whole map column. */}
+          <div className={anchorState === 'none' ? 'flex justify-center' : 'flex justify-end'}>
+            <AnchorDropRaiseButton
+              className={anchorState === 'none' ? 'w-full max-w-xs' : undefined}
+              anchorActive={anchorState !== 'none'}
+              canDrop={canDrop}
+              onDrop={onDropAnchor}
+              onRaise={onClearAnchor}
             />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center px-6 py-8 text-center text-muted-foreground">
-              <div className="mb-4">Not monitoring</div>
-              <Button
-                className="h-11 bg-teal-600 text-teal-50 hover:bg-teal-700"
-                disabled={!canDrop}
-                onClick={onDropAnchor}
-              >
-                <Anchor className="h-4 w-4" />
-                Drop
-              </Button>
-            </div>
-          )}
+          </div>
         </div>
 
         <AnchorRodePlanner
@@ -184,6 +220,8 @@ export function AnchorWatchDrawer({
           anchorConfig={anchorConfig}
           bowOffsetM={bowOffsetM}
           vesselLengthOverallM={vesselLengthOverallM}
+          windBandId={windBandId}
+          onWindBandChange={onWindBandChange}
           onUpdateRodeAndConditions={onUpdateRodeAndConditions}
           onApplyAlarmRadius={async (radius) => onRadiusChange(radius)}
         />

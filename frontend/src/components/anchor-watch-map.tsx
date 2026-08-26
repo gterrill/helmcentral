@@ -3,12 +3,13 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, ArrowUp, CircleStop, Crosshair, Expand, MapPin, Minus, Plus, Satellite, Ship, X } from 'lucide-react'
+import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Plus, Satellite, Ship, X } from 'lucide-react'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { TrailPoint } from '@/hooks/use-server-trails'
+import type { RodeMethodResult } from '@/lib/rode-plan'
 
 // ── Map style URLs (Carto, no API key required) ─────────────────────────────
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
@@ -122,8 +123,11 @@ export interface AnchorWatchMapProps {
   vesselLat: number
   vesselLon: number
   vesselHeadingDeg: number | null
-  anchorLat: number
-  anchorLon: number
+  // Null before an anchor is set — groundwork for an always-on map. The
+  // hosts still gate rendering on anchor-set for now, so the no-anchor path
+  // below only runs under test until the tile/drawer rework lands.
+  anchorLat: number | null
+  anchorLon: number | null
   radiusMeters: number
   depthMeters: number | null
   currentDriftKts: number | null
@@ -131,6 +135,11 @@ export interface AnchorWatchMapProps {
   currentDriftImpactKts?: number | null
   distanceMeters: number | null
   bearingDeg: number | null
+  // Rendered as the Scope row in the metric overlay, under Current (ADR 0059
+  // §3). Null when the host has nothing to say yet (e.g. no map at all) —
+  // distinct from a RodeMethodResult carrying its own unavailableReason,
+  // which still renders the row with the reason visible.
+  scopeRecommendation: RodeMethodResult | null
   isImperial: boolean
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
@@ -140,7 +149,6 @@ export interface AnchorWatchMapProps {
   onImageryToggle?: (enabled: boolean) => void
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
-  onClearAnchor: () => void
   onFullscreen?: () => void
   // Session-bound pins shared across every client watching this anchorage.
   placemarks?: AnchorPlacemark[]
@@ -162,6 +170,7 @@ export function AnchorWatchMap({
   currentDriftImpactKts = null,
   distanceMeters,
   bearingDeg: bearingDegProp,
+  scopeRecommendation,
   isImperial,
   vesselTrail,
   aisVessels,
@@ -171,13 +180,13 @@ export function AnchorWatchMap({
   onImageryToggle,
   onAnchorReposition,
   onRadiusChange,
-  onClearAnchor,
   onFullscreen,
   placemarks = [],
   onPlacemarkCreate,
   onPlacemarkRemove,
   className,
 }: AnchorWatchMapProps) {
+  const hasAnchor = anchorLat !== null && anchorLon !== null
   const mapRef = useRef<MapRef | null>(null)
   const [editMode, setEditMode] = useState<EditMode>('none')
   const [ghostAnchor, setGhostAnchor] = useState<{ lat: number; lon: number } | null>(null)
@@ -231,6 +240,15 @@ export function AnchorWatchMap({
     : bearingDegProp
   const showRepositionBreadcrumbs = editMode === 'reposition'
   const highDriftImpact = currentDriftImpactKts !== null && Math.abs(currentDriftImpactKts) >= HIGH_DRIFT_IMPACT_KTS
+  // Scope row (ADR 0059 §3): unavailable covers both a null prop (host has
+  // nothing to say) and a RodeMethodResult carrying its own unavailableReason
+  // — either way the row shows the reason, never a bare dash.
+  const scopeUnit = isImperial ? 'ft' : 'm'
+  const scopeAvailable = scopeRecommendation !== null && !scopeRecommendation.unavailableReason
+  const scopeReason = scopeRecommendation?.unavailableReason ?? null
+  const scopeRodeDisplay = scopeAvailable
+    ? Math.round(isImperial ? scopeRecommendation!.recommendedRodeM * 3.28084 : scopeRecommendation!.recommendedRodeM)
+    : null
   const formatRange = useCallback(
     (distanceM: number) => {
       if (isImperial) {
@@ -242,9 +260,15 @@ export function AnchorWatchMap({
   )
 
   // GeoJSON data
-  const circleGeoJSON = useMemo(
-    () => generateCircleGeoJSON(anchorLon, anchorLat, displayRadius),
-    [anchorLon, anchorLat, displayRadius],
+  // Empty FeatureCollection with no anchor, rather than unmounting the
+  // Source/Layers below — see the raster-layer comment further down for why
+  // they have to stay mounted regardless.
+  const circleGeoJSON = useMemo<GeoJSON.Feature<GeoJSON.Polygon> | GeoJSON.FeatureCollection>(
+    () =>
+      hasAnchor
+        ? generateCircleGeoJSON(anchorLon, anchorLat, displayRadius)
+        : { type: 'FeatureCollection', features: [] },
+    [hasAnchor, anchorLon, anchorLat, displayRadius],
   )
 
   const ghostCircleGeoJSON = useMemo(
@@ -376,6 +400,9 @@ export function AnchorWatchMap({
         return
       }
       if (editMode !== 'none') return
+      // No active watch: POST /api/anchor-watch/placemarks would 409 (see
+      // backend/anchor_placemarks.go), so don't even raise the tooltip.
+      if (!hasAnchor) return
       // Unoccupied water: offer to pin it. Markers (AIS, anchor, self
       // vessel, placemarks) all set suppressNextMapClickRef, so a click
       // that reaches here landed on open chart.
@@ -383,7 +410,7 @@ export function AnchorWatchMap({
       setSelectedPlacemarkId(null)
       setPinCandidate({ lat, lon: lng })
     },
-    [editMode, ghostAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor],
+    [editMode, ghostAnchor, hasAnchor, liveRadius, onAnchorReposition, onRadiusChange, setCursor],
   )
 
   // ── Placemarks ───────────────────────────────────────────────────────────
@@ -437,6 +464,11 @@ export function AnchorWatchMap({
   // ── Map mouse move handler (for radius drag) ─────────────────────────────
   const handleMouseMove = useCallback(
     (e: maplibregl.MapMouseEvent) => {
+      // Radius drag, reposition drag and edge-hover detection all project
+      // anchor coords — none of them are reachable without an anchor (radius
+      // and reposition mode both require one to enter), but bail explicitly
+      // rather than let a NaN projection slip through.
+      if (!hasAnchor) return
       if (editMode === 'radius') {
         const { lat, lng } = e.lngLat
         const newRadius = haversineMeters(anchorLat, anchorLon, lat, lng)
@@ -467,7 +499,7 @@ export function AnchorWatchMap({
         }
       }
     },
-    [editMode, anchorLat, anchorLon, displayRadius, setCursor],
+    [editMode, hasAnchor, anchorLat, anchorLon, displayRadius, setCursor],
   )
 
   // ── Circle edge click detection ──────────────────────────────────────────
@@ -483,6 +515,8 @@ export function AnchorWatchMap({
         return
       }
       if (editMode !== 'none') return
+      // No anchor to project — bail before it produces NaN.
+      if (!hasAnchor) return
       const map = mapRef.current
       if (!map) return
       const circleEdgePoint = map.project([anchorLon, anchorLat])
@@ -507,7 +541,7 @@ export function AnchorWatchMap({
         mapRef.current?.dragPan.disable()
       }
     },
-    [editMode, anchorLat, anchorLon, displayRadius, liveRadius, onRadiusChange, radiusMeters, setCursor],
+    [editMode, hasAnchor, anchorLat, anchorLon, displayRadius, liveRadius, onRadiusChange, radiusMeters, setCursor],
   )
 
   // ── Touch start: circle-edge detection for tablet radius adjustment ──────
@@ -522,6 +556,8 @@ export function AnchorWatchMap({
         return
       }
       if (editMode !== 'none') return
+      // No anchor to project — bail before it produces NaN.
+      if (!hasAnchor) return
       const map = mapRef.current
       if (!map) return
       const circleEdgePoint = map.project([anchorLon, anchorLat])
@@ -545,12 +581,15 @@ export function AnchorWatchMap({
         mapRef.current?.dragPan.disable()
       }
     },
-    [editMode, liveRadius, anchorLat, anchorLon, displayRadius, radiusMeters, onRadiusChange, setCursor],
+    [editMode, hasAnchor, liveRadius, anchorLat, anchorLon, displayRadius, radiusMeters, onRadiusChange, setCursor],
   )
 
   // ── Touch move: update ghost anchor or live radius on tablet ─────────────
   const handleTouchMove = useCallback(
     (e: maplibregl.MapTouchEvent) => {
+      // Mirrors handleMouseMove: neither branch is reachable without an
+      // anchor (both edit modes require one to enter), but bail explicitly.
+      if (!hasAnchor) return
       if (editMode === 'radius') {
         const { lat, lng } = e.lngLat
         const newRadius = haversineMeters(anchorLat, anchorLon, lat, lng)
@@ -560,7 +599,7 @@ export function AnchorWatchMap({
         setGhostAnchor({ lat, lon: lng })
       }
     },
-    [editMode, anchorLat, anchorLon],
+    [editMode, hasAnchor, anchorLat, anchorLon],
   )
 
   // ── Double-click on map confirms radius edit ─────────────────────────────
@@ -602,6 +641,9 @@ export function AnchorWatchMap({
   const handleAnchorMarkerClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
+      // Belt-and-braces: the marker itself only renders when hasAnchor, so
+      // this shouldn't be reachable without one.
+      if (!hasAnchor) return
       if (editMode === 'reposition' && ghostAnchor) {
         confirmAnchorReposition()
         return
@@ -612,7 +654,7 @@ export function AnchorWatchMap({
       setCursor('grabbing')
       void fetchMotoringTrail()
     },
-    [confirmAnchorReposition, editMode, anchorLat, anchorLon, ghostAnchor, setCursor, fetchMotoringTrail],
+    [confirmAnchorReposition, editMode, hasAnchor, anchorLat, anchorLon, ghostAnchor, setCursor, fetchMotoringTrail],
   )
 
   // ── Zoom / Recenter controls ────────────────────────────────────────────
@@ -628,8 +670,10 @@ export function AnchorWatchMap({
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(ANCHOR_WATCH_CENTER_STORAGE_KEY)
     }
-    mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
-  }, [anchorLat, anchorLon])
+    // Nothing to swing around without an anchor — recentre on the vessel.
+    const center: [number, number] = hasAnchor ? [anchorLon, anchorLat] : [vesselLon, vesselLat]
+    mapRef.current?.easeTo({ center, duration: 600 })
+  }, [hasAnchor, anchorLat, anchorLon, vesselLat, vesselLon])
 
   const handleMoveEnd = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
     if (typeof window === 'undefined') return
@@ -648,9 +692,13 @@ export function AnchorWatchMap({
   // ── Initial map view ─────────────────────────────────────────────────────
   const initialViewState = useMemo(() => {
     const storedCenter = readStoredCenter()
+    // No anchor to open on yet — fall back to the vessel.
+    const fallback = hasAnchor
+      ? { latitude: anchorLat, longitude: anchorLon }
+      : { latitude: vesselLat, longitude: vesselLon }
     return {
-      longitude: storedCenter ? storedCenter.longitude : anchorLon,
-      latitude: storedCenter ? storedCenter.latitude : anchorLat,
+      longitude: storedCenter ? storedCenter.longitude : fallback.longitude,
+      latitude: storedCenter ? storedCenter.latitude : fallback.latitude,
       zoom: currentZoom,
     }
   },
@@ -803,6 +851,15 @@ export function AnchorWatchMap({
           alarm-circle-fill, which is unconditional and always mounts first,
           keeps these rasters below the vector layers regardless of when
           they're toggled on.
+
+          This is exactly why the alarm-circle Source and its two layers
+          above stay mounted even with no anchor set, rather than being
+          unmounted along with the anchor marker: if they weren't there,
+          beforeId="alarm-circle-fill" would have no target to attach to, the
+          rasters would never mount at all, and layer order would scramble
+          the moment an anchor later appeared mid-session. Instead,
+          circleGeoJSON collapses to an empty FeatureCollection with no
+          anchor (see above), so the layers stay put and simply draw nothing.
         */}
         {showImageryLayer && worldImageryOpacity > 0 && (
           <Source
@@ -928,21 +985,23 @@ export function AnchorWatchMap({
         )}
 
         {/* Anchor marker */}
-        <Marker latitude={anchorLat} longitude={anchorLon} style={{ zIndex: 1000 }}>
-          <button
-            onClick={handleAnchorMarkerClick}
-            className="flex items-center justify-center"
-            style={{ width: 40, height: 40, cursor: editMode === 'none' ? 'grab' : 'default' }}
-            aria-label="Anchor position — click to reposition"
-          >
-            <div
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-600/90 shadow-lg"
-              style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}
+        {hasAnchor && (
+          <Marker latitude={anchorLat} longitude={anchorLon} style={{ zIndex: 1000 }}>
+            <button
+              onClick={handleAnchorMarkerClick}
+              className="flex items-center justify-center"
+              style={{ width: 40, height: 40, cursor: editMode === 'none' ? 'grab' : 'default' }}
+              aria-label="Anchor position — click to reposition"
             >
-              <Anchor className="h-4 w-4 text-white" />
-            </div>
-          </button>
-        </Marker>
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-600/90 shadow-lg"
+                style={{ transform: `scale(${markerScale})`, transformOrigin: 'center', transition: 'transform 150ms ease-out' }}
+              >
+                <Anchor className="h-4 w-4 text-white" />
+              </div>
+            </button>
+          </Marker>
+        )}
 
         {/* Session placemarks — bombies, shoreline, anything worth watching
             the swing against. Range and bearing are recomputed from the live
@@ -1079,7 +1138,10 @@ export function AnchorWatchMap({
           },
           {
             label: 'Radius',
-            value: displayRadius !== null
+            // radiusMeters is a required prop, so without an anchor it's
+            // whatever inactive default the host passed — gate on hasAnchor
+            // instead of a null check, or that default would read as real.
+            value: hasAnchor
               ? isImperial
                 ? `${Math.round(displayRadius * 3.28084)}`
                 : `${Math.round(displayRadius)}`
@@ -1105,9 +1167,30 @@ export function AnchorWatchMap({
             alert: false,
             setDeg: currentSetDeg,
           },
-        ].map(({ label, value, unit, alert, setDeg, live }, index) => (
+          {
+            label: 'Scope',
+            value: scopeRodeDisplay !== null ? `${scopeRodeDisplay}` : '—',
+            // Just the recommended rode and its unit, same as Distance/
+            // Radius/Depth above. The ratio and the MIN_SCOPE_RATIO floor
+            // marker used to ride in this suffix too; they're only reachable
+            // via the row's tooltip now (rowTitle below), which already
+            // carried the full note regardless.
+            unit: scopeAvailable ? scopeUnit : '',
+            alert: false,
+            // The reason (not the unit) renders in the unit slot when
+            // unavailable — see the render branch below — so the fallback
+            // policy's "surface the reason, never a bare dash" holds here too.
+            reason: scopeReason,
+            // The full note (depth source, wind, ratio, and the
+            // MIN_SCOPE_RATIO floor marker when it binds) rides along as a
+            // row tooltip rather than crowding the overlay — only set when
+            // there's a result to describe.
+            rowTitle: scopeAvailable ? scopeRecommendation!.note : undefined,
+          },
+        ].map(({ label, value, unit, alert, setDeg, live, reason, rowTitle }, index) => (
           <div
             key={label}
+            title={rowTitle}
             className={cn(
               'flex items-center justify-between gap-4 px-3 py-1.5',
               index > 0 && 'border-t border-white/10',
@@ -1142,7 +1225,16 @@ export function AnchorWatchMap({
                 style={{ fontSize: '1.1rem' }}
               >
                 {value}
-                <span className="ml-0.5 text-[11px] text-white/80">{unit}</span>
+                {reason ? (
+                  <span
+                    className="ml-1 inline-block max-w-[9rem] truncate align-bottom text-[11px] text-white/80"
+                    title={reason}
+                  >
+                    {reason}
+                  </span>
+                ) : (
+                  <span className="ml-0.5 text-[11px] text-white/80">{unit}</span>
+                )}
               </p>
             )}
           </div>
@@ -1200,16 +1292,10 @@ export function AnchorWatchMap({
         >
           <Crosshair className="h-4 w-4" />
         </button>
-        {editMode === 'none' && (
-          <button
-            onClick={onClearAnchor}
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-red-600/80 active:scale-95"
-            style={{ transition: 'background-color 150ms ease-out, color 150ms ease-out' }}
-            aria-label="Stop anchor watch"
-          >
-            <CircleStop className="h-4 w-4" />
-          </button>
-        )}
+        {/* No stop/clear control here — both hosts are gaining a labeled
+            Raise button with its own confirm dialog (anchor-watch-tile.tsx,
+            anchor-watch-drawer.tsx); a one-tap unlabeled destructive icon
+            next to that would be inconsistent. */}
       </div>
 
     </div>

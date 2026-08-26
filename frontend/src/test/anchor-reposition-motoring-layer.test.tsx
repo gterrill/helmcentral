@@ -51,6 +51,7 @@ describe('Anchor reposition motoring trail rendering', () => {
         currentSetDeg={120}
         distanceMeters={10}
         bearingDeg={80}
+        scopeRecommendation={null}
         isImperial={false}
         vesselTrail={() => []}
         aisVessels={[]}
@@ -58,7 +59,6 @@ describe('Anchor reposition motoring trail rendering', () => {
         isDarkTheme={false}
         onAnchorReposition={() => undefined}
         onRadiusChange={() => undefined}
-        onClearAnchor={() => undefined}
       />,
     )
 

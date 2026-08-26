@@ -339,3 +339,46 @@ func TestSettingsPayload_DefaultsAuthModeToNone(t *testing.T) {
 		t.Fatalf("missing auth section should default to none, got %q", got)
 	}
 }
+
+// anchor.scope_method selects which rode-calculation method the Anchor Watch
+// tile displays (catenary vs ratio). Round-tripped THROUGH the handler,
+// rather than through normalizeSettingsPayload alone, because
+// updateSettingsHandler rebuilds the anchor map wholesale on every save — a
+// key forgotten there is silently stripped from every future save, and a
+// normalize-only test would not catch that.
+func TestUpdateSettings_RoundTripsAnchorScopeMethod(t *testing.T) {
+	srv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer srv.Close()
+	host, port := hostPort(t, srv.URL)
+	settingsPath := writeTestSettings(t, host, port)
+
+	code, _ := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Anchor.ScopeMethod = "catenary"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if got := buildSettingsPayload(saved).Anchor.ScopeMethod; got != "catenary" {
+		t.Fatalf("expected anchor.scope_method to round-trip as catenary, got %q", got)
+	}
+}
+
+// An install that has never set it reads as ratio, not empty.
+func TestSettingsPayload_DefaultsAnchorScopeMethodToRatio(t *testing.T) {
+	if got := buildSettingsPayload(map[string]any{}).Anchor.ScopeMethod; got != "ratio" {
+		t.Fatalf("missing anchor.scope_method should default to ratio, got %q", got)
+	}
+}
+
+func TestSettingsPayload_NormalizesUnknownScopeMethodToRatio(t *testing.T) {
+	req := settingsPayload{}
+	req.Anchor.ScopeMethod = "vibes"
+	if got := normalizeSettingsPayload(req).Anchor.ScopeMethod; got != "ratio" {
+		t.Fatalf("unknown anchor.scope_method should normalize to ratio, got %q", got)
+	}
+}

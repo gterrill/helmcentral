@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
+import type { RodeMethodResult } from '@/lib/rode-plan'
 
 vi.mock('maplibre-gl', () => ({
   default: {},
@@ -53,6 +54,14 @@ const defaultAisVessels: NearbyVessel[] = [
   { id: 'urn:mrn:imo:mmsi:100000001', name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_m: 61, age_seconds: 5 },
 ]
 
+const defaultScopeRecommendation: RodeMethodResult = {
+  id: 'ratio',
+  label: 'Ratio Method',
+  recommendedRodeM: 30,
+  scopeRatio: 5,
+  note: 'Depth 3.2 m (sounder only) · Wind 15 kts · 5:1',
+}
+
 function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
   return (
     <AnchorWatchMap
@@ -67,6 +76,7 @@ function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: P
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
+      scopeRecommendation={defaultScopeRecommendation}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={aisVessels}
@@ -77,7 +87,6 @@ function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: P
       onFullscreen={() => undefined}
       onAnchorReposition={() => undefined}
       onRadiusChange={() => undefined}
-      onClearAnchor={() => undefined}
       {...overrides}
     />
   )
@@ -97,6 +106,15 @@ describe('AnchorWatchMap controls and AIS selection', () => {
 
     expect(zoomOut.nextElementSibling).toBe(satellite)
     expect(screen.getByTestId('anchor-watch-metrics').style.zIndex).toBe('2000')
+  })
+
+  // Both hosts are gaining a labeled Raise button with its own confirm
+  // dialog; a one-tap unlabeled destructive icon next to that would be
+  // inconsistent, so the map no longer offers its own stop control at all.
+  it('does not render a Stop anchor watch button', () => {
+    renderMap()
+
+    expect(screen.queryByRole('button', { name: 'Stop anchor watch' })).not.toBeInTheDocument()
   })
 
   it('expands a clicked AIS vessel for three seconds, and keeps its range on show', () => {
@@ -254,5 +272,126 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     expect(localStorage.getItem('anchor-watch-map-center')).toBeNull()
 
     localStorage.clear()
+  })
+})
+
+// Groundwork for an always-on anchor map: the host still gates on
+// anchor-set today, so this path only runs under test for now.
+describe('AnchorWatchMap with no anchor set', () => {
+  it('renders no anchor marker', () => {
+    renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null })
+
+    expect(
+      screen.queryByRole('button', { name: 'Anchor position — click to reposition' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps the alarm-circle layer mounted so the raster layers still have a beforeId target', () => {
+    // If this layer unmounted with no anchor, world-imagery and openseamap
+    // (which pin beforeId="alarm-circle-fill") would never attach at all,
+    // and layer order would scramble the moment an anchor later appeared.
+    renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null })
+
+    expect(screen.getByTestId('layer-alarm-circle-fill')).toBeInTheDocument()
+    expect(screen.getByTestId('layer-world-imagery-layer').dataset.beforeId).toBe('alarm-circle-fill')
+    expect(screen.getByTestId('layer-openseamap-layer').dataset.beforeId).toBe('alarm-circle-fill')
+  })
+
+  it('re-centres on the vessel rather than the absent anchor', () => {
+    renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-centre on anchor' }))
+
+    expect(easeToMock).toHaveBeenLastCalledWith({ center: [152.9103, -25.2939], duration: 600 })
+  })
+
+  it('shows — for Radius rather than the inactive radiusMeters default', () => {
+    renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null })
+
+    const metrics = screen.getByTestId('anchor-watch-metrics')
+    const radiusLabel = within(metrics).getByText('Radius')
+    expect(radiusLabel.nextElementSibling).toHaveTextContent('—')
+  })
+})
+
+// The recommended-scope readout used to live in a box below the map (ADR
+// 0059 §3); it now renders as a Scope row inside this metric overlay,
+// directly under Current, so both hosts (tile and fullscreen drawer) get it
+// for free by passing scopeRecommendation through.
+describe('AnchorWatchMap Scope row', () => {
+  function scopeRow() {
+    const metrics = screen.getByTestId('anchor-watch-metrics')
+    const currentRow = within(metrics).getByText('Current').parentElement as HTMLElement
+    return currentRow.nextElementSibling as HTMLElement
+  }
+
+  it('renders Scope directly under Current with the recommended rode figure and its plain unit', () => {
+    renderMap()
+
+    const row = scopeRow()
+    expect(within(row).getByText('Scope')).toBeInTheDocument()
+    expect(row).toHaveTextContent('30')
+    expect(row).toHaveTextContent('m')
+    expect(row).not.toHaveTextContent('5:1')
+    expect(row).not.toHaveTextContent('min')
+  })
+
+  // The merged "3:1 min" tag is gone from the row itself — the ratio and the
+  // MIN_SCOPE_RATIO floor marker are only reachable via the row's tooltip now,
+  // riding along on the same `note` the row already carried as its title.
+  it('still surfaces the ratio and the floor marker for a floored recommendation, via the row tooltip', () => {
+    const floored: RodeMethodResult = {
+      id: 'catenary',
+      label: 'Catenary Method',
+      recommendedRodeM: 34.5,
+      scopeRatio: 3,
+      note: 'Depth 10.0 m (tide-corrected) · Wind 3 kts · Chain 12mm · Hull power cat · 3:1 minimum',
+    }
+    renderMap(defaultAisVessels, { scopeRecommendation: floored })
+
+    const row = scopeRow()
+    expect(row).toHaveAttribute('title', floored.note)
+    expect(row).not.toHaveTextContent('3:1 minimum')
+    expect(row).not.toHaveTextContent('min')
+  })
+
+  it('converts the Scope rode figure to feet under imperial units', () => {
+    renderMap(defaultAisVessels, { isImperial: true })
+
+    const row = scopeRow()
+    // 30 m * 3.28084 = 98.4 ft, rounded to 98.
+    expect(row).toHaveTextContent('98')
+    expect(row).toHaveTextContent('ft')
+    expect(row).not.toHaveTextContent('5:1')
+  })
+
+  it('carries the full note as a tooltip on the row when the recommendation is available', () => {
+    renderMap()
+
+    expect(scopeRow()).toHaveAttribute('title', defaultScopeRecommendation.note)
+  })
+
+  it('shows the reason instead of a dash — never a bare dash — when the recommendation is unavailable', () => {
+    const unavailable: RodeMethodResult = {
+      id: 'ratio',
+      label: 'Ratio Method',
+      recommendedRodeM: 0,
+      scopeRatio: 0,
+      note: '',
+      unavailableReason: 'bow roller height not configured',
+    }
+    renderMap(defaultAisVessels, { scopeRecommendation: unavailable })
+
+    const row = scopeRow()
+    expect(within(row).getByText('—')).toBeInTheDocument()
+    const reasonEl = within(row).getByText('bow roller height not configured')
+    expect(reasonEl).toHaveAttribute('title', 'bow roller height not configured')
+    expect(reasonEl.className).toContain('truncate')
+  })
+
+  it('shows a dash with no crash when the scopeRecommendation prop itself is null', () => {
+    renderMap(defaultAisVessels, { scopeRecommendation: null })
+
+    expect(within(scopeRow()).getByText('—')).toBeInTheDocument()
   })
 })

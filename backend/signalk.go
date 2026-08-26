@@ -27,6 +27,7 @@ const (
 	defaultChainSizeMM               = 12
 	defaultChainOnboardM             = 150
 	defaultHullType                  = "power_cat"
+	defaultScopeMethod               = "ratio"
 	defaultWindageAreaM2             = 35
 
 	// signalKSelfAPIPath is the v1 REST prefix every read and write of the
@@ -92,6 +93,7 @@ type settingsPayload struct {
 		ChainSizeMM      float64 `json:"chain_size_mm"`
 		ChainOnboardM    float64 `json:"chain_onboard_m"`
 		HullType         string  `json:"hull_type"`
+		ScopeMethod      string  `json:"scope_method"`
 		WindageAreaM2    float64 `json:"windage_area_m2"`
 		GPSFromBowM      float64 `json:"gps_from_bow_m"`
 		LOAM             float64 `json:"loa_m"`
@@ -173,6 +175,7 @@ func updateSettingsHandler(c echo.Context) error {
 		"chain_size_mm":       normalized.Anchor.ChainSizeMM,
 		"chain_onboard_m":     normalized.Anchor.ChainOnboardM,
 		"hull_type":           normalized.Anchor.HullType,
+		"scope_method":        normalized.Anchor.ScopeMethod,
 		"windage_area_m2":     normalized.Anchor.WindageAreaM2,
 		"gps_from_bow_m":      normalized.Anchor.GPSFromBowM,
 		"loa_m":               normalized.Anchor.LOAM,
@@ -335,6 +338,9 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if hullType := strings.TrimSpace(coerceString(anchorMap["hull_type"])); isSupportedHullType(hullType) {
 			payload.Anchor.HullType = hullType
 		}
+		if scopeMethod := strings.TrimSpace(coerceString(anchorMap["scope_method"])); isSupportedScopeMethod(scopeMethod) {
+			payload.Anchor.ScopeMethod = scopeMethod
+		}
 		if value := coerceFloat(anchorMap["windage_area_m2"]); value > 0 {
 			payload.Anchor.WindageAreaM2 = value
 		}
@@ -436,6 +442,10 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	if !isSupportedHullType(normalized.Anchor.HullType) {
 		normalized.Anchor.HullType = defaultHullType
 	}
+	normalized.Anchor.ScopeMethod = strings.TrimSpace(req.Anchor.ScopeMethod)
+	if !isSupportedScopeMethod(normalized.Anchor.ScopeMethod) {
+		normalized.Anchor.ScopeMethod = defaultScopeMethod
+	}
 	// gps_from_bow_m and loa_m assign straight through, with no positive-default
 	// clamp: both default to 0 ("no correction" / "not entered"), and 0 must
 	// survive the round-trip rather than being replaced by a guessed value. A
@@ -470,6 +480,11 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 func isSupportedHullType(value string) bool {
 	trimmed := strings.TrimSpace(value)
 	return trimmed == "power_cat" || trimmed == "sail_mono" || trimmed == "power_mono" || trimmed == "sail_cat"
+}
+
+func isSupportedScopeMethod(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return trimmed == "catenary" || trimmed == "ratio"
 }
 
 func getSignalKSettingsHandler(c echo.Context) error {

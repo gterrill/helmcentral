@@ -13,6 +13,8 @@ export const defaultTankLabelIds = [
 
 export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 
+export type ScopeMethod = 'catenary' | 'ratio'
+
 /**
  * Local-form mirror of every field owned by the "regular" settings
  * sections (SignalK Connection, Boat & UI, Labels, Anchor, InfluxDB) plus
@@ -41,6 +43,7 @@ export interface RegularSettingsDraft {
   chainSizeMm: string
   chainOnboardM: string
   hullType: HullType
+  scopeMethod: ScopeMethod
   windageAreaM2: string
   influxdbEnabled: boolean
   influxdbUrl: string
@@ -67,6 +70,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   chainSizeMm: '12',
   chainOnboardM: '150',
   hullType: 'power_cat',
+  scopeMethod: 'ratio',
   windageAreaM2: '35',
   influxdbEnabled: false,
   authMode: 'none',
@@ -113,6 +117,12 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
     || settings.anchor?.hull_type === 'sail_cat'
   ) {
     draft.hullType = settings.anchor.hull_type
+  }
+  if (
+    settings.anchor?.scope_method === 'catenary'
+    || settings.anchor?.scope_method === 'ratio'
+  ) {
+    draft.scopeMethod = settings.anchor.scope_method
   }
   if (typeof settings.anchor?.windage_area_m2 === 'number') draft.windageAreaM2 = String(settings.anchor.windage_area_m2)
 
@@ -163,6 +173,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.chainSizeMm !== b.chainSizeMm) return false
   if (a.chainOnboardM !== b.chainOnboardM) return false
   if (a.hullType !== b.hullType) return false
+  if (a.scopeMethod !== b.scopeMethod) return false
   if (a.windageAreaM2 !== b.windageAreaM2) return false
   if (a.influxdbEnabled !== b.influxdbEnabled) return false
   if (a.authMode !== b.authMode) return false
@@ -219,6 +230,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       chain_size_mm: parseNumber(draft.chainSizeMm, 12),
       chain_onboard_m: parseNumber(draft.chainOnboardM, 150),
       hull_type: draft.hullType,
+      scope_method: draft.scopeMethod,
       windage_area_m2: parseNumber(draft.windageAreaM2, 35),
     },
     influxdb: {

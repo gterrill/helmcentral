@@ -71,6 +71,7 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       currentSetDeg={120}
       distanceMeters={10}
       bearingDeg={80}
+      scopeRecommendation={null}
       isImperial={false}
       vesselTrail={() => []}
       aisVessels={[]}
@@ -78,7 +79,6 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       isDarkTheme={false}
       onAnchorReposition={() => undefined}
       onRadiusChange={() => undefined}
-      onClearAnchor={() => undefined}
       {...overrides}
     />,
   )
@@ -109,6 +109,16 @@ describe('anchor-watch placemarks', () => {
     expect(screen.getByTestId('pin-candidate')).toHaveTextContent('0°')
     // ...and offers to make it permanent.
     expect(screen.getByRole('button', { name: /^pin$/i })).toBeInTheDocument()
+  })
+
+  // Without an active watch, POST /api/anchor-watch/placemarks 409s (see
+  // backend/anchor_placemarks.go) — so don't even offer the tooltip.
+  it('offers no Pin tooltip from a map click when no anchor is set', () => {
+    renderMap({ anchorLat: null, anchorLon: null })
+
+    clickMapAt(BOMBIE_LAT, BOMBIE_LON)
+
+    expect(screen.queryByTestId('pin-candidate')).not.toBeInTheDocument()
   })
 
   it('does not let the Pin tooltip expire before it can be clicked', () => {
@@ -188,6 +198,7 @@ describe('anchor-watch placemarks', () => {
         currentSetDeg={120}
         distanceMeters={10}
         bearingDeg={80}
+        scopeRecommendation={null}
         isImperial={false}
         vesselTrail={() => []}
         aisVessels={[]}
@@ -196,7 +207,6 @@ describe('anchor-watch placemarks', () => {
         placemarks={placemarks}
         onAnchorReposition={() => undefined}
         onRadiusChange={() => undefined}
-        onClearAnchor={() => undefined}
       />,
     )
 

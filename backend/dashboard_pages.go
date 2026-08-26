@@ -229,7 +229,9 @@ var defaultDashboardLayout = []dashboardLayoutItem{
 	{ID: "depth-tide", X: 0, Y: 11, W: 4, H: 7},
 	{ID: "position", X: 0, Y: 18, W: 4, H: 5},
 	{ID: "today-now", X: 0, Y: 23, W: 4, H: 5},
-	{ID: "anchor-watch", X: 4, Y: 3, W: 4, H: 8},
+	// H:10 fits the always-on map at full height plus the rode readout and
+	// Drop/Raise button (ADR 0059); at H:8 the tile's map has to shrink.
+	{ID: "anchor-watch", X: 4, Y: 3, W: 4, H: 10},
 	{ID: "tanks", X: 4, Y: 17, W: 4, H: 4},
 	{ID: "route", X: 4, Y: 21, W: 4, H: 4},
 	{ID: "nearby-vessels", X: 4, Y: 25, W: 4, H: 5},

@@ -59,11 +59,14 @@ const baseProps = {
     chainSizeMm: 10,
     chainOnboardM: 50,
     hullType: 'power_cat' as const,
+    scopeMethod: 'ratio' as const,
     windageAreaM2: 20,
     gpsFromBowM: 2,
     loaM: 10,
   },
   vesselLengthOverallM: null,
+  windBandId: null,
+  onWindBandChange: () => undefined,
   onUpdateRodeAndConditions: async () => undefined,
 }
 

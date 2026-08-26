@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AnchorRodePlanner, type AnchorRodePlannerProps } from '@/components/anchor-rode-planner'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import type { TideToday } from '@/hooks/use-tide-today'
+import { catenaryMethod, ratioMethod, resolvePlanningWindBand, type RodePlanInput } from '@/lib/rode-plan'
 
 const tide: TideToday = {
   datetime: new Date(0).toISOString(),
@@ -32,12 +34,15 @@ function baseProps(overrides: Partial<AnchorRodePlannerProps> = {}): AnchorRodeP
       chainSizeMm: 10,
       chainOnboardM: 50,
       hullType: 'power_mono',
+      scopeMethod: 'ratio',
       windageAreaM2: 20,
       gpsFromBowM: 2,
       loaM: 12,
     },
     bowOffsetM: 2,
     vesselLengthOverallM: null,
+    windBandId: null,
+    onWindBandChange: vi.fn(),
     onUpdateRodeAndConditions: vi.fn().mockResolvedValue(undefined),
     onApplyAlarmRadius: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -112,21 +117,91 @@ describe('AnchorRodePlanner — no false-positive scope badge (regression guard)
   })
 })
 
-describe('AnchorRodePlanner — apply as alarm radius', () => {
-  it('calls onApplyAlarmRadius with recommended rode + bow offset + LOA', async () => {
+// Apply used to always use the catenary plan's swing regardless of the
+// operator's anchor.scope_method setting — actively misleading now that both
+// method groups show their own Swing figure. Apply must use the swing of
+// whichever method is configured and refuse rather than substitute the
+// other method's figure (ADR 0059 §4, ADR 0047).
+describe('AnchorRodePlanner — apply as alarm radius follows the configured method', () => {
+  // Mirrors exactly what the component's own planInput builds from
+  // baseProps() — depth 5m sounder + tide, 1h gust of 20kt (which seeds the
+  // 20-25 band, planning at its top of 25kt via resolvePlanningWindBand),
+  // calm/sand, chain 10mm, windage 20m2, power_mono, bow roller 1m — so the
+  // expected figures come from rode-plan.ts itself, not a hand-picked number.
+  const bandedWindKts = resolvePlanningWindBand(
+    { '10m': null, '30m': null, '1h': 20, '24h': null },
+    12,
+    null,
+  )!.planKts
+
+  const expectedPlanInput: RodePlanInput = {
+    sounderDepthM: 5,
+    bowRollerHeightM: 1,
+    tide,
+    windKts: bandedWindKts,
+    seaState: 'calm',
+    seabedType: 'sand',
+    chainSizeMm: 10,
+    chainOnboardM: 50,
+    windageAreaM2: 20,
+    hullType: 'power_mono',
+  }
+
+  it('applies the ratio-method swing when anchor.scope_method is "ratio"', async () => {
     const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
-    renderPlanner({ onApplyAlarmRadius, bowOffsetM: 2 })
+    const props = baseProps()
+    renderPlanner({ onApplyAlarmRadius, anchorConfig: { ...props.anchorConfig, scopeMethod: 'ratio' } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     fireEvent.click(screen.getByRole('button', { name: /apply as alarm radius/i }))
 
-    // depth 5m sounder + tide correction (2ft -> 5ft rise = 0.914m), bowRoller 1m,
-    // wind 20kt (from maxGustKts['1h']), calm/sand, chain 10mm, windage 20m2, power_mono
-    // — the exact recommendedRodeM is pinned by the rode-plan.ts characterization
-    // tests; here we only assert the composition rule: rode + bowOffset + LOA.
     await waitFor(() => expect(onApplyAlarmRadius).toHaveBeenCalledTimes(1))
-    const [radiusMeters] = onApplyAlarmRadius.mock.calls[0]
-    expect(radiusMeters).toBeGreaterThan(2 + 12) // sanity: includes bow offset + LOA at minimum
+    const expected = ratioMethod(expectedPlanInput)!.recommendedRodeM + props.bowOffsetM + props.anchorConfig.loaM
+    expect(onApplyAlarmRadius.mock.calls[0][0]).toBeCloseTo(expected, 6)
+  })
+
+  it('applies the catenary-method swing when anchor.scope_method is "catenary"', async () => {
+    const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
+    const props = baseProps()
+    renderPlanner({ onApplyAlarmRadius, anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary' } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: /apply as alarm radius/i }))
+
+    await waitFor(() => expect(onApplyAlarmRadius).toHaveBeenCalledTimes(1))
+    const expected = catenaryMethod(expectedPlanInput)!.recommendedRodeM + props.bowOffsetM + props.anchorConfig.loaM
+    expect(onApplyAlarmRadius.mock.calls[0][0]).toBeCloseTo(expected, 6)
+  })
+
+  it('names the configured method and its figure in a caption above the button', () => {
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, scopeMethod: 'ratio' } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const expectedRodeM = ratioMethod(expectedPlanInput)!.recommendedRodeM
+    const expectedRadius = Math.round(expectedRodeM + props.bowOffsetM + props.anchorConfig.loaM)
+    expect(screen.getByText(`Applies the Ratio Method swing, ${expectedRadius} m`)).toBeInTheDocument()
+  })
+
+  it('disables Apply and names the reason when the configured method itself is unavailable, without falling back to the other method', () => {
+    const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
+    const props = baseProps()
+    // windageAreaM2: 0 knocks out only the catenary method — ratioMethod
+    // never reads it, so the ratio group still computes fine. Apply must stay
+    // disabled anyway, never silently borrowing the ratio figure it isn't
+    // showing as the configured one.
+    renderPlanner({
+      onApplyAlarmRadius,
+      anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary', windageAreaM2: 0 },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getByText(/Catenary Method unavailable —/i)).toBeInTheDocument()
+
+    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    expect(apply).toBeDisabled()
+    fireEvent.click(apply)
+    expect(onApplyAlarmRadius).not.toHaveBeenCalled()
   })
 })
 
@@ -283,7 +358,11 @@ describe('AnchorRodePlanner — LOA source precedence (settings vs SignalK)', ()
     })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.getByText(/^Swing \d/)).toBeInTheDocument()
+    // Scoped to the catenary group: both method groups now show a Swing
+    // figure (see "Swing on both method groups" below), so an unscoped query
+    // here would find two matches.
+    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
+    expect(within(catenaryGroup).getByText(/^Swing \d/)).toBeInTheDocument()
     expect(screen.queryByText(/boat length/i)).toBeNull()
 
     const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
@@ -293,5 +372,197 @@ describe('AnchorRodePlanner — LOA source precedence (settings vs SignalK)', ()
     await waitFor(() => expect(onApplyAlarmRadius).toHaveBeenCalledTimes(1))
     const [radiusMeters] = onApplyAlarmRadius.mock.calls[0]
     expect(radiusMeters).toBeGreaterThan(2 + 17.9) // includes bow offset + SignalK LOA at minimum
+  })
+})
+
+// ADR 0047 §2a: the planner renders one SidebarGroup per lib/rode-plan.ts
+// RodeMethod result — today that's the catenary method and the ratio method.
+describe('AnchorRodePlanner — renders both rode methods', () => {
+  it('renders a group for both the catenary and ratio methods', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getByText('Catenary Method')).toBeInTheDocument()
+    expect(screen.getByText('Ratio Method')).toBeInTheDocument()
+  })
+
+  it('keeps the methods independent — a catenary-only missing input still lets the ratio method compute', () => {
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, windageAreaM2: 0 } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
+    expect(within(catenaryGroup).getByText(/unavailable —/i)).toBeInTheDocument()
+
+    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
+    expect(within(ratioGroup).getByText('Pay Out')).toBeInTheDocument()
+    expect(within(ratioGroup).queryByText(/unavailable —/i)).toBeNull()
+  })
+
+  it('shows Swing in both groups; LOA provenance is not duplicated into either group', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
+    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
+    expect(within(catenaryGroup).getByText(/^Swing \d/)).toBeInTheDocument()
+    expect(within(ratioGroup).getByText(/^Swing \d/)).toBeInTheDocument()
+
+    // LOA provenance is a shared-input fact, not a per-method one (see the
+    // "shared LOA input lives in the footer" describe block below) — neither
+    // group repeats it.
+    expect(within(catenaryGroup).queryByText(/from settings/i)).toBeNull()
+    expect(within(ratioGroup).queryByText(/from settings/i)).toBeNull()
+    expect(within(ratioGroup).queryByText(/from signalk/i)).toBeNull()
+  })
+})
+
+// LOA describes a single shared input (bow offset + hull length), not
+// anything specific to a method, so its provenance line and its warning are
+// stated once in SidebarFooter, directly above Apply — the control they
+// gate — rather than repeated inside every method group (ADR 0059 §4).
+describe('AnchorRodePlanner — shared LOA input lives in the footer', () => {
+  it('renders the LOA provenance line once, in the footer, not inside either method group', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getAllByText(/LOA .* from settings/i)).toHaveLength(1)
+
+    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
+    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
+    expect(within(catenaryGroup).queryByText(/from settings/i)).toBeNull()
+    expect(within(ratioGroup).queryByText(/from settings/i)).toBeNull()
+  })
+
+  it('renders the LOA warning once, in the footer, not inside either method group', () => {
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, loaM: 0 }, vesselLengthOverallM: null })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(screen.getAllByText(/boat length/i)).toHaveLength(1)
+
+    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
+    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
+    expect(within(catenaryGroup).queryByText(/boat length/i)).toBeNull()
+    expect(within(ratioGroup).queryByText(/boat length/i)).toBeNull()
+  })
+})
+
+// Swing (rode + bow offset + LOA) used to be bound to the catenary plan only.
+// Each method group now shows its own swing figure, computed from that
+// method's own recommended rode, so the ratio group's circle isn't silently
+// missing or borrowed from catenary's.
+describe('AnchorRodePlanner — Swing on both method groups', () => {
+  it('shows a Swing figure in the Ratio Method group, computed from its own recommended rode', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
+    expect(within(ratioGroup).getByText(/^Swing \d/)).toBeInTheDocument()
+  })
+
+  it('shows different Swing figures per group when the two methods recommend different rode', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
+    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
+
+    const catenarySwing = within(catenaryGroup).getByText(/^Swing \d/).textContent
+    const ratioSwing = within(ratioGroup).getByText(/^Swing \d/).textContent
+    expect(catenarySwing).not.toBe(ratioSwing)
+  })
+
+  it('shows Swing in neither group when LOA is unresolved', () => {
+    const props = baseProps()
+    renderPlanner({
+      anchorConfig: { ...props.anchorConfig, loaM: 0 },
+      vesselLengthOverallM: null,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
+    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
+    expect(within(catenaryGroup).queryByText(/^Swing \d/)).toBeNull()
+    expect(within(ratioGroup).queryByText(/^Swing \d/)).toBeNull()
+  })
+
+  it('warns in whichever method group its own recommendation exceeds chain aboard — chain-onboard is per-method, not catenary-only', () => {
+    // At these defaults (baseProps): catenary recommends ~40.3m, ratio ~48.4m
+    // (the 1h gust of 20kt seeds the 20-25 band, which plans at 25kt and
+    // clears the ratio method's 7:1 threshold). 45m aboard is short for
+    // ratio but not for catenary — a real gap the old catenary-only gating
+    // missed entirely, since the ratio method can recommend more chain than
+    // the boat carries and used to say nothing about it.
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, chainOnboardM: 45 } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
+    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
+
+    expect(within(catenaryGroup).queryByText(/only .* aboard/i)).toBeNull()
+    expect(within(ratioGroup).getByText(/only .* aboard/i)).toBeInTheDocument()
+  })
+})
+
+describe('AnchorRodePlanner — forecast wind band', () => {
+  // The select is now a controlled input — App.tsx owns windBandId so the
+  // tile and drawer can share it — so driving it here needs a small
+  // stateful host that plays App.tsx's part: hold the band and feed the
+  // operator's choice back in as a prop, same round trip the real app does.
+  function ControlledPlanner(overrides: Partial<AnchorRodePlannerProps>) {
+    const [windBandId, setWindBandId] = useState<string | null>(null)
+    return (
+      <SidebarProvider>
+        <AnchorRodePlanner {...baseProps({ ...overrides, windBandId, onWindBandChange: setWindBandId })} />
+      </SidebarProvider>
+    )
+  }
+
+  function expandPlanner(overrides: Partial<AnchorRodePlannerProps> = {}) {
+    render(<ControlledPlanner {...overrides} />)
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    return screen.getByLabelText('Forecast wind') as HTMLSelectElement
+  }
+
+  it('preselects the band containing the 1h gust', () => {
+    const select = expandPlanner({ maxGustKts: { '10m': null, '30m': null, '1h': 12.3, '24h': null } })
+    expect(select.value).toBe('10-15')
+  })
+
+  it('falls back to apparent wind for the seed when there is no gust reading', () => {
+    const select = expandPlanner({
+      maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null },
+      windSpeedApparentKts: 27,
+    })
+    expect(select.value).toBe('25-30')
+  })
+
+  it('drops the seed-provenance helper text', () => {
+    expandPlanner()
+    expect(screen.queryByText(/seeded from/i)).toBeNull()
+  })
+
+  it('plans at the top of the chosen band, so switching band changes the recommendation', () => {
+    const select = expandPlanner({ maxGustKts: { '10m': null, '30m': null, '1h': 5, '24h': null } })
+    expect(select.value).toBe('0-10')
+
+    const ratioGroup = screen.getByText('Ratio Method').closest('div')!.parentElement as HTMLElement
+    // 0-10 plans at 10 kts -> under the 20kt threshold -> 5:1 on 6m hawse = 30m.
+    expect(within(ratioGroup).getByText(/Scope 5.0:1/)).toBeInTheDocument()
+
+    fireEvent.change(select, { target: { value: '20-25' } })
+    // 20-25 plans at 25 kts -> at/over the threshold -> 7:1 = 42m.
+    expect(within(ratioGroup).getByText(/Scope 7.0:1/)).toBeInTheDocument()
+  })
+
+  it('offers no band and reports no wind data when nothing is reading', () => {
+    const select = expandPlanner({
+      maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null },
+      windSpeedApparentKts: null,
+    })
+    expect(select.value).toBe('')
+    expect(screen.getAllByText(/no wind data/i).length).toBeGreaterThan(0)
   })
 })

@@ -1,8 +1,8 @@
-import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import type { HullType, RegularSettingsDraft } from '@/components/settings/settings-draft'
+import type { HullType, RegularSettingsDraft, ScopeMethod } from '@/components/settings/settings-draft'
 
 interface AnchorWatchOptionsSectionProps {
   draft: RegularSettingsDraft
@@ -136,6 +136,22 @@ export function AnchorWatchOptionsSection({
                 <SelectItem value="sail_cat">sail_cat</SelectItem>
               </SelectPopup>
             </Select>
+          </Field>
+
+          <Field className="md:col-span-2">
+            <FieldLabel htmlFor="scope-method">Scope Method</FieldLabel>
+            <Select value={draft.scopeMethod} onValueChange={(value) => value && onChange({ scopeMethod: value as ScopeMethod })}>
+              <SelectTrigger id="scope-method" aria-label="Scope method">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="ratio">Ratio — 5:1, 7:1 in a blow</SelectItem>
+                <SelectItem value="catenary">Catenary — chain, windage, hull</SelectItem>
+              </SelectPopup>
+            </Select>
+            <FieldDescription>
+              Method the Anchor Watch tile uses for its recommended rode.
+            </FieldDescription>
           </Field>
         </div>
       </FieldSet>

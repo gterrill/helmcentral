@@ -50,6 +50,7 @@ describe('useAppConfig', () => {
         chain_size_mm: 10,
         chain_onboard_m: 80,
         hull_type: 'sail_mono',
+        scope_method: 'catenary',
         windage_area_m2: 22,
       },
     }))
@@ -62,7 +63,44 @@ describe('useAppConfig', () => {
     expect(result.current.anchor.chainSizeMm).toBe(10)
     expect(result.current.anchor.chainOnboardM).toBe(80)
     expect(result.current.anchor.windageAreaM2).toBe(22)
+    expect(result.current.anchor.scopeMethod).toBe('catenary')
     expect(result.current.ui.vesselStateRefreshSeconds).toBe(30)
+  })
+
+  // anchor.scope_method selects which rode-calculation method the Anchor
+  // Watch tile displays. Unknown/absent values normalize to 'ratio', the
+  // default — matching hull_type's own allowlist-and-fall-back pattern.
+  it('applies scope_method from the settings endpoint', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      anchor: { scope_method: 'catenary' },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+
+    await waitFor(() => expect(result.current.anchor.scopeMethod).toBe('catenary'))
+  })
+
+  it('normalizes an invalid scope_method to ratio', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      anchor: { scope_method: 'vibes' },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.anchor.scopeMethod).toBe('ratio')
+  })
+
+  it('defaults scope_method to ratio when absent', async () => {
+    vi.stubGlobal('fetch', settingsResponse({ anchor: {} }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.anchor.scopeMethod).toBe('ratio')
   })
 
   // gps_from_bow_m defaults to 0, meaning "no bow-offset correction" — unlike

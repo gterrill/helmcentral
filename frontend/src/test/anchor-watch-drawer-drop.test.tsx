@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { App } from '../App'
+
+// The drawer now mounts a map at every anchor state (Phase F), including
+// 'none' — this test's vessel position is a real fix, so without this stub
+// it would try to mount the real maplibre-gl map in jsdom, which the map's
+// own dedicated tests handle separately (see anchor-imagery-toggle.test.tsx
+// ~lines 22-37 for the same pattern).
+vi.mock('@/components/anchor-watch-map', () => ({
+  AnchorWatchMap: () => <div data-testid="anchor-watch-map" />,
+}))
 
 // This test renders the dashboard, not the auth gate. State the precondition
 // explicitly — an install with auth.mode:none — rather than depending on what
@@ -20,6 +29,7 @@ vi.mock('@/hooks/use-auth', () => ({
 
 
 const setAnchorHereMock = vi.fn()
+const clearAnchorMock = vi.fn()
 let anchorStateMock: 'none' | 'set' = 'none'
 
 beforeEach(() => {
@@ -113,7 +123,7 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     updatePosition: vi.fn(),
     updateRadius: vi.fn(),
     updateRodeAndConditions: vi.fn(),
-    clearAnchor: vi.fn(),
+    clearAnchor: clearAnchorMock,
   }),
 }))
 
@@ -166,7 +176,8 @@ vi.mock('@/hooks/use-app-config', () => ({
     ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
-      hullType: 'power_cat', windageAreaM2: 10,
+      hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
+      gpsFromBowM: 0, loaM: 0,
     },
     loaded: true,
   }),
@@ -191,5 +202,19 @@ describe('Anchor watch drawer drop button', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
 
     expect(screen.queryByRole('button', { name: 'Drop' })).toBeNull()
+  })
+
+  it('raises the anchor from the drawer through the confirm dialog when a watch is active', () => {
+    anchorStateMock = 'set'
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
+    const raiseButtons = screen.getAllByRole('button', { name: 'Raise' })
+    fireEvent.click(raiseButtons[raiseButtons.length - 1])
+
+    const dialog = screen.getByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Raise' }))
+
+    expect(clearAnchorMock).toHaveBeenCalledTimes(1)
   })
 })

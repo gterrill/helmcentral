@@ -62,12 +62,12 @@ const baseProps = {
   currentSetDeg: 120,
   distanceMeters: 10,
   bearingDeg: 80,
+  scopeRecommendation: null,
   isImperial: false,
   vesselTrail: () => [],
   aisVessels: [],
   aisTrails: () => new Map(),
   isDarkTheme: false,
-  onClearAnchor: () => undefined,
 }
 
 describe('AnchorWatchMap stale-closure regressions (exhaustive-deps)', () => {

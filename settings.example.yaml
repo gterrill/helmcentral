@@ -46,6 +46,8 @@ anchor:
   chain_onboard_m: 150
   # power_cat | power_mono | sail_cat | sail_mono
   hull_type: power_mono
+  # catenary | ratio — method the Anchor Watch tile uses for the recommended rode
+  scope_method: ratio
   windage_area_m2: 35
 
 ui:

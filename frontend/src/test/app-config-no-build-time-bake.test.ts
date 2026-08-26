@@ -34,6 +34,7 @@ describe('app-config', () => {
       chainSizeMm: 12,
       chainOnboardM: 150,
       hullType: 'power_cat',
+      scopeMethod: 'ratio',
       windageAreaM2: 35,
       gpsFromBowM: 0,
       loaM: 0,

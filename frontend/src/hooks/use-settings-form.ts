@@ -31,6 +31,7 @@ export type SettingsPayload = {
     chain_size_mm?: number
     chain_onboard_m?: number
     hull_type?: string
+    scope_method?: string
     windage_area_m2?: number
   }
   influxdb?: {

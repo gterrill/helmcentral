@@ -407,6 +407,13 @@ export function App() {
     uiConfig.vesselStateRefreshSeconds,
     gnssCriticalAlert,
   )
+  // The forecast wind band shared by the Rode Planner, the tile's Scope row,
+  // and the drawer's Scope row (frontend/src/lib/rode-plan.ts's
+  // resolvePlanningWindBand) — one operator choice, not three independent
+  // seeds. Deliberately not persisted: a band chosen for last night's
+  // forecast must not silently drive tonight's recommendation. A reload
+  // returns to the live seed.
+  const [windBandId, setWindBandId] = useState<string | null>(null)
   const { isAutoCloseArmed, motoringSecondsElapsed } = useAnchorWatchAutoClose(
     navigationState,
     anchorWatch.distanceMeters,
@@ -779,6 +786,11 @@ export function App() {
             placemarks={placemarks}
             onPlacemarkCreate={createPlacemark}
             onPlacemarkRemove={removePlacemark}
+            tide={tide}
+            windSpeedApparentKts={windSpeedApparentKts}
+            maxGustKts={maxGustKts}
+            anchorConfig={anchorConfig}
+            selectedWindBandId={windBandId}
           />
         )
       case 'tanks':
@@ -1078,18 +1090,17 @@ export function App() {
         )
       case 'anchor-watch':
         return (
-          // The `?? 0` below never actually reaches the map: AnchorWatchMap only
-          // renders once anchorLat/anchorLon are non-null (isSet in the drawer),
-          // and at that point anchorWatch.anchorLat/.anchorLon are themselves
-          // non-null, so the outer `latitude ?? anchorWatch.anchorLat` already
-          // resolves. The 0 only satisfies vesselLat/vesselLon's non-null type
-          // for the (map-less) pre-drop render.
+          // vesselLat/vesselLon fall back from the live fix to the anchor
+          // point (e.g. GPS lost after the anchor was already set), and stay
+          // null only when neither is available — the drawer renders an
+          // explicit "No GPS fix" placeholder in the map slot for that case
+          // rather than being handed a fabricated 0,0.
           <AnchorWatchDrawer
             placemarks={placemarks}
             onPlacemarkCreate={createPlacemark}
             onPlacemarkRemove={removePlacemark}
-            vesselLat={latitude ?? anchorWatch.anchorLat ?? 0}
-            vesselLon={longitude ?? anchorWatch.anchorLon ?? 0}
+            vesselLat={latitude ?? anchorWatch.anchorLat}
+            vesselLon={longitude ?? anchorWatch.anchorLon}
             vesselHeadingDeg={headingTrue}
             anchorLat={anchorWatch.anchorLat}
             anchorLon={anchorWatch.anchorLon}
@@ -1126,6 +1137,8 @@ export function App() {
             tide={tide}
             anchorConfig={anchorConfig}
             vesselLengthOverallM={vesselLengthOverallM}
+            windBandId={windBandId}
+            onWindBandChange={setWindBandId}
             onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
           />
         )

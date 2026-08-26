@@ -143,6 +143,48 @@ describe('SettingsPage dirty tracking', () => {
   })
 })
 
+// anchor.scope_method selects which rode-calculation method the Anchor
+// Watch tile uses. Driving the Base UI Select in jsdom needs the trigger
+// opened via a plain click, then the target item picked with a
+// pointerdown+pointerup+click sequence — a click alone (the way every other
+// field in this suite is driven) does not register the selection, which is
+// also why the General section's own Select is avoided elsewhere in this
+// file.
+describe('SettingsPage Anchor scope method', () => {
+  it('renders the Scope Method select, marks the form dirty on change, and saves the chosen value', async () => {
+    const onDirtyChange = vi.fn()
+    render(
+      <SettingsPage
+        autoCloseAnchorWatchEnabled
+        onAutoCloseAnchorWatchToggle={vi.fn()}
+        onDirtyChange={onDirtyChange}
+      />,
+    )
+
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    onDirtyChange.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
+
+    const trigger = screen.getByLabelText('Scope method')
+    expect(trigger).toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    const catenaryOption = await screen.findByText(/Catenary/)
+    fireEvent.pointerDown(catenaryOption, { pointerId: 1, pointerType: 'mouse', button: 0 })
+    fireEvent.pointerUp(catenaryOption, { pointerId: 1, pointerType: 'mouse', button: 0 })
+    fireEvent.click(catenaryOption)
+
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    const patch = saveMock.mock.calls[0][0] as { anchor?: { scope_method?: string } }
+    expect(patch.anchor?.scope_method).toBe('catenary')
+  })
+})
+
 describe('SettingsPage imperative save handle', () => {
   it('saves the settings patch and ALL touched secrets (the full SECRET_KEYS set, not just the inline-section subset)', async () => {
     const ref = createRef<SettingsPageHandle>()
