@@ -48,6 +48,7 @@ import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
 import { SatChartsDrawer } from '@/components/sat-charts-drawer'
 import { RouteTile } from '@/components/route-tile'
 import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
+import { PageSkinSelect } from '@/components/page-skin-select'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { Toaster } from '@/components/ui/sonner'
 import { useRoutes } from '@/hooks/use-routes'
@@ -910,6 +911,11 @@ export function App() {
       {/* Always available in layout mode: Embed is never "placed", so unlike the
           builtin widgets it can be added any number of times. */}
       {layoutEditing && (
+        <div className="flex w-fit flex-wrap items-center gap-2">
+        <PageSkinSelect
+          page={activePage ?? null}
+          onSetSkin={(id, skin) => { void updatePage(id, { skin }) }}
+        />
         <Popover>
           <PopoverTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">
             <Plus className="h-3.5 w-3.5" />
@@ -973,6 +979,7 @@ export function App() {
             </div>
           </PopoverContent>
         </Popover>
+        </div>
       )}
 
       <GaugeConfigDialog
@@ -1304,7 +1311,6 @@ export function App() {
                     })
                   }}
                   onRename={(id, name) => { void updatePage(id, { name }) }}
-                  onSetSkin={(id, skin) => { void updatePage(id, { skin }) }}
                   onDelete={(id) => {
                     void deletePage(id).then((ok) => {
                       if (ok && id === activePageId) {

@@ -259,55 +259,24 @@ describe('DashboardPageSwitcher', () => {
     expect(onCreate).toHaveBeenCalled()
   })
 
-  // ADR 0060: the skin moved from a per-cluster-widget setting to a
-  // per-dashboard-page one, edited here since the popover is the only place
-  // a page-level property lives.
-  describe('skin control', () => {
-    const mockFns = () => ({
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onRename: vi.fn(),
-      onDelete: vi.fn(),
-      onSetSkin: vi.fn(),
-    })
+  /**
+   * ADR 0060 put the skin here because the popover was the only place a
+   * page-level property lived. It is a layout decision, so it now sits with the
+   * other layout controls next to Add Widget, and keeping a second copy here
+   * would be two controls for one setting.
+   */
+  const mockFns = () => ({
+    onSelect: vi.fn(),
+    onCreate: vi.fn(),
+    onRename: vi.fn(),
+    onDelete: vi.fn(),
+  })
 
-    it("shows the active page's current skin", async () => {
-      const skinnedPages: DashboardPage[] = [
-        { ...mockPages[0], skin: 'instrument' },
-        mockPages[1],
-      ]
+  it('leaves the skin to the layout controls', async () => {
+    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns()} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
-      const { rerender } = render(
-        <DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns()} />
-      )
-      fireEvent.click(screen.getByLabelText('Switch dashboard page'))
-      expect(await screen.findByLabelText('Instrument skin')).toHaveValue('default')
-
-      rerender(<DashboardPageSwitcher pages={skinnedPages} activePageId="p1" {...mockFns()} />)
-      expect(screen.getByLabelText('Instrument skin')).toHaveValue('instrument')
-    })
-
-    it('changing the select calls onSetSkin with the active page id and the chosen value', async () => {
-      const onSetSkin = vi.fn()
-
-      render(
-        <DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns()} onSetSkin={onSetSkin} />
-      )
-      fireEvent.click(screen.getByLabelText('Switch dashboard page'))
-
-      const select = await screen.findByLabelText('Instrument skin')
-      fireEvent.change(select, { target: { value: 'instrument' } })
-
-      expect(onSetSkin).toHaveBeenCalledWith('p1', 'instrument')
-    })
-
-    it('is absent when there is no active page', () => {
-      render(
-        <DashboardPageSwitcher pages={mockPages} activePageId={null} {...mockFns()} />
-      )
-      fireEvent.click(screen.getByLabelText('Switch dashboard page'))
-
-      expect(screen.queryByLabelText('Instrument skin')).not.toBeInTheDocument()
-    })
+    await screen.findByText(/New Page/)
+    expect(screen.queryByLabelText(/skin/i)).not.toBeInTheDocument()
   })
 })
