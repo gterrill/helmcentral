@@ -115,7 +115,13 @@ const (
 	clusterMaxCorners    = 4
 	clusterMaxCornerRows = 4
 	clusterMaxTelltales  = 6
+	clusterMaxFuelBars   = 4
 )
+
+// Which edge of the tile the fuel rail sits on, not which side of the boat the
+// tanks are. A starboard cluster laid out on the left of a page wants its rail
+// on the left; the tanks' side is carried by their paths and the tile's title.
+var validClusterFuelSides = map[string]bool{"left": true, "right": true}
 
 var validPageSkins = map[string]bool{"": true, "default": true, "instrument": true}
 
@@ -148,6 +154,25 @@ type dashboardClusterConfig struct {
 	// Readings shown as a telltale under the dial rather than a box of their
 	// own: icon, label, value, coloured by zone.
 	Telltales []dashboardGaugeConfig `json:"telltales,omitempty"`
+	// A fuel rail down one edge (ADR 0061). Every field the renderer reads has
+	// to reach the struct below: the decoder drops unknown keys in silence, so
+	// one left out is discarded on save and the rail renders its default.
+	Fuel *dashboardClusterFuelRail `json:"fuel,omitempty"`
+}
+
+// dashboardClusterFuelBar is one tank. Two gauge slots rather than one because
+// litres needs two readings: a 0..1 ratio and a capacity in m3.
+type dashboardClusterFuelBar struct {
+	Level    dashboardGaugeConfig `json:"level"`
+	Capacity dashboardGaugeConfig `json:"capacity"`
+}
+
+// dashboardClusterFuelRail is the curved bar gauge down one edge of the tile
+// (ADR 0061).
+type dashboardClusterFuelRail struct {
+	Side       string                    `json:"side"`
+	Bars       []dashboardClusterFuelBar `json:"bars"`
+	TotalLabel string                    `json:"totalLabel,omitempty"`
 }
 
 type dashboardGaugeGroupConfig struct {
@@ -777,6 +802,55 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 			return msg
 		}
 	}
+	if msg := validateClusterFuelRail(w.Cluster.Fuel, w.ID); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+/*
+validateClusterFuelRail guards the fuel rail (ADR 0061).
+
+The quantity rules are the load-bearing part. Not one tank path on this vessel
+publishes meta.units, so the config dialog's path picker has nothing to infer
+from and preselects Unitless. Left that way convertFromSI is the identity and
+the rail reads 1.2 where it should read 890. A fuel figure that is wrong but
+plausible is worse on a helm than no figure at all, so rather than guessing a
+unit this refuses the save.
+*/
+func validateClusterFuelRail(rail *dashboardClusterFuelRail, id string) string {
+	if rail == nil {
+		return ""
+	}
+	if !validClusterFuelSides[rail.Side] {
+		return "unknown cluster fuel side: " + rail.Side
+	}
+	// An empty rail is a mistake rather than a choice: it takes the width and
+	// draws nothing. Configure no rail instead.
+	if len(rail.Bars) == 0 {
+		return "cluster fuel rail has no bars: " + id
+	}
+	if len(rail.Bars) > clusterMaxFuelBars {
+		return "cluster fuel rail has too many bars: " + id
+	}
+	if len(rail.TotalLabel) > gaugeLabelMaxLen {
+		return "cluster fuel total label too long: " + id
+	}
+	for i, bar := range rail.Bars {
+		ctx := fmt.Sprintf("%s fuel bar %d", id, i+1)
+		if msg := validateGaugeConfig(bar.Level, ctx+" level"); msg != "" {
+			return msg
+		}
+		if msg := validateGaugeConfig(bar.Capacity, ctx+" capacity"); msg != "" {
+			return msg
+		}
+		if bar.Level.Quantity != "ratio" {
+			return "cluster fuel level must be measured as a ratio: " + ctx
+		}
+		if bar.Capacity.Quantity != "volume" {
+			return "cluster fuel capacity must be measured as a volume: " + ctx
+		}
+	}
 	return ""
 }
 
@@ -916,6 +990,16 @@ func gaugeBoundPaths() []string {
 				}
 				for _, telltale := range widget.Cluster.Telltales {
 					add(telltale.Path)
+				}
+				if widget.Cluster.Fuel != nil {
+					for _, bar := range widget.Cluster.Fuel.Bars {
+						add(bar.Level.Path)
+						// The capacity too. Forgetting it is the subtler
+						// failure: the bars still draw and only the litres and
+						// the total are dashes, which reads as a units problem
+						// rather than a missing subscription.
+						add(bar.Capacity.Path)
+					}
 				}
 			}
 		}

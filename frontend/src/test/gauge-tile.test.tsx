@@ -185,6 +185,9 @@ describe('instrument ring style (ADR 0054)', () => {
 
   test('picks round major steps rather than arbitrary ones', () => {
     expect(majorStepFor(0, 3000)).toBe(500)
+    // A redlined tachometer's range does not end on a round number. Rounding
+    // span/6 straight up took 550 to 1000 and left a four-tick dial.
+    expect(majorStepFor(0, 3300)).toBe(500)
     expect(majorStepFor(0, 100)).toBe(20)
     expect(majorStepFor(0, 1)).toBe(0.2)
   })

@@ -176,12 +176,16 @@ function LampGauge({ value, zone, text, density }: { value: number | null; zone:
  */
 export function majorStepFor(min: number, max: number): number {
   const span = Math.max(1e-9, max - min)
-  const rough = span / 6
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))
+  const magnitude = Math.pow(10, Math.floor(Math.log10(span / 6)))
+  // The largest tidy step that still cuts the span into five intervals or more.
+  // Rounding span/6 straight up assumes the top of the range is a round number
+  // of steps away from the bottom: a tachometer redlined at 3300 rounds 550 up
+  // to 1000 and comes out with four ticks on it.
+  let step = magnitude
   for (const multiple of [1, 2, 2.5, 5, 10]) {
-    if (magnitude * multiple >= rough) return magnitude * multiple
+    if (span / (magnitude * multiple) >= 5) step = magnitude * multiple
   }
-  return magnitude * 10
+  return step
 }
 
 function rangeFor(config: GaugeWidgetConfig): { min: number; max: number } {

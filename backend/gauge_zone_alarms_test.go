@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -206,5 +207,120 @@ func TestZoneDerivedAlarmRulesCoversClusterSlots(t *testing.T) {
 	rules := zoneDerivedAlarmRules()
 	if len(rules) != 2 {
 		t.Fatalf("expected a rule from the ring and one from the corner row, got %d: %+v", len(rules), rules)
+	}
+}
+
+/*
+A fuel bar's zones alarm like any other gauge's (ADR 0050, ADR 0061).
+
+The index is fixed rather than continuing the corner counter. Appending after
+the corners actually present would keep ring, centre and corner ids stable, but
+it would renumber the fuel bars the moment a corner row was added, so an
+unrelated edit would silently orphan a low-fuel alarm's history.
+*/
+func TestZoneDerivedAlarmRulesCoversFuelBars(t *testing.T) {
+	lowFuel := *zoneGaugeConfig(0, 100, gaugeZone{From: 0, To: 15, State: alarmStateWarn})
+	lowFuel.Quantity = "ratio"
+	lowFuel.Unit = "percent"
+
+	withPages(t, dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10,
+		Cluster: &dashboardClusterConfig{
+			Title:  "Port",
+			Ring:   dashboardGaugeConfig{Path: "propulsion.port.revolutions", Display: "radial", Quantity: "raw", Unit: "raw"},
+			Centre: dashboardGaugeConfig{Path: "propulsion.port.fuel.rate", Display: "numeric", Quantity: "raw", Unit: "raw"},
+			Fuel: &dashboardClusterFuelRail{
+				Side: "left",
+				Bars: []dashboardClusterFuelBar{{
+					Level:    lowFuel,
+					Capacity: dashboardGaugeConfig{Path: "tanks.fuel.5.capacity", Display: "numeric", Quantity: "volume", Unit: "L"},
+				}},
+			},
+		},
+	})
+
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 1 {
+		t.Fatalf("expected one rule from the fuel bar's zone, got %d: %+v", len(rules), rules)
+	}
+	want := fmt.Sprintf("%scluster:abcd1234:%d:0", zoneDerivedAlarmRuleIDPrefix, clusterFuelZoneIndexBase)
+	if rules[0].ID != want {
+		t.Fatalf("expected the fuel bar at the fixed base index %q, got %q", want, rules[0].ID)
+	}
+}
+
+// A capacity is a constant, not a reading. Zones on it would be meaningless,
+// and an alarm derived from one would never clear.
+func TestZoneDerivedAlarmRulesIgnoresFuelCapacities(t *testing.T) {
+	capacity := *zoneGaugeConfig(0, 100, gaugeZone{From: 0, To: 15, State: alarmStateWarn})
+	capacity.Quantity = "volume"
+	capacity.Unit = "L"
+	level := *zoneGaugeConfig(0, 100)
+	level.Quantity = "ratio"
+	level.Unit = "percent"
+
+	withPages(t, dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10,
+		Cluster: &dashboardClusterConfig{
+			Title:  "Port",
+			Ring:   dashboardGaugeConfig{Path: "propulsion.port.revolutions", Display: "radial", Quantity: "raw", Unit: "raw"},
+			Centre: dashboardGaugeConfig{Path: "propulsion.port.fuel.rate", Display: "numeric", Quantity: "raw", Unit: "raw"},
+			Fuel: &dashboardClusterFuelRail{
+				Side: "left",
+				Bars: []dashboardClusterFuelBar{{Level: level, Capacity: capacity}},
+			},
+		},
+	})
+
+	if rules := zoneDerivedAlarmRules(); len(rules) != 0 {
+		t.Fatalf("expected no rules from a capacity's zones, got %+v", rules)
+	}
+}
+
+/*
+Adding a fuel rail must not renumber anything already derived.
+
+An alarm id is what ties a firing alarm to its history and its acknowledgement,
+so a config edit that quietly reissues them loses both.
+*/
+func TestZoneDerivedAlarmRuleIDsAreUnaffectedByAFuelRail(t *testing.T) {
+	ring := *zoneGaugeConfig(0, 100, gaugeZone{From: 0, To: 15, State: alarmStateAlarm})
+	corner := *zoneGaugeConfig(0, 100, gaugeZone{From: 90, To: 100, State: alarmStateWarn})
+	base := func() *dashboardClusterConfig {
+		return &dashboardClusterConfig{
+			Title:   "Port",
+			Ring:    ring,
+			Centre:  dashboardGaugeConfig{Path: "propulsion.port.fuel.rate", Display: "numeric", Quantity: "raw", Unit: "raw"},
+			Corners: []dashboardClusterCorner{{Label: "Oil", Rows: []dashboardGaugeConfig{corner}}},
+		}
+	}
+
+	withPages(t, dashboardLayoutItem{ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10, Cluster: base()})
+	before := []string{}
+	for _, r := range zoneDerivedAlarmRules() {
+		before = append(before, r.ID)
+	}
+
+	level := *zoneGaugeConfig(0, 100, gaugeZone{From: 0, To: 15, State: alarmStateWarn})
+	level.Quantity = "ratio"
+	level.Unit = "percent"
+	withFuel := base()
+	withFuel.Fuel = &dashboardClusterFuelRail{
+		Side: "left",
+		Bars: []dashboardClusterFuelBar{{
+			Level:    level,
+			Capacity: dashboardGaugeConfig{Path: "tanks.fuel.5.capacity", Display: "numeric", Quantity: "volume", Unit: "L"},
+		}},
+	}
+	withPages(t, dashboardLayoutItem{ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10, Cluster: withFuel})
+
+	after := map[string]bool{}
+	for _, r := range zoneDerivedAlarmRules() {
+		after[r.ID] = true
+	}
+	for _, id := range before {
+		if !after[id] {
+			t.Fatalf("adding a fuel rail reissued %q; ids: %v", id, after)
+		}
 	}
 }

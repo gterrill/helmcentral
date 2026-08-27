@@ -18,12 +18,16 @@ import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import {
   CLUSTER_MAX_CORNERS,
   CLUSTER_MAX_CORNER_ROWS,
+  CLUSTER_MAX_FUEL_BARS,
   CLUSTER_MAX_TELLTALES,
+  type ClusterFuelRail,
   type DashboardLayoutItem,
   type EngineClusterConfig,
+  type FuelBarConfig,
   type GaugeWidgetConfig,
 } from '@/lib/dashboard-widgets'
 import { CLUSTER_ICON_NAMES, iconForSlot } from '@/lib/cluster-icons'
+import { QUANTITIES, quantityById, unitOption } from '@/lib/quantities'
 import { commonInstancePrefix, instancePrefixCandidates, profileToGauges, type EngineProfile } from '@/lib/engine-profiles'
 
 /**
@@ -58,6 +62,48 @@ const SLOT_SUFFIXES = {
 
 function blankSlot(label: string): GaugeWidgetConfig {
   return { path: '', label, display: 'numeric', quantity: 'raw', unit: 'raw' }
+}
+
+/**
+ * A blank fuel bar (ADR 0061).
+ *
+ * The quantities are set here rather than left for the operator to pick,
+ * because no tank path on this vessel publishes meta.units: the path picker
+ * would preselect Unitless, convertFromSI would be the identity, and the rail
+ * would read 1.2 where it should read 890. The backend rejects that config, so
+ * seeding it correctly is what keeps the rule invisible.
+ */
+function blankFuelBar(label: string): FuelBarConfig {
+  return {
+    level: { path: '', label, display: 'bar', quantity: 'ratio', unit: 'percent', decimals: 0, min: 0, max: 100 },
+    capacity: { path: '', label: '', display: 'numeric', quantity: 'volume', unit: 'L', decimals: 0 },
+  }
+}
+
+/**
+ * The capacity path that goes with a level path.
+ *
+ * SignalK names them as siblings, so picking `tanks.fuel.5.currentLevel` all
+ * but names `tanks.fuel.5.capacity`. Filling it is what makes a rail a
+ * half-minute of configuration instead of eight paths typed by hand.
+ */
+function capacityPathFor(levelPath: string): string {
+  return levelPath.endsWith('.currentLevel') ? levelPath.replace(/\.currentLevel$/, '.capacity') : ''
+}
+
+/**
+ * Hold a fuel slot to the quantity the rail needs.
+ *
+ * GaugeFields preselects the quantity from SignalK's meta.units whenever a path
+ * is picked, which is right everywhere else and wrong here: no tank path on
+ * this vessel publishes units, so it infers Unitless and silently undoes the
+ * seed. The backend then refuses the save, and the operator gets an error about
+ * a field the form never showed them. The rail's quantities are fixed by what
+ * it computes, so pin them rather than asking.
+ */
+function pinQuantity(slot: GaugeWidgetConfig, quantity: string): GaugeWidgetConfig {
+  if (slot.quantity === quantity) return slot
+  return { ...slot, quantity, unit: unitOption(quantity, slot.unit).id }
 }
 
 /** Builds a whole cluster from a profile and an instance prefix. */
@@ -135,12 +181,18 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   const setSlot = (update: (current: EngineClusterConfig) => EngineClusterConfig) =>
     setConfig((current) => (current ? update(current) : current))
 
+  const setFuel = (update: (rail: ClusterFuelRail) => ClusterFuelRail) =>
+    setSlot((c) => (c.fuel ? { ...c, fuel: update(c.fuel) } : c))
+
   const canSave =
     config !== null &&
     config.title.trim() !== '' &&
     config.ring.path.trim() !== '' &&
     config.corners.every((corner) => corner.rows.every((row) => row.path.trim() !== ''))
     && (config.telltales ?? []).every((telltale) => telltale.path.trim() !== '')
+    && (config.fuel === undefined ||
+        (config.fuel.bars.length > 0 &&
+         config.fuel.bars.every((bar) => bar.level.path.trim() !== '' && bar.capacity.path.trim() !== '')))
 
   return (
     <Dialog open={widget !== null} onOpenChange={(open) => { if (!open) onCancel() }}>
@@ -304,6 +356,94 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                   <Plus className="size-3.5" /> Add telltale
                 </Button>
               </div>
+
+              <div className="rounded-md border border-border p-3">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Fuel rail</p>
+                <FieldDescription className="mb-2">
+                  A bar per tank down one edge of the tile, with the side's total underneath.
+                  Each tank needs two paths: the level, and the capacity that turns it into a
+                  volume. Picking a <code>.currentLevel</code> path fills the capacity for you.
+                </FieldDescription>
+
+                {config.fuel === undefined ? (
+                  <Button variant="ghost" className="w-fit"
+                    onClick={() => setSlot((c) => ({
+                      ...c,
+                      // Left for a cluster titled Port, right otherwise, so a
+                      // facing pair puts its rails outboard without being told.
+                      fuel: {
+                        side: /^p(ort)?\b/i.test(c.title.trim()) ? 'left' : 'right',
+                        bars: [blankFuelBar('Fwd'), blankFuelBar('Aft')],
+                      },
+                    }))}>
+                    <Plus className="size-3.5" /> Add fuel rail
+                  </Button>
+                ) : (
+                  <>
+                    <Field className="mb-2">
+                      {/* "Edge", not "side": which side of the boat the tanks
+                          are on is carried by their paths and the tile title. */}
+                      <FieldLabel htmlFor="cluster-fuel-side">Tile edge</FieldLabel>
+                      <select id="cluster-fuel-side"
+                        className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                        value={config.fuel.side}
+                        onChange={(e) => setFuel((f) => ({ ...f, side: e.target.value as ClusterFuelRail['side'] }))}>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                      </select>
+                    </Field>
+
+                    <Field className="mb-2">
+                      <FieldLabel htmlFor="cluster-fuel-total">Total caption</FieldLabel>
+                      <Input id="cluster-fuel-total" value={config.fuel.totalLabel ?? ''}
+                        placeholder="Total"
+                        onChange={(e) => setFuel((f) => ({ ...f, totalLabel: e.target.value }))} />
+                    </Field>
+
+                    {config.fuel.bars.map((bar, index) => (
+                      <div key={index} className="mb-2 border-b border-border/60 pb-2 last:border-b-0">
+                        <GaugeFields value={bar.level} paths={paths} idPrefix={`cluster-fuel-${index}`}
+                          onChange={(next) => setFuel((f) => ({
+                            ...f,
+                            bars: f.bars.map((b, i) => (i === index
+                              ? {
+                                  ...b,
+                                  level: pinQuantity(next, 'ratio'),
+                                  // Only when the operator has not typed one:
+                                  // overwriting a hand-picked path would be the
+                                  // convenience undoing their work.
+                                  capacity: b.capacity.path.trim() === ''
+                                    ? { ...b.capacity, path: capacityPathFor(next.path.trim()) }
+                                    : b.capacity,
+                                }
+                              : b)),
+                          }))} />
+                        <CapacityFields value={bar.capacity} paths={paths} index={index}
+                          onChange={(next) => setFuel((f) => ({
+                            ...f,
+                            bars: f.bars.map((b, i) => (i === index ? { ...b, capacity: pinQuantity(next, 'volume') } : b)),
+                          }))} />
+                        <Button size="sm" variant="ghost" aria-label={`Remove fuel tank ${index + 1}`}
+                          onClick={() => setFuel((f) => ({ ...f, bars: f.bars.filter((_, i) => i !== index) }))}>
+                          <Trash2 className="size-3.5" /> Remove tank
+                        </Button>
+                      </div>
+                    ))}
+
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" className="w-fit"
+                        disabled={config.fuel.bars.length >= CLUSTER_MAX_FUEL_BARS}
+                        onClick={() => setFuel((f) => ({ ...f, bars: [...f.bars, blankFuelBar('')] }))}>
+                        <Plus className="size-3.5" /> Add tank
+                      </Button>
+                      <Button variant="ghost" className="w-fit"
+                        onClick={() => setSlot((c) => ({ ...c, fuel: undefined }))}>
+                        <Trash2 className="size-3.5" /> Remove fuel rail
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -314,6 +454,59 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * The capacity slot's form: path, quantity, unit and nothing else.
+ *
+ * Not the full GaugeFields, because a tank's capacity is a constant: min, max,
+ * zones and a history window are all meaningless on it, and a form offering
+ * them invites a config the renderer will ignore. Not a `compact` flag on
+ * GaugeFields either, since four dialogs share that component and a mode flag
+ * there is the kind of thing that grows.
+ */
+function CapacityFields({ value, paths, index, onChange }: {
+  value: GaugeWidgetConfig
+  paths: { path: string }[]
+  index: number
+  onChange: (next: GaugeWidgetConfig) => void
+}) {
+  const quantity = quantityById(value.quantity)
+  return (
+    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <Field className="sm:col-span-1">
+        <FieldLabel htmlFor={`cluster-fuel-cap-${index}`}>Capacity path</FieldLabel>
+        <Input id={`cluster-fuel-cap-${index}`} value={value.path}
+          list={`cluster-fuel-cap-list-${index}`}
+          placeholder="tanks.fuel.5.capacity"
+          onChange={(e) => onChange({ ...value, path: e.target.value })} />
+        <datalist id={`cluster-fuel-cap-list-${index}`}>
+          {paths.map((p) => <option key={p.path} value={p.path} />)}
+        </datalist>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`cluster-fuel-capq-${index}`}>Quantity</FieldLabel>
+        <select id={`cluster-fuel-capq-${index}`}
+          className="h-9 rounded-md border bg-transparent px-3 text-sm"
+          value={value.quantity}
+          onChange={(e) => {
+            const next = quantityById(e.target.value)
+            onChange({ ...value, quantity: next.id, unit: next.units[0].id })
+          }}>
+          {QUANTITIES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
+        </select>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`cluster-fuel-capu-${index}`}>Unit</FieldLabel>
+        <select id={`cluster-fuel-capu-${index}`}
+          className="h-9 rounded-md border bg-transparent px-3 text-sm"
+          value={unitOption(value.quantity, value.unit).id}
+          onChange={(e) => onChange({ ...value, unit: e.target.value })}>
+          {quantity.units.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+        </select>
+      </Field>
+    </div>
   )
 }
 

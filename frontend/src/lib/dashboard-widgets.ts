@@ -148,6 +148,44 @@ export interface ClusterCorner {
 }
 
 /**
+ * One tank on the fuel rail (ADR 0061).
+ *
+ * Two gauge slots, not one. `GaugeWidgetConfig` binds one widget to one path,
+ * and litres needs two readings: a 0..1 ratio and a capacity in m3. Both are
+ * that type verbatim, the decision that made gauge groups and cluster corners
+ * cheap, so zones, units and the backend's per-gauge validation work unchanged.
+ *
+ * The capacity slot leaves min, max and zones meaningless, which is the price
+ * of not forking the type and the Go struct and the validator alongside it. The
+ * editor pays it by rendering a cut-down form for that slot.
+ *
+ * Both slots must declare their quantity, and the backend rejects a level that
+ * is not `ratio` or a capacity that is not `volume`. Nothing on this vessel
+ * publishes `meta.units` for a tank, so the path picker preselects Unitless and
+ * an unnoticed default would turn 890 L into 1.2 on the helm.
+ */
+export interface FuelBarConfig {
+  /** tanks.fuel.5.currentLevel. Quantity `ratio`, so the bar reads percent. */
+  level: GaugeWidgetConfig
+  /** tanks.fuel.5.capacity. Quantity `volume`, which is what makes litres. */
+  capacity: GaugeWidgetConfig
+}
+
+/**
+ * A fuel rail down one edge of the cluster (ADR 0061): a bar per tank against a
+ * shared percentage scale, and the side's total in litres under it.
+ *
+ * `side` is which edge of the tile it sits on, so a pair of clusters can put
+ * their rails outboard and mirror each other.
+ */
+export interface ClusterFuelRail {
+  side: 'left' | 'right'
+  bars: FuelBarConfig[]
+  /** Caption over the total. "Total" when unset. */
+  totalLabel?: string
+}
+
+/**
  * An engine cluster (ADR 0054): a ticked ring with the primary reading inside
  * it and up to four mask-cut cards in the corners.
  *
@@ -167,11 +205,15 @@ export interface EngineClusterConfig {
    * check by glancing for a colour, not by reading a number.
    */
   telltales?: GaugeWidgetConfig[]
+  /** A fuel rail down one edge (ADR 0061). */
+  fuel?: ClusterFuelRail
 }
 
 export const CLUSTER_MAX_CORNERS = 4
 export const CLUSTER_MAX_CORNER_ROWS = 4
 export const CLUSTER_MAX_TELLTALES = 6
+/** Mirrors clusterMaxFuelBars in backend/dashboard_pages.go. */
+export const CLUSTER_MAX_FUEL_BARS = 4
 
 export const LAMP_STRIP_MAX_LAMPS = 16
 export const LAMP_LABEL_MAX_LENGTH = 12

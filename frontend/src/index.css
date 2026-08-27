@@ -74,6 +74,29 @@
     --dial-label-weight: 400;
     --dial-needle: var(--gauge-primary);
     --dial-needle-glow: 0 0 0 transparent;
+    /* Where the pointer bar starts and stops, as a radius and a radial width.
+       88-122 here, which is the span the blade it replaced swept. */
+    --dial-needle-r: 105px;
+    --dial-needle-w: 34px;
+    /* The fuel rail (ADR 0061). Indirections, so the instrument skin's existing
+       redefinitions flow through and only the ones it genuinely changes have
+       to be restated.
+
+       Colour only. The radii and stroke widths are JS constants in the
+       component, because the tick radii are derived from the bar radii in the
+       same file: a skin free to move one and not the other could put a bar
+       through its neighbour. Nothing about a skin needs them anyway. */
+    --fuel-bar: var(--gauge-primary);
+    --fuel-track: var(--muted);
+    --fuel-tick-major: var(--dial-tick-major);
+    --fuel-tick-minor: var(--dial-tick-minor);
+    --fuel-label: var(--dial-label);
+    /* A whole `filter` value, not one drop-shadow's arguments the way
+       --dial-needle-glow is. That single argument list can only make one
+       falloff, which is why the dial's glow never matched the reference: the
+       bars there have a tight emissive core and a wide bloom, which is two
+       stacked drop-shadows. `none` is the valid no-op. */
+    --fuel-bar-glow: none;
     --font-display: 'Geist Mono';
     --font-sans: 'Geist Sans';
     --sidebar-background: var(--card);
@@ -173,6 +196,16 @@
     --dial-label-weight: 600;
     --dial-needle: 195 100% 97%;
     --dial-needle-glow: 0 0 6px hsl(var(--primary));
+    /* 76-124: the band's own inner edge, out past its outer edge at 116 and
+       into the tick ring, which is the reference's proportion. Stopping at the
+       band left the pointer sitting on the brightest part of its own arc. */
+    --dial-needle-r: 100px;
+    --dial-needle-w: 48px;
+    --fuel-bar: 190 95% 62%;
+    --fuel-track: 205 32% 18%;
+    --fuel-bar-glow:
+      drop-shadow(0 0 2px hsl(var(--fuel-bar) / 0.9))
+      drop-shadow(0 0 10px hsl(var(--fuel-bar) / 0.5));
   }
 
   .dark {

@@ -22,11 +22,11 @@ const R_LABEL = 96 // scale numbers
 // The value arc's radius and width live in --dial-band-r / --dial-band-w
 // rather than here, so a skin can move the band without a second geometry.
 
-// A blade riding the rim rather than a full needle pivoting at the centre: a
-// centre-pivoted needle crosses the readout it is meant to accompany.
-const R_NEEDLE_TIP = 122
-const R_NEEDLE_BASE = 5 // half-width at the widest point
-const R_NEEDLE_TAIL = 88
+// The pointer's width, as a fraction of the circle it is dashed onto. Its
+// radius is CSS (see Needle), so this cannot be a length: 0.46 of a hundredth
+// of the circumference lands at about 3px at the radii the skins use, which is
+// the reference's own 5-of-480.
+const NEEDLE_DASH = 0.46
 
 const D2R = Math.PI / 180
 
@@ -35,8 +35,14 @@ function pt(angleDeg: number, r: number): [number, number] {
   return [C + r * Math.cos(a), C + r * Math.sin(a)]
 }
 
-/** Alarm severities (ADR 0038), the same vocabulary the gauges already use. */
-function zoneStroke(state: GaugeZone['state']): string {
+/**
+ * Alarm severities (ADR 0038), the same vocabulary the gauges already use.
+ *
+ * Exported so the cluster's zone bar and the fuel rail read the one palette
+ * rather than each keeping a copy. Deliberately literal rather than tokenized:
+ * a skin that could recolour these is a skin that could hide an alarm.
+ */
+export function zoneColor(state: GaugeZone['state']): string {
   switch (state) {
     case 'emergency':
       return 'hsl(0 72% 42%)'
@@ -55,30 +61,48 @@ function zoneStroke(state: GaugeZone['state']): string {
  * The arc says how much, the pointer says where — the redundancy every
  * mechanical instrument uses, and the reason a dial reads faster than a bare
  * number at a glance.
+ *
+ * A bar across the band, drawn as a dashed circle for the same reason the value
+ * arc is: the radius and width are the skin's tokens, so a skin that moves the
+ * band takes the pointer with it. The blade this replaces had its geometry
+ * here, which is why the instrument skin pulling the band in to r96 left the
+ * pointer out on the rim, riding its own bright end and lost against it.
  */
 function Needle({ angle }: { angle: number }) {
-  const mid = (R_NEEDLE_TIP + R_NEEDLE_TAIL) / 2
-  const offset = (Math.atan2(R_NEEDLE_BASE, mid) * 180) / Math.PI
-
-  const [tipX, tipY] = pt(angle, R_NEEDLE_TIP)
-  const [leftX, leftY] = pt(angle + offset, mid)
-  const [rightX, rightY] = pt(angle - offset, mid)
-  const [tailX, tailY] = pt(angle, R_NEEDLE_TAIL)
-
   return (
-    <g>
-      <polygon
-        data-needle=""
-        points={[[tipX, tipY], [leftX, leftY], [tailX, tailY], [rightX, rightY]]
-          .map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`)
-          .join(' ')}
-        style={{
-          fill: 'hsl(var(--dial-needle))',
-          filter: 'drop-shadow(var(--dial-needle-glow))',
-        }}
-      />
-    </g>
+    <circle
+      data-needle=""
+      cx={C} cy={C} pathLength={100} fill="none"
+      strokeDasharray={`${NEEDLE_DASH} 100`}
+      // Centred on the angle, not started at it: a bar hung off one side of
+      // its own reading points half a bar-width high.
+      strokeDashoffset={(NEEDLE_DASH / 2 - (angle / 360) * 100).toFixed(2)}
+      style={{
+        r: 'var(--dial-needle-r)',
+        stroke: 'hsl(var(--dial-needle))',
+        strokeWidth: 'var(--dial-needle-w)',
+        // Butt, whatever the band is set to: a round cap on a 48px stroke
+        // would add 24px of pointer at each end.
+        strokeLinecap: 'butt',
+        filter: 'drop-shadow(var(--dial-needle-glow))',
+      }}
+    />
   )
+}
+
+/**
+ * The band a position on the scale falls in, ignoring the normal one.
+ *
+ * A redline is a marking on the scale itself, which is what the reference gets
+ * right and a rim segment alone does not: it is legible from the angle a helm
+ * dial is actually read at. Normal is deliberately not marked, because a scale
+ * painted green everywhere it is fine leaves the redline nothing to mark.
+ */
+function markingAt(v: number, zones: GaugeZone[] | undefined): GaugeZone['state'] | null {
+  const hit = (zones ?? []).find(
+    (z) => z.state !== 'normal' && v >= Math.min(z.from, z.to) && v <= Math.max(z.from, z.to),
+  )
+  return hit ? hit.state : null
 }
 
 /**
@@ -152,10 +176,15 @@ export function DialRing({
 
   const minors: number[] = []
   if (minorPerMajor > 1) {
+    const minorStep = majorStep / minorPerMajor
     for (let i = 0; i < majors.length - 1; i += 1) {
-      for (let k = 1; k < minorPerMajor; k += 1) {
-        minors.push(majors[i] + (majorStep * k) / minorPerMajor)
-      }
+      for (let k = 1; k < minorPerMajor; k += 1) minors.push(majors[i] + minorStep * k)
+    }
+    // The stretch above the last whole major step. A range whose top is not a
+    // round number of them, such as a 3300 rpm redline on a 500 rpm scale, used
+    // to stop ticking at 3000 and leave bare exactly the part the red marks.
+    for (let v = majors[majors.length - 1] + minorStep; v <= max + span * 1e-9; v += minorStep) {
+      minors.push(v)
     }
   }
 
@@ -202,35 +231,50 @@ export function DialRing({
         {minors.map((v) => {
           const [x1, y1] = pt(angleFor(v), R_OUTER - 1)
           const [x2, y2] = pt(angleFor(v), R_MINOR)
-          return <line key={`m${v}`} data-tick="minor" x1={x1} y1={y1} x2={x2} y2={y2}
-            style={{ stroke: 'hsl(var(--dial-tick-minor))', strokeWidth: 'var(--dial-tick-minor-w)' }} />
+          const mark = markingAt(v, zones)
+          return <line key={`m${v}`} data-tick="minor" data-tick-zone={mark ?? undefined}
+            x1={x1} y1={y1} x2={x2} y2={y2}
+            style={{
+              stroke: mark ? zoneColor(mark) : 'hsl(var(--dial-tick-minor))',
+              strokeWidth: 'var(--dial-tick-minor-w)',
+            }} />
         })}
 
         {majors.map((v) => {
           const [x1, y1] = pt(angleFor(v), R_OUTER - 1)
           const [x2, y2] = pt(angleFor(v), R_MAJOR)
-          return <line key={`M${v}`} data-tick="major" x1={x1} y1={y1} x2={x2} y2={y2}
-            style={{ stroke: 'hsl(var(--dial-tick-major))', strokeWidth: 'var(--dial-tick-major-w)' }} />
+          const mark = markingAt(v, zones)
+          return <line key={`M${v}`} data-tick="major" data-tick-zone={mark ?? undefined}
+            x1={x1} y1={y1} x2={x2} y2={y2}
+            style={{
+              stroke: mark ? zoneColor(mark) : 'hsl(var(--dial-tick-major))',
+              strokeWidth: 'var(--dial-tick-major-w)',
+            }} />
         })}
 
         {/* Rim segments rather than a wash across the arc: a red band has to be
-            readable at a glance, which is most of what the reference gets right. */}
+            readable at a glance, which is most of what the reference gets right.
+            Markings only, on the same rule as the ticks: a green arc down the
+            whole normal band buried the value arc, the redline and the pointer
+            under the one thing on the dial that carries no information. */}
         {(zones ?? []).map((zone, index) => {
+          if (zone.state === 'normal') return null
           const from = Math.max(min, Math.min(zone.from, zone.to))
           const to = Math.min(max, Math.max(zone.from, zone.to))
           if (to <= from) return null
           return <path key={index} data-zone={zone.state} d={arc(from, to, R_OUTER + 5)}
-            fill="none" stroke={zoneStroke(zone.state)} strokeWidth="7" />
+            fill="none" stroke={zoneColor(zone.state)} strokeWidth="7" />
         })}
 
         {majors.map((v, index) => {
           if (index % labelEvery !== 0) return null
           const [x, y] = pt(angleFor(v), R_LABEL)
           const shown = labelDivisor ? v / labelDivisor : v
+          const mark = markingAt(v, zones)
           return (
             <text key={`L${v}`} x={x} y={y} textAnchor="middle" dominantBaseline="central"
               style={{
-                fill: 'hsl(var(--dial-label))',
+                fill: mark ? zoneColor(mark) : 'hsl(var(--dial-label))',
                 fontSize: 'var(--dial-label-size)',
                 fontWeight: 'var(--dial-label-weight)' as CSSProperties['fontWeight'],
               }}>

@@ -1710,3 +1710,219 @@ func TestValidateGaugeConfigRejectsANonPositiveLabelDivisor(t *testing.T) {
 		t.Fatal("expected a zero label divisor to be rejected")
 	}
 }
+
+// --- Fuel rail (ADR 0061) ---------------------------------------------------
+
+// The live vessel's port side: forward and aft, each with a capacity path
+// alongside its level. Captured from the running server rather than assumed,
+// which is how ADR 0054 found that three of its own suffixes matched nothing.
+func validFuelRail() *dashboardClusterFuelRail {
+	return &dashboardClusterFuelRail{
+		Side: "left",
+		Bars: []dashboardClusterFuelBar{
+			{
+				Level:    dashboardGaugeConfig{Path: "tanks.fuel.5.currentLevel", Label: "Fwd", Display: "bar", Quantity: "ratio", Unit: "percent"},
+				Capacity: dashboardGaugeConfig{Path: "tanks.fuel.5.capacity", Display: "numeric", Quantity: "volume", Unit: "L"},
+			},
+			{
+				Level:    dashboardGaugeConfig{Path: "tanks.fuel.4.currentLevel", Label: "Aft", Display: "bar", Quantity: "ratio", Unit: "percent"},
+				Capacity: dashboardGaugeConfig{Path: "tanks.fuel.4.capacity", Display: "numeric", Quantity: "volume", Unit: "L"},
+			},
+		},
+	}
+}
+
+func clusterWithFuel() *dashboardClusterConfig {
+	config := validClusterConfig()
+	config.Fuel = validFuelRail()
+	return config
+}
+
+func TestValidateClusterAcceptsAFuelRail(t *testing.T) {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", clusterWithFuel())}); msg != "" {
+		t.Fatalf("expected the live vessel's fuel rail to be accepted, got %q", msg)
+	}
+}
+
+/*
+The rule that matters most here.
+
+No tank path on this vessel publishes meta.units, so the path picker preselects
+Unitless. Left that way convertFromSI is the identity and the total reads 1.2
+where it should read 890. A fuel figure that is wrong but plausible is worse on
+a helm than no figure at all, so the config that produces it cannot be saved.
+*/
+func TestValidateClusterRejectsFuelSlotsWithTheWrongQuantity(t *testing.T) {
+	rawLevel := clusterWithFuel()
+	rawLevel.Fuel.Bars[0].Level.Quantity = "raw"
+	rawLevel.Fuel.Bars[0].Level.Unit = "raw"
+
+	rawCapacity := clusterWithFuel()
+	rawCapacity.Fuel.Bars[0].Capacity.Quantity = "raw"
+	rawCapacity.Fuel.Bars[0].Capacity.Unit = "raw"
+
+	pressureCapacity := clusterWithFuel()
+	pressureCapacity.Fuel.Bars[0].Capacity.Quantity = "pressure"
+	pressureCapacity.Fuel.Bars[0].Capacity.Unit = "psi"
+
+	for _, tc := range []struct {
+		name   string
+		config *dashboardClusterConfig
+	}{
+		{"level not a ratio", rawLevel},
+		{"capacity not a volume", rawCapacity},
+		{"capacity measured as pressure", pressureCapacity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", tc.config)}); msg == "" {
+				t.Fatal("expected a fuel slot with the wrong quantity to be rejected")
+			}
+		})
+	}
+}
+
+func TestValidateClusterRejectsBadFuelRails(t *testing.T) {
+	badSide := clusterWithFuel()
+	badSide.Fuel.Side = "port"
+
+	noBars := clusterWithFuel()
+	noBars.Fuel.Bars = nil
+
+	tooManyBars := clusterWithFuel()
+	for len(tooManyBars.Fuel.Bars) <= clusterMaxFuelBars {
+		tooManyBars.Fuel.Bars = append(tooManyBars.Fuel.Bars, validFuelRail().Bars[0])
+	}
+
+	noCapacityPath := clusterWithFuel()
+	noCapacityPath.Fuel.Bars[1].Capacity.Path = ""
+
+	for _, tc := range []struct {
+		name   string
+		config *dashboardClusterConfig
+	}{
+		// "port" names the tanks, not the edge the rail sits on. A starboard
+		// cluster laid out on the left of a page wants a left-hand rail.
+		{"side names a tank rather than an edge", badSide},
+		{"no bars at all", noBars},
+		{"too many bars", tooManyBars},
+		{"capacity with no path", noCapacityPath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", tc.config)}); msg == "" {
+				t.Fatal("expected the rail to be rejected")
+			}
+		})
+	}
+}
+
+/*
+Both paths per bar, not just the level.
+
+Missing the capacity path is the subtler of the two failures: the bars still
+draw and only the litres and the total are dashes, which reads as a units
+problem rather than a subscription one.
+*/
+func TestGaugeBoundPathsIncludesFuelLevelsAndCapacities(t *testing.T) {
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{
+		"a": {ID: "a", Widgets: []dashboardLayoutItem{clusterWidget("cluster:abcd1234", clusterWithFuel())}},
+	}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+
+	paths := gaugeBoundPaths()
+	for _, want := range []string{
+		"tanks.fuel.4.capacity",
+		"tanks.fuel.4.currentLevel",
+		"tanks.fuel.5.capacity",
+		"tanks.fuel.5.currentLevel",
+	} {
+		found := false
+		for _, p := range paths {
+			if p == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %q among the bound paths, got %v", want, paths)
+		}
+	}
+}
+
+/*
+The test that catches a field missing from the Go struct.
+
+Go's decoder drops unknown keys without complaint, so a field the renderer reads
+but dashboardClusterFuelRail does not declare is discarded on every save with no
+error anywhere. The widget then renders its default and looks like a frontend
+bug. Four fields on dashboardGaugeConfig were lost exactly this way before
+anyone noticed.
+*/
+func TestClusterFuelRailRoundTripsEveryRenderedField(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	raw := `{
+	  "side": "right",
+	  "totalLabel": "Aboard",
+	  "bars": [{
+	    "level": {
+	      "path": "tanks.fuel.2.currentLevel", "label": "Fwd", "display": "bar",
+	      "quantity": "ratio", "unit": "percent", "decimals": 0, "min": 0, "max": 100,
+	      "zones": [{"from": 0, "to": 15, "state": "warn"}]
+	    },
+	    "capacity": {
+	      "path": "tanks.fuel.2.capacity", "display": "numeric",
+	      "quantity": "volume", "unit": "L"
+	    }
+	  }]
+	}`
+	var rail dashboardClusterFuelRail
+	if err := json.Unmarshal([]byte(raw), &rail); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	config := validClusterConfig()
+	config.Fuel = &rail
+	page := createTestDashboardPage(t, "Engines", []dashboardLayoutItem{
+		clusterWidget("cluster:abcd1234", config),
+	})
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	reloaded := dashboardPagesState[page.ID]
+	dashboardPagesMu.RUnlock()
+
+	got := reloaded.Widgets[0].Cluster.Fuel
+	if got == nil {
+		t.Fatal("the whole fuel rail was discarded on save")
+	}
+	if got.Side != "right" {
+		t.Errorf("side did not survive: %q", got.Side)
+	}
+	if got.TotalLabel != "Aboard" {
+		t.Errorf("totalLabel did not survive: %q", got.TotalLabel)
+	}
+	if len(got.Bars) != 1 {
+		t.Fatalf("expected one bar, got %d", len(got.Bars))
+	}
+	if got.Bars[0].Level.Path != "tanks.fuel.2.currentLevel" {
+		t.Errorf("level path did not survive: %q", got.Bars[0].Level.Path)
+	}
+	// The one most likely to be forgotten, and the one whose absence looks
+	// like a units bug rather than a persistence bug.
+	if got.Bars[0].Capacity.Path != "tanks.fuel.2.capacity" {
+		t.Errorf("capacity path did not survive: %q", got.Bars[0].Capacity.Path)
+	}
+	if got.Bars[0].Capacity.Quantity != "volume" || got.Bars[0].Capacity.Unit != "L" {
+		t.Errorf("capacity units did not survive: %q/%q", got.Bars[0].Capacity.Quantity, got.Bars[0].Capacity.Unit)
+	}
+	if len(got.Bars[0].Level.Zones) != 1 {
+		t.Errorf("level zones did not survive: %v", got.Bars[0].Level.Zones)
+	}
+}

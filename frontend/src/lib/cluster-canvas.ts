@@ -55,6 +55,60 @@ export function bezelOverhangFor(ringBox: number, gap: number, radiusRatio = 130
   return Math.max(0, (ringBox / 2) * radiusRatio + gap - 1 - ringBox / 2)
 }
 
+/**
+ * The engine cluster's own canvas (ADR 0054).
+ *
+ * Here rather than in the tile because it is not only the tile that needs it:
+ * the bento grid derives the cluster's minimum row count from this height, and
+ * the last copy of that number was written by hand and went stale.
+ */
+const RING_BOX = 218
+const CARD_W = 196
+const CARD_H = 92
+const GAP = 14
+
+/**
+ * The bezel makes the dial a solid disc, so the canvas has to contain the
+ * whole circle. It used to stop where the 250-degree sweep ended and let the
+ * empty lower part of the ring box hang off the bottom, which cost nothing
+ * while nothing was drawn there and put the dial through the tile's edge the
+ * moment a bezel was.
+ *
+ * So the composition now closes on the circle: the disc is exactly as tall as
+ * the block of boxes and centred on it, which is also what makes all four the
+ * same size instead of the lower pair being stretched to reach the arc.
+ */
+const OVERHANG = bezelOverhangFor(RING_BOX, GAP)
+const DISC = RING_BOX + 2 * OVERHANG
+const RING_TOP = OVERHANG
+const CARD_BLOCK_H = DISC
+
+export const CLUSTER_CANVAS: ClusterCanvasConfig = {
+  width: 520,
+  height: CARD_BLOCK_H,
+  ringBox: RING_BOX,
+  ringTop: RING_TOP,
+  topCardW: CARD_W,
+  bottomCardW: CARD_W,
+  cardH: CARD_H,
+  bottomCardTop: CARD_BLOCK_H - CARD_H,
+  gap: GAP,
+}
+
+/**
+ * How wide the cluster's design is once a fuel rail is attached (ADR 0061).
+ *
+ * The rail is a sibling column, so CLUSTER_CANVAS keeps its 520 and the corner
+ * masks keep every offset they were computed against. Growing the canvas itself
+ * would re-centre the ring and move all four cards, including on clusters that
+ * have no rail at all.
+ */
+export const CLUSTER_RAIL = { width: 112, gap: 14 }
+
+export function clusterDesignWidth(hasRail: boolean): number {
+  return CLUSTER_CANVAS.width + (hasRail ? CLUSTER_RAIL.width + CLUSTER_RAIL.gap : 0)
+}
+
 export function computeCornerMasks(cfg: ClusterCanvasConfig) {
   const { width, height, ringBox, topCardW, bottomCardW, cardH, gap, radiusRatio = 130 / 140 } = cfg
   const topCardH = cfg.topCardH ?? cardH

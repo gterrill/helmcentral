@@ -167,9 +167,94 @@ describe('temperature telltales', () => {
     expect(container.querySelector('[data-cluster-dial]')!.contains(row)).toBe(true)
   })
 
+  /**
+   * Down in the wedge with the notch, not stacked under the reading. Together
+   * the four came to half the dial's height, which drove the reading up off the
+   * middle and through the scale numbers.
+   */
+  test('rides the dial foot rather than the readout', () => {
+    renderCluster(withTelltales())
+    const foot = screen.getByTestId('cluster-foot')
+
+    expect(foot.contains(screen.getByTestId('cluster-telltales'))).toBe(true)
+    expect(foot.contains(screen.getByTestId('cluster-notch'))).toBe(true)
+    expect(foot.className).toContain('absolute')
+    expect(foot.className).toContain('bottom-')
+    expect(foot.contains(screen.getByTestId('cluster-centre'))).toBe(false)
+  })
+
   test('renders no row at all when none are configured', () => {
     renderCluster()
     expect(screen.queryByTestId('cluster-telltales')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The fuel rail (ADR 0061) hangs off one edge of the tile. It widens only the
+ * design the canvas scales against: everything the corner masks were computed
+ * against has to stay where it was, or every cluster gains a hole in the middle.
+ */
+describe('fuel rail', () => {
+  const rail = {
+    side: 'left' as const,
+    bars: [{
+      level: { path: 'tanks.fuel.5.currentLevel', label: 'Fwd', display: 'bar' as const,
+        quantity: 'ratio', unit: 'percent', decimals: 0, min: 0, max: 100 },
+      capacity: { path: 'tanks.fuel.5.capacity', label: '', display: 'numeric' as const,
+        quantity: 'volume', unit: 'L', decimals: 0 },
+    }],
+  }
+  const withRail = (side: 'left' | 'right' = 'left'): EngineClusterConfig =>
+    ({ ...port, fuel: { ...rail, side } })
+
+  const fuelValues = { ...values, 'tanks.fuel.5.currentLevel': 0.7416, 'tanks.fuel.5.capacity': 1.2 }
+  const renderRailed = (config: EngineClusterConfig) =>
+    render(<EngineClusterTile config={config} values={fuelValues} editing={false} onConfigure={vi.fn()} />)
+
+  test('renders nothing extra when no rail is configured', () => {
+    const { container } = renderCluster()
+    expect(container.querySelector('[data-fuel-rail]')).toBeNull()
+  })
+
+  test('reads the tanks it is given', () => {
+    renderRailed(withRail())
+    expect(screen.getByTestId('fuel-total')).toHaveTextContent('890')
+  })
+
+  test('puts the rail on the configured edge and the dial block beside it', () => {
+    const { container: left } = renderRailed(withRail('left'))
+    const leftBody = left.querySelector('[data-cluster-body]') as HTMLElement
+    expect(parseFloat(leftBody.style.left)).toBeGreaterThan(0)
+
+    const { container: right } = renderRailed(withRail('right'))
+    const rightBody = right.querySelector('[data-cluster-body]') as HTMLElement
+    expect(parseFloat(rightBody.style.left)).toBe(0)
+  })
+
+  /**
+   * The corner masks are computed at module scope against a 520-wide canvas.
+   * If the rail moved the cards inside that box rather than shifting the whole
+   * box, every mask would cut in the wrong place.
+   */
+  test('leaves the corner geometry exactly where it was', () => {
+    const offsets = (config: EngineClusterConfig) => {
+      const { container } = renderRailed(config)
+      return [0, 1, 2, 3].map((i) => {
+        const el = container.querySelector(`[data-testid="cluster-corner-${i}"]`) as HTMLElement
+        return `${el.style.left}/${el.style.top}/${el.style.width}/${el.style.height}`
+      })
+    }
+    expect(offsets(withRail())).toEqual(offsets(port))
+  })
+
+  test('costs the tile no extra height, only width', () => {
+    const canvas = (config: EngineClusterConfig) =>
+      (renderRailed(config).container.querySelector('[data-cluster-canvas]') as HTMLElement).style
+
+    const bare = canvas(port)
+    const railed = canvas(withRail())
+    expect(railed.height).toBe(bare.height)
+    expect(parseFloat(railed.width)).toBeGreaterThan(parseFloat(bare.width))
   })
 })
 
@@ -350,8 +435,8 @@ describe('composition', () => {
     const hero = screen.getByTestId('cluster-centre-value')
     expect(hero).toHaveTextContent('698')
     expect(hero).not.toHaveTextContent('894')
-    expect(hero.className).toContain('text-5xl')
-    expect(screen.getByTestId('cluster-notch').className).not.toContain('text-5xl')
+    expect(hero.className).toContain('text-4xl')
+    expect(screen.getByTestId('cluster-notch').className).not.toContain('text-4xl')
   })
 
   test('puts the secondary reading in the notch', () => {

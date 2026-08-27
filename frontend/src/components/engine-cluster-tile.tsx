@@ -4,14 +4,14 @@ import { CoolantIcon, ExhaustIcon, GearboxIcon } from '@/components/ui/telltale-
 import { memo, type CSSProperties } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { DialRing } from '@/components/ui/dial-ring'
+import { DialRing, zoneColor } from '@/components/ui/dial-ring'
 import { Tile } from '@/components/ui/tile'
 import { CLUSTER_ICONS, iconForSlot } from '@/lib/cluster-icons'
-import { bezelOverhangFor, computeCornerMasks, useFitScale, type ClusterCanvasConfig } from '@/lib/cluster-canvas'
+import { reading, zoneFor, zoneTextClass } from '@/lib/cluster-readings'
+import { CLUSTER_CANVAS, CLUSTER_RAIL, clusterDesignWidth, computeCornerMasks, useFitScale } from '@/lib/cluster-canvas'
+import { FuelRail } from '@/components/ui/fuel-rail'
 import type { ClusterCorner, EngineClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { majorStepFor } from '@/components/gauge-tile'
-import { convertFromSI, formatQuantity, unitOption } from '@/lib/quantities'
-import type { GaugeZone } from '@/lib/dashboard-widgets'
 
 /**
  * An engine cluster (ADR 0054).
@@ -23,40 +23,7 @@ import type { GaugeZone } from '@/lib/dashboard-widgets'
  * DialRing's rim sits at 130 in a 280 viewBox, the same proportion the compass
  * uses, so the default radiusRatio carries over unchanged.
  */
-const RING_BOX = 218
-const CARD_W = 196
-const CARD_H = 92
-const GAP = 14
-
-/**
- * The bezel makes the dial a solid disc, so the canvas has to contain the
- * whole circle. It used to stop where the 250-degree sweep ended and let the
- * empty lower part of the ring box hang off the bottom, which cost nothing
- * while nothing was drawn there and put the dial through the tile's edge the
- * moment a bezel was.
- *
- * So the composition now closes on the circle: the disc is exactly as tall as
- * the block of boxes and centred on it, which is also what makes all four the
- * same size instead of the lower pair being stretched to reach the arc.
- */
-const OVERHANG = bezelOverhangFor(RING_BOX, GAP)
-const DISC = RING_BOX + 2 * OVERHANG
-const RING_TOP = OVERHANG
-const CARD_BLOCK_H = DISC
-
-const CLUSTER_CFG: ClusterCanvasConfig = {
-  width: 520,
-  height: CARD_BLOCK_H,
-  ringBox: RING_BOX,
-  ringTop: RING_TOP,
-  topCardW: CARD_W,
-  bottomCardW: CARD_W,
-  cardH: CARD_H,
-  bottomCardTop: CARD_BLOCK_H - CARD_H,
-  gap: GAP,
-}
-
-const CLUSTER_MASKS = computeCornerMasks(CLUSTER_CFG)
+const CLUSTER_MASKS = computeCornerMasks(CLUSTER_CANVAS)
 
 /**
  * The mask cuts a circle out of each card's ring-facing corner, so a reading
@@ -69,59 +36,6 @@ const CORNER_LAYOUT = [
   { align: 'items-start text-left', pad: 'pr-12' },
   { align: 'items-end text-right', pad: 'pl-12' },
 ] as const
-
-/** One reading, converted and formatted, or the structural dash when absent. */
-function reading(slot: GaugeWidgetConfig, values: Record<string, number | null>) {
-  const raw = values[slot.path] ?? null
-  const converted = raw === null ? null : convertFromSI(raw, slot.quantity, slot.unit)
-  return {
-    text: formatQuantity(raw, slot.quantity, slot.unit, slot.decimals),
-    unit: unitOption(slot.quantity, slot.unit).label,
-    converted,
-    zone: zoneFor(converted, slot.zones),
-  }
-}
-
-/**
- * The band a reading falls in, or `outside` when bands exist and it is in none
- * of them. A value that has left its healthy range must not keep reading
- * normal — answering "is anything wrong" is the whole job here.
- */
-function zoneFor(value: number | null, zones: GaugeZone[] | undefined): GaugeZone['state'] | 'outside' | null {
-  if (value === null || !zones || zones.length === 0) return null
-  const hit = zones.find((zone) => value >= Math.min(zone.from, zone.to) && value <= Math.max(zone.from, zone.to))
-  return hit ? hit.state : 'outside'
-}
-
-function zoneTextClass(state: ReturnType<typeof zoneFor>): string {
-  switch (state) {
-    case 'emergency':
-    case 'alarm':
-      return 'text-red-500'
-    case 'warn':
-    case 'outside':
-      return 'text-amber-500'
-    case 'alert':
-      return 'text-amber-400'
-    default:
-      return 'text-gauge-primary'
-  }
-}
-
-function zoneFill(state: GaugeZone['state']): string {
-  switch (state) {
-    case 'emergency':
-      return 'hsl(0 72% 42%)'
-    case 'alarm':
-      return 'hsl(0 72% 51%)'
-    case 'warn':
-      return 'hsl(38 92% 50%)'
-    case 'alert':
-      return 'hsl(43 96% 56%)'
-    default:
-      return 'hsl(142 71% 45%)'
-  }
-}
 
 /**
  * A hairline of the reading's own scale, using the room the mask leaves in the
@@ -143,7 +57,7 @@ function ZoneBar({ slot, value }: { slot: GaugeWidgetConfig; value: number | nul
       {zones.map((zone, index) => {
         const from = at(Math.min(zone.from, zone.to))
         const to = at(Math.max(zone.from, zone.to))
-        return <rect key={index} x={from} y="1.5" width={Math.max(0, to - from)} height="1" fill={zoneFill(zone.state)} />
+        return <rect key={index} x={from} y="1.5" width={Math.max(0, to - from)} height="1" fill={zoneColor(zone.state)} />
       })}
       {value !== null && (
         <rect x={Math.max(0, at(value) - 0.9)} y="0" width="1.8" height="4" fill="hsl(var(--foreground))" />
@@ -257,13 +171,13 @@ function telltaleClass(state: ReturnType<typeof zoneFor>, value: number | null):
 }
 
 /**
- * The telltale row, under the hours notch inside the dial. It sits in the wedge
- * the 250-degree sweep leaves at the bottom, so it costs the composition
+ * The telltale row, under the hours notch at the dial's foot. It sits in the
+ * wedge the 250-degree sweep leaves at the bottom, so it costs the composition
  * nothing and puts the lights where the eye already is.
  */
 function Telltales({ slots, values }: { slots: GaugeWidgetConfig[]; values: Record<string, number | null> }) {
   return (
-    <div data-testid="cluster-telltales" className="mt-2 flex items-center justify-center gap-3">
+    <div data-testid="cluster-telltales" className="mt-1.5 flex items-center justify-center gap-3">
       {slots.map((slot, index) => {
         const { text, converted, zone } = reading(slot, values)
         const { kind, Icon } = telltaleIcon(slot.path)
@@ -289,7 +203,15 @@ interface EngineClusterTileProps {
 export const EngineClusterTile = memo(function EngineClusterTile({
   config, values, editing, onConfigure,
 }: EngineClusterTileProps) {
-  const [ref, scale] = useFitScale(CLUSTER_CFG.width)
+  // The rail widens only the design the canvas is scaled against. The body
+  // keeps its own 520-wide coordinate space, which is what every corner mask
+  // was computed in.
+  const fuel = config.fuel
+  const designWidth = clusterDesignWidth(Boolean(fuel))
+  const bodyLeft = fuel?.side === 'left' ? CLUSTER_RAIL.width + CLUSTER_RAIL.gap : 0
+  const railLeft = fuel?.side === 'left' ? 0 : CLUSTER_CANVAS.width + CLUSTER_RAIL.gap
+
+  const [ref, scale] = useFitScale(designWidth)
   const title = config.title.trim() || 'Engine'
 
   const ring = reading(config.ring, values)
@@ -298,7 +220,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   const ringMax = config.ring.max ?? 100
 
   const telltales = config.telltales ?? []
-  const { width, height, ringBox, ringTop, topCardW, bottomCardW } = CLUSTER_CFG
+  const { width, height, ringBox, ringTop, topCardW, bottomCardW } = CLUSTER_CANVAS
   const { topCardH, bottomCardH, bottomCardTop } = CLUSTER_MASKS.geometry
   // The telltales live inside the dial now, so the canvas is exactly the block
   // of boxes again and the disc still spans it.
@@ -343,8 +265,17 @@ export const EngineClusterTile = memo(function EngineClusterTile({
           // useFitScale is what handles narrow columns; the box itself must
           // not also try to.
           className="relative shrink-0"
-          style={{ width, height: canvasH, transform: `scale(${scale})`, transformOrigin: 'top center' }}
+          style={{ width: designWidth, height: canvasH, transform: `scale(${scale})`, transformOrigin: 'top center' }}
         >
+          {fuel && (
+            <div className="absolute" style={{ left: railLeft, top: 0 }}>
+              <FuelRail config={fuel} values={values} height={canvasH} />
+            </div>
+          )}
+
+          {/* The body keeps the canvas's own width whatever the rail does, so
+              the cards sit at the offsets their masks were cut for. */}
+          <div data-cluster-body="" className="absolute" style={{ left: bodyLeft, top: 0, width, height: canvasH }}>
           <div
             data-cluster-dial=""
             className="absolute"
@@ -363,10 +294,16 @@ export const EngineClusterTile = memo(function EngineClusterTile({
               labelEvery={2}
               zones={config.ring.zones}
             >
-              {/* The centre belongs to the ring reading alone. */}
+              {/* The centre belongs to the ring reading alone.
+                  Two groups, not one stack: the reading is centred on the dial
+                  and the hours notch and telltales hang off its foot. Stacked
+                  together they came to half the dial's height, which pushed the
+                  reading up off the middle and straight through the scale
+                  numbers - the widest part of the readout meeting the narrowest
+                  part of the face. */}
               <div data-testid="cluster-centre" className="flex flex-col items-center">
                 <span data-testid="cluster-centre-value"
-                  className={`font-display text-5xl leading-none tracking-tight tabular-nums ${zoneTextClass(ring.zone)}`}>
+                  className={`font-display text-4xl leading-none tracking-tight tabular-nums ${zoneTextClass(ring.zone)}`}>
                   {ring.text ?? '--'}
                 </span>
                 {/* A rule between the reading and what it is measured in. It
@@ -375,21 +312,29 @@ export const EngineClusterTile = memo(function EngineClusterTile({
                 <div className="mt-1.5 h-0.5 w-[68px] bg-foreground/25" />
                 {/* The divisor belongs with the unit it scales, not floating
                     at the dial's foot where the notch now sits. */}
-                <span className="mt-1.5 text-sm font-semibold uppercase tracking-[0.16em] text-foreground">
+                <span className="mt-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-foreground">
                   {config.ring.label.trim() || ring.unit}
                   {config.ring.labelDivisor ? ` x${config.ring.labelDivisor}` : ''}
                 </span>
+              </div>
 
-                {/* Stacked rather than positioned against the dial: an
-                    absolutely placed badge has to dodge whatever height the
-                    readout above it happens to take. */}
+              {/* The foot: the hours notch and the telltale row, in the wedge
+                  the 250-degree sweep leaves at the bottom. Pinned there rather
+                  than stacked under the reading, so neither group moves when
+                  the other changes height. 15% clears the rim at the width the
+                  row runs to. */}
+              <div data-testid="cluster-foot"
+                className="absolute bottom-[15%] left-0 right-0 flex flex-col items-center">
+                {/* Smaller than the reading it sits under by more than one
+                    step. Hours are a number you look up, not one you monitor,
+                    and at text-sm the pill crowded the unit caption above it. */}
                 <span data-testid="cluster-notch"
-                  className="mt-2.5 flex items-center gap-1.5 rounded-full border bg-card/90 px-2.5 py-1">
+                  className="flex items-center gap-1.5 rounded-full border bg-card/90 px-2 py-0.5">
                   <SlotIcon name={config.centreIcon} slot={config.centre} className="size-3 shrink-0 text-gauge-secondary" />
-                  <span className="font-display text-sm leading-none tabular-nums text-gauge-secondary">
+                  <span className="font-display text-xs leading-none tabular-nums text-gauge-secondary">
                     {centre.text ?? '--'}
                   </span>
-                  {centre.unit && <span className="text-[10px] text-muted-foreground">{centre.unit}</span>}
+                  {centre.unit && <span className="text-[9px] text-muted-foreground">{centre.unit}</span>}
                 </span>
 
                 {telltales.length > 0 && <Telltales slots={telltales} values={values} />}
@@ -400,6 +345,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
           {config.corners.slice(0, CORNER_LAYOUT.length).map((corner, index) => (
             <CornerCard key={index} index={index} corner={corner} values={values} style={cardStyles[index]} />
           ))}
+          </div>
         </div>
       </div>
     </Tile>

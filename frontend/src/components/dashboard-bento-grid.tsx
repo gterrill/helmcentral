@@ -6,6 +6,7 @@ import '@/styles/dashboard-bento-grid.css'
 import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
+import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
 import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 
 const ReactGridLayout = WidthProvider(GridLayout)
@@ -13,8 +14,18 @@ const ReactGridLayout = WidthProvider(GridLayout)
 // RGL's row geometry. Shared with the narrow CSS grid below, which derives each tile's
 // minimum height from the same numbers so a tile keeps roughly its authored proportions.
 const GRID_COLUMNS = 12
-const GRID_ROW_HEIGHT = 32
-const GRID_MARGIN = 16
+export const GRID_ROW_HEIGHT = 32
+export const GRID_MARGIN = 16
+
+/** What a row count is worth in pixels: n rows and the n-1 margins between them. */
+export function gridPixelHeight(rows: number): number {
+  return rows * GRID_ROW_HEIGHT + Math.max(0, rows - 1) * GRID_MARGIN
+}
+
+/** The fewest whole rows that will hold a given height. */
+function rowsForHeight(px: number): number {
+  return Math.ceil((px + GRID_MARGIN) / (GRID_ROW_HEIGHT + GRID_MARGIN))
+}
 
 // At half the 12-column grid or wider, a tile was authored as a "big" one and stays
 // full-bleed in the two-column narrow layout instead of being squeezed into a half.
@@ -32,8 +43,37 @@ const GAUGE_GROUP_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
 // A ribbon is wide and short by nature.
 const LAMP_STRIP_WIDGET_CONSTRAINTS = { minW: 3, minH: 2 }
 
-// The cluster canvas is 460x300, so anything narrower just scales it down.
-const CLUSTER_WIDGET_CONSTRAINTS = { minW: 4, minH: 9 }
+// Tile header, its top padding, and the card's bottom padding: everything the
+// cluster canvas sits inside. Measured rather than derived, since it comes out
+// of the Card and CardHeader utility classes rather than a number this file
+// could import.
+const TILE_CHROME_H = 54 + 16
+
+/**
+ * Derived from the canvas rather than written down beside it. The number here
+ * used to be nine rows against a comment claiming a 460x300 canvas, and it
+ * outlived two rebuilds of the cluster: by the time the canvas settled at 228px
+ * tall the floor was 120px above what the tile needed, and the tile could not be
+ * resized down at all.
+ *
+ * The canvas only ever scales down (see useFitScale), so its design height is
+ * the tallest the tile ever gets and a wider column costs no extra rows.
+ */
+const CLUSTER_WIDGET_CONSTRAINTS = {
+  minW: 4,
+  minH: rowsForHeight(TILE_CHROME_H + CLUSTER_CANVAS.height),
+}
+
+/**
+ * A cluster carrying a fuel rail needs a wider column (ADR 0061). The rail adds
+ * 126 to a 520-wide design, so at the bare floor of 4 the whole canvas scales
+ * to about 0.6 and the corner labels drop under the legibility floor. Applied
+ * per widget rather than raising the constant, so a cluster with no rail keeps
+ * the width it has always had.
+ */
+export const CLUSTER_FUEL_MIN_W = 5
+
+export { CLUSTER_WIDGET_CONSTRAINTS }
 
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
@@ -81,7 +121,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       w: w.w,
       h: w.h,
       ...(isClusterWidgetId(w.id)
-        ? CLUSTER_WIDGET_CONSTRAINTS
+        ? { ...CLUSTER_WIDGET_CONSTRAINTS, ...(w.cluster?.fuel ? { minW: CLUSTER_FUEL_MIN_W } : {}) }
         : isLampStripWidgetId(w.id)
         ? LAMP_STRIP_WIDGET_CONSTRAINTS
         : isEmbedWidgetId(w.id)

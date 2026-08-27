@@ -21,6 +21,11 @@ import (
 
 const zoneDerivedAlarmRuleIDPrefix = "zone:"
 
+// Where a cluster's fuel bars start in the flat index space, past every corner
+// row a cluster can hold. Fixed rather than derived from the corners actually
+// present, so editing them cannot renumber a fuel bar's derived alarm.
+const clusterFuelZoneIndexBase = 2 + clusterMaxCorners*clusterMaxCornerRows
+
 const (
 	// A value hovering at a threshold is the reason people switch marine
 	// alarms off entirely. A zone carries no opinion about either of these, so
@@ -180,6 +185,18 @@ func zoneDerivedAlarmRules() []alarmRule {
 					for _, row := range corner.Rows {
 						collect(widget.ID, index, row)
 						index++
+					}
+				}
+				// Fuel bars sit at a fixed base past every corner row a cluster
+				// can hold, rather than continuing the counter above. Appending
+				// would keep the ids already issued stable but renumber the
+				// fuel bars whenever a corner row was added, so an unrelated
+				// edit would orphan a low-fuel alarm's history and its
+				// acknowledgement. Level slots only: a capacity is a constant,
+				// and an alarm derived from one would never clear.
+				if widget.Cluster.Fuel != nil {
+					for i, bar := range widget.Cluster.Fuel.Bars {
+						collect(widget.ID, clusterFuelZoneIndexBase+i, bar.Level)
 					}
 				}
 			}
