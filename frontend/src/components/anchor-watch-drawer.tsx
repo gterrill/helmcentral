@@ -64,6 +64,13 @@ interface AnchorWatchDrawerProps {
   windBandId: string | null
   onWindBandChange: (bandId: string) => void
   onUpdateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
+  // The resolved planning depth (App.tsx owns it — ADR 0063): the persisted
+  // watch record while anchored, the not-anchored session what-if otherwise.
+  // Feeds both the map's Scope row here and the Rode Planner below it, so the
+  // two can't disagree.
+  planningDepthM: number | null
+  planningTideHeightFt: number | null
+  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => void
 }
 
 export function AnchorWatchDrawer({
@@ -111,15 +118,23 @@ export function AnchorWatchDrawer({
   windBandId,
   onWindBandChange,
   onUpdateRodeAndConditions,
+  planningDepthM,
+  planningTideHeightFt,
+  onPlanningDepthChange,
 }: AnchorWatchDrawerProps) {
+  const isAnchored = anchorState !== 'none'
+
   // Rendered by the map's metric overlay as the Scope row, under Current
   // (ADR 0059 §3) — shared with the tile via computeScopeRecommendation, and
   // with the Rode Planner below via windBandId, so all three plan against
-  // the same forecast band.
+  // the same forecast band and the same resolved depth (ADR 0063).
   const scopeRecommendation = useMemo(
     () =>
       computeScopeRecommendation({
-        depthMeters,
+        isAnchored,
+        liveDepthM: depthMeters,
+        planningDepthM,
+        planningTideHeightFt,
         tide,
         maxGustKts,
         windSpeedApparentKts,
@@ -128,7 +143,19 @@ export function AnchorWatchDrawer({
         anchorConfig,
         selectedWindBandId: windBandId,
       }),
-    [depthMeters, tide, maxGustKts, windSpeedApparentKts, seaState, seabedType, anchorConfig, windBandId],
+    [
+      isAnchored,
+      depthMeters,
+      planningDepthM,
+      planningTideHeightFt,
+      tide,
+      maxGustKts,
+      windSpeedApparentKts,
+      seaState,
+      seabedType,
+      anchorConfig,
+      windBandId,
+    ],
   )
 
   return (
@@ -213,6 +240,9 @@ export function AnchorWatchDrawer({
           seaState={seaState}
           seabedType={seabedType}
           depthM={depthMeters}
+          planningDepthM={planningDepthM}
+          planningTideHeightFt={planningTideHeightFt}
+          onPlanningDepthChange={onPlanningDepthChange}
           windSpeedApparentKts={windSpeedApparentKts}
           maxGustKts={maxGustKts}
           tide={tide}

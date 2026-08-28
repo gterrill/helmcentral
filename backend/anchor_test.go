@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -440,4 +441,490 @@ func patchAnchorWatchForTest(t *testing.T, body map[string]any) (int, map[string
 	var decoded map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &decoded)
 	return rec.Code, decoded
+}
+
+// resetAnchorWatchState clears the package-level anchor watch so a test that
+// needs a genuine drop (current == nil) isn't at the mercy of whatever an
+// earlier test in this binary happened to leave behind. anchorTestEnv only
+// isolates the on-disk file and settings; anchorWatchState is an in-memory
+// package var that outlives it.
+func resetAnchorWatchState(t *testing.T) {
+	t.Helper()
+	anchorWatchMu.Lock()
+	anchorWatchState = nil
+	anchorWatchMu.Unlock()
+}
+
+// Test 9: POST persists the planning_depth_m / planning_tide_height_ft pair
+// seeded at the moment of drop, and it reads back both from the POST
+// response itself and from a subsequent GET.
+func TestSetAnchorWatch_StoresThePlanningDepthAndTide(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat":                     -21.1113,
+		"lon":                     149.2276,
+		"planning_depth_m":        6.2,
+		"planning_tide_height_ft": 1.4,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+	if got, _ := resp["planning_depth_m"].(float64); got != 6.2 {
+		t.Fatalf("expected planning_depth_m 6.2 in POST response, got %v", resp["planning_depth_m"])
+	}
+	if got, _ := resp["planning_tide_height_ft"].(float64); got != 1.4 {
+		t.Fatalf("expected planning_tide_height_ft 1.4 in POST response, got %v", resp["planning_tide_height_ft"])
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/anchor-watch", nil)
+	rec := httptest.NewRecorder()
+	if err := getAnchorWatch(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("getAnchorWatch: %v", err)
+	}
+	var getResp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &getResp)
+	if got, _ := getResp["planning_depth_m"].(float64); got != 6.2 {
+		t.Fatalf("expected GET planning_depth_m 6.2, got %v", getResp["planning_depth_m"])
+	}
+	if got, _ := getResp["planning_tide_height_ft"].(float64); got != 1.4 {
+		t.Fatalf("expected GET planning_tide_height_ft 1.4, got %v", getResp["planning_tide_height_ft"])
+	}
+}
+
+// Test 10: with neither field sent and no prior watch, planning_depth_m and
+// planning_tide_height_ft default to the -1 "not captured" sentinel, never 0
+// - 0 is a valid depth/tide reading on its own and must not be confused
+// with "nothing was recorded".
+func TestSetAnchorWatch_PlanningDepthDefaultsToSentinelWhenOmitted(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1113,
+		"lon": 149.2276,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", code, resp)
+	}
+	if got, _ := resp["planning_depth_m"].(float64); got != -1 {
+		t.Fatalf("expected planning_depth_m -1 when omitted, got %v", resp["planning_depth_m"])
+	}
+	if got, _ := resp["planning_tide_height_ft"].(float64); got != -1 {
+		t.Fatalf("expected planning_tide_height_ft -1 when omitted, got %v", resp["planning_tide_height_ft"])
+	}
+}
+
+// Test 11: the most important guard in this file. patchAnchorWatch rebuilds
+// the whole record field-by-field from `current` before applying the PATCH
+// (the `updated := &anchorWatchData{...}` literal); omitting the planning
+// depth pair from that copy silently zeroes it out, and a working plan goes
+// dark because the operator picked "choppy". A sea-state PATCH must carry
+// planning_depth_m/planning_tide_height_ft through untouched, both in the
+// response and across a disk round trip via loadAnchorWatch.
+func TestPatchAnchorWatch_CarriesPlanningDepthThrough(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat":                     -21.1113,
+		"lon":                     149.2276,
+		"planning_depth_m":        6.2,
+		"planning_tide_height_ft": 1.4,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 from post, got %d: %+v", code, resp)
+	}
+
+	patchCode, patchResp := patchAnchorWatchForTest(t, map[string]any{"sea_state": "choppy"})
+	if patchCode != http.StatusOK {
+		t.Fatalf("expected 200 from patch, got %d: %+v", patchCode, patchResp)
+	}
+	if got, _ := patchResp["planning_depth_m"].(float64); got != 6.2 {
+		t.Fatalf("expected PATCH response to carry planning_depth_m 6.2 through, got %v", patchResp["planning_depth_m"])
+	}
+	if got, _ := patchResp["planning_tide_height_ft"].(float64); got != 1.4 {
+		t.Fatalf("expected PATCH response to carry planning_tide_height_ft 1.4 through, got %v", patchResp["planning_tide_height_ft"])
+	}
+
+	// Survives a disk round trip, not just held in memory.
+	resetAnchorWatchState(t)
+	loadAnchorWatch()
+
+	anchorWatchMu.RLock()
+	reloaded := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if reloaded == nil {
+		t.Fatalf("expected a watch to load from disk")
+	}
+	if reloaded.PlanningDepthM != 6.2 {
+		t.Fatalf("expected reloaded PlanningDepthM 6.2, got %v", reloaded.PlanningDepthM)
+	}
+	if reloaded.PlanningTideHeightFt != 1.4 {
+		t.Fatalf("expected reloaded PlanningTideHeightFt 1.4, got %v", reloaded.PlanningTideHeightFt)
+	}
+}
+
+// Test 12: the planning depth pair is directly patchable - it's how the
+// operator corrects a wrong or missing depth after the drop, since the
+// revert-to-capture button is gone and editing now overwrites in place. A
+// PATCH setting both fields updates them, in the response and across a disk
+// round trip via loadAnchorWatch, and planning_depth_m: -1 clears both - a
+// half-cleared pair is not a thing.
+func TestPatchAnchorWatch_UpdatesPlanningDepthAndPersists(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1113,
+		"lon": 149.2276,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 from post, got %d: %+v", code, resp)
+	}
+
+	setCode, setResp := patchAnchorWatchForTest(t, map[string]any{
+		"planning_depth_m":        8.5,
+		"planning_tide_height_ft": 0.9,
+	})
+	if setCode != http.StatusOK {
+		t.Fatalf("expected 200 setting the planning depth, got %d: %+v", setCode, setResp)
+	}
+	if got, _ := setResp["planning_depth_m"].(float64); got != 8.5 {
+		t.Fatalf("expected planning_depth_m 8.5, got %v", setResp["planning_depth_m"])
+	}
+	if got, _ := setResp["planning_tide_height_ft"].(float64); got != 0.9 {
+		t.Fatalf("expected planning_tide_height_ft 0.9, got %v", setResp["planning_tide_height_ft"])
+	}
+
+	// Survives a disk round trip, not just held in memory.
+	resetAnchorWatchState(t)
+	loadAnchorWatch()
+
+	anchorWatchMu.RLock()
+	reloaded := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if reloaded == nil {
+		t.Fatalf("expected a watch to load from disk")
+	}
+	if reloaded.PlanningDepthM != 8.5 {
+		t.Fatalf("expected reloaded PlanningDepthM 8.5, got %v", reloaded.PlanningDepthM)
+	}
+	if reloaded.PlanningTideHeightFt != 0.9 {
+		t.Fatalf("expected reloaded PlanningTideHeightFt 0.9, got %v", reloaded.PlanningTideHeightFt)
+	}
+
+	clearCode, clearResp := patchAnchorWatchForTest(t, map[string]any{"planning_depth_m": -1.0})
+	if clearCode != http.StatusOK {
+		t.Fatalf("expected 200 clearing the planning depth, got %d: %+v", clearCode, clearResp)
+	}
+	if got, _ := clearResp["planning_depth_m"].(float64); got != -1 {
+		t.Fatalf("expected planning_depth_m -1 after clearing, got %v", clearResp["planning_depth_m"])
+	}
+	if got, _ := clearResp["planning_tide_height_ft"].(float64); got != -1 {
+		t.Fatalf("expected planning_tide_height_ft -1 after clearing (a half-cleared pair is not a thing), got %v", clearResp["planning_tide_height_ft"])
+	}
+}
+
+// Test 13: the pair rule, enforced at the boundary. A positive
+// planning_depth_m arriving without planning_tide_height_ft in the same
+// PATCH is rejected - there is no way to know what instant the depth
+// reading is from otherwise.
+func TestPatchAnchorWatch_RejectsPlanningDepthWithoutItsTideStamp(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1113,
+		"lon": 149.2276,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 from post, got %d: %+v", code, resp)
+	}
+
+	patchCode, patchResp := patchAnchorWatchForTest(t, map[string]any{"planning_depth_m": 8.5})
+	if patchCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 when planning_depth_m arrives without its tide stamp, got %d: %+v", patchCode, patchResp)
+	}
+}
+
+// Test 14: a clear-only body of just planning_depth_m: -1 must not trip the
+// "no patch fields provided" 400 - it's a legitimate patch (clearing the
+// planning depth), not an empty one.
+func TestPatchAnchorWatch_PlanningDepthOnlyBodyIsNotEmpty(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1113,
+		"lon": 149.2276,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 from post, got %d: %+v", code, resp)
+	}
+
+	patchCode, patchResp := patchAnchorWatchForTest(t, map[string]any{"planning_depth_m": -1.0})
+	if patchCode != http.StatusOK {
+		t.Fatalf("expected 200, not the empty-body 400, got %d: %+v", patchCode, patchResp)
+	}
+	if got, _ := patchResp["error"].(string); got == "no patch fields provided" {
+		t.Fatalf("planning_depth_m: -1 alone must not be treated as an empty patch body")
+	}
+}
+
+// Test 15: updatePosition (a map marker drag) is a POST, and it must not
+// wipe the planning depth pair the way a naive full-replace would. A drop
+// with the pair, followed by a reposition POST with neither
+// apply_bow_offset nor the pair, must carry the pair forward from the
+// previous record.
+func TestSetAnchorWatch_RepositionCarriesPlanningDepthForward(t *testing.T) {
+	anchorTestEnv(t, 8)
+	seedHeadingTrue(t, 0)
+	resetAnchorWatchState(t)
+
+	dropCode, dropResp := postAnchorWatch(t, map[string]any{
+		"lat":                     -21.1113,
+		"lon":                     149.2276,
+		"apply_bow_offset":        true,
+		"planning_depth_m":        6.2,
+		"planning_tide_height_ft": 1.4,
+	})
+	if dropCode != http.StatusOK {
+		t.Fatalf("expected 200 from drop, got %d: %+v", dropCode, dropResp)
+	}
+
+	repositionCode, repositionResp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1120,
+		"lon": 149.2280,
+		// apply_bow_offset and the depth/tide pair both omitted, exactly
+		// like a map marker drag (updatePosition) does.
+	})
+	if repositionCode != http.StatusOK {
+		t.Fatalf("expected 200 from reposition, got %d: %+v", repositionCode, repositionResp)
+	}
+	if got, _ := repositionResp["planning_depth_m"].(float64); got != 6.2 {
+		t.Fatalf("expected planning_depth_m 6.2 to survive the reposition, got %v", repositionResp["planning_depth_m"])
+	}
+	if got, _ := repositionResp["planning_tide_height_ft"].(float64); got != 1.4 {
+		t.Fatalf("expected planning_tide_height_ft 1.4 to survive the reposition, got %v", repositionResp["planning_tide_height_ft"])
+	}
+}
+
+// Test 16: a legacy anchor_watch.json written before this change has neither
+// of the new fields. loadAnchorWatch must decode it without error, and the
+// missing fields must read as 0 (not -1) and be reported as 0 - the "not
+// captured" state, with no migration, per the read predicate (>0 for depth,
+// >=0 for tide) documented on anchorWatchData.
+func TestLoadAnchorWatch_LegacyFileWithNoPlanningDepthReadsAsUnset(t *testing.T) {
+	anchorTestEnv(t, 0)
+
+	legacy := `{
+		"lat": -21.1113,
+		"lon": 149.2276,
+		"radius_meters": 20,
+		"rode_deployed_m": 30,
+		"sea_state": "calm",
+		"seabed_type": "sand",
+		"set_at": "2026-01-01T00:00:00Z",
+		"bow_offset_m": 0,
+		"bow_offset_applied": false,
+		"bow_offset_reason": "",
+		"heading_at_set_deg": -1,
+		"place_name": "Legacy Cove"
+	}`
+	if err := os.WriteFile(anchorWatchFilePath(), []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy file: %v", err)
+	}
+
+	resetAnchorWatchState(t)
+	loadAnchorWatch()
+
+	anchorWatchMu.RLock()
+	loaded := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if loaded == nil {
+		t.Fatalf("expected the legacy file to load")
+	}
+	if loaded.PlanningDepthM != 0 {
+		t.Fatalf("expected PlanningDepthM 0 for a legacy file with no depth fields, got %v", loaded.PlanningDepthM)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/anchor-watch", nil)
+	rec := httptest.NewRecorder()
+	if err := getAnchorWatch(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("getAnchorWatch: %v", err)
+	}
+	var getResp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &getResp)
+	if got, _ := getResp["planning_depth_m"].(float64); got != 0 {
+		t.Fatalf("expected GET planning_depth_m 0 for a legacy record, got %v", getResp["planning_depth_m"])
+	}
+}
+
+// Test 17: the other half of the pair rule. A PATCH body containing only
+// planning_tide_height_ft, with no planning_depth_m, must be rejected -
+// applying it would fall through to the apply block's stamp-only branch and
+// re-stamp the EXISTING planning depth with a tide height read at a
+// different instant. That is the same datum-mixing error the pair rule
+// exists to prevent (see Test 13), just arriving from the other direction,
+// and it must not silently corrupt a stored pair.
+func TestPatchAnchorWatch_RejectsTideStampWithoutItsDepth(t *testing.T) {
+	anchorTestEnv(t, 0)
+	resetAnchorWatchState(t)
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1113,
+		"lon": 149.2276,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 from post, got %d: %+v", code, resp)
+	}
+
+	setCode, setResp := patchAnchorWatchForTest(t, map[string]any{
+		"planning_depth_m":        8.5,
+		"planning_tide_height_ft": 0.9,
+	})
+	if setCode != http.StatusOK {
+		t.Fatalf("expected 200 establishing the planning depth pair, got %d: %+v", setCode, setResp)
+	}
+
+	patchCode, patchResp := patchAnchorWatchForTest(t, map[string]any{"planning_tide_height_ft": 4.0})
+	if patchCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 when planning_tide_height_ft arrives without planning_depth_m, got %d: %+v", patchCode, patchResp)
+	}
+
+	// The stored pair must be untouched by the rejected patch - not
+	// re-stamped with the new tide height and not partially applied.
+	anchorWatchMu.RLock()
+	depth := anchorWatchState.PlanningDepthM
+	tide := anchorWatchState.PlanningTideHeightFt
+	anchorWatchMu.RUnlock()
+	if depth != 8.5 {
+		t.Fatalf("expected planning_depth_m to remain 8.5 after the rejected patch, got %v", depth)
+	}
+	if tide != 0.9 {
+		t.Fatalf("expected planning_tide_height_ft to remain 0.9 after the rejected patch, got %v", tide)
+	}
+}
+
+// Test 18: patchAnchorWatch does a read-modify-write of the whole record
+// (see the comment on Test 11). The old implementation released its RLock
+// immediately after reading `current` and only took the write Lock at the
+// very end, after saveAnchorWatch's real disk write - a wide-enough window
+// for two concurrent PATCHes to both read the same `current` and for the
+// second writer's full-record rebuild (built from the now-stale snapshot) to
+// silently discard the first writer's change. This is documented as a known
+// trade in docs/adr/0063-planning-depth-captured-at-set.md's Consequences
+// section, and became reachable in practice because the Rode Planner
+// debounces depth on its own timer alongside the existing rode/sea-state/
+// seabed timer, so a sea-state change and a depth change landing in the same
+// 800ms window fire two overlapping PATCHes.
+//
+// Fires N concurrent PATCHes, each setting a different field, and requires
+// every one of them to have landed. Repeated over several trials because a
+// lost update is scheduler-dependent, not guaranteed on any single run -
+// against the old RLock-then-Lock implementation this reliably loses at
+// least one field within a handful of trials; against the fixed
+// whole-handler Lock it cannot, because the mutex makes the five PATCHes
+// strictly sequential.
+func TestPatchAnchorWatch_ConcurrentPatchesDoNotLoseUpdates(t *testing.T) {
+	anchorTestEnv(t, 0)
+
+	const trials = 5
+	for trial := 0; trial < trials; trial++ {
+		resetAnchorWatchState(t)
+		code, resp := postAnchorWatch(t, map[string]any{
+			"lat": -21.1113,
+			"lon": 149.2276,
+		})
+		if code != http.StatusOK {
+			t.Fatalf("trial %d: expected 200 from post, got %d: %+v", trial, code, resp)
+		}
+
+		radius := 30.0 + float64(trial)
+		rode := 40.0 + float64(trial)
+		seaState := "choppy"
+		if trial%2 == 1 {
+			seaState = "rough"
+		}
+		seabedType := "rock"
+		if trial%2 == 1 {
+			seabedType = "grass"
+		}
+		planningDepth := 8.0 + float64(trial)*0.1
+		planningTide := 0.5 + float64(trial)*0.1
+
+		bodies := []map[string]any{
+			{"radius_meters": radius},
+			{"rode_deployed_m": rode},
+			{"sea_state": seaState},
+			{"seabed_type": seabedType},
+			{"planning_depth_m": planningDepth, "planning_tide_height_ft": planningTide},
+		}
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errCh := make(chan error, len(bodies))
+
+		for _, body := range bodies {
+			wg.Add(1)
+			// Build the request/recorder up front and block each goroutine
+			// on the start gate right before the handler call, so closing
+			// the gate releases all of them as close to simultaneously as
+			// the scheduler allows.
+			go func(body map[string]any) {
+				defer wg.Done()
+				raw, err := json.Marshal(body)
+				if err != nil {
+					errCh <- fmt.Errorf("marshal %+v: %w", body, err)
+					return
+				}
+				e := echo.New()
+				req := httptest.NewRequest(http.MethodPatch, "/api/anchor-watch", strings.NewReader(string(raw)))
+				req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+				rec := httptest.NewRecorder()
+
+				<-start
+				if err := patchAnchorWatch(e.NewContext(req, rec)); err != nil {
+					errCh <- fmt.Errorf("handler for %+v: %w", body, err)
+					return
+				}
+				if rec.Code != http.StatusOK {
+					errCh <- fmt.Errorf("patch %+v: expected 200, got %d: %s", body, rec.Code, rec.Body.String())
+				}
+			}(body)
+		}
+		close(start)
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			t.Fatalf("trial %d: %v", trial, err)
+		}
+
+		anchorWatchMu.RLock()
+		final := *anchorWatchState
+		anchorWatchMu.RUnlock()
+
+		if final.RadiusMeters != radius {
+			t.Fatalf("trial %d: expected radius_meters %v to land, got %v (lost update)", trial, radius, final.RadiusMeters)
+		}
+		if final.RodeDeployedM != rode {
+			t.Fatalf("trial %d: expected rode_deployed_m %v to land, got %v (lost update)", trial, rode, final.RodeDeployedM)
+		}
+		if final.SeaState != seaState {
+			t.Fatalf("trial %d: expected sea_state %q to land, got %q (lost update)", trial, seaState, final.SeaState)
+		}
+		if final.SeabedType != seabedType {
+			t.Fatalf("trial %d: expected seabed_type %q to land, got %q (lost update)", trial, seabedType, final.SeabedType)
+		}
+		if final.PlanningDepthM != planningDepth {
+			t.Fatalf("trial %d: expected planning_depth_m %v to land, got %v (lost update)", trial, planningDepth, final.PlanningDepthM)
+		}
+		if final.PlanningTideHeightFt != planningTide {
+			t.Fatalf("trial %d: expected planning_tide_height_ft %v to land, got %v (lost update)", trial, planningTide, final.PlanningTideHeightFt)
+		}
+	}
 }

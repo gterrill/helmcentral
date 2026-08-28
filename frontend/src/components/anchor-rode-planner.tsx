@@ -5,7 +5,20 @@ import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { SeabedType, SeaState } from '@/lib/catenary'
-import { buildRodePlan, resolvePlanningWindBand, rodeMethods, scopeRatio, scopeStatus, WIND_BANDS, type RodePlanInput, type ScopeStatus } from '@/lib/rode-plan'
+import {
+  buildRodePlan,
+  maxExpectedDepthM,
+  resolvePlanningDepth,
+  resolvePlanningWindBand,
+  rodeMethods,
+  scopeRatio,
+  scopeStatus,
+  tideHeightFtOrNull,
+  WIND_BANDS,
+  type PlanningDepthDatum,
+  type RodePlanInput,
+  type ScopeStatus,
+} from '@/lib/rode-plan'
 import { Button } from '@/components/ui/button'
 import {
   Sidebar,
@@ -26,7 +39,20 @@ export interface AnchorRodePlannerProps {
   rodeDeployedM: number
   seaState: SeaState
   seabedType: SeabedType
+  // The live sounder reading — consulted directly while not anchored (ADR
+  // 0063 resolvePlanningDepth), but no longer the only depth this component
+  // plans against.
   depthM: number | null
+  // The planning depth: seeded from the depth at the moment the anchor was
+  // dropped and editable from there, and the tide height alongside it — a
+  // contemporaneous pair (ADR 0063), never re-derived from the current tide
+  // reading. Both null when nothing has been recorded (legacy record, or no
+  // reading was available at the moment of drop).
+  planningDepthM: number | null
+  planningTideHeightFt: number | null
+  // Routes to a PATCH when anchored, to React state when not (App.tsx
+  // decides which).
+  onPlanningDepthChange: (depthM: number, tideHeightFt: number | null) => void
   windSpeedApparentKts: number | null
   maxGustKts: Record<GustWindow, number | null>
   tide: TideToday | null
@@ -82,6 +108,9 @@ export function AnchorRodePlanner({
   seaState,
   seabedType,
   depthM,
+  planningDepthM,
+  planningTideHeightFt,
+  onPlanningDepthChange,
   windSpeedApparentKts,
   maxGustKts,
   tide,
@@ -101,16 +130,44 @@ export function AnchorRodePlanner({
   }, [open])
 
   const isInactive = anchorState === 'none'
+  const isAnchored = !isInactive
   const inactiveReason = 'Set anchor watch to record deployed rode and apply an alarm radius.'
 
   const [pendingSeaState, setPendingSeaState] = useState<SeaState>(seaState)
   const [pendingSeabedType, setPendingSeabedType] = useState<SeabedType>(seabedType)
   const [pendingRode, setPendingRode] = useState<number>(Math.max(0, toDisplayDistance(rodeDeployedM, isImperial)))
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Depth gets its own debounce ref, not handlePersist/debounceRef's: that
+  // one's `if (isInactive) return` guard exists because PATCH 404s with no
+  // watch. For depth, inactive is a valid destination (session state in
+  // App.tsx), not a dead end — see persistPlanningDepth below.
+  const depthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { setPendingSeaState(seaState) }, [seaState])
   useEffect(() => { setPendingSeabedType(seabedType) }, [seabedType])
   useEffect(() => { setPendingRode(Math.max(0, toDisplayDistance(rodeDeployedM, isImperial))) }, [rodeDeployedM, isImperial])
+
+  // debounceRef never had unmount cleanup before this change, and adding a
+  // second timer doubles the exposure: a stray PATCH firing after Raise
+  // unmounts the drawer would 404 against a deleted watch.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      if (depthDebounceRef.current) clearTimeout(depthDebounceRef.current)
+    }
+  }, [])
+
+  // The one place depth precedence lives (ADR 0063) — the recorded planning
+  // depth while anchored, the live sounder while not, with
+  // anchored-and-nothing-recorded resolving to null rather than silently
+  // falling back to the live sounder.
+  const resolvedDepth: PlanningDepthDatum | null = useMemo(() => resolvePlanningDepth({
+    isAnchored,
+    liveDepthM: depthM,
+    planningDepthM,
+    planningTideHeightFt,
+    tide,
+  }), [isAnchored, depthM, planningDepthM, planningTideHeightFt, tide])
 
   // The dropdown starts on whichever band the live seed (1h gust, else
   // apparent) falls in, and stays there until the operator picks another —
@@ -124,7 +181,8 @@ export function AnchorRodePlanner({
   const windKts = selectedBand?.planKts ?? null
 
   const planInput: RodePlanInput = useMemo(() => ({
-    sounderDepthM: depthM,
+    depth: resolvedDepth,
+    isAnchored,
     bowRollerHeightM: anchorConfig.bowRollerHeightM,
     tide,
     windKts,
@@ -134,7 +192,7 @@ export function AnchorRodePlanner({
     chainOnboardM: anchorConfig.chainOnboardM,
     windageAreaM2: anchorConfig.windageAreaM2,
     hullType: anchorConfig.hullType,
-  }), [depthM, tide, windKts, pendingSeaState, pendingSeabedType, anchorConfig])
+  }), [resolvedDepth, isAnchored, tide, windKts, pendingSeaState, pendingSeabedType, anchorConfig])
 
   const methodResults = useMemo(() => rodeMethods.map((method) => method(planInput)), [planInput])
   const plan = useMemo(() => buildRodePlan(planInput), [planInput])
@@ -212,6 +270,66 @@ export function AnchorRodePlanner({
 
   const unit = isImperial ? 'ft' : 'm'
 
+  // ADR 0063 — the editable Depth input holds the RAW reading
+  // (resolvedDepth.depthM), never plan.planningDepthM, which is already
+  // tide-corrected: typing over a corrected figure and storing the result
+  // would feed the rise back in and compound it on every render. The
+  // corrected figure moves into the caption below instead.
+  const seedDepthM = resolvedDepth?.depthM ?? null
+  const [depthInputValue, setDepthInputValue] = useState<string>('')
+
+  // Re-seeds from the datum's VALUE, not the object — resolvedDepth is a
+  // fresh object every render (an unchanged 10s poll still builds a new
+  // one), so keying this off seedDepthM (a primitive) is what lets a poll
+  // that returns the same number write an identical string and React bail
+  // out, rather than clobbering the field mid-typing.
+  useEffect(() => {
+    setDepthInputValue(seedDepthM !== null ? toDisplayDistance(seedDepthM, isImperial).toFixed(1) : '')
+  }, [seedDepthM, isImperial])
+
+  const persistPlanningDepth = useCallback((nextDepthM: number) => {
+    // Stamped with the tide right now, at the moment it was entered —
+    // useTideToday never returns null, so tideHeightFtOrNull is the one
+    // place the -1-sentinel-to-null rule lives (ADR 0063).
+    const tideHeightFt = tideHeightFtOrNull(tide)
+    if (isInactive) {
+      // No PATCH target when inactive — the planning depth lives in
+      // App.tsx's React state (a pre-drop what-if), a valid destination
+      // rather than a dead end, so it fires immediately instead of
+      // debouncing a write that has nothing to 404 against.
+      onPlanningDepthChange(nextDepthM, tideHeightFt)
+      return
+    }
+    if (depthDebounceRef.current) clearTimeout(depthDebounceRef.current)
+    depthDebounceRef.current = setTimeout(() => {
+      onPlanningDepthChange(nextDepthM, tideHeightFt)
+    }, 800)
+  }, [isInactive, onPlanningDepthChange, tide])
+
+  const handleDepthInputChange = useCallback((raw: string) => {
+    setDepthInputValue(raw)
+    // A momentarily empty field mid-typing is not a request to persist
+    // anything — the field always holds a value once one has been typed, so
+    // an in-progress edit simply doesn't persist yet.
+    if (raw.trim() === '') return
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed) || parsed <= 0) return
+    const nextDepthM = isImperial ? parsed / METERS_TO_FEET : parsed
+    persistPlanningDepth(nextDepthM)
+  }, [isImperial, persistPlanningDepth])
+
+  // Whether the rise to the next high got added — the caption's only job is
+  // to say so; the corrected figure itself isn't shown here (ADR 0047 still
+  // requires the visible fallback to sounder-only when uncorrected).
+  const isDepthTideCorrected = useMemo(() => maxExpectedDepthM(resolvedDepth, tide) !== null, [resolvedDepth, tide])
+
+  const depthCaption = (() => {
+    if (resolvedDepth === null) {
+      return isAnchored ? 'No depth entered — type the depth' : 'no depth reading'
+    }
+    return isDepthTideCorrected ? 'Tide adjusted' : 'sounder only — no tide station'
+  })()
+
   if (!open) {
     return (
       <button
@@ -262,22 +380,25 @@ export function AnchorRodePlanner({
                 long caption can't widen its 1fr track past half the sidebar. */}
             <SidebarGroupContent className="grid grid-cols-1 gap-2 lg:grid-cols-2">
               <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
-                <p className="font-display text-lg text-gauge-secondary tabular-nums">
-                  {plan !== null ? toDisplayDistance(plan.planningDepthM, isImperial).toFixed(1) : '—'}
-                  <span className="ml-1 text-xs text-muted-foreground">{unit}</span>
-                </p>
-                {/* The headline figure is the planning depth, so the caption
-                    only has to say which of the two it is. The sounder-only
-                    case still names its reason: the substitution has to stay
-                    visible (ADR 0047), it just doesn't need the arithmetic. */}
-                <p className="text-[10px] text-muted-foreground">
-                  {plan === null
-                    ? 'no depth reading'
-                    : plan.depthSource === 'tide'
-                      ? 'Tide adjusted'
-                      : 'sounder only — no tide station'}
-                </p>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Depth ({unit})</p>
+                {/* Holds the RAW reading, never plan.planningDepthM — that
+                    figure is already tide-corrected, so typing over it and
+                    storing the result would feed the rise back in and
+                    compound it on every render (ADR 0063's highest-
+                    consequence trap here). The corrected figure lives in the
+                    caption below instead. Empty (not prefilled with live
+                    depth) when anchored with nothing recorded — that is the
+                    strict no-fallback rule made visible, and this input is
+                    the remedy. */}
+                <input
+                  aria-label="Depth"
+                  type="number"
+                  step={isImperial ? 1 : 0.1}
+                  value={depthInputValue}
+                  onChange={(e) => handleDepthInputChange(e.target.value)}
+                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">{depthCaption}</p>
               </label>
 
               <label className="min-w-0 rounded-md border bg-background/60 px-3 py-2 text-left">

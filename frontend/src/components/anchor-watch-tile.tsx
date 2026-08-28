@@ -13,7 +13,7 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { AnchorConfig } from '@/config/app-config'
-import { computeScopeRecommendation } from '@/lib/rode-plan'
+import { computeScopeRecommendation, tideHeightFtOrNull } from '@/lib/rode-plan'
 
 interface AnchorWatchTileProps {
   watch: AnchorWatchResult
@@ -44,6 +44,13 @@ interface AnchorWatchTileProps {
   // rather than seeding its own raw wind. Null when there's no explicit pick
   // — computeScopeRecommendation falls back to the live seed.
   selectedWindBandId: string | null
+  // The resolved planning depth (App.tsx owns it — ADR 0063): the persisted
+  // watch record while anchored, the not-anchored session what-if otherwise.
+  // This tile has no control to set it, only to plan against it — the same
+  // resolved figure reaching the drawer and the planner is what keeps all
+  // three surfaces in agreement.
+  planningDepthM: number | null
+  planningTideHeightFt: number | null
 }
 
 export const AnchorWatchTile = memo(function AnchorWatchTile({
@@ -71,6 +78,8 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   maxGustKts,
   anchorConfig,
   selectedWindBandId,
+  planningDepthM,
+  planningTideHeightFt,
 }: AnchorWatchTileProps) {
   const {
     anchorState,
@@ -96,8 +105,11 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
 
   const handleDropHere = useCallback(() => {
     if (lat === null || lon === null) return
-    void setAnchorHere(lat, lon)
-  }, [lat, lon, setAnchorHere])
+    void setAnchorHere(lat, lon, {
+      planningDepthM: depthMeters,
+      planningTideHeightFt: tideHeightFtOrNull(tide),
+    })
+  }, [lat, lon, setAnchorHere, depthMeters, tide])
 
   // Nothing truthful to center a map on without either a live fix or an
   // anchor point — falls back from the live fix to the anchor (e.g. GPS lost
@@ -105,12 +117,17 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   const vesselLat = lat ?? anchorLat
   const vesselLon = lon ?? anchorLon
 
+  const isAnchored = anchorState !== 'none'
+
   // Rendered by the map's metric overlay as the Scope row, under Current
   // (ADR 0059 §3) — this tile no longer renders the readout itself.
   const rodeResult = useMemo(
     () =>
       computeScopeRecommendation({
-        depthMeters,
+        isAnchored,
+        liveDepthM: depthMeters,
+        planningDepthM,
+        planningTideHeightFt,
         tide,
         maxGustKts,
         windSpeedApparentKts,
@@ -119,7 +136,19 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
         anchorConfig,
         selectedWindBandId,
       }),
-    [depthMeters, tide, maxGustKts, windSpeedApparentKts, seaState, seabedType, anchorConfig, selectedWindBandId],
+    [
+      isAnchored,
+      depthMeters,
+      planningDepthM,
+      planningTideHeightFt,
+      tide,
+      maxGustKts,
+      windSpeedApparentKts,
+      seaState,
+      seabedType,
+      anchorConfig,
+      selectedWindBandId,
+    ],
   )
 
   return (

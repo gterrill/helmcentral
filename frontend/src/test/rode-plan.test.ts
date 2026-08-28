@@ -7,11 +7,13 @@ import {
   maxExpectedDepthM,
   MIN_SCOPE_RATIO,
   ratioMethod,
+  resolvePlanningDepth,
   resolvePlanningWindBand,
   rodeMethods,
   scopeRatio,
   scopeStatus,
   seedPlanningWindKts,
+  tideHeightFtOrNull,
   WIND_BANDS,
   windBandForKts,
   type RodePlanInput,
@@ -35,8 +37,12 @@ function makeTide(overrides: Partial<TideToday> = {}): TideToday {
   }
 }
 
+// Not-anchored, live-depth-only baseline (no tide stamp on the datum, so no
+// tide correction happens unless a test overrides `depth` too) — mirrors what
+// the old baseInput's `sounderDepthM: 5, tide: null` meant before this change.
 const baseInput: RodePlanInput = {
-  sounderDepthM: 5,
+  depth: { depthM: 5, tideHeightFt: null },
+  isAnchored: false,
   bowRollerHeightM: 1,
   tide: null,
   windKts: 20,
@@ -127,33 +133,140 @@ describe('calculateCatenary (characterization)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// tideHeightFtOrNull — useTideToday NEVER returns null; it returns
+// defaultTide with -1 sentinels. This is the one place that -1-to-null
+// normalization lives, so every caller (the two drop sites, the planner's
+// override entry, and resolvePlanningDepth's own "live" datum) shares it.
+// ---------------------------------------------------------------------------
+describe('tideHeightFtOrNull', () => {
+  it('returns the current tide height when the station has reported', () => {
+    expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: 2.5 }))).toBe(2.5)
+  })
+
+  it('returns null on the -1 sentinel, not -1 itself', () => {
+    expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: -1 }))).toBeNull()
+  })
+
+  it('returns null when there is no tide object at all', () => {
+    expect(tideHeightFtOrNull(null)).toBeNull()
+  })
+
+  it('treats exactly 0 as a valid reading, not "unset" (the real check is >= 0, not !== -1)', () => {
+    expect(tideHeightFtOrNull(makeTide({ current_tide_height_ft: 0 }))).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// resolvePlanningDepth — the one place precedence lives (shaped like the
+// existing resolvePlanningWindBand): anchored plans off the recorded
+// planning depth; else (not anchored) live sounder; anchored + nothing
+// recorded is a hard null, never a silent fall back to live depth.
+// ---------------------------------------------------------------------------
+describe('resolvePlanningDepth', () => {
+  const tide = makeTide({ current_tide_height_ft: 3, high_tide_height_ft: 5 })
+
+  it('rule 1: anchored uses the recorded planning depth, not the live sounder', () => {
+    const result = resolvePlanningDepth({
+      isAnchored: true,
+      liveDepthM: 99,
+      planningDepthM: 6,
+      planningTideHeightFt: 1.5,
+      tide,
+    })
+    expect(result).toEqual({ depthM: 6, tideHeightFt: 1.5 })
+  })
+
+  it('rule 2: not anchored uses the live sounder, tide-stamped from right now', () => {
+    const result = resolvePlanningDepth({
+      isAnchored: false,
+      liveDepthM: 5,
+      planningDepthM: null,
+      planningTideHeightFt: null,
+      tide,
+    })
+    expect(result).toEqual({ depthM: 5, tideHeightFt: 3 })
+  })
+
+  it('rule 3: anchored, nothing recorded -> null. Never a silent fall back to live depth', () => {
+    const result = resolvePlanningDepth({
+      isAnchored: true,
+      liveDepthM: 5,
+      planningDepthM: null,
+      planningTideHeightFt: null,
+      tide,
+    })
+    expect(result).toBeNull()
+  })
+
+  it('not anchored with no live reading is also null — nothing to plan against', () => {
+    const result = resolvePlanningDepth({
+      isAnchored: false,
+      liveDepthM: null,
+      planningDepthM: null,
+      planningTideHeightFt: null,
+      tide,
+    })
+    expect(result).toBeNull()
+  })
+
+  it('the live datum has no tide stamp when the tide station has no reading (sentinel -1)', () => {
+    const result = resolvePlanningDepth({
+      isAnchored: false,
+      liveDepthM: 5,
+      planningDepthM: null,
+      planningTideHeightFt: null,
+      tide: makeTide({ current_tide_height_ft: -1 }),
+    })
+    expect(result).toEqual({ depthM: 5, tideHeightFt: null })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // maxExpectedDepthM
 // ---------------------------------------------------------------------------
 describe('maxExpectedDepthM', () => {
   it('adds the rise to the next high on a rising tide', () => {
-    // current 2ft, high 5ft -> rise 3ft -> 3/3.28084 = 0.914...m
-    const result = maxExpectedDepthM(5, makeTide({ current_tide_height_ft: 2, high_tide_height_ft: 5 }))
+    // datum's own tide-at-reading is 2ft, high 5ft -> rise 3ft -> 3/3.28084 = 0.914...m
+    const datum = { depthM: 5, tideHeightFt: 2 }
+    const result = maxExpectedDepthM(datum, makeTide({ high_tide_height_ft: 5 }))
     expect(result).toBeCloseTo(5 + 3 / 3.28084, 6)
   })
 
-  it('clamps a falling tide so planning depth never drops below the sounder reading', () => {
-    // current 4ft is already above high 3ft (falling past the high) -> rise would
-    // be negative; must clamp to 0, not subtract.
-    const result = maxExpectedDepthM(5, makeTide({ current_tide_height_ft: 4, high_tide_height_ft: 3 }))
+  it('clamps a falling tide so planning depth never drops below the datum reading', () => {
+    // datum's tide-at-reading is 4ft, already above high 3ft (falling past the
+    // high) -> rise would be negative; must clamp to 0, not subtract.
+    const datum = { depthM: 5, tideHeightFt: 4 }
+    const result = maxExpectedDepthM(datum, makeTide({ high_tide_height_ft: 3 }))
     expect(result).toBe(5)
   })
 
-  it('returns null when depth is unavailable', () => {
+  it('returns null when the datum is unavailable', () => {
     expect(maxExpectedDepthM(null, makeTide())).toBeNull()
   })
 
   it('returns null when tide is unavailable', () => {
-    expect(maxExpectedDepthM(5, null)).toBeNull()
+    expect(maxExpectedDepthM({ depthM: 5, tideHeightFt: 2 }, null)).toBeNull()
   })
 
-  it('returns null when the tide station has no reading (sentinel -1)', () => {
-    expect(maxExpectedDepthM(5, makeTide({ current_tide_height_ft: -1 }))).toBeNull()
-    expect(maxExpectedDepthM(5, makeTide({ high_tide_height_ft: -1 }))).toBeNull()
+  it('returns null when the datum itself has no tide stamp (e.g. nothing recorded at the moment of drop)', () => {
+    expect(maxExpectedDepthM({ depthM: 5, tideHeightFt: null }, makeTide())).toBeNull()
+  })
+
+  it('returns null when the high-tide forecast has no reading (sentinel -1)', () => {
+    const datum = { depthM: 5, tideHeightFt: 2 }
+    expect(maxExpectedDepthM(datum, makeTide({ high_tide_height_ft: -1 }))).toBeNull()
+  })
+
+  // The datum-mixing regression: the bug this whole change fixes was mixing a
+  // depth reading from one moment with the tide reading from another. This
+  // pins that the rise is measured from the tide stamped alongside the
+  // reading, never from whatever the tide happens to be right now.
+  it('measures the rise from the tide at the reading, not the tide now', () => {
+    const datum = { depthM: 6, tideHeightFt: 1 }
+    // Risen from 1 ft to 4 ft since the reading; next high 5 ft.
+    const tide = makeTide({ current_tide_height_ft: 4, high_tide_height_ft: 5 })
+    expect(maxExpectedDepthM(datum, tide)).toBeCloseTo(6 + 4 / 3.28084, 6)     // correct
+    expect(maxExpectedDepthM(datum, tide)).not.toBeCloseTo(6 + 1 / 3.28084, 6) // the bug: short, unsafe
   })
 })
 
@@ -208,23 +321,24 @@ describe('scopeStatus', () => {
 // buildRodePlan
 // ---------------------------------------------------------------------------
 describe('buildRodePlan', () => {
-  it('uses the raw sounder depth and reports depthSource "sounder" with no tide', () => {
+  it('uses the raw live depth with no tide correction', () => {
     const plan = buildRodePlan(baseInput)
     expect(plan).not.toBeNull()
-    expect(plan!.depthSource).toBe('sounder')
+    expect(plan!.tideCorrected).toBe(false)
     expect(plan!.planningDepthM).toBe(5)
     expect(plan!.depthFromHawseM).toBe(6)
     expect(plan!.recommendedRodeM).toBeCloseTo(30.062226808928283, 6)
     expect(plan!.recommendedScope).toBeCloseTo(5.010371134821381, 6)
   })
 
-  it('uses the tide-corrected depth and reports depthSource "tide" when tide data is available', () => {
+  it('uses the tide-corrected depth and reports tideCorrected true when the datum carries a tide stamp', () => {
     const plan = buildRodePlan({
       ...baseInput,
+      depth: { depthM: 5, tideHeightFt: 2 },
       tide: makeTide({ current_tide_height_ft: 2, high_tide_height_ft: 5 }),
     })
     expect(plan).not.toBeNull()
-    expect(plan!.depthSource).toBe('tide')
+    expect(plan!.tideCorrected).toBe(true)
     expect(plan!.planningDepthM).toBeCloseTo(5 + 3 / 3.28084, 6)
   })
 
@@ -242,7 +356,7 @@ describe('buildRodePlan', () => {
   })
 
   it('returns null when depth is unavailable', () => {
-    expect(buildRodePlan({ ...baseInput, sounderDepthM: null })).toBeNull()
+    expect(buildRodePlan({ ...baseInput, depth: null })).toBeNull()
   })
 
   it('returns null when wind is unavailable', () => {
@@ -266,7 +380,7 @@ describe('buildRodePlan — MIN_SCOPE_RATIO floor', () => {
   it('floors recommendedRodeM/recommendedScope to MIN_SCOPE_RATIO in light wind and flags scopeFloorApplied', () => {
     const plan = buildRodePlan({ ...baseInput, windKts: 3 })
     expect(plan).not.toBeNull()
-    // depthFromHawseM is 5 (sounder) + 1 (bow roller) = 6, per baseInput.
+    // depthFromHawseM is 5 (live) + 1 (bow roller) = 6, per baseInput.
     expect(plan!.depthFromHawseM).toBe(6)
     expect(plan!.recommendedRodeM).toBe(18) // MIN_SCOPE_RATIO * 6
     expect(plan!.recommendedScope).toBe(3)
@@ -287,7 +401,7 @@ describe('buildRodePlan — MIN_SCOPE_RATIO floor', () => {
     // hand-picking a hardcoded expected number — compare against the same
     // physics function rather than a magic constant.
     const raw = calculateCatenary({
-      depthM: baseInput.sounderDepthM!,
+      depthM: baseInput.depth!.depthM,
       bowRollerHeightM: baseInput.bowRollerHeightM,
       windKts: 12,
       seaState: baseInput.seaState,
@@ -331,16 +445,23 @@ describe('catenaryMethod', () => {
   })
 
   it('names the missing input in unavailableReason rather than rendering a dash', () => {
-    const result = catenaryMethod({ ...baseInput, sounderDepthM: null })
+    const result = catenaryMethod({ ...baseInput, depth: null })
     expect(result).not.toBeNull()
     expect(result!.unavailableReason).toBeTruthy()
     expect(typeof result!.unavailableReason).toBe('string')
   })
 
   it('names a different reason when wind is missing than when depth is missing', () => {
-    const noDepth = catenaryMethod({ ...baseInput, sounderDepthM: null })
+    const noDepth = catenaryMethod({ ...baseInput, depth: null })
     const noWind = catenaryMethod({ ...baseInput, windKts: null })
     expect(noDepth!.unavailableReason).not.toBe(noWind!.unavailableReason)
+  })
+
+  it('names "no depth reading" when not anchored, and "no depth entered" when anchored — same missing depth, different reason', () => {
+    const notAnchored = catenaryMethod({ ...baseInput, depth: null, isAnchored: false })
+    const anchored = catenaryMethod({ ...baseInput, depth: null, isAnchored: true })
+    expect(notAnchored!.unavailableReason).toBe('no depth reading')
+    expect(anchored!.unavailableReason).toBe('no depth entered')
   })
 
   it('appends the floor marker to the note when the MIN_SCOPE_RATIO floor binds', () => {
@@ -353,8 +474,8 @@ describe('catenaryMethod', () => {
   // not depth alone, so the caption has to name both terms of that sum
   // rather than just the depth half of it — sitting between the depth clause
   // and the wind clause, ahead of chain/hull/floor.
-  it('names the bow roller height between the depth and wind clauses', () => {
-    const result = catenaryMethod(baseInput) // sounderDepthM 5, bowRollerHeightM 1, no tide
+  it('names the tide-correction status between the depth and wind clauses', () => {
+    const result = catenaryMethod(baseInput) // live depth 5, no tide, bowRollerHeightM 1
     expect(result).not.toBeNull()
     expect(result!.note).toContain('Depth 5.0 m (sounder only) + 1.0 m bow height · Wind 20 kts')
   })
@@ -400,10 +521,11 @@ describe('ratioMethod', () => {
     expect(result!.scopeRatio).toBe(5)
   })
 
-  it('plans against tide-corrected depth, same as buildRodePlan', () => {
+  it('plans against tide-corrected depth, same as buildRodePlan, when the datum carries a tide stamp', () => {
     const result = ratioMethod({
       ...baseInput,
       windKts: 15,
+      depth: { depthM: 5, tideHeightFt: 2 },
       tide: makeTide({ current_tide_height_ft: 2, high_tide_height_ft: 5 }),
     })
     expect(result).not.toBeNull()
@@ -412,7 +534,7 @@ describe('ratioMethod', () => {
     expect(result!.note).toContain('tide-corrected')
   })
 
-  it('falls back to sounder-only depth when the tide station has no reading (sentinel -1)', () => {
+  it('falls back to sounder-only depth when the datum carries no tide stamp', () => {
     const result = ratioMethod({
       ...baseInput,
       windKts: 15,
@@ -425,15 +547,20 @@ describe('ratioMethod', () => {
 
   // Same bow-height naming rule as catenaryMethod, and via the same helper:
   // the ratio scope is also computed against depth-from-hawse, not depth alone.
-  it('names the bow roller height between the depth and wind clauses', () => {
+  it('names the tide-correction status between the depth and wind clauses', () => {
     const result = ratioMethod({ ...baseInput, windKts: 15 })
     expect(result).not.toBeNull()
     expect(result!.note).toContain('Depth 5.0 m (sounder only) + 1.0 m bow height · Wind 15 kts')
   })
 
-  it('names "no depth reading" first in the unavailable ladder', () => {
-    const result = ratioMethod({ ...baseInput, sounderDepthM: null })
+  it('names "no depth reading" first in the unavailable ladder when not anchored', () => {
+    const result = ratioMethod({ ...baseInput, depth: null })
     expect(result!.unavailableReason).toBe('no depth reading')
+  })
+
+  it('names "no depth entered" when anchored with nothing recorded', () => {
+    const result = ratioMethod({ ...baseInput, depth: null, isAnchored: true })
+    expect(result!.unavailableReason).toBe('no depth entered')
   })
 
   it('names "no wind data" when depth is present but wind is missing', () => {
@@ -463,6 +590,26 @@ describe('ratioMethod', () => {
     expect(result!.unavailableReason).toBeUndefined()
     expect(result!.scopeRatio).toBe(5)
     expect(result!.scopeRatio).toBeGreaterThanOrEqual(MIN_SCOPE_RATIO)
+  })
+
+  // The extracted planningDepthWithTide helper (rode-plan.ts) is what both
+  // buildRodePlan and ratioMethod call, rather than ratioMethod re-deriving
+  // the same three tide lines separately — this guards that the two stay in
+  // lockstep by construction, not by two call sites happening to agree today.
+  it('derives its planning depth from the same shared datum-plus-tide arithmetic buildRodePlan uses', () => {
+    const input: RodePlanInput = {
+      ...baseInput,
+      windKts: 15,
+      isAnchored: true,
+      depth: { depthM: 6, tideHeightFt: 1 },
+      tide: makeTide({ current_tide_height_ft: 4, high_tide_height_ft: 5 }),
+    }
+    const plan = buildRodePlan(input)
+    const result = ratioMethod(input)
+    expect(plan).not.toBeNull()
+    expect(result).not.toBeNull()
+    expect(plan!.tideCorrected).toBe(true)
+    expect(result!.recommendedRodeM).toBeCloseTo((plan!.planningDepthM + input.bowRollerHeightM) * 5, 6)
   })
 })
 
@@ -514,7 +661,10 @@ describe('computeScopeRecommendation', () => {
   }
 
   const baseArgs = {
-    depthMeters: 5,
+    isAnchored: false,
+    liveDepthM: 5,
+    planningDepthM: null as number | null,
+    planningTideHeightFt: null as number | null,
     tide: null,
     maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null } as Record<GustWindow, number | null>,
     windSpeedApparentKts: 15,
@@ -547,7 +697,8 @@ describe('computeScopeRecommendation', () => {
     // different figure) — this uses the 15-20 band's planKts (20), the band
     // the seeded 15kt apparent wind falls in, not the raw 15kt reading.
     const expected = catenaryMethod({
-      sounderDepthM: 5,
+      depth: { depthM: 5, tideHeightFt: null },
+      isAnchored: false,
       bowRollerHeightM: 1,
       tide: null,
       windKts: 20,
@@ -582,8 +733,26 @@ describe('computeScopeRecommendation', () => {
   })
 
   it('passes through the unavailableReason when depth is missing, rather than throwing or masking it', () => {
-    const result = computeScopeRecommendation({ ...baseArgs, depthMeters: null })
+    const result = computeScopeRecommendation({ ...baseArgs, liveDepthM: null })
     expect(result.unavailableReason).toBe('no depth reading')
+  })
+
+  it('names "no depth entered" when anchored with nothing recorded', () => {
+    const result = computeScopeRecommendation({ ...baseArgs, isAnchored: true, liveDepthM: 99 })
+    expect(result.unavailableReason).toBe('no depth entered')
+  })
+
+  it('plans off the recorded planning depth, not the live sounder, once anchored', () => {
+    const result = computeScopeRecommendation({
+      ...baseArgs,
+      isAnchored: true,
+      liveDepthM: 99,
+      planningDepthM: 5,
+      planningTideHeightFt: null,
+    })
+    // Same 5m depth as the not-anchored baseline case above, proving the
+    // 99m live reading was ignored once a watch is active.
+    expect(result.recommendedRodeM).toBeCloseTo(42, 6)
   })
 
   it('passes through the unavailableReason when neither gust nor apparent wind is available', () => {
@@ -609,7 +778,8 @@ describe('computeScopeRecommendation', () => {
     // the raw 12.3kt reading. Catenary's load term is v², so the two would
     // produce visibly different figures if the raw seed leaked through.
     const inputAtBandTop: RodePlanInput = {
-      sounderDepthM: 5,
+      depth: { depthM: 5, tideHeightFt: null },
+      isAnchored: false,
       bowRollerHeightM: 1,
       tide: null,
       windKts: 15,

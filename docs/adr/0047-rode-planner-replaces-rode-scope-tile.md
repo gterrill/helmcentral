@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended by ADR 0063 (seed the planning depth from the drop), which splits the
+wind and depth overrides below: wind stays a client-only planning input, while the
+planning depth is seeded at the drop and stored on the watch record.
 
 ## Context
 
@@ -53,7 +55,10 @@ dashboard grid where it can only ever look backward at a number nobody entered.
   `PATCH /api/anchor-watch` 404s when no watch is active (`backend/anchor.go`), so the
   planner guards the call site and simply holds edits locally while inactive — it never
   fires the PATCH and swallows the resulting error. Wind and depth overrides are pure
-  planning inputs and are never sent to the server at all.
+  planning inputs and are never sent to the server at all. (Amended by ADR 0063: this
+  now holds for wind only. The planning depth is seeded from the sounder at the moment
+  the anchor goes down and stored on the watch record, so a depth entered while anchored
+  updates that record rather than living only in the client.)
 
 ### Mounting a second sidebar without breaking the left nav
 

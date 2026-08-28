@@ -60,10 +60,13 @@ function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResul
     bowOffsetM: 0,
     bowOffsetApplied: false,
     bowOffsetReason: '',
+    planningDepthM: null,
+    planningTideHeightFt: null,
     setAnchorHere: vi.fn(),
     updatePosition: vi.fn(),
     updateRadius: vi.fn(),
     updateRodeAndConditions: vi.fn(),
+    updatePlanningDepth: vi.fn(),
     clearAnchor: vi.fn(),
     ...overrides,
   }
@@ -103,6 +106,8 @@ function baseProps(overrides: Record<string, unknown> = {}) {
       loaM: 0,
     },
     selectedWindBandId: null,
+    planningDepthM: null,
+    planningTideHeightFt: null,
     ...overrides,
   }
 }
@@ -243,7 +248,8 @@ describe('AnchorWatchTile', () => {
         bowRollerHeightM: 1,
       }
       const input: RodePlanInput = {
-        sounderDepthM: 5,
+        depth: { depthM: 5, tideHeightFt: null },
+        isAnchored: false,
         bowRollerHeightM: anchorConfig.bowRollerHeightM,
         tide: null,
         // 12kt apparent (the wind fed to the tile below) seeds the 10-15

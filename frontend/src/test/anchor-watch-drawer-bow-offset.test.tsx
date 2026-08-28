@@ -68,6 +68,9 @@ const baseProps = {
   windBandId: null,
   onWindBandChange: () => undefined,
   onUpdateRodeAndConditions: async () => undefined,
+  planningDepthM: null,
+  planningTideHeightFt: null,
+  onPlanningDepthChange: () => undefined,
 }
 
 // Test 9: the drawer shows the corrected-by-d readout when the backend

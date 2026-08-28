@@ -67,6 +67,7 @@ import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
+import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useAlarms } from '@/hooks/use-alarms'
@@ -415,6 +416,18 @@ export function App() {
   // forecast must not silently drive tonight's recommendation. A reload
   // returns to the live seed.
   const [windBandId, setWindBandId] = useState<string | null>(null)
+  // The planning depth is seeded from the depth at drop and editable from
+  // there (ADR 0063). Hoisted here for the same reason windBandId is (ADR
+  // 0059 §3): three surfaces (tile, drawer's map Scope row, and the Rode
+  // Planner) plan off this number, and a component-local copy is how the
+  // tile and planner drifted apart before computeScopeRecommendation
+  // existed. While anchored the planning depth lives on the watch record
+  // (anchorWatch.planningDepthM, persisted server-side); this state only
+  // covers the not-anchored "what-if" case, which has nowhere else to live
+  // and is deliberately lost on reload. Cleared on every hasActiveAnchorWatch
+  // transition below — without that, a pre-drop what-if would reappear once
+  // the anchor comes up and is raised again.
+  const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tideHeightFt: number | null } | null>(null)
   const { isAutoCloseArmed, motoringSecondsElapsed } = useAnchorWatchAutoClose(
     navigationState,
     anchorWatch.distanceMeters,
@@ -432,11 +445,34 @@ export function App() {
 
   const handleDropAnchorHere = () => {
     if (latitude === null || longitude === null) return
-    void anchorWatch.setAnchorHere(latitude, longitude)
+    void anchorWatch.setAnchorHere(latitude, longitude, {
+      planningDepthM: depth,
+      planningTideHeightFt: tideHeightFtOrNull(tide),
+    })
   }
 
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
+
+  // See sessionPlanningDepth's own comment above for why this has to be
+  // cleared on every transition rather than left to go stale.
+  useEffect(() => {
+    setSessionPlanningDepth(null)
+  }, [hasActiveAnchorWatch])
+
+  // The single resolved planning depth every surface plans against (ADR
+  // 0063): the persisted watch record while anchored, the session what-if
+  // otherwise.
+  const resolvedPlanningDepthM = hasActiveAnchorWatch ? anchorWatch.planningDepthM : sessionPlanningDepth?.depthM ?? null
+  const resolvedPlanningTideHeightFt = hasActiveAnchorWatch ? anchorWatch.planningTideHeightFt : sessionPlanningDepth?.tideHeightFt ?? null
+
+  const handlePlanningDepthChange = useCallback((depthM: number, tideHeightFt: number | null) => {
+    if (hasActiveAnchorWatch) {
+      void anchorWatch.updatePlanningDepth(depthM, tideHeightFt ?? -1)
+    } else {
+      setSessionPlanningDepth({ depthM, tideHeightFt })
+    }
+  }, [hasActiveAnchorWatch, anchorWatch])
 
   // One poller for the whole app: the tile and the fullscreen drawer both
   // draw the same session's pins, and each running its own would double the
@@ -792,6 +828,8 @@ export function App() {
             maxGustKts={maxGustKts}
             anchorConfig={anchorConfig}
             selectedWindBandId={windBandId}
+            planningDepthM={resolvedPlanningDepthM}
+            planningTideHeightFt={resolvedPlanningTideHeightFt}
           />
         )
       case 'tanks':
@@ -1147,6 +1185,9 @@ export function App() {
             windBandId={windBandId}
             onWindBandChange={setWindBandId}
             onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
+            planningDepthM={resolvedPlanningDepthM}
+            planningTideHeightFt={resolvedPlanningTideHeightFt}
+            onPlanningDepthChange={handlePlanningDepthChange}
           />
         )
       default:

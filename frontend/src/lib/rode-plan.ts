@@ -21,8 +21,28 @@ export const MIN_SCOPE_RATIO = 3
 
 export type ScopeStatus = 'ok' | 'low' | 'insufficient' | 'unknown'
 
+/**
+ * A planning depth is only meaningful as a contemporaneous pair: a reading
+ * plus the tide height at the instant it was taken (ADR 0063). The tide
+ * height is never re-derived from the live tide station later — mixing a
+ * reading from one moment with the tide from another is the unsafe bug this
+ * type exists to prevent (see maxExpectedDepthM).
+ */
+export interface PlanningDepthDatum {
+  depthM: number
+  /** The tide height at the moment this depth was read, or null if no tide
+   * reading accompanied it (e.g. no tide station configured yet, or the
+   * station hadn't reported). Never the tide right now. */
+  tideHeightFt: number | null
+}
+
 export interface RodePlanInput {
-  sounderDepthM: number | null
+  depth: PlanningDepthDatum | null
+  /** Drives depthUnavailableReason's wording when depth is null, and is the
+   * precedence rule resolvePlanningDepth already applied to produce `depth`
+   * — carried here rather than re-derived so a caller can't disagree with
+   * itself between building the datum and explaining its absence. */
+  isAnchored: boolean
   bowRollerHeightM: number
   tide: TideToday | null
   windKts: number | null
@@ -36,7 +56,9 @@ export interface RodePlanInput {
 
 export interface RodePlan {
   planningDepthM: number
-  depthSource: 'tide' | 'sounder'
+  /** Whether the rise to the next high was actually added. False whenever
+   * the datum carried no tide stamp of its own. */
+  tideCorrected: boolean
   depthFromHawseM: number
   recommendedRodeM: number
   recommendedScope: number
@@ -47,23 +69,86 @@ export interface RodePlan {
 }
 
 /**
- * Sounder depth plus the rise to the next high, reusing the arithmetic already
+ * useTideToday NEVER returns null — it returns defaultTide with -1
+ * sentinels for "the station hasn't reported yet", so `tide === null` never
+ * fires and the real check is `current_tide_height_ft >= 0`. This is the one
+ * place that check lives; every caller that needs "the tide right now, or
+ * nothing" (the two anchor-drop capture sites and the planner's Depth input,
+ * plus this module's own live-datum construction below) shares it rather
+ * than re-deriving the sentinel rule.
+ */
+export function tideHeightFtOrNull(tide: TideToday | null): number | null {
+  if (tide === null) return null
+  return tide.current_tide_height_ft >= 0 ? tide.current_tide_height_ft : null
+}
+
+export interface PlanningDepthInputs {
+  isAnchored: boolean
+  liveDepthM: number | null
+  planningDepthM: number | null
+  planningTideHeightFt: number | null
+  tide: TideToday | null
+}
+
+/**
+ * The one place depth precedence lives (ADR 0063), shaped deliberately like
+ * the existing resolvePlanningWindBand below:
+ *
+ * 1. Anchor down: the recorded planning depth — seeded from the depth at the
+ *    moment the anchor was dropped, and editable from there. Nothing
+ *    recorded: null, never a silent fall back to live depth — that
+ *    substitution is what made a good set read "Scope Insufficient" because
+ *    the boat swung over a hole.
+ * 2. No anchor down: the live sounder, tide-stamped from right now — you are
+ *    deciding what to pay out, so "now" is the correct reading.
+ */
+export function resolvePlanningDepth(inputs: PlanningDepthInputs): PlanningDepthDatum | null {
+  if (inputs.isAnchored) {
+    if (inputs.planningDepthM === null) return null
+    return { depthM: inputs.planningDepthM, tideHeightFt: inputs.planningTideHeightFt }
+  }
+  if (inputs.liveDepthM === null) return null
+  return { depthM: inputs.liveDepthM, tideHeightFt: tideHeightFtOrNull(inputs.tide) }
+}
+
+/**
+ * Datum depth plus the rise to the next high, reusing the arithmetic already
  * proven in depth-tide-tile.tsx. A falling tide (or one already past the next
  * high) never *reduces* the planning depth — that would be a silent unsafe
  * substitution — so the rise is clamped to zero rather than allowed negative.
  *
- * Returns null when depth or tide data is unavailable, or when the tide
- * station hasn't reported a reading (the -1 sentinel used throughout the tide
- * hook). Callers must fall back to the raw sounder depth explicitly and
- * visibly — no silent substitution here.
+ * The rise is measured from `datum.tideHeightFt` — the tide at the moment the
+ * depth was read — never from `tide.current_tide_height_ft`. Mixing a depth
+ * reading from one moment with the tide reading from another is wrong in the
+ * unsafe direction (too little chain) whenever the tide has risen since
+ * (ADR 0063); this is the one arithmetic site that guards against it.
+ *
+ * Returns null when the datum, its own tide stamp, or the high-tide forecast
+ * is unavailable. Callers must fall back to the raw datum depth explicitly
+ * and visibly — no silent substitution here.
  */
-export function maxExpectedDepthM(sounderDepthM: number | null, tide: TideToday | null): number | null {
-  if (sounderDepthM === null || tide === null) return null
-  if (tide.current_tide_height_ft < 0 || tide.high_tide_height_ft < 0) return null
+export function maxExpectedDepthM(datum: PlanningDepthDatum | null, tide: TideToday | null): number | null {
+  if (datum === null || tide === null) return null
+  if (datum.tideHeightFt === null || datum.tideHeightFt < 0) return null
+  if (tide.high_tide_height_ft < 0) return null
 
-  const riseFt = tide.high_tide_height_ft - tide.current_tide_height_ft
+  const riseFt = tide.high_tide_height_ft - datum.tideHeightFt
   const riseM = Math.max(0, riseFt) / METERS_PER_FOOT
-  return sounderDepthM + riseM
+  return datum.depthM + riseM
+}
+
+/**
+ * Composes a datum with the tide forecast into the figure the rest of the
+ * module plans against, plus whether that figure actually got corrected.
+ * Extracted so buildRodePlan and ratioMethod share one arithmetic site
+ * instead of each re-deriving it (they used to diverge here) — "both sites
+ * must change" becomes "both sites already share".
+ */
+function planningDepthWithTide(datum: PlanningDepthDatum, tide: TideToday | null): { planningDepthM: number; tideCorrected: boolean } {
+  const tideDepthM = maxExpectedDepthM(datum, tide)
+  return tideDepthM !== null
+    ? { planningDepthM: tideDepthM, tideCorrected: true }
+    : { planningDepthM: datum.depthM, tideCorrected: false }
 }
 
 /** The division inlined in the old tile: current rode over depth-from-hawse. */
@@ -91,11 +176,9 @@ export function scopeStatus(currentScope: number | null, recommendedScope: numbe
  * explicit "why" rather than a dash for that case (see RodeMethod below).
  */
 export function buildRodePlan(input: RodePlanInput): RodePlan | null {
-  if (input.sounderDepthM === null || input.windKts === null) return null
+  if (input.depth === null || input.windKts === null) return null
 
-  const tideDepthM = maxExpectedDepthM(input.sounderDepthM, input.tide)
-  const planningDepthM = tideDepthM ?? input.sounderDepthM
-  const depthSource: 'tide' | 'sounder' = tideDepthM !== null ? 'tide' : 'sounder'
+  const { planningDepthM, tideCorrected } = planningDepthWithTide(input.depth, input.tide)
 
   const catenary = calculateCatenary({
     depthM: planningDepthM,
@@ -121,7 +204,7 @@ export function buildRodePlan(input: RodePlanInput): RodePlan | null {
 
   return {
     planningDepthM,
-    depthSource,
+    tideCorrected,
     depthFromHawseM,
     recommendedRodeM,
     recommendedScope,
@@ -154,13 +237,23 @@ export type RodeMethod = (input: RodePlanInput) => RodeMethodResult | null
  * alone, so the caption has to name both terms of that sum rather than just
  * the depth half of it.
  */
-function depthAndBowHeightNote(planningDepthM: number, depthSource: 'tide' | 'sounder', bowRollerHeightM: number): string {
-  const depthLabel = depthSource === 'tide' ? '(tide-corrected)' : '(sounder only)'
+function depthAndBowHeightNote(planningDepthM: number, tideCorrected: boolean, bowRollerHeightM: number): string {
+  const depthLabel = tideCorrected ? '(tide-corrected)' : '(sounder only)'
   return `Depth ${planningDepthM.toFixed(1)} m ${depthLabel} + ${bowRollerHeightM.toFixed(1)} m bow height`
 }
 
+/**
+ * Shared by both methods' unavailable-depth branch: anchored with nothing
+ * recorded is a different, more actionable reason than simply having no
+ * reading at all — the map's Scope row and the planner both print reasons in
+ * the value slot, so this needs no new rendering, only the right words.
+ */
+function depthUnavailableReason(isAnchored: boolean): string {
+  return isAnchored ? 'no depth entered' : 'no depth reading'
+}
+
 function catenaryUnavailableReason(input: RodePlanInput): string {
-  if (input.sounderDepthM === null) return 'no depth reading'
+  if (input.depth === null) return depthUnavailableReason(input.isAnchored)
   if (input.windKts === null) return 'no wind data'
   if (input.bowRollerHeightM <= 0) return 'bow roller height not configured'
   if (input.chainSizeMm <= 0) return 'chain size not configured'
@@ -182,7 +275,7 @@ export const catenaryMethod: RodeMethod = (input) => {
     }
   }
 
-  const depthNote = depthAndBowHeightNote(plan.planningDepthM, plan.depthSource, input.bowRollerHeightM)
+  const depthNote = depthAndBowHeightNote(plan.planningDepthM, plan.tideCorrected, input.bowRollerHeightM)
   const floorNote = plan.scopeFloorApplied ? ` · ${MIN_SCOPE_RATIO}:1 minimum` : ''
 
   return {
@@ -203,7 +296,7 @@ const RATIO_HIGH = 7
 const RATIO_NORMAL = 5
 
 function ratioUnavailableReason(input: RodePlanInput): string {
-  if (input.sounderDepthM === null) return 'no depth reading'
+  if (input.depth === null) return depthUnavailableReason(input.isAnchored)
   if (input.windKts === null) return 'no wind data'
   if (input.bowRollerHeightM <= 0) return 'bow roller height not configured'
   return 'ratio calculation unavailable'
@@ -216,7 +309,7 @@ function ratioUnavailableReason(input: RodePlanInput): string {
  * seabed type, and hull type never factor in, unlike catenaryMethod.
  */
 export const ratioMethod: RodeMethod = (input) => {
-  if (input.sounderDepthM === null || input.windKts === null || input.bowRollerHeightM <= 0) {
+  if (input.depth === null || input.windKts === null || input.bowRollerHeightM <= 0) {
     return {
       id: 'ratio',
       label: 'Ratio Method',
@@ -227,14 +320,12 @@ export const ratioMethod: RodeMethod = (input) => {
     }
   }
 
-  const tideDepthM = maxExpectedDepthM(input.sounderDepthM, input.tide)
-  const planningDepthM = tideDepthM ?? input.sounderDepthM
-  const depthSource: 'tide' | 'sounder' = tideDepthM !== null ? 'tide' : 'sounder'
+  const { planningDepthM, tideCorrected } = planningDepthWithTide(input.depth, input.tide)
 
   const ratio = input.windKts >= RATIO_WIND_THRESHOLD_KTS ? RATIO_HIGH : RATIO_NORMAL
   const recommendedRodeM = (planningDepthM + input.bowRollerHeightM) * ratio
 
-  const depthNote = depthAndBowHeightNote(planningDepthM, depthSource, input.bowRollerHeightM)
+  const depthNote = depthAndBowHeightNote(planningDepthM, tideCorrected, input.bowRollerHeightM)
   const ratioNote = ratio === RATIO_HIGH ? `${ratio}:1 (wind ≥ ${RATIO_WIND_THRESHOLD_KTS} kts)` : `${ratio}:1`
 
   return {
@@ -341,19 +432,26 @@ export function resolvePlanningWindBand(
 /**
  * The single recommendation a host renders (map overlay's Scope row, née the
  * tile's below-map readout — ADR 0059 §3): resolves the shared wind band the
- * same way the Rode Planner does (resolvePlanningWindBand), builds the
- * RodePlanInput from the band's planKts, and picks catenaryMethod vs
- * ratioMethod from anchorConfig.scopeMethod. Extracted so the tile and drawer
- * hosts, which both already hold every one of these inputs, don't duplicate
- * this composition.
+ * same way the Rode Planner does (resolvePlanningWindBand), resolves the
+ * planning depth the same way the planner does (resolvePlanningDepth — ADR
+ * 0063), builds the RodePlanInput, and picks catenaryMethod vs ratioMethod
+ * from anchorConfig.scopeMethod. Extracted so the tile and drawer hosts,
+ * which both already hold every one of these inputs, don't duplicate this
+ * composition.
  *
  * selectedWindBandId is required, not defaulted: a silent default here is
  * exactly how the tile's raw-seed plan and the planner's banded plan drifted
  * apart before this function existed — every caller must say explicitly
- * which band (if any) the operator has chosen.
+ * which band (if any) the operator has chosen. isAnchored/planningDepthM/
+ * planningTideHeightFt are the same discipline applied to depth (ADR 0063):
+ * callers must say explicitly what they know rather than this function
+ * guessing a fallback.
  */
 export function computeScopeRecommendation(args: {
-  depthMeters: number | null
+  isAnchored: boolean
+  liveDepthM: number | null
+  planningDepthM: number | null
+  planningTideHeightFt: number | null
   tide: TideToday | null
   maxGustKts: Record<GustWindow, number | null>
   windSpeedApparentKts: number | null
@@ -363,8 +461,16 @@ export function computeScopeRecommendation(args: {
   selectedWindBandId: string | null
 }): RodeMethodResult {
   const windKts = resolvePlanningWindBand(args.maxGustKts, args.windSpeedApparentKts, args.selectedWindBandId)?.planKts ?? null
+  const depth = resolvePlanningDepth({
+    isAnchored: args.isAnchored,
+    liveDepthM: args.liveDepthM,
+    planningDepthM: args.planningDepthM,
+    planningTideHeightFt: args.planningTideHeightFt,
+    tide: args.tide,
+  })
   const planInput: RodePlanInput = {
-    sounderDepthM: args.depthMeters,
+    depth,
+    isAnchored: args.isAnchored,
     bowRollerHeightM: args.anchorConfig.bowRollerHeightM,
     tide: args.tide,
     windKts,

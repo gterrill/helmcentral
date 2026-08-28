@@ -16,6 +16,8 @@ interface AnchorWatchServerState {
   bow_offset_m?: number
   bow_offset_applied?: boolean
   bow_offset_reason?: string
+  planning_depth_m?: number
+  planning_tide_height_ft?: number
 }
 
 export interface AnchorWatchResult {
@@ -34,10 +36,22 @@ export interface AnchorWatchResult {
   bowOffsetM: number
   bowOffsetApplied: boolean
   bowOffsetReason: string
-  setAnchorHere: (lat: number, lon: number, radiusMeters?: number) => Promise<void>
+  /** The planning depth: seeded from the depth reading at the moment the
+   * anchor was dropped, and editable by the operator from there — a
+   * contemporaneous pair with the tide height, never re-derived from the
+   * live tide station (ADR 0063). Null when nothing has been recorded
+   * (legacy record, or no reading was available at the moment of drop). */
+  planningDepthM: number | null
+  planningTideHeightFt: number | null
+  setAnchorHere: (
+    lat: number,
+    lon: number,
+    capture: { planningDepthM: number | null; planningTideHeightFt: number | null; radiusMeters?: number },
+  ) => Promise<void>
   updatePosition: (lat: number, lon: number) => Promise<void>
   updateRadius: (radiusMeters: number) => Promise<void>
   updateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
+  updatePlanningDepth: (depthM: number, tideHeightFt: number) => Promise<void>
   clearAnchor: () => Promise<void>
 }
 
@@ -83,18 +97,36 @@ export function useAnchorWatch(
     }
   }, [fetchState, refreshInterval])
 
-  const setAnchorHere = useCallback(async (lat: number, lon: number, radiusMeters?: number) => {
+  const setAnchorHere = useCallback(async (
+    lat: number,
+    lon: number,
+    capture: { planningDepthM: number | null; planningTideHeightFt: number | null; radiusMeters?: number },
+  ) => {
     // Fed the live GPS fix, so the backend should apply the bow-offset
     // correction (projecting forward by gps_from_bow_m along heading) if
     // it's configured. updatePosition below is a user-dragged map point
     // that is already meant to be the anchor, so it deliberately omits this.
-    const payload: { lat: number; lon: number; radius_meters?: number; apply_bow_offset: true } = {
+    //
+    // planning_depth_m/planning_tide_height_ft always ride along, using the
+    // -1 sentinel when the caller had nothing to capture (ADR 0063) — the
+    // capture argument is required, not optional, so a caller can't silently
+    // create a watch the planner has nothing to plan against.
+    const payload: {
+      lat: number
+      lon: number
+      radius_meters?: number
+      apply_bow_offset: true
+      planning_depth_m: number
+      planning_tide_height_ft: number
+    } = {
       lat,
       lon,
       apply_bow_offset: true,
+      planning_depth_m: capture.planningDepthM ?? -1,
+      planning_tide_height_ft: capture.planningTideHeightFt ?? -1,
     }
-    if (typeof radiusMeters === 'number' && radiusMeters > 0) {
-      payload.radius_meters = radiusMeters
+    if (typeof capture.radiusMeters === 'number' && capture.radiusMeters > 0) {
+      payload.radius_meters = capture.radiusMeters
     }
 
     const res = await fetch('/api/anchor-watch', {
@@ -132,6 +164,24 @@ export function useAnchorWatch(
         rode_deployed_m: rodeDeployedM,
         sea_state: seaState,
         seabed_type: seabedType,
+      }),
+    })
+    if (res.ok) {
+      const data = (await res.json()) as AnchorWatchServerState
+      setServerState(data)
+    }
+  }, [])
+
+  const updatePlanningDepth = useCallback(async (depthM: number, tideHeightFt: number) => {
+    // The planning depth pair is PATCHable — this is how the operator edits
+    // the depth seeded at drop. Follows updateRodeAndConditions exactly:
+    // await, replace state with the server echo, no optimistic update.
+    const res = await fetch('/api/anchor-watch', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        planning_depth_m: depthM,
+        planning_tide_height_ft: tideHeightFt,
       }),
     })
     if (res.ok) {
@@ -207,6 +257,17 @@ export function useAnchorWatch(
     ? serverState.bow_offset_reason
     : ''
 
+  // Read predicate is `> 0` for depth and `>= 0` for tide, not `!== -1`
+  // (ADR 0063) — a legacy anchor_watch.json with none of these fields decodes
+  // them to 0, which must read as "not recorded", same as the -1 sentinel a
+  // fresh POST/PATCH writes explicitly for "unset".
+  const planningDepthM = serverState.active && typeof serverState.planning_depth_m === 'number' && serverState.planning_depth_m > 0
+    ? serverState.planning_depth_m
+    : null
+  const planningTideHeightFt = serverState.active && typeof serverState.planning_tide_height_ft === 'number' && serverState.planning_tide_height_ft >= 0
+    ? serverState.planning_tide_height_ft
+    : null
+
   return {
     anchorState,
     gnssCritical,
@@ -223,10 +284,13 @@ export function useAnchorWatch(
     bowOffsetM,
     bowOffsetApplied,
     bowOffsetReason,
+    planningDepthM,
+    planningTideHeightFt,
     setAnchorHere,
     updatePosition,
     updateRadius,
     updateRodeAndConditions,
+    updatePlanningDepth,
     clearAnchor,
   }
 }

@@ -27,6 +27,21 @@ type anchorWatchData struct {
 	BowOffsetApplied bool      `json:"bow_offset_applied"`
 	BowOffsetReason  string    `json:"bow_offset_reason"`  // why not, when not applied
 	HeadingAtSetDeg  float64   `json:"heading_at_set_deg"` // -1 when not read
+	// A planning depth only means something paired with the tide height at
+	// the moment it was read. Feed the rode planner a depth from one state
+	// of the tide and a tide reading from another and the answer is wrong,
+	// in the unsafe direction (too little chain), by however much the tide
+	// has moved in between. So these are one pair, never two independent
+	// numbers: PlanningDepthM/PlanningTideHeightFt is seeded from the live
+	// sounder at the instant the anchor goes down, and the operator can
+	// freely edit it afterwards - editing overwrites the pair in place,
+	// there is no separate capture underneath it to fall back to. -1 is
+	// "not captured", matching HeadingAtSetDeg above. Read predicate is >0
+	// for depth and >=0 for tide (never != -1), so a pre-existing
+	// anchor_watch.json with these fields absent decodes to 0 and reads
+	// correctly as "not captured" - no migration.
+	PlanningDepthM       float64 `json:"planning_depth_m"`
+	PlanningTideHeightFt float64 `json:"planning_tide_height_ft"`
 	// PlaceName is resolved once from the anchor position (place_name.go's
 	// resolveAndPinAnchorWatchPlaceName), then pinned for the life of this
 	// watch so it stops drifting as the boat swings - see docs/adr/0056.
@@ -202,35 +217,45 @@ func getAnchorWatch(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"active":             true,
-		"lat":                state.Lat,
-		"lon":                state.Lon,
-		"radius_meters":      state.RadiusMeters,
-		"rode_deployed_m":    state.RodeDeployedM,
-		"sea_state":          state.SeaState,
-		"seabed_type":        state.SeabedType,
-		"set_at":             state.SetAt.Format(time.RFC3339),
-		"bow_offset_m":       state.BowOffsetM,
-		"bow_offset_applied": state.BowOffsetApplied,
-		"bow_offset_reason":  state.BowOffsetReason,
-		"heading_at_set_deg": state.HeadingAtSetDeg,
-		"place_name":         state.PlaceName,
+		"active":                  true,
+		"lat":                     state.Lat,
+		"lon":                     state.Lon,
+		"radius_meters":           state.RadiusMeters,
+		"rode_deployed_m":         state.RodeDeployedM,
+		"sea_state":               state.SeaState,
+		"seabed_type":             state.SeabedType,
+		"set_at":                  state.SetAt.Format(time.RFC3339),
+		"bow_offset_m":            state.BowOffsetM,
+		"bow_offset_applied":      state.BowOffsetApplied,
+		"bow_offset_reason":       state.BowOffsetReason,
+		"heading_at_set_deg":      state.HeadingAtSetDeg,
+		"planning_depth_m":        state.PlanningDepthM,
+		"planning_tide_height_ft": state.PlanningTideHeightFt,
+		"place_name":              state.PlaceName,
 	})
 }
 
 // POST /api/anchor-watch
 func setAnchorWatch(c echo.Context) error {
 	var body struct {
-		Lat            float64  `json:"lat"`
-		Lon            float64  `json:"lon"`
-		RadiusMeters   *float64 `json:"radius_meters"`
-		ApplyBowOffset *bool    `json:"apply_bow_offset"`
+		Lat                  float64  `json:"lat"`
+		Lon                  float64  `json:"lon"`
+		RadiusMeters         *float64 `json:"radius_meters"`
+		ApplyBowOffset       *bool    `json:"apply_bow_offset"`
+		PlanningDepthM       *float64 `json:"planning_depth_m"`
+		PlanningTideHeightFt *float64 `json:"planning_tide_height_ft"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 	if body.Lat < -90 || body.Lat > 90 || body.Lon < -180 || body.Lon > 180 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat/lon out of range"})
+	}
+	if body.PlanningDepthM != nil && *body.PlanningDepthM != -1 && *body.PlanningDepthM <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m must be positive or -1"})
+	}
+	if body.PlanningTideHeightFt != nil && *body.PlanningTideHeightFt < -1 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_tide_height_ft must be -1 or greater"})
 	}
 
 	radius := defaultAnchorWatchRadiusMeters
@@ -245,6 +270,29 @@ func setAnchorWatch(c echo.Context) error {
 		radius = current.RadiusMeters
 	} else if previousRadius > 0 {
 		radius = previousRadius
+	}
+
+	planningDepthM := -1.0
+	planningTideHeightFt := -1.0
+	if current != nil {
+		// updatePosition (a map marker drag) is a POST too: it corrects
+		// where you think the anchor lies, not how deep the water was when
+		// it went down. Carry the pair forward from the previous record
+		// unless the body says otherwise. On a genuine drop current is nil
+		// (Raise DELETEs first), so nothing stale leaks into a new
+		// anchorage.
+		if current.PlanningDepthM > 0 {
+			planningDepthM = current.PlanningDepthM
+		}
+		if current.PlanningTideHeightFt >= 0 {
+			planningTideHeightFt = current.PlanningTideHeightFt
+		}
+	}
+	if body.PlanningDepthM != nil {
+		planningDepthM = *body.PlanningDepthM
+	}
+	if body.PlanningTideHeightFt != nil {
+		planningTideHeightFt = *body.PlanningTideHeightFt
 	}
 
 	lat, lon := body.Lat, body.Lon
@@ -284,17 +332,19 @@ func setAnchorWatch(c echo.Context) error {
 	}
 
 	aw := &anchorWatchData{
-		Lat:              lat,
-		Lon:              lon,
-		RadiusMeters:     radius,
-		RodeDeployedM:    0,
-		SeaState:         "calm",
-		SeabedType:       "sand",
-		SetAt:            time.Now().UTC(),
-		BowOffsetM:       bowOffsetM,
-		BowOffsetApplied: bowOffsetApplied,
-		BowOffsetReason:  bowOffsetReason,
-		HeadingAtSetDeg:  headingAtSetDeg,
+		Lat:                  lat,
+		Lon:                  lon,
+		RadiusMeters:         radius,
+		RodeDeployedM:        0,
+		SeaState:             "calm",
+		SeabedType:           "sand",
+		SetAt:                time.Now().UTC(),
+		BowOffsetM:           bowOffsetM,
+		BowOffsetApplied:     bowOffsetApplied,
+		BowOffsetReason:      bowOffsetReason,
+		HeadingAtSetDeg:      headingAtSetDeg,
+		PlanningDepthM:       planningDepthM,
+		PlanningTideHeightFt: planningTideHeightFt,
 	}
 
 	if err := saveAnchorWatch(aw); err != nil {
@@ -322,42 +372,62 @@ func setAnchorWatch(c echo.Context) error {
 	})
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"active":             true,
-		"lat":                aw.Lat,
-		"lon":                aw.Lon,
-		"radius_meters":      aw.RadiusMeters,
-		"rode_deployed_m":    aw.RodeDeployedM,
-		"sea_state":          aw.SeaState,
-		"seabed_type":        aw.SeabedType,
-		"set_at":             aw.SetAt.Format(time.RFC3339),
-		"bow_offset_m":       aw.BowOffsetM,
-		"bow_offset_applied": aw.BowOffsetApplied,
-		"bow_offset_reason":  aw.BowOffsetReason,
-		"heading_at_set_deg": aw.HeadingAtSetDeg,
-		"place_name":         aw.PlaceName,
+		"active":                  true,
+		"lat":                     aw.Lat,
+		"lon":                     aw.Lon,
+		"radius_meters":           aw.RadiusMeters,
+		"rode_deployed_m":         aw.RodeDeployedM,
+		"sea_state":               aw.SeaState,
+		"seabed_type":             aw.SeabedType,
+		"set_at":                  aw.SetAt.Format(time.RFC3339),
+		"bow_offset_m":            aw.BowOffsetM,
+		"bow_offset_applied":      aw.BowOffsetApplied,
+		"bow_offset_reason":       aw.BowOffsetReason,
+		"heading_at_set_deg":      aw.HeadingAtSetDeg,
+		"planning_depth_m":        aw.PlanningDepthM,
+		"planning_tide_height_ft": aw.PlanningTideHeightFt,
+		"place_name":              aw.PlaceName,
 	})
 }
 
-// PATCH /api/anchor-watch — update radius only (multi-client adjustment)
+// PATCH /api/anchor-watch — update radius, depth, and other watch settings
+//
+// This handler holds anchorWatchMu.Lock() for its entire body rather than
+// the more permissive read-then-write pattern, because it does a
+// read-modify-write: `updated` is rebuilt field-by-field from `current`
+// (see the comment on the PlanningDepthM copy below) and only afterward
+// assigned back. Reading under RLock and only re-taking the lock to write
+// leaves a gap in between where a second, concurrent PATCH can read the
+// same stale `current` and then overwrite the first PATCH's change with its
+// own full rebuild — a lost update. This is no longer just theoretical:
+// the Rode Planner debounces depth on its own timer alongside the existing
+// rode/sea-state/seabed timer, so changing sea state and depth inside the
+// same 800ms window fires two overlapping PATCHes. saveAnchorWatch does not
+// itself take anchorWatchMu (it only calls writeJSONFileAtomic), so holding
+// the lock across the save call below is not re-entrant and cannot
+// deadlock. Do not narrow this back to RLock+Lock.
 func patchAnchorWatch(c echo.Context) error {
-	anchorWatchMu.RLock()
-	current := anchorWatchState
-	anchorWatchMu.RUnlock()
+	anchorWatchMu.Lock()
+	defer anchorWatchMu.Unlock()
 
+	current := anchorWatchState
 	if current == nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "no active anchor watch"})
 	}
 
 	var body struct {
-		RadiusMeters  *float64 `json:"radius_meters"`
-		RodeDeployedM *float64 `json:"rode_deployed_m"`
-		SeaState      *string  `json:"sea_state"`
-		SeabedType    *string  `json:"seabed_type"`
+		RadiusMeters         *float64 `json:"radius_meters"`
+		RodeDeployedM        *float64 `json:"rode_deployed_m"`
+		SeaState             *string  `json:"sea_state"`
+		SeabedType           *string  `json:"seabed_type"`
+		PlanningDepthM       *float64 `json:"planning_depth_m"`
+		PlanningTideHeightFt *float64 `json:"planning_tide_height_ft"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if body.RadiusMeters == nil && body.RodeDeployedM == nil && body.SeaState == nil && body.SeabedType == nil {
+	if body.RadiusMeters == nil && body.RodeDeployedM == nil && body.SeaState == nil && body.SeabedType == nil &&
+		body.PlanningDepthM == nil && body.PlanningTideHeightFt == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
 	}
 	if body.RadiusMeters != nil && *body.RadiusMeters <= 0 {
@@ -380,6 +450,29 @@ func patchAnchorWatch(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid seabed_type"})
 		}
 	}
+	if body.PlanningDepthM != nil && *body.PlanningDepthM != -1 && *body.PlanningDepthM <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m must be positive or -1"})
+	}
+	if body.PlanningTideHeightFt != nil && *body.PlanningTideHeightFt < -1 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_tide_height_ft must be -1 or greater"})
+	}
+	// The pair rule, enforced at the boundary: a planning depth is only
+	// meaningful with the tide height at the instant it was read, so a
+	// positive planning_depth_m must arrive with its tide stamp in the same
+	// request. -1 (clearing the pair) is exempt — see the apply step below,
+	// which clears the stamp too.
+	if body.PlanningDepthM != nil && *body.PlanningDepthM > 0 && body.PlanningTideHeightFt == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_tide_height_ft is required when setting planning_depth_m"})
+	}
+	// The other half of the pair rule: a tide stamp with no depth in the
+	// same body would otherwise fall through to the apply step and re-stamp
+	// the EXISTING planning depth with a tide height read at a different
+	// instant — the same datum-mixing error above, arriving from the other
+	// direction. There is no clear case to exempt here, unlike above:
+	// clearing the stamp only ever happens by clearing the depth.
+	if body.PlanningTideHeightFt != nil && body.PlanningDepthM == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "planning_depth_m is required when setting planning_tide_height_ft"})
+	}
 
 	updated := &anchorWatchData{
 		Lat:              current.Lat,
@@ -393,7 +486,13 @@ func patchAnchorWatch(c echo.Context) error {
 		BowOffsetApplied: current.BowOffsetApplied,
 		BowOffsetReason:  current.BowOffsetReason,
 		HeadingAtSetDeg:  current.HeadingAtSetDeg,
-		PlaceName:        current.PlaceName,
+		// planning_depth_m/planning_tide_height_ft still have to be copied
+		// here even though they're patchable below, or a PATCH for
+		// something unrelated (sea state, say) would silently zero them out
+		// and a working plan would go dark.
+		PlanningDepthM:       current.PlanningDepthM,
+		PlanningTideHeightFt: current.PlanningTideHeightFt,
+		PlaceName:            current.PlaceName,
 	}
 
 	if body.RadiusMeters != nil {
@@ -408,32 +507,46 @@ func patchAnchorWatch(c echo.Context) error {
 	if body.SeabedType != nil {
 		updated.SeabedType = *body.SeabedType
 	}
+	if body.PlanningDepthM != nil {
+		updated.PlanningDepthM = *body.PlanningDepthM
+		if *body.PlanningDepthM == -1 {
+			// Clearing the depth clears its stamp with it — a half-cleared
+			// pair is not a thing.
+			updated.PlanningTideHeightFt = -1
+		} else if body.PlanningTideHeightFt != nil {
+			updated.PlanningTideHeightFt = *body.PlanningTideHeightFt
+		}
+	}
+	// No else branch: the validation above rejects a lone
+	// planning_tide_height_ft, so the only ways to write the stamp are
+	// "with its depth" (above) or "cleared alongside its depth" (the -1
+	// case above too).
 
 	if err := saveAnchorWatch(updated); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist"})
 	}
 
-	anchorWatchMu.Lock()
 	anchorWatchState = updated
 	if updated.RadiusMeters > 0 {
 		lastAnchorWatchRadiusMeters = updated.RadiusMeters
 	}
-	anchorWatchMu.Unlock()
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"active":             true,
-		"lat":                updated.Lat,
-		"lon":                updated.Lon,
-		"radius_meters":      updated.RadiusMeters,
-		"rode_deployed_m":    updated.RodeDeployedM,
-		"sea_state":          updated.SeaState,
-		"seabed_type":        updated.SeabedType,
-		"set_at":             updated.SetAt.Format(time.RFC3339),
-		"bow_offset_m":       updated.BowOffsetM,
-		"bow_offset_applied": updated.BowOffsetApplied,
-		"bow_offset_reason":  updated.BowOffsetReason,
-		"heading_at_set_deg": updated.HeadingAtSetDeg,
-		"place_name":         updated.PlaceName,
+		"active":                  true,
+		"lat":                     updated.Lat,
+		"lon":                     updated.Lon,
+		"radius_meters":           updated.RadiusMeters,
+		"rode_deployed_m":         updated.RodeDeployedM,
+		"sea_state":               updated.SeaState,
+		"seabed_type":             updated.SeabedType,
+		"set_at":                  updated.SetAt.Format(time.RFC3339),
+		"bow_offset_m":            updated.BowOffsetM,
+		"bow_offset_applied":      updated.BowOffsetApplied,
+		"bow_offset_reason":       updated.BowOffsetReason,
+		"heading_at_set_deg":      updated.HeadingAtSetDeg,
+		"planning_depth_m":        updated.PlanningDepthM,
+		"planning_tide_height_ft": updated.PlanningTideHeightFt,
+		"place_name":              updated.PlaceName,
 	})
 }
 

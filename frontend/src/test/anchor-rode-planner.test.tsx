@@ -25,6 +25,12 @@ function baseProps(overrides: Partial<AnchorRodePlannerProps> = {}): AnchorRodeP
     seaState: 'calm',
     seabedType: 'sand',
     depthM: 5,
+    // anchorState is 'set' above, so resolvePlanningDepth prefers this over
+    // depthM once the Depth cell wires up (ADR 0063) — same value as depthM
+    // so every pre-existing expected figure in this file survives unchanged.
+    planningDepthM: 5,
+    planningTideHeightFt: 2,
+    onPlanningDepthChange: vi.fn(),
     windSpeedApparentKts: 12,
     maxGustKts: { '10m': null, '30m': null, '1h': 20, '24h': null },
     tide,
@@ -135,7 +141,10 @@ describe('AnchorRodePlanner — apply as alarm radius follows the configured met
   )!.planKts
 
   const expectedPlanInput: RodePlanInput = {
-    sounderDepthM: 5,
+    // baseProps() has anchorState: 'set' with planningDepthM: 5, planningTideHeightFt: 2
+    // — resolvePlanningDepth (ADR 0063) resolves that to this same datum.
+    depth: { depthM: 5, tideHeightFt: 2 },
+    isAnchored: true,
     bowRollerHeightM: 1,
     tide,
     windKts: bandedWindKts,
@@ -564,5 +573,112 @@ describe('AnchorRodePlanner — forecast wind band', () => {
     })
     expect(select.value).toBe('')
     expect(screen.getAllByText(/no wind data/i).length).toBeGreaterThan(0)
+  })
+})
+
+// ADR 0063: the Depth cell is a real, editable input, seeded from the depth
+// at the moment the anchor was dropped. The highest-consequence trap here is
+// double tide correction, so these tests pin that the input always holds the
+// RAW reading (never plan.planningDepthM, which is already tide-corrected)
+// while the caption alone reports whether a correction was applied.
+describe('AnchorRodePlanner — Depth cell', () => {
+  function depthInput() {
+    return screen.getByLabelText('Depth') as HTMLInputElement
+  }
+
+  it('is a real, editable input', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(depthInput()).toBeInTheDocument()
+    expect(depthInput()).not.toBeDisabled()
+  })
+
+  it('shows the recorded planning depth, not the live sounder, while anchored', () => {
+    renderPlanner({ depthM: 99, planningDepthM: 5, planningTideHeightFt: 2 })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(depthInput().value).toBe('5.0')
+  })
+
+  it('renders an empty input and names the reason when anchored with nothing recorded — never a live-depth fallback', () => {
+    renderPlanner({ depthM: 42, planningDepthM: null, planningTideHeightFt: null })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(depthInput().value).toBe('')
+    // Exact string, not a loose regex: the two method groups separately show
+    // "Unavailable — no depth entered" for the same reason, so a looser
+    // match would find three hits instead of the Depth cell's own caption.
+    expect(screen.getByText('No depth entered — type the depth')).toBeInTheDocument()
+  })
+
+  // The double-correction guard: baseProps' tide has current_tide_height_ft 2,
+  // high_tide_height_ft 5 -> a 3ft rise -> 3/3.28084 = 0.914m corrected onto the
+  // 5m raw reading. The input must show the raw 5.0, never the 5.9 corrected
+  // figure — typing over a corrected figure and storing the result would feed
+  // the rise back in and compound it on every render.
+  it('holds the raw reading in the input while the caption reports the tide correction', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(depthInput().value).toBe('5.0')
+    expect(screen.getByText('Tide adjusted')).toBeInTheDocument()
+  })
+
+  describe('persistence', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    it('debounces the change to metres, 800ms, when a watch is anchored', () => {
+      const onPlanningDepthChange = vi.fn()
+      renderPlanner({ onPlanningDepthChange })
+      fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+      fireEvent.change(depthInput(), { target: { value: '8' } })
+      expect(onPlanningDepthChange).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(800)
+      // baseProps' tide has current_tide_height_ft: 2 — the edit is stamped
+      // with the tide right now, at the moment it was typed.
+      expect(onPlanningDepthChange).toHaveBeenCalledWith(8, 2)
+    })
+
+    it('converts a typed feet value to metres under imperial before persisting', () => {
+      const onPlanningDepthChange = vi.fn()
+      renderPlanner({ onPlanningDepthChange, isImperial: true })
+      fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+      fireEvent.change(depthInput(), { target: { value: '20' } })
+      vi.advanceTimersByTime(800)
+
+      expect(onPlanningDepthChange).toHaveBeenCalledTimes(1)
+      const [depthMArg] = onPlanningDepthChange.mock.calls[0]
+      expect(depthMArg).toBeCloseTo(20 / 3.28084, 6)
+    })
+
+    it('fires immediately, with no debounce, when there is no active watch', () => {
+      const onPlanningDepthChange = vi.fn()
+      renderPlanner({ anchorState: 'none', onPlanningDepthChange })
+      fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+      fireEvent.change(depthInput(), { target: { value: '8' } })
+      expect(onPlanningDepthChange).toHaveBeenCalledWith(8, 2)
+    })
+
+    it('clears both the sea-state and depth debounce timers on unmount, so a stray PATCH cannot fire after Raise', () => {
+      const onPlanningDepthChange = vi.fn()
+      const onUpdateRodeAndConditions = vi.fn().mockResolvedValue(undefined)
+      const { unmount } = renderPlanner({ onPlanningDepthChange, onUpdateRodeAndConditions })
+      fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+      fireEvent.change(depthInput(), { target: { value: '8' } })
+      fireEvent.change(screen.getByLabelText(/sea state/i), { target: { value: 'storm' } })
+      unmount()
+      vi.advanceTimersByTime(2000)
+
+      expect(onPlanningDepthChange).not.toHaveBeenCalled()
+      expect(onUpdateRodeAndConditions).not.toHaveBeenCalled()
+    })
   })
 })

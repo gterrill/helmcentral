@@ -119,10 +119,13 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     bearingDeg: null,
     suggestSet: false,
     setAt: null,
+    planningDepthM: null,
+    planningTideHeightFt: null,
     setAnchorHere: setAnchorHereMock,
     updatePosition: vi.fn(),
     updateRadius: vi.fn(),
     updateRodeAndConditions: vi.fn(),
+    updatePlanningDepth: vi.fn(),
     clearAnchor: clearAnchorMock,
   }),
 }))
@@ -185,14 +188,21 @@ vi.mock('@/hooks/use-app-config', () => ({
 }))
 
 describe('Anchor watch drawer drop button', () => {
-  it('drops anchor from drawer when no watch is active', () => {
+  // useVesselState mock above has depth: null, so this is the "no sounder at
+  // drop" case (ADR 0063) — setAnchorHere still gets called, now with a
+  // third capture argument carrying explicit nulls rather than silently
+  // omitting them.
+  it('drops anchor from drawer when no watch is active, capturing null depth/tide when there is no sounder reading', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
     const dropButtons = screen.getAllByRole('button', { name: 'Drop' })
     fireEvent.click(dropButtons[dropButtons.length - 1])
 
-    expect(setAnchorHereMock).toHaveBeenCalledWith(-36.8485, 174.7633)
+    expect(setAnchorHereMock).toHaveBeenCalledWith(-36.8485, 174.7633, {
+      planningDepthM: null,
+      planningTideHeightFt: null,
+    })
   })
 
   it('does not show a drawer drop button when anchor watch is active', () => {
