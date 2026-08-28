@@ -127,15 +127,19 @@ services:
       - CHOKIDAR_USEPOLLING=1
       - CHOKIDAR_INTERVAL=300
       - VITE_API_PROXY_TARGET=http://host.docker.internal:8090
-      # Required, not belt-and-braces. Several hooks — including
-      # use-settings-form.ts, the sole caller of POST /api/settings — do not
-      # use the Vite proxy at all; they build an absolute URL defaulting to
-      # `<host>:8080`, which is the *dev* backend and the real settings.yaml.
-      # Without this override, clicking Save on :5174 writes to the live
-      # config, i.e. exactly the incident this stack exists to prevent.
-      # localhost is correct here: the browser runs on the host, not in the
-      # container.
-      - VITE_API_BASE_URL=http://localhost:8090
+      # Deliberately no VITE_API_BASE_URL here. It used to be required: until
+      # e1a0e79 (2026-08-11) config/api.ts defaulted apiBaseUrl to an absolute
+      # `<host>:8080`, which is the *dev* backend and the real settings.yaml,
+      # so without an override a Save on :5174 wrote to the live config. That
+      # default is gone. apiBaseUrl is now '' and every call is same-origin
+      # relative, pinned by frontend/src/test/api-base-url.test.ts, so the
+      # proxy above is what routes them and it points at the e2e backend.
+      #
+      # Do not re-add it. An absolute base URL makes the browser call :8090
+      # cross-origin from :5174, and the backend sends no
+      # Access-Control-Allow-Origin, so every fetch fails and the dashboard
+      # dies at the auth probe with "Could not determine whether this
+      # Helmcentral requires a sign-in".
     ports:
       - "5174:5174"
     volumes:
