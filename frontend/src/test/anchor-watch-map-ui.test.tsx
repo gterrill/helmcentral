@@ -253,9 +253,12 @@ describe('AnchorWatchMap controls and AIS selection', () => {
       })
     })
 
+    // sessionId tags the pan with the anchorage it was made in; this map is
+    // mounted without a set_at, so there is no session to tag it with.
     expect(JSON.parse(localStorage.getItem('anchor-watch-map-center')!)).toEqual({
       latitude: -25.3050,
       longitude: 152.9150,
+      sessionId: null,
     })
     expect(localStorage.getItem('anchor-watch-map-zoom')).toBe('15')
 

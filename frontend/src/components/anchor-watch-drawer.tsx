@@ -32,7 +32,9 @@ interface AnchorWatchDrawerProps {
   bowOffsetM?: number
   bowOffsetApplied?: boolean
   bowOffsetReason?: string
-  anchorSetAt?: never  // removed — motoring track fetched by map on reposition
+  // The watch's set_at, passed straight through to the map: it centres on
+  // the anchor whenever the session changes.
+  anchorSetAt: string | null
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
@@ -93,6 +95,7 @@ export function AnchorWatchDrawer({
   bowOffsetM = 0,
   bowOffsetApplied = false,
   bowOffsetReason = '',
+  anchorSetAt,
   vesselTrail,
   aisVessels,
   aisTrails,
@@ -195,6 +198,7 @@ export function AnchorWatchDrawer({
                 vesselHeadingDeg={vesselHeadingDeg}
                 anchorLat={anchorLat}
                 anchorLon={anchorLon}
+                anchorSetAt={anchorSetAt}
                 radiusMeters={radiusMeters}
                 depthMeters={depthMeters}
                 currentDriftKts={currentDriftKts}

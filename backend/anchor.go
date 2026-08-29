@@ -272,6 +272,20 @@ func setAnchorWatch(c echo.Context) error {
 		radius = previousRadius
 	}
 
+	// set_at is the anchoring session's identity, not a "last written"
+	// stamp: it is minted at the drop and carried forward for the life of
+	// the watch. A reposition is a POST too, and it corrects where you
+	// believe the hook lies rather than beginning a new anchorage — the
+	// same rule that keeps placemarks alive across a reposition (ADR 0048).
+	// Clients compare it against the session their map view was last
+	// centred for, so a stamp that moved on every drag would swing every
+	// client's chart mid-anchorage. On a genuine drop current is nil
+	// (Raise DELETEs first), so a new anchorage always gets a fresh one.
+	setAt := time.Now().UTC()
+	if current != nil {
+		setAt = current.SetAt
+	}
+
 	planningDepthM := -1.0
 	planningTideHeightFt := -1.0
 	if current != nil {
@@ -338,7 +352,7 @@ func setAnchorWatch(c echo.Context) error {
 		RodeDeployedM:        0,
 		SeaState:             "calm",
 		SeabedType:           "sand",
-		SetAt:                time.Now().UTC(),
+		SetAt:                setAt,
 		BowOffsetM:           bowOffsetM,
 		BowOffsetApplied:     bowOffsetApplied,
 		BowOffsetReason:      bowOffsetReason,

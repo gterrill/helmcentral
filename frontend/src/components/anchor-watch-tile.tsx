@@ -91,6 +91,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     gnssCritical,
     anchorLat,
     anchorLon,
+    setAt,
     radiusMeters,
     distanceMeters,
     bearingDeg,
@@ -200,6 +201,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
             vesselHeadingDeg={vesselHeadingDeg}
             anchorLat={anchorLat}
             anchorLon={anchorLon}
+            anchorSetAt={setAt}
             radiusMeters={radiusMeters}
             depthMeters={depthMeters}
             currentDriftKts={currentDriftKts}

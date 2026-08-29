@@ -27,6 +27,7 @@ const baseProps = {
   vesselHeadingDeg: 45,
   anchorLat: -25.2938,
   anchorLon: 152.9102,
+  anchorSetAt: '2026-08-20T06:30:00Z',
   radiusMeters: 20,
   depthMeters: 3.2,
   currentDriftKts: null,

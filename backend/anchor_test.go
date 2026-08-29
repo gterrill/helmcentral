@@ -928,3 +928,98 @@ func TestPatchAnchorWatch_ConcurrentPatchesDoNotLoseUpdates(t *testing.T) {
 		}
 	}
 }
+
+// Test 19: set_at identifies the anchoring session, so it is minted at the
+// drop and carried forward across a reposition. A map marker drag corrects
+// where you believe the hook lies; it does not begin a new anchorage (the
+// same rule that keeps placemarks alive across a reposition, ADR 0048), and
+// clients key their map view off set_at to decide whether the view they are
+// showing belongs to the anchorage now under the boat.
+func TestSetAnchorWatch_RepositionKeepsTheSessionSetAt(t *testing.T) {
+	anchorTestEnv(t, 8)
+	seedHeadingTrue(t, 0)
+	resetAnchorWatchState(t)
+
+	dropCode, dropResp := postAnchorWatch(t, map[string]any{
+		"lat":              -21.1113,
+		"lon":              149.2276,
+		"apply_bow_offset": true,
+	})
+	if dropCode != http.StatusOK {
+		t.Fatalf("expected 200 from drop, got %d: %+v", dropCode, dropResp)
+	}
+
+	// Backdate the session rather than sleeping: set_at serialises at
+	// RFC3339 second resolution, so a re-minted stamp could otherwise
+	// coincide with the drop's and pass by accident.
+	dropped := time.Date(2026, 8, 20, 6, 30, 0, 0, time.UTC)
+	anchorWatchMu.Lock()
+	anchorWatchState.SetAt = dropped
+	anchorWatchMu.Unlock()
+	want := dropped.Format(time.RFC3339)
+
+	repositionCode, repositionResp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1120,
+		"lon": 149.2280,
+		// apply_bow_offset omitted, exactly like a map marker drag.
+	})
+	if repositionCode != http.StatusOK {
+		t.Fatalf("expected 200 from reposition, got %d: %+v", repositionCode, repositionResp)
+	}
+	if got, _ := repositionResp["set_at"].(string); got != want {
+		t.Fatalf("expected set_at %q to survive the reposition, got %q", want, got)
+	}
+
+	// GET must agree with the POST echo — clients poll it, not the echo.
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	if err := getAnchorWatch(e.NewContext(httptest.NewRequest(http.MethodGet, "/api/anchor-watch", nil), rec)); err != nil {
+		t.Fatalf("getAnchorWatch: %v", err)
+	}
+	var state map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &state)
+	if got, _ := state["set_at"].(string); got != want {
+		t.Fatalf("expected GET set_at %q, got %q", want, got)
+	}
+}
+
+// Test 20: the other half of Test 19. Raising ends the session, so the next
+// drop is a new anchorage and must mint a fresh set_at — that difference is
+// the only signal a client has that the boat is somewhere else now.
+func TestSetAnchorWatch_DropAfterRaiseMintsANewSetAt(t *testing.T) {
+	anchorTestEnv(t, 8)
+	seedHeadingTrue(t, 0)
+	resetAnchorWatchState(t)
+
+	if code, resp := postAnchorWatch(t, map[string]any{
+		"lat":              -21.1113,
+		"lon":              149.2276,
+		"apply_bow_offset": true,
+	}); code != http.StatusOK {
+		t.Fatalf("expected 200 from the first drop, got %d: %+v", code, resp)
+	}
+
+	first := time.Date(2026, 8, 20, 6, 30, 0, 0, time.UTC)
+	anchorWatchMu.Lock()
+	anchorWatchState.SetAt = first
+	anchorWatchMu.Unlock()
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	if err := deleteAnchorWatch(e.NewContext(httptest.NewRequest(http.MethodDelete, "/api/anchor-watch", nil), rec)); err != nil {
+		t.Fatalf("deleteAnchorWatch: %v", err)
+	}
+
+	_, secondResp := postAnchorWatch(t, map[string]any{
+		"lat":              -21.2500,
+		"lon":              149.3000,
+		"apply_bow_offset": true,
+	})
+	secondSetAt, _ := secondResp["set_at"].(string)
+	if secondSetAt == "" {
+		t.Fatalf("expected a set_at on the second drop, got %+v", secondResp)
+	}
+	if secondSetAt == first.Format(time.RFC3339) {
+		t.Fatalf("expected a new session set_at after a raise, got the previous session's %q", secondSetAt)
+	}
+}

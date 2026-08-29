@@ -276,7 +276,10 @@ Beyond the grid:
   takes pins: click open water to mark a bombie or the nearest shoreline and
   watch the range close as you swing. Pins are shared across every device
   watching the anchorage and expire with the anchoring
-  ([ADR 0048](docs/adr/0048-session-bound-anchor-placemarks.md)).
+  ([ADR 0048](docs/adr/0048-session-bound-anchor-placemarks.md)). The map keeps
+  the view you panned to for as long as you stay in the anchorage, and centres
+  itself on the new anchor on every device when you drop somewhere else
+  ([ADR 0064](docs/adr/0064-anchor-map-follows-the-session.md)).
 - **Route planning.** Multi-leg waypoint sequences with per-leg distance,
   bearing and ETA. A saved route can be activated, which pushes it to SignalK as
   the vessel's active route for autopilots and MFDs to follow. This is manual

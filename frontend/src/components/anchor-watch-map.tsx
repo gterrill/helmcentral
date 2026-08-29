@@ -46,12 +46,22 @@ function readStoredZoom(): number | null {
   return Math.max(10, Math.min(22, value))
 }
 
-function readStoredCenter(): { latitude: number; longitude: number } | null {
+// The centre the operator last left the map at, tagged with the anchor
+// session it was made in. An untagged record (or one written with no watch
+// running) carries a null session, which matches no live session and so
+// gets re-centred the moment one arrives.
+interface StoredCenter {
+  latitude: number
+  longitude: number
+  sessionId: string | null
+}
+
+function readStoredCenter(): StoredCenter | null {
   if (typeof window === 'undefined') return null
   const raw = window.localStorage.getItem(ANCHOR_WATCH_CENTER_STORAGE_KEY)
   if (!raw) return null
   try {
-    const parsed = JSON.parse(raw) as { latitude?: unknown; longitude?: unknown }
+    const parsed = JSON.parse(raw) as { latitude?: unknown; longitude?: unknown; sessionId?: unknown }
     if (
       typeof parsed === 'object' &&
       parsed !== null &&
@@ -64,12 +74,24 @@ function readStoredCenter(): { latitude: number; longitude: number } | null {
       parsed.longitude >= -180 &&
       parsed.longitude <= 180
     ) {
-      return { latitude: parsed.latitude, longitude: parsed.longitude }
+      return {
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+        sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : null,
+      }
     }
   } catch {
     // Ignore JSON parse errors and return null
   }
   return null
+}
+
+function writeStoredCenter(latitude: number, longitude: number, sessionId: string | null): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(
+    ANCHOR_WATCH_CENTER_STORAGE_KEY,
+    JSON.stringify({ latitude, longitude, sessionId }),
+  )
 }
 
 // ── Generate a circle GeoJSON polygon ──────────────────────────────────────
@@ -129,6 +151,13 @@ export interface AnchorWatchMapProps {
   // below only runs under test until the tile/drawer rework lands.
   anchorLat: number | null
   anchorLon: number | null
+  // The watch's set_at: the anchoring session's identity, minted at the drop
+  // and held for the life of the watch (a reposition keeps it). Null while
+  // the first /api/anchor-watch poll is in flight and whenever no watch is
+  // running. The map centres itself on the anchor whenever this changes, so
+  // every client swings to the new anchorage instead of sitting over the
+  // water it was left looking at.
+  anchorSetAt?: string | null
   radiusMeters: number
   depthMeters: number | null
   currentDriftKts: number | null
@@ -168,6 +197,7 @@ export function AnchorWatchMap({
   vesselHeadingDeg,
   anchorLat,
   anchorLon,
+  anchorSetAt = null,
   radiusMeters,
   depthMeters,
   currentDriftKts,
@@ -681,14 +711,32 @@ export function AnchorWatchMap({
     mapRef.current?.easeTo({ center, duration: 600 })
   }, [hasAnchor, anchorLat, anchorLon, vesselLat, vesselLon])
 
+  // Resolved once, at mount. A stored centre is the operator's pan, but only
+  // for the anchorage it was made in: against a different session it is a
+  // view of water the boat has left, so the anchor wins. anchorSetAt is null
+  // while the first watch poll is in flight, and that is not evidence of a
+  // new session — trust the stored centre for now and let the effect below
+  // correct it the moment a session id lands.
+  const [mountView] = useState(() => {
+    const stored = readStoredCenter()
+    const belongsToCurrentSession =
+      stored !== null && (anchorSetAt === null || stored.sessionId === anchorSetAt)
+    return {
+      center: belongsToCurrentSession ? stored : null,
+      sessionId: belongsToCurrentSession ? stored.sessionId : anchorSetAt,
+    }
+  })
+  // The anchor session the view on screen is currently following.
+  const viewSessionRef = useRef<string | null>(mountView.sessionId)
+
   const handleMoveEnd = useCallback((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => {
     if (typeof window === 'undefined') return
     const { latitude, longitude, zoom } = e.viewState
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-      window.localStorage.setItem(
-        ANCHOR_WATCH_CENTER_STORAGE_KEY,
-        JSON.stringify({ latitude, longitude }),
-      )
+      // Tagged with the session the view is following (a ref, so this stays
+      // a stable handler) — a pan is only worth restoring for the anchorage
+      // it was made in.
+      writeStoredCenter(latitude, longitude, viewSessionRef.current)
     }
     if (Number.isFinite(zoom)) {
       setCurrentZoom(zoom)
@@ -696,15 +744,16 @@ export function AnchorWatchMap({
   }, [])
 
   // ── Initial map view ─────────────────────────────────────────────────────
+  // mountView, resolved above, has already decided whether the stored centre
+  // belongs to the anchorage now under the boat.
   const initialViewState = useMemo(() => {
-    const storedCenter = readStoredCenter()
     // No anchor to open on yet — fall back to the vessel.
     const fallback = hasAnchor
       ? { latitude: anchorLat, longitude: anchorLon }
       : { latitude: vesselLat, longitude: vesselLon }
     return {
-      longitude: storedCenter ? storedCenter.longitude : fallback.longitude,
-      latitude: storedCenter ? storedCenter.latitude : fallback.latitude,
+      longitude: mountView.center ? mountView.center.longitude : fallback.longitude,
+      latitude: mountView.center ? mountView.center.latitude : fallback.latitude,
       zoom: currentZoom,
     }
   },
@@ -712,6 +761,20 @@ export function AnchorWatchMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   )
+
+  // A new anchorage pulls every client's view to it. The alternative is a
+  // chart still centred on last night's bay: the boat and its swing circle
+  // are off-screen, and nothing on the map says so. Only a change of session
+  // does this — a reposition drag keeps the same set_at (the backend carries
+  // it forward), so nobody's view is yanked while the hook is being nudged
+  // around, and a pan made during this session survives a reload.
+  useEffect(() => {
+    if (anchorSetAt === null || anchorLat === null || anchorLon === null) return
+    if (viewSessionRef.current === anchorSetAt) return
+    viewSessionRef.current = anchorSetAt
+    writeStoredCenter(anchorLat, anchorLon, anchorSetAt)
+    mapRef.current?.easeTo({ center: [anchorLon, anchorLat], duration: 600 })
+  }, [anchorSetAt, anchorLat, anchorLon])
 
   const mapStyle = isDarkTheme ? STYLE_DARK : STYLE_LIGHT
 
