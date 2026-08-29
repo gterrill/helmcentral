@@ -9,6 +9,7 @@ import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
+import type { RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
@@ -28,6 +29,9 @@ interface AnchorWatchTileProps {
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
+  // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
+  // integration wired up simply omits it.
+  radarTargets?: RadarTarget[]
   isDarkTheme: boolean
   showImageryLayer: boolean
   onImageryToggle: (enabled: boolean) => void
@@ -66,6 +70,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   vesselTrail,
   aisVessels,
   aisTrails,
+  radarTargets,
   isDarkTheme,
   showImageryLayer,
   onImageryToggle,
@@ -207,6 +212,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
             vesselTrail={vesselTrail}
             aisVessels={aisVessels}
             aisTrails={aisTrails}
+            radarTargets={radarTargets}
             isDarkTheme={isDarkTheme}
             showImageryLayer={showImageryLayer}
             onImageryToggle={onImageryToggle}

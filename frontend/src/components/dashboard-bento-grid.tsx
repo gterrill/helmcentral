@@ -87,6 +87,7 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'tanks': { minW: 2, minH: 3 },
   'route': { minW: 2, minH: 3 },
   'nearby-vessels': { minW: 2, minH: 3 },
+  'radar-targets': { minW: 2, minH: 3 },
   'alternator': { minW: 2, minH: 4 },
   'generator': { minW: 2, minH: 4 },
   'czone-switches': { minW: 2, minH: 3 },

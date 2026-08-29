@@ -1,0 +1,14 @@
+{
+  "updates": [
+    {
+      "$source": "mayara",
+      "timestamp": "2026-08-28T02:03:24.077031Z",
+      "values": [
+        {
+          "path": "radars.fur6424A.targets.100000003",
+          "value": null
+        }
+      ]
+    }
+  ]
+}

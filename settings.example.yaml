@@ -71,3 +71,10 @@ influxdb:
   url: http://localhost:8086
   org: my-org
   bucket: SignalK_Data
+
+# ARPA radar targets need no configuration here. They appear automatically
+# when the mayara SignalK plugin (github.com/MarineYachtRadar/
+# mayara-server-signalk-plugin) is installed on the SignalK server above and
+# mayara-server itself is running against the radar. Helmcentral reads both
+# through the SignalK connection it already has, the same way it reads every
+# other sensor.

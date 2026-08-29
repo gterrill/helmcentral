@@ -46,6 +46,7 @@ func telemetryEmitters() []*streamEmitter {
 		{event: "gauge-values", interval: 1 * time.Second, build: buildGaugeValuesPayload},
 		{event: "electrical-state", interval: 5 * time.Second, build: buildElectricalStatePayload},
 		{event: "nearby-vessels", interval: 5 * time.Second, build: buildNearbyVesselsPayload},
+		{event: "radar-targets", interval: 2 * time.Second, build: buildRadarTargetsPayload},
 		{event: "solar-state", interval: 10 * time.Second, build: buildSolarStatePayload},
 		{event: "tanks-state", interval: 10 * time.Second, build: buildTanksStatePayload},
 	}

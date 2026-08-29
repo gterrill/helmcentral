@@ -26,6 +26,7 @@ import { ForecastWarningsBanner } from '@/components/forecast-warnings-banner'
 import { AlarmBanner } from '@/components/alarm-banner'
 import { AlarmsDrawer } from '@/components/alarms-drawer'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
+import { RadarTargetsTile } from '@/components/radar-targets-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
 import {
@@ -61,6 +62,7 @@ import { useRouteActivation } from '@/hooks/use-route-activation'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useSolarState } from '@/hooks/use-solar-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
+import { useRadarTargets } from '@/hooks/use-radar-targets'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
 import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
@@ -351,6 +353,7 @@ export function App() {
   // can't trigger the prompt spuriously.
   const { settings: currentSettings, loading: currentSettingsLoading } = useSettingsForm()
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels()
+  const { targets: radarTargets, radars: radarInfos, source: radarSource, loading: radarTargetsLoading } = useRadarTargets()
   const { tanks, loading: tanksLoading } = useTanksState()
   const {
     batterySocPercent,
@@ -816,6 +819,7 @@ export function App() {
             vesselTrail={getSelfTrail}
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
+            radarTargets={radarTargets}
             isDarkTheme={isDarkTheme}
             showImageryLayer={showAnchorImagery}
             onImageryToggle={setShowAnchorImagery}
@@ -845,6 +849,16 @@ export function App() {
         )
       case 'nearby-vessels':
         return <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
+      case 'radar-targets':
+        return (
+          <RadarTargetsTile
+            targets={radarTargets}
+            radars={radarInfos}
+            source={radarSource}
+            loading={radarTargetsLoading}
+            distanceUnits={uiConfig.distanceUnits}
+          />
+        )
       case 'battery-power':
         return (
           <BatteryPowerTile
@@ -1162,6 +1176,7 @@ export function App() {
             vesselTrail={getSelfTrail}
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
+            radarTargets={radarTargets}
             isDarkTheme={isDarkTheme}
             showImageryLayer={showAnchorImagery}
             onImageryToggle={setShowAnchorImagery}

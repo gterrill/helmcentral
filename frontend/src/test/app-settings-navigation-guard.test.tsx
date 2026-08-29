@@ -77,6 +77,10 @@ vi.mock('@/hooks/use-nearby-vessels', () => ({
   useNearbyVessels: () => ({ vessels: [], loading: false }),
 }))
 
+vi.mock('@/hooks/use-radar-targets', () => ({
+  useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
+}))
+
 vi.mock('@/hooks/use-anchor-watch', () => ({
   useAnchorWatch: () => ({
     anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,

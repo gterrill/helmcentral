@@ -8,6 +8,7 @@ import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
+import type { RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { RodeMethodResult } from '@/lib/rode-plan'
 
@@ -144,6 +145,10 @@ export interface AnchorWatchMapProps {
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
+  // Optional, and defaulted below, so every existing caller and test that
+  // mounts this map without a mayara integration keeps compiling untouched
+  // — the same treatment `placemarks` already gets.
+  radarTargets?: RadarTarget[]
   isDarkTheme: boolean
   showImageryLayer?: boolean
   onImageryToggle?: (enabled: boolean) => void
@@ -175,6 +180,7 @@ export function AnchorWatchMap({
   vesselTrail,
   aisVessels,
   aisTrails,
+  radarTargets = [],
   isDarkTheme,
   showImageryLayer = false,
   onImageryToggle,
@@ -937,6 +943,72 @@ export function AnchorWatchMap({
                   </div>
                 </div>
               </button>
+            </Marker>
+          )
+        })}
+
+        {/* Radar target markers (ADR 0062). Shape carries identity, colour
+            carries state: AIS keeps its filled circle with the Ship glyph
+            above, radar draws a filled triangle oriented along course_rad —
+            the ARPA convention, readable without relying on hue. A target
+            with no lat/lon (no mayara fix and no own-ship position to
+            project from) renders nothing, exactly as the AIS block above. */}
+        {radarTargets.map((target) => {
+          if (target.lat === undefined || target.lon === undefined) return null
+          const distanceM = Math.round(haversineMeters(vesselLat, vesselLon, target.lat, target.lon))
+          const bearing = Math.round(bearingDeg(vesselLat, vesselLon, target.lat, target.lon))
+          const acquiring = target.status === 'acquiring'
+          // course_rad is true course in radians, same convention as the
+          // vessel heading rotation just below. Unknown motion (course_rad
+          // absent) leaves the triangle pointing north rather than guessing.
+          const rotationDeg = target.course_rad !== undefined ? (target.course_rad * 180) / Math.PI : 0
+          return (
+            <Marker
+              key={target.id}
+              latitude={target.lat}
+              longitude={target.lon}
+              style={{ zIndex: target.is_dangerous ? 25 : 8 }}
+            >
+              <div
+                className="flex flex-col items-center"
+                style={{ minWidth: 40, minHeight: 40 }}
+                aria-label={`Radar target: ${target.id}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  style={{
+                    transform: `scale(${markerScale}) rotate(${rotationDeg}deg)`,
+                    transformOrigin: 'center',
+                    transition: 'transform 150ms ease-out',
+                  }}
+                >
+                  {/*
+                    bg-foreground, not bg-secondary. In the day theme
+                    --secondary is 0 0% 92%, near-white, and the map tiles
+                    underneath are near-white too: the first live run put 20
+                    targets on the chart and only the 3 dangerous ones were
+                    visible, the other 17 showing as a floating RDR label with
+                    no marker above it. --foreground is 0% on day and 92% on
+                    night, so it is legible in both by construction.
+                  */}
+                  <div
+                    className={cn(
+                      'h-4 w-4 shadow-lg',
+                      acquiring
+                        ? 'border-2 border-foreground bg-transparent'
+                        : target.is_dangerous
+                          ? 'bg-red-600 ring-2 ring-red-600/50'
+                          : 'bg-foreground',
+                    )}
+                    style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
+                  />
+                </div>
+                <div className="mt-0.5 max-w-24 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                  <div className="whitespace-nowrap">
+                    RDR {formatRange(distanceM)} · {bearing}°
+                  </div>
+                </div>
+              </div>
             </Marker>
           )
         })}

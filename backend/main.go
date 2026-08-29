@@ -28,6 +28,12 @@ var (
 	buildRevision = "unknown"
 )
 
+// globalRadarTargetStore holds the current set of ARPA radar targets fed by
+// radarPoller (radar_source.go), read by the "radar-targets" telemetry
+// emitter and GET /api/radar/targets. nil until initialised in main(),
+// mirroring globalNearbyContactStore (nearby_contacts.go).
+var globalRadarTargetStore *radarTargetStore
+
 // gustWindowLadder is the shared, ordered set of "max gust" windows exposed
 // via the vessel-state API's max_gust_kts field (and the frontend's MAX GUST
 // cards, which cycle through it shortest-to-longest). It is the single
@@ -304,12 +310,23 @@ func main() {
 	loadRoutes()
 	loadDashboardPages()
 	loadEngineProfiles()
+	// Radar (ADR 0062, amended for the mayara SignalK plugin): a target store
+	// fed by radarPoller (radar_source.go), which polls the plugin's proxied
+	// REST endpoint through the already-configured SignalK connection —
+	// there is no separate mayara host/port, and no push path through
+	// SignalK to subscribe to instead. Initialised unconditionally, same as
+	// the SignalK snapshot below — an absent or unreachable plugin is a live
+	// "disabled"/"mayara-unreachable" source in the telemetry payload, not
+	// an absent store.
+	globalRadarTargetStore = newRadarTargetStore()
+
 	// All vessel data arrives over the SignalK delta stream (ADR 0037). There
 	// is no REST read path to fall back to: a dropped stream surfaces as an
 	// outage rather than being papered over.
 	streamCtx, cancelStream := context.WithCancel(context.Background())
 	defer cancelStream()
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
+	go newRadarPoller(globalRadarTargetStore, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	go startAlarmEvaluator(streamCtx, alarmEvaluationInterval)
 	go startNotificationDrainer(streamCtx, notifyDrainInterval)
 	go startStreamWatchdog(streamCtx, watchdogCheckInterval)
@@ -363,6 +380,11 @@ func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []a
 		{http.MethodGet, "/api/tanks-state", tierRead, tanksState},
 		{http.MethodGet, "/api/nearby-vessels", tierRead, nearbyVessels},
 		{http.MethodGet, "/api/nearby-vessels/:key/sightings", tierRead, getNearbyVesselSightingsHandler(globalNearbyContactStore)},
+		// mayara ARPA radar targets, polled through the mayara SignalK plugin
+		// (ADR 0062 amendment). Read-only, same tier as nearby-vessels: this
+		// is the REST equivalent of the "radar-targets" telemetry event,
+		// curl-able before any UI exists.
+		{http.MethodGet, "/api/radar/targets", tierRead, radarTargetsHandler},
 		{http.MethodGet, "/api/weather-today", tierRead, weatherToday},
 		{http.MethodGet, "/api/weather-forecast", tierRead, weatherForecast},
 		{http.MethodGet, "/api/weather-providers", tierRead, weatherProvidersHandler},

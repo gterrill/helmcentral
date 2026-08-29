@@ -1,0 +1,264 @@
+{
+  "config": {
+    "allow_wifi": false,
+    "brand": null,
+    "emulator": false,
+    "interface": "Furuno",
+    "multiple_radar": false,
+    "navigation_address": null,
+    "nmea0183": false,
+    "port": 6502,
+    "replay": false,
+    "stationary": false,
+    "targets": "arpa",
+    "tls_enabled": false,
+    "transmit": false
+  },
+  "generated_at": "2026-08-28T00:03:16.011072700+00:00",
+  "host": {
+    "interfaces": [
+      {
+        "addresses": [
+          {
+            "family": "v6",
+            "ip": "fe80::830b:bb7f:dcbb:a35a"
+          },
+          {
+            "family": "v4",
+            "ip": "169.254.250.192",
+            "netmask": "255.255.0.0"
+          }
+        ],
+        "index": 10,
+        "internal": false,
+        "mac": "00:07:32:AA:D1:CD",
+        "name": "Ethernet"
+      },
+      {
+        "addresses": [
+          {
+            "family": "v6",
+            "ip": "fe80::5130:157:5cba:dcd5"
+          },
+          {
+            "broadcast": "172.31.255.255",
+            "family": "v4",
+            "ip": "172.31.3.150",
+            "netmask": "255.255.0.0"
+          }
+        ],
+        "index": 15,
+        "internal": false,
+        "mac": "00:07:32:AA:D1:CF",
+        "name": "Furuno"
+      },
+      {
+        "addresses": [
+          {
+            "family": "v6",
+            "ip": "fd7a:115c:a1e0::9101:e281"
+          },
+          {
+            "family": "v6",
+            "ip": "fe80::2b6d:2c54:8016:c54a"
+          },
+          {
+            "broadcast": "100.122.205.24",
+            "family": "v4",
+            "ip": "100.109.226.127",
+            "netmask": "255.255.255.255"
+          }
+        ],
+        "index": 7,
+        "internal": false,
+        "name": "Tailscale"
+      },
+      {
+        "addresses": [
+          {
+            "family": "v6",
+            "ip": "fe80::bf3b:26b8:6b25:5226"
+          },
+          {
+            "broadcast": "192.168.1.255",
+            "family": "v4",
+            "ip": "192.168.1.1",
+            "netmask": "255.255.255.0"
+          }
+        ],
+        "index": 13,
+        "internal": false,
+        "mac": "00:07:32:AA:D1:CE",
+        "name": "NVR"
+      },
+      {
+        "addresses": [
+          {
+            "family": "v6",
+            "ip": "fda3:4b75:9984:4de7:3474:a6e9:83ae:cf9f"
+          },
+          {
+            "family": "v6",
+            "ip": "fda3:4b75:9984:4de7:9422:2d69:5c16:4679"
+          },
+          {
+            "family": "v6",
+            "ip": "fe80::a512:c99f:bcb4:65ba"
+          },
+          {
+            "broadcast": "192.168.50.255",
+            "family": "v4",
+            "ip": "192.168.50.81",
+            "netmask": "255.255.255.0"
+          }
+        ],
+        "index": 2,
+        "internal": false,
+        "mac": "00:07:32:AA:D1:D0",
+        "name": "Main LAN (Peplink) [Ethernet 4]"
+      },
+      {
+        "addresses": [
+          {
+            "family": "v6",
+            "ip": "fd5e:10d1:666f:cb64:2d99:93e8:b87f:f3b7"
+          },
+          {
+            "family": "v6",
+            "ip": "fe80::8f28:78ba:8e56:372a"
+          },
+          {
+            "broadcast": "10.147.18.255",
+            "family": "v4",
+            "ip": "10.147.18.193",
+            "netmask": "255.255.255.0"
+          }
+        ],
+        "index": 16,
+        "internal": false,
+        "mac": "2E:8C:73:10:95:66",
+        "name": "ZeroTier One [5e10d1666fcb642d]"
+      },
+      {
+        "addresses": [
+          {
+            "family": "v6",
+            "ip": "::1"
+          },
+          {
+            "broadcast": "127.255.255.255",
+            "family": "v4",
+            "ip": "127.0.0.1",
+            "netmask": "255.0.0.0"
+          }
+        ],
+        "index": 1,
+        "internal": true,
+        "name": "Loopback Pseudo-Interface 1"
+      }
+    ]
+  },
+  "locator": {
+    "brands": [
+      "Garmin",
+      "Raymarine",
+      "Navico",
+      "Furuno",
+      "Koden"
+    ],
+    "interfaces": {
+      "Furuno (172.31.3.150)": {
+        "devices": [
+          {
+            "hostnames": [],
+            "ip": "172.31.3.248",
+            "mac": "00:d0:1d:4a:21:ef",
+            "sources": [
+              "arp"
+            ]
+          },
+          {
+            "hostnames": [],
+            "ip": "172.31.92.1",
+            "mac": "00:d0:1d:33:67:ec",
+            "sources": [
+              "arp"
+            ]
+          },
+          {
+            "hostnames": [],
+            "ip": "172.31.252.1",
+            "mac": "00:04:f3:40:d1:68",
+            "sources": [
+              "arp"
+            ]
+          },
+          {
+            "hostnames": [
+              "mconnect.local."
+            ],
+            "ip": "172.31.254.4",
+            "sources": [
+              "mdns:_http._tcp.local."
+            ]
+          }
+        ],
+        "ip": "172.31.3.150",
+        "listeners": {
+          "Furuno": "Active",
+          "Garmin": "Listening",
+          "Koden": "Listening",
+          "Navico": "Listening",
+          "Raymarine": "Listening"
+        },
+        "netmask": "255.255.0.0",
+        "status": "Ok"
+      }
+    }
+  },
+  "radars": [
+    {
+      "address": "172.31.3.248:10010",
+      "brand": "Furuno",
+      "id": "fur6424A",
+      "model": "DRS4DNXT",
+      "name": "DRS4D-NXT 6424",
+      "replay": false,
+      "report_address": "172.31.3.248:10100",
+      "send_command_address": "172.31.3.248:10100",
+      "serial_no": "6424",
+      "spoke_data_address": "239.255.0.2:10024",
+      "via_nic": "172.31.3.150"
+    },
+    {
+      "address": "172.31.3.248:10010",
+      "brand": "Furuno",
+      "id": "fur6424B",
+      "model": "DRS4DNXT",
+      "name": "DRS4D-NXT 6424 B",
+      "replay": false,
+      "report_address": "172.31.3.248:10100",
+      "send_command_address": "172.31.3.248:10100",
+      "serial_no": "6424",
+      "spoke_data_address": "239.255.0.2:10024",
+      "via_nic": "172.31.3.150"
+    }
+  ],
+  "schema": "mayara-network-diagnostics-v1",
+  "server": {
+    "api_version": "3.4.0",
+    "arch": "x86_64",
+    "compiled_features": [
+      "navico",
+      "furuno",
+      "garmin",
+      "koden",
+      "raymarine",
+      "emulator"
+    ],
+    "family": "windows",
+    "os": "windows",
+    "package": "mayara",
+    "version": "3.10.0"
+  }
+}

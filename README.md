@@ -107,6 +107,7 @@ edit by hand.
   | [`tracks`](https://github.com/SignalK/tracks) | Vessel trails and historical path data |
   | [`signalk-venus-plugin`](https://github.com/sbender9/signalk-venus-plugin) | Generator and advanced electrical state (Victron GX devices) |
   | [`signalk-to-influxdb-v2`](https://github.com/tkurki/signalk-to-influxdb-v2) | Optional, only for InfluxDB-backed history |
+  | [`mayara-server-signalk-plugin`](https://github.com/MarineYachtRadar/mayara-server-signalk-plugin) | Optional, ARPA radar targets. Needs a [mayara-server](https://github.com/MarineYachtRadar/mayara-server) reaching your radar |
 
 - **A browser on Baseline 2024 or newer**: Chrome/Edge 111+, Firefox 111+,
   Safari 16.4+, which means iPadOS/iOS 16.4+ on a helm tablet. Older devices are
@@ -115,6 +116,12 @@ edit by hand.
 
 That is the whole list. Telemetry history is in-memory by default. InfluxDB buys
 you longer retention if you want it, and is not otherwise needed.
+
+Radar is the same shape: optional, and off unless the pieces are there. Targets
+appear once mayara-server is running against the radar and the mayara plugin is
+installed in SignalK. Helmcentral needs no configuration of its own for it, and
+auto-detects the radar from the SignalK stream, so there is nothing to switch on.
+Without both pieces the radar tile simply reads `--`.
 
 ## Other ways to install
 
@@ -290,6 +297,11 @@ Beyond the grid:
   steering takes a deliberate press-and-hold
   ([ADR 0041](docs/adr/0041-autopilot-widget.md)).
 - **Weather radar** via an embedded Windy map, centred on the vessel.
+- **Radar targets** from the ship's own radar, if you run one. ARPA contacts are
+  plotted on the anchor map as course-oriented triangles, distinct from the AIS
+  circles, and listed with range, bearing and the CPA/TCPA the radar computed.
+  This is the marine radar and has nothing to do with the weather radar above
+  ([ADR 0062](docs/adr/0062-marine-radar-targets-from-mayara.md)).
 - **Max wind gust** over a window you pick per readout: 10m, 30m, 1h or 24h
   ([ADR 0030](docs/adr/0030-selectable-max-gust-windows.md)).
 

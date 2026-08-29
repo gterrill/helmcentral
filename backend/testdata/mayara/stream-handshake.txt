@@ -1,0 +1,12 @@
+Captured 2026-08-28 from mayara-server 3.10.0 at 192.168.50.81:6502.
+
+Connect:
+  ws://192.168.50.81:6502/signalk/v1/stream?subscribe=none
+
+Client sends (note: no "context" key, unlike Helmcentral's own
+streamSubscription() which sets "context": "vessels.*"):
+{"subscribe":[{"path":"radars.*.targets.*","policy":"instant"}]}
+
+Server replies with a single hello frame and then stays silent until a
+target appears. The subscribe frame is accepted: no error frame, no close.
+{"name":"mayara","version":"3.10.0","self":"vessels.urn:mrn:imo:mmsi:518999323","timestamp":"2026-08-28T00:04:31.004Z","roles":["master"],"serverStartId":"5d8-18cfcf44afdc2df4"}

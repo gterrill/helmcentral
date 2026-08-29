@@ -81,6 +81,7 @@ function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: P
       vesselTrail={() => []}
       aisVessels={aisVessels}
       aisTrails={() => new Map()}
+      radarTargets={[]}
       isDarkTheme={false}
       showImageryLayer
       onImageryToggle={() => undefined}

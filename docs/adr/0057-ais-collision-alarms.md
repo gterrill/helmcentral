@@ -89,6 +89,8 @@ Helmcentral gains a CPA/TCPA alarm the Furuno was never going to give it, comput
 
 **It will not agree with the Furuno, and it is not meant to.** Different thresholds, an independent calculation, and a narrower input. The Furuno tracks radar ARPA targets, and a radar-only contact transmits no AIS, so this will never see it. This is a second opinion covering AIS traffic, not a mirror of the plotter, and the UI should not imply otherwise.
 
+> **Amended 2026-08-28 by ADR 0062.** The last sentence held for as long as AIS was the only target source. It no longer does: Helmcentral now also ingests ARPA targets from mayara-server, which reads the same Furuno directly, so a radar-only contact is visible after all. The rest of the paragraph stands and matters more than before. There are now two target sources that disagree by construction, they are labelled apart, and they are deliberately not merged. See ADR 0062.
+
 The four threshold profiles (anchored, harbor, coastal, offshore) live in plugin config, not in Helmcentral. Profile selection stays in the plugin's webapp for now; surfacing it in the dashboard is a later decision.
 
 The bearing conversion is a wart we are carrying for an upstream bug. It is worth an issue against the plugin, and the guard in step 2 is what tells us when the fix lands.
