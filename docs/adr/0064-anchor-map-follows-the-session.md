@@ -84,12 +84,30 @@ poll without any coordination between them. The phone in a pocket, the tablet on
 the browser at the nav station all swing to the new anchorage as they wake, the same way they
 all see the same placemarks.
 
+### 5. Everything else a reposition holds on to
+
+`POST /api/anchor-watch` is a full replace and the marker drag goes through it, so every
+field the body is silent about has to be carried forward deliberately or it is reset. The
+radius already was, and ADR 0063 carried the planning depth pair. `set_at` joins them here,
+and so do the rode, the sea state and the seabed, which were being wiped on every drag:
+40 m of chain and a rocky bottom, entered while setting, became 0 m on calm sand the moment
+somebody nudged the marker. Nothing on screen said so. The Rode Planner simply started
+recommending against inputs the operator had not chosen.
+
+The rule is one rule, applied to the whole record: a reposition changes the point and nothing
+else. What still resets is the bow-offset group, `bow_offset_m`, `bow_offset_applied` and
+`heading_at_set_deg`, and that is correct rather than an oversight. Those describe a
+correction applied to a live GPS fix at the drop. A hand-placed point had no correction
+applied to it, and reporting one would be a claim about provenance that is not true.
+
 ## Consequences
 
 - Dropping in a new bay re-centres every device. An operator who had deliberately panned during
   the previous anchorage loses that pan, which is the point: it was a view of somewhere else.
 - Repositioning the anchor no longer moves anybody's view, including the view of the operator
   doing the dragging, who is watching the marker under their own finger.
+- Repositioning no longer wipes the rode, sea state or seabed, so the Rode Planner keeps
+  planning against what was entered while the anchor was going down.
 - `set_at` is now stable for the life of a watch. Nothing else read it before this change: it
   was persisted and echoed in every response and then ignored, which is how a marker drag
   quietly took over the stamp in the first place. Anything that reads it from here on gets the

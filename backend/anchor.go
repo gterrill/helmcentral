@@ -272,29 +272,40 @@ func setAnchorWatch(c echo.Context) error {
 		radius = previousRadius
 	}
 
-	// set_at is the anchoring session's identity, not a "last written"
-	// stamp: it is minted at the drop and carried forward for the life of
-	// the watch. A reposition is a POST too, and it corrects where you
-	// believe the hook lies rather than beginning a new anchorage — the
-	// same rule that keeps placemarks alive across a reposition (ADR 0048).
-	// Clients compare it against the session their map view was last
-	// centred for, so a stamp that moved on every drag would swing every
-	// client's chart mid-anchorage. On a genuine drop current is nil
-	// (Raise DELETEs first), so a new anchorage always gets a fresh one.
+	// POST is a full replace and a reposition drag goes through it, so
+	// everything the active watch holds that the body is silent about is
+	// carried forward here. Dragging the marker corrects where you believe
+	// the hook lies; it does not begin a new anchorage, and it says nothing
+	// about the chain, the bottom or the water. current is nil on a genuine
+	// drop (Raise DELETEs first), so a new anchorage starts fresh on every
+	// one of these.
 	setAt := time.Now().UTC()
-	if current != nil {
-		setAt = current.SetAt
-	}
-
+	rodeDeployedM := 0.0
+	seaState := "calm"
+	seabedType := "sand"
 	planningDepthM := -1.0
 	planningTideHeightFt := -1.0
 	if current != nil {
-		// updatePosition (a map marker drag) is a POST too: it corrects
-		// where you think the anchor lies, not how deep the water was when
-		// it went down. Carry the pair forward from the previous record
-		// unless the body says otherwise. On a genuine drop current is nil
-		// (Raise DELETEs first), so nothing stale leaks into a new
-		// anchorage.
+		// set_at is the session's identity rather than a "last written"
+		// stamp. Clients compare it against the session their map view was
+		// last centred for (ADR 0064), so a stamp that moved on every drag
+		// would swing every client's chart mid-anchorage.
+		setAt = current.SetAt
+
+		// Rode, sea state and seabed are the operator's own entries and
+		// belong to the anchorage, not to the point. Resetting them here
+		// silently emptied the Rode Planner's inputs mid-anchorage, with
+		// nothing on screen to say the drag had done it. Copied straight
+		// through the way patchAnchorWatch rebuilds them: PATCH is their
+		// only writer and it validates the enums, so whatever the record
+		// holds is what the operator chose.
+		rodeDeployedM = current.RodeDeployedM
+		seaState = current.SeaState
+		seabedType = current.SeabedType
+
+		// The depth pair is the reading taken at the drop (ADR 0063): a
+		// reposition corrects where you think the anchor lies, not how deep
+		// the water was when it went down.
 		if current.PlanningDepthM > 0 {
 			planningDepthM = current.PlanningDepthM
 		}
@@ -349,9 +360,9 @@ func setAnchorWatch(c echo.Context) error {
 		Lat:                  lat,
 		Lon:                  lon,
 		RadiusMeters:         radius,
-		RodeDeployedM:        0,
-		SeaState:             "calm",
-		SeabedType:           "sand",
+		RodeDeployedM:        rodeDeployedM,
+		SeaState:             seaState,
+		SeabedType:           seabedType,
 		SetAt:                setAt,
 		BowOffsetM:           bowOffsetM,
 		BowOffsetApplied:     bowOffsetApplied,

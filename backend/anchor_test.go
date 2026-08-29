@@ -1023,3 +1023,111 @@ func TestSetAnchorWatch_DropAfterRaiseMintsANewSetAt(t *testing.T) {
 		t.Fatalf("expected a new session set_at after a raise, got the previous session's %q", secondSetAt)
 	}
 }
+
+// Test 21: a reposition must not wipe the rode and conditions the operator
+// entered. Dragging the marker says where the hook lies, nothing about how
+// much chain is out or what the seabed is, so those carry forward from the
+// active watch the way the radius and the planning depth already do. On a
+// genuine drop there is nothing to carry from, so the defaults stand.
+func TestSetAnchorWatch_RepositionCarriesRodeAndConditionsForward(t *testing.T) {
+	anchorTestEnv(t, 8)
+	seedHeadingTrue(t, 0)
+	resetAnchorWatchState(t)
+
+	if code, resp := postAnchorWatch(t, map[string]any{
+		"lat":              -21.1113,
+		"lon":              149.2276,
+		"apply_bow_offset": true,
+	}); code != http.StatusOK {
+		t.Fatalf("expected 200 from drop, got %d: %+v", code, resp)
+	}
+
+	if code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"rode_deployed_m": 42.5,
+		"sea_state":       "choppy",
+		"seabed_type":     "mud",
+	}); code != http.StatusOK {
+		t.Fatalf("expected 200 from the rode/conditions PATCH, got %d: %+v", code, resp)
+	}
+
+	code, resp := postAnchorWatch(t, map[string]any{
+		"lat": -21.1120,
+		"lon": 149.2280,
+		// apply_bow_offset omitted, exactly like a map marker drag.
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 from reposition, got %d: %+v", code, resp)
+	}
+	if got, _ := resp["rode_deployed_m"].(float64); got != 42.5 {
+		t.Fatalf("expected rode_deployed_m 42.5 to survive the reposition, got %v", resp["rode_deployed_m"])
+	}
+	if got, _ := resp["sea_state"].(string); got != "choppy" {
+		t.Fatalf("expected sea_state %q to survive the reposition, got %q", "choppy", got)
+	}
+	if got, _ := resp["seabed_type"].(string); got != "mud" {
+		t.Fatalf("expected seabed_type %q to survive the reposition, got %q", "mud", got)
+	}
+
+	// GET must agree with the POST echo — the planner reads the poll.
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	if err := getAnchorWatch(e.NewContext(httptest.NewRequest(http.MethodGet, "/api/anchor-watch", nil), rec)); err != nil {
+		t.Fatalf("getAnchorWatch: %v", err)
+	}
+	var state map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &state)
+	if got, _ := state["rode_deployed_m"].(float64); got != 42.5 {
+		t.Fatalf("expected GET rode_deployed_m 42.5, got %v", state["rode_deployed_m"])
+	}
+	if got, _ := state["sea_state"].(string); got != "choppy" {
+		t.Fatalf("expected GET sea_state %q, got %q", "choppy", got)
+	}
+	if got, _ := state["seabed_type"].(string); got != "mud" {
+		t.Fatalf("expected GET seabed_type %q, got %q", "mud", got)
+	}
+}
+
+// Test 22: the other side of Test 21. A genuine drop starts from the
+// defaults, so last anchorage's 42.5 m of chain and rough-water settings
+// cannot follow the boat into a new bay.
+func TestSetAnchorWatch_DropAfterRaiseResetsRodeAndConditions(t *testing.T) {
+	anchorTestEnv(t, 8)
+	seedHeadingTrue(t, 0)
+	resetAnchorWatchState(t)
+
+	if code, resp := postAnchorWatch(t, map[string]any{
+		"lat":              -21.1113,
+		"lon":              149.2276,
+		"apply_bow_offset": true,
+	}); code != http.StatusOK {
+		t.Fatalf("expected 200 from the first drop, got %d: %+v", code, resp)
+	}
+	if code, resp := patchAnchorWatchForTest(t, map[string]any{
+		"rode_deployed_m": 42.5,
+		"sea_state":       "rough",
+		"seabed_type":     "rock",
+	}); code != http.StatusOK {
+		t.Fatalf("expected 200 from the rode/conditions PATCH, got %d: %+v", code, resp)
+	}
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	if err := deleteAnchorWatch(e.NewContext(httptest.NewRequest(http.MethodDelete, "/api/anchor-watch", nil), rec)); err != nil {
+		t.Fatalf("deleteAnchorWatch: %v", err)
+	}
+
+	_, resp := postAnchorWatch(t, map[string]any{
+		"lat":              -21.2500,
+		"lon":              149.3000,
+		"apply_bow_offset": true,
+	})
+	if got, _ := resp["rode_deployed_m"].(float64); got != 0 {
+		t.Fatalf("expected a new anchorage to start with no rode recorded, got %v", resp["rode_deployed_m"])
+	}
+	if got, _ := resp["sea_state"].(string); got != "calm" {
+		t.Fatalf("expected a new anchorage to start at sea_state calm, got %q", got)
+	}
+	if got, _ := resp["seabed_type"].(string); got != "sand" {
+		t.Fatalf("expected a new anchorage to start at seabed_type sand, got %q", got)
+	}
+}
