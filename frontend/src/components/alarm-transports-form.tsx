@@ -1,17 +1,12 @@
 import { Send } from 'lucide-react'
-import { memo, useEffect, useState } from 'react'
+import { memo } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Field, FieldError, FieldLabel } from '@/components/ui/field'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Tile } from '@/components/ui/tile'
 import { WebPushSection } from '@/components/web-push-section'
-import {
-  emptyTransportConfig,
-  useAlarmTransports,
-  type AlarmTransportConfig,
-  type TransportSecretKey,
-} from '@/hooks/use-alarm-transports'
+import { useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
 
 function Toggle({ id, checked, label, onChange }: { id: string; checked: boolean; label: string; onChange: (v: boolean) => void }) {
   return (
@@ -25,31 +20,15 @@ function Toggle({ id, checked, label, onChange }: { id: string; checked: boolean
 /**
  * Notification delivery. Every transport here is self-hosted or free — no
  * subscription — which is why a cloud relay and SMS are absent (ADR 0038).
+ *
+ * Presentation only: the draft, the entered secrets and the save all belong
+ * to AlarmTransportsProvider, so this panel is saved by the settings page's
+ * own "Save Settings" button along with every other section. "Send Test" is
+ * the one action it still owns, because probing a transport is not a save.
  */
 export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
-  const { config, secretsPresent, loading, error, save, test, testResults, testing } = useAlarmTransports()
-  const [draft, setDraft] = useState<AlarmTransportConfig>(emptyTransportConfig)
-  const [secrets, setSecrets] = useState<Partial<Record<TransportSecretKey, string>>>({})
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
-
-  // Re-seed only when the server's copy changes, so typing is never clobbered.
-  useEffect(() => { setDraft(config) }, [config])
-
-  const setSection = <K extends keyof AlarmTransportConfig>(key: K, value: Partial<AlarmTransportConfig[K]>) =>
-    setDraft((current) => ({ ...current, [key]: { ...current[key], ...value } }))
-
-  const submit = async () => {
-    setSaveError(null)
-    setSaved(false)
-    try {
-      await save(draft, secrets)
-      setSecrets({})
-      setSaved(true)
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
-    }
-  }
+  const { draft, setSection, secrets, setSecret, secretsPresent, loading, error, test, testResults, testing } =
+    useAlarmTransportsFormContext()
 
   if (loading) {
     return (
@@ -106,7 +85,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
                 <Input id="ntfy-token" type="password" autoComplete="off"
                   placeholder={secretsPresent.NTFY_TOKEN ? 'Saved — enter to replace' : 'Only for a protected topic'}
                   value={secrets.NTFY_TOKEN ?? ''}
-                  onChange={(e) => setSecrets((s) => ({ ...s, NTFY_TOKEN: e.target.value }))} />
+                  onChange={(e) => setSecret('NTFY_TOKEN', e.target.value)} />
               </Field>
             </div>
           )}
@@ -147,7 +126,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
                 <Input id="smtp-password" type="password" autoComplete="off"
                   placeholder={secretsPresent.SMTP_PASSWORD ? 'Saved — enter to replace' : ''}
                   value={secrets.SMTP_PASSWORD ?? ''}
-                  onChange={(e) => setSecrets((s) => ({ ...s, SMTP_PASSWORD: e.target.value }))} />
+                  onChange={(e) => setSecret('SMTP_PASSWORD', e.target.value)} />
               </Field>
             </div>
           )}
@@ -197,15 +176,6 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
             </Field>
           </div>
         </section>
-      </div>
-
-      {saveError && <FieldError className="mt-3">{saveError}</FieldError>}
-      {saved && !saveError && (
-        <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Saved</p>
-      )}
-
-      <div className="mt-3 flex justify-end">
-        <Button size="sm" onClick={() => void submit()}>Save Notifications</Button>
       </div>
     </Tile>
   )

@@ -3,9 +3,11 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { Button } from '@/components/ui/button'
 import { SettingsFormProvider, useSettingsFormContext } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider, useSecretsStatusContext } from '@/components/settings/secrets-status-context'
+import { AlarmTransportsProvider, useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
 import { refreshAuthState } from '@/hooks/use-auth'
 import { SettingsNav, SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
 import { SECRET_KEYS } from '@/hooks/use-secrets-status'
+import { AlarmsSection } from '@/components/settings/sections/alarms-section'
 import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor-watch-options-section'
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
 import { GeneralSection } from '@/components/settings/sections/general-section'
@@ -35,7 +37,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   return (
     <SettingsFormProvider>
       <SecretsStatusProvider>
-        <SettingsPageContent {...props} ref={ref} />
+        <AlarmTransportsProvider>
+          <SettingsPageContent {...props} ref={ref} />
+        </AlarmTransportsProvider>
       </SecretsStatusProvider>
     </SettingsFormProvider>
   )
@@ -47,6 +51,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
 ) {
   const { settings, loading, error, save } = useSettingsFormContext()
   const { touched, saveTouchedKeys } = useSecretsStatusContext()
+  const transports = useAlarmTransportsFormContext()
   const [activeSectionId, setActiveSectionId] = useState<SettingsSectionId>(SETTINGS_SECTIONS[0].id)
   const [draft, setDraft] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
@@ -57,6 +62,11 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // scope here. saveTouchedKeys (a sibling call hitting an independent
   // endpoint) needs its own error slot rendered in the same visual style.
   const [secretsSaveError, setSecretsSaveError] = useState<string | null>(null)
+  // Same reasoning for the transports POST: it is a third independent
+  // endpoint inside one save (ADR 0038 §2 keeps transport config out of
+  // settings.yaml), so its failure needs its own slot rather than being
+  // folded into either of the other two.
+  const [transportsSaveError, setTransportsSaveError] = useState<string | null>(null)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
 
   // `touched` covers ALL secret keys tracked by useSecretsStatus — the
@@ -67,7 +77,10 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // count toward "dirty" too.
   const hasUnsavedSecrets = Object.values(touched).some(Boolean)
   const draftDirty = !draftsEqual(draft, savedDraftSnapshot)
-  const dirty = draftDirty || hasUnsavedSecrets
+  // The Alarms section's provider is mounted for the whole page, not just
+  // while that section is on screen, so an edit there counts as dirty from
+  // whichever section you happen to be looking at when you navigate away.
+  const dirty = draftDirty || hasUnsavedSecrets || transports.dirty
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -106,6 +119,10 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         setSecretsSaveError(err instanceof Error ? err.message : 'Unable to save secrets')
         throw err
       }),
+      transports.save().catch((err: unknown) => {
+        setTransportsSaveError(err instanceof Error ? err.message : 'Unable to save notifications')
+        throw err
+      }),
     ])
     setSavedDraftSnapshot(draft)
 
@@ -121,13 +138,14 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     // succeeded. The module publishes to its listeners when it resolves, so the
     // gate applies either way.
     void refreshAuthState()
-  }, [save, draft, saveTouchedKeys])
+  }, [save, draft, saveTouchedKeys, transports])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
   const handleSaveSettings = async () => {
     setSaveSuccess(null)
     setSecretsSaveError(null)
+    setTransportsSaveError(null)
     setIsSavingSettings(true)
     try {
       await performSave()
@@ -152,6 +170,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <BoatUiSection draft={draft} onChange={handleDraftChange} />
       case 'widgets':
         return <WidgetsSection draft={draft} onChange={handleDraftChange} />
+      case 'alarms':
+        return <AlarmsSection />
       case 'security':
         return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':
@@ -196,6 +216,11 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         {secretsSaveError && (
           <div className="mx-auto max-w-3xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
             {secretsSaveError}
+          </div>
+        )}
+        {transportsSaveError && (
+          <div className="mx-auto max-w-3xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs uppercase tracking-[0.08em] text-destructive">
+            {transportsSaveError}
           </div>
         )}
         {saveSuccess && (

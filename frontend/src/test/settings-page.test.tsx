@@ -61,6 +61,24 @@ vi.mock('@/hooks/use-secrets-status', async () => {
   }
 })
 
+// The Settings page mounts AlarmTransportsProvider for the whole page (so an
+// Alarms-section edit counts toward the page's dirty signal), which means the
+// real hook would fire its /api/alarm-transports GET into jsdom. Stub it the
+// same way useSettingsForm/useSecretsStatus are stubbed above. `config` is
+// built once so its identity is stable across renders.
+vi.mock('@/hooks/use-alarm-transports', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-alarm-transports')>()
+  const config = actual.emptyTransportConfig()
+  return {
+    ...actual,
+    useAlarmTransports: () => ({
+      config, secretsPresent: {}, loading: false, loaded: true, error: null,
+      save: vi.fn().mockResolvedValue(undefined), test: vi.fn().mockResolvedValue(undefined),
+      testResults: null, testing: false,
+    }),
+  }
+})
+
 beforeEach(() => {
   mockTouched = emptyTouched()
   saveMock.mockReset().mockResolvedValue({})

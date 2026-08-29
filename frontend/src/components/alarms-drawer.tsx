@@ -1,7 +1,6 @@
 import { BellRing, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { memo, useCallback, useEffect, useState } from 'react'
 
-import { AlarmTransportsForm } from '@/components/alarm-transports-form'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -242,8 +241,6 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
           />
         )}
       </Tile>
-
-      <AlarmTransportsForm />
 
       <Tile title="History" icon={<BellRing className="h-3.5 w-3.5 text-gauge-secondary" />}>
         {entries.length === 0 ? (

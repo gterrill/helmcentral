@@ -24,10 +24,44 @@ export function emptyTransportConfig(): AlarmTransportConfig {
   }
 }
 
+/**
+ * Field-by-field so an added key is a type error rather than a silently
+ * missed comparison. Drives the settings page's dirty indicator, which is
+ * what gates its navigation guard — a wrong answer here either strands an
+ * edit or nags about one that was never made.
+ */
+export function transportConfigsEqual(a: AlarmTransportConfig, b: AlarmTransportConfig): boolean {
+  if (a.ntfy.enabled !== b.ntfy.enabled) return false
+  if (a.ntfy.server !== b.ntfy.server) return false
+  if (a.ntfy.topic !== b.ntfy.topic) return false
+  if (a.smtp.enabled !== b.smtp.enabled) return false
+  if (a.smtp.host !== b.smtp.host) return false
+  if (a.smtp.port !== b.smtp.port) return false
+  if (a.smtp.username !== b.smtp.username) return false
+  if (a.smtp.from !== b.smtp.from) return false
+  const aTo = a.smtp.to ?? []
+  const bTo = b.smtp.to ?? []
+  if (aTo.length !== bTo.length || aTo.some((value, i) => value !== bTo[i])) return false
+  if (a.webhook.enabled !== b.webhook.enabled) return false
+  if (a.webhook.url !== b.webhook.url) return false
+  if (a.signalk.enabled !== b.signalk.enabled) return false
+  if (a.webpush.enabled !== b.webpush.enabled) return false
+  if (a.watchdog.stream_silence_seconds !== b.watchdog.stream_silence_seconds) return false
+  if (a.watchdog.heartbeat_minutes !== b.watchdog.heartbeat_minutes) return false
+  return true
+}
+
 export function useAlarmTransports() {
   const [config, setConfig] = useState<AlarmTransportConfig>(emptyTransportConfig)
   const [secretsPresent, setSecretsPresent] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
+  // "Is there a server copy under this config", which is not the same
+  // question as "did the last request work". A refresh that fails after a
+  // good load leaves the last good config in place and stays loaded, so the
+  // settings page can still save against it; a load that never succeeded
+  // must not be saved from, because the draft would be an empty config
+  // standing in for whatever the server actually holds.
+  const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<Record<string, string> | null>(null)
   const [testing, setTesting] = useState(false)
@@ -38,13 +72,16 @@ export function useAlarmTransports() {
         fetch('/api/alarm-transports'),
         fetch('/api/settings/secrets'),
       ])
-      if (configResponse.ok) {
-        const payload = (await configResponse.json()) as AlarmTransportConfig
-        setConfig({ ...emptyTransportConfig(), ...payload })
-      }
-      if (secretsResponse.ok) {
-        setSecretsPresent((await secretsResponse.json()) as Record<string, boolean>)
-      }
+      // A non-ok response used to be dropped: config stayed at
+      // emptyTransportConfig() with error null, which reads as "loaded, and
+      // nothing is configured" and is indistinguishable from that being the
+      // truth. The fallback policy rules that out.
+      if (!configResponse.ok) throw new Error(`alarm transports: HTTP ${configResponse.status}`)
+      if (!secretsResponse.ok) throw new Error(`secrets status: HTTP ${secretsResponse.status}`)
+      const payload = (await configResponse.json()) as AlarmTransportConfig
+      setConfig({ ...emptyTransportConfig(), ...payload })
+      setSecretsPresent((await secretsResponse.json()) as Record<string, boolean>)
+      setLoaded(true)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -105,5 +142,5 @@ export function useAlarmTransports() {
     }
   }, [])
 
-  return { config, secretsPresent, loading, error, save, test, testResults, testing }
+  return { config, secretsPresent, loading, loaded, error, save, test, testResults, testing }
 }

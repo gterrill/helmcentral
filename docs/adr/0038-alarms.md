@@ -159,6 +159,25 @@ Instead the duplicates are collapsed at the two layers that can actually do it:
 
 The secure-context requirement, the PWA shell this needs on iOS, and the `tailscale serve` deployment answer are not alarm concerns and live in [ADR 0045](0045-web-push-secure-context-and-pwa-shell.md).
 
+## Addendum: notification config belongs on the Settings page
+
+The Notifications panel was originally rendered inside the Alarms drawer, between the rule list and the history log. That put configuration in the one view you open when something is going off, which is the wrong moment to be editing an SMTP password. It now lives on the Settings page under an Alarms section, and the drawer is operational state only: active alarms, rules, history.
+
+Moving it exposed a second problem. The panel carried its own "Save Notifications" button, so on the settings page it sat directly above the page's "Save Settings" button, two controls that look alike and do different things. The panel is now presentation only. `AlarmTransportsProvider` owns the draft and the entered secrets, mounted for the whole settings page rather than for the section, so an edit made under Alarms counts toward the page's dirty signal and is saved by the same button and the same "Save and Continue" handle as every other section.
+
+One page save therefore writes three independent endpoints: the settings patch, the touched secrets, and `/api/alarm-transports`. §2 still holds, none of this merges transport config into `settings.yaml`. The three go out together and each reports its own failure, since a settings save that succeeded while the transport POST failed must not read as "Settings saved".
+
+Two guards follow from a save button that fires whether or not anyone opened the panel:
+
+- An untouched panel sends no request. The old per-panel button could only fire while someone was looking at it.
+- A panel whose GET failed refuses to save at all. Its draft would be `emptyTransportConfig()`, and one toggle on top of that would overwrite the ntfy and SMTP config held on the server. The save stops and says why, per the fallback policy.
+
+The dirty snapshot is taken from what was actually sent, rather than waiting for the save's own refetch to re-seed the draft. The page's dirty state gates its navigation guard, so it has to settle on the write succeeding and not on a follow-up GET that may not arrive.
+
+That second guard needed the load path fixed to be worth anything. `refresh()` treated a non-`ok` GET as an empty config with `error` left null, so a 500 was indistinguishable from a server that genuinely has no transports configured. It now throws on a non-`ok` response from either the config or the secrets read, which is the fallback policy applied to the same code that §6 wrote it for.
+
+The guard keys on a new `loaded` flag rather than on `error`, because the two answer different questions. `loaded` is "is there a server copy under this draft". A refresh that fails after a good load leaves the last good config in place and stays loaded, so the page can still save against it. Only a load that never succeeded blocks the write.
+
 ## Consequences
 
 - Any path the SignalK server publishes can be alarmed on, without code changes. This is the first feature to use ADR 0037's generic ingestion, and the precondition ADR 0039 (bindable widgets) also depends on.
