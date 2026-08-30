@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -393,4 +394,46 @@ func TestBuildSignalKStreamURLDisablesImplicitSubscription(t *testing.T) {
 	if !strings.Contains(got, "subscribe=none") {
 		t.Fatalf("stream URL must disable implicit subscription, got %q", got)
 	}
+}
+
+// Reproduces the freeze observed against the live boat on 2026-08-27: the
+// mayara radar plugin's target sweep publishes one delta carrying a null for
+// every target id it has ever seen — 6,152 values, 402KB — and SignalK replays
+// it as part of the initial state dump on every subscribe. coder/websocket's
+// default 32KiB message read limit made that a fatal read error, so the client
+// died on the state dump, reconnected, and died on it again, ~9,365 times over
+// three days. Reconnect worked perfectly; there was simply nothing on the far
+// side of it but the same oversized frame. The read limit has to clear the
+// largest frame SignalK can legitimately send.
+func TestStreamClientAcceptsDeltaLargerThanDefaultReadLimit(t *testing.T) {
+	var values strings.Builder
+	for i := 0; i < 6000; i++ {
+		fmt.Fprintf(&values, `{"path":"radars.fur6424A.targets.1000%05d","value":null},`, i)
+	}
+	values.WriteString(`{"path":"environment.depth.belowTransducer","value":2.5}`)
+	frame := `{"context":"vessels.self","updates":[{"timestamp":"2026-08-27T01:18:00.000Z","$source":"mayara","values":[` + values.String() + `]}]}`
+
+	if len(frame) <= 32768 {
+		t.Fatalf("frame is %d bytes, needs to exceed the 32KiB default read limit", len(frame))
+	}
+
+	stub := newStreamStub(func(ctx context.Context, c *websocket.Conn, _ int) {
+		if err := writeFrame(ctx, c, frame); err != nil {
+			return
+		}
+		<-ctx.Done()
+	})
+	defer stub.close()
+
+	snapshot := newSignalKSnapshot()
+	client := testStreamClient(snapshot)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	go client.connectOnce(ctx, stub.wsURL(), "")
+
+	waitFor(t, 2*time.Second, "oversized delta to reach the snapshot", func() bool {
+		return snapshotDepth(snapshot) == 2.5
+	})
 }

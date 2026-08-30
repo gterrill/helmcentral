@@ -61,6 +61,19 @@ const (
 	defaultStreamMinBackoff = 1 * time.Second
 	defaultStreamMaxBackoff = 30 * time.Second
 
+	// coder/websocket defaults to a 32KiB message read limit, and going over it
+	// is a fatal connection error, not a dropped frame. SignalK replays its
+	// whole model as the initial state dump on every subscribe, and that dump
+	// includes one mayara frame carrying a null for each of the ~6,000 radar
+	// target ids it has ever seen: 402KB measured against the boat. Under the
+	// default limit the client died on that frame every single time it
+	// connected, so run's reconnect loop below spun for three days against a
+	// stream it could never read past, and the whole dashboard sat frozen on
+	// snapshot values hours stale. Ten times the largest frame observed, which
+	// leaves room for the target list to grow while still bounding what one
+	// message can make this process allocate.
+	signalKStreamReadLimit = 4 << 20
+
 	// A connection that survived this long is treated as evidence the endpoint
 	// is healthy, so the next drop retries promptly instead of inheriting the
 	// backoff grown by an earlier outage.
@@ -166,6 +179,7 @@ func (c *signalKStreamClient) connectOnce(ctx context.Context, streamURL, httpBa
 		return err
 	}
 	defer conn.CloseNow()
+	conn.SetReadLimit(signalKStreamReadLimit)
 
 	// Sent before marking connected: with subscribe=none the server sends
 	// nothing until it arrives, so a failure here is a dead stream, not a
