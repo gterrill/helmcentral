@@ -227,6 +227,77 @@ So targets are gated two ways, and both are free because the controls already st
 
 Without this the tile would have shown fifty half-hour-old phantoms as live contacts, and had the alarm phase already shipped, five of them would have been ringing at anchor with the radar switched off.
 
+### Correction, 2026-08-29: the plugin does publish targets
+
+The table above says `vessels.self.radars.<id>.targets` is absent and that the delta stream carries no target paths. **That is wrong, and the decision to poll rests on it.**
+
+Re-measured once the radar had actually acquired something:
+
+    GET /signalk/v1/api/vessels/self/radars/fur6424A/targets
+      -> 928 target ids, 53 with a non-null value
+
+    delta stream, 30 s on radars.*
+      -> 928 target values, 875 of them null
+      -> path shape: radars.<radar>.targets.<id>
+
+The plugin publishes ARPA targets as ordinary deltas, with `value: null` as the removal signal, which is precisely the shape the original mayara-direct client consumed.
+
+The earlier finding was not a misreading; it was a measurement taken while the radar had produced no targets, on a system where the branch does not exist until something populates it. An absent branch was read as an absent feature. Every check that produced the table was taken during such a window, so the error was consistent and looked solid.
+
+What follows from it:
+
+- Polling is not wrong and is not broken. It works, and it is what is deployed. But it is the more complicated option: it adds traffic, and it discards the `value: null` removal signal in favour of inferring absence from a full-state response.
+- Reading targets from the snapshot needs no new connection, no polling, and no configuration, since the deltas already arrive on the stream Helmcentral subscribes to. Decision 5's three eviction signals become relevant again, because `null` is back.
+- The tree accumulates removed targets as null-valued keys: 875 of 928 on one read. A snapshot reader must treat null as absence rather than as a target, and should expect the key count to grow well past the live count.
+
+Whether to move from polling to the snapshot is a separate decision and is not taken here. What is recorded here is that the premise for polling was false.
+
+### Measured 2026-08-30: what actually filters the clutter
+
+The first capture with the radar transmitting continuously, once TimeZero Pro and mayara were separated onto different IPs (Furuno permits one connection per address, and the two clients had been trading the radar back and forth in roughly forty-second turns).
+
+Three and a half minutes at anchor, own ship making 0.3 knots, sampled every 6 seconds. Raw capture in `backend/testdata/mayara/target-persistence-anchored.jsonl`.
+
+**Track age is a powerful filter.** 111 distinct target ids appeared across 36 samples. The median id was present in 4 of them, about 24 seconds. Requiring a target to persist cuts the population hard:
+
+| Minimum persistence | Targets surviving | Ever flagged dangerous |
+| --- | --- | --- |
+| none | 111 | 29 |
+| 30 s | 51 | 20 |
+| 60 s | 3 | 2 |
+| 120 s | 2 | 2 |
+
+A 60-second floor removes 97% of them. The clutter is ephemeral: it appears for half a minute and is gone.
+
+**But it is not sufficient, and the survivor proves why.** Of the three that lasted a minute, the one flagged dangerous was:
+
+    id=100000001  36/36 samples  range 155->161 m  bearing 56->55 deg
+                  sog 0.3 kn     cpa 156 m  tcpa 112 s  is_dangerous=true
+
+Constant range, constant bearing, stationary. Almost certainly an anchored boat or a fixed object. And its CPA of 156 m against a present range of 155 m is the exact signature ADR 0058 recorded for the AIS path: with both vessels stopped the relative velocity vector is noise, CPA collapses to present range, and TCPA becomes range over GPS jitter. Persistence filtering keeps this target precisely because it is stationary, which is the opposite of what is wanted.
+
+So the two candidates in decision 7b are not alternatives. Track age kills the ephemeral clutter that dominates by count; something else has to kill the degenerate stationary case that survives it. ADR 0058 solved the same problem for AIS with a speed floor, and its lesson applies unchanged: `speed: 0` there did not mean "no minimum", it disabled the filter and let a motionless boat raise a collision alarm.
+
+Deliberately not fixing thresholds here. What the measurement settles is the shape of the answer: a persistence requirement plus a relative-motion or speed floor, not either alone. What it cannot settle is the numbers, because every capture so far is at anchor, where own-ship motion is the degenerate input. That part still wants a passage.
+
+### Measured 2026-08-31: two failures of retention, one ours
+
+The ship's computer was off overnight. Both problems come from something retaining state that has stopped being true.
+
+**mayara accumulates dead target ids and republishes them all on subscribe.** 6,152 of them in one frame, 402 KB, about 67 bytes per dead id, and it grows for as long as the process runs. Helmcentral survives it because `signalKStreamReadLimit` is 4 MB (`signalk_stream.go`), well above the default, with a test already covering oversized deltas.
+
+That headroom is finite and the arithmetic is worth stating, because it has a date on it. 4 MB divided by 67 bytes is roughly 62,700 ids. The persistence capture measured 111 distinct ids in 3.5 minutes at anchor, about 46,000 a day, so **on the order of a day and a half of continuous radar before the subscribe frame exceeds the read limit**. The churn was measured in heavy clutter and would likely be lower on passage, so treat that as an order of magnitude rather than a deadline. The failure mode is what makes it matter: the frame is sent *on subscribe*, so past the threshold every reconnection attempt dies on the first message, and Helmcentral loses the entire SignalK stream, not just radar. Worth reporting upstream, and worth watching the frame size if the radar ever runs for days.
+
+It also argues against the change the previous correction implied. Reading targets from the snapshot instead of polling would mean consuming that frame and filtering 875-of-928 nulls on every reconnect, and holding every dead id in our own snapshot, which never evicts either. Polling reads the live set and nothing else. The correction stands, in that the premise for polling was false, but the conclusion happens to survive on grounds nobody had measured yet.
+
+**Our own presence detection had the same disease.** `radarsFromSnapshot` read `vessels.self.radars` with no freshness check. The SignalK tree never evicts, so with mayara gone it still listed both radars, controls 17.9 hours old, power frozen at Transmit. Two consequences: the poller kept polling a radar that no longer existed, logging a 404 every two seconds against the live server, and `Transmitting` read true off an eighteen-hour-old value, feeding the standby gate exactly the stale input it exists to reject. Only mayara's 404 stopped stale targets reaching the map.
+
+This is ADR 0057 section 6 for the fourth time in this integration, and the first time in code written for it. Presence is now gated on `radarPresenceMaxAge` (5 minutes) judged on `snapshot.lastSeen`, our own receive clock, matching `aisTargetPositionFresh`.
+
+One subtlety that receive-time freshness does not remove: SignalK replays the whole retained tree on subscribe, measured as 76 control deltas all arriving at 0.0 s and nothing afterwards. So every reconnect refreshes the receive time of stale values, and a dead radar reads as present for up to `radarPresenceMaxAge` after each one. That is a bounded window rather than a hole, and it fails safe, but it means "we received it recently" is a weaker statement than it looks on a protocol that replays.
+
+Poll failures are now logged on their edges rather than every tick. The fallback policy requires retry behaviour to be loud, and the transition into failure and the recovery are both still reported; what is dropped is the identical line every two seconds for as long as the radar is switched off.
+
 ### On ADR 0037
 
 ADR 0037 says all vessel data arrives on the delta stream and there is deliberately no REST read path, so a dropped stream surfaces as an outage instead of being papered over.

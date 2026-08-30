@@ -85,11 +85,29 @@ const radarObservationMaxAge = 60 * time.Second
 // only as keys in the tree — vessels.self.radars.<id>.controls.* — which
 // Helmcentral already receives for free on its existing subscription
 // (context vessels.*, path *).
-func radarsFromSnapshot(snapshot *signalKSnapshot) []radarInfo {
+// radarPresenceMaxAge is how long a radar keeps counting as present after
+// its last control delta.
+//
+// The SignalK tree never evicts, so a radar published once stays in it
+// forever. Measured 2026-08-31 with the ship's computer off overnight: the
+// tree still listed both radars with controls 17.9 hours old and power frozen
+// at Transmit, while mayara's own radar list was empty. Reading presence
+// straight off the tree therefore reports radars that no longer exist and,
+// worse, feeds an eighteen-hour-old power value to the standby gate.
+//
+// Controls re-publish roughly every thirty seconds while mayara holds the
+// radar, so five minutes is many missed rounds rather than a near miss.
+// Judged on our own receive clock via snapshot.lastSeen, never on the
+// timestamps inside the control values, which are mayara's (ADR 0062
+// decision 5). Same discipline as aisTargetPositionFresh (signalk.go).
+const radarPresenceMaxAge = 5 * time.Minute
+
+func radarsFromSnapshot(snapshot *signalKSnapshot, now time.Time) []radarInfo {
 	tree := snapshot.selfTree()
 	if tree == nil {
 		return nil
 	}
+	selfCtx := snapshot.selfContext()
 
 	radarsTree, ok := tree["radars"].(map[string]any)
 	if !ok || len(radarsTree) == 0 {
@@ -119,6 +137,13 @@ func radarsFromSnapshot(snapshot *signalKSnapshot) []radarInfo {
 			lookupString(radarsTree, id, "controls", "modelName", "value", "value"),
 		)
 		controls := lookupAnyMap(radarsTree, id, "controls")
+
+		// Presence is a freshness question, not a lookup.
+		seen := newestControlReceipt(snapshot, selfCtx, id, controls)
+		if seen.IsZero() || now.Sub(seen) > radarPresenceMaxAge {
+			continue
+		}
+
 		radars = append(radars, radarInfo{
 			ID:           id,
 			Name:         name,
@@ -149,7 +174,11 @@ type radarPoller struct {
 	// disk, the same seam radarStreamClient used.
 	radars       func() []radarInfo
 	fetchTargets func(radarID string) ([]mayaraArpaTarget, error)
-	ownShipFix   func() (lat, lon float64, ok bool)
+
+	// pollFailing tracks whether the last poll failed, so a sustained outage
+	// is reported on its edges rather than on every tick.
+	pollFailing bool
+	ownShipFix  func() (lat, lon float64, ok bool)
 }
 
 // newRadarPoller wires real defaults: radarsFromSnapshot against the live
@@ -162,7 +191,7 @@ func newRadarPoller(store *radarTargetStore, settingsPath string) *radarPoller {
 		settingsPath: settingsPath,
 		now:          func() time.Time { return time.Now().UTC() },
 		radars: func() []radarInfo {
-			return radarsFromSnapshot(globalSignalKSnapshot)
+			return radarsFromSnapshot(globalSignalKSnapshot, time.Now().UTC())
 		},
 		fetchTargets: func(radarID string) ([]mayaraArpaTarget, error) {
 			return fetchMayaraTargets(settingsPath, radarID)
@@ -222,8 +251,8 @@ func (p *radarPoller) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := p.pollOnce(p.now()); err != nil {
-				log.Printf("radar poll: %v", err)
+			if err := p.pollOnce(p.now()); err != nil && p.shouldLogPollFailure() {
+				log.Printf("radar poll: %v (further identical failures suppressed until it recovers)", err)
 			}
 		}
 	}
@@ -277,6 +306,7 @@ func (p *radarPoller) pollOnce(now time.Time) error {
 
 	p.store.replace(radarID, targets, now)
 	p.store.setConnected(true)
+	p.notePollRecovered()
 	return nil
 }
 
@@ -307,7 +337,7 @@ const radarTargetsPayloadCap = 20
 func buildRadarTargetsPayload() map[string]any {
 	now := time.Now().UTC()
 
-	radars := radarsFromSnapshot(globalSignalKSnapshot)
+	radars := radarsFromSnapshot(globalSignalKSnapshot, now)
 	if radars == nil {
 		radars = []radarInfo{}
 	}
@@ -457,4 +487,44 @@ func freshestControlTimestamp(controls map[string]any) time.Time {
 		}
 	}
 	return newest
+}
+
+// newestControlReceipt reports when we last received any control for this
+// radar, on our own clock. snapshot.lastSeen records local receive time per
+// path, which is what makes this immune to mayara's clock (ADR 0062).
+func newestControlReceipt(snapshot *signalKSnapshot, selfCtx, radarID string, controls map[string]any) time.Time {
+	var newest time.Time
+	for name := range controls {
+		seen := snapshot.lastSeen(selfCtx, "radars."+radarID+".controls."+name)
+		if seen.After(newest) {
+			newest = seen
+		}
+	}
+	return newest
+}
+
+// shouldLogPollFailure reports whether this failure is worth a log line: the
+// first of an outage, not the five-hundredth.
+//
+// The fallback policy (AGENTS.md) requires retry behaviour to be loud, and
+// this stays loud in the sense that matters. The transition into failure is
+// reported, and so is the next one after a recovery. What is dropped is the
+// identical line repeated every two seconds for as long as the radar is off,
+// which was filling the live server's log while telling the operator nothing
+// it had not already said.
+func (p *radarPoller) shouldLogPollFailure() bool {
+	if p.pollFailing {
+		return false
+	}
+	p.pollFailing = true
+	return true
+}
+
+// notePollRecovered re-arms the failure log, so a later outage is reported
+// rather than swallowed by the previous one.
+func (p *radarPoller) notePollRecovered() {
+	if p.pollFailing {
+		log.Printf("radar poll: recovered")
+	}
+	p.pollFailing = false
 }

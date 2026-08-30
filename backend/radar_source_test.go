@@ -29,6 +29,13 @@ func withGlobalRadarTargetStore(t *testing.T, store *radarTargetStore) {
 // path production deltas go through, mirroring selfSnapshotWithDepth
 // (signalk_payload_test.go).
 func radarSnapshotWithRadars(t *testing.T, radars map[string]struct{ modelName, userName string }) *signalKSnapshot {
+	return radarSnapshotWithRadarsAt(t, radars, time.Now().UTC())
+}
+
+// radarSnapshotWithRadarsAt stamps the deltas with an explicit receive time.
+// Presence is judged on that clock (radarPresenceMaxAge), so a test about
+// staleness has to control it rather than inherit time.Now().
+func radarSnapshotWithRadarsAt(t *testing.T, radars map[string]struct{ modelName, userName string }, receivedAt time.Time) *signalKSnapshot {
 	t.Helper()
 
 	snapshot := newSignalKSnapshot()
@@ -44,7 +51,7 @@ func radarSnapshotWithRadars(t *testing.T, radars map[string]struct{ modelName, 
 				{Path: "radars." + id + ".controls.userName", Value: map[string]any{"value": names.userName, "timestamp": "2026-08-28T00:22:22.878896300Z"}},
 				{Path: "radars." + id + ".controls.power", Value: map[string]any{"value": float64(mayaraTransmitPowerValue), "timestamp": "2026-08-28T22:08:52.254697200Z"}},
 			}}},
-		}, time.Now().UTC())
+		}, receivedAt)
 	}
 	snapshot.setSelfContext("vessels.self")
 	return snapshot
@@ -56,7 +63,7 @@ func TestRadarsFromSnapshotReturnsBothDualRangeRadars(t *testing.T) {
 		"fur6424B": {modelName: "DRS4DNXT", userName: "DRS4D-NXT 6424 B"},
 	})
 
-	radars := radarsFromSnapshot(snapshot)
+	radars := radarsFromSnapshot(snapshot, time.Now().UTC())
 	if len(radars) != 2 {
 		t.Fatalf("expected 2 radars, got %d: %+v", len(radars), radars)
 	}
@@ -93,7 +100,7 @@ func TestRadarsFromSnapshotNilWhenRadarsAbsent(t *testing.T) {
 	}, time.Now().UTC())
 	snapshot.setSelfContext("vessels.self")
 
-	if got := radarsFromSnapshot(snapshot); got != nil {
+	if got := radarsFromSnapshot(snapshot, time.Now().UTC()); got != nil {
 		t.Fatalf("expected nil when radars is absent, got %+v", got)
 	}
 }
@@ -103,7 +110,7 @@ func TestRadarsFromSnapshotNilWhenRadarsAbsent(t *testing.T) {
 // as no radars, not panic on a nil tree.
 func TestRadarsFromSnapshotNilWhenSelfTreeUnknown(t *testing.T) {
 	snapshot := newSignalKSnapshot()
-	if got := radarsFromSnapshot(snapshot); got != nil {
+	if got := radarsFromSnapshot(snapshot, time.Now().UTC()); got != nil {
 		t.Fatalf("expected nil when the self context has never been seen, got %+v", got)
 	}
 }
@@ -200,7 +207,11 @@ func TestRadarPollOnceTargetAbsentFromNextPollIsGone(t *testing.T) {
 		return []mayaraArpaTarget{newTestArpaTarget(1, "tracking", 510)}, nil
 	}
 
-	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	// Relative to the real clock, not a fixed date: buildRadarTargetsPayload
+	// below reads time.Now(), so a hardcoded date silently ages the target
+	// past radarTargetMaxAge once the calendar moves on, and the test starts
+	// failing for reasons that have nothing to do with what it asserts.
+	now := time.Now().UTC()
 	if err := poller.pollOnce(now); err != nil {
 		t.Fatalf("first pollOnce: %v", err)
 	}
@@ -228,7 +239,11 @@ func TestRadarPollOnceFailingPollDoesNotPurgeAndMarksUnreachable(t *testing.T) {
 		return []mayaraArpaTarget{newTestArpaTarget(1, "tracking", 500)}, nil
 	}
 
-	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	// Relative to the real clock, not a fixed date: buildRadarTargetsPayload
+	// below reads time.Now(), so a hardcoded date silently ages the target
+	// past radarTargetMaxAge once the calendar moves on, and the test starts
+	// failing for reasons that have nothing to do with what it asserts.
+	now := time.Now().UTC()
 	if err := poller.pollOnce(now); err != nil {
 		t.Fatalf("first pollOnce: %v", err)
 	}
@@ -616,7 +631,7 @@ func TestRadarsFromSnapshotReadsTheCapturedControlDeltaShape(t *testing.T) {
 	snapshot.applyDelta(delta, time.Now().UTC())
 	snapshot.setSelfContext("vessels.self")
 
-	radars := radarsFromSnapshot(snapshot)
+	radars := radarsFromSnapshot(snapshot, time.Now().UTC())
 	if len(radars) == 0 {
 		t.Fatal("no radars decoded from the captured control delta")
 	}
@@ -638,5 +653,108 @@ func TestRadarsFromSnapshotReadsTheCapturedControlDeltaShape(t *testing.T) {
 	}
 	if a.clockNow.IsZero() {
 		t.Error("clockNow is zero; the control timestamps carry mayara's own clock")
+	}
+}
+
+// A radar the SignalK tree still lists, long after mayara stopped having it.
+//
+// Measured 2026-08-31 after the ship's computer was off overnight: the tree
+// still carried radars.fur6424A and fur6424B, their controls 17.9 hours old,
+// power frozen at 2 (Transmit), while mayara's own radar list was empty. The
+// snapshot never evicts, so presence in the tree is not evidence the radar
+// exists now.
+//
+// Two things went wrong from one omission. The poller kept polling a radar
+// that was gone, logging a 404 every two seconds. And Transmitting read true
+// off an eighteen-hour-old power value, which is precisely the standby gate
+// this file already implements being fed stale availability. Only mayara's
+// 404 stopped stale targets reaching the map.
+//
+// This is ADR 0057 section 6 for the fourth time in this integration, and the
+// first time in code written for it.
+func TestRadarsFromSnapshotDropsRadarsWhoseControlsWentStale(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+
+	snapshot := radarSnapshotWithRadarsAt(t, map[string]struct{ modelName, userName string }{
+		"fur6424A": {modelName: "DRS4DNXT", userName: "DRS4D-NXT 6424"},
+	}, now)
+
+	// Fresh: the controls arrived seconds ago.
+	if got := radarsFromSnapshot(snapshot, now); len(got) != 1 {
+		t.Fatalf("a radar whose controls just arrived must be reported, got %d", len(got))
+	}
+
+	// Same tree, read 18 hours later. Nothing has been republished since.
+	stale := now.Add(18 * time.Hour)
+	if got := radarsFromSnapshot(snapshot, stale); len(got) != 0 {
+		t.Fatalf("radar still reported %v after its controls went 18h stale: "+
+			"the tree retains it, but mayara no longer has it", got)
+	}
+}
+
+// The staleness must be judged on our own receive clock, not on the
+// timestamps inside the control values. Those are mayara's, and ADR 0062
+// decision 5 already settled that a transmitter's clock is the wrong thing to
+// age against.
+func TestRadarPresenceIsJudgedOnLocalReceiveTime(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{
+			// mayara's embedded timestamp is deliberately ancient; the delta
+			// itself has only just been received.
+			{Path: "radars.fur6424A.controls.userName", Value: map[string]any{
+				"value": "DRS4D-NXT 6424", "timestamp": "2020-01-01T00:00:00.000Z"}},
+			{Path: "radars.fur6424A.controls.power", Value: map[string]any{
+				"value": float64(mayaraTransmitPowerValue), "timestamp": "2020-01-01T00:00:00.000Z"}},
+		}}},
+	}, now)
+	snapshot.setSelfContext("vessels.self")
+
+	got := radarsFromSnapshot(snapshot, now)
+	if len(got) != 1 {
+		t.Fatalf("a just-received delta must count as present however old mayara says its value is, got %d", len(got))
+	}
+}
+
+// A failing poll must report the failure once, not every two seconds.
+//
+// Observed 2026-08-31: with the ship's computer off overnight the poller
+// logged "returned status 404: Radar not found" every ~3 s against the live
+// server, indefinitely. Loud retry behaviour is the fallback policy's
+// requirement (AGENTS.md), but loud means the operator learns something,
+// and the thousandth identical line teaches nothing while burying what does.
+func TestRadarPollLogsFailuresOnTheEdgeNotEveryTick(t *testing.T) {
+	store := newRadarTargetStore()
+	poller := testRadarPollerWith(store,
+		[]radarInfo{{ID: "fur6424A", Name: "R", Transmitting: true}},
+		func(string) ([]mayaraArpaTarget, error) { return nil, fmt.Errorf("404 radar not found") },
+	)
+
+	now := time.Now().UTC()
+	logged := 0
+	for i := 0; i < 10; i++ {
+		if poller.shouldLogPollFailure() {
+			logged++
+		}
+		_ = poller.pollOnce(now.Add(time.Duration(i) * radarPollInterval))
+	}
+	if logged != 1 {
+		t.Fatalf("ten consecutive identical failures logged %d times, want 1", logged)
+	}
+
+	// Recovery re-arms it, so the next outage is reported rather than swallowed.
+	poller.fetchTargets = func(string) ([]mayaraArpaTarget, error) {
+		return []mayaraArpaTarget{newTestArpaTarget(1, "tracking", 400)}, nil
+	}
+	if err := poller.pollOnce(now.Add(20 * radarPollInterval)); err != nil {
+		t.Fatalf("recovered poll: %v", err)
+	}
+
+	poller.fetchTargets = func(string) ([]mayaraArpaTarget, error) { return nil, fmt.Errorf("404 again") }
+	if !poller.shouldLogPollFailure() {
+		t.Fatal("a fresh outage after a recovery must be logged again")
 	}
 }
