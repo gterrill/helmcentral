@@ -5,7 +5,7 @@ Meteorology's public tide-table pages, covering Australian ports. Unlike
 [../noaa](../noaa) (a teaching example backed by a clean JSON API), this is
 the real, only implementation of the `"bom"` provider — ported 1:1 from the
 formerly-native `backend/tide_provider_bom.go` (now deleted). See
-[docs/adr/0017-wasm-plugin-tide-providers.md](../../adr/0017-wasm-plugin-tide-providers.md)'s
+[docs/adr/0017-wasm-plugin-tide-providers.md](../../../adr/0017-wasm-plugin-tide-providers.md)'s
 "Update: BOM ported to WASM" section for why this port was made and what
 tradeoffs were accepted.
 

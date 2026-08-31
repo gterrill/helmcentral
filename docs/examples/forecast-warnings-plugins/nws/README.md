@@ -6,7 +6,7 @@ It exists to show what wiring up a real government marine-warnings API into
 Helmcentral's WASM plugin contract looks like, end to end, and gives real
 non-Australian coverage — the region-appropriate alternative to
 [../bom](../bom) (the **default**, `id: "bom"`) for US-based installs. See
-[docs/adr/0019-ftp-host-function-and-forecast-warnings-provider.md](../../adr/0019-ftp-host-function-and-forecast-warnings-provider.md)
+[docs/adr/0019-ftp-host-function-and-forecast-warnings-provider.md](../../../adr/0019-ftp-host-function-and-forecast-warnings-provider.md)
 for the "each provider resolves its own zone semantics" design decision
 behind the Forecast Warnings contract as a whole.
 

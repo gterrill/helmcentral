@@ -19,7 +19,7 @@ stream, so every widget that can bind a path can bind one of these with no
 widget code at all.
 
 Host-side derivation is this repo's standing rule: a plugin returns raw
-provider numbers and the host computes what is derived from them (docs/plugins.md).
+provider numbers and the host computes what is derived from them (docs/reference/plugins.md).
 */
 
 const derivedPathPrefix = "helmcentral."

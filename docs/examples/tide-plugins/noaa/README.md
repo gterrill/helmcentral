@@ -11,7 +11,7 @@ It is **not** a production-hardened client (no pagination, no
 retry/backoff — see the comments at the top of `main.go`), and it is a
 different plugin from [../bom](../bom) (the real, only "bom" provider,
 ported from the formerly-native `backend/tide_provider_bom.go`) — see
-[docs/adr/0017-wasm-plugin-tide-providers.md](../../adr/0017-wasm-plugin-tide-providers.md)'s
+[docs/adr/0017-wasm-plugin-tide-providers.md](../../../adr/0017-wasm-plugin-tide-providers.md)'s
 "Update: BOM ported to WASM" section for why that port was made.
 
 Written in TinyGo — the most approachable option given Helmcentral's own

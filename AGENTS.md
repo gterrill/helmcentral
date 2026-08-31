@@ -33,9 +33,49 @@ This file mirrors AGENTS.md. AGENTS.md is the canonical repo instruction file.
 
 ## Documentation Location Policy
 
-- Architectural decisions, design decisions, and feature specifications must be documented in the ADR folder: https://vscode.dev/github/gterrill/helmcentral/blob/main/docs/adr
-- Do not keep durable feature-spec or architecture notes in backend/README.md or other component READMEs.
-- When adding or changing behavior that affects architecture or feature contracts, create or update an ADR in docs/adr and link it from relevant README files.
+Two audiences, two trees. Operator-facing documentation exists to explain what
+Helmcentral does and how to use it. ADRs exist to record why it was built that
+way. Mixing them produces feature pages that read like engineering history and
+decision records that read like manuals, and both get worse.
+
+### The user-facing tree
+
+`docs/` follows the [Diátaxis](https://diataxis.fr/) split, indexed by
+`docs/index.md`:
+
+| Content | Location |
+| --- | --- |
+| What a feature does, what it gives the operator, where it stops | `docs/features/` |
+| Steps to accomplish a specific task | `docs/how-to/` |
+| Fields, formats, environment variables, state paths | `docs/reference/` |
+| Guided first run (none yet; create only when something needs it) | `docs/tutorials/` |
+
+A feature normally gets one `features/` page as its entry point, and grows
+`how-to/` and `reference/` pages as it needs them. Do not create empty
+directories or placeholder pages in advance.
+
+### The engineering tree
+
+`docs/adr/` holds architecture decision records and is **not part of the
+Diátaxis tree.** It is the internal record: context, the decision, what was
+rejected, and what a later ADR reversed. Wrong turns belong here and only here.
+
+### The rule that keeps them apart
+
+- **User-facing pages do not cite ADR numbers.** If a `features/`, `how-to/` or
+  `reference/` page only makes sense once the reader has followed a decision
+  record, the page is not finished. State the behaviour and the reason for it in
+  the page's own words.
+- **ADRs do not carry operator instructions.** An ADR may describe what an
+  operator will see; the steps for doing it live in `docs/how-to/`.
+- Component READMEs (`backend/README.md`, `frontend/README.md`) hold neither.
+  No durable feature specs or architecture notes there.
+
+### When behaviour changes
+
+A change affecting architecture or a feature contract needs both: create or
+update the ADR in `docs/adr/`, **and** update the affected page under `docs/`.
+An ADR alone leaves the operator-facing docs silently wrong.
 
 ## Modern Web Guidance
 

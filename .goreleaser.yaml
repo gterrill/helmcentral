@@ -74,7 +74,7 @@ archives:
       - settings.example.yaml
       - src: packaging/helmcentral.service
         dst: packaging/helmcentral.service
-      - src: docs/configuration.md
+      - src: docs/reference/configuration.md
         dst: docs/configuration.md
 
 checksum:
@@ -107,7 +107,7 @@ release:
     ```
 
     Requires an existing SignalK server on the same network. See the
-    [configuration reference](https://github.com/gterrill/helmcentral/blob/main/docs/configuration.md).
+    [configuration reference](https://github.com/gterrill/helmcentral/blob/main/docs/reference/configuration.md).
   footer: |
     ---
 

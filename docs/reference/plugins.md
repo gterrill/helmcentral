@@ -55,9 +55,9 @@ fetch function:
 | Forecast warnings | `fetch_warnings(lat, lon)` | Current, relevant bulletins only |
 
 Full contracts and config-file formats:
-[ADR 0017](adr/0017-wasm-plugin-tide-providers.md) (tides),
-[ADR 0018](adr/0018-wasm-plugin-weather-and-wave-providers.md) (weather and
-waves), [ADR 0019](adr/0019-ftp-host-function-and-forecast-warnings-provider.md)
+[ADR 0017](../adr/0017-wasm-plugin-tide-providers.md) (tides),
+[ADR 0018](../adr/0018-wasm-plugin-weather-and-wave-providers.md) (weather and
+waves), [ADR 0019](../adr/0019-ftp-host-function-and-forecast-warnings-provider.md)
 (forecast warnings).
 
 ### Why warnings are the exception
@@ -82,7 +82,7 @@ generic custom Extism host function — `ftp_fetch`, in
 `backend/wasm_ftp_fetch.go` — available to every plugin type and gated by the
 same `allowed_hosts.json` allowlist used for HTTP. It is the only custom host
 function in the codebase. See
-[ADR 0019](adr/0019-ftp-host-function-and-forecast-warnings-provider.md) for
+[ADR 0019](../adr/0019-ftp-host-function-and-forecast-warnings-provider.md) for
 why it was built rather than keeping BOM native.
 
 ## Why tides have no default
@@ -100,7 +100,7 @@ So an operator must explicitly set `ui.tide_provider` in Settings to match
 their region. With no plugin installed there are no tide providers at all, and
 `/api/tide-today` returns a clear error naming what is missing rather than
 guessing. See
-[ADR 0033](adr/0033-remove-storm-glass-tides-plugin-only.md) for why the last
+[ADR 0033](../adr/0033-remove-storm-glass-tides-plugin-only.md) for why the last
 built-in provider (Storm Glass) was removed, and the recorded path for porting
 a position-based provider to a plugin.
 
@@ -138,7 +138,7 @@ Available example directories:
 - `docs/examples/forecast-warnings-plugins/bom`, `docs/examples/forecast-warnings-plugins/nws`
 
 Each has its own README with installation notes.
-[docs/examples/weather-plugins/weatherkit/README.md](examples/weather-plugins/weatherkit/README.md)
+[docs/examples/weather-plugins/weatherkit/README.md](../examples/weather-plugins/weatherkit/README.md)
 also covers how to obtain WeatherKit credentials.
 
 ## Installing a built plugin

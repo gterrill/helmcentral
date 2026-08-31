@@ -8,7 +8,7 @@
 #
 # Secrets (SignalK credentials, InfluxDB token, WeatherKit keys) are NOT kept
 # here — they live in an encrypted store managed from Settings. See
-# docs/configuration.md.
+# docs/reference/configuration.md.
 
 signalk:
   # Hostname or IP of your SignalK server. `localhost` is correct when

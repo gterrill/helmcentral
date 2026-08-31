@@ -27,7 +27,7 @@ plugins mounted separately at `/app/plugins`.
 credential is unrecoverable** — SignalK login, InfluxDB token, WeatherKit
 keys all have to be re-entered. Back up the whole state directory; at minimum
 back up that file. See
-[ADR 0023](adr/0023-encrypted-secrets-store.md).
+[ADR 0023](../adr/0023-encrypted-secrets-store.md).
 
 ## Environment variables
 
@@ -57,7 +57,7 @@ or your shell.
 running app) and has no environment-variable override — `settings.yaml` is its
 only source. Changes take effect on the next request, without a restart.
 
-See [ADR 0040](adr/0040-signalk-delegated-authentication.md) for the full design.
+See [ADR 0040](../adr/0040-signalk-delegated-authentication.md) for the full design.
 
 ### SignalK
 
@@ -103,7 +103,7 @@ SignalK credentials, `INFLUXDB_TOKEN`, the
 `WEATHERKIT_*` keys and the `VAPID_*` web push keys are **not** environment
 variables in normal use. They live in an AES-256-GCM encrypted SQLite store and
 are managed from the Settings UI's Secrets panel. See
-[ADR 0023](adr/0023-encrypted-secrets-store.md).
+[ADR 0023](../adr/0023-encrypted-secrets-store.md).
 
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to "managed from
 the UI": they are generated automatically on first start and never rotate,
@@ -118,7 +118,7 @@ how many, rather than letting every push fail silently forever. Back up
 
 Tide, weather, wave and forecast-warning data all come from WASM plugins
 rather than being built in, so a provider can be added or swapped without
-rebuilding (see [ADR 0017](adr/0017-wasm-plugin-tide-providers.md), and
+rebuilding (see [ADR 0017](../adr/0017-wasm-plugin-tide-providers.md), and
 [plugins.md](plugins.md) for the contracts and how to build one). The release
 bundle ships:
 
@@ -197,7 +197,7 @@ an app that still cannot receive push, with nothing on screen to explain why.
 Registered devices live in `backend/data/webpush-subscriptions.sqlite`
 (`WEBPUSH_DB_PATH`), separate from the alarm log so that clearing alarm history
 never disconnects a phone. See
-[ADR 0045](adr/0045-web-push-secure-context-and-pwa-shell.md).
+[ADR 0045](../adr/0045-web-push-secure-context-and-pwa-shell.md).
 
 ## Security
 
@@ -212,7 +212,7 @@ It is designed for a trusted boat LAN in this mode.
 
 Set `auth.mode: signalk` to require login via your SignalK server's own
 accounts before Helmcentral serves anything but the login screen — see
-[ADR 0040](adr/0040-signalk-delegated-authentication.md). This still assumes a
+[ADR 0040](../adr/0040-signalk-delegated-authentication.md). This still assumes a
 trusted-enough network to reach the login screen itself: it does not replace
 a VPN or reverse proxy for genuine internet exposure, and every startup with
 `auth.mode: none` logs a warning naming the risk so it isn't easy to run this

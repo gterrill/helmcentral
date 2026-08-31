@@ -14,8 +14,8 @@ never locks you out of a running boat.
 **Recommended:** once your SignalK server has security enabled, set
 `auth.mode: signalk` in `settings.yaml` to require login before the API and
 dashboard respond to anything but the login screen. See
-[ADR 0040](adr/0040-signalk-delegated-authentication.md) and the
-[README's Configuration section](../README.md#configuration).
+[ADR 0040](../adr/0040-signalk-delegated-authentication.md) and the
+[README's Configuration section](../../README.md#configuration).
 
 ## Weather and waves moved to WASM plugins
 
@@ -36,7 +36,7 @@ Open-Meteo-marine integration.
   Open-Meteo (keyless). Paste the four WeatherKit credentials into
   Settings → Secrets and select "Apple WeatherKit" under Settings → Weather.
 
-See [ADR 0018](adr/0018-wasm-plugin-weather-and-wave-providers.md).
+See [ADR 0018](../adr/0018-wasm-plugin-weather-and-wave-providers.md).
 
 ## Marine warnings became forecast warnings
 
@@ -48,7 +48,7 @@ See [ADR 0018](adr/0018-wasm-plugin-weather-and-wave-providers.md).
 - No environment variables are needed for the default BOM plugin — it is
   keyless, reading BOM's public anonymous FTP mirror.
 
-See [ADR 0019](adr/0019-ftp-host-function-and-forecast-warnings-provider.md).
+See [ADR 0019](../adr/0019-ftp-host-function-and-forecast-warnings-provider.md).
 
 ## Tides became plugin-only
 
@@ -57,5 +57,5 @@ tide provider and no fallback: install a tide plugin for your region and set
 `ui.tide_provider` in Settings. Until you do, `/api/tide-today` returns an
 error naming what is missing.
 
-See [ADR 0033](adr/0033-remove-storm-glass-tides-plugin-only.md) and
-[docs/plugins.md](plugins.md).
+See [ADR 0033](../adr/0033-remove-storm-glass-tides-plugin-only.md) and
+[docs/reference/plugins.md](../reference/plugins.md).

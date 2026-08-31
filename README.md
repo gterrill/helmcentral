@@ -51,7 +51,7 @@ in daylight, in a layout you can rearrange without editing a config file.
   seconds out to 30 minutes for up to 24 hours, with every attempt logged.
 - **A watchdog on the stream.** If the SignalK connection dies, that is itself
   an alarm. A periodic heartbeat sent off the boat makes its absence one too.
-- **Layouts you arrange yourself.** 16 built-in widgets, custom gauges bound to
+- **Layouts you arrange yourself.** 17 built-in widgets, custom gauges bound to
   any path your server publishes, and embed tiles for anything with a URL.
   Named pages you switch between, persisted server-side.
 - **Forecasts with no API key.** Open-Meteo and Open-Meteo Marine are the
@@ -70,7 +70,8 @@ Then open `http://<this-machine>:8080/`. On first run Helmcentral searches your
 network for a SignalK server and offers what it finds, so there is nothing to
 edit by hand.
 
-[Other ways to install](#other-ways-to-install), including Docker, are below.
+Docker, manual binaries and upgrade instructions:
+[docs/how-to/install.md](docs/how-to/install.md).
 
 > [!WARNING]
 > **Authentication is off by default** (`auth.mode: none`). A fresh install's
@@ -85,11 +86,10 @@ edit by hand.
 ## Contents
 
 - [Requirements](#requirements)
-- [Other ways to install](#other-ways-to-install)
 - [Configuration](#configuration)
-- [What's on the dashboard](#whats-on-the-dashboard)
-- [Alarms](#alarms)
+- [What you get](#what-you-get)
 - [Provider plugins](#provider-plugins)
+- [Documentation](#documentation)
 - [Development](#development)
 - [Architecture](#architecture)
 - [Roadmap](#roadmap)
@@ -111,89 +111,11 @@ edit by hand.
 
 - **A browser on Baseline 2024 or newer**: Chrome/Edge 111+, Firefox 111+,
   Safari 16.4+, which means iPadOS/iOS 16.4+ on a helm tablet. Older devices are
-  out of support, since the shipped CSS is not downlevelled past that floor
-  ([ADR 0046](docs/adr/0046-frontend-build-toolchain-and-css-browser-floor.md)).
+  out of support, since the shipped CSS is not downlevelled past that floor.
 
 That is the whole list. Telemetry history is in-memory by default. InfluxDB buys
-you longer retention if you want it, and is not otherwise needed.
-
-Radar is the same shape: optional, and off unless the pieces are there. Targets
-appear once mayara-server is running against the radar and the mayara plugin is
-installed in SignalK. Helmcentral needs no configuration of its own for it, and
-auto-detects the radar from the SignalK stream, so there is nothing to switch on.
-Without both pieces the radar tile simply reads `--`.
-
-## Other ways to install
-
-### Install script (recommended)
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/gterrill/helmcentral/main/install.sh | sh
-```
-
-It detects your platform, verifies the download against the published
-checksums, installs to `/usr/local/bin`, creates `/var/lib/helmcentral` for
-state, installs the reference plugin bundle, and enables a systemd service on
-Linux. **Re-run it any time to upgrade**; your settings and data are left alone.
-
-Pin a version or change locations with `HELMCENTRAL_VERSION`,
-`HELMCENTRAL_PREFIX` and `HELMCENTRAL_STATE_DIR`.
-
-Useful afterwards:
-
-```sh
-systemctl status helmcentral
-journalctl -u helmcentral -f
-```
-
-On macOS the script installs the binary and prints how to run it, with no
-launchd service. On Windows, download the `.zip` from the
-[releases page](https://github.com/gterrill/helmcentral/releases).
-
-### Manual binary download
-
-Grab the archive for your platform from the
-[releases page](https://github.com/gterrill/helmcentral/releases), then:
-
-```sh
-tar -xzf helmcentral_<version>_linux_arm64.tar.gz
-sudo install -m0755 helmcentral /usr/local/bin/helmcentral
-
-# State needs an explicit home, or it lands in the working directory.
-sudo mkdir -p /var/lib/helmcentral
-HELMCENTRAL_STATE_DIR=/var/lib/helmcentral \
-  SETTINGS_FILE=/var/lib/helmcentral/settings.yaml \
-  helmcentral
-```
-
-The archive also contains `packaging/helmcentral.service` if you want the
-systemd unit, and `settings.example.yaml` as a starting config.
-
-### Docker
-
-The image is multi-arch (amd64, arm64, armv7), so it runs on a Raspberry Pi.
-Take `docker-compose.yml` from this repo, then, from the directory containing
-it:
-
-```sh
-# 1. Add the reference plugins first. Compose bind-mounts ./plugins, and without
-#    them there are no tide, weather, wave or warning providers. They are
-#    deliberately not baked into the image, so you can add or update one without
-#    repulling.
-mkdir -p plugins && curl -fsSL \
-  https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \
-  | tar -xz -C plugins
-
-# 2. Start it.
-docker compose pull
-docker compose up -d --force-recreate
-```
-
-Dashboard and API: <http://localhost:9091>. Change the left-hand side of the
-port mapping to serve it elsewhere. State lands in `./backend-data`, created on
-first run, so nothing needs to exist beforehand.
-
-Stop with `docker compose down`.
+you longer retention if you want it, and is not otherwise needed. Radar is the
+same shape: optional, and off unless the pieces are there.
 
 ## Configuration
 
@@ -201,7 +123,7 @@ Helmcentral starts with no configuration file, and **secrets are never set in
 files or environment variables**. Start with none configured, then paste SignalK
 credentials, the InfluxDB token and any WeatherKit keys into
 Settings → Secrets in the running app, where they are encrypted at rest with
-AES-256-GCM ([ADR 0023](docs/adr/0023-encrypted-secrets-store.md)).
+AES-256-GCM.
 
 > Back up `data/secrets.key`. Lose it and every stored credential is
 > unrecoverable.
@@ -209,151 +131,49 @@ AES-256-GCM ([ADR 0023](docs/adr/0023-encrypted-secrets-store.md)).
 ### Authentication
 
 `auth.mode` defaults to `none`, so upgrading an existing install never locks
-anyone out of a running boat. Setting `auth.mode: signalk` in `settings.yaml`
-requires login before the API and dashboard respond to anything except
-`/api/health` and the login screen.
+anyone out of a running boat. Setting `auth.mode: signalk` requires login before
+the API and dashboard respond to anything except `/api/health` and the login
+screen.
 
 Helmcentral has no user database of its own. It forwards submitted credentials
-to your SignalK server's `/signalk/v1/auth/login` and trusts the answer, mapping
-SignalK's `readonly`, `readwrite` and `admin` levels onto matching Helmcentral
-permissions. That means SignalK's own security has to be enabled first.
-Helmcentral checks at startup and refuses to boot into `auth.mode: signalk`
-against a server with security switched off, because "login required" against a
-server with no login to require cannot be satisfied.
+to your SignalK server and trusts the answer, mapping SignalK's `readonly`,
+`readwrite` and `admin` levels onto matching Helmcentral permissions. An
+unrecognised role fails closed rather than falling back to something permissive.
 
-Turn it on from Settings → Security, which refuses to save unless SignalK's
-security is already enabled, so the lockout is prevented at save time rather
-than discovered at the next reboot. Turning it back off is never gated on
-SignalK being reachable, so that way out always works. Full design:
-[ADR 0040](docs/adr/0040-signalk-delegated-authentication.md).
+That means SignalK's own security has to be enabled first. Turn Helmcentral's
+login on from Settings → Security, which refuses to save unless SignalK security
+is already on, so a lockout is prevented at save time rather than discovered at
+the next reboot. Turning it back off is never gated on SignalK being reachable,
+so that way out always works.
 
-### Reference
+Every environment variable, state path and startup behaviour:
+[docs/reference/configuration.md](docs/reference/configuration.md).
 
-- **Full operator reference:** [docs/configuration.md](docs/configuration.md),
-  covering every environment variable, state path and startup behaviour.
-- **Upgrading across a breaking release:**
-  [docs/upgrading.md](docs/upgrading.md).
+## What you get
 
-## What's on the dashboard
+**[The dashboard](docs/features/dashboard.md).** Seventeen built-in widgets,
+plus gauge widgets that bind to any path your server publishes and embed tiles
+that put any URL in the grid. Arrange them yourself into named pages you switch
+between, persisted server-side. A gauge's coloured band set into an alarm
+severity *is* the alarm rule, not a picture of one.
 
-Sixteen built-in widgets: Vessel, Apparent Wind, Depth & Tide, Position,
-Today & Now, Anchor Watch, Tanks, Route, Nearby Vessels, Battery & Power, Solar,
-Alternator, Generator, Switches, Hot Water and Autopilot.
+**[Anchor watch](docs/features/anchor-watch.md).** Trail sampling and drag
+detection run on the server, so closing the browser cannot silence a drag. A
+lost GNSS fix never raises one. The rode planner does pay-out and swing-radius
+planning against tide-corrected depth before the anchor is down, on a map that
+takes shared pins for hazards.
 
-Two of them are not fixed. **Gauge widgets** bind to any path your SignalK
-server publishes, with a numeric, radial, bar or lamp display and coloured bands
-that reuse the alarm severities, so oil pressure or engine hours do not have to
-wait for someone to write a widget for them
-([ADR 0039](docs/adr/0039-bindable-gauge-widgets.md)). **Embed tiles** put any
-URL in the grid, such as a Grafana panel or a camera feed; the windrose in the
-screenshot above is one.
+**[Alarms](docs/features/alarms.md).** Rules on any SignalK path, with mandatory
+dwell and hysteresis, using SignalK's own severity vocabulary in both
+directions. Five transports, none needing a paid subscription. Failed deliveries
+are queued and retried, not dropped.
 
-Arrange them yourself: toggle layout mode in the header, then drag, resize or
-remove widgets and add them back from a picker. Layouts are named **pages** you
-switch between, because "Anchored" and "Underway" want different screens.
-Everything is persisted server-side and restored next session
-([ADR 0012](docs/adr/0012-configurable-bento-dashboard.md),
-[ADR 0013](docs/adr/0013-multi-page-dashboard.md)). The layout stays usable down
-to a phone, with three structurally different arrangements across the range
-([ADR 0032](docs/adr/0032-responsive-dashboard-below-grid-breakpoint.md)).
+Also aboard: route planning that pushes an active route to SignalK for your
+autopilot, satellite charts from your own MBTiles, autopilot control on
+SignalK's v2 API, ARPA radar targets, and an embedded weather radar.
 
-Beyond the grid:
-
-- **Anchor watch.** Trail sampling and drag detection both run on the server,
-  for your vessel and for nearby AIS targets. Closing the browser cannot silence
-  a drag: it is a normal alarm, so it is logged, acknowledgeable, and delivered
-  off the boat by whatever transports you have configured. Silencing is a
-  server-side acknowledgement, so a second browser is not left ringing. A lost
-  GNSS fix never raises a drag, because position freezes at its last trusted
-  value during an outage and the stream watchdog reports that separately
-  ([ADR 0001](docs/adr/0001-server-owned-trail-sampling.md),
-  [ADR 0002](docs/adr/0002-separate-motoring-and-anchor-trails.md),
-  [ADR 0038](docs/adr/0038-alarms.md)).
-- **Rode planner.** A sidebar on Anchor Watch for pay-out and swing-radius
-  planning against tide-corrected depth and gust-seeded wind, usable before the
-  anchor is down
-  ([ADR 0047](docs/adr/0047-rode-planner-replaces-rode-scope-tile.md)). Its map
-  takes pins: click open water to mark a bombie or the nearest shoreline and
-  watch the range close as you swing. Pins are shared across every device
-  watching the anchorage and expire with the anchoring
-  ([ADR 0048](docs/adr/0048-session-bound-anchor-placemarks.md)). The map keeps
-  the view you panned to for as long as you stay in the anchorage, and centres
-  itself on the new anchor on every device when you drop somewhere else
-  ([ADR 0064](docs/adr/0064-anchor-map-follows-the-session.md)).
-- **Route planning.** Multi-leg waypoint sequences with per-leg distance,
-  bearing and ETA. A saved route can be activated, which pushes it to SignalK as
-  the vessel's active route for autopilots and MFDs to follow. This is manual
-  waypoint planning and nothing more: no hazard avoidance, no weather routing,
-  no chart licensing dependency, and Helmcentral does no live navigation itself
-  ([ADR 0006](docs/adr/0006-manual-route-planning.md),
-  [ADR 0007](docs/adr/0007-signalk-route-activation.md)).
-- **Satellite charts.** Upload your own MBTiles and Helmcentral serves them. It
-  never fetches or bulk-caches tiles from a live provider, so it takes on no
-  licensing exposure
-  ([ADR 0011](docs/adr/0011-mbtiles-satellite-chart-upload.md)).
-- **Autopilot.** Engage and disengage, mode, heading nudges, tack and gybe
-  either way, and dodge, against SignalK's v2 Autopilot API only, with no legacy
-  `steering.autopilot.*` write fallback. The tile shows what the pilot last
-  reported on the delta stream, never what a command asked for. It greys itself
-  if steering data goes quiet, and disables rather than hides any action the
-  connected pilot is not currently advertising. Anything that changes who is
-  steering takes a deliberate press-and-hold
-  ([ADR 0041](docs/adr/0041-autopilot-widget.md)).
-- **Weather radar** via an embedded Windy map, centred on the vessel.
-- **Radar targets** from the ship's own radar, if you run one. ARPA contacts are
-  plotted on the anchor map as course-oriented triangles, distinct from the AIS
-  circles, and listed with range, bearing and the CPA/TCPA the radar computed.
-  This is the marine radar and has nothing to do with the weather radar above
-  ([ADR 0062](docs/adr/0062-marine-radar-targets-from-mayara.md)).
-- **Max wind gust** over a window you pick per readout: 10m, 30m, 1h or 24h
-  ([ADR 0030](docs/adr/0030-selectable-max-gust-windows.md)).
-
-## Alarms
-
-Rules can name **any path the SignalK server publishes**, because ingestion is a
-delta-stream subscription rather than a hardcoded path list
-([ADR 0037](docs/adr/0037-signalk-delta-stream-ingestion.md)). Alarming on
-something new needs no code change.
-
-Helmcentral uses SignalK's own notification vocabulary, with severities
-`normal | alert | warn | alarm | emergency` verbatim. That is what makes it work
-in both directions: alarms raised elsewhere on the bus show up here
-untranslated, and Helmcentral's own rule hits are written back to
-`notifications.*`, where a buzzer plugin or an MFD can react to them without
-knowing Helmcentral exists.
-
-Three decisions worth spelling out, because they are the ones people ask about:
-
-- **Dwell and hysteresis are mandatory.** A rule has to hold for its dwell
-  before it fires, and the value has to travel back past a deadband before it
-  clears. Alarm storms are the most common reason people switch marine alarms
-  off, and a switched-off alarm is worse than no alarm at all, because you still
-  think something is watching.
-- **Absence is not a value.** A missing path does not satisfy a threshold, so a
-  freshly booted boat does not fire every rule at once. The same rule applies in
-  reverse: a live alarm does not clear when its path goes stale, so a dying
-  sensor cannot silence its own alarm by going quiet.
-- **Failed deliveries are queued, not dropped.** Retried from 30 seconds out to
-  30 minutes for 24 hours, then discarded, because a day-old alarm delivered as
-  though it were current is its own kind of wrong. The heartbeat is the
-  exception and is never queued, since a burst of stale "still alive" messages
-  is worse than useless.
-
-Anchor drag and the stream watchdog are built in and travel the same path as
-your own rules. See [Anchor watch](#whats-on-the-dashboard) above.
-
-Five transports, none of which needs a paid subscription: **ntfy**
-(self-hostable, or the free public server, no account), **SMTP**, **webhook**,
-**SignalK `notifications.*`**, which needs no internet at all, and **web push**,
-which puts alarms on your phone's lock screen with no app to install and needs
-Helmcentral served over https (see
-[ADR 0045](docs/adr/0045-web-push-secure-context-and-pwa-shell.md) for a
-`tailscale serve` recipe).
-
-`POST /api/alarm-transports/test` probes every enabled transport. Discovering at
-3am that the ntfy topic was mistyped is the failure that justifies one button.
-
-Full design and its trade-offs: [ADR 0038](docs/adr/0038-alarms.md).
+What it deliberately does not do: hazard avoidance, weather routing, live
+navigation, or anything requiring a chart licence.
 
 ## Provider plugins
 
@@ -372,9 +192,8 @@ and the new provider appears in the existing Settings dropdown on restart.
 Plugins run under [Extism](https://extism.org/)/[wazero](https://wazero.io/)
 with no filesystem access, no process access, and network default-deny: a plugin
 reaches only the hosts named in its `allowed_hosts.json` sidecar. The host owns
-all derived data (units, interpolation, caching, timezone bucketing), so a
-plugin only ever returns raw provider numbers. You can write one in any language
-with an Extism PDK.
+all derived data, so a plugin only ever returns raw provider numbers. You can
+write one in any language with an Extism PDK.
 
 **Tides are the one thing with no default.** Tide data is tied to physical
 station networks rather than a global model, so there is no keyless worldwide
@@ -383,17 +202,23 @@ Settings to match your region. Until you do, `/api/tide-today` returns an error
 naming what is missing rather than guessing.
 
 Contracts, the sandbox model, and how to build a plugin:
-**[docs/plugins.md](docs/plugins.md)**.
+[docs/reference/plugins.md](docs/reference/plugins.md).
+
+## Documentation
+
+[docs/index.md](docs/index.md) is the map. In short:
+
+| | |
+| --- | --- |
+| [docs/features/](docs/features/) | What each part does and where it stops |
+| [docs/how-to/](docs/how-to/) | Install, upgrade, develop |
+| [docs/reference/](docs/reference/) | Configuration, plugin contracts, engine profiles |
+| [docs/adr/](docs/adr/) | Why each non-obvious trade-off went the way it did |
 
 ## Development
 
-Requires **Go 1.22** and **Node.js 20+**. The Go toolchain is deliberately
-pinned at 1.22, and several dependencies are held back to match, so do not let
-`go get -u` bump the `go` directive
-([ADR 0037](docs/adr/0037-signalk-delta-stream-ingestion.md)). CI and release
-builds use Node 24; the dev containers run Node 20.
-
-In two terminals, from the repo root:
+Requires Go 1.22 and Node.js 20 or newer. From the repository root, in two
+terminals:
 
 ```sh
 cd backend && go run .                      # API on :8080
@@ -403,46 +228,13 @@ cd backend && go run .                      # API on :8080
 cd frontend && npm install && npm run dev   # Vite dev server on :5173
 ```
 
-Open <http://localhost:5173>.
-
-The Vite dev server proxies `/api` to `localhost:8080`, so the frontend always
-talks to the backend on the same origin, exactly as in a release build where the
-SPA is embedded in the binary.
-
-### Tests
-
 ```sh
-cd backend && go test -short ./...   # -short skips live BOM FTP round-trips
+cd backend && go test -short ./...
 cd frontend && npm test && npm run lint
 ```
 
-### Docker workflows
-
-```sh
-make dev     # backend-dev (air hot-reload) + frontend-dev (Vite), :8080 / :5173
-make logs    # tail both
-make down    # stop
-
-make e2e-up  # isolated stack on :5174 for anything that mutates state
-```
-
-Use the E2E stack for any script that clicks Save. The dev stack bind-mounts
-your live `settings.yaml` and can take a real dashboard offline
-([ADR 0026](docs/adr/0026-e2e-stack-isolation.md)).
-
-A production-like build is
-`docker compose -f docker-compose.dev.yml --profile prod up --build -d backend frontend`.
-
-### Release builds
-
-```sh
-goreleaser build --snapshot --clean   # cross-compiles every published target
-```
-
-Build hooks build the frontend and stage it into `backend/dist` for the
-`//go:embed`, so a snapshot binary is the real thing. Tagging `vX.Y.Z` and
-pushing runs [.github/workflows/release.yml](.github/workflows/release.yml),
-which publishes the archives, the WASM plugin bundle and the multi-arch image.
+Docker workflows, the isolated E2E stack and release builds:
+[docs/how-to/development.md](docs/how-to/development.md).
 
 ## Architecture
 
@@ -452,7 +244,7 @@ helmcentral/
 ├── frontend/         # React + TypeScript + Vite dashboard
 ├── plugins/          # WASM providers, by category
 ├── packaging/        # systemd unit, plugin build script
-├── docs/adr/         # Architecture decision records
+├── docs/             # Operator docs and architecture decision records
 ├── install.sh        # One-line installer
 └── docker-compose.yml
 ```
@@ -465,70 +257,54 @@ helmcentral/
   reassembled into a snapshot tree. It is the only ingestion path. There is no
   REST fallback and no toggle, because a fallback would mask exactly the
   upstream failures the watchdog exists to catch. REST survives only for probing
-  during discovery and connection tests
-  ([ADR 0037](docs/adr/0037-signalk-delta-stream-ingestion.md)).
+  during discovery and connection tests.
 - **Storage.** SQLite for secrets, alarm history and tile caches; JSON files for
   routes and dashboard pages. Telemetry history is an in-memory ring buffer by
-  default, with InfluxDB optional for longer retention
-  ([ADR 0020](docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md)).
+  default, with InfluxDB optional for longer retention.
 - **Startup is fail-fast.** If the secrets store or a plugin-override database
   cannot be opened, the process exits rather than running degraded.
 
 ### Why Helmcentral isn't a SignalK plugin
 
-The value SignalK brings to the table is normalization. It translates thirty years 
-of fragmented, reverse-engineered NMEA 2000 data into a single tree with documented 
-paths and standard SI units. That decoding work is solid, and there's no reason to 
+What SignalK brings is normalization. It translates thirty years of fragmented,
+reverse-engineered NMEA 2000 data into a single tree with documented paths and
+standard SI units. That decoding work is solid and there is no reason to
 reinvent it.
 
-The problem is isolation. SignalK runs plugins in-process inside the Node runtime. 
-Any plugin can register arbitrary HTTP routes, inject spoofed delta updates, inspect 
-server configuration, or crash the event loop. That trust model works for hobbyist 
-setups, but it's too fragile for critical systems like an anchor alarm.
+The problem is isolation. SignalK runs plugins in-process inside the Node
+runtime, where any plugin can register arbitrary HTTP routes, inject spoofed
+delta updates, read server configuration or crash the event loop. That trust
+model is fine for a hobbyist setup and too fragile for an anchor alarm.
 
-Authorization at the wire level is also fundamentally missing. NMEA 2000 has no 
-device authentication - i.e. any node on the CAN bus can claim an address and broadcast 
-any PGN. Hardening the layer directly above an unauthenticated stream offers limited 
-protection. The boundaries that matter are:
+Authorization at the wire level is missing too. NMEA 2000 has no device
+authentication, so any node on the CAN bus can claim an address and broadcast
+any PGN. Hardening the layer directly above an unauthenticated stream buys
+limited protection. The boundaries that actually matter are the write path,
+meaning anything able to engage an autopilot or switch a CZone breaker, and the
+network edge between the vessel's bus and the internet.
 
-1. The write path: anything capable of engaging an autopilot or switching a CZone breaker.
-1. The network edge: the interface between the vessel's local bus and the internet.
+Helmcentral therefore treats SignalK strictly as a translation layer and owns
+those boundaries itself: a single read-only delta subscription into an isolated
+state snapshot, role resolution downstream of SignalK that fails closed on an
+unrecognised role, and third-party provider code confined to WASM with linear
+memory isolation, host allowlists and hard execution timeouts.
 
-Helmcentral treats SignalK strictly as a translation layer and handles security 
-boundaries independently:
-
-- Read-only ingestion: Helmcentral consumes a single read-only delta subscription into 
-  an isolated state snapshot ([ADR 0037](docs/adr/0037-signalk-delta-stream-ingestion.md)).
-- Strict auth validation: User accounts remain in SignalK, but role resolution happens 
-  downstream. Any unrecognized role fails closed rather than falling back to permissive 
-  defaults ([ADR 0040](docs/adr/0040-signalk-delegated-authentication.md)).
-- Sandboxed extensions: Third-party provider code runs in WASM with linear-memory 
-  isolation, strict host allowlists, and hard execution timeouts 
-  ([ADR 0017](docs/adr/0017-wasm-plugin-tide-providers.md)).
-
-SignalK belongs at the sensor/data layer (not as the security boundary between 
-third-party code and physical relays).
-
-### Architecture Decision Records
-
-Durable design decisions live in [docs/adr/](docs/adr/) covering
-why each non-obvious trade-off went the way it did.
+SignalK belongs at the sensor and data layer, not as the security boundary
+between third-party code and physical relays.
 
 ## Roadmap
 
-- **`auth.mode: signalk` as the default.** Delegated login against your SignalK
-  server's own accounts is implemented and opt-in
-  ([ADR 0040](docs/adr/0040-signalk-delegated-authentication.md)), but stays off
-  by default for this release so upgrading an existing install cannot lock
-  anyone out of a running boat. A later major version can flip the default once
-  operators have had a release to opt in deliberately.
-- **Collapse the client-side `dragging` state onto the server's answer.**
-  `use-anchor-watch.ts` still derives its own for map and tile styling. The
-  alarm no longer depends on it, but the two can disagree inside the hysteresis
-  band ([ADR 0038](docs/adr/0038-alarms.md)).
-- **mDNS-based SignalK discovery**, now viable for native installs, since the
-  container networking that ruled it out no longer applies
-  ([ADR 0029](docs/adr/0029-signalk-discovery.md)).
+- **Inventory tracking**, with stocktakes done by walking the boat with an RFID
+  reader rather than opening lockers. Designed and documented, not yet built:
+  [docs/features/inventory-tracking.md](docs/features/inventory-tracking.md).
+- **Maintenance and service history**, tied to live engine hours so a service
+  falling due raises an ordinary alarm and logging the work clears it.
+- **`auth.mode: signalk` as the default.** Delegated login is implemented and
+  opt-in, but stays off by default for this release so upgrading an existing
+  install cannot lock anyone out of a running boat. A later major version can
+  flip the default once operators have had a release to opt in deliberately.
+- **mDNS-based SignalK discovery**, now viable for native installs since the
+  container networking that ruled it out no longer applies.
 
 ## Contributing
 
@@ -537,7 +313,8 @@ suites, lint, and a full cross-platform release build on every PR, so run those
 locally first (see [Development](#development)).
 
 If a change turns on a non-obvious trade-off, add an ADR alongside it in
-[docs/adr/](docs/adr/).
+[docs/adr/](docs/adr/). If it changes what an operator sees, update the affected
+page under [docs/](docs/) too.
 
 ## License
 

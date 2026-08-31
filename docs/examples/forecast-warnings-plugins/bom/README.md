@@ -7,7 +7,7 @@ pluggable Forecast Warnings provider contract, ported 1:1 from the
 formerly-hardcoded `backend/bom_marine_warnings.go` +
 `backend/bom_marine_zones.go` (still present in the backend until a later
 phase deletes them, now that this plugin replaces their function). See
-[docs/adr/0019-ftp-host-function-and-forecast-warnings-provider.md](../../adr/0019-ftp-host-function-and-forecast-warnings-provider.md)
+[docs/adr/0019-ftp-host-function-and-forecast-warnings-provider.md](../../../adr/0019-ftp-host-function-and-forecast-warnings-provider.md)
 for the full rationale behind this plugin's unusual network-access model
 (below) and the "each provider resolves its own zone semantics" design
 decision behind the Forecast Warnings contract as a whole.
