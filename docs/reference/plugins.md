@@ -54,11 +54,45 @@ fetch function:
 | Waves | `fetch_waves` | Hourly wave/swell series, optional sea-surface temperature |
 | Forecast warnings | `fetch_warnings(lat, lon)` | Current, relevant bulletins only |
 
-Full contracts and config-file formats:
-[ADR 0017](../adr/0017-wasm-plugin-tide-providers.md) (tides),
-[ADR 0018](../adr/0018-wasm-plugin-weather-and-wave-providers.md) (weather and
-waves), [ADR 0019](../adr/0019-ftp-host-function-and-forecast-warnings-provider.md)
-(forecast warnings).
+The reference plugins under `docs/examples/` are the working statement of each
+export's exact JSON shape. Read the one for your category alongside this table
+rather than working from a transcription that can drift from the code.
+
+### Companion files
+
+A plugin is a `.wasm` file plus up to three optional sidecars, each named after
+it. A missing sidecar means "none", never "all".
+
+| File | Shape | Purpose |
+| --- | --- | --- |
+| `<name>.allowed_hosts.json` | JSON array of hostnames | The only hosts this plugin may reach, over HTTP or FTP. Absent means no network at all. |
+| `<name>.config.json` | JSON object of string values | Plugin configuration. A `${VAR}` value is expanded by the host before the plugin sees it. |
+| `<name>.allowed_secrets.json` | JSON array of secret names | Which stored secrets this plugin's `${VAR}` references may resolve. A secret not listed here is denied and the denial is logged. |
+
+```jsonc
+// noaa.allowed_hosts.json
+["api.tidesandcurrents.noaa.gov"]
+```
+
+```jsonc
+// weatherkit.config.json
+{
+  "key_id": "${WEATHERKIT_KEY_ID}",
+  "team_id": "${WEATHERKIT_TEAM_ID}",
+  "service_id": "${WEATHERKIT_SERVICE_ID}",
+  "private_key": "${WEATHERKIT_PRIVATE_KEY}"
+}
+```
+
+```jsonc
+// weatherkit.allowed_secrets.json
+["WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY"]
+```
+
+Both allowlists are host-enforced, not sandbox guarantees. They stop a plugin
+receiving a secret or reaching a host nobody granted it. A plugin that *is*
+granted both can still send the one to the other, so review a third-party
+plugin's sidecars with that in mind.
 
 ### Why warnings are the exception
 
@@ -81,9 +115,12 @@ content. A WASM guest cannot open raw sockets, so Helmcentral provides a
 generic custom Extism host function — `ftp_fetch`, in
 `backend/wasm_ftp_fetch.go` — available to every plugin type and gated by the
 same `allowed_hosts.json` allowlist used for HTTP. It is the only custom host
-function in the codebase. See
-[ADR 0019](../adr/0019-ftp-host-function-and-forecast-warnings-provider.md) for
-why it was built rather than keeping BOM native.
+function in the codebase.
+
+It exists because BOM publishes warnings over anonymous FTP and nothing else.
+The alternative was keeping BOM as built-in Go code purely because of its
+transport, which would have made the one Australian data source the exception
+to the plugin model for no reason a user could see.
 
 ## Why tides have no default
 
@@ -99,10 +136,15 @@ and NOAA cover Australia and the US respectively, and nothing else.
 So an operator must explicitly set `ui.tide_provider` in Settings to match
 their region. With no plugin installed there are no tide providers at all, and
 `/api/tide-today` returns a clear error naming what is missing rather than
-guessing. See
-[ADR 0033](../adr/0033-remove-storm-glass-tides-plugin-only.md) for why the last
-built-in provider (Storm Glass) was removed, and the recorded path for porting
-a position-based provider to a plugin.
+guessing.
+
+There was once a built-in provider, Storm Glass, which was position-based and
+worldwide. It was removed rather than kept as a fallback: a global model
+silently standing in for a missing local station network produces tide times
+that look authoritative and are wrong for the water you are floating in, which
+is worse than an error message. Porting a position-based provider to a plugin
+is possible; it takes `search_stations` returning a single synthetic station
+for the requested position.
 
 ## Building a plugin
 

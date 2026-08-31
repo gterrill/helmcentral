@@ -7,8 +7,9 @@ into `plugins/engine-profiles/` and restarting makes it available under
 
 Profiles are plain JSON rather than compiled plugins, unlike everything else under
 `plugins/`. The reason is that a profile supplies alarm thresholds, and you should be
-able to open the file and read exactly what your oil-pressure alarm will fire at. See
-[ADR 0053](../adr/0053-engine-profiles.md).
+able to open the file and read exactly what your oil-pressure alarm will fire at.
+A compiled module hides that behind a build step for no gain, since a profile is
+data with no logic to run.
 
 ## What ships, and what does not
 

@@ -13,8 +13,9 @@ never locks you out of a running boat.
 
 **Recommended:** once your SignalK server has security enabled, set
 `auth.mode: signalk` in `settings.yaml` to require login before the API and
-dashboard respond to anything but the login screen. See
-[ADR 0040](../adr/0040-signalk-delegated-authentication.md) and the
+dashboard respond to anything but the login screen. Helmcentral checks at
+startup and refuses to boot into `auth.mode: signalk` against a server with
+security switched off, so turn SignalK's own security on first. See the
 [README's Configuration section](../../README.md#configuration).
 
 ## Weather and waves moved to WASM plugins
@@ -36,7 +37,8 @@ Open-Meteo-marine integration.
   Open-Meteo (keyless). Paste the four WeatherKit credentials into
   Settings → Secrets and select "Apple WeatherKit" under Settings → Weather.
 
-See [ADR 0018](../adr/0018-wasm-plugin-weather-and-wave-providers.md).
+Both providers stay keyless by default, so an install that never touches
+Settings keeps working.
 
 ## Marine warnings became forecast warnings
 
@@ -48,7 +50,8 @@ See [ADR 0018](../adr/0018-wasm-plugin-weather-and-wave-providers.md).
 - No environment variables are needed for the default BOM plugin — it is
   keyless, reading BOM's public anonymous FTP mirror.
 
-See [ADR 0019](../adr/0019-ftp-host-function-and-forecast-warnings-provider.md).
+The rename is the visible part; the change underneath is that warnings became a
+plugin category like the rest.
 
 ## Tides became plugin-only
 
@@ -57,5 +60,8 @@ tide provider and no fallback: install a tide plugin for your region and set
 `ui.tide_provider` in Settings. Until you do, `/api/tide-today` returns an
 error naming what is missing.
 
-See [ADR 0033](../adr/0033-remove-storm-glass-tides-plugin-only.md) and
+The removed built-in was Storm Glass, a worldwide position-based provider. A
+global model quietly standing in for a missing local station network gives tide
+times that look authoritative and are wrong for your water, so it was removed
+rather than left as a fallback. See
 [docs/reference/plugins.md](../reference/plugins.md).
