@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
+import { PLACE_LABEL_LAYER_IDS } from '@/components/map-place-labels'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RodeMethodResult } from '@/lib/rode-plan'
 
@@ -10,7 +11,31 @@ vi.mock('maplibre-gl', () => ({
 
 let lastInitialViewState: { latitude: number; longitude: number; zoom: number } | null = null
 let lastMoveEndHandler: ((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => void) | null = null
+let lastStyleDataHandler: (() => void) | null = null
 const easeToMock = vi.fn()
+// Toggled per-test to exercise the map-place-labels fail-fast guard - every
+// other test wants the source present so its layers behave like the real
+// Carto style.
+let mockCartoSourcePresent = true
+
+// Every prop a <Layer> mounts with, captured in full so tests can inspect
+// the label layers' filter/paint/source-layer/minzoom without the mock
+// having to hand-pick which fields matter. data-testid/data-before-id below
+// stay exactly as they were so every pre-existing assertion keeps passing
+// unchanged.
+interface RecordedLayerProps {
+  id: string
+  type?: string
+  source?: string
+  'source-layer'?: string
+  minzoom?: number
+  maxzoom?: number
+  beforeId?: string
+  filter?: unknown
+  layout?: Record<string, unknown>
+  paint?: Record<string, unknown>
+}
+let recordedLayers: RecordedLayerProps[] = []
 
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
@@ -21,19 +46,26 @@ vi.mock('react-map-gl/maplibre', async () => {
           children,
           initialViewState,
           onMoveEnd,
+          onStyleData,
         }: {
           children?: React.ReactNode
           initialViewState?: { latitude: number; longitude: number; zoom: number }
           onMoveEnd?: (e: { viewState: { latitude: number; longitude: number; zoom: number } }) => void
+          onStyleData?: () => void
         },
         ref: React.Ref<unknown>,
       ) => {
         lastInitialViewState = initialViewState ?? null
         lastMoveEndHandler = onMoveEnd ?? null
+        lastStyleDataHandler = onStyleData ?? null
         React.useImperativeHandle(ref, () => ({
           getCanvas: () => ({ style: { cursor: 'grab' } }),
           getZoom: () => 14,
           easeTo: easeToMock,
+          getMap: () => ({
+            isStyleLoaded: () => true,
+            getSource: (id: string) => (id === 'carto' && !mockCartoSourcePresent ? undefined : {}),
+          }),
         }))
         return <div data-testid="map-root">{children}</div>
       },
@@ -44,10 +76,16 @@ vi.mock('react-map-gl/maplibre', async () => {
     Source: ({ children, id }: { children?: React.ReactNode; id: string }) => (
       <div data-testid={`source-${id}`}>{children}</div>
     ),
-    Layer: ({ id, beforeId }: { id: string; beforeId?: string }) => (
-      <div data-testid={`layer-${id}`} data-before-id={beforeId} />
-    ),
+    Layer: (props: RecordedLayerProps) => {
+      recordedLayers.push(props)
+      return <div data-testid={`layer-${props.id}`} data-before-id={props.beforeId} />
+    },
   }
+})
+
+beforeEach(() => {
+  mockCartoSourcePresent = true
+  recordedLayers = []
 })
 
 const defaultAisVessels: NearbyVessel[] = [
@@ -276,6 +314,89 @@ describe('AnchorWatchMap controls and AIS selection', () => {
     expect(localStorage.getItem('anchor-watch-map-center')).toBeNull()
 
     localStorage.clear()
+  })
+})
+
+describe('AnchorWatchMap place-name labels', () => {
+  it('mounts all five label layers on the existing carto source, and overImagery tracks showImageryLayer', () => {
+    const { rerender } = renderMap(defaultAisVessels, { showImageryLayer: false })
+
+    for (const id of PLACE_LABEL_LAYER_IDS) {
+      expect(screen.getByTestId(`layer-${id}`)).toBeInTheDocument()
+    }
+
+    const water = recordedLayers.filter((l) => l.id === 'place-names-water').at(-1)
+    expect(water?.source).toBe('carto')
+    // showImageryLayer is off: theme-native water color, not the hybrid
+    // white-on-black override.
+    expect(water?.paint).toMatchObject({ 'text-color': '#7a96a0' })
+
+    recordedLayers = []
+    rerender(mapElement(defaultAisVessels, { showImageryLayer: true }))
+
+    const waterOverImagery = recordedLayers.filter((l) => l.id === 'place-names-water').at(-1)
+    expect(waterOverImagery?.paint).toMatchObject({
+      'text-color': '#ffffff',
+      'text-halo-color': '#000000',
+      'text-halo-width': 1.5,
+    })
+  })
+
+  it('gives each label layer its source-layer, filter, and minzoom', () => {
+    renderMap()
+
+    const byId = (id: string) => recordedLayers.find((l) => l.id === id)
+
+    expect(byId('place-names-water')).toMatchObject({ 'source-layer': 'water_name', minzoom: 9 })
+    expect(byId('place-names-island')).toMatchObject({ 'source-layer': 'place', minzoom: 9 })
+    expect(byId('place-names-harbor')).toMatchObject({ 'source-layer': 'poi', minzoom: 14 })
+    expect(byId('place-names-peak')).toMatchObject({ 'source-layer': 'mountain_peak', minzoom: 12 })
+    expect(byId('place-names-town-topup')).toMatchObject({ 'source-layer': 'place', minzoom: 14 })
+  })
+
+  it('mounts the label layers above alarm-circle-fill and its rasters - no beforeId means it lands on top of everything mounted before it', () => {
+    // This map pins its rasters beforeId="alarm-circle-fill", i.e. above
+    // the whole base style, so with imagery on, Carto's own labels (never
+    // drawn anyway - see ADR 0065) would be buried under the raster
+    // regardless. Mounting these label layers with no beforeId, right after
+    // the alarm-circle Source, is what keeps names visible above the
+    // satellite raster on this map.
+    renderMap()
+
+    for (const id of PLACE_LABEL_LAYER_IDS) {
+      expect(screen.getByTestId(`layer-${id}`).dataset.beforeId).toBeUndefined()
+    }
+  })
+
+  it('logs an explicit error once when the carto vector source is missing from the loaded style', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    mockCartoSourcePresent = false
+
+    renderMap()
+    act(() => {
+      lastStyleDataHandler?.()
+    })
+    act(() => {
+      lastStyleDataHandler?.()
+    })
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[map-place-labels]'))
+    // Guarded by a ref so a repeated styledata event (which fires many
+    // times per style load) doesn't spam the console once per tick.
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    errorSpy.mockRestore()
+  })
+
+  it('does not log a missing-source error when the carto source is present', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    renderMap()
+    act(() => {
+      lastStyleDataHandler?.()
+    })
+
+    expect(errorSpy).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
   })
 })
 

@@ -11,6 +11,7 @@ import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { RodeMethodResult } from '@/lib/rode-plan'
+import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 
 // ── Map style URLs (Carto, no API key required) ─────────────────────────────
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
@@ -251,6 +252,30 @@ export function AnchorWatchMap({
     if (typeof window === 'undefined') return
     window.localStorage.setItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY, String(currentZoom))
   }, [currentZoom])
+
+  // Fail-fast per the repo fallback policy: MapPlaceLabels' <Layer>
+  // elements (mounted below, after the alarm-circle Source) attach to a
+  // source this component never creates. If the loaded style doesn't carry
+  // one named BASE_VECTOR_SOURCE_ID, react-map-gl's createLayer silently
+  // skips addLayer and every place name just never shows up, with nothing
+  // else saying why. styledata fires many times per style load (tiles
+  // arriving, etc.), so this is guarded by a ref to log once per load
+  // rather than once per event - reset below when isDarkTheme flips,
+  // which is a real style reload (STYLE_LIGHT/STYLE_DARK swap).
+  const missingSourceWarnedRef = useRef(false)
+  const isDarkThemeRef = useRef(isDarkTheme)
+  useEffect(() => {
+    if (isDarkThemeRef.current !== isDarkTheme) {
+      isDarkThemeRef.current = isDarkTheme
+      missingSourceWarnedRef.current = false
+    }
+  }, [isDarkTheme])
+  const handleStyleData = useCallback(() => {
+    const map = mapRef.current?.getMap()
+    if (!map || !map.isStyleLoaded() || missingSourceWarnedRef.current) return
+    missingSourceWarnedRef.current = true
+    warnIfBaseVectorSourceMissing(map)
+  }, [])
 
   // Re-render trails on each poll cycle (trails are stored in refs, not state)
   useEffect(() => {
@@ -793,6 +818,7 @@ export function AnchorWatchMap({
         minZoom={10}
         onZoom={handleZoomChange}
         onMoveEnd={handleMoveEnd}
+        onStyleData={handleStyleData}
         onClick={handleMapClick}
         onMouseMove={handleMouseMove}
         onDblClick={handleDblClick}
@@ -825,6 +851,20 @@ export function AnchorWatchMap({
             }}
           />
         </Source>
+
+        {/*
+          Place-name labels (bays, islands, marinas, peaks, town top-up -
+          see docs/adr/0066-basemap-place-name-labels.md) mount here,
+          unconditionally and with no beforeId. This map pins its rasters
+          beforeId="alarm-circle-fill" - i.e. above the whole base style -
+          so with imagery on, Carto's own labels (never drawn anyway, which
+          is the whole reason this component exists) would be buried under
+          the raster regardless. Mounting these label layers right after
+          alarm-circle, with no beforeId, is what keeps names visible above
+          the satellite raster on this map; the overImagery white/black-halo
+          paint below is load-bearing here, not cosmetic.
+        */}
+        <MapPlaceLabels isDarkTheme={isDarkTheme} overImagery={showImageryLayer} />
 
         {/* Ghost circle during reposition mode */}
         {ghostCircleGeoJSON && (

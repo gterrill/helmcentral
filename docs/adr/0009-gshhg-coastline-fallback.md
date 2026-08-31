@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-ADR 0006 (Manual Route Planning) explicitly decided against any chart licensing dependency, and the route planner map currently has no land/coastline reference layer beyond whatever the underlying Carto basemap style happens to render and the OpenSeaMap seamark overlay. A route can currently be drawn straight through a landmass with zero visual cue beyond the basemap's own (non-marine-purposed) land rendering.
+ADR 0006 (Manual Route Planning) explicitly decided against any chart licensing dependency, and the route planner map currently has no land/coastline reference layer beyond whatever the underlying Carto basemap style happens to render and the OpenSeaMap seamark overlay. A route can currently be drawn straight through a landmass with zero visual cue beyond the basemap's own (non-marine-purposed) land rendering. ADR 0066 later narrows the "whatever the basemap happens to render" part for place names, by adding our own style layers on the Carto vector source. That is independent of the coastline geometry this ADR is about.
 
 The longer-term plan is to support real S-57 ENC (Electronic Navigational Chart) ingestion, with chart-coverage detection so the app can pick the best available chart for the current view. That pipeline does not exist yet in this repo — there is no GDAL dependency, no S-57 parser, no chart-coverage catalog — and building it is a substantially larger effort than this change. In the meantime, the operator asked: when no chart is available for the current view (which today is always, since no chart source exists), can the app at least render publicly-available coastline geometry as a minimal "you are roughly here relative to land" reference, instead of nothing?
 

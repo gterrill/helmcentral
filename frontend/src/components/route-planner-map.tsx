@@ -13,6 +13,7 @@ import { useGshhgCoastline } from '@/hooks/use-gshhg-coastline'
 import { isChartAvailable } from '@/lib/chart-availability'
 import type { SatChart } from '@/hooks/use-sat-charts'
 import { useImageryPrefetch } from '@/hooks/use-imagery-prefetch'
+import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
@@ -177,9 +178,24 @@ export function RoutePlannerMap({
   // values from the previous theme.
   const originalLabelPaintRef = useRef<Record<string, Partial<Record<typeof HYBRID_LABEL_PAINT_PROPS[number], unknown>>>>({})
 
+  // Fail-fast per the repo fallback policy: MapPlaceLabels' <Layer>
+  // elements below mount onto a source this component never creates. If
+  // the loaded style doesn't carry one named BASE_VECTOR_SOURCE_ID,
+  // react-map-gl's createLayer silently skips addLayer and every place
+  // name just never shows up, with nothing else saying why. onStyleData
+  // fires many times per style load (tiles arriving, etc.), so this is
+  // guarded by a ref to log once per load rather than once per event -
+  // reset alongside originalLabelPaintRef, on the same real style-swap
+  // trigger (the isDarkTheme effect below).
+  const missingSourceWarnedRef = useRef(false)
+
   const applyHybridVisibility = useCallback(() => {
     const map = mapRef.current?.getMap()
     if (!map || !map.isStyleLoaded()) return
+    if (!missingSourceWarnedRef.current) {
+      missingSourceWarnedRef.current = true
+      warnIfBaseVectorSourceMissing(map)
+    }
     const visibility = showHybridSatellite ? 'none' : 'visible'
     for (const id of HYBRID_HIDDEN_LAYER_IDS) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility)
@@ -228,6 +244,10 @@ export function RoutePlannerMap({
       // applyHybridVisibility re-captures fresh instead of reapplying the
       // old theme's colors onto the new one.
       originalLabelPaintRef.current = {}
+      // A theme switch is a real style reload (new STYLE_LIGHT/STYLE_DARK
+      // document), so the missing-source check is worth running again
+      // rather than staying "already warned" from the previous style.
+      missingSourceWarnedRef.current = false
       setShowHybridSatellite((prev) => {
         if (!prev) return prev
         window.localStorage.setItem(IMAGERY_ENABLED_KEY, 'false')
@@ -393,6 +413,19 @@ export function RoutePlannerMap({
           anything else has a chance to.
         */}
         <Layer id="raster-overlay-anchor" type="background" paint={{ 'background-opacity': 0 }} />
+
+        {/*
+          Place-name labels (bays, islands, marinas, peaks, town top-up -
+          see docs/adr/0066-basemap-place-name-labels.md) mount here,
+          unconditionally and with no beforeId, so they land right above
+          raster-overlay-anchor - and therefore above the OpenSeaMap seamark
+          raster and any sat chart below, both of which pin
+          beforeId="raster-overlay-anchor" onto themselves. The route line
+          and GSHHG coastline fallback further down mount with no beforeId
+          of their own, so they draw on top of this component's labels in
+          turn - text under safety-critical geometry, above raster imagery.
+        */}
+        <MapPlaceLabels isDarkTheme={isDarkTheme} overImagery={showHybridSatellite} />
 
         {showHybridSatellite && worldImageryOpacity > 0 && (
           <Source

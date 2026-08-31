@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { RoutePlannerMap, HYBRID_HIDDEN_LAYER_IDS, HYBRID_LABEL_LAYER_IDS } from '@/components/route-planner-map'
+import { PLACE_LABEL_LAYER_IDS } from '@/components/map-place-labels'
 import type { SatChart } from '@/hooks/use-sat-charts'
 
 vi.mock('maplibre-gl', () => ({
@@ -32,6 +33,29 @@ const setLayoutPropertyMock = vi.fn()
 const setPaintPropertyMock = vi.fn()
 const getPaintPropertyMock = vi.fn((_id: string, prop: string) => `original-${prop}`)
 let mockZoom = 12
+// Toggled per-test to exercise the map-place-labels fail-fast guard - every
+// other test wants the source present so its layers behave like the real
+// Carto style.
+let mockCartoSourcePresent = true
+
+// Every prop a <Layer> mounts with, captured in full so tests can inspect
+// the label layers' filter/paint/source-layer/minzoom without the mock
+// having to hand-pick which fields matter. data-testid/data-before-id below
+// stay exactly as they were so every pre-existing assertion keeps passing
+// unchanged.
+interface RecordedLayerProps {
+  id: string
+  type?: string
+  source?: string
+  'source-layer'?: string
+  minzoom?: number
+  maxzoom?: number
+  beforeId?: string
+  filter?: unknown
+  layout?: Record<string, unknown>
+  paint?: Record<string, unknown>
+}
+let recordedLayers: RecordedLayerProps[] = []
 
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
@@ -72,6 +96,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           getMap: () => ({
             isStyleLoaded: () => true,
             getLayer: () => ({}),
+            getSource: (id: string) => (id === 'carto' && !mockCartoSourcePresent ? undefined : {}),
             setLayoutProperty: setLayoutPropertyMock,
             setPaintProperty: setPaintPropertyMock,
             getPaintProperty: getPaintPropertyMock,
@@ -109,9 +134,10 @@ vi.mock('react-map-gl/maplibre', async () => {
         {children}
       </div>
     ),
-    Layer: ({ id, beforeId }: { id: string; beforeId?: string }) => (
-      <div data-testid={`layer-${id}`} data-before-id={beforeId} />
-    ),
+    Layer: (props: RecordedLayerProps) => {
+      recordedLayers.push(props)
+      return <div data-testid={`layer-${props.id}`} data-before-id={props.beforeId} />
+    },
   }
 })
 
@@ -134,6 +160,8 @@ describe('RoutePlannerMap', () => {
     mockBounds = { west: -1, south: -1, east: 1, north: 1 }
     localStorage.clear()
     mockZoom = 12
+    mockCartoSourcePresent = true
+    recordedLayers = []
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -628,5 +656,86 @@ describe('RoutePlannerMap', () => {
 
     expect(screen.queryByText('Cached')).not.toBeInTheDocument()
     vi.useRealTimers()
+  })
+
+  describe('place-name labels', () => {
+    it('mounts all five label layers on the existing carto source, and overImagery tracks the satellite toggle', () => {
+      render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+      for (const id of PLACE_LABEL_LAYER_IDS) {
+        expect(screen.getByTestId(`layer-${id}`)).toBeInTheDocument()
+      }
+
+      const water = recordedLayers.filter((l) => l.id === 'place-names-water').at(-1)
+      // Light theme, no imagery: the theme-native water color, not the
+      // hybrid white-on-black override.
+      expect(water?.source).toBe('carto')
+      expect(water?.paint).toMatchObject({ 'text-color': '#7a96a0' })
+
+      recordedLayers = []
+      fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
+      mockZoom = 12
+      act(() => {
+        lastZoomHandler?.()
+      })
+
+      const waterOverImagery = recordedLayers.filter((l) => l.id === 'place-names-water').at(-1)
+      expect(waterOverImagery?.paint).toMatchObject({
+        'text-color': '#ffffff',
+        'text-halo-color': '#000000',
+        'text-halo-width': 1.5,
+      })
+    })
+
+    it('gives each label layer its source-layer, filter, and minzoom', () => {
+      render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+      const byId = (id: string) => recordedLayers.find((l) => l.id === id)
+
+      expect(byId('place-names-water')).toMatchObject({ 'source-layer': 'water_name', minzoom: 9 })
+      expect(byId('place-names-island')).toMatchObject({ 'source-layer': 'place', minzoom: 9 })
+      expect(byId('place-names-harbor')).toMatchObject({ 'source-layer': 'poi', minzoom: 14 })
+      expect(byId('place-names-peak')).toMatchObject({ 'source-layer': 'mountain_peak', minzoom: 12 })
+      expect(byId('place-names-town-topup')).toMatchObject({ 'source-layer': 'place', minzoom: 14 })
+
+      // The water filter admits both bay and strait classes - Cid Harbour is
+      // a bay, Hayman Channel resolves to strait in the tiles.
+      expect(JSON.stringify(byId('place-names-water')?.filter)).toContain(JSON.stringify(['bay', 'strait']))
+      expect(JSON.stringify(byId('place-names-island')?.filter)).toContain(JSON.stringify(['==', ['get', 'class'], 'island']))
+    })
+
+    it('does not set beforeId on any label layer - they mount unconditionally ahead of every conditional overlay', () => {
+      render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+      for (const id of PLACE_LABEL_LAYER_IDS) {
+        expect(screen.getByTestId(`layer-${id}`).dataset.beforeId).toBeUndefined()
+      }
+    })
+
+    it('logs an explicit error once when the carto vector source is missing from the loaded style', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      mockCartoSourcePresent = false
+
+      render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+      act(() => {
+        lastStyleDataHandler?.()
+      })
+      act(() => {
+        lastStyleDataHandler?.()
+      })
+
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[map-place-labels]'))
+      // Guarded by a ref so a repeated styledata event (which fires many
+      // times per style load) doesn't spam the console once per tick.
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not log a missing-source error when the carto source is present', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+      render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} />)
+
+      expect(errorSpy).not.toHaveBeenCalled()
+    })
   })
 })
