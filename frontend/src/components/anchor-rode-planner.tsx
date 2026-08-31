@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Link } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { AnchorConfig } from '@/config/app-config'
+import type { AnchorConfig, ScopeMethod } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
@@ -16,10 +16,12 @@ import {
   tideHeightFtOrNull,
   WIND_BANDS,
   type PlanningDepthDatum,
+  type RodeMethodResult,
   type RodePlanInput,
   type ScopeStatus,
 } from '@/lib/rode-plan'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Sidebar,
   SidebarContent,
@@ -196,6 +198,23 @@ export function AnchorRodePlanner({
 
   const methodResults = useMemo(() => rodeMethods.map((method) => method(planInput)), [planInput])
   const plan = useMemo(() => buildRodePlan(planInput), [planInput])
+
+  // The configured method leads the tab strip. It is the one "Apply as alarm
+  // radius" uses (ADR 0059 §4), so it is the one the planner should open on —
+  // the operator shouldn't have to hunt for the figure the button below will
+  // apply. Sort is stable, so the other method keeps its rodeMethods order.
+  const orderedMethodResults = useMemo(() => {
+    const present = methodResults.filter((result): result is RodeMethodResult => result !== null)
+    return [...present].sort((a, b) =>
+      Number(b.id === anchorConfig.scopeMethod) - Number(a.id === anchorConfig.scopeMethod))
+  }, [methodResults, anchorConfig.scopeMethod])
+
+  // Seeded from settings and re-seeded when settings change, the same shape
+  // as pendingSeaState/pendingSeabedType above: changing the method in
+  // Settings should move the planner to that tab rather than strand it on a
+  // method the operator has moved off.
+  const [activeMethodId, setActiveMethodId] = useState<ScopeMethod>(anchorConfig.scopeMethod)
+  useEffect(() => { setActiveMethodId(anchorConfig.scopeMethod) }, [anchorConfig.scopeMethod])
 
   const currentScope = rodeDeployedM > 0 && plan !== null ? scopeRatio(rodeDeployedM, plan.depthFromHawseM) : null
   const status = rodeDeployedM > 0 ? scopeStatus(currentScope, plan?.recommendedScope ?? null) : null
@@ -450,52 +469,73 @@ export function AnchorRodePlanner({
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {methodResults.map((result) => {
-            if (result === null) return null
-            // Swing (that method's own recommended rode + bow offset + LOA)
-            // renders in every group — each method proposes its own circle.
-            // Chain-onboard is genuinely per-method — each method can
-            // recommend a different rode, so each can separately outgrow
-            // what's aboard — and stays here. LOA provenance and its warning
-            // describe the single shared LOA input, not anything specific to
-            // a method, so they render once in SidebarFooter instead,
-            // directly above Apply, where they gate it (ADR 0059 §4).
-            const methodSwingRadiusM = !result.unavailableReason && resolvedLoaM !== null
-              ? result.recommendedRodeM + bowOffsetM + resolvedLoaM
-              : null
-            return (
-              <SidebarGroup key={result.id}>
-                <SidebarGroupLabel>{result.label}</SidebarGroupLabel>
-                <SidebarGroupContent>
-                  {result.unavailableReason ? (
-                    <p className="rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
-                      Unavailable — {result.unavailableReason}
-                    </p>
-                  ) : (
-                    <div className="rounded-md border bg-background/60 px-3 py-2">
-                      <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Pay Out</p>
-                      <p className="font-display text-3xl text-gauge-primary tabular-nums">
-                        {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))}
-                        <span className="ml-1 text-base text-muted-foreground">{unit}</span>
-                      </p>
-                      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                        <span>Scope {result.scopeRatio.toFixed(1)}:1</span>
-                        {methodSwingRadiusM !== null && (
-                          <span>Swing {Math.round(toDisplayDistance(methodSwingRadiusM, isImperial))} {unit}</span>
-                        )}
-                      </div>
-                      {result.recommendedRodeM > anchorConfig.chainOnboardM && (
-                        <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-500">
-                          Needs {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
+          {/* One method on screen at a time. Two full recommendations stacked
+              in a 20rem sidebar pushed the deployed-rode input and Apply below
+              the fold, and the operator only plans against one method anyway —
+              the other is there to compare, not to read alongside. The
+              configured method leads and opens first (orderedMethodResults
+              above), so the panel starts on the figure Apply will use. */}
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <Tabs value={activeMethodId} onValueChange={(value) => setActiveMethodId(value as ScopeMethod)}>
+                {/* The line variant, not the default pill: --sidebar-background
+                    is var(--card) — the same 8% lightness as --background — so a
+                    bg-background pill would be invisible against the panel it
+                    sits on, and --muted being lighter would make the *unselected*
+                    tabs the ones that stand out. */}
+                <TabsList variant="line">
+                  {orderedMethodResults.map((result) => (
+                    <TabsTrigger key={result.id} value={result.id} className="text-xs">
+                      {result.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+
+                {orderedMethodResults.map((result) => {
+                  // Swing (that method's own recommended rode + bow offset + LOA)
+                  // renders in every panel — each method proposes its own circle.
+                  // Chain-onboard is genuinely per-method — each method can
+                  // recommend a different rode, so each can separately outgrow
+                  // what's aboard — and stays here. LOA provenance and its warning
+                  // describe the single shared LOA input, not anything specific to
+                  // a method, so they render once in SidebarFooter instead,
+                  // directly above Apply, where they gate it (ADR 0059 §4).
+                  const methodSwingRadiusM = !result.unavailableReason && resolvedLoaM !== null
+                    ? result.recommendedRodeM + bowOffsetM + resolvedLoaM
+                    : null
+                  return (
+                    <TabsContent key={result.id} value={result.id}>
+                      {result.unavailableReason ? (
+                        <p className="rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                          Unavailable — {result.unavailableReason}
                         </p>
+                      ) : (
+                        <div className="rounded-md border bg-background/60 px-3 py-2">
+                          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Pay Out</p>
+                          <p className="font-display text-3xl text-gauge-primary tabular-nums">
+                            {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))}
+                            <span className="ml-1 text-base text-muted-foreground">{unit}</span>
+                          </p>
+                          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                            <span>Scope {result.scopeRatio.toFixed(1)}:1</span>
+                            {methodSwingRadiusM !== null && (
+                              <span>Swing {Math.round(toDisplayDistance(methodSwingRadiusM, isImperial))} {unit}</span>
+                            )}
+                          </div>
+                          {result.recommendedRodeM > anchorConfig.chainOnboardM && (
+                            <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-500">
+                              Needs {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
+                            </p>
+                          )}
+                          <p className="mt-2 text-[10px] text-muted-foreground">{result.note}</p>
+                        </div>
                       )}
-                      <p className="mt-2 text-[10px] text-muted-foreground">{result.note}</p>
-                    </div>
-                  )}
-                </SidebarGroupContent>
-              </SidebarGroup>
-            )
-          })}
+                    </TabsContent>
+                  )
+                })}
+              </Tabs>
+            </SidebarGroupContent>
+          </SidebarGroup>
 
           <SidebarGroup>
             <SidebarGroupLabel>Deployed</SidebarGroupLabel>

@@ -66,6 +66,45 @@ function renderPlanner(overrides: Partial<AnchorRodePlannerProps> = {}) {
   )
 }
 
+// The two rode methods share one tab strip, so only the selected method's
+// panel is mounted at a time — every per-method assertion scopes to the live
+// panel rather than to a sidebar group that no longer exists.
+function methodPanel(): HTMLElement {
+  return screen.getByRole('tabpanel')
+}
+
+function selectMethodTab(name: RegExp): HTMLElement {
+  fireEvent.click(screen.getByRole('tab', { name }))
+  return methodPanel()
+}
+
+// Mirrors exactly what the component's own planInput builds from
+// baseProps() — depth 5m sounder + tide, 1h gust of 20kt (which seeds the
+// 20-25 band, planning at its top of 25kt via resolvePlanningWindBand),
+// calm/sand, chain 10mm, windage 20m2, power_mono, bow roller 1m — so the
+// expected figures come from rode-plan.ts itself, not a hand-picked number.
+const bandedWindKts = resolvePlanningWindBand(
+  { '10m': null, '30m': null, '1h': 20, '24h': null },
+  12,
+  null,
+)!.planKts
+
+const expectedPlanInput: RodePlanInput = {
+  // baseProps() has anchorState: 'set' with planningDepthM: 5, planningTideHeightFt: 2
+  // — resolvePlanningDepth (ADR 0063) resolves that to this same datum.
+  depth: { depthM: 5, tideHeightFt: 2 },
+  isAnchored: true,
+  bowRollerHeightM: 1,
+  tide,
+  windKts: bandedWindKts,
+  seaState: 'calm',
+  seabedType: 'sand',
+  chainSizeMm: 10,
+  chainOnboardM: 50,
+  windageAreaM2: 20,
+  hullType: 'power_mono',
+}
+
 beforeEach(() => {
   localStorage.clear()
 })
@@ -129,33 +168,6 @@ describe('AnchorRodePlanner — no false-positive scope badge (regression guard)
 // whichever method is configured and refuse rather than substitute the
 // other method's figure (ADR 0059 §4, ADR 0047).
 describe('AnchorRodePlanner — apply as alarm radius follows the configured method', () => {
-  // Mirrors exactly what the component's own planInput builds from
-  // baseProps() — depth 5m sounder + tide, 1h gust of 20kt (which seeds the
-  // 20-25 band, planning at its top of 25kt via resolvePlanningWindBand),
-  // calm/sand, chain 10mm, windage 20m2, power_mono, bow roller 1m — so the
-  // expected figures come from rode-plan.ts itself, not a hand-picked number.
-  const bandedWindKts = resolvePlanningWindBand(
-    { '10m': null, '30m': null, '1h': 20, '24h': null },
-    12,
-    null,
-  )!.planKts
-
-  const expectedPlanInput: RodePlanInput = {
-    // baseProps() has anchorState: 'set' with planningDepthM: 5, planningTideHeightFt: 2
-    // — resolvePlanningDepth (ADR 0063) resolves that to this same datum.
-    depth: { depthM: 5, tideHeightFt: 2 },
-    isAnchored: true,
-    bowRollerHeightM: 1,
-    tide,
-    windKts: bandedWindKts,
-    seaState: 'calm',
-    seabedType: 'sand',
-    chainSizeMm: 10,
-    chainOnboardM: 50,
-    windageAreaM2: 20,
-    hullType: 'power_mono',
-  }
-
   it('applies the ratio-method swing when anchor.scope_method is "ratio"', async () => {
     const onApplyAlarmRadius = vi.fn().mockResolvedValue(undefined)
     const props = baseProps()
@@ -367,11 +379,11 @@ describe('AnchorRodePlanner — LOA source precedence (settings vs SignalK)', ()
     })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    // Scoped to the catenary group: both method groups now show a Swing
-    // figure (see "Swing on both method groups" below), so an unscoped query
-    // here would find two matches.
-    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
-    expect(within(catenaryGroup).getByText(/^Swing \d/)).toBeInTheDocument()
+    // Scoped to the catenary panel: every method shows its own Swing figure
+    // (see "Swing on both method tabs" below), and only the selected one is
+    // mounted, so the tab has to be picked before the figure exists at all.
+    const catenaryPanel = selectMethodTab(/catenary/i)
+    expect(within(catenaryPanel).getByText(/^Swing \d/)).toBeInTheDocument()
     expect(screen.queryByText(/boat length/i)).toBeNull()
 
     const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
@@ -384,15 +396,89 @@ describe('AnchorRodePlanner — LOA source precedence (settings vs SignalK)', ()
   })
 })
 
-// ADR 0047 §2a: the planner renders one SidebarGroup per lib/rode-plan.ts
-// RodeMethod result — today that's the catenary method and the ratio method.
-describe('AnchorRodePlanner — renders both rode methods', () => {
-  it('renders a group for both the catenary and ratio methods', () => {
+// ADR 0047 §2a: the planner renders one entry per lib/rode-plan.ts RodeMethod
+// result — today the catenary method and the ratio method. They are tabs, not
+// two stacked groups: in a 20rem sidebar two full recommendations pushed the
+// deployed-rode input and Apply below the fold. The method the operator
+// configured (anchor.scope_method) leads and opens first, so the panel starts
+// on the figure Apply will actually use.
+describe('AnchorRodePlanner — rode methods are tabs', () => {
+  it('renders one tab per method and mounts only the selected panel', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    expect(screen.getByText('Catenary Method')).toBeInTheDocument()
-    expect(screen.getByText('Ratio Method')).toBeInTheDocument()
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
+    // The single strongest signal that the two recommendations no longer
+    // stack: exactly one Pay Out figure is on screen at a time.
+    expect(screen.getAllByText('Pay Out')).toHaveLength(1)
+  })
+
+  it('leads with the configured method and opens on it — ratio', () => {
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, scopeMethod: 'ratio' } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const [first, second] = screen.getAllByRole('tab')
+    expect(first).toHaveTextContent('Ratio Method')
+    expect(second).toHaveTextContent('Catenary Method')
+    expect(first).toHaveAttribute('aria-selected', 'true')
+
+    const expected = ratioMethod(expectedPlanInput)!
+    expect(within(methodPanel()).getByText(`Scope ${expected.scopeRatio.toFixed(1)}:1`)).toBeInTheDocument()
+  })
+
+  it('leads with the configured method and opens on it — catenary', () => {
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary' } })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const [first, second] = screen.getAllByRole('tab')
+    expect(first).toHaveTextContent('Catenary Method')
+    expect(second).toHaveTextContent('Ratio Method')
+    expect(first).toHaveAttribute('aria-selected', 'true')
+
+    const expected = catenaryMethod(expectedPlanInput)!
+    expect(within(methodPanel()).getByText(`Scope ${expected.scopeRatio.toFixed(1)}:1`)).toBeInTheDocument()
+  })
+
+  it('swaps the panel to the other method when its tab is picked', () => {
+    renderPlanner()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const ratio = ratioMethod(expectedPlanInput)!
+    const catenary = catenaryMethod(expectedPlanInput)!
+    // The whole point of showing both: at these conditions they disagree.
+    expect(catenary.scopeRatio.toFixed(1)).not.toBe(ratio.scopeRatio.toFixed(1))
+
+    expect(within(methodPanel()).getByText(`Scope ${ratio.scopeRatio.toFixed(1)}:1`)).toBeInTheDocument()
+
+    const catenaryPanel = selectMethodTab(/catenary/i)
+    expect(within(catenaryPanel).getByText(`Scope ${catenary.scopeRatio.toFixed(1)}:1`)).toBeInTheDocument()
+    expect(within(catenaryPanel).queryByText(`Scope ${ratio.scopeRatio.toFixed(1)}:1`)).toBeNull()
+  })
+
+  it('follows a later settings change of the method onto that tab', () => {
+    const props = baseProps()
+    const { rerender } = render(
+      <SidebarProvider>
+        <AnchorRodePlanner {...baseProps({ anchorConfig: { ...props.anchorConfig, scopeMethod: 'ratio' } })} />
+      </SidebarProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    expect(screen.getAllByRole('tab')[0]).toHaveTextContent('Ratio Method')
+
+    rerender(
+      <SidebarProvider>
+        <AnchorRodePlanner {...baseProps({ anchorConfig: { ...props.anchorConfig, scopeMethod: 'catenary' } })} />
+      </SidebarProvider>,
+    )
+
+    const [first] = screen.getAllByRole('tab')
+    expect(first).toHaveTextContent('Catenary Method')
+    expect(first).toHaveAttribute('aria-selected', 'true')
+    const expected = catenaryMethod(expectedPlanInput)!
+    expect(within(methodPanel()).getByText(`Scope ${expected.scopeRatio.toFixed(1)}:1`)).toBeInTheDocument()
   })
 
   it('keeps the methods independent — a catenary-only missing input still lets the ratio method compute', () => {
@@ -400,89 +486,75 @@ describe('AnchorRodePlanner — renders both rode methods', () => {
     renderPlanner({ anchorConfig: { ...props.anchorConfig, windageAreaM2: 0 } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
-    expect(within(catenaryGroup).getByText(/unavailable —/i)).toBeInTheDocument()
+    // scopeMethod is 'ratio' in baseProps, so the ratio tab opens first.
+    expect(within(methodPanel()).getByText('Pay Out')).toBeInTheDocument()
+    expect(within(methodPanel()).queryByText(/unavailable —/i)).toBeNull()
 
-    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
-    expect(within(ratioGroup).getByText('Pay Out')).toBeInTheDocument()
-    expect(within(ratioGroup).queryByText(/unavailable —/i)).toBeNull()
+    const catenaryPanel = selectMethodTab(/catenary/i)
+    expect(within(catenaryPanel).getByText(/unavailable —/i)).toBeInTheDocument()
   })
 
-  it('shows Swing in both groups; LOA provenance is not duplicated into either group', () => {
+  it('does not duplicate the LOA provenance line into a method panel', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
-    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
-    expect(within(catenaryGroup).getByText(/^Swing \d/)).toBeInTheDocument()
-    expect(within(ratioGroup).getByText(/^Swing \d/)).toBeInTheDocument()
-
     // LOA provenance is a shared-input fact, not a per-method one (see the
-    // "shared LOA input lives in the footer" describe block below) — neither
-    // group repeats it.
-    expect(within(catenaryGroup).queryByText(/from settings/i)).toBeNull()
-    expect(within(ratioGroup).queryByText(/from settings/i)).toBeNull()
-    expect(within(ratioGroup).queryByText(/from signalk/i)).toBeNull()
+    // "shared LOA input lives in the footer" describe block below).
+    expect(within(methodPanel()).queryByText(/from settings/i)).toBeNull()
+    expect(within(selectMethodTab(/catenary/i)).queryByText(/from settings/i)).toBeNull()
   })
 })
 
 // LOA describes a single shared input (bow offset + hull length), not
 // anything specific to a method, so its provenance line and its warning are
 // stated once in SidebarFooter, directly above Apply — the control they
-// gate — rather than repeated inside every method group (ADR 0059 §4).
+// gate — rather than repeated inside every method panel (ADR 0059 §4).
 describe('AnchorRodePlanner — shared LOA input lives in the footer', () => {
-  it('renders the LOA provenance line once, in the footer, not inside either method group', () => {
+  it('renders the LOA provenance line once, in the footer, not inside either method panel', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(screen.getAllByText(/LOA .* from settings/i)).toHaveLength(1)
 
-    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
-    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
-    expect(within(catenaryGroup).queryByText(/from settings/i)).toBeNull()
-    expect(within(ratioGroup).queryByText(/from settings/i)).toBeNull()
+    expect(within(methodPanel()).queryByText(/from settings/i)).toBeNull()
+    expect(within(selectMethodTab(/catenary/i)).queryByText(/from settings/i)).toBeNull()
   })
 
-  it('renders the LOA warning once, in the footer, not inside either method group', () => {
+  it('renders the LOA warning once, in the footer, not inside either method panel', () => {
     const props = baseProps()
     renderPlanner({ anchorConfig: { ...props.anchorConfig, loaM: 0 }, vesselLengthOverallM: null })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(screen.getAllByText(/boat length/i)).toHaveLength(1)
 
-    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
-    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
-    expect(within(catenaryGroup).queryByText(/boat length/i)).toBeNull()
-    expect(within(ratioGroup).queryByText(/boat length/i)).toBeNull()
+    expect(within(methodPanel()).queryByText(/boat length/i)).toBeNull()
+    expect(within(selectMethodTab(/catenary/i)).queryByText(/boat length/i)).toBeNull()
   })
 })
 
 // Swing (rode + bow offset + LOA) used to be bound to the catenary plan only.
-// Each method group now shows its own swing figure, computed from that
-// method's own recommended rode, so the ratio group's circle isn't silently
+// Each method panel now shows its own swing figure, computed from that
+// method's own recommended rode, so the ratio panel's circle isn't silently
 // missing or borrowed from catenary's.
-describe('AnchorRodePlanner — Swing on both method groups', () => {
-  it('shows a Swing figure in the Ratio Method group, computed from its own recommended rode', () => {
+describe('AnchorRodePlanner — Swing on both method tabs', () => {
+  it('shows a Swing figure in the Ratio Method panel, computed from its own recommended rode', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
-    expect(within(ratioGroup).getByText(/^Swing \d/)).toBeInTheDocument()
+    const ratioPanel = selectMethodTab(/ratio/i)
+    expect(within(ratioPanel).getByText(/^Swing \d/)).toBeInTheDocument()
   })
 
-  it('shows different Swing figures per group when the two methods recommend different rode', () => {
+  it('shows different Swing figures per tab when the two methods recommend different rode', () => {
     renderPlanner()
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
-    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
-
-    const catenarySwing = within(catenaryGroup).getByText(/^Swing \d/).textContent
-    const ratioSwing = within(ratioGroup).getByText(/^Swing \d/).textContent
+    const ratioSwing = within(selectMethodTab(/ratio/i)).getByText(/^Swing \d/).textContent
+    const catenarySwing = within(selectMethodTab(/catenary/i)).getByText(/^Swing \d/).textContent
     expect(catenarySwing).not.toBe(ratioSwing)
   })
 
-  it('shows Swing in neither group when LOA is unresolved', () => {
+  it('shows Swing in neither panel when LOA is unresolved', () => {
     const props = baseProps()
     renderPlanner({
       anchorConfig: { ...props.anchorConfig, loaM: 0 },
@@ -490,13 +562,11 @@ describe('AnchorRodePlanner — Swing on both method groups', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
-    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
-    expect(within(catenaryGroup).queryByText(/^Swing \d/)).toBeNull()
-    expect(within(ratioGroup).queryByText(/^Swing \d/)).toBeNull()
+    expect(within(methodPanel()).queryByText(/^Swing \d/)).toBeNull()
+    expect(within(selectMethodTab(/catenary/i)).queryByText(/^Swing \d/)).toBeNull()
   })
 
-  it('warns in whichever method group its own recommendation exceeds chain aboard — chain-onboard is per-method, not catenary-only', () => {
+  it('warns in whichever method panel its own recommendation exceeds chain aboard — chain-onboard is per-method, not catenary-only', () => {
     // At these defaults (baseProps): catenary recommends ~40.3m, ratio ~48.4m
     // (the 1h gust of 20kt seeds the 20-25 band, which plans at 25kt and
     // clears the ratio method's 7:1 threshold). 45m aboard is short for
@@ -507,11 +577,8 @@ describe('AnchorRodePlanner — Swing on both method groups', () => {
     renderPlanner({ anchorConfig: { ...props.anchorConfig, chainOnboardM: 45 } })
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
-    const catenaryGroup = screen.getByText('Catenary Method').closest('[data-sidebar="group"]') as HTMLElement
-    const ratioGroup = screen.getByText('Ratio Method').closest('[data-sidebar="group"]') as HTMLElement
-
-    expect(within(catenaryGroup).queryByText(/only .* aboard/i)).toBeNull()
-    expect(within(ratioGroup).getByText(/only .* aboard/i)).toBeInTheDocument()
+    expect(within(selectMethodTab(/ratio/i)).getByText(/only .* aboard/i)).toBeInTheDocument()
+    expect(within(selectMethodTab(/catenary/i)).queryByText(/only .* aboard/i)).toBeNull()
   })
 })
 
@@ -557,13 +624,13 @@ describe('AnchorRodePlanner — forecast wind band', () => {
     const select = expandPlanner({ maxGustKts: { '10m': null, '30m': null, '1h': 5, '24h': null } })
     expect(select.value).toBe('0-10')
 
-    const ratioGroup = screen.getByText('Ratio Method').closest('div')!.parentElement as HTMLElement
+    // baseProps' scopeMethod is 'ratio', so the ratio tab is the open one.
     // 0-10 plans at 10 kts -> under the 20kt threshold -> 5:1 on 6m hawse = 30m.
-    expect(within(ratioGroup).getByText(/Scope 5.0:1/)).toBeInTheDocument()
+    expect(within(methodPanel()).getByText(/Scope 5.0:1/)).toBeInTheDocument()
 
     fireEvent.change(select, { target: { value: '20-25' } })
     // 20-25 plans at 25 kts -> at/over the threshold -> 7:1 = 42m.
-    expect(within(ratioGroup).getByText(/Scope 7.0:1/)).toBeInTheDocument()
+    expect(within(methodPanel()).getByText(/Scope 7.0:1/)).toBeInTheDocument()
   })
 
   it('offers no band and reports no wind data when nothing is reading', () => {
@@ -606,9 +673,9 @@ describe('AnchorRodePlanner — Depth cell', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
 
     expect(depthInput().value).toBe('')
-    // Exact string, not a loose regex: the two method groups separately show
+    // Exact string, not a loose regex: the open method panel also shows
     // "Unavailable — no depth entered" for the same reason, so a looser
-    // match would find three hits instead of the Depth cell's own caption.
+    // match would find two hits instead of the Depth cell's own caption.
     expect(screen.getByText('No depth entered — type the depth')).toBeInTheDocument()
   })
 
