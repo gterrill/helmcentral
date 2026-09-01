@@ -1,51 +1,52 @@
 # Provider plugins
 
-Tides, weather, waves and forecast warnings are **not built into Helmcentral**.
-Every one of them is a sandboxed WASM plugin loaded from disk at startup, so
-adding support for another region's government API means dropping a `.wasm`
-file into a directory — no fork, no Go, no rebuild, no frontend change.
+Tides, weather, waves, and forecast warnings are **not built into Helmcentral**.
+Each provider is a sandboxed WASM plugin loaded from disk at startup. Adding
+support for another region's government API requires placing a `.wasm` file into
+a directory, with no code changes, Go compilation, binary rebuilds, or frontend
+modifications.
 
 The four registries (`backend/tide_providers.go`,
-`backend/weather_providers.go`, `backend/wave_providers.go`,
-`backend/forecast_warnings_providers.go`) all sit on one generic WASM host
-layer, `backend/wasm_plugin.go`.
+`backend/weather_providers.go`, `backend/wave_providers.go`, and
+`backend/forecast_warnings_providers.go`) share a single WASM host layer in
+`backend/wasm_plugin.go`.
 
 | Category | Directory | Override | Bundled reference plugins |
 | --- | --- | --- | --- |
 | Tides | `plugins/tides/` | `PLUGINS_TIDES_DIR` | `bom` (Australia), `noaa` (US) |
-| Weather | `plugins/weather/` | `PLUGINS_WEATHER_DIR` | `open-meteo` (worldwide, keyless — **default**), `weatherkit` (Apple, needs keys) |
+| Weather | `plugins/weather/` | `PLUGINS_WEATHER_DIR` | `open-meteo` (worldwide, keyless, **default**), `weatherkit` (Apple, needs keys) |
 | Waves | `plugins/waves/` | `PLUGINS_WAVES_DIR` | `open-meteo-marine` (**default**) |
-| Forecast warnings | `plugins/forecast-warnings/` | `PLUGINS_FORECAST_WARNINGS_DIR` | `bom` (Australia — **default**), `nws` (US) |
+| Forecast warnings | `plugins/forecast-warnings/` | `PLUGINS_FORECAST_WARNINGS_DIR` | `bom` (Australia, **default**), `nws` (US) |
 
-Pick the active provider per category in Settings. All seven reference plugins
-are built and installed automatically by the `plugins-builder` Compose service
-on every `make dev`/deploy.
+You select the active provider for each category in Settings. All seven
+reference plugins are built and installed automatically by the `plugins-builder`
+Compose service during each `make dev` run and deployment.
 
 ## The sandbox
 
-Plugins run via [Extism](https://extism.org/)/[wazero](https://wazero.io/):
-WASM linear-memory isolation, no filesystem access, no process access. Network
-access is **default-deny** — a plugin can only reach hosts named in a companion
-`<name>.allowed_hosts.json` file sitting next to the `.wasm`. No file means no
-network at all.
+Plugins run via [Extism](https://extism.org/) and [wazero](https://wazero.io/).
+This provides WASM linear-memory isolation without filesystem or process access.
+Network access is **default-deny**: a plugin can only reach hosts specified in a
+companion `<name>.allowed_hosts.json` file located next to the `.wasm` file. If
+this file is missing, the plugin cannot access the network.
 
-A plugin needing operator-supplied secrets (WeatherKit's signing key is the
-only example in this codebase) reads them from a companion
-`<name>.config.json` whose values are `${ENV_VAR}`-expanded from the backend's
-environment at load time.
+If a plugin requires operator-supplied secrets (WeatherKit's signing key is
+currently the only example in this codebase), it reads them from a companion
+`<name>.config.json` file. The host expands `${ENV_VAR}` references in this file
+using the backend environment at load time.
 
 **The host owns all derived data.** Unit conversion, interpolation, caching,
 day-bucketing into the vessel's local timezone, spring/neap classification,
-summary sentences, moon phase — all of it is host-side, so a plugin only ever
-returns raw, provider-native numbers.
+summary sentences, and moon phase calculations are all executed host-side. The
+plugin only returns raw, provider-native numbers.
 
-Plugins can be authored in any language with an Extism PDK: TinyGo, Rust, Zig,
-C, AssemblyScript, C++, Haskell.
+Plugins can be written in any language that provides an Extism PDK, such as
+TinyGo, Rust, Zig, C, AssemblyScript, C++, or Haskell.
 
 ## The contracts
 
-Every plugin exports `id`, `name` and `ttl_seconds`, plus its category's
-fetch function:
+Every plugin exports `id`, `name`, and `ttl_seconds`, along with the fetch
+function for its category:
 
 | Category | Fetch exports | Returns |
 | --- | --- | --- |
@@ -54,14 +55,15 @@ fetch function:
 | Waves | `fetch_waves` | Hourly wave/swell series, optional sea-surface temperature |
 | Forecast warnings | `fetch_warnings(lat, lon)` | Current, relevant bulletins only |
 
-The reference plugins under `docs/examples/` are the working statement of each
-export's exact JSON shape. Read the one for your category alongside this table
-rather than working from a transcription that can drift from the code.
+The reference plugins under `docs/examples/` define the exact JSON shape for
+each export. Refer to the example for your category alongside this table rather
+than relying on written summaries that might diverge from the code.
 
 ### Companion files
 
-A plugin is a `.wasm` file plus up to three optional sidecars, each named after
-it. A missing sidecar means "none", never "all".
+A plugin consists of a `.wasm` file and up to three optional companion files
+sharing its base name. An omitted companion file means that no hosts, configs,
+or secrets are granted.
 
 | File | Shape | Purpose |
 | --- | --- | --- |
@@ -89,68 +91,72 @@ it. A missing sidecar means "none", never "all".
 ["WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY"]
 ```
 
-Both allowlists are host-enforced, not sandbox guarantees. They stop a plugin
-receiving a secret or reaching a host nobody granted it. A plugin that *is*
-granted both can still send the one to the other, so review a third-party
-plugin's sidecars with that in mind.
+Both allowlists are enforced by the host rather than the WASM sandbox. They
+prevent a plugin from receiving unapproved secrets or contacting unlisted hosts.
+If a plugin receives approval for both a secret and an external host, it can
+transmit that secret to that host. Review third-party companion files with this
+in mind.
 
 ### Why warnings are the exception
 
-For tides, weather and waves the host does the derivation. For forecast
-warnings it does **none** — no zone-matching, no active/cancelled filtering.
-Each plugin resolves its own zones for a position and returns only what is
-already current.
+For tides, weather, and waves, the host performs all derived calculations.
+For forecast warnings, it does **none**: it performs no zone matching and no
+filtering between active and cancelled bulletins. Each plugin resolves its own
+zones for a coordinate and returns only bulletins that are currently active.
 
-This is deliberate. BOM's zone taxonomy (named coastal zones from state
-bounding boxes) and NWS's (UGC marine zone codes) are incompatible namespaces,
-and "is this warning still active" is answered differently by each — BOM by
-free-text section parsing, NWS by structured CAP alert status fields. There is
-nothing universal to factor out host-side.
+This design is intentional. BOM's zone taxonomy (named coastal zones derived
+from state bounding boxes) and NWS's taxonomy (UGC marine zone codes) use
+incompatible namespaces. Determining whether a warning remains active also
+differs: BOM requires parsing free-text sections, whereas NWS provides
+structured CAP alert status fields. Because these models share no common
+structure, this logic cannot be generalised into the host.
 
 ### The FTP host function
 
-BOM's warnings are only reliably available over anonymous FTP
-(`ftp.bom.gov.au`); BOM's website actively bot-blocks HTTP scraping of the same
-content. A WASM guest cannot open raw sockets, so Helmcentral provides a
-generic custom Extism host function — `ftp_fetch`, in
-`backend/wasm_ftp_fetch.go` — available to every plugin type and gated by the
-same `allowed_hosts.json` allowlist used for HTTP. It is the only custom host
+BOM warnings are only reliably available over anonymous FTP (`ftp.bom.gov.au`),
+because the BOM website blocks automated HTTP scraping of the same content.
+Because WASM guests cannot open raw network sockets, Helmcentral provides a
+generic custom Extism host function, `ftp_fetch` (in `backend/wasm_ftp_fetch.go`).
+This function is available to all plugin types and is controlled by the same
+`allowed_hosts.json` allowlist used for HTTP. It is the only custom host
 function in the codebase.
 
-It exists because BOM publishes warnings over anonymous FTP and nothing else.
-The alternative was keeping BOM as built-in Go code purely because of its
-transport, which would have made the one Australian data source the exception
-to the plugin model for no reason a user could see.
+This host function exists because BOM distributes warnings exclusively over
+anonymous FTP. The alternative would have been keeping BOM as built-in Go code
+due to its transport requirements. That would have made the Australian source
+an exception to the plugin architecture without a functional justification.
 
 ## Why tides have no default
 
-Weather and waves default to Open-Meteo and Open-Meteo Marine because both are
-free, keyless and genuinely worldwide — a fresh install gets a working forecast
-dashboard with zero configuration.
+Weather and waves default to Open-Meteo and Open-Meteo Marine because both
+services are free, keyless, and worldwide. A new installation receives a
+functional forecast dashboard without configuration.
 
-Tides have no equivalent. Tide data is tied to real physical station networks
-rather than a global forecast model, so there is no free API with worldwide
-coverage to hardcode, and there is no built-in fallback provider either. BOM
-and NOAA cover Australia and the US respectively, and nothing else.
+Tides have no equivalent global service. Tide predictions depend on physical
+water-level stations rather than global numerical models, so there is no free
+API with worldwide coverage to configure by default, and Helmcentral does not
+include a built-in fallback provider. BOM covers Australia and NOAA covers the
+United States, with no coverage beyond those jurisdictions.
 
-So an operator must explicitly set `ui.tide_provider` in Settings to match
-their region. With no plugin installed there are no tide providers at all, and
-`/api/tide-today` returns a clear error naming what is missing rather than
-guessing.
+Operators must therefore configure `ui.tide_provider` in Settings for their
+region. If no tide plugin is installed, no tide providers exist, and
+`/api/tide-today` returns an explicit error identifying the missing provider
+rather than generating inaccurate predictions.
 
-There was once a built-in provider, Storm Glass, which was position-based and
-worldwide. It was removed rather than kept as a fallback: a global model
-silently standing in for a missing local station network produces tide times
-that look authoritative and are wrong for the water you are floating in, which
-is worse than an error message. Porting a position-based provider to a plugin
-is possible; it takes `search_stations` returning a single synthetic station
-for the requested position.
+Helmcentral previously included a built-in coordinate-based provider, Storm
+Glass, which offered global coverage. It was removed rather than retained as a
+fallback. A global model substituting for physical station observations
+generates tide predictions that appear authoritative but are inaccurate for
+local waters, which is less safe than returning an explicit error. Operators who
+need a coordinate-based provider can write one as a plugin by implementing
+`search_stations` to return a single synthetic station for the requested
+coordinates.
 
 ## Building a plugin
 
-Each reference plugin lives under `docs/examples/`. The NOAA tide plugin is a
-complete, working TinyGo integration against NOAA's CO-OPS API — a real
-integration, not BOM ported to WASM.
+Reference plugins are located in `docs/examples/`. The NOAA tide plugin is a
+complete TinyGo implementation for the NOAA CO-OPS API, written directly for
+this interface rather than ported from BOM.
 
 ```bash
 docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
@@ -160,9 +166,10 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
 "
 ```
 
-Swap the directory for any other example. **Note the build target:** the NOAA
-tide plugin is a single file (`main.go`); the weather, wave and
-forecast-warning examples are multi-file packages, so their target is `.`:
+The same command structure applies to other examples. **Note the build target:**
+the NOAA tide plugin consists of a single file (`main.go`), whereas the weather,
+wave, and forecast-warning plugins are multi-file packages that use `.` as the
+build target:
 
 ```bash
 docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:latest sh -c "
@@ -179,14 +186,15 @@ Available example directories:
 - `docs/examples/wave-plugins/open-meteo-marine`
 - `docs/examples/forecast-warnings-plugins/bom`, `docs/examples/forecast-warnings-plugins/nws`
 
-Each has its own README with installation notes.
+Each directory contains a README with installation instructions.
 [docs/examples/weather-plugins/weatherkit/README.md](../examples/weather-plugins/weatherkit/README.md)
-also covers how to obtain WeatherKit credentials.
+also explains how to obtain WeatherKit credentials.
 
 ## Installing a built plugin
 
-Copy the `.wasm` and its `allowed_hosts.json` sidecar into the right category
-directory and restart. To install the published bundle by hand:
+Copy the `.wasm` file and its `<name>.allowed_hosts.json` companion file into the
+appropriate category directory, then restart the service. To manually install
+the pre-built archive:
 
 ```sh
 curl -fsSL https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \
@@ -194,5 +202,5 @@ curl -fsSL https://github.com/gterrill/helmcentral/releases/latest/download/helm
 sudo systemctl restart helmcentral
 ```
 
-The plugin appears in the existing Settings provider dropdown for its category
-on the next restart. No frontend changes are ever needed.
+After restarting, the plugin appears in the Settings provider dropdown for its
+category. No frontend changes are required.

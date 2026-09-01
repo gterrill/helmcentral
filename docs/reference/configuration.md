@@ -1,9 +1,9 @@
 # Configuration reference
 
-Helmcentral needs no configuration file to start. A missing `settings.yaml` is
-tolerated, and on first run the dashboard sweeps your network for a SignalK
-server and offers what it finds. Everything below is for tuning an install
-that is already running.
+Helmcentral does not require a configuration file to start. A missing
+`settings.yaml` is tolerated, and on first run the dashboard sweeps your
+network for a SignalK server and offers what it finds. The information below
+is for tuning an existing installation.
 
 ## Where things live
 
@@ -11,7 +11,7 @@ A native install (via `install.sh`) uses:
 
 | Path | Contents |
 | --- | --- |
-| `/usr/local/bin/helmcentral` | The binary. Self-contained — the web UI is embedded in it. |
+| `/usr/local/bin/helmcentral` | The binary. Self-contained: the web UI is embedded in it. |
 | `/var/lib/helmcentral/settings.yaml` | Operator settings, rewritten by the Settings UI on save. |
 | `/var/lib/helmcentral/data/` | SQLite stores, routes, dashboard pages, uploaded charts. |
 | `/var/lib/helmcentral/cache/` | Anchor-watch state and plugin forecast caches. |
@@ -24,17 +24,17 @@ plugins mounted separately at `/app/plugins`.
 ### Back this up
 
 `data/secrets.key` decrypts the secrets store. **Lose it and every stored
-credential is unrecoverable** — SignalK login, InfluxDB token, WeatherKit
-keys all have to be re-entered. Back up the whole state directory; at minimum
-back up that file. There is no key-recovery mechanism, by design: a recoverable
-key would defeat the point of encrypting at rest.
+credential is unrecoverable**: SignalK login, InfluxDB token, and WeatherKit
+keys must all be re-entered. Back up the whole state directory; at minimum
+back up that file. There is no key-recovery mechanism by design, because a
+recoverable key would defeat the purpose of encrypting at rest.
 
 ## Environment variables
 
-Non-secret knobs are real environment variables. There is no `.env` file and
-nothing loads one — the backend reads these through `os.Getenv` only. Set them
-in the systemd unit's `Environment=` lines, the compose `environment:` block,
-or your shell.
+Non-secret settings use standard environment variables. There is no `.env`
+file and nothing loads one; the backend reads these through `os.Getenv` only.
+Set them in the systemd unit's `Environment=` lines, the compose `environment:`
+block, or your shell.
 
 ### Common
 
@@ -51,11 +51,11 @@ or your shell.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SESSIONS_DB_PATH` | `data/sessions.sqlite` | Session store — see State paths below. |
+| `SESSIONS_DB_PATH` | `data/sessions.sqlite` | Session store (see State paths below). |
 
 `auth.mode` is set in `settings.yaml` (or from Settings → Security in the
-running app) and has no environment-variable override — `settings.yaml` is its
-only source. Changes take effect on the next request, without a restart.
+running application) and has no environment-variable override; `settings.yaml`
+is its only source. Changes take effect on the next request, without a restart.
 
 Helmcentral keeps no user database. It forwards credentials to your SignalK
 server and maps the `readonly`, `readwrite` and `admin` levels it answers with
@@ -101,28 +101,28 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 
 ## Secrets
 
-SignalK credentials, `INFLUXDB_TOKEN`, the
-`WEATHERKIT_*` keys and the `VAPID_*` web push keys are **not** environment
-variables in normal use. They live in an AES-256-GCM encrypted SQLite store and
-are managed from the Settings UI's Secrets panel. Keeping them out of the
-process environment is deliberate: every WASM plugin's `${VAR}` config expansion
-reads from it, so a value there is a value any plugin could reference.
+SignalK credentials, `INFLUXDB_TOKEN`, the `WEATHERKIT_*` keys and the
+`VAPID_*` web push keys are **not** environment variables in normal use. They
+reside in an AES-256-GCM encrypted SQLite store and are managed from the
+Secrets panel in the Settings UI. Keeping them out of the process environment
+is deliberate: every WASM plugin's `${VAR}` configuration expansion reads
+from the environment, so a value placed there is accessible to any plugin.
 
-`VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to "managed from
-the UI": they are generated automatically on first start and never rotate,
-because there is nowhere to obtain a VAPID keypair from — it is self-issued.
-**Losing them is unrecoverable.** Every registered web push device holds the
-public key it subscribed with, so a new pair means every phone must physically
-re-subscribe. Helmcentral discards the orphaned registrations at boot and logs
-how many, rather than letting every push fail silently forever. Back up
+`VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to being managed
+from the UI. They are generated automatically on first start and never rotate,
+because there is nowhere to obtain a VAPID keypair from: it is self-issued.
+**Losing them is unrecoverable.** Every registered web push device stores the
+public key it subscribed with, so a new pair requires every phone to
+re-subscribe. Helmcentral discards orphaned registrations at boot and logs
+the count, rather than allowing pushes to fail silently. Back up
 `backend/data/secrets.sqlite` and `backend/data/secrets.key` together.
 
 ## Plugins
 
 Tide, weather, wave and forecast-warning data all come from WASM plugins
-rather than being built in, so a provider can be added or swapped without
-rebuilding. See [plugins.md](plugins.md) for the contracts and how to build one.
-The release bundle ships:
+rather than being built into the core binary, so providers can be added or
+swapped without recompilation. See [plugins.md](plugins.md) for plugin
+contracts and build instructions. The release bundle ships:
 
 | Category | Plugins |
 | --- | --- |
@@ -131,11 +131,12 @@ The release bundle ships:
 | `waves/` | `open-meteo-marine` |
 | `forecast-warnings/` | `bom` (Australia), `nws` (US) |
 
-Select which is active per category in Settings. Each plugin carries an
-`allowed_hosts.json` next to its `.wasm`; the runtime refuses any outbound host
-not listed there, so keep the sidecars alongside the binaries.
+Select the active plugin per category in Settings. Each plugin carries an
+`allowed_hosts.json` file next to its `.wasm` binary; the runtime rejects any
+outbound host not listed there, so keep the sidecar files alongside the
+binaries.
 
-To install or update the bundle by hand:
+To install or update the bundle manually:
 
 ```sh
 curl -fsSL https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \
@@ -145,58 +146,60 @@ sudo systemctl restart helmcentral
 
 ## Startup behaviour
 
-Startup is deliberately fail-fast. If the secrets store, session store,
+Startup is fail-fast by design. If the secrets store, session store,
 plugin-override store, tile cache or nearby-contacts store cannot be opened,
-the process exits rather than running degraded — usually a permissions
+the process exits rather than running degraded: this is usually a permissions
 problem on the state directory, or a `secrets.key` that no longer matches the
 store. Check `journalctl -u helmcentral -n 50`.
 
-`auth.mode: signalk` adds one more fail-fast check: Helmcentral probes your
+`auth.mode: signalk` adds one more fail-fast check: Helmcentral probes the
 SignalK server's security status once at startup and refuses to boot if
-SignalK's own security is disabled — "login required" against a server with
-no login to require can't be satisfied. Enable security on the SignalK server
-first, or set `auth.mode: none` in `settings.yaml` to boot without it.
+SignalK's own security is disabled. A login-required requirement against a
+server with no login cannot be satisfied. Enable security on the SignalK
+server first, or set `auth.mode: none` in `settings.yaml` to boot without it.
 
 You should not normally reach that state: Settings → Security refuses to save
-`signalk` in the first place unless SignalK reports security is already on, so
-the unsatisfiable combination is prevented rather than discovered on the next
-reboot. Reaching it means `settings.yaml` was edited by hand, or SignalK's
-security was turned off after Helmcentral was configured. Either way the fix
-is the same — turn SignalK's security back on, or set `auth.mode: none` in
-`settings.yaml` and restart. Turning authentication *off* is never gated on
-SignalK being reachable, so that route out always works.
+`signalk` unless SignalK reports security is already active, preventing an
+unsatisfiable configuration from being saved. Reaching this state means
+`settings.yaml` was edited manually, or SignalK security was disabled after
+Helmcentral was configured. Either way the fix is the same: turn SignalK
+security back on, or set `auth.mode: none` in `settings.yaml` and restart.
+Turning authentication *off* is never gated on SignalK being reachable, so that
+recovery path always works.
 
 ## Web push over Tailscale
 
-Web push puts alarms on a phone's lock screen with no app to install, but
-browsers only expose the Push API in a **secure context**. Helmcentral ships no
-TLS certificate of its own, so on a plain `http://<lan-ip>:8080` address the
-feature cannot work at all — the alarm settings detect this and say so rather
-than offering a toggle that does nothing.
+Web push delivers alarms to a phone's lock screen without requiring an app
+install, but browsers only expose the Push API in a **secure context**.
+Helmcentral ships no TLS certificate of its own, so on an unencrypted
+`http://<lan-ip>:8080` address the feature cannot function. The alarm
+settings detect this and state the requirement rather than displaying an
+inactive toggle.
 
-The supported route is Tailscale, on the machine running Helmcentral:
+The supported configuration uses Tailscale on the machine running Helmcentral:
 
 ```sh
 tailscale serve --bg 8080
 ```
 
-That publishes the dashboard at `https://<machine>.<tailnet>.ts.net` with a real
-Let's Encrypt certificate — no public DNS, no certificate to install on each
-phone, and no open port on the boat. Open Helmcentral at that address, then
-enable web push under Alarms → Notifications.
+That publishes the dashboard at `https://<machine>.<tailnet>.ts.net` with a
+valid Let's Encrypt certificate: no public DNS, no certificates to install on
+each phone, and no open ports on the boat. Open Helmcentral at that address,
+then enable web push under Alarms → Notifications.
 
 **Do not use `tailscale funnel`.** The push service never calls back into
-Helmcentral; the only party that needs the secure origin is the browser, and it
-is already on the tailnet. Funnel would expose the boat to the public internet
-to solve a problem it does not have.
+Helmcentral; the only component that requires the secure origin is the
+browser, which is already on the tailnet. Funnel exposes the local network to
+the public internet to solve a problem that does not exist.
 
 **On iPhone and iPad**, add Helmcentral to the Home Screen first (Share → Add to
 Home Screen) and open it from that icon: iOS grants the Push API only to
-installed web apps, and only since iOS 16.4. It must be installed **from the
-`https://…ts.net` address** — installing from a LAN `http://` address produces
-an app that still cannot receive push, with nothing on screen to explain why.
+installed web apps, and only on iOS 16.4 or later. It must be installed
+**from the `https://…ts.net` address**: installing from a LAN `http://`
+address produces an app that cannot receive push, with no indication on
+screen explaining why.
 
-Registered devices live in `backend/data/webpush-subscriptions.sqlite`
+Registered devices are stored in `backend/data/webpush-subscriptions.sqlite`
 (`WEBPUSH_DB_PATH`), separate from the alarm log so that clearing alarm history
 never disconnects a phone.
 
@@ -207,17 +210,16 @@ API can control connected equipment (generator start/stop, CZone switching).
 It is designed for a trusted boat LAN in this mode.
 
 - Do not port-forward it to the internet.
-- For remote access, use a VPN (Tailscale, WireGuard) or put it behind a
+- For remote access, use a VPN (Tailscale, WireGuard) or place it behind a
   reverse proxy that enforces authentication.
 - Anyone who can reach the port can change settings and operate equipment.
 
 Set `auth.mode: signalk` to require login via your SignalK server's own
-accounts before Helmcentral serves anything but the login screen. This still assumes a
-trusted-enough network to reach the login screen itself: it does not replace
-a VPN or reverse proxy for genuine internet exposure, and every startup with
-`auth.mode: none` logs a warning naming the risk so it isn't easy to run this
-way by accident.
+accounts before Helmcentral serves anything other than the login screen. This
+configuration still assumes a trusted network to reach the login screen
+itself: it does not replace a VPN or reverse proxy for internet exposure, and
+every startup with `auth.mode: none` logs a warning explaining the risk.
 
-CORS is an explicit allowlist (the server's own origin, plus optional
-`CORS_ALLOWED_ORIGINS`) rather than the wildcard earlier releases sent, so a
-credentialed cross-origin request only succeeds against an origin you named.
+CORS uses an explicit allowlist (the server's own origin, plus any optional
+`CORS_ALLOWED_ORIGINS`) rather than wildcard matching, so credentialed
+cross-origin requests only succeed against explicitly named origins.
