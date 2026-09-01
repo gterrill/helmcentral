@@ -28,6 +28,7 @@ let lastMapClickHandler: ((e: { lngLat: { lat: number; lng: number } }) => void)
 let lastZoomHandler: (() => void) | null = null
 let lastStyleDataHandler: (() => void) | null = null
 let lastInitialViewState: { latitude: number; longitude: number; zoom: number } | null = null
+let lastMapStyle: string | null = null
 const easeToMock = vi.fn()
 const setLayoutPropertyMock = vi.fn()
 const setPaintPropertyMock = vi.fn()
@@ -68,6 +69,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           onZoom,
           onStyleData,
           initialViewState,
+          mapStyle,
         }: {
           children?: React.ReactNode
           onClick?: (e: { lngLat: { lat: number; lng: number } }) => void
@@ -75,6 +77,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           onLoad?: () => void
           onStyleData?: () => void
           initialViewState?: { latitude: number; longitude: number; zoom: number }
+          mapStyle?: unknown
         },
         ref: React.Ref<unknown>,
       ) => {
@@ -82,6 +85,7 @@ vi.mock('react-map-gl/maplibre', async () => {
         lastZoomHandler = onZoom ?? null
         lastStyleDataHandler = onStyleData ?? null
         lastInitialViewState = initialViewState ?? null
+        lastMapStyle = typeof mapStyle === 'string' ? mapStyle : null
         React.useImperativeHandle(ref, () => ({
           getCanvas: () => ({ style: { cursor: 'grab' } }),
           getZoom: () => mockZoom,
@@ -202,6 +206,19 @@ describe('RoutePlannerMap', () => {
     )
 
     expect(lastInitialViewState).toEqual({ latitude: 1, longitude: 2, zoom: 12 })
+  })
+
+  // The basemap style must come from our own backend, not basemaps.cartocdn.com.
+  // Reverting this to the CDN URL silently breaks the offline chart: MapLibre
+  // fetches the style before anything else, and a failed style fetch means the
+  // map never initialises and no cached tile is ever requested.
+  // See docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
+  it('loads the basemap style from the same-origin proxy', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => {}} isDarkTheme={false} />)
+    expect(lastMapStyle).toBe('/api/basemap/style/positron')
+
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => {}} isDarkTheme />)
+    expect(lastMapStyle).toBe('/api/basemap/style/dark-matter')
   })
 
   it('recenters on the vessel when the "center on current position" control is used', () => {

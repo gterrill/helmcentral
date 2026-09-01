@@ -55,7 +55,16 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       '/api': {
         target: apiProxyTarget,
-        changeOrigin: true,
+        // Deliberately NOT changeOrigin. The backend builds the basemap
+        // style's absolute sprite URL from the incoming Host (MapLibre
+        // rejects a relative sprite URL and aborts the whole style load),
+        // and in production it serves the frontend itself, so Host is the
+        // browser-facing origin. Rewriting Host here would make dev the
+        // only place that disagrees, handing the browser a sprite URL on
+        // the backend's own port. The target is our own Go server, which
+        // does not vhost on Host, so preserving it costs nothing.
+        // See docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
+        changeOrigin: false,
       }
     }
   },

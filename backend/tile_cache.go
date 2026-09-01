@@ -24,6 +24,16 @@ import (
 // sources later without a schema change.
 const worldImagerySource = "esri-world-imagery"
 
+// cartoBasemapSource is the tiles.source key for Carto vector basemap tiles
+// (.mvt), stored in the same table as worldImagerySource above - the
+// source column exists precisely so a second tile provider needs no schema
+// change. One value, not two: both Carto styles this app loads (Positron
+// light, Dark Matter dark) declare exactly one vector source, "carto",
+// and it is the same tile data either way - only the style document (which
+// this proxy also caches, in basemap_assets below) decides how those tiles
+// get colored. There is no light/dark split at the tile level.
+const cartoBasemapSource = "carto-basemap"
+
 // maxDegradeLevels bounds how many zoom levels coarser than the originally
 // requested tile the cache-through proxy will try before giving up and
 // falling back to a blank tile, per the graceful-degradation design.
@@ -113,6 +123,24 @@ func newTileCache(dbPath string) (*tileCache, error) {
 		return nil, fmt.Errorf("create tiles table: %w", err)
 	}
 
+	// basemap_assets holds the four Carto basemap asset classes that are
+	// NOT (z,x,y)-addressable, so they don't fit the tiles table above:
+	// style.json (x2, one per theme), tiles.json, glyph PBFs, and sprite
+	// files. "path" is this proxy's own request path (e.g.
+	// "/api/basemap/style/positron"), which already uniquely identifies an
+	// asset - no need for a second addressing scheme on top of it. Same
+	// no-TTL reasoning as tiles: none of these change on human timescales,
+	// so a fetched-once asset is cached forever until an explicit clear.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS basemap_assets (
+		path TEXT PRIMARY KEY,
+		content_type TEXT NOT NULL,
+		data BLOB NOT NULL,
+		fetched_at INTEGER NOT NULL
+	)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create basemap_assets table: %w", err)
+	}
+
 	return &tileCache{db: db}, nil
 }
 
@@ -149,9 +177,55 @@ func (tc *tileCache) put(source string, z, x, y int, data []byte, contentType st
 	return nil
 }
 
+// getBasemapAsset / putBasemapAsset mirror tileCache's get/put above, but
+// keyed on the basemap_assets table's free-text "path" primary key instead
+// of (source, z, x, y). Kept as separate methods rather than generalizing
+// the tile methods over both tables: the two call sites (resolveCartoVectorTile
+// vs. resolveBasemapDocument in basemap_proxy.go) already have genuinely
+// different resolution semantics (cache-through-with-404-on-miss vs.
+// cache-through-with-502-on-miss), so sharing a key-shaped storage method is
+// as far as that unification usefully goes.
+func (tc *tileCache) getBasemapAsset(path string) (data []byte, contentType string, ok bool, err error) {
+	row := tc.db.QueryRow(`SELECT content_type, data FROM basemap_assets WHERE path = ?`, path)
+	if err := row.Scan(&contentType, &data); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, "", false, nil
+		}
+		return nil, "", false, fmt.Errorf("read cached basemap asset: %w", err)
+	}
+	return data, contentType, true, nil
+}
+
+func (tc *tileCache) putBasemapAsset(path string, data []byte, contentType string) error {
+	_, err := tc.db.Exec(
+		`INSERT INTO basemap_assets (path, content_type, data, fetched_at) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(path) DO UPDATE SET
+			content_type = excluded.content_type,
+			data = excluded.data,
+			fetched_at = excluded.fetched_at`,
+		path, contentType, data, time.Now().Unix(),
+	)
+	if err != nil {
+		return fmt.Errorf("store cached basemap asset: %w", err)
+	}
+	return nil
+}
+
+// clear wipes both the tiles table (Esri imagery + Carto vector basemap
+// tiles) and basemap_assets (style/tilejson/glyph/sprite documents).
+// Deliberate, not an oversight, that DELETE /api/world-imagery/cache below
+// clears both: a stale basemap_assets entry has exactly the same shape as a
+// stale tile - no TTL, cached forever until told otherwise - so a second,
+// narrower escape hatch just for basemap_assets would be one more thing to
+// remember to also clear, for no real operational benefit. A full offline
+// basemap re-seed after this is one "cache this area" prefetch away either
+// way (Section 5 below), same as it already is for imagery.
 func (tc *tileCache) clear() error {
 	if _, err := tc.db.Exec(`DELETE FROM tiles`); err != nil {
 		return fmt.Errorf("clear tile cache: %w", err)
+	}
+	if _, err := tc.db.Exec(`DELETE FROM basemap_assets`); err != nil {
+		return fmt.Errorf("clear basemap assets cache: %w", err)
 	}
 	return nil
 }
@@ -265,6 +339,97 @@ func resolveWorldImageryTile(cache *tileCache, fetcher tileFetcher, source strin
 	return transparentPNG1x1, "image/png", nil
 }
 
+// cartoVectorTileHosts are the 4 subdomains Carto shards vector tile
+// requests across, confirmed directly against the "tiles" array in the
+// upstream tiles.json response (tiles-a/b/c/d.basemaps.cartocdn.com).
+// Picking a host deterministically from the tile coordinate spreads
+// prefetch's concurrent worker-pool load the way a real panning client
+// would, rather than hammering a single subdomain from every worker.
+var cartoVectorTileHosts = [...]string{"tiles-a", "tiles-b", "tiles-c", "tiles-d"}
+
+// fetchCartoVectorTileUpstream performs a single upstream Carto vector
+// tile (.mvt) fetch. Same blanket "non-200/transport/body-read error all
+// become one error" shape as fetchWorldImageryUpstream above - the caller
+// (resolveCartoVectorTile) decides what that means, which here is "give up
+// entirely," not "try a coarser zoom."
+func fetchCartoVectorTileUpstream(fetcher tileFetcher, z, x, y int) ([]byte, string, error) {
+	host := cartoVectorTileHosts[(x+y)%len(cartoVectorTileHosts)]
+	tileURL := fmt.Sprintf(
+		"https://%s.basemaps.cartocdn.com/vectortiles/carto.streets/v1/%d/%d/%d.mvt",
+		host, z, x, y,
+	)
+
+	req, err := http.NewRequest(http.MethodGet, tileURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("build upstream request: %w", err)
+	}
+	req.Header.Set("User-Agent", "helmcentral/1.0")
+
+	resp, err := fetcher.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("upstream request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("upstream returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("read upstream body: %w", err)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/x-protobuf"
+	}
+	return body, contentType, nil
+}
+
+// resolveCartoVectorTile is the cache-through resolver for Carto vector
+// basemap tiles. Deliberately NOT resolveWorldImageryTile, and deliberately
+// without its graceful-degradation behavior, for a reason specific to
+// vector data: an MVT tile's feature geometry is encoded in tile-local
+// coordinates (an extent, typically 0-4096, spanning just that one tile's
+// bounding box). A raster image degrades gracefully because a coarser
+// tile's pixels still look like a blurrier version of the right place when
+// stretched to fill a finer tile's footprint. A coarser MVT tile's bytes
+// served under a finer tile's key do not degrade - they are wrong: every
+// coastline, island, and label decodes at a scale and offset that assumes
+// the smaller bounding box of the tile it was actually cut for, so it
+// renders confidently, silently, and incorrectly, shifted and rescaled
+// into whatever fraction of the requested tile its origin corner happens
+// to land in. That is worse than nothing on a navigation chart. So the
+// semantics here are narrower on purpose:
+//  1. cache hit at the requested (z,x,y) -> serve immediately.
+//  2. cache miss -> fetch upstream. Success -> cache and serve.
+//  3. upstream failure -> return an error. No parent-tile walk, no
+//     synthesized empty tile. The caller (basemapVectorTileHandler) turns
+//     this into a 404, which MapLibre already treats as "no data for this
+//     tile" and simply doesn't draw it - correct behavior for genuinely
+//     absent data, as opposed to wrong data presented as real.
+//
+// Cache read/write errors (infrastructure, not upstream availability) are
+// surfaced to the caller exactly as resolveWorldImageryTile does.
+func resolveCartoVectorTile(cache *tileCache, fetcher tileFetcher, z, x, y int) ([]byte, string, error) {
+	if data, contentType, ok, err := cache.get(cartoBasemapSource, z, x, y); err != nil {
+		return nil, "", err
+	} else if ok {
+		return data, contentType, nil
+	}
+
+	data, contentType, err := fetchCartoVectorTileUpstream(fetcher, z, x, y)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if err := cache.put(cartoBasemapSource, z, x, y, data, contentType); err != nil {
+		return nil, "", err
+	}
+	return data, contentType, nil
+}
+
 // lonToTileX and latToTileY are the standard slippy-map bbox<->tile
 // conversions (see e.g. the OSM wiki's "Slippy map tilenames"). No
 // antimeridian-crossing handling - out of scope for this feature.
@@ -279,7 +444,23 @@ func latToTileY(lat float64, z int) int {
 	return int(math.Floor((1.0 - math.Log(math.Tan(latRad)+1.0/math.Cos(latRad))/math.Pi) / 2.0 * n))
 }
 
+// tileKind discriminates which resolver a prefetch job's worker pool must
+// route a given tileCoord to. Esri imagery and Carto vector basemap tiles
+// are fetched from different upstreams into the same (z,x,y)-keyed tiles
+// table under different source values, and - critically - a basemap tile
+// must never be routed to resolveWorldImageryTile: that function's parent-
+// tile degradation would reproduce, inside the prefetch worker pool, the
+// exact MVT-coordinate-mismatch hazard resolveCartoVectorTile's doc
+// comment above exists to avoid.
+type tileKind int
+
+const (
+	tileKindImagery tileKind = iota
+	tileKindBasemap
+)
+
 type tileCoord struct {
+	kind    tileKind
 	z, x, y int
 }
 
@@ -314,18 +495,60 @@ func countTilesForBBox(west, south, east, north float64, minZoom, maxZoom int) i
 }
 
 // tilesForBBox builds the actual tile coordinate list across
-// [minZoom,maxZoom]. Only called once countTilesForBBox has already
-// confirmed the total is within the prefetch cap.
-func tilesForBBox(west, south, east, north float64, minZoom, maxZoom int) []tileCoord {
+// [minZoom,maxZoom], tagged with the given kind. Only called once
+// countTilesForBBox has already confirmed the total is within the
+// prefetch cap.
+func tilesForBBox(west, south, east, north float64, minZoom, maxZoom int, kind tileKind) []tileCoord {
 	var tiles []tileCoord
 	for z := minZoom; z <= maxZoom; z++ {
 		xMin, xMax, yMin, yMax := zoomTileRange(west, south, east, north, z)
 		for x := xMin; x <= xMax; x++ {
 			for y := yMin; y <= yMax; y++ {
-				tiles = append(tiles, tileCoord{z: z, x: x, y: y})
+				tiles = append(tiles, tileCoord{kind: kind, z: z, x: x, y: y})
 			}
 		}
 	}
+	return tiles
+}
+
+// basemapPrefetchMaxZoom caps how deep a "cache this area" prefetch will
+// enqueue Carto vector basemap tiles, regardless of the requested imagery
+// maxZoom: Carto's vector source stops at zoom 14 (cartoBasemapMaxZoom in
+// basemap_proxy.go), and MapLibre overzooms client-side past a source's
+// declared maxzoom rather than requesting deeper tiles that don't exist -
+// so prefetching past 14 would just mean fetches that 404 forever and
+// count against the operator's cap for nothing. A separate named constant
+// here (rather than importing cartoBasemapMaxZoom directly into this
+// arithmetic) keeps the "why 14" reasoning next to the one that actually
+// matters for a request budget, while both constants stay equal by
+// definition - see the equality assertion this repo's tests carry for it.
+const basemapPrefetchMaxZoom = 14
+
+// countPrefetchTiles and prefetchTileCoords compute the COMBINED "cache
+// this area" job: Esri imagery across the full requested [minZoom,maxZoom]
+// (unchanged from before this feature), plus Carto vector basemap tiles
+// across [minZoom, min(maxZoom, basemapPrefetchMaxZoom)]. Both delegate to
+// the existing single-source helpers above per tileKind and just add the
+// two counts/lists together - tilesForBBox/countTilesForBBox already
+// return zero tiles for an empty range (minZoom > maxZoom), so a request
+// entirely deeper than z14 naturally contributes zero basemap tiles with
+// no extra branching here.
+func countPrefetchTiles(west, south, east, north float64, minZoom, maxZoom int) int {
+	basemapMaxZoom := maxZoom
+	if basemapMaxZoom > basemapPrefetchMaxZoom {
+		basemapMaxZoom = basemapPrefetchMaxZoom
+	}
+	return countTilesForBBox(west, south, east, north, minZoom, maxZoom) +
+		countTilesForBBox(west, south, east, north, minZoom, basemapMaxZoom)
+}
+
+func prefetchTileCoords(west, south, east, north float64, minZoom, maxZoom int) []tileCoord {
+	basemapMaxZoom := maxZoom
+	if basemapMaxZoom > basemapPrefetchMaxZoom {
+		basemapMaxZoom = basemapPrefetchMaxZoom
+	}
+	tiles := tilesForBBox(west, south, east, north, minZoom, maxZoom, tileKindImagery)
+	tiles = append(tiles, tilesForBBox(west, south, east, north, minZoom, basemapMaxZoom, tileKindBasemap)...)
 	return tiles
 }
 
@@ -376,10 +599,23 @@ func lookupPrefetchJob(id string) (*prefetchJob, bool) {
 	return job, ok
 }
 
-// runPrefetchJob fetches every tile in tiles through the same cache-through
-// + degradation logic as the live proxy (resolveWorldImageryTile), using a
-// bounded worker pool. Completed tiles are immediately servable through the
-// regular tile endpoint mid-job, since they land in the same cache.
+// runPrefetchJob fetches every tile in tiles using a bounded worker pool,
+// routing each one to the resolver matching its kind: imagery tiles through
+// resolveWorldImageryTile's cache-through + degradation logic, basemap
+// tiles through resolveCartoVectorTile's narrower cache-through-or-fail
+// logic. Getting this dispatch wrong - e.g. sending a basemap tile through
+// resolveWorldImageryTile - is exactly the bug this whole split exists to
+// prevent (see resolveCartoVectorTile's doc comment), so the switch below
+// has an explicit default case rather than silently falling through to one
+// resolver or the other: an unrecognised kind can only mean a bug in
+// prefetchTileCoords (the only place tileCoord values are constructed), and
+// it is logged and counted as a failed tile - loud, but not a crash of the
+// whole background-worker pool (or the process, since an unrecovered
+// goroutine panic here would take down every other in-flight request too)
+// over what should be an unreachable case.
+// Completed tiles are immediately servable through the regular tile
+// endpoints mid-job, since they land in the same cache the live proxies
+// read.
 func runPrefetchJob(job *prefetchJob, cache *tileCache, fetcher tileFetcher, tiles []tileCoord) {
 	if len(tiles) == 0 {
 		job.mu.Lock()
@@ -395,8 +631,17 @@ func runPrefetchJob(job *prefetchJob, cache *tileCache, fetcher tileFetcher, til
 		go func() {
 			defer wg.Done()
 			for t := range tileCh {
-				if _, _, err := resolveWorldImageryTile(cache, fetcher, worldImagerySource, t.z, t.x, t.y); err != nil {
-					log.Printf("prefetch job %s: tile z=%d x=%d y=%d failed: %v", job.ID, t.z, t.x, t.y, err)
+				var err error
+				switch t.kind {
+				case tileKindImagery:
+					_, _, err = resolveWorldImageryTile(cache, fetcher, worldImagerySource, t.z, t.x, t.y)
+				case tileKindBasemap:
+					_, _, err = resolveCartoVectorTile(cache, fetcher, t.z, t.x, t.y)
+				default:
+					err = fmt.Errorf("unrecognised tileKind %d", t.kind)
+				}
+				if err != nil {
+					log.Printf("prefetch job %s: tile kind=%d z=%d x=%d y=%d failed: %v", job.ID, t.kind, t.z, t.x, t.y, err)
 				}
 				job.addDone(1)
 			}
@@ -420,9 +665,15 @@ type prefetchRequestBody struct {
 }
 
 // prefetchWorldImageryHandler is the POST /api/world-imagery/prefetch
-// handler factory: computes the tile count for the requested bbox/zoom
-// range, rejects it with the computed count if over maxPrefetchTiles, or
-// otherwise kicks off a background prefetch job and returns its id.
+// handler factory: computes the COMBINED tile count (Esri imagery across
+// the full requested zoom range, plus Carto vector basemap tiles capped at
+// basemapPrefetchMaxZoom - see countPrefetchTiles/prefetchTileCoords) for
+// the requested bbox/zoom range, rejects it with that combined computed
+// count if over maxPrefetchTiles, or otherwise kicks off a background
+// prefetch job covering both and returns its id. The frontend's existing
+// progress pill reads {done, total} with no notion of imagery vs. basemap,
+// so folding both into one combined job/count here is what keeps it
+// accurate with no frontend change.
 func prefetchWorldImageryHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		var body prefetchRequestBody
@@ -433,7 +684,7 @@ func prefetchWorldImageryHandler(cache *tileCache, fetcher tileFetcher) echo.Han
 			return c.NoContent(http.StatusBadRequest)
 		}
 
-		total := countTilesForBBox(body.West, body.South, body.East, body.North, body.MinZoom, body.MaxZoom)
+		total := countPrefetchTiles(body.West, body.South, body.East, body.North, body.MinZoom, body.MaxZoom)
 		if total > maxPrefetchTiles {
 			return c.JSON(http.StatusBadRequest, map[string]any{
 				"error":      fmt.Sprintf("area too large: %d tiles (max %d)", total, maxPrefetchTiles),
@@ -441,7 +692,7 @@ func prefetchWorldImageryHandler(cache *tileCache, fetcher tileFetcher) echo.Han
 			})
 		}
 
-		tiles := tilesForBBox(body.West, body.South, body.East, body.North, body.MinZoom, body.MaxZoom)
+		tiles := prefetchTileCoords(body.West, body.South, body.East, body.North, body.MinZoom, body.MaxZoom)
 		job := &prefetchJob{ID: uuid.NewString(), Total: len(tiles)}
 		registerPrefetchJob(job)
 
@@ -474,9 +725,13 @@ func prefetchStatusHandler() echo.HandlerFunc {
 }
 
 // deleteWorldImageryCacheHandler is the DELETE /api/world-imagery/cache
-// escape hatch: clears every cached tile (across all sources), e.g. to
-// force a re-fetch after Esri adds coverage where a blank/degraded result
-// was previously cached.
+// escape hatch: clears every cached tile (across all sources, so both Esri
+// imagery and Carto vector basemap tiles) AND every cached basemap_assets
+// document (style.json x2, tiles.json, glyphs, sprites) - see tileCache.clear's
+// comment for why the two tables share one clear operation. Kept on its
+// existing /api/world-imagery path rather than adding a second basemap-
+// specific endpoint: from an operator's point of view this is one "wipe
+// the offline map cache and start clean" action, not two.
 func deleteWorldImageryCacheHandler(cache *tileCache) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if err := cache.clear(); err != nil {

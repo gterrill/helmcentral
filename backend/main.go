@@ -295,13 +295,16 @@ func main() {
 	}
 	globalAlarmDispatcher = newAlarmDispatcher()
 
-	// World imagery HTTP client for tile fetches (with timeout to prevent hangs).
-	worldImageryClient := newWorldImageryHTTPClient()
+	// Shared HTTP client for tile/basemap-asset fetches (with timeout to
+	// prevent hangs), used both by the Esri World Imagery proxy and the
+	// Carto basemap proxy (ADR 0067) - one upstream-fetch client for both,
+	// same as they already share one SQLite-backed tileCache.
+	tileFetchClient := newWorldImageryHTTPClient()
 
 	// Every /api route, tiered per docs/adr/0040 §3 and registered through
 	// registerAPIRoutes — the one place a route reaches Echo at all. See
 	// buildAPIRoutes below for the full table and its tier assignments.
-	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, worldImageryClient))
+	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, tileFetchClient))
 
 	registerStaticHandler(e)
 
@@ -356,10 +359,13 @@ func main() {
 // tests call it directly to build and register the exact same table
 // (auth_middleware_test.go's route-coverage walk, most notably).
 //
-// worldImageryClient is passed in because it's a plain local value in
-// main() (not a package-level global like globalTileCache/
-// globalNearbyContactStore, which the five closures below read directly).
-func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []apiRoute {
+// tileFetchClient is passed in because it's a plain local value in main()
+// (not a package-level global like globalTileCache/
+// globalNearbyContactStore, which the closures below read directly). It
+// backs both the Esri World Imagery routes and the Carto basemap routes
+// (ADR 0067) - one shared upstream-fetch client, same reasoning as the one
+// shared tileCache both write into.
+func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiRoute {
 	return []apiRoute{
 		// ── public: no session required ─────────────────────────────────
 		{http.MethodGet, "/api/health", tierPublic, healthCheck},
@@ -415,11 +421,19 @@ func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []a
 		{http.MethodGet, "/api/engine-profiles", tierRead, engineProfilesHandler},
 		{http.MethodGet, "/api/czone/switches", tierRead, getCZoneSwitchesHandler},
 		{http.MethodGet, "/api/autopilot", tierRead, getAutopilotHandler},
-		{http.MethodGet, "/api/world-imagery/:z/:x/:y", tierRead, proxyWorldImageryTileHandler(globalTileCache, worldImageryClient)},
+		{http.MethodGet, "/api/world-imagery/:z/:x/:y", tierRead, proxyWorldImageryTileHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/world-imagery/prefetch/:jobId", tierRead, prefetchStatusHandler()},
 		{http.MethodGet, "/api/gshhg-coastline", tierRead, gshhgCoastlineHandler},
 		{http.MethodGet, "/api/sat-charts", tierRead, listSatChartsHandler},
 		{http.MethodGet, "/api/sat-charts/:id/:z/:x/:y", tierRead, satChartTileHandler},
+		// Carto vector basemap proxy + offline cache (ADR 0067) - same
+		// tierRead as world-imagery above: read-only, no session write
+		// implied by fetching a map tile/style/font/sprite.
+		{http.MethodGet, "/api/basemap/style/:name", tierRead, basemapStyleHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/tilejson", tierRead, basemapTileJSONHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/tiles/:z/:x/:y", tierRead, basemapVectorTileHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/fonts/:fontstack/:range", tierRead, basemapFontsHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/sprite/:name", tierRead, basemapSpriteHandler(globalTileCache, tileFetchClient)},
 
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
@@ -454,7 +468,7 @@ func buildAPIRoutes(sessions *sessionStore, worldImageryClient *http.Client) []a
 		{http.MethodPost, "/api/autopilot/gybe/:side", tierWrite, postAutopilotGybeHandler},
 		{http.MethodPut, "/api/autopilot/dodge", tierWrite, putAutopilotDodgeHandler},
 		{http.MethodDelete, "/api/autopilot/dodge", tierWrite, deleteAutopilotDodgeHandler},
-		{http.MethodPost, "/api/world-imagery/prefetch", tierWrite, prefetchWorldImageryHandler(globalTileCache, worldImageryClient)},
+		{http.MethodPost, "/api/world-imagery/prefetch", tierWrite, prefetchWorldImageryHandler(globalTileCache, tileFetchClient)},
 		{http.MethodDelete, "/api/world-imagery/cache", tierWrite, deleteWorldImageryCacheHandler(globalTileCache)},
 		{http.MethodPost, "/api/sat-charts", tierWrite, uploadSatChartHandler},
 		{http.MethodDelete, "/api/sat-charts/:id", tierWrite, deleteSatChartHandler},

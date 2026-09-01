@@ -13,9 +13,13 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { RodeMethodResult } from '@/lib/rode-plan'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 
-// ── Map style URLs (Carto, no API key required) ─────────────────────────────
-const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
-const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+// Carto basemap styles, served by our own backend rather than fetched
+// from basemaps.cartocdn.com directly: the backend rewrites the style's
+// tile/glyph/sprite URLs to same-origin /api/basemap paths and caches
+// every asset in SQLite, so the chart still draws with no uplink. See
+// docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
+const STYLE_LIGHT = '/api/basemap/style/positron'
+const STYLE_DARK = '/api/basemap/style/dark-matter'
 const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
 const SAT_HANDOFF_START_ZOOM = 9
