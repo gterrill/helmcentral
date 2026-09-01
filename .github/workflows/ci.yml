@@ -53,6 +53,15 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      # Dependency correctness only, not dead-code hunting. Catches imports of
+      # packages that resolve today purely because they are transitive deps
+      # that npm happens to hoist, which is a build that breaks on someone
+      # else's version bump. Run `npm run knip` locally for the full report;
+      # its unused-export findings are advisory and not worth failing a build.
+      - name: Dependency check
+        working-directory: frontend
+        run: npm run knip:deps
+
       - name: Test
         working-directory: frontend
         run: npm test
