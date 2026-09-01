@@ -14,6 +14,7 @@ import { isChartAvailable } from '@/lib/chart-availability'
 import type { SatChart } from '@/hooks/use-sat-charts'
 import { useImageryPrefetch } from '@/hooks/use-imagery-prefetch'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
+import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 
 // Carto basemap styles, served by our own backend rather than fetched
 // from basemaps.cartocdn.com directly: the backend rewrites the style's
@@ -130,6 +131,7 @@ export function RoutePlannerMap({
   satCharts = [],
 }: RoutePlannerMapProps) {
   const mapRef = useRef<MapRef | null>(null)
+  const collapseAttribution = useCollapsedMapAttribution(mapRef)
   const suppressNextMapClickRef = useRef(false)
   const hasCenteredOnVesselRef = useRef(false)
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
@@ -409,6 +411,7 @@ export function RoutePlannerMap({
         // Compact keeps it to a single small "i" until tapped, which suits a
         // dense helm display better than a permanent strip of credits.
         attributionControl={{ compact: true }}
+        onIdle={collapseAttribution}
         dragRotate={false}
         touchPitch={false}
       >

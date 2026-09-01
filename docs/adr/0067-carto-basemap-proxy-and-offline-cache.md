@@ -248,8 +248,24 @@ OpenStreetMap via the proxied TileJSON, OpenSeaMap always, Esri only while satel
 switched on, and any uploaded MBTiles chart. Hand-writing a static credit string would drift
 the moment a layer was added.
 
-The stock control is a light pill with dark text, which is right on a plain light basemap and
-reads as a foreign element over Dark Matter or over satellite imagery. It is restyled in
+It is pinned to its compact "i" icon rather than the full credit line. `compact: true` alone
+does not achieve that: reading MapLibre's `_updateCompact`, the first time the attribution
+becomes non-empty the control has neither the compact nor the empty class yet, so it adds
+`maplibregl-compact` and `maplibregl-compact-show` together and renders fully expanded. It then
+stays expanded until something collapses it, which on a real map is the first drag or pinch and
+never happens at all if you only zoom with the on-screen buttons. That is why it looked like an
+icon at some times and a long strip of text at others: it depended entirely on whether the map
+had been touched yet.
+
+This cannot be fixed in CSS. The auto-expanded state and the state after a deliberate tap on
+the icon are identical - `open` and `maplibregl-compact-show` are always both present or both
+absent - so no selector can distinguish "MapLibre opened this" from "the operator opened this".
+`useCollapsedMapAttribution` collapses it on the map's `onIdle` instead, and stops permanently
+the moment the operator clicks the icon themselves, since re-collapsing under someone reading
+the credits would be worse than the original inconsistency.
+
+The stock control is also a light pill with dark text, which is right on a plain light basemap
+and reads as a foreign element over Dark Matter or over satellite imagery. It is restyled in
 `index.css` to the same translucent-dark treatment the "No chart data" pill and the
 zoom/satellite buttons already use, identical in both themes, because it sits on map imagery
 rather than on an app surface. Those overrides deliberately live outside `@layer components`:

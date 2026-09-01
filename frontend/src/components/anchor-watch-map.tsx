@@ -12,6 +12,7 @@ import type { RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { RodeMethodResult } from '@/lib/rode-plan'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
+import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 
 // Carto basemap styles, served by our own backend rather than fetched
 // from basemaps.cartocdn.com directly: the backend rewrites the style's
@@ -229,6 +230,7 @@ export function AnchorWatchMap({
 }: AnchorWatchMapProps) {
   const hasAnchor = anchorLat !== null && anchorLon !== null
   const mapRef = useRef<MapRef | null>(null)
+  const collapseAttribution = useCollapsedMapAttribution(mapRef)
   const [editMode, setEditMode] = useState<EditMode>('none')
   const [ghostAnchor, setGhostAnchor] = useState<{ lat: number; lon: number } | null>(null)
   const [liveRadius, setLiveRadius] = useState<number | null>(null)
@@ -839,6 +841,7 @@ export function AnchorWatchMap({
         // Compact keeps it to a single small "i" until tapped, which suits a
         // dense helm display better than a permanent strip of credits.
         attributionControl={{ compact: true }}
+        onIdle={collapseAttribution}
         dragRotate={false}
         touchPitch={false}
         dragPan={editMode === 'none'}
