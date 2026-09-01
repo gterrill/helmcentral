@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import type { TrailPoint } from '@/hooks/use-vessel-trail'
+import type { TrailPoint } from '@/hooks/use-server-trails'
 
 // ── Pure filter logic extracted from fetchMotoringTrail ───────────────────────
 // This mirrors the logic in anchor-watch-map.tsx fetchMotoringTrail callback.
