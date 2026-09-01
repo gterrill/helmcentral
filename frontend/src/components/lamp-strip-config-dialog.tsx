@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import {
+  GAUGE_GROUP_TITLE_MAX_LENGTH,
   LAMP_LABEL_MAX_LENGTH,
   LAMP_STRIP_MAX_LAMPS,
   type DashboardLayoutItem,
@@ -78,6 +79,7 @@ export function LampStripConfigDialog({ widget, onCancel, onSave }: LampStripCon
             <FieldLabel htmlFor="lamp-strip-title">Title</FieldLabel>
             <Input
               id="lamp-strip-title"
+              maxLength={GAUGE_GROUP_TITLE_MAX_LENGTH}
               value={config.title}
               onChange={(e) => setConfig((current) => ({ ...current, title: e.target.value }))}
             />

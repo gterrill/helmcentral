@@ -20,6 +20,7 @@ import {
   CLUSTER_MAX_CORNER_ROWS,
   CLUSTER_MAX_FUEL_BARS,
   CLUSTER_MAX_TELLTALES,
+  GAUGE_GROUP_TITLE_MAX_LENGTH,
   type ClusterFuelRail,
   type DashboardLayoutItem,
   type EngineClusterConfig,
@@ -236,7 +237,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor="cluster-title">Title</FieldLabel>
-                  <Input id="cluster-title" value={config.title}
+                  <Input id="cluster-title" maxLength={GAUGE_GROUP_TITLE_MAX_LENGTH} value={config.title}
                     onChange={(e) => setSlot((c) => ({ ...c, title: e.target.value }))} placeholder="Port" />
                 </Field>
                 <Field>

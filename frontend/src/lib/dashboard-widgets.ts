@@ -222,6 +222,10 @@ export const LAMP_LABEL_MAX_LENGTH = 12
 
 /** Caps mirroring gaugeGroupMaxGauges / gaugeGroupTitleMaxLen in backend/dashboard_pages.go. */
 export const GAUGE_GROUP_MAX_GAUGES = 12
+/**
+ * Named for the gauge group, but the backend checks the same cap against the
+ * cluster and indicator strip titles too, so all three dialogs share it.
+ */
 export const GAUGE_GROUP_TITLE_MAX_LENGTH = 48
 export const GAUGE_GROUP_MAX_COLUMNS = 4
 

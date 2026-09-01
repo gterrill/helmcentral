@@ -19,6 +19,7 @@ import { mergeGaugeSettingsBySuffix } from '@/lib/engine-profiles'
 import {
   GAUGE_GROUP_MAX_COLUMNS,
   GAUGE_GROUP_MAX_GAUGES,
+  GAUGE_GROUP_TITLE_MAX_LENGTH,
   rewriteGaugePaths,
   type DashboardLayoutItem,
   type GaugeGroupWidgetConfig,
@@ -112,6 +113,7 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupC
               <FieldLabel htmlFor="gauge-group-title">Title</FieldLabel>
               <Input
                 id="gauge-group-title"
+                maxLength={GAUGE_GROUP_TITLE_MAX_LENGTH}
                 value={config.title}
                 onChange={(e) => setConfig((current) => ({ ...current, title: e.target.value }))}
                 placeholder="Port"
