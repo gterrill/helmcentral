@@ -29,6 +29,7 @@ let lastZoomHandler: (() => void) | null = null
 let lastStyleDataHandler: (() => void) | null = null
 let lastInitialViewState: { latitude: number; longitude: number; zoom: number } | null = null
 let lastMapStyle: string | null = null
+let lastAttributionControl: unknown = undefined
 const easeToMock = vi.fn()
 const setLayoutPropertyMock = vi.fn()
 const setPaintPropertyMock = vi.fn()
@@ -70,6 +71,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           onStyleData,
           initialViewState,
           mapStyle,
+          attributionControl,
         }: {
           children?: React.ReactNode
           onClick?: (e: { lngLat: { lat: number; lng: number } }) => void
@@ -78,6 +80,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           onStyleData?: () => void
           initialViewState?: { latitude: number; longitude: number; zoom: number }
           mapStyle?: unknown
+          attributionControl?: unknown
         },
         ref: React.Ref<unknown>,
       ) => {
@@ -86,6 +89,7 @@ vi.mock('react-map-gl/maplibre', async () => {
         lastStyleDataHandler = onStyleData ?? null
         lastInitialViewState = initialViewState ?? null
         lastMapStyle = typeof mapStyle === 'string' ? mapStyle : null
+        lastAttributionControl = attributionControl
         React.useImperativeHandle(ref, () => ({
           getCanvas: () => ({ style: { cursor: 'grab' } }),
           getZoom: () => mockZoom,
@@ -213,6 +217,18 @@ describe('RoutePlannerMap', () => {
   // fetches the style before anything else, and a failed style fetch means the
   // map never initialises and no cached tile is ever requested.
   // See docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
+  // Carto and OpenStreetMap require attribution, and the backend now proxies
+  // their tiles, so displaying the credit is squarely our obligation rather
+  // than the CDN's. MapLibre's own control aggregates the attribution every
+  // active source declares (Carto/OSM via the proxied TileJSON, OpenSeaMap,
+  // Esri), so it must not be disabled.
+  // See docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
+  it('shows the attribution control', () => {
+    render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => {}} isDarkTheme={false} />)
+    expect(lastAttributionControl).not.toBe(false)
+    expect(lastAttributionControl).toEqual({ compact: true })
+  })
+
   it('loads the basemap style from the same-origin proxy', () => {
     render(<RoutePlannerMap waypoints={[]} onWaypointsChange={() => {}} isDarkTheme={false} />)
     expect(lastMapStyle).toBe('/api/basemap/style/positron')

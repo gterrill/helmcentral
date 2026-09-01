@@ -399,7 +399,16 @@ export function RoutePlannerMap({
         onZoom={handleZoomChange}
         onLoad={applyHybridVisibility}
         onStyleData={applyHybridVisibility}
-        attributionControl={false}
+        // Carto and OpenStreetMap both require attribution, and since the
+        // backend now proxies and caches their tiles (ADR 0067) rather than
+        // the browser fetching them from CARTO directly, showing that credit
+        // is our obligation, not the CDN's. MapLibre's own control collects
+        // the attribution string every active source declares - Carto/OSM
+        // through the proxied TileJSON, plus OpenSeaMap, Esri and any
+        // uploaded chart - so it stays correct as layers come and go.
+        // Compact keeps it to a single small "i" until tapped, which suits a
+        // dense helm display better than a permanent strip of credits.
+        attributionControl={{ compact: true }}
         dragRotate={false}
         touchPitch={false}
       >

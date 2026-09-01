@@ -237,13 +237,24 @@ redistribution and the cache is not served to anyone else. It sits in the same r
 territory ADR 0016 concluded Esri did, and deliberately not in the territory ADR 0016 ruled out
 for Google, whose ToS carries an explicit caching prohibition.
 
-The attribution obligation is worth calling out as an outstanding gap rather than a solved
-problem. The TileJSON's `attribution` field survives the rewrite untouched, so the credit is
-present in the served document, but both maps set `attributionControl={false}`, so nothing is
-actually rendered on screen. That predates this change and is not made worse by it, but
-proxying the tiles ourselves makes displaying the credit more clearly our responsibility than
-it was when the browser talked to CARTO directly. Turning attribution back on is left as
-follow-up work.
+Attribution is displayed. Both maps previously set `attributionControl={false}`, so the credit
+was present in the served TileJSON but never rendered. Proxying the tiles ourselves makes
+showing it clearly our responsibility rather than the CDN's, so the control is now enabled in
+compact form on both maps.
+
+MapLibre's own control is the right mechanism because it aggregates whatever each currently
+active source declares, so the credit stays correct as layers come and go: Carto and
+OpenStreetMap via the proxied TileJSON, OpenSeaMap always, Esri only while satellite imagery is
+switched on, and any uploaded MBTiles chart. Hand-writing a static credit string would drift
+the moment a layer was added.
+
+The stock control is a light pill with dark text, which is right on a plain light basemap and
+reads as a foreign element over Dark Matter or over satellite imagery. It is restyled in
+`index.css` to the same translucent-dark treatment the "No chart data" pill and the
+zoom/satellite buttons already use, identical in both themes, because it sits on map imagery
+rather than on an app surface. Those overrides deliberately live outside `@layer components`:
+Tailwind tree-shakes that layer against the content scan, and MapLibre builds the control in
+JS, so the class names never appear in the source and the rules would be dropped.
 
 ### Cache clearing
 
@@ -268,7 +279,8 @@ frontend caller for no functional benefit.
 - The tile cache database will grow. Vector tiles are small, but the prefetch action can now
   add up to 8000 combined tiles per invocation. There is no eviction, by design, matching
   ADR 0016.
-- Attribution is still not displayed. See above.
+- Attribution is rendered on both maps, in compact form, and follows whichever sources are
+  actually active.
 
 ## Related
 
@@ -292,5 +304,7 @@ frontend caller for no functional benefit.
 - Load a chart with every request to `*.cartocdn.com` blocked in the browser. The basemap, its
   labels and its glyphs all still render, and the count of blocked CDN requests is zero: nothing
   in the page talks to CARTO directly any more.
+- The attribution control reads "OpenSeaMap | CARTO, OpenStreetMap" on the plain basemap, and
+  gains "Source: Esri, Maxar, Earthstar Geographics" once satellite imagery is toggled on.
 - Load a chart area with the uplink up, then pull the uplink and reload. The basemap, its
   labels and its glyphs all still render.

@@ -10,6 +10,7 @@ vi.mock('maplibre-gl', () => ({
 }))
 
 let lastInitialViewState: { latitude: number; longitude: number; zoom: number } | null = null
+let lastAttributionControl: unknown = undefined
 let lastMoveEndHandler: ((e: { viewState: { latitude: number; longitude: number; zoom: number } }) => void) | null = null
 let lastStyleDataHandler: (() => void) | null = null
 const easeToMock = vi.fn()
@@ -45,17 +46,20 @@ vi.mock('react-map-gl/maplibre', async () => {
         {
           children,
           initialViewState,
+          attributionControl,
           onMoveEnd,
           onStyleData,
         }: {
           children?: React.ReactNode
           initialViewState?: { latitude: number; longitude: number; zoom: number }
+          attributionControl?: unknown
           onMoveEnd?: (e: { viewState: { latitude: number; longitude: number; zoom: number } }) => void
           onStyleData?: () => void
         },
         ref: React.Ref<unknown>,
       ) => {
         lastInitialViewState = initialViewState ?? null
+        lastAttributionControl = attributionControl
         lastMoveEndHandler = onMoveEnd ?? null
         lastStyleDataHandler = onStyleData ?? null
         React.useImperativeHandle(ref, () => ({
@@ -150,6 +154,15 @@ describe('AnchorWatchMap controls and AIS selection', () => {
   // Both hosts are gaining a labeled Raise button with its own confirm
   // dialog; a one-tap unlabeled destructive icon next to that would be
   // inconsistent, so the map no longer offers its own stop control at all.
+  // Same obligation as the routes map: the backend proxies Carto/OSM tiles,
+  // so the credit has to be shown here too.
+  // See docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
+  it('shows the attribution control', () => {
+    renderMap()
+    expect(lastAttributionControl).not.toBe(false)
+    expect(lastAttributionControl).toEqual({ compact: true })
+  })
+
   it('does not render a Stop anchor watch button', () => {
     renderMap()
 

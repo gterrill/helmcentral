@@ -294,3 +294,43 @@
     }
   }
 }
+
+/*
+  Map attribution control (Carto/OpenStreetMap/OpenSeaMap/Esri credit - see
+  docs/adr/0067-carto-basemap-proxy-and-offline-cache.md for why displaying
+  this is our obligation now that the backend proxies those tiles).
+
+  Deliberately NOT inside @layer components. Tailwind tree-shakes that layer
+  against the content scan, and these class names only ever exist at runtime
+  because MapLibre builds the control in JS, so they never survive the scan.
+  Plain CSS here is also why each selector is doubled up: maplibre-gl.css is
+  imported from the map components, so it lands after this file in the
+  bundle and wins any tie on equal specificity.
+
+  The control sits on map imagery rather than an app surface, so it follows
+  the map's own chrome instead of the app's light/dark tokens: the same
+  translucent-dark treatment the "No chart data" pill and the zoom/satellite
+  buttons already use, identical in both themes. MapLibre's stock light pill
+  with dark text reads as a foreign element over Dark Matter or satellite.
+*/
+.maplibregl-ctrl-attrib.maplibregl-ctrl {
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
+  border-radius: 9999px;
+}
+
+.maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner {
+  color: rgb(255 255 255 / 0.8);
+  font-size: 0.6875rem;
+  line-height: 1.25rem;
+}
+
+.maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner a {
+  color: rgb(255 255 255 / 0.9);
+  text-decoration: underline;
+}
+
+/* The compact toggle glyph is drawn dark for a light pill; invert it. */
+.maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
