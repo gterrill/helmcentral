@@ -52,7 +52,7 @@ function for its category:
 | --- | --- | --- |
 | Tides | `search_stations`, `fetch_tide_chart` | Raw station and tide-extreme data |
 | Weather | `fetch_forecast` | Current + multi-day + hourly, all SI units |
-| Waves | `fetch_waves` | Hourly wave/swell series, optional sea-surface temperature |
+| Waves | `fetch_waves` | Hourly wave/swell series with per-component direction and period, optional sea-surface temperature |
 | Forecast warnings | `fetch_warnings(lat, lon)` | Current, relevant bulletins only |
 
 The reference plugins under `docs/examples/` define the exact JSON shape for

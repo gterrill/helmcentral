@@ -11,6 +11,8 @@ What a part of Helmcentral does, what it gives you, and where it stops. Start
 here if you are working out whether to install it or what it will bring aboard.
 
 - [The dashboard](features/dashboard.md), widgets, gauges, embeds and pages.
+- [Forecast](features/forecast.md), weather, wind, wave and tide, and the
+  heavy-weather warning signs the wave graph watches for.
 - [Anchor watch](features/anchor-watch.md), including the rode planner.
 - [Alarms](features/alarms.md), rules, transports and the decisions behind them.
 - [Inventory tracking](features/inventory-tracking.md), designed but not yet built.

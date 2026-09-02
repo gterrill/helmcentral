@@ -123,7 +123,7 @@ cd docs/examples/wave-plugins/open-meteo-marine && go mod tidy && go vet ./... &
 
 ## Endpoints this plugin uses
 
-1. Wave data: `GET https://marine-api.open-meteo.com/v1/marine?latitude=<lat>&longitude=<lon>&hourly=wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height&timezone=auto&forecast_days=<days>&models=ncep_gfswave025`
+1. Wave data: `GET https://marine-api.open-meteo.com/v1/marine?latitude=<lat>&longitude=<lon>&hourly=wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto&forecast_days=<days>&models=ncep_gfswave025`
 
    Response includes `utc_offset_seconds` (how many seconds local time is ahead
    of UTC), hourly time arrays in naive local-time format
@@ -137,3 +137,31 @@ cd docs/examples/wave-plugins/open-meteo-marine && go mod tidy && go vet ./... &
 See Open-Meteo's [Marine Weather API
 docs](https://open-meteo.com/en/docs/marine-weather-api) for full endpoint
 details and coverage.
+
+## Per-component direction and period
+
+The query asks for `wind_wave_direction`, `wind_wave_period`,
+`swell_wave_direction` and `swell_wave_period` alongside the combined figures,
+because the combined ones smear two wave trains into one and that is exactly
+what hides a crossing sea.
+
+One thing to know if you are writing another wave plugin against a different
+model. **Open-Meteo reports a component that is not there as three zeros, not
+as null.** An hour with no swell in it comes back with swell height 0, swell
+period 0 and swell direction 0, and that last one is indistinguishable from a
+genuine northerly swell if you read it on its own.
+
+Verified against a live response at a real vessel position:
+
+```
+time                  Hs     T   wwH   wwD   wwT   swH   swD   swT
+2026-09-03T00:00     0.6   7.4   0.6    79   7.4   0.0     0   0.0
+2026-09-03T18:00     0.5   7.7  0.26   109  2.35  0.44    65   7.7
+```
+
+The first hour is a single wind sea with no swell. The second is a genuine
+two-system sea. The host treats a **zero period** as the marker for "this
+component is absent", so pass the provider's zeros through unchanged rather
+than substituting anything. A plugin whose model does not carry these fields
+at all should omit them; they arrive as zeros and the host reads that as no
+per-component data rather than as waves out of the north.

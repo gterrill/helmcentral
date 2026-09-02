@@ -95,6 +95,15 @@ type wasmWaveHourOutput struct {
 	WaveDirectionDeg float64 `json:"wave_direction_deg"`
 	WindWaveHeightM  float64 `json:"wind_wave_height_m"`
 	SwellWaveHeightM float64 `json:"swell_wave_height_m"`
+
+	// Per-component direction and period. A plugin whose upstream model does
+	// not carry them omits them, and they arrive as 0 - which the host reads
+	// as "this component is not there" rather than as due north, since that
+	// is also how Open-Meteo itself encodes a flat component.
+	WindWaveDirectionDeg  float64 `json:"wind_wave_direction_deg"`
+	WindWavePeriodS       float64 `json:"wind_wave_period_s"`
+	SwellWaveDirectionDeg float64 `json:"swell_wave_direction_deg"`
+	SwellWavePeriodS      float64 `json:"swell_wave_period_s"`
 }
 
 type wasmFetchWavesOutput struct {
@@ -118,6 +127,11 @@ func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, erro
 			WaveDirectionDeg: h.WaveDirectionDeg,
 			WindWaveHeightM:  h.WindWaveHeightM,
 			SwellWaveHeightM: h.SwellWaveHeightM,
+
+			WindWaveDirectionDeg:  h.WindWaveDirectionDeg,
+			WindWavePeriodS:       h.WindWavePeriodS,
+			SwellWaveDirectionDeg: h.SwellWaveDirectionDeg,
+			SwellWavePeriodS:      h.SwellWavePeriodS,
 		})
 	}
 

@@ -208,6 +208,49 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
 // Renders a small double-headed arrow pointing in the direction the swell
 // is heading (the API reports the direction it's coming from, so this is
 // rotated 180 degrees to match the convention used by most swell forecasts).
+/*
+ * Wave statistics and thresholds from Surviving the Storm (Dashew, 1999).
+ *
+ * The highest wave in a sea runs 1.87 times the significant height (page
+ * 243), which is why a forecast read as its headline number understates what
+ * you will actually meet. The 0.8 ceiling (page 233) says wave height in feet
+ * does not normally exceed 0.8 times the wind in knots; a sea past that was
+ * not built by the wind you can see, which is the book's cue to look harder.
+ */
+const HIGHEST_WAVE_MULTIPLE = 1.87
+const METRES_TO_FEET = 3.28084
+const WIND_WAVE_CEILING = 0.8
+// "As little as 3 or 4 degrees Fahrenheit (1 or 2 degrees Celsius)" (page 310).
+const AIR_SEA_DELTA_F = 4
+
+/*
+ * Steepness band colours.
+ *
+ * Only the two escalating bands get an alert colour. Rolling and building
+ * stay the ordinary wave colour, because most days are one of those and a
+ * line that is always painted "a colour" teaches the eye to ignore it. Amber
+ * and red are the app's existing alert tokens rather than new hues, so they
+ * keep looking like warnings under the instrument skin.
+ *
+ * Colour never carries the band on its own: the ratio is written beside every
+ * direction arrow and the band is named in the summary and the tooltip. In
+ * the light theme both the wave and gust tokens fall under 3:1 against the
+ * card, so that text is a requirement rather than a nicety.
+ */
+const WAVE_STEEPNESS_STROKE: Record<string, string> = {
+  rolling: 'hsl(var(--chart-wave) / 0.9)',
+  building: 'hsl(var(--chart-wave) / 0.9)',
+  steep: 'hsl(var(--chart-gust))',
+  breaking: 'hsl(var(--destructive))',
+}
+
+// "1 in N", floored so a 1-in-9.8 sea reads as the steeper 1:9 rather than
+// the flatter-sounding 1:10. Mirrors formatSteepnessRatio in the backend.
+function formatSteepnessRatio(ratio: number | null): string | null {
+  if (ratio === null || ratio <= 0) return null
+  return `1:${Math.floor(1 / ratio)}`
+}
+
 function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; directionDeg: number }) {
   if (directionDeg < 0) return null
 
@@ -444,6 +487,7 @@ export function ForecastDrawer({
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
   const windAreaGradientId = useId()
   const waveAreaGradientId = useId()
+  const waveSteepnessGradientId = useId()
   const tempAreaGradientId = useId()
   const uvAreaGradientId = useId()
   const detailsCardRef = useRef<HTMLDivElement>(null)
@@ -573,7 +617,68 @@ export function ForecastDrawer({
       })),
     [waveHourly],
   )
+  /*
+   * Hard-edged gradient stops, one band per hour, in user space across the
+   * plot so the colour change lands on the hour it describes rather than on
+   * a proportion of the drawn path. Each band emits its colour at its own
+   * hour and again at the next, which makes the transition a step instead of
+   * a blend - a wave either breaks or it does not, and a smeared gradient
+   * would invent intermediate states the data does not have.
+   */
+  const waveSteepnessStops = useMemo(() => {
+    const banded = waveHourly.filter((entry) => entry.steepnessBand !== null)
+    return banded.flatMap((entry, idx) => {
+      const colour = WAVE_STEEPNESS_STROKE[entry.steepnessBand as string] ?? WAVE_STEEPNESS_STROKE.rolling
+      const start = Math.min(1, Math.max(0, entry.hourOfDay / 23))
+      const next = banded[idx + 1]
+      const end = next === undefined ? 1 : Math.min(1, Math.max(0, next.hourOfDay / 23))
+      return [
+        { key: `${idx}-a`, offset: start, colour, band: entry.steepnessBand as string },
+        { key: `${idx}-b`, offset: end, colour, band: entry.steepnessBand as string },
+      ]
+    })
+  }, [waveHourly])
   const waveLabelByHour = useMemo(() => buildLabelByHour(waveHourly), [waveHourly])
+
+  const wavePeakHeightM = useMemo(
+    () => waveHourly.reduce((max, entry) => Math.max(max, entry.waveHeightM), 0),
+    [waveHourly],
+  )
+
+  /*
+   * The warning signs for the selected day, in the words a watchkeeper would
+   * use rather than the field names.
+   *
+   * Three come from the backend, which sees the whole hourly series. The last
+   * two are joined here because they need the weather forecast as well as the
+   * wave one, and those arrive from separate endpoints already keyed by day.
+   */
+  const waveIndicatorMessages = useMemo(() => {
+    const messages: string[] = []
+    const flags = selectedWaveDay?.indicators
+
+    if (flags?.waveFront) messages.push('Sea building fast, 3m or more inside three hours')
+    if (flags?.rapidBuild) messages.push('Height and period both up by half in an hour, a danger signal')
+    if (flags?.periodStep) messages.push('Period lengthening sharply, often ahead of a wave front')
+    if (flags?.crossSea) messages.push('Crossing seas, swell and wind wave more than 60 degrees apart')
+
+    const peakWindKts = selectedDay?.hourlyWind?.reduce((max, entry) => Math.max(max, entry.windSpeed), 0) ?? 0
+    if (wavePeakHeightM > 0 && peakWindKts > 0) {
+      if (wavePeakHeightM * METRES_TO_FEET > WIND_WAVE_CEILING * peakWindKts) {
+        messages.push('Seas outrunning the wind that could have built them')
+      }
+    }
+
+    // Cold air over warmer water is the direction that matters: the water is
+    // the energy source. Warm air over cold water is not the same event.
+    if (waveSeaTemperatureF !== null && typeof selectedDay?.low === 'number') {
+      if (waveSeaTemperatureF - selectedDay.low >= AIR_SEA_DELTA_F) {
+        messages.push('Cold air over warmer water, which feeds gusty, unsettled weather')
+      }
+    }
+
+    return messages
+  }, [selectedWaveDay, selectedDay, wavePeakHeightM, waveSeaTemperatureF])
   // Wave's viewBox is 170 tall (not the 175 the other hourly charts use), so
   // its bottom margin is derived from that height, not a hardcoded 175.
   const waveChartMargin = hourlyChartMargin(170)
@@ -1175,13 +1280,34 @@ export function ForecastDrawer({
                     const summaryWithTemp = `${trimmed} and sea surface temperature of ${seaTempDisplay}.`
                     return <p className="mb-2 text-base text-foreground/80">{summaryWithTemp}</p>
                   })()}
+                  {wavePeakHeightM > 0 && (
+                    <p data-testid="forecast-wave-largest" className="mb-2 text-[13px] text-muted-foreground">
+                      Largest wave you are likely to meet: {(wavePeakHeightM * HIGHEST_WAVE_MULTIPLE).toFixed(1)} m.
+                      Roughly one wave in seven reaches the significant height.
+                    </p>
+                  )}
+                  {waveIndicatorMessages.length > 0 && (
+                    <ul
+                      data-testid="forecast-wave-indicators"
+                      className="mb-2 space-y-1 rounded border border-gauge-secondary/40 bg-muted/25 p-2 text-[13px] text-foreground/90"
+                    >
+                      {waveIndicatorMessages.map((message) => (
+                        <li key={message} className="flex items-start gap-1.5">
+                          <Waves size={12} className="mt-0.5 shrink-0 text-gauge-secondary" aria-hidden />
+                          <span>{message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <div className="relative">
                     {waveTooltipEntry && (
                       <ChartTooltipBubble
                         pixelX={waveTooltip.tooltipPixelX ?? 0}
                         time={waveTooltipEntry.label}
                         primary={`${waveTooltipEntry.waveHeightM.toFixed(1)} m`}
-                        secondary={`Swell ${waveTooltipEntry.swellWaveHeightM.toFixed(1)}m from ${compassLabel(waveTooltipEntry.waveDirectionDeg)} · Chop ${waveTooltipEntry.windWaveHeightM.toFixed(1)}m`}
+                        secondary={`Swell ${waveTooltipEntry.swellWaveHeightM.toFixed(1)}m from ${compassLabel(waveTooltipEntry.waveDirectionDeg)} · Chop ${waveTooltipEntry.windWaveHeightM.toFixed(1)}m${
+                          waveTooltipEntry.steepnessBand ? ` · ${formatSteepnessRatio(waveTooltipEntry.steepnessRatio)} ${waveTooltipEntry.steepnessBand}` : ''
+                        }`}
                       />
                     )}
                     <div
@@ -1239,7 +1365,7 @@ export function ForecastDrawer({
                           type="monotone"
                           isAnimationActive={false}
                           dot={false}
-                          stroke="hsl(var(--chart-wave) / 0.9)"
+                          stroke={waveSteepnessStops.length > 0 ? `url(#${waveSteepnessGradientId})` : 'hsl(var(--chart-wave) / 0.9)'}
                           strokeWidth={2.4}
                         />
                         <Customized
@@ -1250,7 +1376,14 @@ export function ForecastDrawer({
                                 return (
                                   <g key={idx}>
                                     <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
-                                    <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{entry.wavePeriodS.toFixed(1)}s</text>
+                                    {/* Period and steepness share one baseline: the plot starts at
+                                        HOURLY_CHART_TOP (35) and a second row would land inside it. */}
+                                    <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                                      {entry.wavePeriodS.toFixed(1)}s
+                                      {formatSteepnessRatio(entry.steepnessRatio) && (
+                                        <tspan dx={5}>{formatSteepnessRatio(entry.steepnessRatio)}</tspan>
+                                      )}
+                                    </text>
                                   </g>
                                 )
                               })}
@@ -1272,6 +1405,24 @@ export function ForecastDrawer({
                           <linearGradient id={waveAreaGradientId} x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="hsl(var(--chart-wave))" stopOpacity="0.28" />
                             <stop offset="100%" stopColor="hsl(var(--chart-wave))" stopOpacity="0.02" />
+                          </linearGradient>
+                          <linearGradient
+                            id={waveSteepnessGradientId}
+                            gradientUnits="userSpaceOnUse"
+                            x1={hourlyChartLeft}
+                            y1="0"
+                            x2={hourlyChartRight}
+                            y2="0"
+                          >
+                            {waveSteepnessStops.map((stop) => (
+                              <stop
+                                key={stop.key}
+                                data-testid="forecast-wave-steepness-stop"
+                                data-band={stop.band}
+                                offset={`${stop.offset * 100}%`}
+                                stopColor={stop.colour}
+                              />
+                            ))}
                           </linearGradient>
                         </defs>
                         {waveAxisTicks.filter((tick) => Number.isInteger(tick)).map((tick) => (

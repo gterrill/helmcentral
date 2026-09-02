@@ -68,6 +68,15 @@ func (b *telemetryRingBuffer) since(cutoff time.Time) []telemetryPoint {
 var (
 	windGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
 	depthHistory    = newTelemetryRingBuffer(telemetryHistoryCapacity)
+
+	// Heavy-weather trends (ADR 0070). All three are sized like the gust
+	// buffer because the barometric figures the book works in run out to a
+	// 24-hour tendency, well past the 3-hour window the derived paths use.
+	//
+	// Variables rather than constants so tests can swap in a small buffer.
+	barometerHistory         = newTelemetryRingBuffer(windGustHistoryCapacity)
+	trueWindSpeedHistory     = newTelemetryRingBuffer(windGustHistoryCapacity)
+	trueWindDirectionHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
 )
 
 // inMemoryMaxWindGustKts returns the max recorded wind speed in the given

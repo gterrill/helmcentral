@@ -3,6 +3,7 @@ package main
 import (
 	"sort"
 	"strings"
+	"time"
 )
 
 /*
@@ -29,11 +30,51 @@ const derivedPathPrefix = "helmcentral."
 // existing fuelEconomy quantity converts it unchanged.
 const vesselFuelEconomyPath = derivedPathPrefix + "propulsion.fuelEconomy"
 
-var derivedPathIDs = []string{vesselFuelEconomyPath}
+/*
+Heavy-weather trends (ADR 0070).
+
+These exist because Surviving the Storm's advice is almost entirely about
+rates and relationships, and an alarm rule compares one path against one
+number. Deriving the rate here means the rule engine, its dwell and its
+hysteresis all work unchanged.
+
+pressureRate is the barometer's slope, the figure the book treats as the real
+warning. squashZoneIndex is the pattern it says onboard instruments are worst
+at spotting and that causes the most trouble: the wind climbing while the
+barometer sits still.
+*/
+const (
+	pressureRatePath     = derivedPathPrefix + "environment.pressureRate"
+	pressureChange3hPath = derivedPathPrefix + "environment.pressureChange3h"
+	squashZoneIndexPath  = derivedPathPrefix + "environment.squashZoneIndex"
+)
+
+// SignalK paths these are derived from. Read through the snapshot rather than
+// added to the vessel-state struct, since nothing else needs them there.
+const (
+	outsidePressurePath   = "environment.outside.pressure"
+	windSpeedTruePath     = "environment.wind.speedTrue"
+	windDirectionTruePath = "environment.wind.directionTrue"
+)
+
+var derivedPathIDs = []string{
+	vesselFuelEconomyPath,
+	pressureRatePath,
+	pressureChange3hPath,
+	squashZoneIndexPath,
+}
 
 // Units each derived path reports in, so the path picker can preselect a
 // quantity the same way it does from SignalK's own meta.
-var derivedPathUnits = map[string]string{vesselFuelEconomyPath: "m/m3"}
+//
+// squashZoneIndex is unitless: it is 1 or 0, and a rule binds it with
+// "above 0.5". An empty unit is the honest answer rather than inventing one.
+var derivedPathUnits = map[string]string{
+	vesselFuelEconomyPath: "m/m3",
+	pressureRatePath:      "Pa/s",
+	pressureChange3hPath:  "Pa",
+	squashZoneIndexPath:   "",
+}
 
 func isDerivedPath(path string) bool {
 	return strings.HasPrefix(path, derivedPathPrefix)
@@ -93,7 +134,16 @@ func fuelRatePaths(tree map[string]any) []string {
 // derivedPathValues computes every derived path, absent ones included, so the
 // stream can carry a null rather than dropping the key.
 func derivedPathValues() map[string]*float64 {
-	out := map[string]*float64{vesselFuelEconomyPath: nil}
+	out := map[string]*float64{
+		vesselFuelEconomyPath: nil,
+		pressureRatePath:      nil,
+		pressureChange3hPath:  nil,
+		squashZoneIndexPath:   nil,
+	}
+
+	// The weather trends come from ring buffers rather than the snapshot, so
+	// they are computed whether or not the vessel tree has arrived yet.
+	addWeatherTrendValues(out, time.Now().UTC())
 
 	tree := globalSignalKSnapshot.selfTree()
 	if tree == nil {
@@ -105,4 +155,70 @@ func derivedPathValues() map[string]*float64 {
 		out[vesselFuelEconomyPath] = &economy
 	}
 	return out
+}
+
+// addWeatherTrendValues fills in the barometric and squash-zone paths from
+// the recorded history.
+//
+// The squash-zone index is only reported once there is enough barometer
+// history to say the barometer is genuinely steady. Without that, "the
+// pressure is not moving" and "we have not been watching the pressure" are
+// indistinguishable, and the second must not read as the first.
+func addWeatherTrendValues(out map[string]*float64, now time.Time) {
+	cutoff := now.Add(-pressureTrendWindow)
+	pressure := barometerHistory.since(cutoff)
+
+	if rate, ok := linearSlopePerSecond(pressure); ok {
+		out[pressureRatePath] = &rate
+	}
+	if change, ok := changeOverWindow(pressure); ok {
+		out[pressureChange3hPath] = &change
+	}
+
+	if _, ok := linearSlopePerSecond(pressure); !ok {
+		return
+	}
+	windSpeed := trueWindSpeedHistory.since(cutoff)
+	if _, ok := linearSlopePerSecond(windSpeed); !ok {
+		return
+	}
+
+	index := squashZoneSignature(pressure, windSpeed, trueWindDirectionHistory.since(cutoff))
+	out[squashZoneIndexPath] = &index
+}
+
+/*
+derivedAwareAlarmReader reads derived paths as well as published ones.
+
+ADR 0055 said a derived value could be bound anywhere a path could and named
+alarm rules among them, but the alarm loop read through snapshotAlarmReader,
+which walks the SignalK tree alone. A rule naming helmcentral.* therefore saw
+absence, and since absence never satisfies a threshold the rule silently never
+fired. A rule that cannot fire is worse than one that does not exist, because
+the operator believes something is watching.
+
+Derived values keep their absence: a path that is computed but undefined right
+now reports not-present, exactly as a missing SignalK path does, so a "below"
+rule cannot fire on a number that does not exist.
+*/
+func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
+	published := snapshotAlarmReader(snapshot)
+
+	return func(path string) alarmSample {
+		if !isDerivedPath(path) {
+			return published(path)
+		}
+
+		value, ok := derivedPathValues()[path]
+		if !ok || value == nil {
+			return alarmSample{}
+		}
+
+		// Derived values are recomputed every tick from the current snapshot,
+		// so they are exactly as fresh as the stream itself. Reporting the
+		// snapshot's last message time lets a staleness rule on a derived path
+		// mean what it does on a published one.
+		_, lastMessage := snapshot.status()
+		return alarmSample{Value: *value, Present: true, LastSeen: lastMessage}
+	}
 }

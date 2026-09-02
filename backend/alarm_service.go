@@ -50,7 +50,10 @@ func evaluateAlarmsOnce(now time.Time) {
 	// band on a gauge is the alarm rather than merely looking like one.
 	rules := append(listAlarmRules(), zoneDerivedAlarmRules()...)
 
-	events := globalAlarmEngine.evaluate(rules, snapshotAlarmReader(globalSignalKSnapshot), now)
+	// derivedAwareAlarmReader rather than snapshotAlarmReader, so a rule can
+	// name a helmcentral.* path. Reading through the snapshot alone made those
+	// rules permanently absent, and so permanently silent (ADR 0070).
+	events := globalAlarmEngine.evaluate(rules, derivedAwareAlarmReader(globalSignalKSnapshot), now)
 	for _, event := range events {
 		recordAlarmEvent(event, now)
 	}

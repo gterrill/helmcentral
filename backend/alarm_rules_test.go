@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,10 @@ func withTempAlarmRules(t *testing.T) string {
 
 	alarmRulesMu.Lock()
 	alarmRulesState = map[string]*alarmRule{}
+	// The seed markers are part of the rules file's state, so a helper that
+	// stands up a fresh install has to clear them too - otherwise one test's
+	// seeding suppresses every later test's.
+	alarmRulesSeededSets = nil
 	alarmRulesMu.Unlock()
 
 	return path
@@ -209,5 +214,107 @@ func TestValidateAlarmRuleTrimsAndDefaultsMethods(t *testing.T) {
 	}
 	if len(rule.Methods) == 0 {
 		t.Fatalf("expected a default notification method rather than a silent alarm")
+	}
+}
+
+// --- heavy-weather seed set (ADR 0070) ---
+
+func TestSeedHeavyWeatherRules_CreatesThemDisabled(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedHeavyWeatherRules(); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	rules := listAlarmRules()
+	if len(rules) == 0 {
+		t.Fatal("expected the heavy-weather set to be created")
+	}
+	for _, rule := range rules {
+		// Every threshold here is one crew's number from a 1999 book, not
+		// something measured on this boat. Enabling them unasked would be
+		// asserting a confidence nobody has earned yet.
+		if rule.Enabled {
+			t.Fatalf("seeded rule %q must ship disabled", rule.Label)
+		}
+		if rule.DwellSeconds <= 0 {
+			t.Fatalf("seeded rule %q needs a dwell; alarm storms are why people switch alarms off", rule.Label)
+		}
+		if !isDerivedPath(rule.Path) {
+			t.Fatalf("seeded rule %q binds %q, which is not a derived path", rule.Label, rule.Path)
+		}
+	}
+}
+
+// Seeding is keyed on a marker in the file, not on the file being empty, so
+// a set the operator deleted on purpose never comes back. Unexpected state is
+// usually deliberate.
+func TestSeedHeavyWeatherRules_RunsOnceAndDoesNotResurrectDeleted(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedHeavyWeatherRules(); err != nil {
+		t.Fatalf("first seed failed: %v", err)
+	}
+	first := listAlarmRules()
+	if len(first) < 2 {
+		t.Fatalf("expected several seeded rules, got %d", len(first))
+	}
+
+	if err := deleteAlarmRule(first[0].ID); err != nil {
+		t.Fatalf("deleting a seeded rule failed: %v", err)
+	}
+	remaining := len(listAlarmRules())
+
+	if err := seedHeavyWeatherRules(); err != nil {
+		t.Fatalf("second seed failed: %v", err)
+	}
+	if got := len(listAlarmRules()); got != remaining {
+		t.Fatalf("re-seeding changed the rule count from %d to %d", remaining, got)
+	}
+
+	// And the marker survives a reload from disk.
+	if err := loadAlarmRules(); err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	if err := seedHeavyWeatherRules(); err != nil {
+		t.Fatalf("third seed failed: %v", err)
+	}
+	if got := len(listAlarmRules()); got != remaining {
+		t.Fatalf("seeding after a reload changed the rule count to %d, want %d", got, remaining)
+	}
+}
+
+// The thresholds convert the book's millibars into the SI units the derived
+// paths report, and getting that conversion wrong is the difference between
+// a rule that fires on a gale and one that never fires at all.
+func TestSeedHeavyWeatherRules_ThresholdsAreInSIUnits(t *testing.T) {
+	withTempAlarmRules(t)
+	if err := seedHeavyWeatherRules(); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	byLabel := map[string]alarmRule{}
+	for _, rule := range listAlarmRules() {
+		byLabel[rule.Label] = rule
+	}
+
+	falling, ok := byLabel["Barometer falling"]
+	if !ok {
+		t.Fatalf("expected a 'Barometer falling' rule, got %v", byLabel)
+	}
+	// 1 mb/hr is 100 Pa over 3600 s.
+	if math.Abs(falling.Value-(-100.0/3600.0)) > 1e-6 {
+		t.Fatalf("falling threshold = %v Pa/s, want %v", falling.Value, -100.0/3600.0)
+	}
+	if falling.Op != alarmOpBelow {
+		t.Fatalf("a falling barometer is a 'below' rule, got %q", falling.Op)
+	}
+
+	squash, ok := byLabel["Squash zone"]
+	if !ok {
+		t.Fatalf("expected a 'Squash zone' rule")
+	}
+	if squash.Op != alarmOpAbove || squash.Value != 0.5 {
+		t.Fatalf("squash-zone rule should be 'above 0.5', got %q %v", squash.Op, squash.Value)
 	}
 }

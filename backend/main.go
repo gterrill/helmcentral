@@ -292,6 +292,12 @@ func main() {
 	if err := loadAlarmRules(); err != nil {
 		log.Fatalf("failed to load alarm rules: %v", err)
 	}
+	// Offers the heavy-weather set once per installation, disabled, for the
+	// operator to enable and tune (ADR 0070). A failure here is not fatal: it
+	// leaves the alarm centre exactly as it was, which is a working state.
+	if err := seedHeavyWeatherRules(); err != nil {
+		log.Printf("could not seed the heavy-weather alarm rules: %v", err)
+	}
 	if err := loadAlarmTransports(); err != nil {
 		log.Fatalf("failed to load alarm transports: %v", err)
 	}

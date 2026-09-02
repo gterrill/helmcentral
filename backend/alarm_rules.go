@@ -88,11 +88,18 @@ type alarmRule struct {
 
 type alarmRulesFile struct {
 	Rules []*alarmRule `json:"rules"`
+
+	// SeededSets records which built-in rule sets have already been offered,
+	// so seeding runs once per installation. Keyed on the marker rather than
+	// on the file being empty, because a set the operator deleted on purpose
+	// must never come back on the next restart.
+	SeededSets []string `json:"seeded_sets,omitempty"`
 }
 
 var (
-	alarmRulesMu    sync.RWMutex
-	alarmRulesState = map[string]*alarmRule{}
+	alarmRulesMu         sync.RWMutex
+	alarmRulesState      = map[string]*alarmRule{}
+	alarmRulesSeededSets []string
 )
 
 // Rules live in their own file rather than settings.yaml deliberately: POST
@@ -111,6 +118,7 @@ func loadAlarmRules() error {
 			// A fresh install has no rules; that is not a failure.
 			alarmRulesMu.Lock()
 			alarmRulesState = map[string]*alarmRule{}
+			alarmRulesSeededSets = nil
 			alarmRulesMu.Unlock()
 			return nil
 		}
@@ -134,6 +142,7 @@ func loadAlarmRules() error {
 
 	alarmRulesMu.Lock()
 	alarmRulesState = next
+	alarmRulesSeededSets = file.SeededSets
 	alarmRulesMu.Unlock()
 	return nil
 }
@@ -144,7 +153,7 @@ func saveAlarmRulesLocked() error {
 		list = append(list, rule)
 	}
 	sortAlarmRules(list)
-	return writeJSONFileAtomic(alarmRulesFilePath(), alarmRulesFile{Rules: list})
+	return writeJSONFileAtomic(alarmRulesFilePath(), alarmRulesFile{Rules: list, SeededSets: alarmRulesSeededSets})
 }
 
 // sortAlarmRules gives both the file and the API a stable order. CreatedAt

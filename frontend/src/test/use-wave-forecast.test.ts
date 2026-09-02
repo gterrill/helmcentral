@@ -92,6 +92,17 @@ describe('useWaveForecast', () => {
       waveDirectionDeg: 90,
       windWaveHeightM: 0.4,
       swellWaveHeightM: 0.8,
+      // Absent per-component fields carry the -1 marker the rest of this
+      // payload uses for "the provider did not send this", never 0 - a zero
+      // period is how the provider says a component is flat.
+      windWaveDirectionDeg: -1,
+      windWavePeriodS: -1,
+      swellWaveDirectionDeg: -1,
+      swellWavePeriodS: -1,
+      // This fixture predates steepness and carries neither field, so both
+      // map to absent rather than to a fabricated calm reading.
+      steepnessRatio: null,
+      steepnessBand: null,
     })
     expect(result.current.seaTemperatureF).toBe(74.5)
     expect(result.current.provider).toBe('open-meteo-marine')
@@ -171,5 +182,90 @@ describe('useWaveForecast', () => {
     // Stale data from the previous successful fetch stays visible instead of
     // flickering to empty on a transient refetch failure.
     expect(result.current.days).toHaveLength(1)
+  })
+})
+
+describe('useWaveForecast steepness', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('maps the steepness ratio and band, and keeps absence absent', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [
+          {
+            day_key: '2026-09-03',
+            hourly_wave: [
+              { label: '3AM', hour_of_day: 3, wave_height_m: 4, wave_period_s: 5, steepness_ratio: 0.1025, steepness_band: 'breaking' },
+              { label: '4AM', hour_of_day: 4, wave_height_m: 2, wave_period_s: 0, steepness_ratio: null, steepness_band: '' },
+            ],
+          },
+        ],
+        sea_temperature_f: null,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWaveForecast())
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const hours = result.current.days[0].hourlyWave
+    expect(hours[0].steepnessRatio).toBeCloseTo(0.1025, 4)
+    expect(hours[0].steepnessBand).toBe('breaking')
+
+    // A null ratio must not become 0: a flat sea and an unknown one are
+    // different readings, and only one of them is reassuring.
+    expect(hours[1].steepnessRatio).toBeNull()
+    expect(hours[1].steepnessBand).toBeNull()
+  })
+})
+
+describe('useWaveForecast indicators', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('maps the day indicator flags', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        days: [
+          {
+            day_key: '2026-09-03',
+            hourly_wave: [],
+            indicators: { wave_front: true, rapid_build: false, period_step: true },
+          },
+          { day_key: '2026-09-04', hourly_wave: [] },
+        ],
+        sea_temperature_f: null,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWaveForecast())
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.days[0].indicators).toEqual({ waveFront: true, rapidBuild: false, periodStep: true, crossSea: false })
+    // A day the backend sent no indicators for reports all-clear rather than
+    // undefined, so the drawer has nothing to guard against.
+    expect(result.current.days[1].indicators).toEqual({ waveFront: false, rapidBuild: false, periodStep: false, crossSea: false })
   })
 })

@@ -86,6 +86,26 @@ func sampleTracks(settingsPath string) {
 		}
 	}
 
+	/*
+	 * Heavy-weather trends (ADR 0070), read straight off the delta-stream
+	 * snapshot rather than the vessel-state fetch, because none of these three
+	 * are in that struct and none of them needs to be - nothing but the
+	 * derived paths consumes them.
+	 *
+	 * A path the boat does not publish simply records nothing, and the derived
+	 * value stays absent rather than becoming a confident zero.
+	 */
+	trend := derivedAwareAlarmReader(globalSignalKSnapshot)
+	if pressure := trend(outsidePressurePath); pressure.Present {
+		barometerHistory.record(pressure.Value, now)
+	}
+	if windSpeed := trend(windSpeedTruePath); windSpeed.Present {
+		trueWindSpeedHistory.record(windSpeed.Value, now)
+	}
+	if windDirection := trend(windDirectionTruePath); windDirection.Present {
+		trueWindDirectionHistory.record(windDirection.Value, now)
+	}
+
 	solar, solarErr := fetchSignalKSolarState()
 	if solarErr == nil && solar.CurrentW >= 0 {
 		solarStats.record(solar.CurrentW, now)

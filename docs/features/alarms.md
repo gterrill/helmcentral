@@ -71,3 +71,78 @@ units.
 Rules derived this way appear in the alarms list alongside hand-written ones,
 marked as coming from a gauge, and are edited on the gauge rather than in the
 list.
+
+## Values Helmcentral works out for itself
+
+A rule can name any path SignalK publishes, but some of the most useful things
+to alarm on are not published by anything. They are rates, or relationships
+between two readings, and an instrument reports neither.
+
+Helmcentral computes these and publishes them under `helmcentral.`, where they
+behave like any other path. They appear in the path picker with their units,
+they bind to gauges and rules the same way, and they report nothing rather than
+zero when there is not enough history to answer.
+
+| Path | Units | What it is |
+| --- | --- | --- |
+| `helmcentral.environment.pressureRate` | Pa/s | The barometer's rate of change over the last three hours. 100 Pa/hr is 1 mb/hr. |
+| `helmcentral.environment.pressureChange3h` | Pa | The plain three-hour tendency, the figure marine forecasts quote. |
+| `helmcentral.environment.squashZoneIndex` | none | 1 when the wind has climbed 10 knots in three hours while the barometer stayed within 1 mb and the direction held. Bind it with "above 0.5". |
+| `helmcentral.propulsion.fuelEconomy` | m/m³ | The whole boat's distance per unit fuel, rather than one engine's. |
+
+These need the boat to be publishing `environment.outside.pressure` and, for
+the squash-zone index, true wind speed and direction. Nothing breaks if it is
+not: the value stays absent, and an absent value never satisfies a rule.
+
+The barometer paths need half an hour of history before they report anything,
+and clear when Helmcentral restarts. A slope drawn through two readings a
+minute apart can imply any weather at all.
+
+### Why a squash zone gets its own path
+
+A squash zone is a high and a low close enough together to accelerate the wind
+between them. It is worth a rule of its own because it is the one pattern the
+barometer cannot warn you about: pressure and wind direction both hold steady
+while the wind builds. The instrument everybody watches does nothing.
+
+*Surviving the Storm* calls squash zones the cause of most heavy-weather
+trouble yachts encounter, and singles out the western South Pacific around New
+Zealand and Australia as getting more than its share. See
+[Forecast](forecast.md) for where these thresholds come from.
+
+## The heavy-weather rule set
+
+Helmcentral ships five rules using thresholds from that book, created once on
+first run:
+
+| Rule | Fires when | Severity |
+| --- | --- | --- |
+| Barometer falling | Falling faster than 1 mb/hr | warn |
+| Barometer plummeting | Falling faster than 2 mb/hr | alarm |
+| Barometer down 3mb in three hours | Three-hour tendency past -3 mb | warn |
+| Squash zone | The signature above holds | warn |
+| Tropical barometer anomaly | Three-hour tendency past -1.5 mb | alert |
+
+**They arrive switched off.** These are one crew's numbers, published in 1999,
+and they have not been calibrated against your boat or your cruising ground.
+Enabling them unasked would claim a confidence nobody has earned. Turn on the
+ones that suit where you sail, and adjust them once you have watched your own
+barometer for a season.
+
+The tropical rule is the clearest example of why. In the tropics the barometer
+swings about 1.5 mb either way every day on its own, so any departure from that
+rhythm means something. Anywhere else the same rule will cry wolf.
+
+They are ordinary rules once created. Edit them, retune them, delete them. A
+rule you delete stays deleted; the set is not re-created on the next restart.
+
+### One thing the rules cannot know
+
+A rate of fall means different things depending on which way you are going. A
+system moving at 15 knots closes 190 miles a day on a boat running with it and
+528 on one heading into it, and the barometer moves accordingly. The same
+1 mb/hr is a different situation in each case.
+
+At anchor this does not apply. Underway it does, and no threshold can account
+for it, so it is worth holding in your head rather than expecting the alarm to
+have allowed for it.

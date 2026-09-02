@@ -208,3 +208,52 @@ func TestClampForecastDays_PassThrough(t *testing.T) {
 		t.Errorf("expected 1 for days=1, got %d", got)
 	}
 }
+
+// Captured from a live Open-Meteo Marine response at the vessel's position on
+// 2026-09-03, not hand-written. The point it pins is the encoding of an
+// absent component: at 00:00 there was no swell, and the provider reported
+// its height, period and direction all as 0 rather than null. The host reads
+// a zero period as "no such wave train", so this parse must carry those zeros
+// through faithfully instead of substituting anything.
+func TestParseOpenMeteoWaveResponse_CarriesPerComponentDirectionAndPeriod(t *testing.T) {
+	raw := []byte(`{"hourly":{
+		"time":["2026-09-03T00:00","2026-09-03T18:00"],
+		"wave_height":[0.6,0.5],
+		"wave_period":[7.4,7.7],
+		"wave_direction":[79,71],
+		"wind_wave_height":[0.6,0.26],
+		"wind_wave_direction":[79,109],
+		"wind_wave_period":[7.4,2.35],
+		"swell_wave_height":[0.0,0.44],
+		"swell_wave_direction":[0,65],
+		"swell_wave_period":[0.0,7.7]
+	}}`)
+
+	points, err := parseOpenMeteoWaveResponse(raw, 0)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if len(points) != 2 {
+		t.Fatalf("expected 2 points, got %d", len(points))
+	}
+
+	// The hour with no swell in it.
+	if points[0].SwellWavePeriodS != 0 || points[0].SwellWaveDirectionDeg != 0 {
+		t.Fatalf("a flat swell must stay zeroed, got period %v direction %v",
+			points[0].SwellWavePeriodS, points[0].SwellWaveDirectionDeg)
+	}
+	if points[0].WindWaveDirectionDeg != 79 || points[0].WindWavePeriodS != 7.4 {
+		t.Fatalf("wind wave = %v deg at %vs, want 79 at 7.4",
+			points[0].WindWaveDirectionDeg, points[0].WindWavePeriodS)
+	}
+
+	// The genuine two-system hour.
+	if points[1].WindWaveDirectionDeg != 109 || points[1].WindWavePeriodS != 2.35 {
+		t.Fatalf("wind wave = %v deg at %vs, want 109 at 2.35",
+			points[1].WindWaveDirectionDeg, points[1].WindWavePeriodS)
+	}
+	if points[1].SwellWaveDirectionDeg != 65 || points[1].SwellWavePeriodS != 7.7 {
+		t.Fatalf("swell = %v deg at %vs, want 65 at 7.7",
+			points[1].SwellWaveDirectionDeg, points[1].SwellWavePeriodS)
+	}
+}

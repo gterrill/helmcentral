@@ -28,15 +28,29 @@ function buildHourlyWind(count = 24) {
   }))
 }
 
-function buildHourlyWave(count = 24) {
+// Mirrors the backend's waveSteepness so fixtures stay internally consistent
+// rather than carrying a ratio that contradicts their own height and period.
+function steepnessFor(heightM: number, periodS: number) {
+  if (periodS <= 0 || heightM < 0) return { steepnessRatio: null, steepnessBand: null }
+  const ratio = heightM / ((9.80665 * periodS * periodS) / (2 * Math.PI))
+  const band = ratio >= 0.1 ? 'breaking' : ratio >= 0.07 ? 'steep' : ratio >= 0.04 ? 'building' : 'rolling'
+  return { steepnessRatio: ratio, steepnessBand: band as 'rolling' | 'building' | 'steep' | 'breaking' }
+}
+
+function buildHourlyWave(count = 24, periodS = 6, heightAt = (idx: number) => 1 + idx * 0.05) {
   return Array.from({ length: count }, (_, idx) => ({
     label: HOUR_LABELS[idx % HOUR_LABELS.length],
     hourOfDay: idx % 24,
-    waveHeightM: 1 + idx * 0.05,
-    wavePeriodS: 6,
+    waveHeightM: heightAt(idx),
+    wavePeriodS: periodS,
     waveDirectionDeg: 90,
     windWaveHeightM: 0.4 + idx * 0.02,
     swellWaveHeightM: 0.8 + idx * 0.03,
+    windWaveDirectionDeg: 90,
+    windWavePeriodS: periodS,
+    swellWaveDirectionDeg: 95,
+    swellWavePeriodS: periodS,
+    ...steepnessFor(heightAt(idx), periodS),
   }))
 }
 
@@ -100,6 +114,7 @@ function buildWaveDay(overrides: Record<string, unknown> = {}) {
     dayName: 'Sunday',
     waveSummary: 'Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec.',
     hourlyWave: buildHourlyWave(),
+    indicators: { waveFront: false, rapidBuild: false, periodStep: false, crossSea: false },
     ...overrides,
   }
 }
@@ -438,7 +453,11 @@ describe('ForecastDrawer refresh age', () => {
 
     const chart = screen.getByTestId('forecast-wave-chart')
     const curves = Array.from(chart.querySelectorAll('path.recharts-curve'))
-    const waveLine = curves.find((path) => path.getAttribute('stroke') === 'hsl(var(--chart-wave) / 0.9)')
+    // The total-wave line is stroked with the steepness gradient rather than a
+    // flat colour now, so it is identified by being the solid one.
+    const waveLine = curves.find(
+      (path) => path.getAttribute('stroke')?.startsWith('url(#') && !path.getAttribute('stroke-dasharray'),
+    )
     const windWaveLine = curves.find((path) => path.getAttribute('stroke') === 'hsl(var(--chart-gust) / 0.85)')
     const swellLine = curves.find((path) => path.getAttribute('stroke') === 'hsl(var(--chart-swell) / 0.85)')
     expect(waveLine).toBeTruthy()
@@ -827,5 +846,99 @@ describe('ForecastDrawer refresh age', () => {
     fireEvent.click(screen.getByRole('button', { name: /Select forecast day Monday Jun 15/i }))
 
     expect(screen.getByTestId('mock-forecast-tide-section')).toHaveAttribute('data-day-offset', '1')
+  })
+})
+
+
+describe('ForecastDrawer wave steepness', () => {
+  // A day that never leaves the rolling band paints as the ordinary wave
+  // colour. Escalation colour is reserved for seas worth escalating about.
+  it('paints no alert colour on a rolling day', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+
+    const bands = screen.getAllByTestId('forecast-wave-steepness-stop').map((el) => el.getAttribute('data-band'))
+    expect(bands.length).toBeGreaterThan(0)
+    expect(new Set(bands)).toEqual(new Set(['rolling']))
+  })
+
+  it('escalates the wave line colour once seas reach the breaking band', () => {
+    // 4m at 5s is 1:9, past the book's real-world 1-in-10 breaking slope.
+    const breaking = buildWaveDay({ hourlyWave: buildHourlyWave(24, 5, () => 4) })
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[breaking]} loading={false} error={null} unit="metric" />)
+
+    const bands = screen.getAllByTestId('forecast-wave-steepness-stop').map((el) => el.getAttribute('data-band'))
+    expect(bands).toContain('breaking')
+  })
+
+  // The light-theme wave and gust colours sit under 3:1 against the card, so
+  // the band must never be carried by colour alone - the ratio is written out
+  // beside every direction arrow.
+  it('writes the steepness ratio as text, not colour alone', () => {
+    const breaking = buildWaveDay({ hourlyWave: buildHourlyWave(24, 5, () => 4) })
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[breaking]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getAllByText('1:9').length).toBeGreaterThan(0)
+  })
+})
+
+describe('ForecastDrawer wave leading indicators', () => {
+  it('shows nothing when the day trips no indicator', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+    expect(screen.queryByTestId('forecast-wave-indicators')).not.toBeInTheDocument()
+  })
+
+  it('names each tripped indicator in words', () => {
+    const day = buildWaveDay({ indicators: { waveFront: true, rapidBuild: false, periodStep: true, crossSea: false } })
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[day]} loading={false} error={null} unit="metric" />)
+
+    const panel = screen.getByTestId('forecast-wave-indicators')
+    expect(within(panel).getByText(/Sea building/i)).toBeInTheDocument()
+    expect(within(panel).getByText(/Period lengthening/i)).toBeInTheDocument()
+    expect(within(panel).queryByText(/danger signal/i)).not.toBeInTheDocument()
+  })
+
+  // Page 243: the highest wave runs 1.87 times the significant height, so a
+  // forecast read as its headline number understates what you will meet.
+  it('shows the largest likely wave alongside the significant height', () => {
+    const day = buildWaveDay({ hourlyWave: buildHourlyWave(24, 8, () => 3) })
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[day]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByTestId('forecast-wave-largest')).toHaveTextContent('5.6 m')
+  })
+
+  // Page 233: wave heights do not normally exceed 0.8 times the wind in knots.
+  // Past that the sea is not the local wind's doing.
+  it('flags a sea that outruns the wind that could have built it', () => {
+    // 4m is 13.1ft; 0.8 x 10kt of wind allows 8ft. Well past the ceiling.
+    // The ceiling uses the day's peak hourly wind, so that is what to pin.
+    const flatWind = buildHourlyWind().map((entry) => ({ ...entry, windSpeed: 10, windGust: 12 }))
+    const day = buildWaveDay({ hourlyWave: buildHourlyWave(24, 8, () => 4) })
+    render(<ForecastDrawer forecast={[buildDay({ hourlyWind: flatWind })]} waveDays={[day]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByTestId('forecast-wave-indicators')).toHaveTextContent(/outrunning the wind/i)
+  })
+
+  it('does not flag a sea the wind accounts for', () => {
+    // 1.2m is 3.9ft, comfortably under 0.8 x 30kt.
+    const day = buildWaveDay({ hourlyWave: buildHourlyWave(24, 8, () => 1.2) })
+    render(<ForecastDrawer forecast={[buildDay({ windSpeed: 30, windGust: 35 })]} waveDays={[day]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.queryByText(/outrunning the wind/i)).not.toBeInTheDocument()
+  })
+
+  // Page 310: "Small changes, sometimes as little as 3 or 4 degrees Fahrenheit
+  // (1 or 2 degrees Celsius), can have a major impact."
+  it('flags cold air arriving over warmer water', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay({ low: 50 })]}
+        waveDays={[buildWaveDay()]}
+        waveSeaTemperatureF={72}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+    expect(screen.getByTestId('forecast-wave-indicators')).toHaveTextContent(/cold air over warmer water/i)
   })
 })

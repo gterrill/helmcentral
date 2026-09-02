@@ -19,7 +19,7 @@ const (
 	// model so swell height, period and direction line up with other WaveWatch
 	// III-based swell forecasts for a given coastline; Open-Meteo's default
 	// "best_match" model blend runs noticeably lower/different here.
-	marineWaveURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height&timezone=auto&forecast_days=%d&models=ncep_gfswave025"
+	marineWaveURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto&forecast_days=%d&models=ncep_gfswave025"
 
 	// Marine sea temperature endpoint - Deliberately does not pin a models=
 	// param (unlike fetchWaveData) - the wave-specific NOAA GFS-Wave model
@@ -84,6 +84,15 @@ func parseOpenMeteoWaveResponse(raw []byte, utcOffsetSeconds int) ([]waveHourOut
 	windWaveHeights, _ := hourly["wind_wave_height"].([]any)
 	swellWaveHeights, _ := hourly["swell_wave_height"].([]any)
 
+	// Per-component direction and period, so the host can tell a cross sea
+	// from one system. Open-Meteo reports all three of a flat component's
+	// fields as 0 rather than null, so a zero period is what marks a
+	// component as absent - the host relies on that.
+	windWaveDirections, _ := hourly["wind_wave_direction"].([]any)
+	windWavePeriods, _ := hourly["wind_wave_period"].([]any)
+	swellWaveDirections, _ := hourly["swell_wave_direction"].([]any)
+	swellWavePeriods, _ := hourly["swell_wave_period"].([]any)
+
 	hourly_out := make([]waveHourOutput, 0, len(times))
 	for i, rawTime := range times {
 		timeStr, ok := rawTime.(string)
@@ -120,6 +129,26 @@ func parseOpenMeteoWaveResponse(raw []byte, utcOffsetSeconds int) ([]waveHourOut
 		if i < len(swellWaveHeights) {
 			if s, ok := swellWaveHeights[i].(float64); ok {
 				point.SwellWaveHeightM = s
+			}
+		}
+		if i < len(windWaveDirections) {
+			if d, ok := windWaveDirections[i].(float64); ok {
+				point.WindWaveDirectionDeg = d
+			}
+		}
+		if i < len(windWavePeriods) {
+			if p, ok := windWavePeriods[i].(float64); ok {
+				point.WindWavePeriodS = p
+			}
+		}
+		if i < len(swellWaveDirections) {
+			if d, ok := swellWaveDirections[i].(float64); ok {
+				point.SwellWaveDirectionDeg = d
+			}
+		}
+		if i < len(swellWavePeriods) {
+			if p, ok := swellWavePeriods[i].(float64); ok {
+				point.SwellWavePeriodS = p
 			}
 		}
 
@@ -196,6 +225,11 @@ type waveHourOutput struct {
 	WaveDirectionDeg float64 `json:"wave_direction_deg"`
 	WindWaveHeightM  float64 `json:"wind_wave_height_m"`
 	SwellWaveHeightM float64 `json:"swell_wave_height_m"`
+
+	WindWaveDirectionDeg  float64 `json:"wind_wave_direction_deg"`
+	WindWavePeriodS       float64 `json:"wind_wave_period_s"`
+	SwellWaveDirectionDeg float64 `json:"swell_wave_direction_deg"`
+	SwellWavePeriodS      float64 `json:"swell_wave_period_s"`
 }
 
 // fetchWavesOutput mirrors the host's wasmFetchWavesOutput contract

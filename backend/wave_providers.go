@@ -20,9 +20,16 @@
 //
 //	fetch_waves({"lat": float64, "lon": float64, "days": int}) -> {
 //	  "hourly": [{time, wave_height_m, wave_period_s, wave_direction_deg,
-//	              wind_wave_height_m, swell_wave_height_m}],
+//	              wind_wave_height_m, wind_wave_direction_deg, wind_wave_period_s,
+//	              swell_wave_height_m, swell_wave_direction_deg, swell_wave_period_s}],
 //	  "sea_surface_temperature_c": float64 (optional)
 //	}
+//
+// The per-component direction and period fields are OPTIONAL in the sense
+// that a model without them may omit them; they then read as 0, and a
+// component with a zero period is treated as absent rather than as a wave
+// train heading due north. That is not a guess - it is how Open-Meteo itself
+// reports a flat component, verified against a live response.
 //
 // All times are RFC3339. sea_surface_temperature_c is OPTIONAL: a plugin or
 // upstream model that genuinely has no sea-temperature data for a location
@@ -63,6 +70,13 @@ type waveHourPoint struct {
 	WaveDirectionDeg float64
 	WindWaveHeightM  float64
 	SwellWaveHeightM float64
+
+	// Per-component direction and period. The combined figures above smear
+	// two systems into one, which is exactly what hides a cross sea.
+	WindWaveDirectionDeg  float64
+	WindWavePeriodS       float64
+	SwellWaveDirectionDeg float64
+	SwellWavePeriodS      float64
 }
 
 // waveForecastBundle is one provider round-trip's worth of data - the
@@ -164,6 +178,11 @@ type waveDayHourlyData struct {
 	WaveDirectionDeg float64
 	WindWaveHeightM  float64
 	SwellWaveHeightM float64
+
+	WindWaveDirectionDeg  float64
+	WindWavePeriodS       float64
+	SwellWaveDirectionDeg float64
+	SwellWavePeriodS      float64
 }
 
 // buildWaveHourlySeriesByDay buckets a provider's flat hourly points into
@@ -188,10 +207,254 @@ func buildWaveHourlySeriesByDay(hourly []waveHourPoint, localLocation *time.Loca
 			WaveDirectionDeg: hp.WaveDirectionDeg,
 			WindWaveHeightM:  hp.WindWaveHeightM,
 			SwellWaveHeightM: hp.SwellWaveHeightM,
+
+			WindWaveDirectionDeg:  hp.WindWaveDirectionDeg,
+			WindWavePeriodS:       hp.WindWavePeriodS,
+			SwellWaveDirectionDeg: hp.SwellWaveDirectionDeg,
+			SwellWavePeriodS:      hp.SwellWavePeriodS,
 		})
 	}
 
 	return series
+}
+
+// --- host-side derivation: wave steepness ---
+
+// Steepness bands. The names are the ones the forecast page renders, so they
+// are part of the API rather than an internal detail.
+const (
+	waveSteepnessRolling  = "rolling"
+	waveSteepnessBuilding = "building"
+	waveSteepnessSteep    = "steep"
+	waveSteepnessBreaking = "breaking"
+)
+
+// Band edges as height-over-length ratios.
+//
+// The breaking edge is 1-in-10 rather than the 1-in-7 a tank test gives.
+// Surviving the Storm reports both on page 231 and endorses the former:
+// "Theory and tank test data indicate that waves become unstable at a slope
+// ratio of 1 to 7 or steeper. However, observations in the real world
+// indicate this figure is more like 1 to 10." Page 240 states it as a number:
+// "A steepness ratio of 0.1 or 1 in 10 would imply breaking seas."
+//
+// The rolling edge is 1-in-25, the slope the same book works out on page 252
+// and calls "not normally considered steep enough to break". The middle edge
+// is interpolated between the two and carries no separate authority.
+const (
+	waveSteepnessRollingMax  = 0.04 // 1 in 25
+	waveSteepnessBuildingMax = 0.07
+	waveSteepnessBreakingMin = 0.10 // 1 in 10
+)
+
+// gravityMPerS2 is standard gravity, for the deep-water wavelength relation.
+const gravityMPerS2 = 9.80665
+
+// waveSteepness is height over deep-water wavelength, and whether the figure
+// is defined at all.
+//
+// Wavelength is the textbook deep-water relation L = gT²/2π, which is the
+// same one the book gives in feet on page 218 as "5 times the period
+// squared" for swell. It reproduces the worked example on page 252 exactly:
+// a 14-second period comes out at 1,004 feet against the book's stated
+// "1,000 to 1,300 feet" for 14 to 16 seconds.
+//
+// Reports absence rather than zero whenever the ratio is undefined - no
+// period reported, or the negative marker the rest of this file uses for a
+// missing height. A zero steepness would render as a glassy sea, which is a
+// measurement rather than the absence of one (the same discipline SeaTempC
+// applies to sea temperature).
+func waveSteepness(heightM, periodS float64) (float64, bool) {
+	if periodS <= 0 || heightM < 0 {
+		return 0, false
+	}
+
+	wavelengthM := gravityMPerS2 * periodS * periodS / (2 * math.Pi)
+	if wavelengthM <= 0 {
+		return 0, false
+	}
+
+	return heightM / wavelengthM, true
+}
+
+// waveSteepnessBand names the band a steepness ratio falls in, for the
+// forecast page to colour by.
+func waveSteepnessBand(steepness float64) string {
+	switch {
+	case steepness >= waveSteepnessBreakingMin:
+		return waveSteepnessBreaking
+	case steepness >= waveSteepnessBuildingMax:
+		return waveSteepnessSteep
+	case steepness >= waveSteepnessRollingMax:
+		return waveSteepnessBuilding
+	default:
+		return waveSteepnessRolling
+	}
+}
+
+// formatSteepnessRatio renders a steepness as the "1 in N" slope the book
+// and every mariner talks in.
+//
+// N is floored rather than rounded, so a 1-in-9.8 sea reads as 1:9 and not
+// the flatter-sounding 1:10. Rounding the other way would understate the
+// slope, and this figure exists to warn.
+func formatSteepnessRatio(steepness float64) string {
+	if steepness <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("1:%d", int(math.Floor(1/steepness)))
+}
+
+// peakWaveSteepness is the steepest hour of a day, and whether any hour had
+// a defined steepness at all.
+func peakWaveSteepness(hourly []waveDayHourlyData) (float64, bool) {
+	peak := 0.0
+	found := false
+	for _, entry := range hourly {
+		steepness, ok := waveSteepness(entry.WaveHeightM, entry.WavePeriodS)
+		if !ok {
+			continue
+		}
+		found = true
+		if steepness > peak {
+			peak = steepness
+		}
+	}
+	return peak, found
+}
+
+// --- host-side derivation: leading indicators ---
+
+/*
+waveDayIndicatorSet is the set of warning signs Surviving the Storm names as
+detectable from a wave forecast alone, evaluated per day.
+
+Each is a documented threshold from the book rather than a house heuristic,
+and each is deliberately narrow. A flag that fires most days is a flag the
+operator stops reading, which is the same failure the alarm engine's dwell
+and hysteresis exist to prevent.
+*/
+type waveDayIndicatorSet struct {
+	// WaveFront is a 3m rise inside any three-hour window - the screening
+	// criterion Scott Prosise of the NOAA Marine Prediction Center used to
+	// find dynamic-fetch events in a year of buoy data (page 246).
+	WaveFront bool `json:"wave_front"`
+
+	// RapidBuild is height and period both up 50% inside an hour, which Lee
+	// Chesneau calls "a certain danger signal" (page 250). Both must rise:
+	// height alone is an ordinary building sea.
+	RapidBuild bool `json:"rapid_build"`
+
+	// PeriodStep is the period lengthening 3s or more in an hour, the "8-second
+	// period that suddenly lengthens to 11 seconds" Prosise describes as a
+	// leading indicator of a wave front (page 250).
+	PeriodStep bool `json:"period_step"`
+
+	// CrossSea is the wind wave and the swell running more than 60 degrees
+	// apart. Page 233: a secondary system "not large enough initially to do
+	// great harm on their own" is what puts a boat beam-on to the primary
+	// seas, which is where the harm comes from.
+	CrossSea bool `json:"cross_sea"`
+}
+
+// crossSeaThresholdDeg is where two wave trains stop being one system's own
+// spread. Page 233 puts a single system at "plus or minus 20 to 30 degrees"
+// off the wind axis, so past 60 the simpler explanation is two systems.
+const crossSeaThresholdDeg = 60.0
+
+// crossSeaMinSecondaryFraction is how big the smaller train has to be,
+// relative to the larger, before the two count as crossing seas.
+//
+// Found against live data: the model will happily report a 0.02m swell beside
+// a 1.44m wind sea 75 degrees away. Page 233's argument for why a secondary
+// system matters is that it swings the boat off its alignment with the
+// primary one; a component this small cannot. A third is the point where it
+// plausibly can.
+const crossSeaMinSecondaryFraction = 1.0 / 3.0
+
+/*
+crossSeaSeparationDeg is the angle between the wind-wave and swell trains,
+and whether both trains actually exist.
+
+The presence test is the period, not the height or the direction. Verified
+against a live Open-Meteo Marine response: a component with no waves in it
+comes back with height, period AND direction all reported as 0, not null. A
+naive angle would then read a flat swell's placeholder "0 degrees" against a
+real wind wave and manufacture a large separation on an ordinary
+single-system day. A wave train with no period is not a wave train.
+*/
+func crossSeaSeparationDeg(entry waveDayHourlyData) (float64, bool) {
+	if entry.WindWavePeriodS <= 0 || entry.SwellWavePeriodS <= 0 {
+		return 0, false
+	}
+	if entry.WindWaveHeightM <= 0 || entry.SwellWaveHeightM <= 0 {
+		return 0, false
+	}
+
+	smaller := math.Min(entry.WindWaveHeightM, entry.SwellWaveHeightM)
+	larger := math.Max(entry.WindWaveHeightM, entry.SwellWaveHeightM)
+	if smaller/larger < crossSeaMinSecondaryFraction {
+		return 0, false
+	}
+
+	radians := (entry.WindWaveDirectionDeg - entry.SwellWaveDirectionDeg) * math.Pi / 180
+	return math.Abs(shortestAngleDiffRadians(radians, 0)) * 180 / math.Pi, true
+}
+
+const (
+	waveFrontRiseM       = 3.0 // 10 feet, page 246
+	waveFrontWindowHours = 3
+	rapidBuildFraction   = 1.5 // a 50% increase, page 250
+	periodStepS          = 3.0 // 8s to 11s, page 250
+)
+
+// waveDayIndicators evaluates every indicator over a day's hourly series.
+//
+// Hours carrying the negative marker this file uses for missing data are
+// skipped rather than treated as zero, so a gap in the feed cannot manufacture
+// a 3m rise out of nothing.
+func waveDayIndicators(hourly []waveDayHourlyData) waveDayIndicatorSet {
+	var set waveDayIndicatorSet
+
+	for i, entry := range hourly {
+		if separation, ok := crossSeaSeparationDeg(entry); ok && separation >= crossSeaThresholdDeg {
+			set.CrossSea = true
+		}
+
+		if entry.WaveHeightM < 0 {
+			continue
+		}
+
+		// Wave front: compare against every earlier hour still inside the
+		// window, which handles a series with gaps in it correctly.
+		for j := i - 1; j >= 0 && i-j <= waveFrontWindowHours; j-- {
+			prior := hourly[j]
+			if prior.WaveHeightM < 0 {
+				continue
+			}
+			if entry.WaveHeightM-prior.WaveHeightM >= waveFrontRiseM {
+				set.WaveFront = true
+			}
+		}
+
+		if i == 0 {
+			continue
+		}
+		prev := hourly[i-1]
+
+		if prev.WavePeriodS > 0 && entry.WavePeriodS > 0 {
+			if entry.WavePeriodS-prev.WavePeriodS >= periodStepS {
+				set.PeriodStep = true
+			}
+			if prev.WaveHeightM > 0 &&
+				entry.WaveHeightM >= prev.WaveHeightM*rapidBuildFraction &&
+				entry.WavePeriodS >= prev.WavePeriodS*rapidBuildFraction {
+				set.RapidBuild = true
+			}
+		}
+	}
+
+	return set
 }
 
 // buildWaveSummary formats a human-readable sentence describing a day's
@@ -236,12 +499,34 @@ func buildWaveSummary(hourly []waveDayHourlyData) string {
 		heightPhrase = fmt.Sprintf("%s from the %s", heightPhrase, directionRange)
 	}
 
+	summary := fmt.Sprintf("Significant wave height %s.", heightPhrase)
 	if periodCount > 0 {
 		periodRounded := int(math.Round(periodTotal / float64(periodCount)))
-		return fmt.Sprintf("Significant wave height %s, with a period around %d sec.", heightPhrase, periodRounded)
+		summary = fmt.Sprintf("Significant wave height %s, with a period around %d sec.", heightPhrase, periodRounded)
 	}
 
-	return fmt.Sprintf("Significant wave height %s.", heightPhrase)
+	return summary + steepnessClause(hourly)
+}
+
+// steepnessClause names the day's peak steepness, but only once the seas are
+// steep enough for it to be worth saying.
+//
+// A rolling or building day says nothing, because most days are one of those
+// and a sentence repeated on every benign forecast stops being read. The
+// threshold for speaking up is the same one the band table draws: seas that
+// are getting close to breaking, or are there already.
+func steepnessClause(hourly []waveDayHourlyData) string {
+	peak, ok := peakWaveSteepness(hourly)
+	if !ok {
+		return ""
+	}
+
+	band := waveSteepnessBand(peak)
+	if band != waveSteepnessSteep && band != waveSteepnessBreaking {
+		return ""
+	}
+
+	return fmt.Sprintf(" Steepness peaks at %s, %s seas.", formatSteepnessRatio(peak), band)
 }
 
 // waveDirectionRange describes how a day's swell direction shifts from
@@ -284,6 +569,18 @@ type waveHourlyResponse struct {
 	WaveDirectionDeg float64 `json:"wave_direction_deg"`
 	WindWaveHeightM  float64 `json:"wind_wave_height_m"`
 	SwellWaveHeightM float64 `json:"swell_wave_height_m"`
+
+	WindWaveDirectionDeg  float64 `json:"wind_wave_direction_deg"`
+	WindWavePeriodS       float64 `json:"wind_wave_period_s"`
+	SwellWaveDirectionDeg float64 `json:"swell_wave_direction_deg"`
+	SwellWavePeriodS      float64 `json:"swell_wave_period_s"`
+
+	// SteepnessRatio is height over deep-water wavelength, nil when the hour
+	// carries no period to derive it from. SteepnessBand is the matching band
+	// name, empty for the same reason - an hour with no reading must not
+	// render as the calmest band.
+	SteepnessRatio *float64 `json:"steepness_ratio"`
+	SteepnessBand  string   `json:"steepness_band"`
 }
 
 // waveDayResponse mirrors weatherForecastDayResponse's day-key/date/day-name
@@ -295,6 +592,7 @@ type waveDayResponse struct {
 	DayName     string               `json:"day_name"`
 	WaveSummary string               `json:"wave_summary"`
 	HourlyWave  []waveHourlyResponse `json:"hourly_wave"`
+	Indicators  waveDayIndicatorSet  `json:"indicators"`
 }
 
 type waveForecastResponse struct {
@@ -309,7 +607,7 @@ type waveForecastResponse struct {
 func mapWaveHourlyResponse(entries []waveDayHourlyData) []waveHourlyResponse {
 	response := make([]waveHourlyResponse, 0, len(entries))
 	for _, entry := range entries {
-		response = append(response, waveHourlyResponse{
+		mapped := waveHourlyResponse{
 			Label:            entry.Label,
 			HourOfDay:        entry.HourOfDay,
 			WaveHeightM:      entry.WaveHeightM,
@@ -317,7 +615,17 @@ func mapWaveHourlyResponse(entries []waveDayHourlyData) []waveHourlyResponse {
 			WaveDirectionDeg: entry.WaveDirectionDeg,
 			WindWaveHeightM:  entry.WindWaveHeightM,
 			SwellWaveHeightM: entry.SwellWaveHeightM,
-		})
+
+			WindWaveDirectionDeg:  entry.WindWaveDirectionDeg,
+			WindWavePeriodS:       entry.WindWavePeriodS,
+			SwellWaveDirectionDeg: entry.SwellWaveDirectionDeg,
+			SwellWavePeriodS:      entry.SwellWavePeriodS,
+		}
+		if steepness, ok := waveSteepness(entry.WaveHeightM, entry.WavePeriodS); ok {
+			mapped.SteepnessRatio = &steepness
+			mapped.SteepnessBand = waveSteepnessBand(steepness)
+		}
+		response = append(response, mapped)
 	}
 	return response
 }
@@ -399,6 +707,7 @@ func waveForecast(c echo.Context) error {
 			DayName:     localDay.Weekday().String(),
 			WaveSummary: buildWaveSummary(hourly),
 			HourlyWave:  mapWaveHourlyResponse(hourly),
+			Indicators:  waveDayIndicators(hourly),
 		})
 	}
 
