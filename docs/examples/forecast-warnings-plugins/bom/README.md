@@ -5,8 +5,8 @@ Bureau of Meteorology's public marine wind and hazardous surf warning
 bulletins. This is the **default** (`id: "bom"`) implementation of the
 pluggable Forecast Warnings provider contract, ported 1:1 from the
 formerly-hardcoded `backend/bom_marine_warnings.go` +
-`backend/bom_marine_zones.go` (still present in the backend until a later
-phase deletes them, now that this plugin replaces their function). See
+`backend/bom_marine_zones.go`, both since deleted from the backend now that
+this plugin does their job. See
 [docs/adr/0019-ftp-host-function-and-forecast-warnings-provider.md](../../../adr/0019-ftp-host-function-and-forecast-warnings-provider.md)
 for the full rationale behind this plugin's unusual network-access model
 (below) and the "each provider resolves its own zone semantics" design

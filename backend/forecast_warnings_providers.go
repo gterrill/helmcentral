@@ -4,10 +4,9 @@
 // (bom_marine_warnings.go / bom_marine_zones.go - Australia-only, zero
 // abstraction) into a WASM plugin type, exactly like tide/weather/wave: a
 // forecastWarningsProvider interface, a registry, HTTP handlers, and a WASM
-// adapter (wasm_forecast_warnings_provider.go). Those old files are NOT
-// touched by this phase - they get deleted in a later phase once a BOM
-// reference plugin built on this new system replaces them; until then they
-// coexist unreferenced by any of the code below.
+// adapter (wasm_forecast_warnings_provider.go). Those old files are gone:
+// they were deleted once the BOM reference plugin built on this system
+// (docs/examples/forecast-warnings-plugins/bom) took over their function.
 //
 // Unlike tide/weather/wave, the host does NO derivation here: no
 // day-bucketing, no zone-matching, no active/cancelled filtering. Different

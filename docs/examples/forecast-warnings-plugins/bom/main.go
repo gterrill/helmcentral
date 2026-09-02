@@ -6,8 +6,8 @@
 // Forecast Warnings provider contract (backend/forecast_warnings_providers.go).
 // It is a port, not a new implementation: same state/zone resolution, same
 // BOM FTP product IDs, same text-parsing rules as the formerly-hardcoded
-// backend/bom_marine_warnings.go + backend/bom_marine_zones.go (still
-// present until a later phase deletes them once this plugin replaces them).
+// backend/bom_marine_warnings.go + backend/bom_marine_zones.go, both since
+// deleted from the backend now that this plugin does their job.
 //
 // Unlike every other WASM plugin in this repo, this one does NOT use
 // Extism's built-in HTTP support (pdk.NewHTTPRequest) for its network

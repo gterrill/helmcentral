@@ -30,17 +30,16 @@
 // zero/placeholder value) - see wasm_wave_provider.go's
 // wasmFetchWavesOutput.SeaSurfaceTemperatureC.
 //
-// Reference implementation context for whoever builds
-// docs/examples/wave-plugins/open-meteo-marine (future phase, not this
-// one): the wave forecast fetch should pin Open-Meteo Marine's
+// Why the reference plugin (docs/examples/wave-plugins/open-meteo-marine)
+// queries the way it does: its wave forecast fetch pins Open-Meteo Marine's
 // `models=ncep_gfswave025` param (NOAA's GFS-Wave / WaveWatch III model) so
 // swell height, period and direction line up with other WaveWatch
 // III-based swell forecasts for a given coastline - Open-Meteo's default
-// "best_match" model blend runs noticeably lower/different. The separate
-// sea-surface-temperature fetch should deliberately OMIT that `models=`
-// param - the wave-specific NOAA GFS-Wave model does not carry sea surface
+// "best_match" model blend runs noticeably lower/different. Its separate
+// sea-surface-temperature fetch deliberately OMITS that `models=` param -
+// the wave-specific NOAA GFS-Wave model does not carry sea surface
 // temperature at all (returns null/"undefined" units); only Open-Meteo's
-// default model blend does.
+// default model blend does. Any other wave plugin faces the same choice.
 package main
 
 import (

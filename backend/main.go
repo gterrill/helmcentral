@@ -222,8 +222,8 @@ func main() {
 
 	// Weather providers - WASM-plugin-only (no native built-in); registry
 	// stays empty (weatherToday/weatherForecast correctly 502) until
-	// plugins/weather/*.wasm exists, which a later phase's Docker build step
-	// creates.
+	// plugins/weather/*.wasm exists, which the plugins-builder Compose
+	// service creates.
 	loadWasmWeatherProviders(pluginsWeatherDir())
 
 	// Wave providers - WASM-plugin-only (no native built-in), same reasoning

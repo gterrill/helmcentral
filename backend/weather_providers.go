@@ -595,10 +595,9 @@ type weatherHourlyCloudResponse struct {
 }
 
 // weatherForecastDayResponse mirrors weatherForecastDayData for JSON output.
-// Unlike the pre-Phase-3 shape, it carries no wave fields (waves get their
-// own /api/wave-forecast endpoint in a later phase) and gains DayKey - the
-// vessel-local "2006-01-02" join key a future wave-forecast response will
-// match against.
+// Unlike the pre-Phase-3 shape, it carries no wave fields (waves have their
+// own /api/wave-forecast endpoint) and gains DayKey - the vessel-local
+// "2006-01-02" join key the wave-forecast response matches against.
 type weatherForecastDayResponse struct {
 	DayKey               string                               `json:"day_key"`
 	Date                 string                               `json:"date"`
@@ -728,7 +727,7 @@ func mapWeatherForecastDayResponse(day weatherForecastDayData, dayKey string) we
 // provider's current-conditions point. No fake defaults: an unknown
 // provider or a fetch failure is a 502 with a clear message, never a
 // plausible-looking placeholder reading. sea_temperature_f is dropped
-// entirely (moves to the wave endpoint in a later phase); high/low
+// entirely (it lives on the wave endpoint instead); high/low
 // temperature is dropped too (that belongs to the day bundle in
 // /api/weather-forecast's days[0], not a point-in-time "today" reading).
 func weatherToday(c echo.Context) error {

@@ -21,9 +21,8 @@ const metersToFeet = 3.28084
 // weatherForecastDayData is the host's per-day forecast assembly, built by
 // weather_providers.go's buildDayData from a weatherProvider's
 // weatherDayPoint plus that day's bucketed hourly series. It carries no wave
-// fields (WaveSummary/HourlyWave were removed here - waves get their own
-// provider/endpoint in a later phase; weatherHourlyWaveData itself is left
-// untouched below since a future wave phase still needs it).
+// fields: waves have their own provider and endpoint (wave_providers.go,
+// /api/wave-forecast), and the frontend joins the two responses by day_key.
 type weatherForecastDayData struct {
 	Date                 string
 	DayName              string
