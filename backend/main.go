@@ -1059,10 +1059,6 @@ func nearbyVessels(c echo.Context) error {
 	return c.JSON(http.StatusOK, buildNearbyVesselsPayload())
 }
 
-func formatWeatherCondition(code string) string {
-	return formatWeatherConditionAt(code, time.Time{}, nil, false)
-}
-
 func formatWeatherConditionAt(code string, observedAt time.Time, location *time.Location, preferDaytime bool) string {
 	normalized := strings.ToLower(strings.TrimSpace(code))
 	normalized = strings.ReplaceAll(normalized, "_", "")

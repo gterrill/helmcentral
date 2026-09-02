@@ -1717,15 +1717,6 @@ func tankLabelOverride(overrides map[string]string, category string, entryID str
 	return ""
 }
 
-func buildTankLabel(category string, entryID string) string {
-	base := humanizeCategory(category)
-	if strings.TrimSpace(entryID) == "" {
-		return base
-	}
-
-	return fmt.Sprintf("%s %s", base, strings.ToUpper(strings.TrimSpace(entryID)))
-}
-
 func tankKindFromCategory(category string) string {
 	normalized := strings.ToLower(strings.TrimSpace(category))
 	if strings.Contains(normalized, "fuel") {
@@ -1737,29 +1728,6 @@ func tankKindFromCategory(category string) string {
 	}
 
 	return "water"
-}
-
-func humanizeCategory(category string) string {
-	if strings.TrimSpace(category) == "" {
-		return "Tank"
-	}
-
-	r := strings.NewReplacer("freshWater", "Fresh Water", "blackWater", "Black Water", "greyWater", "Grey Water", "wasteWater", "Waste Water", "liveWell", "Live Well")
-	converted := r.Replace(category)
-
-	if strings.EqualFold(converted, category) {
-		converted = strings.ReplaceAll(converted, "_", " ")
-	}
-
-	parts := strings.Fields(converted)
-	for i, part := range parts {
-		if len(part) == 0 {
-			continue
-		}
-		parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
-	}
-
-	return strings.Join(parts, " ")
 }
 
 func lookupString(payload map[string]any, keys ...string) string {

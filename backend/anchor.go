@@ -86,30 +86,6 @@ func (vt *vesselTrail) addPointWithTimestamp(lat, lon float64, ts time.Time) {
 	}
 }
 
-func (vt *vesselTrail) orderedPoints() []*trailPoint {
-	if !vt.full && vt.index == 0 {
-		return nil
-	}
-
-	result := make([]*trailPoint, 0, maxTrailPoints)
-	if vt.full {
-		start := vt.index
-		for i := 0; i < maxTrailPoints; i++ {
-			if p := vt.points[(start+i)%maxTrailPoints]; p != nil {
-				result = append(result, p)
-			}
-		}
-		return result
-	}
-
-	for i := 0; i < vt.index; i++ {
-		if vt.points[i] != nil {
-			result = append(result, vt.points[i])
-		}
-	}
-	return result
-}
-
 // pointsSince returns all trail points after the given timestamp, in chronological order.
 func (vt *vesselTrail) pointsSince(since time.Time) []*trailPoint {
 	if !vt.full && vt.index == 0 {

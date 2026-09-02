@@ -14,8 +14,6 @@ import (
 
 // ── Trail storage ─────────────────────────────────────────────────────────────
 
-const maxTrackPoints = 1000
-
 // selfTrack records self-vessel positions at all times (motoring, anchored, etc.).
 var (
 	trackMu   sync.RWMutex
