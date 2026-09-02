@@ -3,17 +3,21 @@ import { useEffect, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import {
   fallbackAnchorConfig,
+  fallbackMayaraConfig,
   fallbackUiConfig,
   normalizeAnchorConfig,
+  normalizeMayaraConfig,
   normalizeUiConfig,
   type AnchorConfig,
   type AppConfigSettings,
+  type MayaraConfig,
   type UiConfig,
 } from '@/config/app-config'
 
 export type AppConfig = {
   ui: UiConfig
   anchor: AnchorConfig
+  mayara: MayaraConfig
   /** False until the backend's settings have been applied (or have failed). */
   loaded: boolean
 }
@@ -21,6 +25,7 @@ export type AppConfig = {
 const defaultAppConfig: AppConfig = {
   ui: fallbackUiConfig,
   anchor: fallbackAnchorConfig,
+  mayara: fallbackMayaraConfig,
   loaded: false,
 }
 
@@ -41,6 +46,7 @@ function toAppConfig(settings: AppConfigSettings | null): AppConfig {
   return {
     ui: normalizeUiConfig(settings),
     anchor: normalizeAnchorConfig(settings),
+    mayara: normalizeMayaraConfig(settings),
     loaded: true,
   }
 }

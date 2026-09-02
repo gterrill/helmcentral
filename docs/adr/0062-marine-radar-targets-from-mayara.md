@@ -60,6 +60,8 @@ Neither is a Helmcentral problem, and neither is fixed by writing client code. T
 
 ### 1. Consume ARPA targets and radar status. Leave the spokes alone.
 
+> **Extended 2026-09-02 by [ADR 0069](0069-radar-picture-relayed-from-mayara.md).** The spokes are now consumed too, as a radar picture overlaid on the anchor map. This decision is not reversed: targets still arrive through the plugin exactly as described here and below. The picture is a separate data product on a separate transport, because the plugin returns 404 for the spoke stream. ADR 0069 also corrects the antenna-offset conclusion recorded further down: `Spoke.lat`/`lon` are populated but frozen, so the offset is carried, not cancelled.
+
 The target stream is JSON over the Signal K WebSocket. The spoke stream is protobuf at the antenna's rotation rate and exists to draw a radar picture. We want collision awareness, not a second plotter, and the boat already has a plotter that renders this radar properly. Taking the targets and skipping the spokes avoids protobuf codegen, a high-bandwidth stream, and a canvas renderer, for no loss against the actual goal.
 
 Radar presence, model, range and transmit state come along because an empty target list is ambiguous without them. "No contacts" and "the radar is in standby" must not look alike.

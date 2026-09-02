@@ -3,7 +3,7 @@ import type { AnchorConfig } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RadarTarget } from '@/hooks/use-radar-targets'
+import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
@@ -41,9 +41,15 @@ interface AnchorWatchDrawerProps {
   // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
   // integration wired up simply omits it.
   radarTargets?: RadarTarget[]
+  // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
+  // integration wired up simply omits it.
+  radars?: RadarInfo[]
+  radarSource?: RadarSource
   isDarkTheme: boolean
   showImageryLayer: boolean
   onImageryToggle: (enabled: boolean) => void
+  showRadarEcho: boolean
+  onRadarEchoToggle: (enabled: boolean) => void
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
   onClearAnchor: () => Promise<void> | void
@@ -100,9 +106,13 @@ export function AnchorWatchDrawer({
   aisVessels,
   aisTrails,
   radarTargets,
+  radars,
+  radarSource,
   isDarkTheme,
   showImageryLayer,
   onImageryToggle,
+  showRadarEcho,
+  onRadarEchoToggle,
   onAnchorReposition,
   onRadiusChange,
   onClearAnchor,
@@ -212,9 +222,13 @@ export function AnchorWatchDrawer({
                 aisVessels={aisVessels}
                 aisTrails={aisTrails}
                 radarTargets={radarTargets}
+                radars={radars}
+                radarSource={radarSource}
                 isDarkTheme={isDarkTheme}
                 showImageryLayer={showImageryLayer}
                 onImageryToggle={onImageryToggle}
+                showRadarEcho={showRadarEcho}
+                onRadarEchoToggle={onRadarEchoToggle}
                 onAnchorReposition={onAnchorReposition}
                 onRadiusChange={onRadiusChange}
                 placemarks={placemarks}

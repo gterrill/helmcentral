@@ -42,6 +42,32 @@ describe('useAppConfig', () => {
     await waitFor(() => expect(result.current.ui.distanceUnits).toBe('imperial'))
   })
 
+  // Phase 2 of the radar overlay plan: the map (Phase 5) will read the
+  // mayara address through this same hook, not through the settings form, so
+  // this pins that the block actually reaches useAppConfig()'s consumers.
+  it('applies the mayara block from the settings endpoint', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      mayara: { address: '192.168.50.81', port: 6503 },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+
+    await waitFor(() => expect(result.current.mayara.address).toBe('192.168.50.81'))
+    expect(result.current.mayara.port).toBe(6503)
+  })
+
+  it('defaults the mayara block to a blank address and port 6502 when absent', async () => {
+    vi.stubGlobal('fetch', settingsResponse({}))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.mayara.address).toBe('')
+    expect(result.current.mayara.port).toBe(6502)
+  })
+
   it('applies the anchor block and refresh interval from the settings endpoint', async () => {
     vi.stubGlobal('fetch', settingsResponse({
       ui: { vessel_state_refresh_seconds: 30 },

@@ -9,12 +9,29 @@ interface TileProps {
   className?: string
   titleClassName?: string
   titleExtra?: React.ReactNode
+  /**
+   * The tile's source has stopped updating. Dims the readings and shows how
+   * long ago the last one arrived, so a value frozen by a dead feed is not
+   * mistaken for a live measurement.
+   */
+  stale?: boolean
+  /** Age of the last update, already formatted (`1h 39m`). */
+  staleLabel?: string
   children: React.ReactNode
 }
 
-export function Tile({ title, icon, className, titleClassName, titleExtra, children }: TileProps) {
+export function Tile({
+  title,
+  icon,
+  className,
+  titleClassName,
+  titleExtra,
+  stale = false,
+  staleLabel,
+  children,
+}: TileProps) {
   return (
-    <Card className={cn('h-full gap-0 py-4', className)}>
+    <Card className={cn('h-full gap-0 py-4', className)} data-stale={stale ? 'true' : undefined}>
       {/* Padding and letter-spacing tighten before anything else at phone width. The
           0.22em tracking costs more width than the horizontal padding does, so it is
           the first thing to give. */}
@@ -29,12 +46,23 @@ export function Tile({ title, icon, className, titleClassName, titleExtra, child
           {/* Truncates rather than stretching the card: an operator-supplied embed
               title is arbitrary length and used to have no way to yield. */}
           <span className="truncate">{title}</span>
+          {/* Inside the title rather than a sibling of it: CardHeader is a grid,
+              and a direct child would stretch into a full-width band. */}
+          {stale && (
+            <span
+              data-testid="tile-stale-badge"
+              title={staleLabel ? `No update for ${staleLabel}` : 'Source has stopped updating'}
+              className="ml-1 shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] leading-none text-amber-600 dark:text-amber-400"
+            >
+              Stale{staleLabel ? ` ${staleLabel}` : ''}
+            </span>
+          )}
         </CardTitle>
         <div className="h-px flex-1 bg-border/70" />
         {titleExtra && <CardAction className="static shrink-0">{titleExtra}</CardAction>}
       </CardHeader>
 
-      <CardContent className="flex-1 px-3 sm:px-4">{children}</CardContent>
+      <CardContent className={cn('flex-1 px-3 sm:px-4', stale && 'opacity-50 grayscale')}>{children}</CardContent>
     </Card>
   )
 }

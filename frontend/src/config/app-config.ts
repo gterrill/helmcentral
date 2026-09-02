@@ -13,6 +13,11 @@ export type AnchorConfig = {
   loaM: number
 }
 
+export type MayaraConfig = {
+  address: string
+  port: number
+}
+
 export type DistanceUnits = 'metric' | 'imperial'
 
 export type UiConfig = {
@@ -52,6 +57,14 @@ export const fallbackAnchorConfig: AnchorConfig = {
   loaM: 0,
 }
 
+// Blank address is the documented "not configured" state — see
+// settings-draft.ts's mayaraAddress default for why an empty string, not a
+// plausible-looking host, is what an unset radar server normalizes to.
+export const fallbackMayaraConfig: MayaraConfig = {
+  address: '',
+  port: 6502,
+}
+
 /** The subset of GET /api/settings this module reads. */
 export type AppConfigSettings = {
   ui?: {
@@ -67,6 +80,10 @@ export type AppConfigSettings = {
     windage_area_m2?: number
     gps_from_bow_m?: number
     loa_m?: number
+  }
+  mayara?: {
+    address?: string
+    port?: number
   }
 }
 
@@ -86,6 +103,13 @@ function positiveNumber(value: unknown, fallback: number): number {
 // so it must not be rejected the way positiveNumber rejects 0.
 function nonNegativeNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+// A radar-server port has an upper bound a generic positiveNumber() doesn't
+// enforce — out of range falls back to the default rather than propagating a
+// value that could never be a real TCP port.
+function validPort(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 65535 ? value : fallback
 }
 
 export function normalizeUiConfig(settings: AppConfigSettings | null | undefined): UiConfig {
@@ -132,4 +156,17 @@ export function normalizeAnchorConfig(settings: AppConfigSettings | null | undef
     gpsFromBowM: nonNegativeNumber(anchor?.gps_from_bow_m, fallbackAnchorConfig.gpsFromBowM),
     loaM: positiveNumber(anchor?.loa_m, fallbackAnchorConfig.loaM),
   }
+}
+
+// settings.yaml is hand-editable and the endpoint returns whatever it was
+// given, so a non-string address or a non-finite/out-of-range port falls
+// back to the default for that field alone rather than propagating to the
+// map — same per-field discipline as normalizeUiConfig/normalizeAnchorConfig.
+export function normalizeMayaraConfig(settings: AppConfigSettings | null | undefined): MayaraConfig {
+  const mayara = settings?.mayara
+
+  const address = typeof mayara?.address === 'string' ? mayara.address.trim() : fallbackMayaraConfig.address
+  const port = validPort(mayara?.port, fallbackMayaraConfig.port)
+
+  return { address, port }
 }

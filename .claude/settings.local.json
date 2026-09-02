@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(git stash *)",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(npx tailwindcss *)",
+      "Bash(curl -s http://localhost:5173/src/App.tsx)",
+      "Read(//tmp/**)",
+      "Read(//Applications/**)",
+      "Bash(npx --yes playwright --version)",
+      "Bash(ls ~/Library/Caches/ms-playwright 2>/dev/null; ls \"/Applications/Google Chrome.app/Contents/MacOS/\" 2>/dev/null)",
+      "Read(//Users/gavinator/Library/Caches/ms-playwright/**)",
+      "Bash(PLAYWRIGHT_BROWSERS_PATH=/Users/gavinator/Library/Caches/ms-playwright node /tmp/screenshot.mjs)",
+      "Bash(npm install *)",
+      "Bash(node *)",
+      "Bash(git commit *)",
+      "Bash(awk 'NR==335,NR==345{print NR\": \"$0}' src/components/anchor-watch-map.tsx)",
+      "Bash(awk 'NR==260,NR==300{print NR\": \"$0}' src/components/anchor-watch-map.tsx)",
+      "Bash(awk NR==395,NR==418{print NR\": \"$0} *)",
+      "Bash(awk NR==380,NR==395{print NR\": \"$0} *)",
+      "Bash(git status *)",
+      "Bash(echo \"---TSC EXIT: $?---\")",
+      "Bash(docker run *)",
+      "Skill(shadcn)",
+      "Bash(lsof -iTCP -sTCP:LISTEN -P -n)"
+    ]
+  },
+  "outputStyle": "Concise"
+}

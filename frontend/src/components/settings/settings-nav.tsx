@@ -8,6 +8,7 @@ export type SettingsSectionId =
   | 'widgets'
   | 'influxdb'
   | 'anchor-watch'
+  | 'mayara'
   | 'alarms'
   | 'security'
 
@@ -17,6 +18,7 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> 
   { id: 'signalk', label: 'SignalK' },
   { id: 'influxdb', label: 'InfluxDB' },
   { id: 'anchor-watch', label: 'Anchor Watch' },
+  { id: 'mayara', label: 'Mayara' },
   { id: 'alarms', label: 'Alarms' },
   { id: 'widgets', label: 'Widgets' },
   { id: 'security', label: 'Security' },

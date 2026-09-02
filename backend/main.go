@@ -109,6 +109,7 @@ type solarStateData struct {
 	TodayKWh      float64
 	YesterdayKWh  float64
 	PeakTodayW    float64
+	LastUpdateAge float64
 	Controllers   []solarControllerData
 	Trend24hTotal []solarTrendPoint
 }
@@ -131,6 +132,7 @@ type electricalStateData struct {
 	DC24VVoltageV       float64
 	ACLoadsW            float64
 	GeneratorRealPowerW float64
+	LastUpdateAge       float64
 	Alternator0         alternatorInstanceData
 	Alternator1         alternatorInstanceData
 	Charger0            chargerInstanceData
@@ -391,6 +393,18 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// is the REST equivalent of the "radar-targets" telemetry event,
 		// curl-able before any UI exists.
 		{http.MethodGet, "/api/radar/targets", tierRead, radarTargetsHandler},
+		// The radar picture overlay's capabilities proxy (legend, spoke
+		// geometry, range table), same tier and same plugin path shape as
+		// targets above but a distinct endpoint: mayara's REST surface, not
+		// the delta stream (radar_capabilities.go).
+		{http.MethodGet, "/api/radar/capabilities", tierRead, radarCapabilitiesHandler},
+		// The radar picture overlay's spoke stream: mayara-server itself, not
+		// the SignalK plugin (which 404s for spokes — plan: "Why the backend
+		// relays rather than the browser connecting direct"). Upgraded to
+		// WebSocket inside the handler rather than declared as one here,
+		// same tier as the REST radar routes above since it is equally
+		// read-only (radar_spoke_relay.go).
+		{http.MethodGet, "/api/radar/spokes", tierRead, radarSpokeRelayHandler},
 		{http.MethodGet, "/api/weather-today", tierRead, weatherToday},
 		{http.MethodGet, "/api/weather-forecast", tierRead, weatherForecast},
 		{http.MethodGet, "/api/weather-providers", tierRead, weatherProvidersHandler},
@@ -765,6 +779,7 @@ func buildElectricalStatePayload() map[string]any {
 
 	return map[string]any{
 		"datetime":                   state.Datetime.Format(time.RFC3339),
+		"last_update_age_s":          state.LastUpdateAge,
 		"battery_soc_percent":        state.BatterySocPercent,
 		"battery_capacity_ah":        state.BatteryCapacityAh,
 		"charging_current_a":         state.ChargingCurrentA,
@@ -852,14 +867,15 @@ func buildSolarStatePayload() map[string]any {
 	}
 
 	return map[string]any{
-		"datetime":        state.Datetime.Format(time.RFC3339),
-		"source":          source,
-		"current_w":       state.CurrentW,
-		"today_kwh":       state.TodayKWh,
-		"yesterday_kwh":   state.YesterdayKWh,
-		"peak_today_w":    state.PeakTodayW,
-		"controllers":     controllers,
-		"trend_24h_total": state.Trend24hTotal,
+		"datetime":          state.Datetime.Format(time.RFC3339),
+		"source":            source,
+		"current_w":         state.CurrentW,
+		"today_kwh":         state.TodayKWh,
+		"yesterday_kwh":     state.YesterdayKWh,
+		"peak_today_w":      state.PeakTodayW,
+		"last_update_age_s": state.LastUpdateAge,
+		"controllers":       controllers,
+		"trend_24h_total":   state.Trend24hTotal,
 	}
 }
 func solarState(c echo.Context) error {

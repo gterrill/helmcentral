@@ -65,6 +65,17 @@ export default defineConfig(({ mode }) => ({
         // does not vhost on Host, so preserving it costs nothing.
         // See docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
         changeOrigin: false,
+        // The radar spoke relay is a WebSocket on this same /api prefix.
+        // Vite does not forward upgrade requests unless an entry opts in,
+        // and it fails silently: the socket never opens, nothing is logged,
+        // and the overlay just shows nothing. Measured before this line
+        // existed, the browser got 0 frames through :5173 against 19 in the
+        // same 8 s straight to the backend on :8080.
+        //
+        // Production never hits this path, because there the Go server
+        // serves the frontend itself and no proxy sits in between, which is
+        // what makes the gap easy to miss until someone tries it in dev.
+        ws: true,
       }
     }
   },

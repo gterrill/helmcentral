@@ -78,3 +78,12 @@ influxdb:
 # mayara-server itself is running against the radar. Helmcentral reads both
 # through the SignalK connection it already has, the same way it reads every
 # other sensor.
+#
+# The live radar picture overlay on the anchor watch map is different: the
+# SignalK plugin proxies mayara's REST API but not its spoke stream (the
+# 8192-spoke sweep a live picture needs), so the overlay talks to
+# mayara-server directly and needs its address here. Leave it blank to leave
+# the overlay off.
+mayara:
+  address: ""
+  port: 6502

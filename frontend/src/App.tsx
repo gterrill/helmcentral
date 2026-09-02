@@ -161,6 +161,7 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
 ]
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
+const ANCHOR_RADAR_ECHO_ENABLED_KEY = 'anchorWatch.radarEcho.enabled'
 const AUTO_CLOSE_ANCHOR_WATCH_KEY = 'anchorWatch.autoClose.enabled'
 
 export function App() {
@@ -180,6 +181,10 @@ export function App() {
   const [activePanel, setActivePanel] = useState<PanelId | null>(null)
   const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)
+    return raw === 'true'
+  })
+  const [showRadarEcho, setShowRadarEcho] = useState(() => {
+    const raw = globalThis.localStorage?.getItem(ANCHOR_RADAR_ECHO_ENABLED_KEY)
     return raw === 'true'
   })
   const [autoCloseAnchorWatchEnabled, setAutoCloseAnchorWatchEnabled] = useState(() => {
@@ -260,6 +265,10 @@ export function App() {
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
   }, [showAnchorImagery])
+
+  useEffect(() => {
+    globalThis.localStorage?.setItem(ANCHOR_RADAR_ECHO_ENABLED_KEY, String(showRadarEcho))
+  }, [showRadarEcho])
 
   useEffect(() => {
     globalThis.localStorage?.setItem(AUTO_CLOSE_ANCHOR_WATCH_KEY, String(autoCloseAnchorWatchEnabled))
@@ -356,6 +365,7 @@ export function App() {
   const { targets: radarTargets, radars: radarInfos, source: radarSource, loading: radarTargetsLoading } = useRadarTargets()
   const { tanks, loading: tanksLoading } = useTanksState()
   const {
+    lastUpdateAgeS: electricalLastUpdateAgeS,
     batterySocPercent,
     chargingCurrentA,
     chargingPowerW,
@@ -378,6 +388,7 @@ export function App() {
     todayKWh: solarTodayKWh,
     yesterdayKWh: solarYesterdayKWh,
     peakTodayW: solarPeakTodayW,
+    lastUpdateAgeS: solarLastUpdateAgeS,
     controllers: solarControllers,
   } = useSolarState()
   const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
@@ -820,9 +831,13 @@ export function App() {
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
             radarTargets={radarTargets}
+            radars={radarInfos}
+            radarSource={radarSource}
             isDarkTheme={isDarkTheme}
             showImageryLayer={showAnchorImagery}
             onImageryToggle={setShowAnchorImagery}
+            showRadarEcho={showRadarEcho}
+            onRadarEchoToggle={setShowRadarEcho}
             onFullscreen={() => setActivePanel('anchor-watch')}
             placemarks={placemarks}
             onPlacemarkCreate={createPlacemark}
@@ -875,6 +890,7 @@ export function App() {
             charger0Error={charger0Error}
             batteryRatePercentPerHour={batteryRatePercentPerHour}
             timeToGoHours={timeToGoHours}
+            lastUpdateAgeS={electricalLastUpdateAgeS}
           />
         )
       case 'solar':
@@ -884,6 +900,7 @@ export function App() {
             todayKWh={solarTodayKWh}
             yesterdayKWh={solarYesterdayKWh}
             peakTodayW={solarPeakTodayW}
+            lastUpdateAgeS={solarLastUpdateAgeS}
             controllers={solarControllers}
           />
         )
@@ -1178,9 +1195,13 @@ export function App() {
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
             radarTargets={radarTargets}
+            radars={radarInfos}
+            radarSource={radarSource}
             isDarkTheme={isDarkTheme}
             showImageryLayer={showAnchorImagery}
             onImageryToggle={setShowAnchorImagery}
+            showRadarEcho={showRadarEcho}
+            onRadarEchoToggle={setShowRadarEcho}
             onAnchorReposition={anchorWatch.updatePosition}
             onRadiusChange={anchorWatch.updateRadius}
             onClearAnchor={anchorWatch.clearAnchor}

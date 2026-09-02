@@ -141,6 +141,108 @@ func TestBuildSettingsPayload_SurfacesInfluxdbSectionFromDisk(t *testing.T) {
 	}
 }
 
+// TestSettingsPayloadRoundTripsMayaraBlock drives a real write/read cycle
+// through updateSettingsHandler (postSettings, settings_validation_test.go),
+// the same path the Settings UI uses, mirroring the Influxdb round trip
+// above. Mayara has no address on SignalK's own connection (fetchMayaraTargets,
+// radar_source.go) — it needs its own, used only by the radar picture
+// overlay — so this pins that address/port survive the save, and that
+// saving them does not clobber the rest of the file.
+func TestSettingsPayloadRoundTripsMayaraBlock(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Mayara.Address = "192.168.50.81"
+		p.Mayara.Port = 6502
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	payload := buildSettingsPayload(saved)
+	if payload.Mayara.Address != "192.168.50.81" {
+		t.Fatalf("expected mayara.address to round-trip, got %q", payload.Mayara.Address)
+	}
+	if payload.Mayara.Port != 6502 {
+		t.Fatalf("expected mayara.port to round-trip, got %d", payload.Mayara.Port)
+	}
+
+	// Saving the mayara block must not disturb unrelated fields already on
+	// disk (writeTestSettings, settings_validation_test.go).
+	if payload.Boat.Model != "Test Boat" {
+		t.Fatalf("expected boat.model to survive untouched, got %q", payload.Boat.Model)
+	}
+	if payload.Boat.VesselPrefix != "M/V" {
+		t.Fatalf("expected boat.vessel_prefix to survive untouched, got %q", payload.Boat.VesselPrefix)
+	}
+	if payload.UI.TankLabels["fuel.2"] != "PORT FWD" {
+		t.Fatalf("expected ui.tank_labels to survive untouched, got %+v", payload.UI.TankLabels)
+	}
+	address, port := persistedSignalK(t, settingsPath)
+	if address != "203.0.113.1" || port != 3000 {
+		t.Fatalf("expected signalk.address/port to survive untouched, got %s:%d", address, port)
+	}
+}
+
+// TestNormalizeSettingsPayloadDefaultsMayaraPort pins the port clamp (0 or
+// out of range -> 6502, mayara's default REST port) and, separately, that a
+// blank address is left blank rather than defaulting to a host the way
+// signalk.address defaults to defaultSignalKAddress — there is no sane
+// address to guess for a radar, and a guessed one would silently point the
+// overlay at the wrong box.
+func TestNormalizeSettingsPayloadDefaultsMayaraPort(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		port int
+		want int
+	}{
+		{"zero clamps to 6502", 0, 6502},
+		{"negative clamps to 6502", -1, 6502},
+		{"out of range clamps to 6502", 99999, 6502},
+		{"a valid port passes through unchanged", 6502, 6502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := settingsPayload{}
+			req.Mayara.Port = tc.port
+			if got := normalizeSettingsPayload(req).Mayara.Port; got != tc.want {
+				t.Fatalf("port %d: got %d, want %d", tc.port, got, tc.want)
+			}
+		})
+	}
+
+	blank := normalizeSettingsPayload(settingsPayload{})
+	if blank.Mayara.Address != "" {
+		t.Fatalf("expected a blank mayara address to stay blank, got %q", blank.Mayara.Address)
+	}
+}
+
+// TestValidateSettingsChangeDoesNotProbeMayara pins the deliberate absence of
+// a mayara probe: a radar that is switched off, or a mayara box that is
+// simply unreachable, must never block an unrelated settings save the way an
+// unreachable new SignalK address does (validateSettingsChange above). Both
+// addresses are TEST-NET-3 (RFC 5737, see hostPort/postSettings above) so
+// this fails fast and without depending on the test machine's network if
+// anyone adds a probe here later.
+func TestValidateSettingsChangeDoesNotProbeMayara(t *testing.T) {
+	current := settingsPayload{}
+	current.Signalk.Address = "203.0.113.1"
+	current.Signalk.Port = 3000
+	current.Mayara.Address = "203.0.113.2"
+	current.Mayara.Port = 6502
+
+	next := current
+	next.Mayara.Address = "203.0.113.3"
+	next.Mayara.Port = 6503
+
+	if invalid := validateSettingsChange(current, next); invalid != nil {
+		t.Fatalf("a mayara address/port change must never be probed, got %+v", invalid)
+	}
+}
+
 // TestNormalizeSettingsPayload_PreservesGPSFromBowMZero guards the anchor
 // bow-offset correction (see docs on setAnchorWatch): gps_from_bow_m
 // defaults to 0, meaning "no correction", so 0 is a meaningful explicit
@@ -790,5 +892,115 @@ func TestFetchSignalKSolarState_NormalizesWhYieldToKWh(t *testing.T) {
 	}
 	if !approxEqual(state.YesterdayKWh, 1.3, 0.001) {
 		t.Fatalf("expected yieldYesterday converted to 1.3 kWh, got %v", state.YesterdayKWh)
+	}
+}
+
+func TestFetchSignalKSolarState_ReportsAgeOfFreshestController(t *testing.T) {
+	// Sample time is 2026-09-02T00:00:00Z; the two controllers last reported
+	// 600s and 300s before that. The state-level age tracks the freshest of
+	// them, because a source is only as stale as its most recent update.
+	body := []byte(`{
+		"timestamp": "2026-09-02T00:00:00Z",
+		"electrical": {
+			"solar": {
+				"0": {
+					"panelPower": {"value": 0, "timestamp": "2026-09-01T23:50:00Z"}
+				},
+				"1": {
+					"panelPower": {"value": 0, "timestamp": "2026-09-01T23:55:00Z"}
+				}
+			}
+		}
+	}`)
+
+	seedSelfTree(t, string(body))
+
+	state, err := fetchSignalKSolarState()
+	if err != nil {
+		t.Fatalf("fetchSignalKSolarState: %v", err)
+	}
+
+	if !approxEqual(state.Controllers[0].LastUpdateAge, 600, 0.01) {
+		t.Fatalf("expected controller 0 age 600s, got %v", state.Controllers[0].LastUpdateAge)
+	}
+	if !approxEqual(state.Controllers[1].LastUpdateAge, 300, 0.01) {
+		t.Fatalf("expected controller 1 age 300s, got %v", state.Controllers[1].LastUpdateAge)
+	}
+	if !approxEqual(state.LastUpdateAge, 300, 0.01) {
+		t.Fatalf("expected state age to track freshest controller (300s), got %v", state.LastUpdateAge)
+	}
+}
+
+func TestFetchSignalKSolarState_AgeIsUnknownWithoutTimestamps(t *testing.T) {
+	// No per-controller timestamps means we cannot claim the data is fresh.
+	// -1 is this codebase's "unknown", and must not be confused with 0s old.
+	body := []byte(`{
+		"timestamp": "2026-09-02T00:00:00Z",
+		"electrical": {
+			"solar": {
+				"0": {"panelPower": {"value": 240.0}}
+			}
+		}
+	}`)
+
+	seedSelfTree(t, string(body))
+
+	state, err := fetchSignalKSolarState()
+	if err != nil {
+		t.Fatalf("fetchSignalKSolarState: %v", err)
+	}
+
+	if state.LastUpdateAge != -1 {
+		t.Fatalf("expected unknown age (-1) when no controller carries a timestamp, got %v", state.LastUpdateAge)
+	}
+}
+
+func TestFetchSignalKElectricalState_ReportsFreshestElectricalTimestamp(t *testing.T) {
+	// The electrical tile draws from paths scattered across the electrical
+	// subtree, so its freshness is that of the most recent one: if anything
+	// under electrical is still reporting, the feed is alive.
+	body := []byte(`{
+		"timestamp": "2026-09-02T00:00:00Z",
+		"electrical": {
+			"batteries": {
+				"house": {
+					"capacity": {"stateOfCharge": {"value": 0.46, "timestamp": "2026-09-01T23:50:00Z"}}
+				}
+			},
+			"solar": {
+				"0": {"panelPower": {"value": 0, "timestamp": "2026-09-01T23:58:00Z"}}
+			}
+		}
+	}`)
+
+	seedSelfTree(t, string(body))
+
+	state, err := fetchSignalKElectricalState()
+	if err != nil {
+		t.Fatalf("fetchSignalKElectricalState: %v", err)
+	}
+
+	if !approxEqual(state.LastUpdateAge, 120, 0.01) {
+		t.Fatalf("expected age of freshest electrical timestamp (120s), got %v", state.LastUpdateAge)
+	}
+}
+
+func TestFetchSignalKElectricalState_AgeIsUnknownWithoutTimestamps(t *testing.T) {
+	body := []byte(`{
+		"timestamp": "2026-09-02T00:00:00Z",
+		"electrical": {
+			"batteries": {"house": {"capacity": {"stateOfCharge": {"value": 0.46}}}}
+		}
+	}`)
+
+	seedSelfTree(t, string(body))
+
+	state, err := fetchSignalKElectricalState()
+	if err != nil {
+		t.Fatalf("fetchSignalKElectricalState: %v", err)
+	}
+
+	if state.LastUpdateAge != -1 {
+		t.Fatalf("expected unknown age (-1) with no timestamps present, got %v", state.LastUpdateAge)
 	}
 }

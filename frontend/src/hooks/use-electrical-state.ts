@@ -11,6 +11,7 @@ interface AlternatorInstance {
 
 interface ElectricalState {
   datetime: string
+  last_update_age_s: number
   battery_soc_percent: number
   battery_capacity_ah: number
   charging_current_a: number
@@ -42,6 +43,7 @@ function parseAlt(v: unknown): number | null {
 }
 
 export function useElectricalState() {
+  const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
   const [batterySocPercent, setBatterySocPercent] = useState<number | null>(null)
   const [chargingCurrentA, setChargingCurrentA] = useState<number | null>(null)
   const [chargingPowerW, setChargingPowerW] = useState<number | null>(null)
@@ -72,6 +74,7 @@ export function useElectricalState() {
         const nextBatterySocPercent =
           typeof data.battery_soc_percent === 'number' && data.battery_soc_percent >= 0 ? data.battery_soc_percent : null
 
+        setLastUpdateAgeS(parseAlt(data.last_update_age_s))
         setBatterySocPercent(nextBatterySocPercent)
         setChargingCurrentA(typeof data.charging_current_a === 'number' ? data.charging_current_a : null)
         setChargingPowerW(typeof data.charging_power_w === 'number' ? data.charging_power_w : null)
@@ -152,6 +155,7 @@ export function useElectricalState() {
   }, [])
 
   return {
+    lastUpdateAgeS,
     batterySocPercent,
     chargingCurrentA,
     chargingPowerW,

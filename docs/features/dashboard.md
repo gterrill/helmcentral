@@ -29,6 +29,34 @@ same arrangement.
 The layout stays usable down to a phone, with three structurally different
 arrangements across the range rather than one grid that squashes.
 
+## When a source goes quiet
+
+A SignalK server keeps serving the last value it received from a source. If the
+feed behind that source stops, the number does not disappear, it stops moving,
+and a tile that renders it looks exactly like a tile reporting a live reading.
+That is harmless for a value you would notice being wrong. It is not harmless
+for solar output, where a frozen 0 W from before sunrise is entirely plausible
+and will happily sit there all morning while the array works.
+
+So the Solar and Battery & Power tiles watch how long it has been since their
+source last said anything. Past two minutes the tile dims, its header gains a
+`STALE` marker with the age, and every reading on it becomes `—`. The values are
+blanked deliberately: a stale reading presented as a measurement is worse than
+no reading at all.
+
+The Solar tile does this per controller as well as for the array as a whole. One
+MPPT dropping off marks that row and leaves the rest of the tile reporting
+normally, because the other controllers are still live and their total is still
+real.
+
+Ages are measured against the vessel clock at the moment the reading was taken,
+so a tablet with a wrong clock or one waking from sleep will not cause false
+staleness.
+
+A tile showing `—` with no `STALE` marker means something different: that path
+is not being published at all. Check that the source exists in SignalK before
+looking for a dead link.
+
 ## Beyond the grid
 
 ### Anchor watch and the rode planner

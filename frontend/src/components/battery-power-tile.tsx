@@ -1,6 +1,7 @@
 import { BatteryCharging, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning } from 'lucide-react'
 import { memo } from 'react'
 import { Tile } from '@/components/ui/tile'
+import { formatDataAge, isStale } from '@/lib/staleness'
 
 export interface BatteryPowerTileProps {
   batterySocPercent: number | null
@@ -16,6 +17,8 @@ export interface BatteryPowerTileProps {
   charger0Error: string | null
   batteryRatePercentPerHour: number | null
   timeToGoHours: number | null
+  /** Seconds since the electrical feed last reported, or null if unknown. */
+  lastUpdateAgeS: number | null
 }
 
 function hasChargerError(errorValue: string | null): boolean {
@@ -63,21 +66,45 @@ function formatTimeToGo(hours: number | null) {
   return `${hh}h ${mm.toString().padStart(2, '0')}m`
 }
 
-export const BatteryPowerTile = memo(function BatteryPowerTile({
-  batterySocPercent,
-  chargingCurrentA,
-  chargingPowerW,
-  solarOutputW,
-  acOutputW,
-  dc12vPowerW,
-  dc24vVoltageV,
-  charger0CurrentA,
-  charger0AcIn1CurrentA,
-  charger0ChargingMode,
-  charger0Error,
-  batteryRatePercentPerHour,
-  timeToGoHours,
-}: BatteryPowerTileProps) {
+/**
+ * Every reading blanked. When the feed is stale the values below are
+ * historical artefacts, and routing them through this instead of the live
+ * props reuses the existing "no value" formatting rather than repeating a
+ * stale branch at each of the fifteen labels.
+ */
+const NO_READINGS = {
+  batterySocPercent: null,
+  chargingCurrentA: null,
+  chargingPowerW: null,
+  solarOutputW: null,
+  acOutputW: null,
+  dc12vPowerW: null,
+  dc24vVoltageV: null,
+  charger0CurrentA: null,
+  charger0AcIn1CurrentA: null,
+  charger0ChargingMode: null,
+  charger0Error: null,
+  batteryRatePercentPerHour: null,
+  timeToGoHours: null,
+} as const
+
+export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPowerTileProps) {
+  const feedStale = isStale(props.lastUpdateAgeS)
+  const {
+    batterySocPercent,
+    chargingCurrentA,
+    chargingPowerW,
+    solarOutputW,
+    acOutputW,
+    dc12vPowerW,
+    dc24vVoltageV,
+    charger0CurrentA,
+    charger0AcIn1CurrentA,
+    charger0ChargingMode,
+    charger0Error,
+    batteryRatePercentPerHour,
+    timeToGoHours,
+  } = feedStale ? NO_READINGS : props
   const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
   const socBarWidth = `${Math.max(0, Math.min(100, batterySocPercent ?? 0))}%`
   const chargingCurrentLabel = chargingCurrentA !== null
@@ -116,7 +143,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile({
   }
 
   return (
-    <Tile title="Battery & Power">
+    <Tile title="Battery & Power" stale={feedStale} staleLabel={formatDataAge(props.lastUpdateAgeS)}>
       <div className="mt-1 grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
           <div className="flex items-baseline gap-2">

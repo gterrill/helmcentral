@@ -49,6 +49,8 @@ export interface RegularSettingsDraft {
   influxdbUrl: string
   influxdbOrg: string
   influxdbBucket: string
+  mayaraAddress: string
+  mayaraPort: string
   authMode: 'none' | 'signalk'
 }
 
@@ -77,6 +79,11 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   influxdbUrl: '',
   influxdbOrg: '',
   influxdbBucket: '',
+  // Blank by default and left blank when unset — a plausible-looking default
+  // host would produce a confusing failure (the overlay silently pointed at
+  // the wrong box) rather than an obvious one (no address configured).
+  mayaraAddress: '',
+  mayaraPort: '6502',
 }
 
 /** Builds the draft's starting values from a freshly-fetched settings payload. */
@@ -132,6 +139,12 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.influxdb?.org === 'string') draft.influxdbOrg = settings.influxdb.org
   if (typeof settings.influxdb?.bucket === 'string') draft.influxdbBucket = settings.influxdb.bucket
 
+  // typeof, not truthy: an explicit blank address must hydrate as blank, not
+  // fall through to some default host. Unlike signalkAddress (whose default
+  // is the meaningful 'localhost'), mayaraAddress's default is itself blank.
+  if (typeof settings.mayara?.address === 'string') draft.mayaraAddress = settings.mayara.address
+  if (typeof settings.mayara?.port === 'number') draft.mayaraPort = String(settings.mayara.port)
+
   return draft
 }
 
@@ -180,6 +193,8 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.influxdbUrl !== b.influxdbUrl) return false
   if (a.influxdbOrg !== b.influxdbOrg) return false
   if (a.influxdbBucket !== b.influxdbBucket) return false
+  if (a.mayaraAddress !== b.mayaraAddress) return false
+  if (a.mayaraPort !== b.mayaraPort) return false
 
   // Compare tankLabels: same keys and same value for each key
   const aLabelsKeys = Object.keys(a.tankLabels).sort()
@@ -238,6 +253,13 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       url: draft.influxdbUrl.trim(),
       org: draft.influxdbOrg.trim(),
       bucket: draft.influxdbBucket.trim(),
+    },
+    mayara: {
+      // Trimmed, never defaulted: a blank address must save as blank so an
+      // unconfigured radar server is an obvious "not set" rather than a
+      // plausible-looking wrong host.
+      address: draft.mayaraAddress.trim(),
+      port: Number.parseInt(draft.mayaraPort, 10) || 6502,
     },
     auth: {
       mode: draft.authMode,

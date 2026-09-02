@@ -40,6 +40,10 @@ export type SettingsPayload = {
     org?: string
     bucket?: string
   }
+  mayara?: {
+    address?: string
+    port?: number
+  }
   auth?: {
     mode?: string
   }

@@ -29,6 +29,11 @@ const (
 	defaultHullType                  = "power_cat"
 	defaultScopeMethod               = "ratio"
 	defaultWindageAreaM2             = 35
+	// defaultMayaraPort is mayara-server's own default REST/WebSocket port.
+	// Used only to clamp an out-of-range settings.mayara.port; unlike
+	// defaultSignalKAddress there is no equivalent default *address* — see
+	// normalizeSettingsPayload.
+	defaultMayaraPort = 6502
 
 	// signalKSelfAPIPath is the v1 REST prefix every read and write of the
 	// self vessel's data model goes through. Reads default to it through
@@ -104,6 +109,14 @@ type settingsPayload struct {
 		Org     string `json:"org"`
 		Bucket  string `json:"bucket"`
 	} `json:"influxdb"`
+	// Mayara is the mayara-server address, used only by the radar picture
+	// overlay. Targets do not need it: they arrive through the SignalK plugin
+	// (ADR 0062 amendment). The overlay does, because the plugin returns 404
+	// for the spoke stream.
+	Mayara struct {
+		Address string `json:"address"`
+		Port    int    `json:"port"`
+	} `json:"mayara"`
 	Auth struct {
 		Mode string `json:"mode"`
 	} `json:"auth"`
@@ -188,6 +201,10 @@ func updateSettingsHandler(c echo.Context) error {
 		"url":     normalized.Influxdb.URL,
 		"org":     normalized.Influxdb.Org,
 		"bucket":  normalized.Influxdb.Bucket,
+	}
+	settings["mayara"] = map[string]any{
+		"address": normalized.Mayara.Address,
+		"port":    normalized.Mayara.Port,
 	}
 	settings["units"] = normalized.Units
 
@@ -365,6 +382,16 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		payload.Influxdb.Bucket = strings.TrimSpace(coerceString(influxMap["bucket"]))
 	}
 
+	if mayaraMap, ok := settings["mayara"].(map[string]any); ok {
+		// Unconditional, like the influxdb fields above: an address stored as
+		// blank must surface as blank, not be mistaken for "absent" and papered
+		// over with whatever normalizeSettingsPayload({}) defaulted payload to.
+		payload.Mayara.Address = strings.TrimSpace(coerceString(mayaraMap["address"]))
+		if port := coercePort(mayaraMap["port"]); port > 0 && port <= 65535 {
+			payload.Mayara.Port = port
+		}
+	}
+
 	if authMap, ok := settings["auth"].(map[string]any); ok {
 		payload.Auth.Mode = strings.TrimSpace(coerceString(authMap["mode"]))
 	}
@@ -463,6 +490,16 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Influxdb.URL = strings.TrimSpace(req.Influxdb.URL)
 	normalized.Influxdb.Org = strings.TrimSpace(req.Influxdb.Org)
 	normalized.Influxdb.Bucket = strings.TrimSpace(req.Influxdb.Bucket)
+
+	// Unlike Signalk.Address just above, a blank mayara address stays blank
+	// rather than defaulting to a host: there is no sane address to guess for
+	// a radar, and an unconfigured mayara address is exactly how the radar
+	// picture overlay reports itself as off (plan: "Backend" section).
+	normalized.Mayara.Address = strings.TrimSpace(req.Mayara.Address)
+	normalized.Mayara.Port = req.Mayara.Port
+	if normalized.Mayara.Port <= 0 || normalized.Mayara.Port > 65535 {
+		normalized.Mayara.Port = defaultMayaraPort
+	}
 
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {
@@ -854,7 +891,7 @@ func parseSignalKCurrent(payload map[string]any) (float64, float64, *float64) {
 }
 
 func fetchSignalKElectricalState() (electricalStateData, error) {
-	state := electricalStateData{Datetime: time.Now().UTC(), BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
+	state := electricalStateData{Datetime: time.Now().UTC(), LastUpdateAge: -1, BatterySocPercent: -1, BatteryCapacityAh: -1, ChargingCurrentA: -1, ChargingPowerW: -1, SolarOutputW: -1, ACOutputW: -1, DC12VPowerW: -1, DC12VCurrentA: -1, DC24VVoltageV: -1, ACLoadsW: -1, Charger0: chargerInstanceData{CurrentA: -1, ACIn1CurrentA: -1}}
 
 	payload, err := signalKSelfPayload()
 	if err != nil {
@@ -868,6 +905,12 @@ func fetchSignalKElectricalState() (electricalStateData, error) {
 			state.Datetime = parsed.UTC()
 		}
 	}
+
+	// The tile's values come from paths scattered across the electrical
+	// subtree, so its freshness is that of the most recent of them. A feed that
+	// has stopped freezes every one of these at once, which is what makes a
+	// single subtree-wide age meaningful here.
+	state.LastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "electrical"), state.Datetime)
 
 	// Identify the main house battery before reading any values from it.
 	mainBattery := lookupMainBattery(payload)
@@ -1052,6 +1095,7 @@ func fetchSignalKSolarState() (solarStateData, error) {
 		TodayKWh:      -1,
 		YesterdayKWh:  -1,
 		PeakTodayW:    -1,
+		LastUpdateAge: -1,
 		Controllers:   []solarControllerData{},
 		Trend24hTotal: []solarTrendPoint{},
 	}
@@ -1104,6 +1148,15 @@ func fetchSignalKSolarState() (solarStateData, error) {
 			if controller.YesterdayKWh >= 0 {
 				sumYesterdayKWh += controller.YesterdayKWh
 				foundYesterday = true
+			}
+			// A source is only as stale as its most recent update, so the
+			// state-level age tracks the freshest controller rather than the
+			// oldest. Controllers reporting no timestamp (-1) cannot vouch for
+			// freshness and are skipped.
+			if controller.LastUpdateAge >= 0 {
+				if state.LastUpdateAge < 0 || controller.LastUpdateAge < state.LastUpdateAge {
+					state.LastUpdateAge = controller.LastUpdateAge
+				}
 			}
 		}
 
@@ -1875,6 +1928,50 @@ func lookupMainBattery(payload map[string]any) map[string]any {
 	}
 
 	return best
+}
+
+// freshestTimestampAge reports how many seconds before sampleTime the most
+// recent RFC3339 "timestamp" anywhere in the subtree was written.
+//
+// It returns -1 when the subtree carries no usable timestamp at all. That is
+// deliberately distinct from 0: an age we cannot determine must never be
+// presented as freshly measured.
+func freshestTimestampAge(node any, sampleTime time.Time) float64 {
+	newest := time.Time{}
+
+	var walk func(any)
+	walk = func(current any) {
+		entry, ok := current.(map[string]any)
+		if !ok {
+			return
+		}
+		for key, child := range entry {
+			if key == "timestamp" {
+				raw, isString := child.(string)
+				if !isString {
+					continue
+				}
+				parsed, err := time.Parse(time.RFC3339, raw)
+				if err == nil && parsed.After(newest) {
+					newest = parsed.UTC()
+				}
+				continue
+			}
+			walk(child)
+		}
+	}
+	walk(node)
+
+	if newest.IsZero() {
+		return -1
+	}
+
+	age := sampleTime.Sub(newest).Seconds()
+	if age < 0 {
+		// Source clock is marginally ahead of the vessel clock; it is current.
+		return 0
+	}
+	return roundTo1(age)
 }
 
 func lookupAnyMap(payload map[string]any, keys ...string) map[string]any {

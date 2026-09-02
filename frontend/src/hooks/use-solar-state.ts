@@ -21,6 +21,7 @@ interface SolarState {
   today_kwh: number
   yesterday_kwh: number
   peak_today_w: number
+  last_update_age_s: number
   controllers: SolarControllerState[]
 }
 
@@ -49,6 +50,7 @@ export function useSolarState() {
   const [todayKWh, setTodayKWh] = useState<number | null>(null)
   const [yesterdayKWh, setYesterdayKWh] = useState<number | null>(null)
   const [peakTodayW, setPeakTodayW] = useState<number | null>(null)
+  const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
   const [controllers, setControllers] = useState<SolarController[]>([])
 
   useEffect(() => {
@@ -60,6 +62,7 @@ export function useSolarState() {
         setTodayKWh(normalizeNumber(data.today_kwh))
         setYesterdayKWh(normalizeNumber(data.yesterday_kwh))
         setPeakTodayW(normalizeNumber(data.peak_today_w))
+        setLastUpdateAgeS(normalizeNumber(data.last_update_age_s))
 
         const nextControllers = Array.isArray(data.controllers)
           ? data.controllers.map((controller) => ({
@@ -91,6 +94,7 @@ export function useSolarState() {
     todayKWh,
     yesterdayKWh,
     peakTodayW,
+    lastUpdateAgeS,
     controllers,
   }
 }

@@ -13,6 +13,7 @@ import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
 import { GeneralSection } from '@/components/settings/sections/general-section'
 import { SecuritySection } from '@/components/settings/sections/security-section'
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
+import { MayaraSection } from '@/components/settings/sections/mayara-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
 import { WidgetsSection } from '@/components/settings/sections/widgets-section'
 import {
@@ -176,6 +177,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':
         return <InfluxdbSection draft={draft} onChange={handleDraftChange} />
+      case 'mayara':
+        return <MayaraSection draft={draft} onChange={handleDraftChange} />
       case 'anchor-watch':
         return (
           <AnchorWatchOptionsSection

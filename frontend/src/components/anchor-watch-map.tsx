@@ -3,16 +3,19 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Plus, Satellite, Ship, X } from 'lucide-react'
+import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Plus, Radar, Satellite, Ship, X } from 'lucide-react'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RadarTarget } from '@/hooks/use-radar-targets'
+import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { RodeMethodResult } from '@/lib/rode-plan'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
+import { useRadarCapabilities } from '@/hooks/use-radar-capabilities'
+import { useRadarEchoLayer } from '@/hooks/use-radar-echo-layer'
+import type { RadarEchoStatus } from '@/hooks/use-radar-echo-stream'
 
 // Carto basemap styles, served by our own backend rather than fetched
 // from basemaps.cartocdn.com directly: the backend rewrites the style's
@@ -40,6 +43,60 @@ export function computeWorldImageryOpacity(currentZoom: number, enabled: boolean
     0,
     Math.min(1, (currentZoom - SAT_HANDOFF_START_ZOOM) / (SAT_HANDOFF_END_ZOOM - SAT_HANDOFF_START_ZOOM)),
   )
+}
+
+export interface RadarEchoAvailability {
+  available: boolean
+  // Always present alongside `available: false`, so the toggle never
+  // silently does nothing (the plan's own requirement) -- a disabled
+  // control carries the reason in its title rather than just being greyed
+  // out with no explanation.
+  reason: string | null
+}
+
+/**
+ * The radar-echo toggle's precedence chain, checked in the stated order:
+ * no mayara address configured, no radar present, radar not transmitting
+ * (STANDBY), capabilities unreadable, stream disconnected. Each reason is
+ * checked only once the ones before it have already passed, so e.g. an
+ * unconfigured integration reports "no mayara radar configured" rather than
+ * a confusing "no radar found".
+ *
+ * The stream-disconnected check is gated on `echoEnabled`: `echoStatus` is
+ * a module-level value (use-radar-echo-stream.ts) that settles to
+ * 'disconnected' the moment the *last* subscriber releases -- including an
+ * ordinary, intentional toggle-off. Without the `echoEnabled` gate, turning
+ * the overlay off would leave it permanently unable to be turned back on,
+ * since the very act of disabling it sets the status this function would
+ * otherwise read as a reason to stay disabled.
+ */
+export function resolveRadarEchoAvailability(params: {
+  radarSource: RadarSource
+  radars: RadarInfo[]
+  capabilitiesError: string | null
+  capabilitiesLoading: boolean
+  echoEnabled: boolean
+  echoStatus: RadarEchoStatus
+}): RadarEchoAvailability {
+  if (params.radarSource === 'disabled') {
+    return { available: false, reason: 'No mayara radar configured' }
+  }
+  if (params.radars.length === 0) {
+    return { available: false, reason: 'No radar found' }
+  }
+  if (!params.radars[0].transmitting) {
+    return { available: false, reason: 'Radar in STANDBY' }
+  }
+  if (params.capabilitiesLoading) {
+    return { available: false, reason: 'Loading radar capabilities…' }
+  }
+  if (params.capabilitiesError !== null) {
+    return { available: false, reason: params.capabilitiesError }
+  }
+  if (params.echoEnabled && (params.echoStatus === 'disconnected' || params.echoStatus === 'reconnecting')) {
+    return { available: false, reason: 'Radar stream disconnected' }
+  }
+  return { available: true, reason: null }
 }
 
 function readStoredZoom(): number | null {
@@ -184,9 +241,17 @@ export interface AnchorWatchMapProps {
   // mounts this map without a mayara integration keeps compiling untouched
   // — the same treatment `placemarks` already gets.
   radarTargets?: RadarTarget[]
+  // The radar *units* mayara knows about (distinct from radarTargets, its
+  // ARPA contacts) -- optional and defaulted below, same treatment as
+  // radarTargets, so every existing caller/test with no mayara integration
+  // wired up keeps compiling untouched.
+  radars?: RadarInfo[]
+  radarSource?: RadarSource
   isDarkTheme: boolean
   showImageryLayer?: boolean
   onImageryToggle?: (enabled: boolean) => void
+  showRadarEcho?: boolean
+  onRadarEchoToggle?: (enabled: boolean) => void
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
   onFullscreen?: () => void
@@ -217,9 +282,13 @@ export function AnchorWatchMap({
   aisVessels,
   aisTrails,
   radarTargets = [],
+  radars = [],
+  radarSource = 'disabled',
   isDarkTheme,
   showImageryLayer = false,
   onImageryToggle,
+  showRadarEcho = false,
+  onRadarEchoToggle,
   onAnchorReposition,
   onRadiusChange,
   onFullscreen,
@@ -282,6 +351,61 @@ export function AnchorWatchMap({
     missingSourceWarnedRef.current = true
     warnIfBaseVectorSourceMissing(map)
   }, [])
+
+  // Dual-range radars (this boat's Furuno) present two radar keys off one
+  // antenna; radars[0] speaks for the pair, same convention
+  // radarHeaderLabel (radar-targets-tile.tsx) already uses.
+  const primaryRadar = radars[0] ?? null
+  // Capabilities are only worth fetching once a radar exists and is
+  // actually transmitting -- otherwise resolveRadarEchoAvailability below
+  // has already explained why there's nothing to show, and a GET here
+  // would just be wasted backend/mayara round-trips for a picture that
+  // can't be drawn regardless of what it returns.
+  const radarEchoRadarId = primaryRadar && primaryRadar.transmitting && radarSource !== 'disabled' ? primaryRadar.id : null
+  const {
+    capabilities: radarEchoCapabilities,
+    palette: radarEchoPalette,
+    error: radarEchoCapabilitiesError,
+    loading: radarEchoCapabilitiesLoading,
+  } = useRadarCapabilities(radarEchoRadarId)
+
+  const {
+    status: radarEchoStatus,
+    handleMapLoad: handleRadarEchoMapLoad,
+    handleStyleData: handleRadarEchoStyleData,
+  } = useRadarEchoLayer({
+    mapRef,
+    // Own ship, not the radar's own reported fix: mayara captures Spoke.lat/lon
+    // once and does not refresh it (resolveEchoCentre).
+    vesselLat,
+    vesselLon,
+    radarId: radarEchoRadarId,
+    enabled: showRadarEcho,
+    capabilities: radarEchoCapabilities,
+    palette: radarEchoPalette,
+  })
+
+  const radarEchoAvailability = useMemo(
+    () =>
+      resolveRadarEchoAvailability({
+        radarSource,
+        radars,
+        capabilitiesError: radarEchoCapabilitiesError,
+        capabilitiesLoading: radarEchoCapabilitiesLoading,
+        echoEnabled: showRadarEcho,
+        echoStatus: radarEchoStatus,
+      }),
+    [radarSource, radars, radarEchoCapabilitiesError, radarEchoCapabilitiesLoading, showRadarEcho, radarEchoStatus],
+  )
+
+  const handleMapLoad = useCallback(() => {
+    handleRadarEchoMapLoad()
+  }, [handleRadarEchoMapLoad])
+
+  const handleMapStyleData = useCallback(() => {
+    handleStyleData()
+    handleRadarEchoStyleData()
+  }, [handleStyleData, handleRadarEchoStyleData])
 
   // Re-render trails on each poll cycle (trails are stored in refs, not state)
   useEffect(() => {
@@ -813,6 +937,10 @@ export function AnchorWatchMap({
     onImageryToggle?.(!showImageryLayer)
   }, [showImageryLayer, onImageryToggle])
 
+  const handleRadarEchoToggle = useCallback(() => {
+    onRadarEchoToggle?.(!showRadarEcho)
+  }, [showRadarEcho, onRadarEchoToggle])
+
   return (
     <div className={cn('relative overflow-hidden rounded-lg', className)}>
       <Map
@@ -822,9 +950,10 @@ export function AnchorWatchMap({
         style={{ width: '100%', height: '100%' }}
         mapStyle={mapStyle}
         minZoom={10}
+        onLoad={handleMapLoad}
         onZoom={handleZoomChange}
         onMoveEnd={handleMoveEnd}
-        onStyleData={handleStyleData}
+        onStyleData={handleMapStyleData}
         onClick={handleMapClick}
         onMouseMove={handleMouseMove}
         onDblClick={handleDblClick}
@@ -1474,6 +1603,20 @@ export function AnchorWatchMap({
           style={{ transition: 'background-color 150ms ease-out' }}
         >
           <Satellite className="h-4 w-4" />
+        </button>
+        <button
+          onClick={handleRadarEchoToggle}
+          aria-label="Toggle radar echo overlay"
+          disabled={!radarEchoAvailability.available}
+          title={radarEchoAvailability.available ? undefined : (radarEchoAvailability.reason ?? undefined)}
+          className={cn(
+            'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+            showRadarEcho ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+            !radarEchoAvailability.available && 'cursor-not-allowed opacity-50',
+          )}
+          style={{ transition: 'background-color 150ms ease-out' }}
+        >
+          <Radar className="h-4 w-4" />
         </button>
         <button
           onClick={handleRecenter}

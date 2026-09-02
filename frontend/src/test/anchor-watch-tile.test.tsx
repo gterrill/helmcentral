@@ -88,6 +88,8 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     isDarkTheme: false,
     showImageryLayer: false,
     onImageryToggle: vi.fn(),
+    showRadarEcho: false,
+    onRadarEchoToggle: vi.fn(),
     onFullscreen: vi.fn(),
     placemarks: [],
     onPlacemarkCreate: vi.fn(),

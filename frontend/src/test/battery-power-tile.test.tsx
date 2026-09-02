@@ -17,6 +17,7 @@ const baseProps = {
   charger0Error: null,
   batteryRatePercentPerHour: 1.1,
   timeToGoHours: 6.5,
+  lastUpdateAgeS: 2,
 }
 
 test('renders Charger card with charger telemetry values', () => {
@@ -45,4 +46,26 @@ test('renders Charger fallbacks when charger fields are unavailable', () => {
   expect(screen.getByText('Charger')).toBeInTheDocument()
   expect(screen.getByText('Mode:')).toBeInTheDocument()
   expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+})
+
+test('flags a stale feed instead of presenting its last readings as current', () => {
+  // Same failure as the solar tile: when the Victron feed stops, the last
+  // numbers it sent sit here looking like live measurements.
+  render(<BatteryPowerTile {...baseProps} lastUpdateAgeS={5940} />)
+
+  const badge = screen.getByTestId('tile-stale-badge')
+  expect(badge).toBeInTheDocument()
+  expect(badge).toHaveTextContent('1h 39m')
+
+  // None of the frozen readings survive as numbers.
+  expect(screen.queryByText('82')).not.toBeInTheDocument()
+  expect(screen.queryByText('520')).not.toBeInTheDocument()
+  expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+})
+
+test('shows live readings and no stale badge when the feed is current', () => {
+  render(<BatteryPowerTile {...baseProps} />)
+
+  expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
+  expect(screen.getByText('82')).toBeInTheDocument()
 })
