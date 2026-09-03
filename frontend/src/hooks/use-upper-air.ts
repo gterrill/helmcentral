@@ -27,6 +27,44 @@ export interface UpperAirOutlook {
   troughSupport: boolean;
 }
 
+/**
+ * One sample of the sub-daily 500mb trace.
+ *
+ * The day cards carry a daily mean, which is the right figure for a badge and
+ * the wrong one for a chart: a trough drawn at one point per day is a sawtooth,
+ * and the fall into it is the part the book actually reads.
+ */
+export interface UpperAirSample {
+  time: string;
+  dayKey: string;
+  /**
+   * Hour of the vessel's local day. Carried from the backend rather than
+   * recovered from `time` in the browser, whose timezone is not the vessel's
+   * and would produce a label that disagrees with `dayKey`.
+   */
+  localHour: number;
+  height500M: number;
+  /** 500mb minus 1000mb height. Low thickness over warm water means cold air aloft. */
+  thicknessM: number;
+  wind500Kts: number;
+  temperature500C: number;
+}
+
+/**
+ * The vertical extent of the forecast window, so the chart can draw the range
+ * each day is judged against rather than restating a percentile in prose.
+ *
+ * `lowQuintileM` is the same edge `troughSupport` tests, computed once on the
+ * backend off the same sorted list, so the drawn band and the marked days
+ * cannot disagree.
+ */
+export interface UpperAirWindow {
+  present: boolean;
+  lowM: number;
+  highM: number;
+  lowQuintileM: number;
+}
+
 export interface UpperAirDay {
   dayKey: string;
   date: string;
@@ -51,9 +89,28 @@ interface UpperAirDayApi {
   outlook?: UpperAirOutlookApi;
 }
 
+interface UpperAirSampleApi {
+  time?: string;
+  day_key?: string;
+  local_hour?: number;
+  height_500_m?: number;
+  thickness_m?: number;
+  wind_500_kts?: number;
+  temperature_500_c?: number;
+}
+
+interface UpperAirWindowApi {
+  present?: boolean;
+  low_m?: number;
+  high_m?: number;
+  low_quintile_m?: number;
+}
+
 interface UpperAirEnvelopeApi {
   provider?: string;
   days?: UpperAirDayApi[];
+  series?: UpperAirSampleApi[];
+  window?: UpperAirWindowApi;
   cached?: boolean;
   updated_at?: string;
   ttl_seconds?: number;
@@ -68,6 +125,46 @@ const ABSENT: UpperAirOutlook = {
   tendency24hM: 0,
   troughSupport: false,
 };
+
+const ABSENT_WINDOW: UpperAirWindow = { present: false, lowM: 0, highM: 0, lowQuintileM: 0 };
+
+function num(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function mapWindow(api: UpperAirWindowApi | undefined): UpperAirWindow {
+  if (!api || api.present !== true) {
+    return ABSENT_WINDOW;
+  }
+  return {
+    present: true,
+    lowM: num(api.low_m),
+    highM: num(api.high_m),
+    lowQuintileM: num(api.low_quintile_m),
+  };
+}
+
+/**
+ * A sample without a 500mb height is not a reading of sea level, it is a gap,
+ * and dropping it here keeps it from drawing as a spike to the floor of the
+ * chart.
+ */
+function mapSeries(api: UpperAirSampleApi[] | undefined): UpperAirSample[] {
+  if (!Array.isArray(api)) {
+    return [];
+  }
+  return api
+    .filter((sample) => typeof sample?.time === 'string' && num(sample.height_500_m) > 0)
+    .map((sample) => ({
+      time: sample.time as string,
+      dayKey: typeof sample.day_key === 'string' ? sample.day_key : '',
+      localHour: num(sample.local_hour),
+      height500M: num(sample.height_500_m),
+      thicknessM: num(sample.thickness_m),
+      wind500Kts: num(sample.wind_500_kts),
+      temperature500C: num(sample.temperature_500_c),
+    }));
+}
 
 function mapOutlook(api: UpperAirOutlookApi | undefined): UpperAirOutlook {
   if (!api || api.present !== true) {
@@ -92,6 +189,8 @@ function mapOutlook(api: UpperAirOutlookApi | undefined): UpperAirOutlook {
  */
 export function useUpperAir(refreshIntervalSeconds = 21600) {
   const [days, setDays] = useState<UpperAirDay[]>([]);
+  const [series, setSeries] = useState<UpperAirSample[]>([]);
+  const [windowBand, setWindowBand] = useState<UpperAirWindow>(ABSENT_WINDOW);
   const [provider, setProvider] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +218,8 @@ export function useUpperAir(refreshIntervalSeconds = 21600) {
           outlook: mapOutlook(day.outlook),
         })),
       );
+      setSeries(mapSeries(payload.series));
+      setWindowBand(mapWindow(payload.window));
       setProvider(typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null);
       if (rawDays.length > 0) {
         hasLoadedDataRef.current = true;
@@ -138,5 +239,5 @@ export function useUpperAir(refreshIntervalSeconds = 21600) {
     return () => clearInterval(interval);
   }, [fetchUpperAir, refreshIntervalSeconds]);
 
-  return { days, provider, loading, error, refetch: fetchUpperAir };
+  return { days, series, windowBand, provider, loading, error, refetch: fetchUpperAir };
 }

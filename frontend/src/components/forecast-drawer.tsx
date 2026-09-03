@@ -13,7 +13,7 @@ import type { ChartConfig } from '@/components/ui/chart'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
 import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
-import type { UpperAirDay } from '@/hooks/use-upper-air'
+import type { UpperAirDay, UpperAirSample, UpperAirWindow } from '@/hooks/use-upper-air'
 import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { compassPointFor } from '@/lib/format'
@@ -58,6 +58,10 @@ interface ForecastDrawerProps {
   waveDays?: WaveForecastDay[]
   /** 500mb outlook, empty when no upper-air provider is installed. */
   upperAirDays?: UpperAirDay[]
+  /** Sub-daily 500mb trace across the whole window, empty when there is no provider. */
+  upperAirSeries?: UpperAirSample[]
+  /** The range the window's days are judged against, absent when there is no provider. */
+  upperAirWindow?: UpperAirWindow
   waveSeaTemperatureF?: number | null
   waveLoading?: boolean
   waveError?: string | null
@@ -290,6 +294,70 @@ function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; 
 // the series' real color/width/dasharray - replacing the old fake swatches
 // that stood in an em-dash for a solid line and two hyphens for a dashed one
 // without tracking the real strokeDasharray at all.
+/**
+ * One horizon of the forecast page.
+ *
+ * The page answers the same question at three ranges: what is happening on
+ * deck today, what the surface forecast holds over ten days, and what the
+ * upper pattern is doing over sixteen. Those are peers, so they get one shell
+ * rather than the accidental hierarchy that came from each being built at a
+ * different time.
+ *
+ * The span meter is the only structural difference between them, because span
+ * is the only thing that actually differs. It also carries the argument
+ * Surviving the Storm makes for the 500mb chart in the first place: you plan
+ * on the fortnight, not on today, and the proportion is visible here without
+ * anyone doing arithmetic.
+ */
+function ForecastPanel({
+  title,
+  spanLabel,
+  spanDays,
+  maxSpanDays,
+  intro,
+  testId,
+  children,
+}: {
+  title: string
+  spanLabel: string
+  spanDays: number
+  maxSpanDays: number
+  intro?: ReactNode
+  testId?: string
+  children: ReactNode
+}) {
+  // A floor, so the single-day panel still reads as a mark rather than as an
+  // empty track.
+  const spanPercent = maxSpanDays <= 0 ? 100 : Math.max(7, Math.min(100, Math.round((spanDays / maxSpanDays) * 100)))
+
+  return (
+    <section
+      data-testid={testId}
+      className="overflow-hidden rounded-[26px] border border-gauge-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]"
+    >
+      <div className="border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground/70">{title}</h3>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="flex h-1 w-11 overflow-hidden rounded-full bg-gauge-secondary/20" aria-hidden>
+              <span
+                data-testid={testId ? `${testId}-span-meter` : undefined}
+                className="h-full rounded-full bg-gauge-secondary/60"
+                style={{ width: `${spanPercent}%` }}
+              />
+            </span>
+            <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+              {spanLabel}
+            </span>
+          </div>
+        </div>
+        {intro && <div className="mt-2">{intro}</div>}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 function LegendSwatch({
   color,
   strokeWidth = 2,
@@ -479,6 +547,8 @@ export function ForecastDrawer({
   activeForecastWarning = null,
   waveDays = [],
   upperAirDays = [],
+  upperAirSeries = [],
+  upperAirWindow,
   waveSeaTemperatureF = null,
   waveLoading = false,
   waveError = null,
@@ -494,6 +564,7 @@ export function ForecastDrawer({
   const waveSteepnessGradientId = useId()
   const tempAreaGradientId = useId()
   const uvAreaGradientId = useId()
+  const upperAirGustGradientId = useId()
   const detailsCardRef = useRef<HTMLDivElement>(null)
   const dayTabsRowRef = useRef<HTMLDivElement>(null)
 
@@ -531,6 +602,8 @@ export function ForecastDrawer({
     () => new Set(upperAirDays.filter((d) => d.outlook.present && d.outlook.troughSupport).map((d) => d.dayKey)),
     [upperAirDays],
   )
+
+
   // A wave-provider outage must read as visibly different from "this
   // location just has no wave data" - if the whole wave fetch failed AND we
   // have no matching day for the selected forecast day, that's the outage
@@ -584,6 +657,134 @@ export function ForecastDrawer({
       bottom: viewboxHeight - HOURLY_CHART_BOTTOM - RECHARTS_XAXIS_HEIGHT,
     }
   }
+
+  // --- The 500mb trace across the whole window ---
+  //
+  // A per-day figure like "500mb 5899 m" cannot be correlated against
+  // anything, and Surviving the Storm's method is not a per-day read: it is
+  // reading the shape across successive charts (p62). So the window gets drawn
+  // as a window, at the sub-daily resolution the provider already returns.
+  //
+  // Surface gust rides on the same x-axis deliberately. The book's claim is
+  // causal and lagged - the upper trough is what vents a surface low - and the
+  // only way to show a lag is to put both series on one time axis. The surface
+  // forecast is shorter than the upper-air one, so its later samples are null
+  // and the area simply stops rather than being extrapolated.
+  const surfaceGustByDayKey = useMemo(
+    () => new Map(days.map((day) => [day.dayKey, day.windGust])),
+    [days],
+  )
+  const upperAirDayLabels = useMemo(
+    () => new Map(upperAirDays.map((day) => [day.dayKey, `${day.dayName.slice(0, 3)} ${day.date.replace(/^[A-Za-z]+ /, '')}`])),
+    [upperAirDays],
+  )
+
+  const upperAirChartData = useMemo(
+    () =>
+      upperAirSeries.map((sample, idx) => ({
+        idx,
+        dayKey: sample.dayKey,
+        localHour: sample.localHour,
+        height500M: sample.height500M,
+        thicknessM: sample.thicknessM,
+        wind500Kts: sample.wind500Kts,
+        surfaceGustKts: surfaceGustByDayKey.get(sample.dayKey) ?? null,
+      })),
+    [upperAirSeries, surfaceGustByDayKey],
+  )
+
+  const hasUpperAirTrace = upperAirChartData.length > 1
+
+  // The height axis is scaled to the window itself, not to a fixed range. At
+  // this vessel 500mb heights run around 5900m and in the Southern Ocean they
+  // are hundreds of metres lower; a fixed domain would flatten one of them into
+  // a straight line. Padding keeps the trace off the frame.
+  const upperAirHeights = upperAirChartData.map((d) => d.height500M)
+  const upperAirRawLow = upperAirHeights.length > 0 ? Math.min(...upperAirHeights) : 0
+  const upperAirRawHigh = upperAirHeights.length > 0 ? Math.max(...upperAirHeights) : 0
+  const upperAirPad = Math.max(5, (upperAirRawHigh - upperAirRawLow) * 0.15)
+  const upperAirMin = upperAirRawLow - upperAirPad
+  const upperAirMax = upperAirRawHigh + upperAirPad
+
+  const upperAirGusts = upperAirChartData.map((d) => d.surfaceGustKts ?? 0)
+  const upperAirGustDataMax = upperAirGusts.length > 0 ? Math.max(...upperAirGusts) : 0
+  const upperAirGustMax = upperAirGustDataMax <= 30 ? 30 : Math.ceil(upperAirGustDataMax / 10) * 10
+
+  const upperAirChartTop = HOURLY_CHART_TOP
+  const upperAirChartBottom = HOURLY_CHART_BOTTOM
+  const upperAirHeightYFor = (value: number) =>
+    upperAirMax === upperAirMin
+      ? upperAirChartBottom
+      : upperAirChartTop + (1 - (value - upperAirMin) / (upperAirMax - upperAirMin)) * (upperAirChartBottom - upperAirChartTop)
+  const upperAirXFor = (idx: number) =>
+    upperAirChartData.length <= 1
+      ? hourlyChartLeft
+      : hourlyChartLeft + (idx / (upperAirChartData.length - 1)) * upperAirPlotWidth
+
+  // One tick per local day, thinned once the window gets long enough that
+  // sixteen labels would collide.
+  const upperAirDayStarts = useMemo(() => {
+    const starts: Array<{ idx: number; dayKey: string }> = []
+    upperAirChartData.forEach((point, idx) => {
+      if (idx === 0 || point.dayKey !== upperAirChartData[idx - 1].dayKey) {
+        starts.push({ idx, dayKey: point.dayKey })
+      }
+    })
+    return starts
+  }, [upperAirChartData])
+
+  const upperAirTickStride = upperAirDayStarts.length > 9 ? 2 : 1
+  const upperAirTicks = upperAirDayStarts.filter((_, i) => i % upperAirTickStride === 0).map((d) => d.idx)
+  const upperAirTickLabels = useMemo(
+    () => new Map(upperAirDayStarts.map((d) => [d.idx, upperAirDayLabels.get(d.dayKey) ?? d.dayKey.slice(5)])),
+    [upperAirDayStarts, upperAirDayLabels],
+  )
+
+  // A flagged day is drawn as the extent of time it actually covers, so the
+  // approach, the bottom and the recovery read as a shape. The card marker
+  // says which day; this says how long.
+  const upperAirTroughSpans = useMemo(
+    () =>
+      upperAirDayStarts
+        .map((start, i) => ({
+          dayKey: start.dayKey,
+          from: start.idx,
+          // A band runs to where the next day begins rather than to this
+          // day's own last sample. Two flagged days in a row are one stretch
+          // of weather, and stopping at the last sample would leave a gap
+          // between them that reads as the trough letting up in the middle.
+          to: upperAirDayStarts[i + 1]?.idx ?? upperAirChartData.length - 1,
+        }))
+        .filter((span) => upperAirFlaggedDayKeys.has(span.dayKey)),
+    [upperAirDayStarts, upperAirFlaggedDayKeys, upperAirChartData.length],
+  )
+
+  // The three panels are scaled against the longest horizon actually on the
+  // page, so the meter stays meaningful when a boat has no upper-air plugin and
+  // ten days is the whole story.
+  const maxPanelSpanDays = Math.max(1, days.length, upperAirDayStarts.length)
+
+  // The per-day charts sit two containers deep inside the extended panel; this
+  // one sits directly in its own panel body, so it is wider and has to measure
+  // itself rather than borrow the day charts' width.
+  //
+  // The ref goes on an element with no padding or border of its own, so the
+  // width needs no inset arithmetic. useMeasuredWidth settles on the observed
+  // contentRect, and subtracting a padding that measurement has already
+  // excluded is how this first came out 20px narrow than its own panel.
+  const [upperAirCardRef, upperAirCardWidth] = useMeasuredWidth()
+  const upperAirChartWidth = upperAirCardWidth > 0 ? upperAirCardWidth : forecastChartWidth
+  const upperAirChartRight = upperAirChartWidth - 20
+  const upperAirPlotWidth = upperAirChartRight - hourlyChartLeft
+  const upperAirChartMargin = {
+    left: hourlyChartLeft,
+    right: upperAirChartWidth - upperAirChartRight,
+    top: HOURLY_CHART_TOP,
+    bottom: 175 - HOURLY_CHART_BOTTOM - RECHARTS_XAXIS_HEIGHT,
+  }
+
+  const upperAirTooltip = useChartTooltip(upperAirChartData.length, upperAirChartData.length, hourlyChartLeft, upperAirChartRight)
+  const upperAirTooltipEntry = upperAirTooltip.activeIndex === null ? null : upperAirChartData[upperAirTooltip.activeIndex] ?? null
 
   const windSpeeds = windHourly.map((entry) => Math.max(0, entry.windSpeed))
   const windGusts = windHourly.map((entry) => Math.max(0, entry.windGust))
@@ -830,14 +1031,20 @@ export function ForecastDrawer({
   return (
     <div className="space-y-4 pb-4">
       {hourlyEntries.length > 0 && (
-    <div className="overflow-hidden rounded-[26px] border border-gauge-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]">
-      <div className="border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
-        <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
-          {summary ?? "Today's hourly forecast"}
-          <WindWarningNotice warnings={activeForecastWarning} />
-        </p>
-      </div>
-      <div className="px-2.5 py-2.5">
+        <ForecastPanel
+          testId="forecast-panel-today"
+          title="Today"
+          spanLabel="Next 24 hours"
+          spanDays={1}
+          maxSpanDays={maxPanelSpanDays}
+          intro={
+            <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
+              {summary ?? "Today's hourly forecast"}
+              <WindWarningNotice warnings={activeForecastWarning} />
+            </p>
+          }
+        >
+          <div className="px-2.5 py-2.5">
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {hourlyEntries.map((entry, idx) => {
             const nightMode = hourlyEntries.slice(0, idx).some((item) => item.kind === 'sunset')
@@ -871,16 +1078,19 @@ export function ForecastDrawer({
             )
           })}
         </div>
-      </div>
-    </div>
+          </div>
+        </ForecastPanel>
       )}
 
-      <div>
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          10-Day Forecast
-        </h3>
-        <div className="flex flex-col gap-3">
-          <div ref={dayTabsRowRef} className="sticky top-0 z-10 flex gap-1.5 overflow-x-auto bg-card pb-2 pt-0.5">
+      <ForecastPanel
+        testId="forecast-panel-extended"
+        title="10-Day Forecast"
+        spanLabel={`${days.length} days`}
+        spanDays={days.length}
+        maxSpanDays={maxPanelSpanDays}
+      >
+        <div className="flex flex-col gap-3 px-2.5 py-2.5">
+          <div ref={dayTabsRowRef} className="sticky top-0 z-10 flex gap-1.5 overflow-x-auto bg-[rgba(255,249,239,0.97)] pb-2 pt-0.5">
             {days.map((day, idx) => (
               <button
                 key={idx}
@@ -1483,11 +1693,182 @@ export function ForecastDrawer({
               )}
             </div>
 
+
             <ForecastTideSection isImperial={unit === 'imperial'} dayOffset={selectedDayIndex} />
 
           </div>
         </div>
-      </div>
+      </ForecastPanel>
+
+      {hasUpperAirTrace && (
+        <ForecastPanel
+          testId="forecast-panel-upper-air"
+          title={'Upper Air \u00b7 500mb'}
+          spanLabel={`${upperAirDayStarts.length} days`}
+          spanDays={upperAirDayStarts.length}
+          maxSpanDays={maxPanelSpanDays}
+          intro={
+            <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
+              The upper trough is what lets a surface low deepen, so the shape of this trace over the next
+              fortnight matters more than any single day's height. Watch for heights falling into the shaded
+              band with surface gusts building a day or two behind.
+            </p>
+          }
+        >
+          <div className="px-2.5 py-2.5">
+          <div ref={upperAirCardRef} className="relative">
+            {upperAirTooltipEntry && (
+              <ChartTooltipBubble
+                pixelX={upperAirTooltip.tooltipPixelX ?? 0}
+                time={`${upperAirTickLabels.get(upperAirDayStarts.find((d) => d.dayKey === upperAirTooltipEntry.dayKey)?.idx ?? 0) ?? upperAirTooltipEntry.dayKey} ${String(upperAirTooltipEntry.localHour).padStart(2, '0')}:00`}
+                primary={`${Math.round(upperAirTooltipEntry.height500M)} m`}
+                secondary={`Jet ${Math.round(upperAirTooltipEntry.wind500Kts)} kt${
+                  upperAirTooltipEntry.thicknessM > 0 ? ` \u00b7 Thickness ${Math.round(upperAirTooltipEntry.thicknessM)} m` : ''
+                }${
+                  upperAirTooltipEntry.surfaceGustKts === null
+                    ? ''
+                    : ` \u00b7 Surface gust ${Math.round(upperAirTooltipEntry.surfaceGustKts)} kts`
+                }`}
+              />
+            )}
+            <div
+              data-testid="forecast-upper-air-chart"
+              className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+              style={{ width: upperAirChartWidth }}
+            >
+              {/* Bands sit behind the traces rather than on the pointer overlay,
+                  so a wash never dims the line it is meant to explain. */}
+              <svg
+                viewBox={`0 0 ${upperAirChartWidth} 175`}
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-0 h-full w-full"
+                style={{ zIndex: 0 }}
+                aria-hidden
+              >
+                {upperAirWindow?.present && (
+                  <rect
+                    data-testid="forecast-upper-air-quintile-band"
+                    x={hourlyChartLeft}
+                    y={upperAirHeightYFor(upperAirWindow.lowQuintileM)}
+                    width={Math.max(0, upperAirPlotWidth)}
+                    height={Math.max(0, upperAirChartBottom - upperAirHeightYFor(upperAirWindow.lowQuintileM))}
+                    fill="hsl(var(--chart-grid) / 0.14)"
+                  />
+                )}
+                {upperAirTroughSpans.map((span) => (
+                  <rect
+                    key={span.dayKey}
+                    data-testid="forecast-upper-air-trough-band"
+                    data-day-key={span.dayKey}
+                    x={upperAirXFor(span.from)}
+                    y={upperAirChartTop}
+                    width={Math.max(1, upperAirXFor(span.to) - upperAirXFor(span.from))}
+                    height={upperAirChartBottom - upperAirChartTop}
+                    fill="hsl(var(--chart-gust) / 0.16)"
+                  />
+                ))}
+              </svg>
+
+              <div className="relative" style={{ zIndex: 1 }}>
+                <ComposedChart width={upperAirChartWidth} height={175} data={upperAirChartData} margin={upperAirChartMargin}>
+                  <XAxis
+                    dataKey="idx"
+                    type="number"
+                    domain={[0, Math.max(1, upperAirChartData.length - 1)]}
+                    allowDataOverflow
+                    ticks={upperAirTicks}
+                    tickFormatter={(value: number) => upperAirTickLabels.get(value) ?? ''}
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: Number(AXIS_LABEL_FONT_SIZE), fill: AXIS_LABEL_COLOR }}
+                    height={RECHARTS_XAXIS_HEIGHT}
+                  />
+                  <YAxis yAxisId="height" domain={[upperAirMin, upperAirMax]} hide />
+                  <YAxis yAxisId="gust" orientation="right" domain={[0, upperAirGustMax]} hide />
+                  <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
+                  <Area
+                    yAxisId="gust"
+                    dataKey="surfaceGustKts"
+                    type="monotone"
+                    isAnimationActive={false}
+                    connectNulls={false}
+                    dot={false}
+                    stroke="hsl(var(--chart-gust) / 0.5)"
+                    strokeWidth={1.2}
+                    fill={`url(#${upperAirGustGradientId})`}
+                  />
+                  <Line
+                    yAxisId="height"
+                    dataKey="height500M"
+                    type="monotone"
+                    isAnimationActive={false}
+                    dot={false}
+                    stroke="hsl(var(--chart-wave) / 0.95)"
+                    strokeWidth={2.4}
+                  />
+                </ComposedChart>
+              </div>
+
+              <svg
+                ref={upperAirTooltip.svgRef}
+                viewBox={`0 0 ${upperAirChartWidth} 175`}
+                preserveAspectRatio="none"
+                className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                style={{ zIndex: 2 }}
+                onPointerDown={upperAirTooltip.onPointerDown}
+                onPointerMove={upperAirTooltip.onPointerMove}
+                onPointerLeave={upperAirTooltip.onPointerLeave}
+              >
+                <defs>
+                  <linearGradient id={upperAirGustGradientId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(var(--chart-gust))" stopOpacity="0.22" />
+                    <stop offset="100%" stopColor="hsl(var(--chart-gust))" stopOpacity="0.02" />
+                  </linearGradient>
+                </defs>
+                <text x={6} y={upperAirChartTop + 4} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                  {Math.round(upperAirMax)}
+                </text>
+                <text x={6} y={upperAirChartBottom} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                  {Math.round(upperAirMin)}
+                </text>
+                <line
+                  x1={hourlyChartLeft}
+                  y1={upperAirChartBottom}
+                  x2={upperAirChartRight}
+                  y2={upperAirChartBottom}
+                  stroke="hsl(var(--chart-grid) / 0.25)"
+                  strokeWidth="1"
+                />
+                {upperAirTooltipEntry && (
+                  <ChartTooltipMarker
+                    x={upperAirXFor(upperAirTooltipEntry.idx)}
+                    y={upperAirHeightYFor(upperAirTooltipEntry.height500M)}
+                    color="hsl(var(--chart-wave) / 0.95)"
+                  />
+                )}
+              </svg>
+            </div>
+          </div>
+          <p data-testid="forecast-upper-air-legend" className="mt-1 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 align-middle">
+              <LegendSwatch color="hsl(var(--chart-wave) / 0.95)" strokeWidth={2.4} /> 500mb height (m)
+            </span>{' '}
+            ·{' '}
+            <span className="inline-flex items-center gap-1 align-middle">
+              <LegendSwatch color="hsl(var(--chart-gust) / 0.5)" strokeWidth={1.2} /> Surface gust (kts, full scale {upperAirGustMax})
+            </span>
+            {upperAirWindow?.present && (
+              <>
+                {' '}· window {Math.round(upperAirWindow.lowM)}–{Math.round(upperAirWindow.highM)} m, shaded below{' '}
+                {Math.round(upperAirWindow.lowQuintileM)} m is the lowest fifth of it
+              </>
+            )}
+            {upperAirTroughSpans.length > 0 && ' · highlighted days have upper support for a surface low'}
+          </p>
+
+          </div>
+        </ForecastPanel>
+      )}
     </div>
   )
 }

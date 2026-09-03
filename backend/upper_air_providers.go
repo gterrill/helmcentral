@@ -136,11 +136,19 @@ type upperAirDayResponse struct {
 }
 
 type upperAirResponse struct {
-	Provider   string                `json:"provider"`
-	Days       []upperAirDayResponse `json:"days"`
-	Cached     bool                  `json:"cached"`
-	UpdatedAt  string                `json:"updated_at"`
-	TTLSeconds int64                 `json:"ttl_seconds"`
+	Provider string                `json:"provider"`
+	Days     []upperAirDayResponse `json:"days"`
+
+	// Series is the sub-daily 500mb trace across the whole window, and Window
+	// the range those days are judged against. The day cards read a scalar per
+	// day; the chart reads the shape, which is what Surviving the Storm's
+	// method actually works on (ADR 0071).
+	Series []upperAirSeriesPoint `json:"series"`
+	Window upperAirWindow        `json:"window"`
+
+	Cached     bool   `json:"cached"`
+	UpdatedAt  string `json:"updated_at"`
+	TTLSeconds int64  `json:"ttl_seconds"`
 }
 
 // upperAirForecast serves GET /api/upper-air.
@@ -155,7 +163,11 @@ func upperAirForecast(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 	if provider == nil {
-		return c.JSON(http.StatusOK, upperAirResponse{Provider: "", Days: []upperAirDayResponse{}})
+		return c.JSON(http.StatusOK, upperAirResponse{
+			Provider: "",
+			Days:     []upperAirDayResponse{},
+			Series:   []upperAirSeriesPoint{},
+		})
 	}
 
 	vesselState, vesselErr := fetchSignalKVesselState()
@@ -212,6 +224,8 @@ func upperAirForecast(c echo.Context) error {
 	response := upperAirResponse{
 		Provider:   configured,
 		Days:       days,
+		Series:     buildUpperAirSeries(bundle.Hourly, localLocation, localTodayKey),
+		Window:     upperAirWindowFor(inputs),
 		Cached:     bundle.Cached,
 		UpdatedAt:  bundle.CachedAt.UTC().Format(time.RFC3339),
 		TTLSeconds: provider.TTLSeconds(),

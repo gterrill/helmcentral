@@ -127,6 +127,45 @@ A day with upper-air data but nothing notable still shows its height and the
 jet strength overhead. A day with no data shows nothing at all, rather than an
 empty section that would read as an all-clear nobody measured.
 
+### The trace
+
+A single day's height is a number you cannot do much with. 5899 m means nothing
+on its own; what means something is whether it is 40 m below where it was two
+days ago, and whether that is the bottom or the way down. So the forecast page ends with a panel of its own carrying a trace of the whole
+window at six-hourly resolution, which is about the interval the synoptic
+charts in the book come at.
+
+The page is three panels, and they are peers rather than a hierarchy. Today is
+the next 24 hours, the 10-day forecast is the surface picture day by day, and
+upper air is the 16-day pattern. Each panel header carries its span and a small
+meter showing how far ahead it reaches, so you can see at a glance that today
+is a sliver of what the upper-air panel covers. That is the Dashews' point
+about the 500mb chart made structural: you plan on the fortnight, not on today.
+
+Three things are drawn on it.
+
+The teal line is 500mb height. Read the shape, not the values: a long fall is
+an upper trough moving in, and the bottom of the fall is where it sits over you.
+
+The shaded strip along the bottom is the lowest fifth of this particular
+window, which is the band a day has to reach before it gets marked. Seeing it
+drawn is the point. It turns "lowest quintile" from a claim into something you
+can check against the line yourself.
+
+The amber area is surface gust from the weather forecast, on the same time
+axis. This is the correlation the whole feature exists for. The book's claim is
+causal and lagged, the trough aloft venting the low beneath it, and a lag is
+only visible if both series share an axis. In practice you are looking for the
+gusts to build a day or two behind a fall in heights. When they do, the surface
+forecast and the upper pattern are telling you the same story and you should
+believe it. When heights fall and nothing happens at the surface, the trough
+went by without a low under it to work on.
+
+The surface forecast runs ten days and the upper-air one sixteen, so the amber
+area stops well before the teal line does. That is not a gap in the data, it is
+the honest edge of the surface forecast, and the last six days of the trace are
+upper pattern only.
+
 Two limits worth knowing. The first two days of the window can never be marked,
 because there is no history behind them to say whether heights are arriving or
 leaving. And forecast skill at 500mb is not uniform across sixteen days: the far

@@ -58,6 +58,57 @@ The day cards are 150px and already carry five lines, so a flagged day gets a sm
 
 A day with upper-air data but no flag still shows its numbers, without any claim about development. A day with no data shows nothing at all, rather than an empty section that would read as "clear".
 
+### 5. The window is drawn as a window (phase 2)
+
+Section 4's marker and sentence were the right call for the day cards and the
+wrong shape for the underlying method. The book reads a trough off the shape of
+successive charts; the strip presented that as one scalar per day. "500mb
+5899 m, jet 23 kt" is a statement about a sequence with the sequence removed,
+and it cannot be correlated against anything.
+
+So the forecast page now carries a trace of the whole window, and three
+decisions inside it are worth recording.
+
+It sits in a panel of its own. The first cut put it inside the selected day's
+detail card, between the wave and tide charts, which are both 24-hour views of
+one day. A 16-day chart nested inside "here is Tuesday" is a category error,
+and it read as one. The page is now three sibling panels on one shell, today /
+ten days / sixteen days, each header carrying its span and a meter showing the
+proportion. Making them peers is the whole point: the panels differ by horizon
+and by nothing else, which is exactly the distinction a reader needs.
+
+**The series is sub-daily.** `buildUpperAirInputs` was averaging the provider's
+hourly data down to one value per day and discarding the rest. A trough drawn at
+one point per day is a sawtooth, and the fall into it is the part being read.
+`buildUpperAirSeries` thins the same fetch to one sample per six-hour block of
+local time, which is roughly the synoptic chart interval and holds 16 days to
+about 64 points. It costs nothing upstream. Buckets are cut on the hour's
+position in the local day rather than on an exact clock hour, so a provider
+reporting at 01/07/13/19 keeps its full resolution instead of silently
+returning nothing.
+
+**The band is computed once, on the backend.** `upperAirWindowFor` reports the
+window's low, high, and the height at which a day stops counting as the lowest
+quintile, all cut from the same sorted list `percentileOf` uses. Re-deriving
+that edge in TypeScript from rounded values would have let the drawn band and
+the marked days disagree, which is the one thing a chart like this must not do.
+The invariant is tested directly: every day at or below the reported edge is a
+day the flag would accept, and the first day above it is not.
+
+**Surface gust rides the same axis.** This is the correlation the feature
+exists for. The book's claim is causal and lagged, and a lag is only legible if
+both series share a time axis. The surface forecast is ten days and the
+upper-air one sixteen, so the surface series ends first and is left null rather
+than extrapolated: the trace's last six days are upper pattern only, and
+drawing a continuation there would be inventing a forecast.
+
+Two rendering details found by looking at it against live data rather than by
+tests. Consecutive flagged days drawn to their own last sample leave a visible
+gap between them, which reads as the trough letting up in the middle; a band now
+runs to where the next day begins. And the gust series is on a hidden axis, so
+its full scale goes in the legend, or the amber line is a shape with no
+magnitude behind it.
+
 ### What was rejected
 
 **Trough detection over a grid**, for now. It was prototyped and it works, but it is a much larger piece and Phase 1 delivers most of the value. The findings are recorded here so the work does not have to be redone.
@@ -82,6 +133,7 @@ At 2.5° over a 238-point grid, 16 days at 6-hourly resolution costs 484 KB and 
 - `plugins/upper-air/` is a new plugin directory. A deployment without it loses the feature silently and correctly, since the category is optional by design.
 - The Open-Meteo weather plugin was briefly modified to carry pressure levels and then reverted. Anyone running Open-Meteo for weather gets upper air from the separate plugin like everyone else, and there is one source for the data rather than two.
 - Upper air refreshes every six hours rather than hourly. The global models behind it run four times a day, so a shorter interval re-fetches identical numbers.
+- The `/api/upper-air` response carries `series` and `window` alongside `days`. Both are additive, and a provider with no pressure levels still lands on an empty series and an absent window rather than on zeros.
 
 ## Verification
 
@@ -92,3 +144,5 @@ Every threshold in the derivation is tested at its boundary, including the cases
 The parse is pinned to values captured from a live response at the vessel's position rather than an assumed shape, per the standing fixture rule: 5878m at 500hPa over 186m at 1000hPa, 500mb wind 9.74 m/s. Two encodings were confirmed against the live API before any parse code was written. `wind_speed_unit=ms` applies to pressure-level winds as well as surface ones, so nothing converts them. And the API returns nulls at the tail of a 16-day run and omits the arrays entirely for a model without pressure levels, both of which land on the contract's zero-means-absent.
 
 End to end against the live boat, the outlook marked 12 and 13 September out of 16 days, with heights falling from 5907m to 5835m and recovering afterwards. The surface forecast corroborates independently: drizzle and rising precipitation probability across 10 to 12 September, building into the upper trough.
+
+Phase 2 was checked against the same live window at 1600, 768 and 390px. The trace shows 63 six-hourly samples across 16 days, the band edge lands at 5839m, and the surface gust series makes the lag visible without any prose: gusts run 11 to 13 kts through 8 September, jump to 32 kts across 9 to 11 September as heights fall, and the marked days sit at the bottom of that fall.

@@ -84,3 +84,59 @@ describe('useUpperAir', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('useUpperAir trace', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  // The day cards read a scalar per day. The chart reads the shape of the
+  // window, which is what Surviving the Storm's method actually works on, so
+  // the sub-daily trace has to survive the mapping intact.
+  it('maps the sub-daily trace and the window band', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        provider: 'open-meteo-upper',
+        days: [],
+        series: [
+          { time: '2026-09-03T00:00:00Z', day_key: '2026-09-03', height_500_m: 5899, thickness_m: 5709, wind_500_kts: 23.4, temperature_500_c: -8.2 },
+          { time: '2026-09-03T06:00:00Z', day_key: '2026-09-03', height_500_m: 5891, thickness_m: 5701, wind_500_kts: 25.1, temperature_500_c: -8.6 },
+        ],
+        window: { present: true, low_m: 5835, high_m: 5907, low_quintile_m: 5851 },
+      }),
+    }))
+
+    const { result } = renderHook(() => useUpperAir())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.series).toHaveLength(2)
+    expect(result.current.series[0].height500M).toBe(5899)
+    expect(result.current.series[0].dayKey).toBe('2026-09-03')
+    expect(result.current.series[1].wind500Kts).toBeCloseTo(25.1, 2)
+    expect(result.current.windowBand.present).toBe(true)
+    expect(result.current.windowBand.lowQuintileM).toBe(5851)
+  })
+
+  // A provider with no pressure levels, or no plugin at all, sends no series
+  // and no window. That has to arrive as "nothing to draw" rather than as a
+  // band pinned to sea level.
+  it('reports an absent window when the payload carries none', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ provider: '', days: [] }),
+    }))
+
+    const { result } = renderHook(() => useUpperAir())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.series).toEqual([])
+    expect(result.current.windowBand.present).toBe(false)
+  })
+})

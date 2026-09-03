@@ -334,3 +334,181 @@ func TestUpperAirOutlook_FirstDaysCannotFlag(t *testing.T) {
 		t.Fatalf("days with no run-up behind them must not flag: %+v / %+v", out[0], out[1])
 	}
 }
+
+// --- Sub-daily trace and window band (ADR 0071 phase 2) ---
+
+// The book's method is reading successive charts, so the trace across the
+// window is the signal. One averaged value per day renders a trough as a
+// sawtooth; the provider already returns hourly data, so the series carries
+// enough resolution to show the shape of the fall.
+func TestBuildUpperAirSeries_SixHourlyBuckets(t *testing.T) {
+	loc := time.UTC
+	start := time.Date(2026, 9, 3, 0, 0, 0, 0, loc)
+
+	var hours []upperAirHourPoint
+	for i := 0; i < 48; i++ {
+		hours = append(hours, upperAirHourPoint{
+			Time:                    start.Add(time.Duration(i) * time.Hour),
+			GeopotentialHeight500M:  5900 - float64(i),
+			GeopotentialHeight1000M: 190,
+			WindSpeed500MS:          10,
+			Temperature500C:         -8,
+		})
+	}
+
+	series := buildUpperAirSeries(hours, loc, "2026-09-03")
+	if len(series) != 8 {
+		t.Fatalf("48 hourly points into 6-hour buckets should give 8 samples, got %d", len(series))
+	}
+	if series[0].Height500M != 5900 {
+		t.Fatalf("first sample should be the first hour of the first bucket, got %.0f", series[0].Height500M)
+	}
+	if series[1].Height500M != 5894 {
+		t.Fatalf("second sample should be hour 6, got %.0f", series[1].Height500M)
+	}
+	if series[0].ThicknessM != 5710 {
+		t.Fatalf("thickness should be 500mb minus 1000mb height, got %.0f", series[0].ThicknessM)
+	}
+	if series[0].DayKey != "2026-09-03" {
+		t.Fatalf("sample should carry its local day key, got %q", series[0].DayKey)
+	}
+}
+
+// Bucketing on the hour's position within the day rather than on an exact
+// clock hour, so a provider that reports at 01:00/07:00/13:00/19:00 still
+// yields four samples a day instead of none.
+func TestBuildUpperAirSeries_OffPhaseProviderStillSamples(t *testing.T) {
+	loc := time.UTC
+	start := time.Date(2026, 9, 3, 1, 0, 0, 0, loc)
+
+	var hours []upperAirHourPoint
+	for i := 0; i < 4; i++ {
+		hours = append(hours, upperAirHourPoint{
+			Time:                   start.Add(time.Duration(i*6) * time.Hour),
+			GeopotentialHeight500M: 5900,
+		})
+	}
+
+	series := buildUpperAirSeries(hours, loc, "2026-09-03")
+	if len(series) != 4 {
+		t.Fatalf("an off-phase 6-hourly provider should keep all 4 samples, got %d", len(series))
+	}
+}
+
+// A zero height is absence, not a reading of sea level, and must not land in
+// the trace as a spike to the bottom of the chart.
+func TestBuildUpperAirSeries_SkipsAbsentHoursAndPastDays(t *testing.T) {
+	loc := time.UTC
+	start := time.Date(2026, 9, 3, 0, 0, 0, 0, loc)
+
+	hours := []upperAirHourPoint{
+		{Time: start.AddDate(0, 0, -1), GeopotentialHeight500M: 5800},
+		{Time: start, GeopotentialHeight500M: 0},
+		{Time: start.Add(6 * time.Hour), GeopotentialHeight500M: 5890},
+	}
+
+	series := buildUpperAirSeries(hours, loc, "2026-09-03")
+	if len(series) != 1 {
+		t.Fatalf("expected only the one present, in-window sample, got %d: %+v", len(series), series)
+	}
+	if series[0].Height500M != 5890 {
+		t.Fatalf("wrong sample survived: %+v", series[0])
+	}
+}
+
+// The trace is only readable against the window it is judged in, so the band
+// edge that TroughSupport uses has to reach the chart as a number rather than
+// being re-derived in TypeScript from rounded values.
+func TestUpperAirWindowFor_ReportsTheBandThatTheFlagUses(t *testing.T) {
+	var days []upperAirDayInput
+	for i := 0; i < 10; i++ {
+		days = append(days, upperAirDay(dayKeyAt(i), 5900-float64(i)*10, 5700, 20))
+	}
+
+	window := upperAirWindowFor(days)
+	if !window.Present {
+		t.Fatalf("a full window should be present: %+v", window)
+	}
+	if window.LowM != 5810 || window.HighM != 5900 {
+		t.Fatalf("window range = %.0f..%.0f, want 5810..5900", window.LowM, window.HighM)
+	}
+
+	// Every day at or below the reported edge must be one the flag would
+	// accept into the low quintile, and the first day above it must not be.
+	// This is the invariant that keeps the drawn band and the marked days
+	// from ever disagreeing.
+	outlooks := upperAirOutlook(days)
+	for i, day := range days {
+		inBand := day.Height500M <= window.LowQuintileM
+		inQuintile := outlooks[i].HeightPercentile <= upperAirLowQuintile
+		if inBand != inQuintile {
+			t.Fatalf("day %d height %.0f: band says %v, percentile %.3f says %v",
+				i, day.Height500M, inBand, outlooks[i].HeightPercentile, inQuintile)
+		}
+	}
+}
+
+// A window with nothing in it, or a single day, has no band to draw. Saying so
+// is better than shipping a zero that renders as a band at sea level.
+func TestUpperAirWindowFor_AbsentWithoutData(t *testing.T) {
+	if window := upperAirWindowFor(nil); window.Present {
+		t.Fatalf("an empty window must not be present: %+v", window)
+	}
+
+	gaps := []upperAirDayInput{{DayKey: dayKeyAt(0)}, {DayKey: dayKeyAt(1)}}
+	if window := upperAirWindowFor(gaps); window.Present {
+		t.Fatalf("a window of absent days must not be present: %+v", window)
+	}
+}
+
+func TestUpperAirForecast_ServesTheTraceAndWindow(t *testing.T) {
+	withCleanUpperAirProviderRegistry(t)
+
+	loc := vesselLocalLocation(153.0)
+	nowLocal := time.Now().In(loc)
+	midnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
+
+	var hours []upperAirHourPoint
+	for i := 0; i < 6*24; i++ {
+		hours = append(hours, upperAirHourPoint{
+			Time:                    midnight.Add(time.Duration(i) * time.Hour),
+			GeopotentialHeight500M:  5900 - float64(i),
+			GeopotentialHeight1000M: 190,
+			WindSpeed500MS:          25,
+			Temperature500C:         -8,
+		})
+	}
+	registerUpperAirProvider(&stubUpperAirProvider{id: "open-meteo-upper",
+		bundle: upperAirBundle{Hourly: hours, CachedAt: time.Now().UTC()}})
+
+	server := trustedSignalKPayloadServer(t, -27.4, 153.0)
+	defer server.Close()
+	t.Setenv("SETTINGS_FILE", writeUpperAirSettings(t, "open-meteo-upper", server.URL))
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	if err := upperAirForecast(e.NewContext(httptest.NewRequest(http.MethodGet, "/api/upper-air", nil), rec)); err != nil {
+		t.Fatalf("upperAirForecast returned error: %v", err)
+	}
+
+	var payload upperAirResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	if len(payload.Series) != 24 {
+		t.Fatalf("6 days of hourly data should give 24 six-hourly samples, got %d", len(payload.Series))
+	}
+	if payload.Series[0].Time == "" {
+		t.Fatalf("series samples need a timestamp: %+v", payload.Series[0])
+	}
+	if payload.Series[0].Wind500Kts <= 0 {
+		t.Fatalf("jet should be converted to knots on the wire: %+v", payload.Series[0])
+	}
+	if !payload.Window.Present || payload.Window.LowQuintileM <= 0 {
+		t.Fatalf("expected a usable window band: %+v", payload.Window)
+	}
+	if payload.Window.LowM >= payload.Window.HighM {
+		t.Fatalf("window low should sit below high: %+v", payload.Window)
+	}
+}

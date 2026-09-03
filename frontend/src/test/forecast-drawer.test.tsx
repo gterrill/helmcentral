@@ -1019,3 +1019,252 @@ describe('ForecastDrawer upper air', () => {
     expect(detail).not.toHaveTextContent(/support/i)
   })
 })
+
+function buildUpperAirSeries(dayKeys: string[], heightAt: (idx: number) => number) {
+  const samples: Array<{
+    time: string
+    dayKey: string
+    localHour: number
+    height500M: number
+    thicknessM: number
+    wind500Kts: number
+    temperature500C: number
+  }> = []
+  dayKeys.forEach((dayKey, dayIdx) => {
+    for (let block = 0; block < 4; block += 1) {
+      const idx = dayIdx * 4 + block
+      samples.push({
+        time: `${dayKey}T${String(block * 6).padStart(2, '0')}:00:00Z`,
+        dayKey,
+        localHour: block * 6,
+        height500M: heightAt(idx),
+        thicknessM: 5645,
+        wind500Kts: 30,
+        temperature500C: -8,
+      })
+    }
+  })
+  return samples
+}
+
+const UPPER_AIR_WINDOW = { present: true, lowM: 5835, highM: 5907, lowQuintileM: 5851 }
+
+describe('ForecastDrawer upper-air trace', () => {
+  // The complaint this chart answers: a single day's "500mb 5899 m" cannot be
+  // correlated against anything. The book's method is reading the shape across
+  // successive charts, so the window has to be drawn as a window.
+  it('draws the trace when a series is present', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        upperAirDays={[buildUpperAirDay('2026-06-14')]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-upper-air-chart')).toBeInTheDocument()
+  })
+
+  // Upper air is optional. A boat with no plugin must not get an empty chart
+  // frame that reads as "nothing happening up there".
+  it('draws no chart at all without a series', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        upperAirDays={[buildUpperAirDay('2026-06-14')]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.queryByTestId('forecast-upper-air-chart')).not.toBeInTheDocument()
+  })
+
+  // The band is the whole point of the percentile: a day is judged against the
+  // rest of the window, so the window's range has to be visible on the chart
+  // rather than asserted in a sentence.
+  it('labels the range the window is judged against', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        upperAirDays={[buildUpperAirDay('2026-06-14')]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const legend = screen.getByTestId('forecast-upper-air-legend')
+    expect(legend).toHaveTextContent('5835')
+    expect(legend).toHaveTextContent('5907')
+  })
+
+  // Surviving the Storm's claim is causal and lagged: the upper trough vents
+  // the surface low. Putting surface wind on the same axis is what makes that
+  // lead-lag readable instead of asserted.
+  it('carries the surface wind alongside the upper trace', () => {
+    render(
+      <ForecastDrawer
+        forecast={[
+          buildDay({ windGust: 33 }),
+          buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday', windGust: 41 }),
+        ]}
+        upperAirDays={[buildUpperAirDay('2026-06-14'), buildUpperAirDay('2026-06-15')]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-upper-air-legend')).toHaveTextContent(/surface gust/i)
+  })
+
+  // Days the outlook marked have to read as an extent in time (approach,
+  // bottom, recovery) rather than as a badge on one card.
+  it('shades the days whose upper air supports development', () => {
+    render(
+      <ForecastDrawer
+        forecast={[
+          buildDay(),
+          buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday' }),
+        ]}
+        upperAirDays={[
+          buildUpperAirDay('2026-06-14', { troughSupport: false }),
+          buildUpperAirDay('2026-06-15', { troughSupport: true }),
+        ]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getAllByTestId('forecast-upper-air-trough-band')).toHaveLength(1)
+  })
+})
+
+describe('ForecastDrawer upper-air trough bands', () => {
+  // Two flagged days in a row are one stretch of weather, not two. Drawing
+  // each band only as far as its own last sample leaves a visible gap between
+  // them, which reads as the trough letting up in the middle.
+  it('joins consecutive flagged days into one continuous band', () => {
+    render(
+      <ForecastDrawer
+        forecast={[
+          buildDay(),
+          buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday' }),
+          buildDay({ dayKey: '2026-06-16', date: 'Jun 16', dayName: 'Tuesday' }),
+        ]}
+        upperAirDays={[
+          buildUpperAirDay('2026-06-14', { troughSupport: false }),
+          buildUpperAirDay('2026-06-15', { troughSupport: true }),
+          buildUpperAirDay('2026-06-16', { troughSupport: true }),
+        ]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15', '2026-06-16'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const bands = screen.getAllByTestId('forecast-upper-air-trough-band')
+    expect(bands).toHaveLength(2)
+
+    const left = bands[0]
+    const right = bands[1]
+    const leftEnd = Number(left.getAttribute('x')) + Number(left.getAttribute('width'))
+    expect(leftEnd).toBeCloseTo(Number(right.getAttribute('x')), 5)
+  })
+})
+
+function buildHourlyToday() {
+  return [
+    { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' as const },
+    { label: '11AM', condition: 'Clear', temperatureF: 73, windSpeedKts: 12, windGustKts: 19, windDirection: 'NE', windDirectionDeg: 50, kind: 'forecast' as const },
+  ]
+}
+
+describe('ForecastDrawer panel hierarchy', () => {
+  // The page answers the same question at three ranges. They are peers, so
+  // they are three sibling panels rather than a 16-day chart buried inside the
+  // card for one selected day.
+  it('renders today, the extended forecast and upper air as sibling panels', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay(), buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday' })]}
+        hourlyToday={buildHourlyToday()}
+        upperAirDays={[buildUpperAirDay('2026-06-14'), buildUpperAirDay('2026-06-15')]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const today = screen.getByTestId('forecast-panel-today')
+    const extended = screen.getByTestId('forecast-panel-extended')
+    const upperAir = screen.getByTestId('forecast-panel-upper-air')
+
+    for (const [a, b] of [[today, extended], [extended, upperAir]] as const) {
+      expect(a.contains(b)).toBe(false)
+      expect(b.contains(a)).toBe(false)
+      expect(a.parentElement).toBe(b.parentElement)
+    }
+  })
+
+  // The upper-air panel must not appear at all without a trace, rather than
+  // leaving an empty frame that reads as "nothing happening up there".
+  it('omits the upper-air panel when there is no trace', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={buildHourlyToday()}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-panel-extended')).toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-panel-upper-air')).not.toBeInTheDocument()
+  })
+
+  // The span meter is the only thing separating the three panels structurally,
+  // so it has to actually track the horizon each one covers.
+  it('scales each span meter to the horizon its panel covers', () => {
+    const dayKeys = Array.from({ length: 16 }, (_, i) => `2026-06-${String(14 + i).padStart(2, '0')}`)
+    render(
+      <ForecastDrawer
+        forecast={dayKeys.slice(0, 10).map((dayKey) => buildDay({ dayKey, date: dayKey.slice(5), dayName: 'Sunday' }))}
+        hourlyToday={buildHourlyToday()}
+        upperAirDays={dayKeys.map((dayKey) => buildUpperAirDay(dayKey))}
+        upperAirSeries={buildUpperAirSeries(dayKeys, (idx) => 5900 - idx)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const pct = (testId: string) =>
+      Number.parseFloat(screen.getByTestId(`${testId}-span-meter`).style.width)
+
+    expect(pct('forecast-panel-upper-air')).toBe(100)
+    expect(pct('forecast-panel-extended')).toBeCloseTo(63, 0)
+    // Floored rather than 6%, so a single day still reads as a mark.
+    expect(pct('forecast-panel-today')).toBe(7)
+    expect(pct('forecast-panel-today')).toBeLessThan(pct('forecast-panel-extended'))
+  })
+})

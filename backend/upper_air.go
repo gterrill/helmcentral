@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 	"time"
 )
@@ -95,14 +96,7 @@ func upperAirOutlook(days []upperAirDayInput) []upperAirDayOutlook {
 		return nil
 	}
 
-	heights := make([]float64, 0, len(days))
-	for _, day := range days {
-		if day.Present {
-			heights = append(heights, day.Height500M)
-		}
-	}
-	sorted := append([]float64(nil), heights...)
-	sort.Float64s(sorted)
+	sorted := sortedPresentHeights(days)
 
 	spread := 0.0
 	if len(sorted) > 1 {
@@ -226,5 +220,142 @@ func buildUpperAirInputs(hourly []upperAirHourPoint, localLocation *time.Locatio
 			Present:       true,
 		}
 	}
+	return out
+}
+
+// sortedPresentHeights is every day's 500mb height that actually exists, in
+// ascending order. Both the per-day percentile and the window band the chart
+// draws are cut from this same list, so the drawn band and the marked days
+// cannot drift apart.
+func sortedPresentHeights(days []upperAirDayInput) []float64 {
+	heights := make([]float64, 0, len(days))
+	for _, day := range days {
+		if day.Present {
+			heights = append(heights, day.Height500M)
+		}
+	}
+	sort.Float64s(heights)
+	return heights
+}
+
+// upperAirWindow is the vertical extent of the forecast window, so the chart
+// can draw the range each day is being judged against instead of restating a
+// percentile in prose.
+//
+// Surviving the Storm reads a trough off the shape of successive charts, and
+// that shape only means anything against the rest of the window. LowQuintileM
+// is the height at which a day stops counting as "the low end of the coming
+// fortnight", which is the same edge TroughSupport tests.
+type upperAirWindow struct {
+	Present bool `json:"present"`
+
+	LowM  float64 `json:"low_m"`
+	HighM float64 `json:"high_m"`
+
+	// LowQuintileM is the highest 500mb height still inside the lowest
+	// quintile of the window. A day at or below it is in the band the flag
+	// looks at; a day above it is not.
+	LowQuintileM float64 `json:"low_quintile_m"`
+}
+
+// upperAirWindowFor measures the window a day list is judged in.
+//
+// A window with fewer than two days of data has no range and reports absent:
+// percentileOf already returns 0 for everything there, and a band drawn from a
+// zero would sit at sea level.
+func upperAirWindowFor(days []upperAirDayInput) upperAirWindow {
+	sorted := sortedPresentHeights(days)
+	if len(sorted) < 2 {
+		return upperAirWindow{}
+	}
+
+	// The index whose percentile is the last one at or under the quintile.
+	// Derived from the same len-1 denominator percentileOf uses rather than
+	// from a metre value, so the two stay in step by construction.
+	edge := int(upperAirLowQuintile * float64(len(sorted)-1))
+
+	return upperAirWindow{
+		Present:      true,
+		LowM:         sorted[0],
+		HighM:        sorted[len(sorted)-1],
+		LowQuintileM: sorted[edge],
+	}
+}
+
+// upperAirSeriesPoint is one sample of the sub-daily 500mb trace.
+//
+// The day cards carry a daily mean, which is the right figure for a badge and
+// the wrong one for a chart: a trough rendered at one point per day is a
+// sawtooth, and the fall into it is the part the book actually reads. The
+// provider already returns hourly data, so the trace costs nothing upstream.
+type upperAirSeriesPoint struct {
+	Time   string `json:"time"`
+	DayKey string `json:"day_key"`
+
+	// LocalHour is the hour of the vessel's local day this sample falls in.
+	// It travels with the sample rather than being recovered from Time in the
+	// browser, because the browser's timezone is not the vessel's and a label
+	// derived there would disagree with DayKey.
+	LocalHour int `json:"local_hour"`
+
+	Height500M float64 `json:"height_500_m"`
+	ThicknessM float64 `json:"thickness_m"`
+	Wind500Kts float64 `json:"wind_500_kts"`
+	Temp500C   float64 `json:"temperature_500_c"`
+}
+
+// upperAirSeriesBucketHours is how coarsely the hourly series is thinned for
+// the chart. Six-hourly matches the synoptic chart times the book works from,
+// and holds a 16-day trace to about 64 points, which is a line a 175px chart
+// can actually draw.
+const upperAirSeriesBucketHours = 6
+
+// buildUpperAirSeries thins a provider's hourly series down to one sample per
+// six-hour block of local time, dropping anything before fromDayKey.
+//
+// Buckets are cut on the hour's position within the local day rather than on
+// an exact clock hour. A provider reporting at 01:00/07:00/13:00/19:00 is
+// off-phase from a 0/6/12/18 test and still has exactly the resolution asked
+// for; selecting on the clock would have silently returned nothing for it.
+func buildUpperAirSeries(hourly []upperAirHourPoint, localLocation *time.Location, fromDayKey string) []upperAirSeriesPoint {
+	present := make([]upperAirHourPoint, 0, len(hourly))
+	for _, hp := range hourly {
+		if hp.Time.IsZero() || hp.GeopotentialHeight500M <= 0 {
+			continue
+		}
+		present = append(present, hp)
+	}
+	sort.Slice(present, func(i, j int) bool { return present[i].Time.Before(present[j].Time) })
+
+	out := make([]upperAirSeriesPoint, 0, len(present)/upperAirSeriesBucketHours+1)
+	seen := map[string]bool{}
+
+	for _, hp := range present {
+		local := hp.Time.In(localLocation)
+		dayKey := local.Format("2006-01-02")
+		if fromDayKey != "" && dayKey < fromDayKey {
+			continue
+		}
+
+		bucket := fmt.Sprintf("%s#%d", dayKey, local.Hour()/upperAirSeriesBucketHours)
+		if seen[bucket] {
+			continue
+		}
+		seen[bucket] = true
+
+		point := upperAirSeriesPoint{
+			Time:       hp.Time.UTC().Format(time.RFC3339),
+			DayKey:     dayKey,
+			LocalHour:  local.Hour(),
+			Height500M: hp.GeopotentialHeight500M,
+			Wind500Kts: hp.WindSpeed500MS * metersPerSecondToKnots,
+			Temp500C:   hp.Temperature500C,
+		}
+		if hp.GeopotentialHeight1000M > 0 {
+			point.ThicknessM = hp.GeopotentialHeight500M - hp.GeopotentialHeight1000M
+		}
+		out = append(out, point)
+	}
+
 	return out
 }
