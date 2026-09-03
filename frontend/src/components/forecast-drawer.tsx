@@ -788,14 +788,35 @@ export function ForecastDrawer({
   const upperAirTooltip = useChartTooltip(upperAirChartData.length, upperAirChartData.length, hourlyChartLeft, upperAirChartRight)
   const upperAirTooltipEntry = upperAirTooltip.activeIndex === null ? null : upperAirChartData[upperAirTooltip.activeIndex] ?? null
 
-  const windSpeeds = windHourly.map((entry) => Math.max(0, entry.windSpeed))
-  const windGusts = windHourly.map((entry) => Math.max(0, entry.windGust))
-  const windDataMax = Math.max(0, ...windSpeeds, ...windGusts)
-  const windMax = windDataMax <= 30 ? 30 : Math.ceil(windDataMax / 10) * 10
+  /*
+   * The wind frame is derived from the WHOLE visible window, not the selected
+   * day, and it is deliberately constant as the reader moves between day
+   * tabs. A rough day late in the window raises the frame for every earlier
+   * day, so the calm ones read as calm relative to what is coming - which is
+   * the comparison a passage plan actually turns on. Do not make this
+   * per-day: that is the bug this replaced, where a fixed 0-30kt floor
+   * rendered a 6kt day and a 16kt day as near-identical flat lines.
+   */
+  const windWindowMax = useMemo(
+    () =>
+      days.reduce(
+        (max, day) =>
+          (day.hourlyWind ?? []).reduce(
+            (dayMax, entry) => Math.max(dayMax, entry.windSpeed, entry.windGust),
+            max,
+          ),
+        0,
+      ),
+    [days],
+  )
+  const windTickStep = windWindowMax <= 20 ? 5 : 10
+  // Math.max(step, ...) matters: a window with no wind data at all would
+  // otherwise give windMax = 0 and make windYFor divide by zero.
+  const windMax = Math.max(windTickStep, Math.ceil(windWindowMax / windTickStep) * windTickStep)
   const windChartTop = HOURLY_CHART_TOP
   const windChartBottom = HOURLY_CHART_BOTTOM
   const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
-  const windAxisTicks = Array.from({ length: windMax / 10 + 1 }, (_, idx) => idx * 10)
+  const windAxisTicks = Array.from({ length: windMax / windTickStep + 1 }, (_, idx) => idx * windTickStep)
   const windHourTicks = useMemo(() => hourTicksFor(windHourly), [windHourly])
   const windChartData = useMemo(
     () =>
@@ -809,15 +830,33 @@ export function ForecastDrawer({
   const windLabelByHour = useMemo(() => buildLabelByHour(windHourly), [windHourly])
   const windChartMargin = hourlyChartMargin(175)
 
-  const waveHeights = waveHourly.map((entry) => Math.max(0, entry.waveHeightM))
-  const windWaveHeights = waveHourly.map((entry) => Math.max(0, entry.windWaveHeightM))
-  const swellWaveHeights = waveHourly.map((entry) => Math.max(0, entry.swellWaveHeightM))
-  const waveDataMax = Math.max(0, ...waveHeights, ...windWaveHeights, ...swellWaveHeights)
-  const waveMax = waveDataMax <= 3 ? 3 : Math.ceil(waveDataMax)
+  /*
+   * Same framing policy as wind, over the wave window: constant across day
+   * tabs so a 0.6m day reads as calm against the 3m one waiting on Thursday.
+   * waveDays can be shorter than `days` or empty - the reduce handles both,
+   * and the step floor keeps waveYFor out of a divide by zero.
+   */
+  const waveWindowMax = useMemo(
+    () =>
+      waveDays.reduce(
+        (max, day) =>
+          (day.hourlyWave ?? []).reduce(
+            (dayMax, entry) => Math.max(dayMax, entry.waveHeightM, entry.windWaveHeightM, entry.swellWaveHeightM),
+            max,
+          ),
+        0,
+      ),
+    [waveDays],
+  )
+  const waveTickStep = waveWindowMax <= 2 ? 0.5 : 1
+  // Counted in whole steps rather than dividing waveMax back out, so a
+  // half-metre step can't lose a tick to floating-point drift.
+  const waveTickCount = Math.max(1, Math.ceil(waveWindowMax / waveTickStep))
+  const waveMax = waveTickCount * waveTickStep
   const waveChartTop = HOURLY_CHART_TOP
   const waveChartBottom = HOURLY_CHART_BOTTOM
   const waveYFor = (value: number) => waveChartTop + (1 - value / waveMax) * (waveChartBottom - waveChartTop)
-  const waveAxisTicks = Array.from({ length: waveMax / 0.5 + 1 }, (_, idx) => idx * 0.5)
+  const waveAxisTicks = Array.from({ length: waveTickCount + 1 }, (_, idx) => idx * waveTickStep)
   const waveHourTicks = useMemo(() => hourTicksFor(waveHourly), [waveHourly])
   const waveChartData = useMemo(
     () =>
@@ -902,11 +941,26 @@ export function ForecastDrawer({
   const cloudTemps = cloudHourly.map((entry) => displayTemp(entry.temperatureF))
   const cloudTempMax = cloudTemps.length > 0 ? Math.max(...cloudTemps) : 0
   const cloudTempMin = cloudTemps.length > 0 ? Math.min(...cloudTemps) : 0
-  const cloudTempRange = Math.max(1, cloudTempMax - cloudTempMin)
+  /*
+   * A minimum span, in the unit actually being displayed, so a day that
+   * drifts a degree does not fill the frame and read as dramatic weather.
+   * cloudTemps have already been through displayTemp, so the floor has to be
+   * unit-aware or the imperial chart magnifies everything by 1.8.
+   *
+   * The day's real range is CENTRED inside that floor rather than anchored
+   * to the bottom of it: a flat day then draws as a flat line through the
+   * middle of the plot, which is the honest read. Bottom-anchoring would put
+   * a still, mild day hard against the baseline and imply a cold snap.
+   */
+  const cloudMinSpan = unit === 'metric' ? 8 : 15
+  const cloudRawSpan = cloudTempMax - cloudTempMin
+  const cloudSpan = Math.max(cloudMinSpan, cloudRawSpan)
+  const cloudScaleMin = cloudTempMin - (cloudSpan - cloudRawSpan) / 2
+  const cloudScaleMax = cloudScaleMin + cloudSpan
   const cloudChartTop = HOURLY_CHART_TOP
   const cloudChartBottom = HOURLY_CHART_BOTTOM
   const cloudYFor = (value: number) =>
-    cloudChartBottom - ((value - cloudTempMin) / cloudTempRange) * (cloudChartBottom - cloudChartTop)
+    cloudChartBottom - ((value - cloudScaleMin) / cloudSpan) * (cloudChartBottom - cloudChartTop)
   // Index of the lowest/highest temperature in the visible window, for the
   // L/H markers - matching indexOf's "first occurrence" tie-break is fine
   // here since a flat run of identical extreme values is rare in practice.
@@ -1246,7 +1300,10 @@ export function ForecastDrawer({
                         height={RECHARTS_XAXIS_HEIGHT}
                       />
                       <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
-                      <YAxis domain={[cloudTempMin, cloudTempMin + cloudTempRange]} hide />
+                      {/* Must stay the same scale cloudYFor uses, or the
+                          axis labels, L/H dots and scrub marker drift off
+                          the plotted curve. */}
+                      <YAxis domain={[cloudScaleMin, cloudScaleMax]} hide />
                       <YAxis yAxisId="precip" domain={[0, precipMax]} orientation="right" hide />
                       <YAxis yAxisId="uv" domain={[0, uvMax]} hide />
                       <defs>
@@ -1330,8 +1387,13 @@ export function ForecastDrawer({
                         </linearGradient>
                       </defs>
 
-                      <text x={6} y={40} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMax)}{tempUnit}</text>
-                      <text x={6} y={123} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMin)}{tempUnit}</text>
+                      {/* The DATA extremes, not the scale extremes - the
+                          reader wants the day's real high and low - but
+                          positioned by cloudYFor so they track the curve
+                          instead of sitting at the fixed y=40/y=123 the old
+                          fill-the-frame scale could assume. */}
+                      <text x={6} y={axisTickLabelY(cloudYFor, cloudTempMax, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMax)}{tempUnit}</text>
+                      <text x={6} y={axisTickLabelY(cloudYFor, cloudTempMin, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMin)}{tempUnit}</text>
                       <text x={forecastChartWidth - 6} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)}mm</text>
                       <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0mm</text>
                       <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
@@ -1669,7 +1731,16 @@ export function ForecastDrawer({
                             ))}
                           </linearGradient>
                         </defs>
-                        {waveAxisTicks.filter((tick) => Number.isInteger(tick)).map((tick) => (
+                        {/*
+                          * Every built tick gets a label. The old
+                          * Number.isInteger filter was right only for the
+                          * fixed 0-3m frame it was written against; on a
+                          * small frame it left [0, 1] and nothing else.
+                          * waveTickStep already picks 1m ticks once the
+                          * window goes past 2m, so integers-only falls out
+                          * of the step rather than out of a filter.
+                          */}
+                        {waveAxisTicks.map((tick) => (
                           <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
                             {tick}
                           </text>

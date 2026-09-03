@@ -1304,3 +1304,185 @@ describe('ForecastDrawer panel hierarchy', () => {
     expect(pct('forecast-panel-today')).toBeLessThan(pct('forecast-panel-extended'))
   })
 })
+
+// The chart frames encode consequence: shape is read before axis numbers, so
+// a variable whose frame is fixed too high flattens real weather into a
+// baseline scribble, and one that auto-scales to a single day magnifies a
+// degree of drift into a dramatic curve. These pin the framing policy:
+// wind and wave scale to the WHOLE visible window (deliberately constant
+// across day tabs), temperature carries a unit-aware minimum span.
+describe('ForecastDrawer chart y-axis framing', () => {
+  const PLOT_TOP = 35
+  const PLOT_BOTTOM = 125
+  const PLOT_HEIGHT = PLOT_BOTTOM - PLOT_TOP
+
+  // The left-hand axis ticks are plain numbers in the manual overlay <svg>;
+  // the recharts XAxis hour labels ("12AM") never match this.
+  const numericTicks = (chart: HTMLElement) =>
+    Array.from(chart.querySelectorAll('text'))
+      .map((el) => el.textContent ?? '')
+      .filter((text) => /^\d+(\.\d+)?$/.test(text))
+
+  const flatWind = (windSpeed: number, windGust: number) =>
+    buildHourlyWind().map((entry) => ({ ...entry, windSpeed, windGust }))
+
+  const windowDays = (hourlyWindFor: (dayIdx: number) => ReturnType<typeof buildHourlyWind>) =>
+    Array.from({ length: 10 }, (_, idx) =>
+      buildDay({
+        dayKey: `2026-06-${String(14 + idx).padStart(2, '0')}`,
+        date: `Jun ${14 + idx}`,
+        hourlyWind: hourlyWindFor(idx),
+      }),
+    )
+
+  const waveWindow = (heightM: number) =>
+    Array.from({ length: 10 }, (_, idx) =>
+      buildWaveDay({
+        dayKey: `2026-06-${String(14 + idx).padStart(2, '0')}`,
+        date: `Jun ${14 + idx}`,
+        hourlyWave: buildHourlyWave(24, 6, () => heightM),
+      }),
+    )
+
+  const rampCloud = (baseF: number, spreadF: number) =>
+    buildHourlyCloud().map((entry, idx) => ({ ...entry, temperatureF: baseF + (idx / 23) * spreadF }))
+
+  const tempAxisLabels = (chart: HTMLElement) =>
+    Array.from(chart.querySelectorAll('text')).filter((el) => /°[CF]$/.test(el.textContent ?? ''))
+
+  it('frames a calm ten-day wind window well below the old fixed 30kt floor', () => {
+    render(<ForecastDrawer forecast={windowDays(() => flatWind(8, 11))} loading={false} error={null} unit="metric" />)
+
+    // Window peak 11kt -> 5kt tick step, frame tops out at 15.
+    expect(numericTicks(screen.getByTestId('forecast-wind-chart'))).toEqual(['0', '5', '10', '15'])
+  })
+
+  // The invariant most likely to regress: someone "fixes" the frame to the
+  // selected day and the calm days stop reading as calm relative to what is
+  // coming. One rough day late in the window must raise the frame for every
+  // tab, including the ones before it.
+  it('keeps the wind frame constant across day tabs when one day late in the window is rough', () => {
+    render(
+      <ForecastDrawer
+        forecast={windowDays((idx) => (idx === 8 ? flatWind(30, 38) : flatWind(6, 9)))}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const tabs = screen.getAllByRole('button', { name: /Select forecast day/i })
+
+    fireEvent.click(tabs[0])
+    const dayZeroTicks = numericTicks(screen.getByTestId('forecast-wind-chart'))
+    fireEvent.click(tabs[8])
+    const dayEightTicks = numericTicks(screen.getByTestId('forecast-wind-chart'))
+
+    expect(dayZeroTicks).toEqual(['0', '10', '20', '30', '40'])
+    expect(dayEightTicks).toEqual(dayZeroTicks)
+  })
+
+  // Guards the divide-by-zero: a frame max of 0 would make windYFor emit
+  // NaN into every y attribute in the chart.
+  it('does not emit NaN or Infinity geometry when the whole wind window is dead calm', () => {
+    render(<ForecastDrawer forecast={windowDays(() => flatWind(0, 0))} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-wind-chart')
+    const badAttributes = Array.from(chart.querySelectorAll('*')).flatMap((el) =>
+      Array.from(el.attributes)
+        .filter((attr) => /NaN|Infinity/.test(attr.value))
+        .map((attr) => `${el.nodeName}.${attr.name}=${attr.value}`),
+    )
+
+    expect(badAttributes).toEqual([])
+    expect(numericTicks(chart)).toEqual(['0', '5'])
+  })
+
+  it('labels half-metre ticks on a wave window under 2m', () => {
+    render(
+      <ForecastDrawer
+        forecast={windowDays(() => flatWind(6, 9))}
+        waveDays={waveWindow(1.5)}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(numericTicks(screen.getByTestId('forecast-wave-chart'))).toEqual(['0', '0.5', '1', '1.5'])
+  })
+
+  it('labels whole-metre ticks on a wave window over 2m', () => {
+    render(
+      <ForecastDrawer
+        forecast={windowDays(() => flatWind(6, 9))}
+        waveDays={waveWindow(2.5)}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(numericTicks(screen.getByTestId('forecast-wave-chart'))).toEqual(['0', '1', '2', '3'])
+  })
+
+  it('does not stretch a one-degree day across the whole temperature frame', () => {
+    // 1.8°F of drift across the day is exactly 1.0°C, against an 8°C floor.
+    render(<ForecastDrawer forecast={[buildDay({ hourlyCloud: rampCloud(60, 1.8) })]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-cloud-chart')
+    const labels = tempAxisLabels(chart)
+    expect(labels.map((el) => el.textContent)).toEqual(['17°C', '16°C'])
+
+    const highY = Number(labels[0].getAttribute('y'))
+    const lowY = Number(labels[1].getAttribute('y'))
+    const spanPx = Math.abs(lowY - highY)
+
+    expect(spanPx).toBeGreaterThan(0)
+    expect(spanPx).toBeCloseTo((1 / 8) * PLOT_HEIGHT, 1)
+    expect(spanPx).toBeLessThan(PLOT_HEIGHT * 0.25)
+
+    // The frame is centred, not bottom-anchored: the flat run sits in the
+    // middle of the plot rather than pinned to the baseline.
+    const midpoint = (highY + lowY) / 2
+    expect(midpoint).toBeCloseTo((PLOT_TOP + PLOT_BOTTOM) / 2 + 3, 1)
+  })
+
+  // The recharts YAxis domain and the manual cloudYFor overlay must agree,
+  // or the axis labels and the scrub marker drift off the plotted curve.
+  it('keeps the plotted temperature curve on the same scale as the axis labels', () => {
+    render(<ForecastDrawer forecast={[buildDay({ hourlyCloud: rampCloud(60, 1.8) })]} loading={false} error={null} unit="metric" />)
+
+    const chart = screen.getByTestId('forecast-cloud-chart')
+    const curve = chart.querySelector('path.recharts-curve[stroke="hsl(var(--chart-temp) / 0.9)"]')
+    expect(curve).toBeTruthy()
+
+    const ys = Array.from((curve!.getAttribute('d') ?? '').matchAll(/[ML,C]\s*-?[\d.]+,(-?[\d.]+)/g)).map((m) =>
+      Number(m[1]),
+    )
+    expect(ys.length).toBeGreaterThan(0)
+
+    const labels = tempAxisLabels(chart)
+    // axisTickLabelY nudges the text 3px below the value it marks.
+    expect(Math.min(...ys)).toBeCloseTo(Number(labels[0].getAttribute('y')) - 3, 0)
+    expect(Math.max(...ys)).toBeCloseTo(Number(labels[1].getAttribute('y')) - 3, 0)
+  })
+
+  it('uses a unit-aware minimum temperature span', () => {
+    // 7.2°F of drift is 4.0°C: half of the 8°C metric floor, a little under
+    // half of the 15°F imperial one.
+    const hourlyCloud = rampCloud(60, 7.2)
+
+    const spanPxFor = (unit: 'metric' | 'imperial') => {
+      const view = render(<ForecastDrawer forecast={[buildDay({ hourlyCloud })]} loading={false} error={null} unit={unit} />)
+      const labels = tempAxisLabels(screen.getByTestId('forecast-cloud-chart'))
+      const span = Math.abs(Number(labels[1].getAttribute('y')) - Number(labels[0].getAttribute('y')))
+      view.unmount()
+      return span
+    }
+
+    expect(spanPxFor('metric')).toBeCloseTo((4.0 / 8) * PLOT_HEIGHT, 1)
+    expect(spanPxFor('imperial')).toBeCloseTo((7.2 / 15) * PLOT_HEIGHT, 1)
+    expect(spanPxFor('metric')).toBeGreaterThan(spanPxFor('imperial'))
+  })
+})
