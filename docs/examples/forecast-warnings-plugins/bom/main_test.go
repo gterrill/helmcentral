@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -552,4 +553,58 @@ func TestBuildFetchWarningsOutput_UsesCorrectFTPHostAndPath(t *testing.T) {
 	if len(want) != 0 {
 		t.Errorf("missing expected fetch calls: %+v", want)
 	}
+}
+
+// BOM publishes a warning product only while that warning is in force, so on
+// a quiet day every product for a state is simply absent from the FTP mirror.
+// That is the answer, not a failure to get one: "no warnings for Queensland".
+// Treating it as an error took the whole widget down with a 502 on exactly
+// the days there was nothing to worry about.
+func TestBuildFetchWarningsOutput_EveryProductNotInForce_ReturnsNoWarnings(t *testing.T) {
+	lat, lon := -22.4, 150.0 // QLD / Capricornia Coast
+
+	f := &fakeFetcher{errors: map[string]error{
+		"/anon/gen/fwo/IDQ20085.txt": notInForce("IDQ20085"),
+		"/anon/gen/fwo/IDQ28522.txt": notInForce("IDQ28522"),
+	}}
+
+	out, err := buildFetchWarningsOutput(lat, lon, f.fetch)
+	if err != nil {
+		t.Fatalf("an absent product means no warning is in force, not a failure: %v", err)
+	}
+	if len(out.Bulletins) != 0 {
+		t.Fatalf("expected no bulletins, got %+v", out.Bulletins)
+	}
+	// The region still reports where we looked, so the widget can say which
+	// waters it is quiet for rather than going blank.
+	if out.Region != "QLD — Capricornia Coast" {
+		t.Fatalf("expected the region to survive an all-quiet result, got %q", out.Region)
+	}
+}
+
+// One product absent, one genuinely unreachable. The absent one resolved, so
+// this follows the same rule the plugin already applies when one of two
+// products fetches: report what was resolved rather than failing the call.
+func TestBuildFetchWarningsOutput_NotInForcePlusRealFailure_ReturnsWhatResolved(t *testing.T) {
+	lat, lon := -22.4, 150.0 // QLD / Capricornia Coast
+
+	f := &fakeFetcher{errors: map[string]error{
+		"/anon/gen/fwo/IDQ20085.txt": notInForce("IDQ20085"),
+		"/anon/gen/fwo/IDQ28522.txt": errors.New("dial tcp: timeout"),
+	}}
+
+	out, err := buildFetchWarningsOutput(lat, lon, f.fetch)
+	if err != nil {
+		t.Fatalf("one resolved product is enough to answer, got %v", err)
+	}
+	if len(out.Bulletins) != 0 {
+		t.Fatalf("expected no bulletins, got %+v", out.Bulletins)
+	}
+}
+
+// notInForce builds the error the real fetcher returns for an absent product:
+// the host's message, wrapping the sentinel so errors.Is can find it.
+func notInForce(productID string) error {
+	return fmt.Errorf("failed to retrieve /anon/gen/fwo/%s.txt from ftp.bom.gov.au:21: 550 Failed to open file.: %w",
+		productID, errProductNotInForce)
 }

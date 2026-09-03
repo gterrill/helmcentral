@@ -25,9 +25,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"net/textproto"
 	"time"
 
 	extism "github.com/extism/go-sdk"
@@ -52,6 +55,35 @@ type ftpFetchRequest struct {
 type ftpFetchResponse struct {
 	Body  string `json:"body"`
 	Error string `json:"error"`
+	// NotFound marks the one FTP failure that is not an upstream problem:
+	// the file is not there. BOM publishes a warning product only while that
+	// warning is in force, so a 550 for IDQ20085 is "no marine wind warning
+	// for Queensland right now", indistinguishable in the error text from a
+	// retired product ID. Reporting the reply code structurally lets a guest
+	// tell an empty result from a broken one; Error stays populated either
+	// way, so a guest that ignores this field behaves exactly as before.
+	NotFound bool `json:"not_found,omitempty"`
+}
+
+// retrError wraps a RETR failure with %w rather than %v, which the sibling
+// errors here do not need to do. The server's reply code is carried by the
+// *textproto.Error itself, and ftpErrorIsNotFound has to find it in the chain:
+// formatted with %v the code survives only as unparseable message text, so a
+// 550 becomes indistinguishable from any other failure.
+func retrError(path, host string, err error) error {
+	return fmt.Errorf("failed to retrieve %s from %s: %w", path, host, err)
+}
+
+// ftpErrorIsNotFound reports whether err is a protocol-level 550. The ftp
+// package returns a *textproto.Error for anything the server answered with a
+// code, so this reads the code rather than matching on message text, which is
+// the server's to change.
+func ftpErrorIsNotFound(err error) bool {
+	var protoErr *textproto.Error
+	if !errors.As(err, &protoErr) {
+		return false
+	}
+	return protoErr.Code == ftp.StatusFileUnavailable
 }
 
 // fetchOverFTP dials host with a timeout, logs in anonymously, RETRs path,
@@ -74,7 +106,7 @@ func fetchOverFTP(host, path string) (string, error) {
 
 	resp, err := conn.Retr(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to retrieve %s from %s: %v", path, host, err)
+		return "", retrError(path, host, err)
 	}
 	defer resp.Close()
 
@@ -156,6 +188,15 @@ func newFTPFetchHostFunction(allowedHosts []string) extism.HostFunction {
 		body, ferr := fetchOverFTP(req.Host, req.Path)
 		if ferr != nil {
 			resp.Error = ferr.Error()
+			resp.NotFound = ftpErrorIsNotFound(ferr)
+			if resp.NotFound {
+				// A guest may legitimately read this as "nothing to report"
+				// (BOM removes a warning product when the warning is
+				// cancelled), which would otherwise make a genuinely retired
+				// or mistyped product ID indistinguishable from a quiet day.
+				// Log it so the difference is visible in hindsight.
+				log.Printf("ftp_fetch: %s%s not present on the server (550)", req.Host, req.Path)
+			}
 		} else {
 			resp.Body = body
 		}

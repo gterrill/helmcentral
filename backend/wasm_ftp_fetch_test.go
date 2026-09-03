@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"net/textproto"
 	"strings"
 	"testing"
 
 	extism "github.com/extism/go-sdk"
+	"github.com/jlaffaye/ftp"
 )
 
 const ftpFetchFixtureWasm = "testdata/wasm_plugins/ftpfetch.wasm"
@@ -142,5 +145,47 @@ func TestFTPFetch_DisallowedHostPanicsAndIsRecoveredIntoCleanError(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "not allowed") {
 		t.Errorf("expected the error to mention the host was not allowed, got: %v", err)
+	}
+}
+
+// BOM publishes a warning product only while that warning is in force, so a
+// 550 for IDQ20085 means "no marine wind warning for Queensland today", not
+// "BOM is broken". The two are indistinguishable in the error text, so the
+// host reports the FTP reply code structurally and lets the guest decide.
+func TestFTPErrorIsNotFound_550IsNotFound(t *testing.T) {
+	// Built by the same function the fetch path uses. Asserting against a
+	// hand-wrapped error instead would pass even when fetchOverFTP formats the
+	// cause away with %v, which is exactly the bug this pair has to catch.
+	err := retrError("/anon/gen/fwo/IDQ20085.txt", "ftp.bom.gov.au:21",
+		&textproto.Error{Code: ftp.StatusFileUnavailable, Msg: "Failed to open file."})
+
+	if !ftpErrorIsNotFound(err) {
+		t.Fatalf("a wrapped 550 must report as not-found: %v", err)
+	}
+	if !strings.Contains(err.Error(), "550") {
+		t.Fatalf("the server's own message must survive for the log: %v", err)
+	}
+}
+
+// Every other protocol-level failure stays a failure. A 421 is the server
+// throwing us off, which is exactly the upstream problem the fail-fast policy
+// wants surfaced rather than reported as an empty result.
+func TestFTPErrorIsNotFound_OtherProtocolCodesAreNot(t *testing.T) {
+	for _, code := range []int{ftp.StatusNotAvailable, ftp.StatusBadCommand, ftp.StatusNotLoggedIn} {
+		err := retrError("/x", "h", &textproto.Error{Code: code, Msg: "nope"})
+		if ftpErrorIsNotFound(err) {
+			t.Fatalf("FTP code %d must not report as not-found", code)
+		}
+	}
+}
+
+// A dial timeout never reaches the protocol layer, so there is no code to
+// read. It is a genuine fetch failure.
+func TestFTPErrorIsNotFound_NonProtocolErrorIsNot(t *testing.T) {
+	if ftpErrorIsNotFound(errors.New("failed to connect to FTP host ftp.bom.gov.au:21: i/o timeout")) {
+		t.Fatal("a dial failure must not report as not-found")
+	}
+	if ftpErrorIsNotFound(nil) {
+		t.Fatal("a nil error must not report as not-found")
 	}
 }

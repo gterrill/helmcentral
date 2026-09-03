@@ -17,6 +17,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -329,6 +330,18 @@ type fetchWarningsOutput struct {
 // toolchain with no WASM runtime involved.
 type ftpFetcher func(host, path string) (string, error)
 
+// errProductNotInForce marks the one fetch failure that is not a failure at
+// all. BOM keeps a warning product on the FTP mirror only while that warning
+// is in force and removes it when the warning is cancelled, so a 550 means
+// "no warning of this type right now" rather than "BOM is broken". main.go
+// wraps this sentinel around the host's message when ftp_fetch reports
+// not_found; tests inject it directly.
+//
+// It is deliberately not a general "treat missing data as empty" rule: only a
+// 550 from the server produces it, and every other failure still counts as a
+// failure below.
+var errProductNotInForce = errors.New("product not currently in force")
+
 // activeSectionsForZone filters a parsed bulletin's sections down to the
 // ones that are (a) not a cancellation and (b) name the given zone - the
 // same "vessel-relevant" test hasActiveWarningForZone applies, but
@@ -371,9 +384,14 @@ func activeSectionsForZone(sections []bomMarineWarningSection, zone string) []se
 // failure for one applicable product does not fail the whole call either -
 // that product's bulletin is just omitted, mirroring the host ftp_fetch
 // function's own "structured error, not everything-fails" philosophy. Only
-// when EVERY applicable product's fetch fails (zero successes) is this
-// treated as a real "couldn't get any data" operational failure worth
-// surfacing as an error.
+// when EVERY applicable product is unresolved (zero fetched and zero
+// confirmed absent) is this treated as a real "couldn't get any data"
+// operational failure worth surfacing as an error.
+//
+// A product the server reports as missing counts as resolved, not failed: see
+// errProductNotInForce. Without that, a state with two products spent every
+// calm day returning an error, because BOM removes both products when neither
+// warning is current.
 func buildFetchWarningsOutput(lat, lon float64, fetch ftpFetcher) (fetchWarningsOutput, error) {
 	out := fetchWarningsOutput{Bulletins: []bulletinOut{}}
 
@@ -406,14 +424,21 @@ func buildFetchWarningsOutput(lat, lon float64, fetch ftpFetcher) (fetchWarnings
 	}
 
 	var lastErr error
-	successCount := 0
+	resolvedCount := 0
 	for _, ref := range productRefs {
 		raw, err := fetch(bomFTPHost, fmt.Sprintf(bomFTPProductPathFmt, ref.ProductID))
+		if errors.Is(err, errProductNotInForce) {
+			// Resolved, with a definite answer: this warning is not current.
+			// Counted alongside a successful fetch so a state whose products
+			// are all absent reports "no warnings" instead of failing.
+			resolvedCount++
+			continue
+		}
 		if err != nil {
 			lastErr = fmt.Errorf("failed to fetch BOM product %s: %w", ref.ProductID, err)
 			continue
 		}
-		successCount++
+		resolvedCount++
 
 		bulletin := parseBomMarineWarningText(raw)
 		bulletin.ProductID = ref.ProductID
@@ -440,7 +465,7 @@ func buildFetchWarningsOutput(lat, lon float64, fetch ftpFetcher) (fetchWarnings
 		})
 	}
 
-	if successCount == 0 {
+	if resolvedCount == 0 {
 		return fetchWarningsOutput{}, fmt.Errorf("failed to fetch any BOM marine warning products for state %s: %w", state, lastErr)
 	}
 

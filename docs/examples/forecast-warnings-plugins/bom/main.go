@@ -50,6 +50,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/extism/go-pdk"
 )
@@ -73,6 +74,10 @@ type ftpFetchRequest struct {
 type ftpFetchResponse struct {
 	Body  string `json:"body"`
 	Error string `json:"error"`
+	// NotFound is the host telling us the server answered 550: the file is
+	// not there. For BOM that means the warning is not in force, which
+	// bom.go treats as an answer rather than a failure.
+	NotFound bool `json:"not_found,omitempty"`
 }
 
 // fetchOverFTP is this plugin's ftpFetcher implementation (see bom.go):
@@ -95,6 +100,12 @@ func fetchOverFTP(host, path string) (string, error) {
 		return "", err
 	}
 	if resp.Error != "" {
+		if resp.NotFound {
+			// Keep the host's message for the log and wrap the sentinel so
+			// buildFetchWarningsOutput can tell "no warning in force" from
+			// "could not reach BOM".
+			return "", fmt.Errorf("%s: %w", resp.Error, errProductNotInForce)
+		}
 		return "", errors.New(resp.Error)
 	}
 	return resp.Body, nil
