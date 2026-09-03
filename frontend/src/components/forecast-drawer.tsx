@@ -681,6 +681,57 @@ export function ForecastDrawer({
     [upperAirDays],
   )
 
+  // --- What the ten days add up to ---
+  //
+  // The strip shows ten cards and four charts and never says which day is the
+  // window. This resolves that, and only from what upperAirFlaggedDayKeys
+  // already holds: no new claim is made here.
+  //
+  // Four outcomes, and the difference between the first and the last is the
+  // point. No provider installed (ADR 0071 calls that a normal
+  // configuration, and the Upper Air panel is absent too) is silence, because
+  // nothing was looked at. Checked and found clear is a sentence, because
+  // something was. Days the provider had no outlook for count as the former:
+  // "no upper support" off an absent outlook would be a reassurance nobody
+  // measured.
+  const extendedIntro = useMemo(() => {
+    if (!upperAirDays.some((day) => day.outlook.present)) return null
+
+    const visibleDayKeys = new Set(days.map((day) => day.dayKey))
+    const namedDays = days
+      .filter((day) => upperAirFlaggedDayKeys.has(day.dayKey))
+      .map((day) => upperAirDayLabels.get(day.dayKey) ?? `${day.dayName.slice(0, 3)} ${day.date.replace(/^[A-Za-z]+ /, '')}`)
+    const hasFlaggedBeyondStrip = [...upperAirFlaggedDayKeys].some((dayKey) => !visibleDayKeys.has(dayKey))
+
+    // The window length is whatever the provider returned, not a constant.
+    // The panel header beside this already derives its span the same way, and
+    // a hardcoded "sixteen" goes quietly wrong the first time it is fourteen.
+    const windowDays = upperAirDays.length
+
+    let text: string
+    if (namedDays.length > 0) {
+      const named =
+        namedDays.length === 1
+          ? namedDays[0]
+          : `${namedDays.slice(0, -1).join(', ')} and ${namedDays[namedDays.length - 1]}`
+      text = hasFlaggedBeyondStrip
+        ? `Upper air supports a surface low developing on ${named}, and again later in the ${windowDays} day trace below.`
+        : `Upper air supports a surface low developing on ${named}.`
+    } else if (hasFlaggedBeyondStrip) {
+      // Naming a day the reader cannot select in this strip is a dead
+      // reference, so the trace gets pointed at instead.
+      text = `Upper air supports a surface low developing later in the ${windowDays} day trace below.`
+    } else {
+      text = `No upper support for a surface low in the next ${windowDays} days.`
+    }
+
+    return (
+      <p data-testid="forecast-extended-intro" className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
+        {text}
+      </p>
+    )
+  }, [days, upperAirDays, upperAirDayLabels, upperAirFlaggedDayKeys])
+
   const upperAirChartData = useMemo(
     () =>
       upperAirSeries.map((sample, idx) => ({
@@ -1094,10 +1145,10 @@ export function ForecastDrawer({
           spanDays={1}
           maxSpanDays={maxPanelSpanDays}
           intro={
-            <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
-              {summary ?? "Today's hourly forecast"}
+            <div className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
+              <p>{summary ?? "Today's hourly forecast"}</p>
               <WindWarningNotice warnings={activeForecastWarning} />
-            </p>
+            </div>
           }
         >
           <div className="px-2.5 py-2.5">
@@ -1144,6 +1195,7 @@ export function ForecastDrawer({
         spanLabel={`${days.length} days`}
         spanDays={days.length}
         maxSpanDays={maxPanelSpanDays}
+        intro={extendedIntro}
       >
         <div className="flex flex-col gap-3 px-2.5 py-2.5">
           <div ref={dayTabsRowRef} className="sticky top-0 z-10 flex gap-1.5 overflow-x-auto bg-card/95 pb-2 pt-0.5">
@@ -1170,7 +1222,7 @@ export function ForecastDrawer({
                         aria-label="Upper air supports a surface low developing"
                         className="rounded bg-gauge-secondary/20 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-gauge-secondary"
                       >
-                        500mb
+                        TROUGH
                       </span>
                     )}
                     {getWeatherIcon(day.condition, 26)}
@@ -1270,6 +1322,9 @@ export function ForecastDrawer({
                   {selectedDay.precipitationSummary && (
                     <p className="mb-2 text-base text-foreground/80">{selectedDay.precipitationSummary}</p>
                   )}
+                  <p data-testid="forecast-cloud-key" className="mb-2 text-sm text-muted-foreground">
+                    Rain bar height is the rate in mm/hr, and bar opacity is the chance of it falling.
+                  </p>
                   <div className="relative">
                   {cloudTooltipEntry && (
                     <ChartTooltipBubble
@@ -1422,7 +1477,7 @@ export function ForecastDrawer({
                   </div>
                   </div>
                   <p data-testid="forecast-cloud-legend" className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={cloudChartConfig.displayTemperature.color ?? 'currentColor'} strokeWidth={2.4} /> Temp ({tempUnit})</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={cloudChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Rain (mm/hr · opacity = probability)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color="hsl(var(--chart-uv) / 0.5)" /> UV background</span>
+                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={cloudChartConfig.displayTemperature.color ?? 'currentColor'} strokeWidth={2.4} /> Temp ({tempUnit})</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={cloudChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Rain (mm/hr)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color="hsl(var(--chart-uv) / 0.5)" /> UV background</span>
                   </p>
                 </>
               ) : (
@@ -1439,6 +1494,9 @@ export function ForecastDrawer({
                   {selectedDay.windSummary && (
                     <p className="mb-2 text-base text-foreground/80">{selectedDay.windSummary}</p>
                   )}
+                  <p data-testid="forecast-wind-key" className="mb-2 text-sm text-muted-foreground">
+                    Barbs show the direction the wind is coming from. A full feather is 10kt, a half feather 5kt.
+                  </p>
                   <div className="relative">
                     {windTooltipEntry && (
                       <ChartTooltipBubble
@@ -1546,7 +1604,7 @@ export function ForecastDrawer({
                     </div>
                   </div>
                   <p data-testid="forecast-wind-legend" className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wind) / 0.95)" strokeWidth={2.4} /> Wind</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.75)" strokeWidth={1.5} dasharray="4 3" /> Gusts</span> ({windUnit}) · barbs show direction the wind is coming from (full feather = 10kt, half = 5kt)
+                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wind) / 0.95)" strokeWidth={2.4} /> Wind</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.75)" strokeWidth={1.5} dasharray="4 3" /> Gusts</span> ({windUnit})
                   </p>
                 </>
               ) : (
@@ -1605,6 +1663,9 @@ export function ForecastDrawer({
                       ))}
                     </ul>
                   )}
+                  <p data-testid="forecast-wave-key" className="mb-2 text-sm text-muted-foreground">
+                    Arrows show the direction the swell is heading, with its period in seconds below each.
+                  </p>
                   <div className="relative">
                     {waveTooltipEntry && (
                       <ChartTooltipBubble
@@ -1758,7 +1819,7 @@ export function ForecastDrawer({
                     </div>
                   </div>
                   <p data-testid="forecast-wave-legend" className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Total wave height (m)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.85)" strokeWidth={1.5} dasharray="4 3" /> Wind wave (chop)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-swell) / 0.85)" strokeWidth={1.5} dasharray="2 3" /> Swell</span> · arrows show direction the swell is heading, with period (sec) below each
+                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Total wave height (m)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.85)" strokeWidth={1.5} dasharray="4 3" /> Wind wave (chop)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-swell) / 0.85)" strokeWidth={1.5} dasharray="2 3" /> Swell</span>
                   </p>
                 </>
               ) : (
@@ -1782,13 +1843,21 @@ export function ForecastDrawer({
           maxSpanDays={maxPanelSpanDays}
           intro={
             <p className="pr-2 text-[15px] font-medium leading-relaxed text-foreground/90">
-              The upper trough is what lets a surface low deepen, so the shape of this trace over the next
-              fortnight matters more than any single day's height. Watch for heights falling into the shaded
-              band with surface gusts building a day or two behind.
+              Upper-level troughs feed surface lows, so track the two-week trend rather than daily numbers. If heights drop into the shaded zone, expect stronger surface winds 24 to 48 hours later.
             </p>
           }
         >
           <div className="px-2.5 py-2.5">
+          <p data-testid="forecast-upper-air-key" className="mb-2 text-sm text-muted-foreground">
+            Surface gust is drawn to a full scale of {upperAirGustMax} kts.
+            {upperAirWindow?.present && (
+              <>
+                {' '}The window runs {Math.round(upperAirWindow.lowM)}–{Math.round(upperAirWindow.highM)} m, and the
+                shading below {Math.round(upperAirWindow.lowQuintileM)} m is the lowest fifth of it.
+              </>
+            )}
+            {upperAirTroughSpans.length > 0 && ' Highlighted days have upper support for a surface low.'}
+          </p>
           <div ref={upperAirCardRef} className="relative">
             {upperAirTooltipEntry && (
               <ChartTooltipBubble
@@ -1928,15 +1997,8 @@ export function ForecastDrawer({
             </span>{' '}
             ·{' '}
             <span className="inline-flex items-center gap-1 align-middle">
-              <LegendSwatch color="hsl(var(--chart-gust) / 0.5)" strokeWidth={1.2} /> Surface gust (kts, full scale {upperAirGustMax})
+              <LegendSwatch color="hsl(var(--chart-gust) / 0.5)" strokeWidth={1.2} /> Surface gust (kts)
             </span>
-            {upperAirWindow?.present && (
-              <>
-                {' '}· window {Math.round(upperAirWindow.lowM)}–{Math.round(upperAirWindow.highM)} m, shaded below{' '}
-                {Math.round(upperAirWindow.lowQuintileM)} m is the lowest fifth of it
-              </>
-            )}
-            {upperAirTroughSpans.length > 0 && ' · highlighted days have upper support for a surface low'}
           </p>
 
           </div>

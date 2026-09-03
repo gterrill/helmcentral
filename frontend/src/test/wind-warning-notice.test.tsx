@@ -79,4 +79,33 @@ describe('WindWarningNotice', () => {
     expect(screen.getByText(/Wind warning in effect/)).toBeInTheDocument()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
+
+  // It used to return a bare fragment so it could sit inline inside the
+  // forecast summary paragraph. It is the highest-stakes element on the page,
+  // so it now carries its own block wrapper and can be found and styled as a
+  // unit rather than being indistinguishable from the prose around it.
+  it('renders as its own block element, not a bare run of text', () => {
+    const warnings: ForecastWarnings = {
+      provider: 'bom',
+      region: 'Capricornia Coast',
+      bulletins: [
+        {
+          id: 'IDQ20085',
+          title: 'Marine Wind Warning Summary for Queensland',
+          issuedAt: '2026-07-05T01:51:00Z',
+          detailsUrl: 'http://www.bom.gov.au/qld/forecasts/map.shtml',
+          category: 'wind',
+          sections: [{ day: 'Sunday 5 July', warningType: 'Strong Wind Warning' }],
+        },
+      ],
+    }
+    const { container } = render(<WindWarningNotice warnings={warnings} />)
+
+    expect(container.childNodes).toHaveLength(1)
+    const notice = container.firstChild as HTMLElement
+    expect(notice.nodeType).toBe(Node.ELEMENT_NODE)
+    expect(notice).toHaveAttribute('data-testid', 'forecast-wind-warning')
+    expect(notice).toHaveTextContent('Wind warning in effect.')
+    expect(notice.textContent?.startsWith(' ')).toBe(false)
+  })
 })

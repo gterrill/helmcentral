@@ -742,7 +742,10 @@ describe('ForecastDrawer refresh age', () => {
     expect(windSwatch).not.toHaveAttribute('stroke-dasharray')
     expect(gustSwatch).toBeTruthy()
     expect(gustSwatch).toHaveAttribute('stroke-dasharray', '4 3')
-    expect(legend).toHaveTextContent('barbs show direction the wind is coming from')
+    // The barb decoding instruction still has to be on the page, but it is no
+    // longer part of the swatch row: it moved above the chart as the wind key
+    // (see 'ForecastDrawer chart decoder keys' below).
+    expect(screen.getByTestId('forecast-wind-key')).toHaveTextContent('Barbs show the direction the wind is coming from')
   })
 
   it('draws real solid/dashed line swatches in the wave legend, not text-character fakes', () => {
@@ -1137,9 +1140,12 @@ describe('ForecastDrawer upper-air trace', () => {
       />,
     )
 
-    const legend = screen.getByTestId('forecast-upper-air-legend')
-    expect(legend).toHaveTextContent('5835')
-    expect(legend).toHaveTextContent('5907')
+    // The range is now stated in the upper-air key above the chart rather than
+    // in the swatch row beneath it; what matters to this test is that the
+    // window's bounds are on the page, not which line carries them.
+    const key = screen.getByTestId('forecast-upper-air-key')
+    expect(key).toHaveTextContent('5835')
+    expect(key).toHaveTextContent('5907')
   })
 
   // Surviving the Storm's claim is causal and lagged: the upper trough vents
@@ -1484,5 +1490,269 @@ describe('ForecastDrawer chart y-axis framing', () => {
     expect(spanPxFor('metric')).toBeCloseTo((4.0 / 8) * PLOT_HEIGHT, 1)
     expect(spanPxFor('imperial')).toBeCloseTo((7.2 / 15) * PLOT_HEIGHT, 1)
     expect(spanPxFor('metric')).toBeGreaterThan(spanPxFor('imperial'))
+  })
+})
+
+// --- Layer-4 resolution: the ten-day strip has to say what it adds up to ---
+
+const RUN_DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+function runDayKey(idx: number) {
+  return `2026-06-${String(14 + idx).padStart(2, '0')}`
+}
+
+function buildDayRun(count: number) {
+  return Array.from({ length: count }, (_, idx) =>
+    buildDay({ dayKey: runDayKey(idx), date: `Jun ${14 + idx}`, dayName: RUN_DAY_NAMES[idx % 7] }),
+  )
+}
+
+// buildUpperAirDay pins its own date/dayName, but the intro's day names are
+// read off the upper-air day itself, so the run has to carry real ones.
+function buildUpperAirRun(count: number, troughIndexes: number[], outlookOverrides: Record<string, unknown> = {}) {
+  return Array.from({ length: count }, (_, idx) => ({
+    ...buildUpperAirDay(runDayKey(idx), { troughSupport: troughIndexes.includes(idx), ...outlookOverrides }),
+    date: `Jun ${14 + idx}`,
+    dayName: RUN_DAY_NAMES[idx % 7],
+  }))
+}
+
+describe('ForecastDrawer ten-day window resolution', () => {
+  // ADR 0071 treats a boat with no upper-air plugin as a normal
+  // configuration, not a degraded one. There is nothing to resolve, and the
+  // Upper Air panel is absent too, so the header stays silent.
+  it('says nothing when no upper-air provider is installed', () => {
+    render(<ForecastDrawer forecast={buildDayRun(10)} loading={false} error={null} unit="metric" />)
+
+    expect(screen.queryByTestId('forecast-extended-intro')).not.toBeInTheDocument()
+  })
+
+  it('names the flagged days that fall inside the visible ten', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(10)}
+        upperAirDays={buildUpperAirRun(10, [0, 4])}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-extended-intro')).toHaveTextContent(
+      'Upper air supports a surface low developing on Sun 14 and Thu 18.',
+    )
+  })
+
+  // Naming a day the reader cannot select in this strip would be a dead
+  // reference, so the ones past day ten are pointed at, not named.
+  it('points at the trace instead of naming days beyond the strip', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(10)}
+        upperAirDays={buildUpperAirRun(12, [11])}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const intro = screen.getByTestId('forecast-extended-intro')
+    expect(intro).toHaveTextContent(
+      'Upper air supports a surface low developing later in the 12 day trace below.',
+    )
+    expect(intro).not.toHaveTextContent('Thu 25')
+  })
+
+  it('names the in-window days and still points at the rest', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(10)}
+        upperAirDays={buildUpperAirRun(12, [0, 11])}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-extended-intro')).toHaveTextContent(
+      'Upper air supports a surface low developing on Sun 14, and again later in the 12 day trace below.',
+    )
+  })
+
+  // "Checked and clear" is a finding. It must not collapse into the same
+  // silence as "no provider installed" - a future refactor that renders
+  // nothing here would be telling the reader nothing was looked at.
+  it('says so plainly when the upper air was checked and nothing is developing', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(10)}
+        upperAirDays={buildUpperAirRun(12, [])}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-extended-intro')).toHaveTextContent(
+      'No upper support for a surface low in the next 12 days.',
+    )
+  })
+
+  // A run of days the provider had no data for is not a clear run. Claiming
+  // "no upper support" off an absent outlook is the reassurance nobody
+  // measured that the rest of this component is careful to avoid.
+  it('stays silent when the provider returned no usable outlook for any day', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(10)}
+        upperAirDays={buildUpperAirRun(12, [], { present: false })}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.queryByTestId('forecast-extended-intro')).not.toBeInTheDocument()
+  })
+
+  // The badge used to label the units (500mb) while the meaning sat in a
+  // title attribute nobody hovers on a boat. The mechanism is the trough.
+  it('names the mechanism on the day card, not the pressure level', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [1])}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const marker = screen.getByTestId('forecast-upper-air-marker')
+    expect(marker).toHaveTextContent('TROUGH')
+    expect(marker).toHaveAccessibleName('Upper air supports a surface low developing')
+  })
+})
+
+// --- The decoder keys are the signal, not the footnote ---
+//
+// Without these sentences the barbs, the bar opacity, the swell arrows and
+// the shaded band cannot be read at all, so they render above the chart at
+// text-sm rather than under it at 10px alongside the colour swatches.
+
+function expectPrecedes(key: HTMLElement, chart: HTMLElement) {
+  // eslint-disable-next-line no-bitwise
+  expect(key.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+}
+
+describe('ForecastDrawer chart decoder keys', () => {
+  it('puts the rain-opacity key above the cloud chart, not in the swatch row', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const key = screen.getByTestId('forecast-cloud-key')
+    expect(key).toHaveTextContent(/opacity/i)
+    expect(key.className).toContain('text-sm')
+    expectPrecedes(key, screen.getByTestId('forecast-cloud-chart'))
+    expect(screen.getByTestId('forecast-cloud-legend')).not.toHaveTextContent(/opacity/i)
+  })
+
+  it('puts the wind-barb key above the wind chart, not in the swatch row', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const key = screen.getByTestId('forecast-wind-key')
+    expect(key).toHaveTextContent(/full feather/i)
+    expect(key).toHaveTextContent(/coming from/i)
+    expect(key.className).toContain('text-sm')
+    expectPrecedes(key, screen.getByTestId('forecast-wind-chart'))
+    expect(screen.getByTestId('forecast-wind-legend')).not.toHaveTextContent(/feather/i)
+  })
+
+  it('puts the swell-arrow key above the wave chart, not in the swatch row', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+
+    const key = screen.getByTestId('forecast-wave-key')
+    expect(key).toHaveTextContent(/heading/i)
+    expect(key).toHaveTextContent(/period/i)
+    expect(key.className).toContain('text-sm')
+    expectPrecedes(key, screen.getByTestId('forecast-wave-chart'))
+    expect(screen.getByTestId('forecast-wave-legend')).not.toHaveTextContent(/arrows show/i)
+  })
+
+  it('puts the shaded-band key above the upper-air chart, not in the swatch row', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [1])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const key = screen.getByTestId('forecast-upper-air-key')
+    expect(key).toHaveTextContent('5835')
+    expect(key).toHaveTextContent('5907')
+    expect(key).toHaveTextContent(/lowest fifth/i)
+    expect(key).toHaveTextContent(/full scale/i)
+    expect(key).toHaveTextContent(/highlighted days/i)
+    expect(key.className).toContain('text-sm')
+    expectPrecedes(key, screen.getByTestId('forecast-upper-air-chart'))
+
+    const legend = screen.getByTestId('forecast-upper-air-legend')
+    expect(legend).not.toHaveTextContent(/lowest fifth/i)
+    expect(legend).not.toHaveTextContent(/full scale/i)
+    // The swatch-to-label pairing survives the split.
+    expect(legend).toHaveTextContent(/surface gust/i)
+    expect(legend).toHaveTextContent(/500mb height/i)
+  })
+})
+
+// --- The wind warning is the highest-stakes element on the page ---
+
+describe('ForecastDrawer wind warning prominence', () => {
+  it('renders the wind warning as its own block under the summary', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={[
+          {
+            label: 'Now',
+            kind: 'forecast',
+            temperatureF: 70,
+            condition: 'Clear',
+            windSpeedKts: 10,
+            windGustKts: 14,
+            windDirection: 'NE',
+            windDirectionDeg: 45,
+          },
+        ]}
+        activeForecastWarning={{
+          provider: 'bom',
+          region: 'Capricornia Coast',
+          bulletins: [
+            {
+              id: 'IDQ20085',
+              title: 'Marine Wind Warning Summary for Queensland',
+              issuedAt: '2026-07-05T01:51:00Z',
+              detailsUrl: 'http://www.bom.gov.au/qld/forecasts/map.shtml',
+              category: 'wind',
+              sections: [{ day: 'Sunday 5 July', warningType: 'Strong Wind Warning' }],
+            },
+          ],
+        }}
+        summary="Today's hourly forecast"
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const notice = screen.getByTestId('forecast-wind-warning')
+    expect(notice).toHaveTextContent('Wind warning in effect.')
+    // Its own block, not a run of text inside the summary paragraph.
+    expect(notice.tagName).toBe('P')
+    expect(notice.textContent).not.toContain("Today's hourly forecast")
   })
 })
