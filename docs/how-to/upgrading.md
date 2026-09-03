@@ -5,6 +5,26 @@ The notes below cover the releases that required manual steps.
 
 If you are installing fresh, none of this applies.
 
+## Checking what you are running
+
+The release version sits in the footer of the menu sidebar, below the
+navigation items. It is the fastest way to confirm an upgrade actually took:
+if the footer still reads the old tag after a restart, the container is running
+the previous image.
+
+The version comes from the running backend, not the browser, so a stale page
+cannot show you a version you are not on. Hovering it gives the full build
+stamp including the git revision, which is what to quote when reporting a
+problem. A build made outside the release workflow reports `dev` or `(devel)`
+instead of a tag, because there is no tag to report.
+
+The same values are served by `GET /api/health` if you would rather read it
+from the shell:
+
+```sh
+curl -s http://localhost:8080/api/health
+```
+
 ## SignalK delegated authentication (opt-in)
 
 This is not a breaking change: no action is required. `auth.mode` defaults to

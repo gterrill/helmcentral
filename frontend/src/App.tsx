@@ -137,6 +137,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarInset,
   SidebarMenu,
   SidebarMenuItem,
@@ -148,6 +149,7 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
+import { SidebarVersion } from '@/components/sidebar-version'
 
 type PanelId = 'forecast' | 'routes' | 'charts' | 'radar' | 'anchor-watch' | 'alarms' | 'settings'
 
@@ -1339,6 +1341,9 @@ export function App() {
             ))}
           </SidebarMenu>
         </SidebarContent>
+        <SidebarFooter>
+          <SidebarVersion />
+        </SidebarFooter>
         <SidebarRail />
       </Sidebar>
 

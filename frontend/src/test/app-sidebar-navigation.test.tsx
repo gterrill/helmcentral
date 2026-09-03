@@ -31,11 +31,15 @@ vi.mock('@/hooks/use-auth', () => ({
 
 
 // ── stub fetch so components that call it don't throw ─────────────────────────
+// /api/health is answered for real: the sidebar footer's version stamp is the
+// one thing in this file that reads it, and a failed probe would render the
+// "version unavailable" branch instead of a version.
 beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: false,
-    json: async () => ({}),
-  }))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+    typeof url === 'string' && url.endsWith('/api/health')
+      ? { ok: true, json: async () => ({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' }) }
+      : { ok: false, json: async () => ({}) }
+  )))
 })
 
 // ── hook mocks (mirrors App.smoke.test.tsx) ────────────────────────────────────
@@ -330,6 +334,12 @@ describe('App sidebar navigation', () => {
     // DepthTideTile's onOpen now routes to 'forecast', not the removed 'tides' panel.
     expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
     expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
+  })
+
+  it('footers the sidebar with the version the backend reports', async () => {
+    render(<App />)
+
+    expect(await screen.findByTestId('sidebar-version')).toHaveTextContent('v0.17.0')
   })
 
   it('lists dashboard pages as sidebar sub-items and navigates between them', () => {
