@@ -27,6 +27,9 @@ const config: Config = {
   			'destructive-foreground': 'hsl(var(--destructive-foreground))',
   			'gauge-primary': 'hsl(var(--gauge-primary))',
   			'gauge-secondary': 'hsl(var(--gauge-secondary))',
+  			'chart-precip': 'hsl(var(--chart-precip))',
+  			'chart-uv': 'hsl(var(--chart-uv))',
+  			'chart-gust': 'hsl(var(--chart-gust))',
   			sidebar: {
   				DEFAULT: 'hsl(var(--sidebar-background))',
   				foreground: 'hsl(var(--sidebar-foreground))',

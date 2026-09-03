@@ -375,6 +375,8 @@ describe('instrument skin token coverage', () => {
       ['chart-swell', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
       ['chart-temp', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
       ['chart-grid', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['chart-precip', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['chart-uv', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
       ['dial-bezel-overhang', 'set inline per tile by the cluster, not by the skin'],
       ['dial-track-r', "invisible under the skin's --dial-track-w: 0px"],
     ])

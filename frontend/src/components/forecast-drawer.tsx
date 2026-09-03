@@ -73,19 +73,19 @@ interface ForecastDrawerProps {
 
 // Simple weather icon selector
 function getWeatherIcon(condition: string, size: number = 40) {
-  const iconProps = { size, className: 'text-amber-500' }
-  
+  const iconProps = { size }
+
   if (condition.toLowerCase().includes('clear') || condition.toLowerCase().includes('sunny')) {
-    return <Sun {...iconProps} className="text-yellow-500" />
+    return <Sun {...iconProps} className="text-gauge-primary" />
   }
   if (condition.toLowerCase().includes('cloud')) {
-    return <Cloud {...iconProps} className="text-gray-400" />
+    return <Cloud {...iconProps} className="text-muted-foreground" />
   }
   if (condition.toLowerCase().includes('rain') || condition.toLowerCase().includes('drizzle')) {
-    return <CloudRain {...iconProps} className="text-blue-400" />
+    return <CloudRain {...iconProps} className="text-chart-precip" />
   }
-  
-  return <Cloud {...iconProps} className="text-gray-400" />
+
+  return <Cloud {...iconProps} className="text-muted-foreground" />
 }
 
 const MOON_PHASE_LABELS: Record<string, string> = {
@@ -333,9 +333,9 @@ function ForecastPanel({
   return (
     <section
       data-testid={testId}
-      className="overflow-hidden rounded-[26px] border border-gauge-secondary/15 bg-[linear-gradient(180deg,rgba(255,249,239,0.96),rgba(238,245,243,0.92))] shadow-[0_14px_32px_rgba(38,84,79,0.08)]"
+      className="overflow-hidden rounded-[26px] border border-gauge-secondary/15 bg-[linear-gradient(180deg,hsl(var(--card)/0.96),hsl(var(--muted)/0.92))] shadow-[0_14px_32px_hsl(var(--gauge-secondary)/0.08)]"
     >
-      <div className="border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,rgba(199,137,0,0.10),rgba(52,116,109,0.08))] px-4 py-3.5">
+      <div className="border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,hsl(var(--gauge-primary)/0.10),hsl(var(--gauge-secondary)/0.08))] px-4 py-3.5">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground/70">{title}</h3>
           <div className="flex shrink-0 items-center gap-2">
@@ -380,22 +380,24 @@ function LegendSwatch({
   )
 }
 
-// Colors a precipitation intensity bar by probability percentage.
-// Low probability fades to a soft translucent light blue, high probability is deep royal blue.
+// Colors a precipitation intensity bar by probability percentage. One hue
+// (the --chart-precip token) at a rising opacity - the legend already reads
+// "opacity = probability", so a hue shift on top of that would contradict
+// what it tells the reader.
 function precipBarColor(chancePct: number | null) {
   if (chancePct === null || chancePct <= 0) {
-    return 'rgba(59,130,246,0.2)'
+    return 'hsl(var(--chart-precip) / 0.2)'
   }
   if (chancePct < 25) {
-    return 'rgba(59,130,246,0.35)'
+    return 'hsl(var(--chart-precip) / 0.35)'
   }
   if (chancePct < 50) {
-    return 'rgba(59,130,246,0.55)'
+    return 'hsl(var(--chart-precip) / 0.55)'
   }
   if (chancePct < 75) {
-    return 'rgba(37,99,235,0.75)'
+    return 'hsl(var(--chart-precip) / 0.75)'
   }
-  return 'rgba(29,78,216,0.92)'
+  return 'hsl(var(--chart-precip) / 0.92)'
 }
 
 // Shared axis label styling, used for every value/tick/band label across the
@@ -980,8 +982,8 @@ export function ForecastDrawer({
   const cloudChartMargin = hourlyChartMargin(175)
   const cloudChartConfig: ChartConfig = {
     displayTemperature: { label: `Temperature (${tempUnit})`, color: 'hsl(var(--chart-temp) / 0.9)' },
-    precipIntensityMm: { label: 'Precipitation (mm/hr)', color: 'rgba(59,130,246,0.85)' },
-    uvIndex: { label: 'UV Index', color: 'rgb(250,204,21)' },
+    precipIntensityMm: { label: 'Precipitation (mm/hr)', color: 'hsl(var(--chart-precip) / 0.85)' },
+    uvIndex: { label: 'UV Index', color: 'hsl(var(--chart-uv))' },
   }
 
   const windTooltip = useChartTooltip(windHourly.length, selectedDayIndex, hourlyChartLeft, hourlyChartRight)
@@ -1011,8 +1013,8 @@ export function ForecastDrawer({
 
   if (error && !hasForecast) {
     return (
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-8 text-center">
-        <p className="text-xs uppercase tracking-[0.16em] text-amber-700">Forecast Offline</p>
+      <div className="rounded-lg border border-gauge-primary/30 bg-gauge-primary/5 px-4 py-8 text-center">
+        <p className="text-xs uppercase tracking-[0.16em] text-gauge-primary">Forecast Offline</p>
         <p className="mt-2 font-medium text-foreground">Unable to load forecast data right now</p>
         <p className="mt-1 text-xs text-muted-foreground">{error}</p>
         <div className="mt-4 flex justify-center">
@@ -1054,7 +1056,7 @@ export function ForecastDrawer({
             return (
               <div
                 key={`${entry.kind}-${entry.label}-${idx}`}
-                className={`relative flex min-w-[84px] flex-col items-center rounded-[20px] border px-2.5 py-3.5 text-center ${entry.kind === 'sunset' ? 'border-gauge-primary/20 bg-gauge-primary/10' : nightMode ? 'border-gauge-secondary/20 bg-gauge-secondary/10' : 'border-border/70 bg-card/80'} ${isNowEntry ? 'shadow-[0_0_0_1px_rgba(199,137,0,0.22),0_10px_18px_rgba(199,137,0,0.10)]' : ''}`}
+                className={`relative flex min-w-[84px] flex-col items-center rounded-[20px] border px-2.5 py-3.5 text-center ${entry.kind === 'sunset' ? 'border-gauge-primary/20 bg-gauge-primary/10' : nightMode ? 'border-gauge-secondary/20 bg-gauge-secondary/10' : 'border-border/70 bg-card/80'} ${isNowEntry ? 'shadow-[0_0_0_1px_hsl(var(--gauge-primary)/0.22),0_10px_18px_hsl(var(--gauge-primary)/0.10)]' : ''}`}
               >
                 {isNowEntry && (
                   <span className="absolute left-1/2 top-1.5 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-gauge-primary" />
@@ -1090,7 +1092,7 @@ export function ForecastDrawer({
         maxSpanDays={maxPanelSpanDays}
       >
         <div className="flex flex-col gap-3 px-2.5 py-2.5">
-          <div ref={dayTabsRowRef} className="sticky top-0 z-10 flex gap-1.5 overflow-x-auto bg-[rgba(255,249,239,0.97)] pb-2 pt-0.5">
+          <div ref={dayTabsRowRef} className="sticky top-0 z-10 flex gap-1.5 overflow-x-auto bg-card/95 pb-2 pt-0.5">
             {days.map((day, idx) => (
               <button
                 key={idx}
@@ -1154,7 +1156,7 @@ export function ForecastDrawer({
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{selectedDay.condition}</p>
               <div className="flex flex-wrap gap-2 text-[11px]">
                 <span className="rounded bg-muted/50 px-2 py-1">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-amber-600">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded bg-muted/50 px-2 py-1">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-chart-gust">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Precip <span data-testid="forecast-selected-precip" className="font-semibold">{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold">{humidityPct === null ? '—' : `${humidityPct}%`}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
@@ -1172,7 +1174,7 @@ export function ForecastDrawer({
                 )}
                 {selectedDay.sunriseTime && (
                   <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
-                    <Sunrise size={13} className="text-amber-500" />
+                    <Sunrise size={13} className="text-gauge-primary" />
                     Sunrise <span className="font-semibold">{selectedDay.sunriseTime}</span>
                   </span>
                 )}
@@ -1253,8 +1255,8 @@ export function ForecastDrawer({
                           <stop offset="100%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.02" />
                         </linearGradient>
                         <linearGradient id={uvAreaGradientId} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="rgb(250,204,21)" stopOpacity="0.30" />
-                          <stop offset="100%" stopColor="rgb(250,204,21)" stopOpacity="0.02" />
+                          <stop offset="0%" stopColor="hsl(var(--chart-uv))" stopOpacity="0.30" />
+                          <stop offset="100%" stopColor="hsl(var(--chart-uv))" stopOpacity="0.02" />
                         </linearGradient>
                       </defs>
                       <Area
@@ -1323,8 +1325,8 @@ export function ForecastDrawer({
                           <stop offset="100%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.02" />
                         </linearGradient>
                         <linearGradient id={uvAreaGradientId} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="rgb(250,204,21)" stopOpacity="0.30" />
-                          <stop offset="100%" stopColor="rgb(250,204,21)" stopOpacity="0.02" />
+                          <stop offset="0%" stopColor="hsl(var(--chart-uv))" stopOpacity="0.30" />
+                          <stop offset="100%" stopColor="hsl(var(--chart-uv))" stopOpacity="0.02" />
                         </linearGradient>
                       </defs>
 
@@ -1358,7 +1360,7 @@ export function ForecastDrawer({
                   </div>
                   </div>
                   <p data-testid="forecast-cloud-legend" className="mt-1 text-[10px] text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={cloudChartConfig.displayTemperature.color ?? 'currentColor'} strokeWidth={2.4} /> Temp ({tempUnit})</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={cloudChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Rain (mm/hr · opacity = probability)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color="rgba(250,204,21,0.5)" /> UV background</span>
+                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color={cloudChartConfig.displayTemperature.color ?? 'currentColor'} strokeWidth={2.4} /> Temp ({tempUnit})</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color={cloudChartConfig.precipIntensityMm.color ?? 'currentColor'} /> Rain (mm/hr · opacity = probability)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="bar" color="hsl(var(--chart-uv) / 0.5)" /> UV background</span>
                   </p>
                 </>
               ) : (

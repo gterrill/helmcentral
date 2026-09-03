@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 
@@ -118,6 +122,38 @@ function buildWaveDay(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+// Stage 1 of the design-token refactor (see docs/adr): every colour in this
+// component must come from a CSS custom-property token (hsl(var(--...))) so
+// the .dark and [data-skin="instrument"] themes can actually repaint it - a
+// hand-typed rgb()/rgba()/hex literal always paints the same colour no matter
+// which theme is active. This is a guard against regressions, not a one-time
+// cleanup: it reads the component source directly off disk so any literal
+// that creeps back in fails the suite immediately.
+describe('ForecastDrawer design tokens', () => {
+  it('contains no raw colour literals - only hsl(var(--...)) tokens', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const sourcePath = resolve(testDir, '../components/forecast-drawer.tsx')
+    const source = readFileSync(sourcePath, 'utf8')
+    const lines = source.split('\n')
+
+    // hsl(var(--...)) is explicitly allowed and never matched by this pattern.
+    const colorLiteralPattern = /rgb\(|rgba\(|#[0-9a-fA-F]{3,8}\b/g
+
+    const offenders: string[] = []
+    lines.forEach((line, idx) => {
+      const matches = line.match(colorLiteralPattern)
+      if (matches) {
+        offenders.push(`  line ${idx + 1} (${matches.length}x): ${line.trim()}`)
+      }
+    })
+
+    expect(
+      offenders,
+      `Found raw colour literal(s) in forecast-drawer.tsx - replace with hsl(var(--token)):\n${offenders.join('\n')}`,
+    ).toEqual([])
+  })
+})
 
 describe('ForecastDrawer refresh age', () => {
   beforeEach(() => {
@@ -618,10 +654,10 @@ describe('ForecastDrawer refresh age', () => {
     const bars = screen.getAllByTestId('forecast-precip-bar')
     // buildHourlyPrecip gives non-zero intensity every 6th hour (4 of 24: idx 0, 6, 12, 18).
     expect(bars).toHaveLength(4)
-    // idx 0 -> chance = 0% -> rgba(59,130,246,0.2)
-    expect(bars[0]).toHaveAttribute('fill', 'rgba(59,130,246,0.2)')
-    // idx 18 -> chance = 90% -> rgba(29,78,216,0.92)
-    expect(bars[3]).toHaveAttribute('fill', 'rgba(29,78,216,0.92)')
+    // idx 0 -> chance = 0% -> hsl(var(--chart-precip) / 0.2)
+    expect(bars[0]).toHaveAttribute('fill', 'hsl(var(--chart-precip) / 0.2)')
+    // idx 18 -> chance = 90% -> hsl(var(--chart-precip) / 0.92)
+    expect(bars[3]).toHaveAttribute('fill', 'hsl(var(--chart-precip) / 0.92)')
   })
 
   it('shows UV as a background gradient and displays sun protection recommendation', () => {
