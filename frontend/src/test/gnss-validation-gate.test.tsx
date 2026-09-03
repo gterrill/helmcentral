@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
 
 function Probe({ gnssCritical }: { gnssCritical: boolean }) {
-  const watch = useAnchorWatch(-25.2939, 152.9103, 'anchored', 1, gnssCritical)
+  const watch = useAnchorWatch(-25.2939, 152.9103, 1, gnssCritical)
   return (
     <div>
       <div data-testid="anchor-state">{watch.anchorState}</div>

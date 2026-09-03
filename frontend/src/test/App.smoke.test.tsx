@@ -65,7 +65,7 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
   useAnchorWatch: () => ({
     anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
     rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
-    distanceMeters: null, bearingDeg: null, suggestSet: false,
+    distanceMeters: null, bearingDeg: null,
     planningDepthM: null, planningTideHeightFt: null,
     setAnchorHere: vi.fn(), updateRadius: vi.fn(),
     updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),

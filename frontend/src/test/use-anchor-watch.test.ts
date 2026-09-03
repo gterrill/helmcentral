@@ -17,7 +17,7 @@ describe('useAnchorWatch bow-offset request shape', () => {
 
   it('setAnchorHere posts apply_bow_offset: true', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, null, 3600))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
 
     // Let the initial GET /api/anchor-watch on mount resolve and clear.
     await act(async () => { await Promise.resolve() })
@@ -37,7 +37,7 @@ describe('useAnchorWatch bow-offset request shape', () => {
 
   it('updatePosition does not send apply_bow_offset', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, null, 3600))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
 
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
@@ -68,7 +68,7 @@ describe('useAnchorWatch planning-depth capture', () => {
 
   it('setAnchorHere posts the depth and tide pair when both are known', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, null, 3600))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -84,7 +84,7 @@ describe('useAnchorWatch planning-depth capture', () => {
 
   it('setAnchorHere posts -1 sentinels when there is no reading, rather than omitting the fields', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, null, 3600))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -100,7 +100,7 @@ describe('useAnchorWatch planning-depth capture', () => {
 
   it('updatePosition omits the depth/tide pair entirely, letting the backend carry it forward', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, null, 3600))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -128,7 +128,7 @@ describe('useAnchorWatch updatePlanningDepth', () => {
 
   it('PATCHes planning_depth_m and planning_tide_height_ft together', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, null, 3600))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -143,7 +143,7 @@ describe('useAnchorWatch updatePlanningDepth', () => {
   })
 
   it('replaces state with the server echo rather than updating optimistically', async () => {
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, null, 3600))
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
     await act(async () => { await Promise.resolve() })
 
     await act(async () => {

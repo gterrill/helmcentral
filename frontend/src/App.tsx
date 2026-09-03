@@ -424,7 +424,6 @@ export function App() {
   const anchorWatch = useAnchorWatch(
     latitude,
     longitude,
-    navigationState,
     uiConfig.vesselStateRefreshSeconds,
     gnssCriticalAlert,
   )

@@ -55,7 +55,6 @@ function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResul
     seabedType: 'sand',
     distanceMeters: null,
     bearingDeg: null,
-    suggestSet: false,
     setAt: null,
     bowOffsetM: 0,
     bowOffsetApplied: false,
@@ -290,10 +289,10 @@ describe('AnchorWatchTile', () => {
   })
 
   describe('banners', () => {
-    it('shows the suggestSet banner only when no anchor is set', () => {
-      render(<AnchorWatchTile {...baseProps({ watch: baseWatch({ anchorState: 'none', suggestSet: true }) })} />)
+    it('never prompts to set a watch from the SignalK navigation state', () => {
+      render(<AnchorWatchTile {...baseProps({ watch: baseWatch({ anchorState: 'none' }) })} />)
 
-      expect(screen.getByText(/anchored/i)).toBeInTheDocument()
+      expect(screen.queryByText(/set anchor watch\?/i)).toBeNull()
     })
 
     it('shows the gnssCritical banner only once a watch is active', () => {

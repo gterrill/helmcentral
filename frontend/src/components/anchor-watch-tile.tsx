@@ -105,7 +105,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
     radiusMeters,
     distanceMeters,
     bearingDeg,
-    suggestSet,
     setAnchorHere,
     updatePosition,
     updateRadius,
@@ -175,11 +174,6 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
           overflow the card. Below lg the persisted height is only a floor
           (dashboard-bento-grid.tsx) and the map keeps its fixed h-64. */}
       <div className="flex h-full min-h-0 flex-col">
-      {anchorState === 'none' && suggestSet && (
-        <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
-          SignalK reports <span className="font-semibold">anchored</span> — set anchor watch?
-        </div>
-      )}
       {anchorState !== 'none' && gnssCritical && (
         <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
           GPS signal degraded — position may be inaccurate

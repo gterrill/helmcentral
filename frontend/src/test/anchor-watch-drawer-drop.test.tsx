@@ -121,7 +121,6 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     seabedType: 'sand',
     distanceMeters: null,
     bearingDeg: null,
-    suggestSet: false,
     setAt: null,
     planningDepthM: null,
     planningTideHeightFt: null,

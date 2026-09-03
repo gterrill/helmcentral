@@ -31,7 +31,6 @@ export interface AnchorWatchResult {
   seabedType: SeabedType
   distanceMeters: number | null
   bearingDeg: number | null
-  suggestSet: boolean
   setAt: string | null
   bowOffsetM: number
   bowOffsetApplied: boolean
@@ -71,7 +70,6 @@ function isSeabedType(value: string | undefined): value is SeabedType {
 export function useAnchorWatch(
   currentLat: number | null,
   currentLon: number | null,
-  navigationState: string | null,
   refreshInterval: number,
   gnssCritical = false,
 ): AnchorWatchResult {
@@ -249,7 +247,6 @@ export function useAnchorWatch(
     }
   }
 
-  const suggestSet = !serverState.active && navigationState === 'anchored'
   const setAt = serverState.active && serverState.set_at ? serverState.set_at : null
   const bowOffsetM = serverState.active && typeof serverState.bow_offset_m === 'number' ? serverState.bow_offset_m : 0
   const bowOffsetApplied = serverState.active ? Boolean(serverState.bow_offset_applied) : false
@@ -279,7 +276,6 @@ export function useAnchorWatch(
     seabedType,
     distanceMeters,
     bearingDeg,
-    suggestSet,
     setAt,
     bowOffsetM,
     bowOffsetApplied,
