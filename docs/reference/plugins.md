@@ -1,15 +1,16 @@
 # Provider plugins
 
-Tides, weather, waves, and forecast warnings are **not built into Helmcentral**.
+Tides, weather, waves, forecast warnings and the upper-air outlook are **not
+built into Helmcentral**.
 Each provider is a sandboxed WASM plugin loaded from disk at startup. Adding
 support for another region's government API requires placing a `.wasm` file into
 a directory, with no code changes, Go compilation, binary rebuilds, or frontend
 modifications.
 
-The four registries (`backend/tide_providers.go`,
-`backend/weather_providers.go`, `backend/wave_providers.go`, and
-`backend/forecast_warnings_providers.go`) share a single WASM host layer in
-`backend/wasm_plugin.go`.
+The five registries (`backend/tide_providers.go`,
+`backend/weather_providers.go`, `backend/wave_providers.go`,
+`backend/forecast_warnings_providers.go`, and `backend/upper_air_providers.go`)
+share a single WASM host layer in `backend/wasm_plugin.go`.
 
 | Category | Directory | Override | Bundled reference plugins |
 | --- | --- | --- | --- |
@@ -17,10 +18,15 @@ The four registries (`backend/tide_providers.go`,
 | Weather | `plugins/weather/` | `PLUGINS_WEATHER_DIR` | `open-meteo` (worldwide, keyless, **default**), `weatherkit` (Apple, needs keys) |
 | Waves | `plugins/waves/` | `PLUGINS_WAVES_DIR` | `open-meteo-marine` (**default**) |
 | Forecast warnings | `plugins/forecast-warnings/` | `PLUGINS_FORECAST_WARNINGS_DIR` | `bom` (Australia, **default**), `nws` (US) |
+| Upper air | `plugins/upper-air/` | `PLUGINS_UPPER_AIR_DIR` | `open-meteo-upper` (worldwide, keyless) |
 
-You select the active provider for each category in Settings. All seven
+You select the active provider for each category in Settings. All eight
 reference plugins are built and installed automatically by the `plugins-builder`
 Compose service during each `make dev` run and deployment.
+
+Upper air is the one optional category: leave the plugin out and the forecast
+page simply shows no 500mb section. The rest have a widget that goes empty
+without a provider.
 
 ## The sandbox
 
@@ -186,6 +192,7 @@ Available example directories:
 - `docs/examples/weather-plugins/open-meteo`, `docs/examples/weather-plugins/weatherkit`
 - `docs/examples/wave-plugins/open-meteo-marine`
 - `docs/examples/forecast-warnings-plugins/bom`, `docs/examples/forecast-warnings-plugins/nws`
+- `docs/examples/upper-air-plugins/open-meteo-upper`
 
 Each directory contains a README with installation instructions.
 [docs/examples/weather-plugins/weatherkit/README.md](../examples/weather-plugins/weatherkit/README.md)

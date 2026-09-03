@@ -17,8 +17,8 @@ services:
       # dashboard pages, plugin caches and uploaded charts. Created on first
       # run if absent — no file needs to exist before the first `up`.
       - ./backend-data:/app/data
-      # Reference tide/weather/wave/warning providers. Download the plugin
-      # bundle from the releases page and unpack it here:
+      # Reference tide/weather/wave/warning/upper-air providers. Download
+      # the plugin bundle from the releases page and unpack it here:
       #
       #   mkdir -p plugins && curl -fsSL \
       #     https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \

@@ -28,7 +28,7 @@ mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 
 # category:plugin-dir pairs, mirroring the layout the backend expects under
-# PLUGINS_{TIDES,WEATHER,WAVES,FORECAST_WARNINGS}_DIR.
+# PLUGINS_{TIDES,WEATHER,WAVES,FORECAST_WARNINGS,UPPER_AIR}_DIR.
 build() {
   category="$1"
   src_dir="$2"
@@ -57,6 +57,7 @@ build weather           weather-plugins/weatherkit           weatherkit
 build waves             wave-plugins/open-meteo-marine       open-meteo-marine
 build forecast-warnings forecast-warnings-plugins/bom        bom
 build forecast-warnings forecast-warnings-plugins/nws        nws
+build upper-air         upper-air-plugins/open-meteo-upper   open-meteo-upper
 
 echo
 echo "Plugins built into $OUT:"
