@@ -60,6 +60,12 @@ ui:
   weather_provider: open-meteo
   wave_provider: open-meteo-marine
   forecast_warnings_provider: nws
+  # Optional. Unlike the others this one may be left out entirely: with no
+  # upper-air plugin installed the forecast page simply shows no 500mb
+  # section. It is separate from weather_provider because the two rarely come
+  # from the same place - Apple WeatherKit makes a good surface forecast and
+  # carries no pressure levels at all.
+  upper_air_provider: open-meteo-upper
   # Optional friendly names for SignalK tank paths, e.g.
   # tank_labels:
   #   freshWater.0: PORT

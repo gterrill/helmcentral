@@ -78,6 +78,7 @@ import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
+import { useUpperAir } from '@/hooks/use-upper-air'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useAuth } from '@/hooks/use-auth'
 import { useAutopilot } from '@/hooks/use-autopilot'
@@ -416,6 +417,10 @@ export function App() {
     loading: waveForecastLoading,
     error: waveForecastError,
   } = useWaveForecast(FORECAST_REFRESH_SECONDS)
+  // Upper air keeps its own refresh cadence: the global models behind it run
+  // four times a day, so polling it on the surface-forecast interval would
+  // re-fetch the same numbers.
+  const { days: upperAirDays } = useUpperAir()
   const anchorWatch = useAnchorWatch(
     latitude,
     longitude,
@@ -1108,6 +1113,7 @@ export function App() {
             unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
             activeForecastWarning={activeForecastWarning}
             waveDays={waveForecastDays}
+            upperAirDays={upperAirDays}
             waveSeaTemperatureF={waveSeaTemperatureF}
             waveLoading={waveForecastLoading}
             waveError={waveForecastError}

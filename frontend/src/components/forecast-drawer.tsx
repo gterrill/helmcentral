@@ -13,6 +13,7 @@ import type { ChartConfig } from '@/components/ui/chart'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
 import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
+import type { UpperAirDay } from '@/hooks/use-upper-air'
 import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { compassPointFor } from '@/lib/format'
@@ -55,6 +56,8 @@ interface ForecastDrawerProps {
   unit: 'imperial' | 'metric'
   activeForecastWarning?: ForecastWarnings | null
   waveDays?: WaveForecastDay[]
+  /** 500mb outlook, empty when no upper-air provider is installed. */
+  upperAirDays?: UpperAirDay[]
   waveSeaTemperatureF?: number | null
   waveLoading?: boolean
   waveError?: string | null
@@ -475,6 +478,7 @@ export function ForecastDrawer({
   unit,
   activeForecastWarning = null,
   waveDays = [],
+  upperAirDays = [],
   waveSeaTemperatureF = null,
   waveLoading = false,
   waveError = null,
@@ -522,6 +526,11 @@ export function ForecastDrawer({
 
   const selectedDay = days[selectedDayIndex] ?? days[0] ?? EMPTY_DAY
   const selectedWaveDay = waveDays.find((d) => d.dayKey === selectedDay.dayKey) ?? null
+  const selectedUpperAir = upperAirDays.find((d) => d.dayKey === selectedDay.dayKey)?.outlook ?? null
+  const upperAirFlaggedDayKeys = useMemo(
+    () => new Set(upperAirDays.filter((d) => d.outlook.present && d.outlook.troughSupport).map((d) => d.dayKey)),
+    [upperAirDays],
+  )
   // A wave-provider outage must read as visibly different from "this
   // location just has no wave data" - if the whole wave fetch failed AND we
   // have no matching day for the selected forecast day, that's the outage
@@ -887,7 +896,19 @@ export function ForecastDrawer({
                     </p>
                     <p className="text-[10px] text-muted-foreground">{day.date}</p>
                   </div>
-                  {getWeatherIcon(day.condition, 26)}
+                  <div className="flex items-center gap-1">
+                    {upperAirFlaggedDayKeys.has(day.dayKey) && (
+                      <span
+                        data-testid="forecast-upper-air-marker"
+                        title="Upper air supports a surface low developing"
+                        aria-label="Upper air supports a surface low developing"
+                        className="rounded bg-gauge-secondary/20 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-gauge-secondary"
+                      >
+                        500mb
+                      </span>
+                    )}
+                    {getWeatherIcon(day.condition, 26)}
+                  </div>
                 </div>
 
                 <p className="mt-1 truncate text-[10px] font-medium text-foreground">
@@ -928,6 +949,17 @@ export function ForecastDrawer({
                 <span className="rounded bg-muted/50 px-2 py-1">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold">{humidityPct === null ? '—' : `${humidityPct}%`}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
                 <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-gauge-secondary">{uvIndex}</span></span>
+                {selectedUpperAir?.present && (
+                  <span
+                    data-testid="forecast-upper-air-detail"
+                    className={`rounded px-2 py-1 ${selectedUpperAir.troughSupport ? 'bg-gauge-secondary/20 text-foreground' : 'bg-muted/50'}`}
+                  >
+                    500mb <span className="font-semibold">{Math.round(selectedUpperAir.height500M)} m</span>
+                    {selectedUpperAir.troughSupport
+                      ? ', lowest of the window after a sustained fall. Conditions aloft support a surface low developing.'
+                      : ` \u00b7 jet ${Math.round(selectedUpperAir.peakWind500Kts)} kt`}
+                  </span>
+                )}
                 {selectedDay.sunriseTime && (
                   <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
                     <Sunrise size={13} className="text-amber-500" />

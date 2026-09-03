@@ -102,6 +102,61 @@ day's low. Warm water under cold air is an energy source, and the difference
 drives gusty, unsettled conditions out of proportion to what the pressure chart
 suggests.
 
+## Upper air, days ahead
+
+The strip marks a day with a small **500MB** badge when conditions high in the
+atmosphere favour a low developing. Select that day and the panel below says
+why.
+
+This is the part of forecasting the Dashews rate above all others. The reason
+is mechanical: a surface low needs an upper trough above it to vent into. With
+one, it deepens. Without one it stays anemic or never forms. So the upper
+pattern tells you days ahead whether the surface systems in your forecast have
+the support to turn nasty, and it is often the only warning you get before the
+barometer moves.
+
+Helmcentral watches 500mb heights across the whole forecast window and marks a
+day that sits at the low end of it after a sustained fall. Everything is
+relative to the rest of that window rather than to a fixed number, for two
+reasons. The book gives no numbers, because its method is reading charts. And
+500mb heights differ by hundreds of metres between the tropics and the high
+latitudes, so any fixed threshold would be wrong as soon as you sailed
+anywhere.
+
+A day with upper-air data but nothing notable still shows its height and the
+jet strength overhead. A day with no data shows nothing at all, rather than an
+empty section that would read as an all-clear nobody measured.
+
+Two limits worth knowing. The first two days of the window can never be marked,
+because there is no history behind them to say whether heights are arriving or
+leaving. And forecast skill at 500mb is not uniform across sixteen days: the far
+end is a scenario, not a forecast. The book's own instruction is to watch the
+rhythm over ten days to two weeks rather than to trust any single chart, which
+is the right way to read this too.
+
+### What it does not do
+
+It does not tell you a storm is coming. The book's real bomb precursor is two
+upper troughs converging until they overlap, which it judges by eye across
+successive charts, and Helmcentral does not attempt that call. What you get is
+"conditions aloft support development on this day", which is a risk modifier for
+your own planning rather than a prediction.
+
+If you want to go further, the reasoning lives in *Mariner's Weather Handbook*,
+free at the same link above. *Surviving the Storm* defers to it for the 500mb
+material and barely covers it directly.
+
+### Getting it
+
+Upper air needs its own provider plugin in `plugins/upper-air/`, separate from
+your weather provider. That separation is deliberate: Apple WeatherKit makes an
+excellent surface forecast and carries no pressure-level data whatsoever, so
+tying the two together would force a choice between them. Run WeatherKit for
+weather and Open-Meteo for upper air if you like.
+
+With no plugin installed, the forecast page simply has no upper-air section.
+Nothing else changes.
+
 ## Alarm rules that use this
 
 The forecast page shows what is coming. For what is happening now, Helmcentral

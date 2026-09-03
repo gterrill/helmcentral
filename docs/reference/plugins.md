@@ -54,6 +54,7 @@ function for its category:
 | Weather | `fetch_forecast` | Current + multi-day + hourly, all SI units |
 | Waves | `fetch_waves` | Hourly wave/swell series with per-component direction and period, optional sea-surface temperature |
 | Forecast warnings | `fetch_warnings(lat, lon)` | Current, relevant bulletins only |
+| Upper air | `fetch_upper_air` | Hourly 500mb and 1000mb geopotential height, 500mb wind and temperature |
 
 The reference plugins under `docs/examples/` define the exact JSON shape for
 each export. Refer to the example for your category alongside this table rather

@@ -942,3 +942,80 @@ describe('ForecastDrawer wave leading indicators', () => {
     expect(screen.getByTestId('forecast-wave-indicators')).toHaveTextContent(/cold air over warmer water/i)
   })
 })
+
+function buildUpperAirDay(dayKey: string, overrides: Record<string, unknown> = {}) {
+  return {
+    dayKey,
+    date: 'Sep 12',
+    dayName: 'Saturday',
+    outlook: {
+      present: true,
+      height500M: 5835,
+      thicknessM: 5645,
+      peakWind500Kts: 33.9,
+      heightPercentile: 0.07,
+      tendency24hM: -23.1,
+      troughSupport: false,
+      ...overrides,
+    },
+  }
+}
+
+describe('ForecastDrawer upper air', () => {
+  it('shows nothing at all when no upper-air provider is installed', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.queryByTestId('forecast-upper-air-marker')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-upper-air-detail')).not.toBeInTheDocument()
+  })
+
+  // An upper-air section that renders "clear" when there is no data would be
+  // a reassurance nobody measured.
+  it('shows nothing for a day the provider had no data for', () => {
+    const day = buildUpperAirDay('2026-06-14', { present: false })
+    render(<ForecastDrawer forecast={[buildDay()]} upperAirDays={[day]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.queryByTestId('forecast-upper-air-marker')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-upper-air-detail')).not.toBeInTheDocument()
+  })
+
+  it('marks only the day whose upper air supports development', () => {
+    const days = [
+      buildUpperAirDay('2026-06-14', { troughSupport: false }),
+      buildUpperAirDay('2026-06-15', { troughSupport: true }),
+    ]
+    render(
+      <ForecastDrawer
+        forecast={[buildDay(), buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday' })]}
+        upperAirDays={days}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getAllByTestId('forecast-upper-air-marker')).toHaveLength(1)
+  })
+
+  // The card is 150px and already carries five lines, so the reasoning goes
+  // in the expanded panel where there is room to say it in words.
+  it('explains the finding in the expanded panel', () => {
+    const day = buildUpperAirDay('2026-06-14', { troughSupport: true })
+    render(<ForecastDrawer forecast={[buildDay()]} upperAirDays={[day]} loading={false} error={null} unit="metric" />)
+
+    const detail = screen.getByTestId('forecast-upper-air-detail')
+    expect(detail).toHaveTextContent(/500mb/i)
+    expect(detail).toHaveTextContent(/lowest/i)
+  })
+
+  // A quiet day still gets its numbers in the panel, just no marker and no
+  // claim about development.
+  it('reports the numbers on a quiet day without claiming a trough', () => {
+    const day = buildUpperAirDay('2026-06-14', { troughSupport: false, heightPercentile: 0.8, tendency24hM: 5 })
+    render(<ForecastDrawer forecast={[buildDay()]} upperAirDays={[day]} loading={false} error={null} unit="metric" />)
+
+    const detail = screen.getByTestId('forecast-upper-air-detail')
+    expect(detail).toHaveTextContent('5835')
+    expect(detail).not.toHaveTextContent(/support/i)
+  })
+})
