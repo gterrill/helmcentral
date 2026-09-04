@@ -35,6 +35,23 @@
     --chart-precip: 217 91% 60%;
     --chart-uv: 48 96% 53%;
     /*
+     * Axis-label variants of the four series colours that label an axis.
+     *
+     * The series tokens above colour lines and areas, which answer to the 3:1
+     * graphics bar. An axis label is text and owes 4.5:1, and on the white
+     * light card these four fell well short of it (temp 3.15:1, precip 3.63:1,
+     * wave 2.50:1, gust 2.14:1 - the last two under even the 3:1 large-text
+     * bar). Each value below is the nearest lightness that clears 4.5:1 with
+     * the hue and saturation held, so the label still reads as its series.
+     *
+     * Split rather than darkening the series tokens themselves: the plotted
+     * colours are deliberate, and darkening them would dull every chart.
+     */
+    --chart-temp-label: 32 95% 36%;
+    --chart-precip-label: 217 91% 53%;
+    --chart-wave-label: 173 80% 29%;
+    --chart-gust-label: 38 92% 33%;
+    /*
      * Dial chrome (ADR 0054). Every default here reproduces the flat dial
      * exactly: the bezel and hub paint nothing, the band keeps its thin-rim
      * radius and width, and each colour indirects to the token the dial read
@@ -149,6 +166,16 @@
     --destructive-foreground: 214 96% 97%;
     --gauge-primary: 199 89% 62%;
     --gauge-secondary: 199 60% 48%;
+    /* This block defines no --chart-* of its own and inherits them from
+       :root, so var(--chart-temp) here resolves to the LIGHT series colour -
+       which is what measures 5.21:1 to 8.85:1 on this dark card (222 47% 8%)
+       and needs no help. Without these four lines the labels would instead
+       inherit :root's darkened label values onto a dark card and come out
+       worse than they started, which is the trap this block exists to avoid. */
+    --chart-temp-label: var(--chart-temp);
+    --chart-precip-label: var(--chart-precip);
+    --chart-wave-label: var(--chart-wave);
+    --chart-gust-label: var(--chart-gust);
     /* Board chrome (ADR 0060): the skin paints the ground, so it also owns
        the padding and radius that separate the board from the header. */
     --board-pad: 0.75rem;
@@ -240,6 +267,12 @@
     --chart-grid: 214 15% 65%;
     --chart-precip: 217 91% 72%;
     --chart-uv: 48 96% 66%;
+    /* On this card (0 0% 9.5%) the series colours already run 7.40:1 to
+       10.41:1 as text, so the labels take them unchanged. */
+    --chart-temp-label: var(--chart-temp);
+    --chart-precip-label: var(--chart-precip);
+    --chart-wave-label: var(--chart-wave);
+    --chart-gust-label: var(--chart-gust);
     --sidebar-background: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-primary: var(--primary);

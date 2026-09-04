@@ -180,6 +180,50 @@ describe('ForecastDrawer design tokens', () => {
       `Found arbitrary text-[...] font-size utilit(y/ies) in forecast-drawer.tsx - replace with a named scale step (text-2xs/text-xs/text-sm/...):\n${offenders.join('\n')}`,
     ).toEqual([])
   })
+
+  /*
+   * Axis labels are text, so they owe 4.5:1 against the card they sit on -
+   * the 3:1 graphics bar the plotted lines and areas answer to is not enough.
+   * Measured against the light card (--card: 0 0% 100%), the four series
+   * tokens the labels used to borrow ran 2.14:1 to 3.63:1, two of them below
+   * even the large-text bar. So the labels get their own tokens: darkened in
+   * :root, and aliased straight back to the series colour in the two dark
+   * themes, which already clear 4.5:1 there.
+   *
+   * The alias in [data-skin="instrument"] is the one that is easy to miss.
+   * That block defines no --chart-* of its own and inherits them from :root,
+   * so without an explicit alias it would inherit the DARKENED label values
+   * onto its dark card and end up worse than before.
+   */
+  it('defines a label variant of every series-coloured axis token in all three themes', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const css = readFileSync(resolve(testDir, '../index.css'), 'utf8')
+      // Strip comments, or a token named in prose reads as a declaration.
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+
+    const block = (selector: string) => {
+      const start = css.indexOf(selector)
+      expect(start, `${selector} not found in index.css`).toBeGreaterThan(-1)
+      return css.slice(start, css.indexOf('}', start))
+    }
+
+    const scopes = {
+      ':root {': block(':root {'),
+      '.dark {': block('.dark {'),
+      '[data-skin="instrument"] {': block('[data-skin="instrument"] {'),
+    }
+
+    const missing: string[] = []
+    for (const series of ['temp', 'precip', 'wave', 'gust']) {
+      for (const [selector, source] of Object.entries(scopes)) {
+        if (!new RegExp(`--chart-${series}-label:\\s*[^;]+;`).test(source)) {
+          missing.push(`--chart-${series}-label in ${selector}`)
+        }
+      }
+    }
+
+    expect(missing, `axis label token(s) not defined:\n${missing.join('\n')}`).toEqual([])
+  })
 })
 
 describe('ForecastDrawer refresh age', () => {
@@ -1857,7 +1901,7 @@ describe('ForecastDrawer upper-air axes', () => {
     // as the wind chart's ticks read.
     expect(gustTicks.map((tick) => tick.textContent)).toEqual(['0', '10', '20', '30', '40 kt'])
     expect(gustTicks.every((tick) => tick.getAttribute('text-anchor') === 'end')).toBe(true)
-    expect(gustTicks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-gust))')).toBe(true)
+    expect(gustTicks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-gust-label))')).toBe(true)
   })
 
   // Two series on one frame with two different scales. Colouring each axis to
@@ -1878,7 +1922,7 @@ describe('ForecastDrawer upper-air axes', () => {
 
     const heightTicks = screen.getAllByTestId('forecast-upper-air-height-tick')
     expect(heightTicks).toHaveLength(2)
-    expect(heightTicks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-wave))')).toBe(true)
+    expect(heightTicks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-wave-label))')).toBe(true)
     // Unit on the top tick only.
     expect(heightTicks[0].textContent).toMatch(/^\d+ m$/)
     expect(heightTicks[1].textContent).toMatch(/^\d+$/)
@@ -2057,7 +2101,7 @@ describe('ForecastDrawer cloud chart axes', () => {
     const ticks = screen.getAllByTestId('forecast-cloud-temp-tick')
     // Rule 4, density: temperature is read as a range, so extremes only.
     expect(ticks).toHaveLength(2)
-    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-temp))')).toBe(true)
+    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-temp-label))')).toBe(true)
     expect(ticks[0].textContent).toMatch(/^-?\d+°C$/)
     expect(ticks[1].textContent).toMatch(/^-?\d+$/)
   })
@@ -2071,7 +2115,7 @@ describe('ForecastDrawer cloud chart axes', () => {
 
     const ticks = screen.getAllByTestId('forecast-cloud-precip-tick')
     expect(ticks).toHaveLength(2)
-    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-precip))')).toBe(true)
+    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-precip-label))')).toBe(true)
     // Unit on the top tick only, matching the temperature axis opposite it.
     expect(ticks[0].textContent).toMatch(/^\d+\.\d+mm$/)
     expect(ticks[1].textContent).toBe('0')
@@ -2397,5 +2441,100 @@ describe('ForecastDrawer visual weight', () => {
     // The rest of the card is untouched.
     expect(within(card).getByText('Clear')).toBeInTheDocument()
     expect(within(card).getByText('5% precip')).toBeInTheDocument()
+  })
+})
+
+/*
+ * Scrubbing a chart overlay is the only way to get an exact hourly number off
+ * these charts - the summary sentences give ranges. The overlays were
+ * pointer-only (no role, no tabindex, no key handling), so with no pointer
+ * there was no read path at all. Each overlay is now a focusable, named
+ * graphic driven by useChartTooltip's keyboard handlers (covered on their own
+ * in use-chart-tooltip.test.tsx).
+ */
+describe('ForecastDrawer chart keyboard access', () => {
+  // jsdom lays nothing out, so the overlay's rect is 0 wide and the hook
+  // (correctly) refuses to derive a pixel position from it. Give it a real
+  // width the way a browser would.
+  function layOut(svg: Element, width = 720) {
+    ;(svg as SVGSVGElement).getBoundingClientRect = () =>
+      ({ width, height: 175, left: 0, top: 0, right: width, bottom: 175, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+  }
+
+  function renderAllCharts() {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        waveDays={[buildWaveDay()]}
+        upperAirDays={buildUpperAirRun(2, [1])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+  }
+
+  it('exposes every chart overlay as a focusable, named graphic', () => {
+    renderAllCharts()
+
+    // Named after what the chart shows and which day it covers, so the name
+    // read aloud on focus is not just "graphic".
+    const names = [
+      /Cloud, temperature and rain for Sunday/i,
+      /Wind and gusts for Sunday/i,
+      /Wave height for Sunday/i,
+      /500mb height and jet wind/i,
+    ]
+
+    for (const name of names) {
+      const overlay = screen.getByRole('img', { name })
+      expect(overlay.tagName.toLowerCase()).toBe('svg')
+      expect(overlay).toHaveAttribute('tabindex', '0')
+      // The name has to say how to drive it - an arrow-key affordance is
+      // invisible otherwise.
+      expect(overlay.getAttribute('aria-label')).toMatch(/arrow keys/i)
+      // shadcn's focus-ring convention; --ring exists in all three themes.
+      expect(overlay.getAttribute('class')).toContain('focus-visible:ring-2')
+      expect(overlay.getAttribute('class')).toContain('focus-visible:ring-ring')
+      expect(overlay.getAttribute('class')).toContain('focus-visible:outline-none')
+    }
+  })
+
+  it('reads hourly wind values off the chart with the keyboard alone', () => {
+    renderAllCharts()
+
+    const overlay = screen.getByRole('img', { name: /Wind and gusts for Sunday/i })
+    layOut(overlay)
+
+    // Tabbing in shows the first hour rather than an empty focus ring.
+    fireEvent.focus(overlay)
+    expect(screen.getByText('Gusts: 15 kts')).toBeInTheDocument()
+
+    fireEvent.keyDown(overlay, { key: 'ArrowRight' })
+    expect(screen.getByText('Gusts: 16 kts')).toBeInTheDocument()
+
+    fireEvent.keyDown(overlay, { key: 'End' })
+    expect(screen.getByText('Gusts: 38 kts')).toBeInTheDocument()
+
+    fireEvent.keyDown(overlay, { key: 'Home' })
+    expect(screen.getByText('Gusts: 15 kts')).toBeInTheDocument()
+
+    fireEvent.keyDown(overlay, { key: 'Escape' })
+    expect(screen.queryByText('Gusts: 15 kts')).not.toBeInTheDocument()
+  })
+
+  it('reads the upper-air trace with the keyboard alone', () => {
+    renderAllCharts()
+
+    const overlay = screen.getByRole('img', { name: /500mb height and jet wind/i })
+    layOut(overlay)
+
+    fireEvent.keyDown(overlay, { key: 'End' })
+    // Last sample of the two-day series: 5900 - 7*4 = 5872 m (the smoothing
+    // window collapses to the raw value at the series end).
+    expect(screen.getByText('5872 m')).toBeInTheDocument()
+    expect(screen.getByText(/^Jet 30 kt/)).toBeInTheDocument()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 
 import { TideChart } from '@/components/tide-chart'
 import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
@@ -136,7 +136,7 @@ describe('TideChart', () => {
 
     const ticks = Array.from(container.querySelectorAll('[data-testid="forecast-tide-height-tick"]'))
     expect(ticks).toHaveLength(2)
-    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-wave))')).toBe(true)
+    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-wave-label))')).toBe(true)
     // Bare numbers - no "m"/"ft" on either tick.
     expect(ticks.map((tick) => tick.textContent)).toEqual([
       expect.stringMatching(/^-?\d+\.\d+$/),
@@ -507,5 +507,67 @@ describe('TideChart', () => {
     )
 
     expect(screen.getByText('Spring Tide')).toBeInTheDocument()
+  })
+})
+
+/*
+ * Same gap the four forecast charts had: the scrub overlay was pointer-only,
+ * and the height at any given time is only readable by scrubbing it. The
+ * keyboard handlers themselves are covered in use-chart-tooltip.test.tsx.
+ */
+describe('TideChart keyboard access', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 5, 14, 12, 0, 0))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function renderChart() {
+    const { windowStart, windowEnd } = todayWindow()
+    return render(
+      <TideChart
+        chart={buildChart({
+          extremes: [
+            { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
+            { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false },
+          ],
+        })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+  }
+
+  it('exposes the scrub overlay as a focusable, named graphic', () => {
+    renderChart()
+
+    // Named with the station and the day it covers - both already on screen
+    // for a sighted reader, neither otherwise available to a screen reader.
+    const overlay = screen.getByRole('img', { name: /Tide height at Test Harbor for Sunday/i })
+    expect(overlay.tagName.toLowerCase()).toBe('svg')
+    expect(overlay).toHaveAttribute('tabindex', '0')
+    expect(overlay.getAttribute('aria-label')).toMatch(/arrow keys/i)
+    expect(overlay.getAttribute('class')).toContain('focus-visible:ring-2')
+    expect(overlay.getAttribute('class')).toContain('focus-visible:ring-ring')
+    expect(overlay.getAttribute('class')).toContain('focus-visible:outline-none')
+  })
+
+  it('reads a height off the curve with the keyboard alone', () => {
+    renderChart()
+
+    const overlay: Element = screen.getByRole('img', { name: /Tide height at Test Harbor/i })
+    // jsdom lays nothing out, so give the overlay the width a browser would.
+    ;(overlay as SVGSVGElement).getBoundingClientRect = () =>
+      ({ width: 1000, height: 175, left: 0, top: 0, right: 1000, bottom: 175, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+
+    fireEvent.focus(overlay)
+    expect(screen.getByText(/^-?\d+\.\d+ m$/)).toBeInTheDocument()
+
+    fireEvent.keyDown(overlay, { key: 'Escape' })
+    expect(screen.queryByText(/^-?\d+\.\d+ m$/)).not.toBeInTheDocument()
   })
 })

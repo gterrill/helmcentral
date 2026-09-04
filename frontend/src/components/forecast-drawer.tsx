@@ -427,6 +427,13 @@ const AXIS_LABEL_COLOR = 'hsl(var(--muted-foreground))'
  *    Upper-air right --chart-gust, Tide --chart-wave; Wind left stays muted
  *    (wind and gust), Wave left stays muted (total, wind-wave and swell).
  *
+ *    The label takes the -label variant of that token, not the series token
+ *    itself: a label is text and owes 4.5:1 against the card, where the line
+ *    it names only owes the 3:1 graphics bar. On the light card all four
+ *    series colours failed that as text (2.14:1 to 3.63:1). The two dark
+ *    themes alias the variant straight back to the series colour, which
+ *    already passes there - see the block beside --chart-uv in index.css.
+ *
  * 2. UNIT PLACEMENT FOLLOWS AXIS COUNT. On a SINGLE-axis chart the unit lives
  *    in the <h4> header ("Wind (kts)", "Wave (m)", "Tide (m)") and every tick
  *    is a bare number - a long unit suffix on the topmost tick runs past the
@@ -1641,10 +1648,15 @@ export function ForecastDrawer({
                       ref={cloudTooltip.svgRef}
                       viewBox={`0 0 ${forecastChartWidth} 175`}
                       preserveAspectRatio="none"
-                      className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                      className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      tabIndex={0}
+                      role="img"
+                      aria-label={`Cloud, temperature and rain for ${selectedDay.dayName}, hourly. Use arrow keys to read values.`}
                       onPointerDown={cloudTooltip.onPointerDown}
                       onPointerMove={cloudTooltip.onPointerMove}
                       onPointerLeave={cloudTooltip.onPointerLeave}
+                      onKeyDown={cloudTooltip.onKeyDown}
+                      onFocus={cloudTooltip.onFocus}
                     >
                       <defs>
                         <linearGradient id={tempAreaGradientId} x1="0" y1="0" x2="0" y2="1">
@@ -1668,10 +1680,10 @@ export function ForecastDrawer({
                           precipitation scale's own bounds through precipYFor,
                           which is what those two labels' hardcoded pixels used
                           to only accidentally agree with. */}
-                      <text data-testid="forecast-cloud-temp-tick" x={6} y={axisTickLabelY(cloudYFor, cloudTempMax, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-temp))">{Math.round(cloudTempMax)}{tempUnit}</text>
-                      <text data-testid="forecast-cloud-temp-tick" x={6} y={axisTickLabelY(cloudYFor, cloudTempMin, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-temp))">{Math.round(cloudTempMin)}</text>
-                      <text data-testid="forecast-cloud-precip-tick" x={forecastChartWidth - 6} y={axisTickLabelY(precipYFor, precipMax, cloudChartTop, cloudChartBottom)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-precip))">{precipMax.toFixed(1)}mm</text>
-                      <text data-testid="forecast-cloud-precip-tick" x={forecastChartWidth - 6} y={axisTickLabelY(precipYFor, 0, cloudChartTop, cloudChartBottom)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-precip))">0</text>
+                      <text data-testid="forecast-cloud-temp-tick" x={6} y={axisTickLabelY(cloudYFor, cloudTempMax, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-temp-label))">{Math.round(cloudTempMax)}{tempUnit}</text>
+                      <text data-testid="forecast-cloud-temp-tick" x={6} y={axisTickLabelY(cloudYFor, cloudTempMin, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-temp-label))">{Math.round(cloudTempMin)}</text>
+                      <text data-testid="forecast-cloud-precip-tick" x={forecastChartWidth - 6} y={axisTickLabelY(precipYFor, precipMax, cloudChartTop, cloudChartBottom)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-precip-label))">{precipMax.toFixed(1)}mm</text>
+                      <text data-testid="forecast-cloud-precip-tick" x={forecastChartWidth - 6} y={axisTickLabelY(precipYFor, 0, cloudChartTop, cloudChartBottom)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-precip-label))">0</text>
                       <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
                       {cloudTooltipEntry && cloudTooltipEntry.hourOfDay >= 0 && (
@@ -1796,10 +1808,15 @@ export function ForecastDrawer({
                         ref={windTooltip.svgRef}
                         viewBox={`0 0 ${forecastChartWidth} 175`}
                         preserveAspectRatio="none"
-                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        tabIndex={0}
+                        role="img"
+                        aria-label={`Wind and gusts for ${selectedDay.dayName}, hourly. Use arrow keys to read values.`}
                         onPointerDown={windTooltip.onPointerDown}
                         onPointerMove={windTooltip.onPointerMove}
                         onPointerLeave={windTooltip.onPointerLeave}
+                        onKeyDown={windTooltip.onKeyDown}
+                        onFocus={windTooltip.onFocus}
                       >
                         <defs>
                           <linearGradient id={windAreaGradientId} x1="0" y1="0" x2="0" y2="1">
@@ -1984,10 +2001,15 @@ export function ForecastDrawer({
                         ref={waveTooltip.svgRef}
                         viewBox={`0 0 ${forecastChartWidth} 175`}
                         preserveAspectRatio="none"
-                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        tabIndex={0}
+                        role="img"
+                        aria-label={`Wave height for ${selectedDay.dayName}, hourly. Use arrow keys to read values.`}
                         onPointerDown={waveTooltip.onPointerDown}
                         onPointerMove={waveTooltip.onPointerMove}
                         onPointerLeave={waveTooltip.onPointerLeave}
+                        onKeyDown={waveTooltip.onKeyDown}
+                        onFocus={waveTooltip.onFocus}
                       >
                         <defs>
                           <linearGradient id={waveAreaGradientId} x1="0" y1="0" x2="0" y2="1">
@@ -2168,11 +2190,16 @@ export function ForecastDrawer({
                 ref={upperAirTooltip.svgRef}
                 viewBox={`0 0 ${upperAirChartWidth} 175`}
                 preserveAspectRatio="none"
-                className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+                className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 style={{ zIndex: 2 }}
+                tabIndex={0}
+                role="img"
+                aria-label={`500mb height and jet wind over ${upperAirDayStarts.length} days. Use arrow keys to read values.`}
                 onPointerDown={upperAirTooltip.onPointerDown}
                 onPointerMove={upperAirTooltip.onPointerMove}
                 onPointerLeave={upperAirTooltip.onPointerLeave}
+                onKeyDown={upperAirTooltip.onKeyDown}
+                onFocus={upperAirTooltip.onFocus}
               >
                 <defs>
                   <linearGradient id={upperAirGustGradientId} x1="0" y1="0" x2="0" y2="1">
@@ -2208,7 +2235,7 @@ export function ForecastDrawer({
                   x={6}
                   y={axisTickLabelY(upperAirHeightYFor, upperAirAxisHighM, upperAirChartTop, upperAirChartBottom)}
                   fontSize={AXIS_LABEL_FONT_SIZE}
-                  fill="hsl(var(--chart-wave))"
+                  fill="hsl(var(--chart-wave-label))"
                 >
                   {Math.round(upperAirAxisHighM)} m
                 </text>
@@ -2217,7 +2244,7 @@ export function ForecastDrawer({
                   x={6}
                   y={axisTickLabelY(upperAirHeightYFor, upperAirAxisLowM, upperAirChartTop, upperAirChartBottom)}
                   fontSize={AXIS_LABEL_FONT_SIZE}
-                  fill="hsl(var(--chart-wave))"
+                  fill="hsl(var(--chart-wave-label))"
                 >
                   {Math.round(upperAirAxisLowM)}
                 </text>
@@ -2229,7 +2256,7 @@ export function ForecastDrawer({
                     y={axisTickLabelY(upperAirGustYFor, tick, upperAirChartTop, upperAirChartBottom)}
                     textAnchor="end"
                     fontSize={AXIS_LABEL_FONT_SIZE}
-                    fill="hsl(var(--chart-gust))"
+                    fill="hsl(var(--chart-gust-label))"
                   >
                     {tick}{i === upperAirGustTicks.length - 1 ? ' kt' : ''}
                   </text>

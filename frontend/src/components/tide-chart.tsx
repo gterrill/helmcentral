@@ -339,18 +339,23 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         <svg
           viewBox={`0 0 ${viewportWidth} 175`}
           preserveAspectRatio="none"
-          className="pointer-events-auto absolute inset-0 h-full w-full touch-none"
+          className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           ref={tideTooltip.svgRef}
+          tabIndex={0}
+          role="img"
+          aria-label={`Tide height at ${chart.station.name} for ${windowStart.toLocaleDateString('en-US', { weekday: 'long' })}, in ${unit}. Use arrow keys to read values.`}
           onPointerDown={tideTooltip.onPointerDown}
           onPointerMove={tideTooltip.onPointerMove}
           onPointerLeave={tideTooltip.onPointerLeave}
+          onKeyDown={tideTooltip.onKeyDown}
+          onFocus={tideTooltip.onFocus}
         >
           {/* One axis, one series, so it takes that series' colour; and being
               single-axis the unit lives in the section header ("Tide (m)"),
               exactly as Wind and Wave do, leaving bare numbers here. Both are
               positioned through the same yFor the curve is drawn with. */}
-          <text data-testid="forecast-tide-height-tick" x={6} y={axisTickLabelY(yFor, yMax, CHART_TOP, CHART_BOTTOM)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-wave))">{yMax.toFixed(1)}</text>
-          <text data-testid="forecast-tide-height-tick" x={6} y={axisTickLabelY(yFor, yMin, CHART_TOP, CHART_BOTTOM)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-wave))">{yMin.toFixed(1)}</text>
+          <text data-testid="forecast-tide-height-tick" x={6} y={axisTickLabelY(yFor, yMax, CHART_TOP, CHART_BOTTOM)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-wave-label))">{yMax.toFixed(1)}</text>
+          <text data-testid="forecast-tide-height-tick" x={6} y={axisTickLabelY(yFor, yMin, CHART_TOP, CHART_BOTTOM)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-wave-label))">{yMin.toFixed(1)}</text>
 
           <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
