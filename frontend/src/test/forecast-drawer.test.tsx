@@ -14,7 +14,7 @@ vi.mock('@/components/forecast-tide-section', () => ({
   ),
 }))
 
-import { ForecastDrawer, formatRefreshAge } from '@/components/forecast-drawer'
+import { ForecastDrawer, formatRefreshAge, smoothUpperAirHeights } from '@/components/forecast-drawer'
 
 const HOUR_LABELS = [
   '12AM', '1AM', '2AM', '3AM', '4AM', '5AM', '6AM', '7AM', '8AM', '9AM', '10AM', '11AM',
@@ -151,6 +151,33 @@ describe('ForecastDrawer design tokens', () => {
     expect(
       offenders,
       `Found raw colour literal(s) in forecast-drawer.tsx - replace with hsl(var(--token)):\n${offenders.join('\n')}`,
+    ).toEqual([])
+  })
+
+  // Type-scale sweep guard: the component should only ever reach for named
+  // Tailwind font-size steps (text-2xs, text-xs, text-sm, ...), not one-off
+  // text-[Npx] bracket values that drift a pixel or two off a scale step
+  // that already exists. Reads the component source directly off disk so any
+  // arbitrary font-size utility that creeps back in fails the suite immediately.
+  it('contains no arbitrary font-size utilities - only named text- scale steps', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const sourcePath = resolve(testDir, '../components/forecast-drawer.tsx')
+    const source = readFileSync(sourcePath, 'utf8')
+    const lines = source.split('\n')
+
+    const arbitraryFontSizePattern = /text-\[[^\]]*\]/g
+
+    const offenders: string[] = []
+    lines.forEach((line, idx) => {
+      const matches = line.match(arbitraryFontSizePattern)
+      if (matches) {
+        offenders.push(`  line ${idx + 1} (${matches.length}x): ${line.trim()}`)
+      }
+    })
+
+    expect(
+      offenders,
+      `Found arbitrary text-[...] font-size utilit(y/ies) in forecast-drawer.tsx - replace with a named scale step (text-2xs/text-xs/text-sm/...):\n${offenders.join('\n')}`,
     ).toEqual([])
   })
 })
@@ -1140,12 +1167,22 @@ describe('ForecastDrawer upper-air trace', () => {
       />,
     )
 
-    // The range is now stated in the upper-air key above the chart rather than
-    // in the swatch row beneath it; what matters to this test is that the
-    // window's bounds are on the page, not which line carries them.
-    const key = screen.getByTestId('forecast-upper-air-key')
-    expect(key).toHaveTextContent('5835')
-    expect(key).toHaveTextContent('5907')
+    // The bounds are no longer restated in a sentence. The height axis now
+    // carries the drawn range, top and bottom, and the key carries the one
+    // number in the window that is a threshold rather than an extent - the
+    // edge of the lowest quintile, which is what the shading means. What
+    // matters to this test is unchanged: the range a day is judged against is
+    // readable off the chart, not asserted in prose.
+    const heightTicks = screen.getAllByTestId('forecast-upper-air-height-tick')
+    expect(heightTicks).toHaveLength(2)
+    const top = Number(heightTicks[0].textContent!.replace(/[^0-9.]/g, ''))
+    const bottom = Number(heightTicks[1].textContent!.replace(/[^0-9.]/g, ''))
+    expect(top).toBeGreaterThan(bottom)
+    // The series runs 5872-5900, so the padded frame has to contain it.
+    expect(top).toBeGreaterThanOrEqual(5900)
+    expect(bottom).toBeLessThanOrEqual(5872)
+
+    expect(screen.getByTestId('forecast-upper-air-key')).toHaveTextContent('5851')
   })
 
   // Surviving the Storm's claim is causal and lagged: the upper trough vents
@@ -1167,12 +1204,23 @@ describe('ForecastDrawer upper-air trace', () => {
       />,
     )
 
-    expect(screen.getByTestId('forecast-upper-air-legend')).toHaveTextContent(/surface gust/i)
+    // The swatch row that used to name this series is gone. The amber trace is
+    // now identified by its own right-hand axis, drawn in the gust colour -
+    // which is also what gives it a magnitude, the job the legend's "full
+    // scale 40 kts" was doing.
+    const chart = screen.getByTestId('forecast-upper-air-chart')
+    expect(chart.querySelector('path.recharts-area-area')).toBeTruthy()
+
+    // Gusts run to 41 kts across this window, so the axis tops out at 50.
+    const gustTicks = screen.getAllByTestId('forecast-upper-air-gust-tick')
+    expect(gustTicks.map((tick) => tick.textContent)).toEqual(['0', '10', '20', '30', '40', '50 kt'])
   })
 
   // Days the outlook marked have to read as an extent in time (approach,
-  // bottom, recovery) rather than as a badge on one card.
-  it('shades the days whose upper air supports development', () => {
+  // bottom, recovery) rather than as a badge on one card. That extent is now
+  // carried by tinting the height trace itself over those samples instead of
+  // by a full-height band behind it.
+  it('tints the trace over the days whose upper air supports development', () => {
     render(
       <ForecastDrawer
         forecast={[
@@ -1191,15 +1239,52 @@ describe('ForecastDrawer upper-air trace', () => {
       />,
     )
 
-    expect(screen.getAllByTestId('forecast-upper-air-trough-band')).toHaveLength(1)
+    const stops = screen.getAllByTestId('forecast-upper-air-trough-stop')
+    const trough = stops.filter((stop) => stop.getAttribute('data-band') === 'trough')
+    // Paired stops at the same offset, so the colour change is a step rather
+    // than a blend - a day either has upper support or it does not.
+    expect(trough).toHaveLength(2)
+    // Red, not amber: amber is already the surface-gust series on this chart.
+    expect(trough.every((stop) => stop.getAttribute('stop-color') === 'hsl(var(--destructive))')).toBe(true)
+    expect(stops.some((stop) => stop.getAttribute('stop-color') === 'hsl(var(--chart-wave) / 0.95)')).toBe(true)
+
+    // The grey quintile band stays: it is a level, not a span, so it cannot be
+    // carried by the trace's colour.
+    expect(screen.getByTestId('forecast-upper-air-quintile-band')).toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-upper-air-trough-band')).not.toBeInTheDocument()
+  })
+
+  // The tint is an escalation, so an unremarkable window must not carry it.
+  it('leaves the trace its plain colour when no day is flagged', () => {
+    render(
+      <ForecastDrawer
+        forecast={[
+          buildDay(),
+          buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday' }),
+        ]}
+        upperAirDays={[
+          buildUpperAirDay('2026-06-14', { troughSupport: false }),
+          buildUpperAirDay('2026-06-15', { troughSupport: false }),
+        ]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.queryAllByTestId('forecast-upper-air-trough-stop')).toHaveLength(0)
+    const curve = screen.getByTestId('forecast-upper-air-chart').querySelector('path.recharts-line-curve')
+    expect(curve!.getAttribute('stroke')).toBe('hsl(var(--chart-wave) / 0.95)')
   })
 })
 
 describe('ForecastDrawer upper-air trough bands', () => {
-  // Two flagged days in a row are one stretch of weather, not two. Drawing
-  // each band only as far as its own last sample leaves a visible gap between
-  // them, which reads as the trough letting up in the middle.
-  it('joins consecutive flagged days into one continuous band', () => {
+  // Two flagged days in a row are one stretch of weather, not two. Tinting
+  // each day only as far as its own last sample leaves an untinted notch
+  // between them, which reads as the trough letting up in the middle.
+  it('joins consecutive flagged days into one continuous tint', () => {
     render(
       <ForecastDrawer
         forecast={[
@@ -1220,13 +1305,19 @@ describe('ForecastDrawer upper-air trough bands', () => {
       />,
     )
 
-    const bands = screen.getAllByTestId('forecast-upper-air-trough-band')
-    expect(bands).toHaveLength(2)
+    const trough = screen
+      .getAllByTestId('forecast-upper-air-trough-stop')
+      .filter((stop) => stop.getAttribute('data-band') === 'trough')
+    expect(trough).toHaveLength(4)
 
-    const left = bands[0]
-    const right = bands[1]
-    const leftEnd = Number(left.getAttribute('x')) + Number(left.getAttribute('width'))
-    expect(leftEnd).toBeCloseTo(Number(right.getAttribute('x')), 5)
+    const offsets = trough.map((stop) => Number(stop.getAttribute('offset')!.replace('%', '')))
+    // The first span's end offset lands exactly on the second's start, so no
+    // base-coloured stop can slip between the two flagged days.
+    expect(offsets[1]).toBeCloseTo(offsets[2], 5)
+    // And the whole run is one colour.
+    expect(new Set(trough.map((stop) => stop.getAttribute('stop-color')))).toEqual(
+      new Set(['hsl(var(--destructive))']),
+    )
   })
 })
 
@@ -1692,20 +1783,228 @@ describe('ForecastDrawer chart decoder keys', () => {
     )
 
     const key = screen.getByTestId('forecast-upper-air-key')
-    expect(key).toHaveTextContent('5835')
-    expect(key).toHaveTextContent('5907')
-    expect(key).toHaveTextContent(/lowest fifth/i)
-    expect(key).toHaveTextContent(/full scale/i)
-    expect(key).toHaveTextContent(/highlighted days/i)
+    expect(key).toHaveTextContent('Grey band marks heights below 5851 m.')
+    expect(key).toHaveTextContent('Red marks days with upper support for a surface low.')
+    expect(key).toHaveTextContent('Trace smoothed over 18 hours.')
+    // The gust scale and the window's extent read off the two axes now, so the
+    // key no longer restates either.
+    expect(key).not.toHaveTextContent(/full scale/i)
+    expect(key).not.toHaveTextContent(/lowest fifth/i)
     expect(key.className).toContain('text-sm')
     expectPrecedes(key, screen.getByTestId('forecast-upper-air-chart'))
 
-    const legend = screen.getByTestId('forecast-upper-air-legend')
-    expect(legend).not.toHaveTextContent(/lowest fifth/i)
-    expect(legend).not.toHaveTextContent(/full scale/i)
-    // The swatch-to-label pairing survives the split.
-    expect(legend).toHaveTextContent(/surface gust/i)
-    expect(legend).toHaveTextContent(/500mb height/i)
+    // Both series are named by their own axis, so the swatch row is gone.
+    expect(screen.queryByTestId('forecast-upper-air-legend')).not.toBeInTheDocument()
+  })
+
+  // The red sentence is a claim about specific days. With no flagged day it
+  // would be explaining a colour that is nowhere on the chart.
+  it('drops the red clause when no day is flagged', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const key = screen.getByTestId('forecast-upper-air-key')
+    expect(key).not.toHaveTextContent(/red marks/i)
+    expect(key).toHaveTextContent('Grey band marks heights below 5851 m.')
+    expect(key).toHaveTextContent('Trace smoothed over 18 hours.')
+  })
+})
+
+// --- Both axes carry their own scale, in their own series colour ---
+
+describe('ForecastDrawer upper-air axes', () => {
+  // The gust axis used to be hidden, which is why its full scale had to be
+  // written into the legend for the amber trace to mean anything. An axis says
+  // it better and says it beside the series.
+  it('labels the gust axis on the right in the gust colour', () => {
+    render(
+      <ForecastDrawer
+        forecast={[
+          buildDay({ windGust: 33 }),
+          buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday', windGust: 38 }),
+        ]}
+        upperAirDays={buildUpperAirRun(2, [1])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const gustTicks = screen.getAllByTestId('forecast-upper-air-gust-tick')
+    // A 38kt window, so 10kt steps to 40. Unit on the top tick only, exactly
+    // as the wind chart's ticks read.
+    expect(gustTicks.map((tick) => tick.textContent)).toEqual(['0', '10', '20', '30', '40 kt'])
+    expect(gustTicks.every((tick) => tick.getAttribute('text-anchor') === 'end')).toBe(true)
+    expect(gustTicks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-gust))')).toBe(true)
+  })
+
+  // Two series on one frame with two different scales. Colouring each axis to
+  // match its trace is what says which number belongs to which line, and is
+  // what makes the swatch legend redundant.
+  it('labels the height axis on the left in the height colour', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [1])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const heightTicks = screen.getAllByTestId('forecast-upper-air-height-tick')
+    expect(heightTicks).toHaveLength(2)
+    expect(heightTicks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-wave))')).toBe(true)
+    // Unit on the top tick only.
+    expect(heightTicks[0].textContent).toMatch(/^\d+ m$/)
+    expect(heightTicks[1].textContent).toMatch(/^\d+$/)
+
+    expect(screen.queryByTestId('forecast-upper-air-legend')).not.toBeInTheDocument()
+  })
+
+  // Same rule the wind and wave charts already use. A fixed 30kt floor renders
+  // a 12kt window as a flat line hugging the bottom of a frame that has
+  // nothing to do with it - which is exactly the bug a5f9348 fixed on the
+  // other two charts and missed here.
+  it('scales the gust axis to a calm window instead of a fixed 30kt floor', () => {
+    render(
+      <ForecastDrawer
+        forecast={[
+          buildDay({ windGust: 11 }),
+          buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday', windGust: 12 }),
+        ]}
+        upperAirDays={buildUpperAirRun(2, [])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    // 12kt window, so 5kt steps up to 15 rather than 10kt steps up to 30.
+    const gustTicks = screen.getAllByTestId('forecast-upper-air-gust-tick')
+    expect(gustTicks.map((tick) => tick.textContent)).toEqual(['0', '5', '10', '15 kt'])
+  })
+
+  // The surface forecast is ten days and the upper-air one sixteen, so a null
+  // gust tail is designed behaviour (ADR 0071 section 5) and a window with no
+  // overlap at all is a real state. The axis floor is what keeps that from
+  // dividing by zero.
+  it('renders finite geometry when the window carries no surface gust at all', () => {
+    render(
+      <ForecastDrawer
+        // No forecast day shares a dayKey with the series, so every sample's
+        // surface gust is null - the same shape as the tail of a real window.
+        forecast={[buildDay({ dayKey: '2026-05-01', date: 'May 1', dayName: 'Friday' })]}
+        upperAirDays={buildUpperAirRun(2, [])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const chart = screen.getByTestId('forecast-upper-air-chart')
+    const svgs = [chart, ...Array.from(chart.parentElement!.querySelectorAll('svg'))]
+    const suspect: string[] = []
+    for (const root of svgs) {
+      for (const node of Array.from(root.querySelectorAll('*'))) {
+        for (const attr of Array.from(node.attributes)) {
+          if (/NaN|Infinity/.test(attr.value)) suspect.push(`${node.nodeName}[${attr.name}]=${attr.value}`)
+        }
+      }
+    }
+    expect(suspect).toEqual([])
+
+    // The nulls are skipped rather than counted as zeroes, so the axis still
+    // carries a usable scale rather than collapsing.
+    const gustTicks = screen.getAllByTestId('forecast-upper-air-gust-tick')
+    expect(gustTicks.length).toBeGreaterThan(1)
+    expect(gustTicks[gustTicks.length - 1].textContent).toMatch(/ kt$/)
+  })
+})
+
+// --- The drawn trace is smoothed; the reported numbers are not ---
+
+// Pulls the y coordinates out of an SVG path built from coordinate pairs
+// (recharts emits M/C/L only for a line curve).
+function pathYs(d: string) {
+  const numbers = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number)
+  return numbers.filter((_, idx) => idx % 2 === 1)
+}
+
+describe('ForecastDrawer upper-air smoothing', () => {
+  // 6-hourly samples carry a diurnal ripple that is not synoptic information.
+  // A centred 3-sample mean is 18 hours, which flattens it without moving the
+  // trough shape the panel exists to show.
+  it('averages each sample with its neighbours', () => {
+    expect(smoothUpperAirHeights([5900, 5860, 5900, 5860])).toEqual([
+      (5900 + 5860) / 2,
+      (5900 + 5860 + 5900) / 3,
+      (5860 + 5900 + 5860) / 3,
+      (5900 + 5860) / 2,
+    ])
+  })
+
+  // Shrinking the window at the ends rather than dropping the points keeps the
+  // trace spanning the full axis; dropping them would leave the frame's first
+  // and last day blank.
+  it('keeps every sample, shrinking the window at the ends', () => {
+    expect(smoothUpperAirHeights([5900, 5880, 5860, 5870, 5890])).toHaveLength(5)
+    expect(smoothUpperAirHeights([5900])).toEqual([5900])
+    expect(smoothUpperAirHeights([])).toEqual([])
+  })
+
+  it('draws the smoothed series, not the raw ripple', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) =>
+          idx % 2 === 0 ? 5900 : 5860,
+        )}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const curve = screen.getByTestId('forecast-upper-air-chart').querySelector('path.recharts-line-curve')
+    const ys = pathYs(curve!.getAttribute('d')!)
+    const drawnSpan = Math.max(...ys) - Math.min(...ys)
+
+    // The raw 40m ripple would fill 40/52 of the 90px plot, about 69px. The
+    // 3-sample mean leaves a 13m ripple, about 23px.
+    expect(drawnSpan).toBeGreaterThan(5)
+    expect(drawnSpan).toBeLessThan(40)
+  })
+
+  // ADR 0071 section 5: the drawn band and the marked days must not disagree.
+  // The smoothing is display-only, so nothing the reader is given as a number
+  // may come off it - the tooltip still reports the sample it is standing on.
+  it('reports the raw height in the tooltip, not the smoothed one', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const source = readFileSync(resolve(testDir, '../components/forecast-drawer.tsx'), 'utf8')
+    const panel = source.slice(source.indexOf('forecast-upper-air-key'))
+
+    expect(panel).toContain('primary={`${Math.round(upperAirTooltipEntry.height500M)} m`}')
+    expect(panel).not.toContain('upperAirTooltipEntry.height500Smoothed')
   })
 })
 
