@@ -1,0 +1,628 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-04T21:03:38.773812Z",
+  "title": "Design System: Helmcentral",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "hsl(0 0% 98%)",
+        "cssVariable": "--background",
+        "tonalRamp": [
+          "hsl(0 0% 15%)",
+          "hsl(0 0% 26%)",
+          "hsl(0 0% 37%)",
+          "hsl(0 0% 48%)",
+          "hsl(0 0% 59%)",
+          "hsl(0 0% 70%)",
+          "hsl(0 0% 82%)",
+          "hsl(0 0% 95%)"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Card White",
+        "canonical": "hsl(0 0% 100%)",
+        "cssVariable": "--card",
+        "tonalRamp": [
+          "hsl(0 0% 15%)",
+          "hsl(0 0% 26%)",
+          "hsl(0 0% 37%)",
+          "hsl(0 0% 48%)",
+          "hsl(0 0% 59%)",
+          "hsl(0 0% 70%)",
+          "hsl(0 0% 82%)",
+          "hsl(0 0% 95%)"
+        ]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "hsl(0 0% 0%)",
+        "cssVariable": "--foreground",
+        "tonalRamp": [
+          "hsl(0 0% 15%)",
+          "hsl(0 0% 26%)",
+          "hsl(0 0% 37%)",
+          "hsl(0 0% 48%)",
+          "hsl(0 0% 59%)",
+          "hsl(0 0% 70%)",
+          "hsl(0 0% 82%)",
+          "hsl(0 0% 95%)"
+        ]
+      },
+      "card-foreground": {
+        "role": "neutral",
+        "displayName": "Card Ink",
+        "canonical": "hsl(0 0% 9.5%)",
+        "cssVariable": "--card-foreground",
+        "tonalRamp": [
+          "hsl(0 0% 15%)",
+          "hsl(0 0% 26%)",
+          "hsl(0 0% 37%)",
+          "hsl(0 0% 48%)",
+          "hsl(0 0% 59%)",
+          "hsl(0 0% 70%)",
+          "hsl(0 0% 82%)",
+          "hsl(0 0% 95%)"
+        ]
+      },
+      "muted-foreground": {
+        "role": "neutral",
+        "displayName": "Muted Ink",
+        "canonical": "hsl(0 0% 32%)",
+        "cssVariable": "--muted-foreground",
+        "tonalRamp": [
+          "hsl(0 0% 15%)",
+          "hsl(0 0% 26%)",
+          "hsl(0 0% 37%)",
+          "hsl(0 0% 48%)",
+          "hsl(0 0% 59%)",
+          "hsl(0 0% 70%)",
+          "hsl(0 0% 82%)",
+          "hsl(0 0% 95%)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "hsl(0 0% 90%)",
+        "cssVariable": "--border",
+        "tonalRamp": [
+          "hsl(0 0% 15%)",
+          "hsl(0 0% 26%)",
+          "hsl(0 0% 37%)",
+          "hsl(0 0% 48%)",
+          "hsl(0 0% 59%)",
+          "hsl(0 0% 70%)",
+          "hsl(0 0% 82%)",
+          "hsl(0 0% 95%)"
+        ]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Signal Blue",
+        "canonical": "hsl(226 52% 50%)",
+        "cssVariable": "--primary",
+        "tonalRamp": [
+          "hsl(226 52% 15%)",
+          "hsl(226 52% 26%)",
+          "hsl(226 52% 37%)",
+          "hsl(226 52% 48%)",
+          "hsl(226 52% 59%)",
+          "hsl(226 52% 70%)",
+          "hsl(226 52% 82%)",
+          "hsl(226 52% 95%)"
+        ]
+      },
+      "primary-foreground": {
+        "role": "primary",
+        "displayName": "Pale Blue Ink",
+        "canonical": "hsl(214 96% 97%)",
+        "cssVariable": "--primary-foreground",
+        "tonalRamp": [
+          "hsl(214 96% 15%)",
+          "hsl(214 96% 26%)",
+          "hsl(214 96% 37%)",
+          "hsl(214 96% 48%)",
+          "hsl(214 96% 59%)",
+          "hsl(214 96% 70%)",
+          "hsl(214 96% 82%)",
+          "hsl(214 96% 95%)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Wash Blue",
+        "canonical": "hsl(216 60% 91%)",
+        "cssVariable": "--accent",
+        "tonalRamp": [
+          "hsl(216 60% 15%)",
+          "hsl(216 60% 26%)",
+          "hsl(216 60% 37%)",
+          "hsl(216 60% 48%)",
+          "hsl(216 60% 59%)",
+          "hsl(216 60% 70%)",
+          "hsl(216 60% 82%)",
+          "hsl(216 60% 95%)"
+        ]
+      },
+      "secondary": {
+        "role": "neutral",
+        "displayName": "Control Grey",
+        "canonical": "hsl(0 0% 92%)",
+        "cssVariable": "--secondary",
+        "tonalRamp": [
+          "hsl(0 0% 15%)",
+          "hsl(0 0% 26%)",
+          "hsl(0 0% 37%)",
+          "hsl(0 0% 48%)",
+          "hsl(0 0% 59%)",
+          "hsl(0 0% 70%)",
+          "hsl(0 0% 82%)",
+          "hsl(0 0% 95%)"
+        ]
+      },
+      "destructive": {
+        "role": "primary",
+        "displayName": "Alarm Red",
+        "canonical": "hsl(359 75% 50%)",
+        "cssVariable": "--destructive",
+        "tonalRamp": [
+          "hsl(359 75% 15%)",
+          "hsl(359 75% 26%)",
+          "hsl(359 75% 37%)",
+          "hsl(359 75% 48%)",
+          "hsl(359 75% 59%)",
+          "hsl(359 75% 70%)",
+          "hsl(359 75% 82%)",
+          "hsl(359 75% 95%)"
+        ]
+      },
+      "gauge-primary": {
+        "role": "secondary",
+        "displayName": "Deep Amber",
+        "canonical": "hsl(39 100% 39%)",
+        "cssVariable": "--gauge-primary",
+        "tonalRamp": [
+          "hsl(39 100% 15%)",
+          "hsl(39 100% 26%)",
+          "hsl(39 100% 37%)",
+          "hsl(39 100% 48%)",
+          "hsl(39 100% 59%)",
+          "hsl(39 100% 70%)",
+          "hsl(39 100% 82%)",
+          "hsl(39 100% 95%)"
+        ]
+      },
+      "gauge-secondary": {
+        "role": "secondary",
+        "displayName": "Muted Teal",
+        "canonical": "hsl(175 42% 32%)",
+        "cssVariable": "--gauge-secondary",
+        "tonalRamp": [
+          "hsl(175 42% 15%)",
+          "hsl(175 42% 26%)",
+          "hsl(175 42% 37%)",
+          "hsl(175 42% 48%)",
+          "hsl(175 42% 59%)",
+          "hsl(175 42% 70%)",
+          "hsl(175 42% 82%)",
+          "hsl(175 42% 95%)"
+        ]
+      },
+      "chart-wind": {
+        "role": "tertiary",
+        "displayName": "Wind Blue",
+        "canonical": "hsl(226 72% 53%)",
+        "cssVariable": "--chart-wind",
+        "tonalRamp": [
+          "hsl(226 72% 15%)",
+          "hsl(226 72% 26%)",
+          "hsl(226 72% 37%)",
+          "hsl(226 72% 48%)",
+          "hsl(226 72% 59%)",
+          "hsl(226 72% 70%)",
+          "hsl(226 72% 82%)",
+          "hsl(226 72% 95%)"
+        ]
+      },
+      "chart-gust": {
+        "role": "tertiary",
+        "displayName": "Gust Amber",
+        "canonical": "hsl(38 92% 50%)",
+        "cssVariable": "--chart-gust",
+        "tonalRamp": [
+          "hsl(38 92% 15%)",
+          "hsl(38 92% 26%)",
+          "hsl(38 92% 37%)",
+          "hsl(38 92% 48%)",
+          "hsl(38 92% 59%)",
+          "hsl(38 92% 70%)",
+          "hsl(38 92% 82%)",
+          "hsl(38 92% 95%)"
+        ]
+      },
+      "chart-wave": {
+        "role": "tertiary",
+        "displayName": "Wave Teal",
+        "canonical": "hsl(173 80% 40%)",
+        "cssVariable": "--chart-wave",
+        "tonalRamp": [
+          "hsl(173 80% 15%)",
+          "hsl(173 80% 26%)",
+          "hsl(173 80% 37%)",
+          "hsl(173 80% 48%)",
+          "hsl(173 80% 59%)",
+          "hsl(173 80% 70%)",
+          "hsl(173 80% 82%)",
+          "hsl(173 80% 95%)"
+        ]
+      },
+      "chart-swell": {
+        "role": "tertiary",
+        "displayName": "Swell Violet",
+        "canonical": "hsl(258 90% 66%)",
+        "cssVariable": "--chart-swell",
+        "tonalRamp": [
+          "hsl(258 90% 15%)",
+          "hsl(258 90% 26%)",
+          "hsl(258 90% 37%)",
+          "hsl(258 90% 48%)",
+          "hsl(258 90% 59%)",
+          "hsl(258 90% 70%)",
+          "hsl(258 90% 82%)",
+          "hsl(258 90% 95%)"
+        ]
+      },
+      "chart-temp": {
+        "role": "tertiary",
+        "displayName": "Temperature Orange",
+        "canonical": "hsl(32 95% 44%)",
+        "cssVariable": "--chart-temp",
+        "tonalRamp": [
+          "hsl(32 95% 15%)",
+          "hsl(32 95% 26%)",
+          "hsl(32 95% 37%)",
+          "hsl(32 95% 48%)",
+          "hsl(32 95% 59%)",
+          "hsl(32 95% 70%)",
+          "hsl(32 95% 82%)",
+          "hsl(32 95% 95%)"
+        ]
+      },
+      "chart-precip": {
+        "role": "tertiary",
+        "displayName": "Precipitation Blue",
+        "canonical": "hsl(217 91% 60%)",
+        "cssVariable": "--chart-precip",
+        "tonalRamp": [
+          "hsl(217 91% 15%)",
+          "hsl(217 91% 26%)",
+          "hsl(217 91% 37%)",
+          "hsl(217 91% 48%)",
+          "hsl(217 91% 59%)",
+          "hsl(217 91% 70%)",
+          "hsl(217 91% 82%)",
+          "hsl(217 91% 95%)"
+        ]
+      },
+      "chart-uv": {
+        "role": "tertiary",
+        "displayName": "UV Yellow",
+        "canonical": "hsl(48 96% 53%)",
+        "cssVariable": "--chart-uv",
+        "tonalRamp": [
+          "hsl(48 96% 15%)",
+          "hsl(48 96% 26%)",
+          "hsl(48 96% 37%)",
+          "hsl(48 96% 48%)",
+          "hsl(48 96% 59%)",
+          "hsl(48 96% 70%)",
+          "hsl(48 96% 82%)",
+          "hsl(48 96% 95%)"
+        ]
+      },
+      "chart-grid": {
+        "role": "neutral",
+        "displayName": "Grid Slate",
+        "canonical": "hsl(214 20% 39%)",
+        "cssVariable": "--chart-grid",
+        "tonalRamp": [
+          "hsl(214 20% 15%)",
+          "hsl(214 20% 26%)",
+          "hsl(214 20% 37%)",
+          "hsl(214 20% 48%)",
+          "hsl(214 20% 59%)",
+          "hsl(214 20% 70%)",
+          "hsl(214 20% 82%)",
+          "hsl(214 20% 95%)"
+        ]
+      }
+    },
+    "themes": {
+      "light": {
+        "selector": ":root",
+        "note": "Default. Near-white page, white tiles, black ink."
+      },
+      "dark": {
+        "selector": ".dark",
+        "note": "True-black page (0 0% 0%) with 9.5% cards; gauge tokens brighten to hsl(39 90% 52%) and hsl(175 50% 45%); chart series lighten and their axis labels take the series colour unchanged.",
+        "overrides": {
+          "background": "hsl(0 0% 0%)",
+          "card": "hsl(0 0% 9.5%)",
+          "foreground": "hsl(0 0% 100%)",
+          "muted-foreground": "hsl(0 0% 64%)",
+          "border": "hsl(0 0% 14%)",
+          "primary": "hsl(225 72% 62%)",
+          "destructive": "hsl(359 100% 70%)",
+          "gauge-primary": "hsl(39 90% 52%)",
+          "gauge-secondary": "hsl(175 50% 45%)"
+        }
+      },
+      "instrument": {
+        "selector": "[data-skin=\"instrument\"]",
+        "note": "Opt-in per page (ADR 0060). A lit MFD: deep navy board, cyan chrome, bezel and bloom on dial and fuel rail. Redefines existing token names only, so no component branches on it. Alert red brightens but never re-hues.",
+        "overrides": {
+          "background": "hsl(222 47% 8%)",
+          "card": "hsl(222 47% 8%)",
+          "foreground": "hsl(199 30% 92%)",
+          "muted-foreground": "hsl(205 20% 62%)",
+          "border": "hsl(205 30% 24%)",
+          "primary": "hsl(199 89% 60%)",
+          "destructive": "hsl(359 100% 70%)",
+          "gauge-primary": "hsl(199 89% 62%)",
+          "gauge-secondary": "hsl(199 60% 48%)",
+          "board-pad": "0.75rem",
+          "board-radius": "0.75rem"
+        }
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Hero readout",
+        "purpose": "The one number a tile exists to show. text-4xl to text-7xl, tabular, leading-none."
+      },
+      "headline": {
+        "displayName": "Secondary readout",
+        "purpose": "Supporting numbers stacked with the hero. text-lg to text-2xl."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Dialog and card titles in settings and configuration surfaces."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Help text, descriptions, settings prose. Geist Sans only."
+      },
+      "label": {
+        "displayName": "Micro-label",
+        "purpose": "Uppercase 10px tracked axis labels, legends and KPI identifiers. The most-used idiom in the codebase."
+      },
+      "tile-title": {
+        "displayName": "Tile title",
+        "purpose": "Mono uppercase tracked label across the top of every tile, followed by a hairline rule."
+      }
+    },
+    "shadows": [
+      {
+        "name": "tile-rest",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "purpose": "Hairline seating under a tile. If it reads as elevation it is too much."
+      },
+      {
+        "name": "instrument-bezel",
+        "value": "inset 0 0 0 3px hsl(var(--dial-rim) / 0.30), inset 0 8px 40px hsl(230 60% 3% / 0.6), 0 0 60px hsl(var(--dial-glow) / 0.35)",
+        "purpose": "Lit rim and ambient glow of a skinned dial. Instrument skin only; none by default."
+      },
+      {
+        "name": "needle-glow",
+        "value": "0 0 6px hsl(var(--primary))",
+        "purpose": "Pointer emission on a skinned dial. 0 0 0 transparent unskinned."
+      },
+      {
+        "name": "fuel-bar-glow",
+        "value": "drop-shadow(0 0 2px hsl(var(--fuel-bar) / 0.9)) drop-shadow(0 0 10px hsl(var(--fuel-bar) / 0.5))",
+        "purpose": "Two stacked drop-shadows: tight emissive core plus wide bloom. A whole filter value, not one shadow's arguments."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-transition",
+        "value": "colors 150ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Buttons, switches and links. Colour only; controls do not move."
+      },
+      {
+        "name": "toast-enter",
+        "value": "200ms ease-out, opacity and translateY(-0.5rem)",
+        "purpose": "Top-layer anchor-watch toast, using popover @starting-style for entry and exit."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "transform: none; transition-duration: 100ms",
+        "purpose": "Under prefers-reduced-motion the toast stops translating and shortens. Honour this everywhere."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ],
+    "grid": [
+      {
+        "name": "columns",
+        "value": "12",
+        "purpose": "react-grid-layout board columns; collapses to a 2-column CSS grid below sm."
+      },
+      {
+        "name": "rowHeight",
+        "value": "32px",
+        "purpose": "One grid row unit."
+      },
+      {
+        "name": "margin",
+        "value": "16px",
+        "purpose": "Gap on both axes. Tile height = rows*32 + (rows-1)*16."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Default action. 40px floor on both axes because it is touched on a moving boat.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; min-height:2.5rem; min-width:2.5rem; height:2.5rem; padding:0.5rem 1rem; border:none; border-radius:6px; font-family:'Geist Sans',sans-serif; font-size:0.875rem; font-weight:600; white-space:nowrap; background:hsl(var(--primary,226 52% 50%)); color:hsl(var(--primary-foreground,214 96% 97%)); transition:background-color 150ms cubic-bezier(0.4,0,0.2,1); cursor:pointer; } .ds-btn-primary:hover { background:hsl(var(--primary,226 52% 50%) / 0.9); } .ds-btn-primary:focus-visible { outline:none; box-shadow:0 0 0 2px hsl(var(--background,0 0% 98%)), 0 0 0 4px hsl(var(--secondary,0 0% 92%)); } .ds-btn-primary:disabled { opacity:0.5; pointer-events:none; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary action on a tile or dialog. Bordered card surface, hovering to muted.",
+      "html": "<button class=\"ds-btn-outline\">Cancel</button>",
+      "css": ".ds-btn-outline { display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; min-height:2.5rem; min-width:2.5rem; height:2.5rem; padding:0.5rem 1rem; border:1px solid hsl(var(--border,0 0% 90%)); border-radius:6px; font-family:'Geist Sans',sans-serif; font-size:0.875rem; font-weight:600; background:hsl(var(--card,0 0% 100%)); color:hsl(var(--foreground,0 0% 0%)); transition:background-color 150ms cubic-bezier(0.4,0,0.2,1); cursor:pointer; } .ds-btn-outline:hover { background:hsl(var(--muted,0 0% 96%)); } .ds-btn-outline:focus-visible { outline:none; box-shadow:0 0 0 2px hsl(var(--background,0 0% 98%)), 0 0 0 4px hsl(var(--secondary,0 0% 92%)); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Quiet until focused. Sits on the page ground, not the card surface.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Anchor alarm radius (m)\" />",
+      "css": ".ds-input { display:flex; width:100%; height:2.5rem; padding:0.5rem 0.75rem; border:1px solid hsl(var(--input,0 0% 92%)); border-radius:6px; background:hsl(var(--background,0 0% 98%)); color:hsl(var(--foreground,0 0% 0%)); font-family:'Geist Sans',sans-serif; font-size:0.875rem; } .ds-input::placeholder { color:hsl(var(--muted-foreground,0 0% 32%)); } .ds-input:focus-visible { outline:none; box-shadow:0 0 0 2px hsl(var(--background,0 0% 98%)), 0 0 0 4px hsl(var(--ring,226 52% 50%)); } .ds-input:disabled { opacity:0.5; cursor:not-allowed; }"
+    },
+    {
+      "name": "Switch",
+      "kind": "custom",
+      "refersTo": "switch",
+      "description": "44x24 track, Signal Blue when checked. Carries the only meaningful shadow in the control set.",
+      "html": "<span class=\"ds-switch\" data-checked><span class=\"ds-switch-thumb\"></span></span>",
+      "css": ".ds-switch { display:inline-flex; align-items:center; width:2.75rem; height:1.5rem; padding:0; border:2px solid transparent; border-radius:9999px; background:hsl(var(--input,0 0% 92%)); transition:background-color 150ms cubic-bezier(0.4,0,0.2,1); cursor:pointer; } .ds-switch[data-checked] { background:hsl(var(--primary,226 52% 50%)); } .ds-switch-thumb { display:block; width:1.25rem; height:1.25rem; border-radius:9999px; background:hsl(var(--background,0 0% 98%)); box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); transform:translateX(0); transition:transform 150ms cubic-bezier(0.4,0,0.2,1); } .ds-switch[data-checked] .ds-switch-thumb { transform:translateX(1.25rem); }"
+    },
+    {
+      "name": "Tile",
+      "kind": "card",
+      "refersTo": "tile",
+      "description": "The wrapper every dashboard widget builds inside: mono tracked title, hairline rule to the edge, then the readout.",
+      "html": "<div class=\"ds-tile\"><div class=\"ds-tile-head\"><span class=\"ds-tile-title\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 22V8\"/><path d=\"M5 12H2a10 10 0 0 0 20 0h-3\"/><circle cx=\"12\" cy=\"5\" r=\"3\"/></svg>Anchor</span><span class=\"ds-tile-rule\"></span></div><div class=\"ds-tile-body\"><span class=\"ds-kpi-label\">Rode out</span><span class=\"ds-kpi-value\">42<span class=\"ds-kpi-unit\">m</span></span></div></div>",
+      "css": ".ds-tile { display:flex; flex-direction:column; border:1px solid hsl(var(--border,0 0% 90%)); border-radius:16px; background:hsl(var(--card,0 0% 100%)); color:hsl(var(--card-foreground,0 0% 9.5%)); padding:1rem 0.75rem; box-shadow:0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-tile-head { display:flex; align-items:center; gap:0.5rem; padding-bottom:0.75rem; } .ds-tile-title { display:inline-flex; align-items:center; gap:0.25rem; min-width:0; font-family:'Geist Mono',monospace; font-size:0.75rem; font-weight:400; text-transform:uppercase; letter-spacing:0.22em; line-height:1; color:hsl(var(--muted-foreground,0 0% 32%)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .ds-tile-rule { height:1px; flex:1; background:hsl(var(--border,0 0% 90%) / 0.7); } .ds-tile-body { display:flex; flex-direction:column; gap:0.25rem; }"
+    },
+    {
+      "name": "KPI Stack",
+      "kind": "custom",
+      "refersTo": "tile",
+      "description": "The recurring unit inside a tile: muted uppercase micro-label over a large mono gauge-token readout on tabular figures.",
+      "html": "<div class=\"ds-kpi\"><span class=\"ds-kpi-label\">State of charge</span><span class=\"ds-kpi-value\">87<span class=\"ds-kpi-unit\">%</span></span></div>",
+      "css": ".ds-kpi { display:flex; flex-direction:column; gap:0.25rem; } .ds-kpi-label { font-family:'Geist Sans',sans-serif; font-size:10px; line-height:1; text-transform:uppercase; letter-spacing:0.16em; color:hsl(var(--muted-foreground,0 0% 32%)); } .ds-kpi-value { font-family:'Geist Mono',monospace; font-size:2.25rem; font-weight:400; line-height:1; font-variant-numeric:tabular-nums; color:hsl(var(--gauge-primary,39 100% 39%)); } .ds-kpi-unit { font-size:0.875rem; line-height:1; margin-left:0.125rem; color:hsl(var(--gauge-secondary,175 42% 32%)); }"
+    },
+    {
+      "name": "Stale Badge",
+      "kind": "chip",
+      "refersTo": "tile",
+      "description": "Appears beside a tile title when the feed stops updating, while the tile body goes to 50% opacity and greyscale. The system's most important state.",
+      "html": "<span class=\"ds-stale\">Stale 1h 39m</span>",
+      "css": ".ds-stale { display:inline-block; border:1px solid hsl(38 92% 50% / 0.4); border-radius:4px; background:hsl(38 92% 50% / 0.1); padding:0.125rem 0.375rem; font-family:'Geist Sans',sans-serif; font-size:9px; line-height:1; color:hsl(32 95% 36%); }"
+    },
+    {
+      "name": "Alarm Banner",
+      "kind": "custom",
+      "refersTo": "alarm-banner",
+      "description": "The one component allowed to be loud. Alarm red border over a 10% wash; both lines truncate.",
+      "html": "<div class=\"ds-alarm\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"/><path d=\"M12 9v4\"/><path d=\"M12 17h.01\"/></svg><div class=\"ds-alarm-text\"><p class=\"ds-alarm-head\">Anchor drag</p><p class=\"ds-alarm-body\">Vessel 8 m outside the alarm radius</p></div></div>",
+      "css": ".ds-alarm { display:flex; align-items:center; gap:0.75rem; min-width:0; padding:0.75rem 1rem; border:1px solid hsl(var(--destructive,359 75% 50%)); border-radius:8px; background:hsl(var(--destructive,359 75% 50%) / 0.1); color:hsl(var(--destructive,359 75% 50%)); box-shadow:0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-alarm-text { min-width:0; } .ds-alarm-head { margin:0; font-family:'Geist Sans',sans-serif; font-size:0.875rem; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .ds-alarm-body { margin:0; font-family:'Geist Sans',sans-serif; font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Watch",
+    "overview": "Nothing on this board raises its voice until something is actually wrong. The chrome is near-greyscale and flat: white tiles on an almost-white page, hairline borders, no gradients, no illustration, nothing decorative competing with a number. What colour there is has been rationed on purpose. Amber and teal belong to instrument readings, blue belongs to things you can click, and red means an alarm. A screen with colour on it is a screen telling you something.\n\nThe density is deliberate and high. Tiles carry a small tracked mono title, a rule running out to the edge, and then as much readout as will fit, with every value on tabular figures so digits do not dance as they update. Type below 12px exists and is used constantly for labels, which is why contrast is treated as non-negotiable rather than a preference: this is read in direct sun on a helm screen, at arm's length, by someone who has other things to do. De-emphasis is done with the muted foreground token, never by dropping opacity on small text.\n\nThe system has a second face. [data-skin=\"instrument\"] is an opt-in dark board that redefines the same token names every component already reads, so a tile re-skins with no per-component branching. It is the one place real depth lives: a bezel gradient, an inset rim, a bloom under the needle. That is not decoration, it is what a real MFD looks like at night, and it stops at instrument chrome. Alert red and amber survive both skins largely intact, because a warning has to look like a warning whichever face is on.",
+    "keyCharacteristics": [
+      "Near-monochrome surfaces; colour reserved for readings, chrome and alarms.",
+      "Geist Mono for every number and every instrument label; Geist Sans for prose.",
+      "Flat by default. Depth belongs to the instrument skin and to overlays.",
+      "Dense grid, hairline borders, uppercase tracked micro-labels at 10px.",
+      "Semantic tokens only. Themes swap values, components never branch."
+    ],
+    "rules": [
+      {
+        "name": "The Rationed Colour Rule",
+        "body": "Follow 60-30-10. Surfaces are bg-background and bg-card (60%). Structure is text-muted-foreground and border-border (30%). The remaining 10% is text-primary for chrome, text-gauge-primary / text-gauge-secondary for readouts, and raw palette colours (amber-*, red-*, emerald-*) for alert semantics only. No colour is ever decorative.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Accents Rule",
+        "body": "Blue is what you touch, amber and teal are what you read. A hero numeral in Signal Blue or a button in Deep Amber is a bug, not a variation.",
+        "section": "colors"
+      },
+      {
+        "name": "The Alarm Survives the Skin Rule",
+        "body": "Red and amber alert states are not reskinnable. The instrument skin may brighten red for a dark board; it may not recolour it, and it defines no alert palette of its own.",
+        "section": "colors"
+      },
+      {
+        "name": "The Three Sizes Rule",
+        "body": "Below text-xs (12px) there are exactly three sizes and no others. text-[11px] for inline secondary values and unit suffixes. text-[10px] for uppercase micro-labels, the default for anything else small. text-[9px] for dense map and marker annotation, and that is the floor. Never text-[8px].",
+        "section": "typography"
+      },
+      {
+        "name": "The No Faded Small Text Rule",
+        "body": "Do not stack low-opacity modifiers (text-white/50, text-white/60) on anything at or below text-[11px]. Reduced contrast on already-tiny glyphs is illegible in daylight glare. Use text-muted-foreground on themed surfaces; on non-themed overlays such as map HUDs, never below /80.",
+        "section": "typography"
+      },
+      {
+        "name": "The Still Digits Rule",
+        "body": "Every number that updates carries tabular-nums and leading-none. A readout that reflows or jitters as its value changes is broken, however pretty it looks at rest.",
+        "section": "typography"
+      },
+      {
+        "name": "The SVG Follows the DOM Rule",
+        "body": "Chart <text> uses a size from the three-size scale as a bare string (fontSize=\"10\") and takes fill from a token (hsl(var(--muted-foreground)) for axis and legend, hsl(var(--primary)) for emphasis). A hardcoded rgba() or hex silently stops adapting to dark mode.",
+        "section": "typography"
+      },
+      {
+        "name": "The Never Stretch Rule",
+        "body": "No string, however long, may widen its parent. An operator-supplied embed title, a vessel name, a unit label: all of them truncate.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Board Rule",
+        "body": "Surfaces on the default board are flat. If something needs to stand out, it gets a border, a tonal step or a token colour, not a shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Depth Is Earned Rule",
+        "body": "Depth appears only where it reproduces real instrument hardware, and only inside the instrument skin. Glass, gloss and drop-shadowed chrome applied to app UI are not on the table.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do reach for semantic tokens first: bg-background, bg-card, text-foreground, text-muted-foreground, border-border, text-primary, text-gauge-primary, text-gauge-secondary. They adapt across light, dark and the instrument skin with no dark: class.",
+      "Do put every updating number in font-display with tabular-nums and leading-none.",
+      "Do stack a KPI as muted uppercase micro-label over a large gauge-token readout, and build it inside Tile rather than inventing a shared primitive.",
+      "Do keep the two-tier density: gap-4 p-4 on the board, gap-2 / p-2-p-3 nested, with identical inner padding across tiles at the same level.",
+      "Do guard every flexible axis with min-w-0 / minmax(0, 1fr) and truncate variable-length strings.",
+      "Do give a skin new values for token names that already exist, so components never branch on which skin is active.",
+      "Do show structural dashes (--), real operational defaults (0.0) or an explicit ON / OFF in a zero state."
+    ],
+    "donts": [
+      "Don't write raw arbitrary colour values (bg-[#f4f3ef], text-[#334455]). Tokens, or the standard palette scale for alert semantics only. Arbitrary tracking values for fine-tuning stay fine; arbitrary colours never are.",
+      "Don't put a gauge token on chrome or a chrome token on a reading.",
+      "Don't fade small text with opacity. Below 12px, de-emphasis is text-muted-foreground and nothing else.",
+      "Don't go below text-[9px], or use any size below 12px outside the three sanctioned steps.",
+      "Don't add shadows to the default board to create hierarchy. Border, tonal step or token colour instead.",
+      "Don't dress the app in a generic SaaS dashboard: rounded pastel cards, gradient hero statistics, decorative illustration, purple-on-white. This is a boat, not a metrics product.",
+      "Don't apply skeuomorphic marine gloss. No brushed steel, teak, leather or chrome bezels for their own sake. The instrument skin's depth is legitimate because it reproduces a real MFD; nothing else gets to borrow it.",
+      "Don't style forecasts like a consumer weather app: no photographic backdrops, animated precipitation or saturated gradient skies behind the numbers.",
+      "Don't invent placeholder metrics or marketing copy in an empty state."
+    ]
+  }
+}
