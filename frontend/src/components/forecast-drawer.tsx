@@ -412,6 +412,40 @@ function precipBarColor(chancePct: number | null) {
 const AXIS_LABEL_FONT_SIZE = '10'
 const AXIS_LABEL_COLOR = 'hsl(var(--muted-foreground))'
 
+/*
+ * THE AXIS IDIOM, one set of rules for all five charts - Cloud, Wind, Wave,
+ * Upper Air here, and Tide in tide-chart.tsx. The five had drifted apart on
+ * four separate dimensions, and a reader moving between them was relearning
+ * the conventions on each one. Settled as:
+ *
+ * 1. COLOUR BY OWNERSHIP. An axis whose labels describe ONE series is drawn
+ *    in that series' colour - it is what says which number belongs to which
+ *    line, and is what made the upper-air swatch legend redundant. An axis
+ *    serving several series stays AXIS_LABEL_COLOR, because tinting it any
+ *    one series' colour would be a lie about the other two. So: Cloud left
+ *    --chart-temp, Cloud right --chart-precip, Upper-air left --chart-wave,
+ *    Upper-air right --chart-gust, Tide --chart-wave; Wind left stays muted
+ *    (wind and gust), Wave left stays muted (total, wind-wave and swell).
+ *
+ * 2. UNIT PLACEMENT FOLLOWS AXIS COUNT. On a SINGLE-axis chart the unit lives
+ *    in the <h4> header ("Wind (kts)", "Wave (m)", "Tide (m)") and every tick
+ *    is a bare number - a long unit suffix on the topmost tick runs past the
+ *    plot's left gutter at fontSize 10. On a DUAL-axis chart one header cannot
+ *    disambiguate two scales, so each axis carries its own unit, ONCE, on its
+ *    extreme (top) tick: "22°C" over "20", "1.0mm" over "0".
+ *
+ * 3. EVERY LABEL IS POSITIONED THROUGH axisTickLabelY, over the same *YFor
+ *    mapping its own series is drawn with. Hardcoded pixel ys survive the
+ *    scale change that invalidates them and stay right only by coincidence.
+ *
+ * 4. TICK DENSITY FOLLOWS HOW THE AXIS IS READ. A ladder where the value is
+ *    read quantitatively - Wind, Wave, and the upper-air gust axis, where "is
+ *    that 20 or 35 knots" is the question. Extremes only where the range is
+ *    read qualitatively and the shape carries the meaning - Cloud temperature,
+ *    Cloud precipitation, and upper-air height, where the trough shape is the
+ *    point and the numbers only bound it.
+ */
+
 // recharts' <XAxis> reserves its own `height` (default 30) via its internal
 // offset calculation IN ADDITION TO whatever `margin.bottom` a <ComposedChart>
 // is given, for any axis that isn't `hide`-den (calculateOffset in
@@ -819,6 +853,28 @@ export function ForecastDrawer({
     upperAirMax === upperAirMin
       ? upperAirChartBottom
       : upperAirChartTop + (1 - (value - upperAirMin) / (upperAirMax - upperAirMin)) * (upperAirChartBottom - upperAirChartTop)
+
+  /*
+   * What the height axis STATES is the window, not the frame. ADR 0071
+   * section 2: each day is scored against the rest of the window and flagged
+   * when it lands in the lowest quintile of it, so the window's own low and
+   * high are the two numbers a reader needs to judge any day on the trace.
+   * upperAirMin/upperAirMax are the series extremes plus 15% padding - an
+   * artefact of drawing the trace clear of the frame - and they sit close
+   * enough to the real window to be misread as it.
+   *
+   * The frame is unchanged; only the labels move, positioned by
+   * upperAirHeightYFor so they land at the heights they name. The window is
+   * derived from the same fetch the series is, so its bounds sit inside the
+   * padded frame and both labels stay visible.
+   *
+   * A provider can return a series with no window at all (the contract's
+   * window is optional and lands absent rather than zeroed), and there is
+   * nothing to state then, so the axis falls back to the frame it draws.
+   */
+  const upperAirAxisHighM = upperAirWindow?.present ? upperAirWindow.highM : upperAirMax
+  const upperAirAxisLowM = upperAirWindow?.present ? upperAirWindow.lowM : upperAirMin
+
   // The gust axis is drawn now rather than hidden. A hidden axis forced its
   // full scale into the legend, which is a magnitude written a long way from
   // the line it belongs to.
@@ -1115,6 +1171,13 @@ export function ForecastDrawer({
   const cloudChartBottom = HOURLY_CHART_BOTTOM
   const cloudYFor = (value: number) =>
     cloudChartBottom - ((value - cloudScaleMin) / cloudSpan) * (cloudChartBottom - cloudChartTop)
+  // The right-hand precipitation scale, in the same shape as every other
+  // *YFor helper, so its two axis labels are positioned by the scale rather
+  // than by the hardcoded pixels they used to sit at (axis rule 3 above).
+  // Matches the <YAxis yAxisId="precip"> domain below exactly. precipMax has
+  // a floor of 1, so there is no divide-by-zero to guard here.
+  const precipYFor = (value: number) =>
+    cloudChartTop + (1 - value / precipMax) * (cloudChartBottom - cloudChartTop)
   // Index of the lowest/highest temperature in the visible window, for the
   // L/H markers - matching indexOf's "first occurrence" tie-break is fine
   // here since a flat run of identical extreme values is rare in practice.
@@ -1260,10 +1323,24 @@ export function ForecastDrawer({
             const nightMode = hourlyEntries.slice(0, idx).some((item) => item.kind === 'sunset')
             const isNowEntry = entry.label === 'Now' && entry.kind === 'forecast'
             const displayTemperature = entry.temperatureF >= 0 ? Math.round(displayTemp(entry.temperatureF)) : null
+            /*
+             * Wind owns the display slot. Twelve tiles of a calm day used to
+             * render twelve big near-identical temperatures spanning about a
+             * degree, while the one variable a passage decision turns on sat
+             * in the smallest type in the tile. Size follows consequence.
+             *
+             * Wind only arrives when the provider gave one, so a forecast hour
+             * without it falls back to the temperature rather than leaving the
+             * biggest slot in the tile blank; the secondary line then has
+             * nothing left to say and is dropped.
+             */
+            const hasWind = entry.kind === 'forecast' && entry.windSpeedKts >= 0
+            const displaySlotClass = nightMode ? 'text-gauge-secondary' : 'text-foreground'
 
             return (
               <div
                 key={`${entry.kind}-${entry.label}-${idx}`}
+                data-testid="forecast-hour-tile"
                 className={`relative flex min-w-[84px] flex-col items-center rounded-xl border px-2.5 py-3.5 text-center ${entry.kind === 'sunset' ? 'border-gauge-primary/20 bg-gauge-primary/10' : nightMode ? 'border-gauge-secondary/20 bg-gauge-secondary/10' : 'border-border/70 bg-card/80'} ${isNowEntry ? 'shadow-[0_0_0_1px_hsl(var(--gauge-primary)/0.22),0_10px_18px_hsl(var(--gauge-primary)/0.10)]' : ''}`}
               >
                 {isNowEntry && (
@@ -1273,12 +1350,26 @@ export function ForecastDrawer({
                 <div className="mt-3.5 flex h-8 items-center justify-center">
                   {getHourlyWeatherIcon(entry, nightMode)}
                 </div>
-                <p className={`mt-4 ${entry.kind === 'sunset' ? 'text-sm font-semibold uppercase tracking-[0.08em] text-gauge-primary' : nightMode ? 'font-display text-3xl leading-none text-gauge-secondary' : 'font-display text-3xl leading-none text-foreground'}`}>
-                  {entry.kind === 'sunset' ? 'Sunset' : displayTemperature !== null ? `${displayTemperature}°` : '—'}
-                </p>
-                {entry.kind === 'forecast' && entry.windSpeedKts >= 0 && (
-                  <p className={`mt-1 whitespace-nowrap text-xs font-semibold ${nightMode ? 'text-gauge-secondary/80' : 'text-gauge-secondary'}`}>
-                    {Math.round(entry.windSpeedKts)}kts {entry.windDirection}
+                {entry.kind === 'sunset' ? (
+                  <p data-testid="forecast-hour-headline" className="mt-4 text-sm font-semibold uppercase tracking-[0.08em] text-gauge-primary">
+                    Sunset
+                  </p>
+                ) : hasWind ? (
+                  <p
+                    data-testid="forecast-hour-headline"
+                    className={`mt-4 flex items-baseline justify-center gap-0.5 whitespace-nowrap ${displaySlotClass}`}
+                  >
+                    <span className="font-display text-3xl leading-none">{Math.round(entry.windSpeedKts)}</span>
+                    <span className="text-2xs">{windUnit} {entry.windDirection}</span>
+                  </p>
+                ) : (
+                  <p data-testid="forecast-hour-headline" className={`mt-4 font-display text-3xl leading-none ${displaySlotClass}`}>
+                    {displayTemperature !== null ? `${displayTemperature}°` : '—'}
+                  </p>
+                )}
+                {hasWind && (
+                  <p data-testid="forecast-hour-subline" className={`mt-1 whitespace-nowrap text-xs ${nightMode ? 'text-gauge-secondary/80' : 'text-muted-foreground'}`}>
+                    {displayTemperature !== null ? `${displayTemperature}°` : '—'}
                   </p>
                 )}
                 {nightMode && entry.kind === 'forecast' && (
@@ -1336,21 +1427,28 @@ export function ForecastDrawer({
                   {day.condition}
                 </p>
 
+                {/*
+                  * Same swap as the hourly tile: wind takes the display slot,
+                  * the high/low drops to the line under it. "17kts SE" and
+                  * "6kts SE" used to render identically in a 10px footer, so
+                  * the card said nothing about whether the day was sailable
+                  * until you read it. Size only - no threshold tinting, per
+                  * ADR 0071 section 2.
+                  */}
                 <div className="mt-1.5 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1">
-                    <span className="font-display text-lg leading-none text-gauge-primary">
-                      {Math.round(displayTemp(day.high))}
-                    </span>
-                    <span className="text-2xs text-muted-foreground">
-                      {tempUnit}
-                    </span>
-                    <span className="text-sm text-muted-foreground">/</span>
-                    <span className="font-display text-sm text-muted-foreground">{Math.round(displayTemp(day.low))}</span>
-                  </div>
+                  <p data-testid="forecast-day-headline" className="flex items-baseline gap-1 whitespace-nowrap text-gauge-secondary">
+                    <span className="font-display text-lg leading-none">{Math.round(day.windSpeed)}</span>
+                    <span className="text-2xs">{windUnit} {day.windDirection}</span>
+                  </p>
                   <p className="text-2xs text-muted-foreground">{day.precipitation === null ? '— precip' : `${Math.round(day.precipitation)}% precip`}</p>
                 </div>
 
-                <p className="mt-1 text-2xs font-semibold text-gauge-secondary">{Math.round(day.windSpeed)}{windUnit} {day.windDirection}</p>
+                <p data-testid="forecast-day-subline" className="mt-1 flex items-center gap-1 text-2xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">{Math.round(displayTemp(day.high))}</span>
+                  <span>{tempUnit}</span>
+                  <span>/</span>
+                  <span className="font-semibold">{Math.round(displayTemp(day.low))}</span>
+                </p>
               </button>
             ))}
           </div>
@@ -1363,17 +1461,27 @@ export function ForecastDrawer({
                 <span className="pb-1 text-lg text-muted-foreground">{tempUnit}</span>
               </div>
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{selectedDay.condition}</p>
-              <div className="flex flex-wrap gap-2 text-xs">
-                <span className="rounded bg-muted/50 px-2 py-1">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-chart-gust">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">Precip <span data-testid="forecast-selected-precip" className="font-semibold">{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold">{humidityPct === null ? '—' : `${humidityPct}%`}</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
-                <span className="rounded bg-muted/50 px-2 py-1">UV Index <span className="font-semibold text-gauge-secondary">{uvIndex}</span></span>
+              {/*
+                * Two tiers in one wrapping row, both visible. Ten identical
+                * chips are ten peers, and working memory does not hold ten:
+                * the eye has to scan the lot to find the one it came for.
+                * Nothing is hidden here, it is ranked. Decisions (wind, gusts,
+                * and what the air aloft is doing) keep the chip and get the
+                * weight; the reference stats drop the chip and sit as plain
+                * muted text after them. No colour escalation on wind - see
+                * ADR 0071 section 2, there is no sourced threshold to escalate
+                * against and an invented one is worse than none.
+                */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
+                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-chart-gust">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
                 {selectedUpperAir?.present && (
                   <span
                     data-testid="forecast-upper-air-detail"
-                    className={`rounded px-2 py-1 ${selectedUpperAir.troughSupport ? 'bg-gauge-secondary/20 text-foreground' : 'bg-muted/50'}`}
+                    /* The trough tint has to stay legible against a tier
+                       baseline that is now bg-muted/80 rather than /50, so it
+                       goes up to /35 and keeps its own hue. */
+                    className={`rounded px-2 py-1 text-sm ${selectedUpperAir.troughSupport ? 'bg-gauge-secondary/35 text-foreground' : 'bg-muted/80'}`}
                   >
                     500mb <span className="font-semibold">{Math.round(selectedUpperAir.height500M)} m</span>
                     {selectedUpperAir.troughSupport
@@ -1381,20 +1489,24 @@ export function ForecastDrawer({
                       : ` \u00b7 jet ${Math.round(selectedUpperAir.peakWind500Kts)} kt`}
                   </span>
                 )}
+                <span className="text-2xs text-muted-foreground">Precip <span data-testid="forecast-selected-precip" className="font-semibold">{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
+                <span className="text-2xs text-muted-foreground">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold">{humidityPct === null ? '—' : `${humidityPct}%`}</span></span>
+                <span className="text-2xs text-muted-foreground">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
+                <span className="text-2xs text-muted-foreground">UV Index <span className="font-semibold text-gauge-secondary">{uvIndex}</span></span>
                 {selectedDay.sunriseTime && (
-                  <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
-                    <Sunrise size={13} className="text-gauge-primary" />
+                  <span className="flex items-center gap-1 text-2xs text-muted-foreground">
+                    <Sunrise size={12} className="text-gauge-primary" />
                     Sunrise <span className="font-semibold">{selectedDay.sunriseTime}</span>
                   </span>
                 )}
                 {selectedDay.sunsetTime && (
-                  <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
-                    <Sunset size={13} className="text-gauge-primary" />
+                  <span className="flex items-center gap-1 text-2xs text-muted-foreground">
+                    <Sunset size={12} className="text-gauge-primary" />
                     Sunset <span className="font-semibold">{selectedDay.sunsetTime}</span>
                   </span>
                 )}
                 {selectedDay.moonPhase && (
-                  <span className="flex items-center gap-1.5 rounded bg-muted/50 px-2 py-1">
+                  <span className="flex items-center gap-1 text-2xs text-muted-foreground">
                     <span aria-hidden>{moonPhaseEmoji(selectedDay.moonPhase)}</span>
                     Moon <span className="font-semibold">{moonPhaseLabel(selectedDay.moonPhase)}</span>
                   </span>
@@ -1545,15 +1657,21 @@ export function ForecastDrawer({
                         </linearGradient>
                       </defs>
 
-                      {/* The DATA extremes, not the scale extremes - the
-                          reader wants the day's real high and low - but
-                          positioned by cloudYFor so they track the curve
+                      {/* Two axes on one frame, so each carries its own colour
+                          and its own unit (axis rules 1 and 2 above).
+
+                          On the left, the DATA extremes rather than the scale
+                          extremes - the reader wants the day's real high and
+                          low - positioned by cloudYFor so they track the curve
                           instead of sitting at the fixed y=40/y=123 the old
-                          fill-the-frame scale could assume. */}
-                      <text x={6} y={axisTickLabelY(cloudYFor, cloudTempMax, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMax)}{tempUnit}</text>
-                      <text x={6} y={axisTickLabelY(cloudYFor, cloudTempMin, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{Math.round(cloudTempMin)}{tempUnit}</text>
-                      <text x={forecastChartWidth - 6} y={40} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{precipMax.toFixed(1)}mm</text>
-                      <text x={forecastChartWidth - 6} y={123} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>0mm</text>
+                          fill-the-frame scale could assume. On the right, the
+                          precipitation scale's own bounds through precipYFor,
+                          which is what those two labels' hardcoded pixels used
+                          to only accidentally agree with. */}
+                      <text data-testid="forecast-cloud-temp-tick" x={6} y={axisTickLabelY(cloudYFor, cloudTempMax, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-temp))">{Math.round(cloudTempMax)}{tempUnit}</text>
+                      <text data-testid="forecast-cloud-temp-tick" x={6} y={axisTickLabelY(cloudYFor, cloudTempMin, cloudChartTop, cloudChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-temp))">{Math.round(cloudTempMin)}</text>
+                      <text data-testid="forecast-cloud-precip-tick" x={forecastChartWidth - 6} y={axisTickLabelY(precipYFor, precipMax, cloudChartTop, cloudChartBottom)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-precip))">{precipMax.toFixed(1)}mm</text>
+                      <text data-testid="forecast-cloud-precip-tick" x={forecastChartWidth - 6} y={axisTickLabelY(precipYFor, 0, cloudChartTop, cloudChartBottom)} textAnchor="end" fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-precip))">0</text>
                       <line x1={hourlyChartLeft} y1={cloudChartBottom} x2={hourlyChartRight} y2={cloudChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
                       {cloudTooltipEntry && cloudTooltipEntry.hourOfDay >= 0 && (
@@ -2088,20 +2206,20 @@ export function ForecastDrawer({
                 <text
                   data-testid="forecast-upper-air-height-tick"
                   x={6}
-                  y={upperAirChartTop + 4}
+                  y={axisTickLabelY(upperAirHeightYFor, upperAirAxisHighM, upperAirChartTop, upperAirChartBottom)}
                   fontSize={AXIS_LABEL_FONT_SIZE}
                   fill="hsl(var(--chart-wave))"
                 >
-                  {Math.round(upperAirMax)} m
+                  {Math.round(upperAirAxisHighM)} m
                 </text>
                 <text
                   data-testid="forecast-upper-air-height-tick"
                   x={6}
-                  y={upperAirChartBottom}
+                  y={axisTickLabelY(upperAirHeightYFor, upperAirAxisLowM, upperAirChartTop, upperAirChartBottom)}
                   fontSize={AXIS_LABEL_FONT_SIZE}
                   fill="hsl(var(--chart-wave))"
                 >
-                  {Math.round(upperAirMin)}
+                  {Math.round(upperAirAxisLowM)}
                 </text>
                 {upperAirGustTicks.map((tick, i) => (
                   <text

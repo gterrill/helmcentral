@@ -13,6 +13,20 @@ import { cn } from '@/lib/utils'
 const AXIS_LABEL_FONT_SIZE = '10'
 const AXIS_LABEL_COLOR = 'hsl(var(--muted-foreground))'
 
+// Computes a y position for an axis tick label, nudging the top and bottom
+// ticks inward so the text isn't clipped by the chart edges. Deliberately
+// identical to forecast-drawer.tsx's axisTickLabelY - this chart sits directly
+// among the four there and has to read the same, and duplicating the six lines
+// is cheaper than a two-way import between two components that already have a
+// cycle through ForecastTideSection. See the axis-idiom rule block above
+// AXIS_LABEL_COLOR in forecast-drawer.tsx.
+function axisTickLabelY(yFor: (value: number) => number, value: number, top: number, bottom: number) {
+  const y = yFor(value)
+  if (Math.abs(y - top) < 0.5) return top + 8
+  if (Math.abs(y - bottom) < 0.5) return bottom - 2
+  return y + 3
+}
+
 const CHART_LEFT = 36
 const CHART_RIGHT_MARGIN = 20
 const CHART_TOP = 16
@@ -331,8 +345,12 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           onPointerMove={tideTooltip.onPointerMove}
           onPointerLeave={tideTooltip.onPointerLeave}
         >
-          <text x={6} y={CHART_TOP + 4} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMax.toFixed(1)} {unit}</text>
-          <text x={6} y={CHART_BOTTOM} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{yMin.toFixed(1)} {unit}</text>
+          {/* One axis, one series, so it takes that series' colour; and being
+              single-axis the unit lives in the section header ("Tide (m)"),
+              exactly as Wind and Wave do, leaving bare numbers here. Both are
+              positioned through the same yFor the curve is drawn with. */}
+          <text data-testid="forecast-tide-height-tick" x={6} y={axisTickLabelY(yFor, yMax, CHART_TOP, CHART_BOTTOM)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-wave))">{yMax.toFixed(1)}</text>
+          <text data-testid="forecast-tide-height-tick" x={6} y={axisTickLabelY(yFor, yMin, CHART_TOP, CHART_BOTTOM)} fontSize={AXIS_LABEL_FONT_SIZE} fill="hsl(var(--chart-wave))">{yMin.toFixed(1)}</text>
 
           <line x1={CHART_LEFT} y1={CHART_BOTTOM} x2={CHART_RIGHT} y2={CHART_BOTTOM} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
 
@@ -351,8 +369,11 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
             const aboveLine = y > CHART_TOP + 16
             return (
               <g key={extreme.time}>
+                {/* Bare number: the section header states the unit once
+                    ("Tide (m)"), so repeating it on every extreme and again in
+                    the legend said it three times for one scale. */}
                 <text x={x} y={aboveLine ? y - 8 : y + 14} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                  {toDisplay(extreme.heightM).toFixed(1)}{unit}
+                  {toDisplay(extreme.heightM).toFixed(1)}
                 </text>
                 <text x={x} y={CHART_BOTTOM + 15} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>{label}</text>
               </g>
@@ -374,7 +395,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
       </div>
 
       <p data-testid="forecast-tide-legend" className="mt-1 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Tide height ({unit})</span> · <span className="text-amber-600">●</span> low · <span className="text-gauge-secondary">●</span> high · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="vertical" color="hsl(var(--gauge-primary) / 0.7)" strokeWidth={1.5} dasharray="4 3" /> now</span>
+        <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Tide height</span> · <span className="text-amber-600">●</span> low · <span className="text-gauge-secondary">●</span> high · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch kind="vertical" color="hsl(var(--gauge-primary) / 0.7)" strokeWidth={1.5} dasharray="4 3" /> now</span>
       </p>
 
     </div>

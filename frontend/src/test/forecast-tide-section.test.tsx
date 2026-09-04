@@ -141,6 +141,20 @@ describe('ForecastTideSection', () => {
     expect(screen.queryByTestId('forecast-tide-unavailable')).not.toBeInTheDocument()
   })
 
+  // Tide is a single-axis chart, so it follows the same rule Wind ("Wind
+  // (kts)") and Wave ("Wave (m)") already do: the unit lives in the header and
+  // the ticks are bare numbers. One axis, one header, nothing to disambiguate.
+  it('carries the height unit in the header rather than on the axis ticks', () => {
+    mockedUseTideSettings.mockReturnValue(settingsState())
+    mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart() }))
+
+    const { rerender } = render(<ForecastTideSection isImperial={false} dayOffset={0} />)
+    expect(screen.getByText('Tide (m)')).toBeInTheDocument()
+
+    rerender(<ForecastTideSection isImperial dayOffset={0} />)
+    expect(screen.getByText('Tide (ft)')).toBeInTheDocument()
+  })
+
   it('toggles the inline station picker via "Change Station"', () => {
     mockedUseTideSettings.mockReturnValue(settingsState())
     mockedUseTideChart.mockReturnValue(chartState({ chart: buildChart() }))

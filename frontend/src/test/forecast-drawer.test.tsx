@@ -297,8 +297,13 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByText('11AM')).toBeInTheDocument()
     expect(screen.getByText('5:09PM')).toBeInTheDocument()
     expect(screen.getAllByText('Sunset').length).toBeGreaterThan(0)
-    expect(screen.getByText('11kts NE')).toBeInTheDocument()
-    expect(screen.getByText('12kts NE')).toBeInTheDocument()
+    // Each forecast hour still carries its own wind speed and direction. Wind
+    // now holds the tile's display slot, so the number and its "kts DIR"
+    // suffix are separate spans and no longer one text node.
+    const headlines = screen
+      .getAllByTestId('forecast-hour-headline')
+      .map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim())
+    expect(headlines).toEqual(['11kts NE', '12kts NE', 'Sunset'])
   })
 
   it('renders up to 10 day tabs', () => {
@@ -1444,8 +1449,12 @@ describe('ForecastDrawer chart y-axis framing', () => {
   const rampCloud = (baseF: number, spreadF: number) =>
     buildHourlyCloud().map((entry, idx) => ({ ...entry, temperatureF: baseF + (idx / 23) * spreadF }))
 
+  // Selected by testid rather than by "text ending in a degree unit": the
+  // Cloud chart is dual-axis, so its unit is now carried once per axis, on the
+  // top tick only ("17°C" over "16"), and a suffix filter would silently drop
+  // the bottom label and leave these span assertions reading one element.
   const tempAxisLabels = (chart: HTMLElement) =>
-    Array.from(chart.querySelectorAll('text')).filter((el) => /°[CF]$/.test(el.textContent ?? ''))
+    Array.from(chart.querySelectorAll('[data-testid="forecast-cloud-temp-tick"]'))
 
   it('frames a calm ten-day wind window well below the old fixed 30kt floor', () => {
     render(<ForecastDrawer forecast={windowDays(() => flatWind(8, 11))} loading={false} error={null} unit="metric" />)
@@ -1529,7 +1538,9 @@ describe('ForecastDrawer chart y-axis framing', () => {
 
     const chart = screen.getByTestId('forecast-cloud-chart')
     const labels = tempAxisLabels(chart)
-    expect(labels.map((el) => el.textContent)).toEqual(['17°C', '16°C'])
+    // Unit on the top tick only - this chart has two axes, so each states its
+    // own unit once rather than on every tick.
+    expect(labels.map((el) => el.textContent)).toEqual(['17°C', '16'])
 
     const highY = Number(labels[0].getAttribute('y'))
     const lowY = Number(labels[1].getAttribute('y'))
@@ -1875,6 +1886,95 @@ describe('ForecastDrawer upper-air axes', () => {
     expect(screen.queryByTestId('forecast-upper-air-legend')).not.toBeInTheDocument()
   })
 
+  // ADR 0071 section 2: a day is judged against the REST OF THE WINDOW, and
+  // flagged when it lands in the lowest quintile of it. The left axis used to
+  // print the drawn frame's own extremes - the series min/max plus 15%
+  // padding - which is an artefact of the drawing, and sits close enough to
+  // the real window to be misread as it. Since the swatch legend went, nothing
+  // on the page stated the window at all. The axis states it now.
+  it('states the window the days are judged against, not the drawn frame', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [1])}
+        // The series runs 5900 down to 5872, so the padded frame is
+        // 5867..5905 - deliberately different numbers from the window's
+        // 5835..5907, or this test could not tell the two apart.
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const heightTicks = screen.getAllByTestId('forecast-upper-air-height-tick')
+    expect(heightTicks.map((tick) => tick.textContent)).toEqual(['5907 m', '5835'])
+
+    // And positioned at the heights they name, on the same scale the trace is
+    // drawn with, rather than parked on the frame edge.
+    const PLOT_TOP = 35
+    const PLOT_BOTTOM = 125
+    const frameMin = 5872 - 5
+    const frameMax = 5900 + 5
+    const heightYFor = (value: number) =>
+      PLOT_TOP + (1 - (value - frameMin) / (frameMax - frameMin)) * (PLOT_BOTTOM - PLOT_TOP)
+    expect(Number(heightTicks[0].getAttribute('y'))).toBeCloseTo(heightYFor(5907) + 3, 1)
+    expect(Number(heightTicks[1].getAttribute('y'))).toBeCloseTo(heightYFor(5835) + 3, 1)
+  })
+
+  // A provider can return a series with no window - the contract's window is
+  // optional and lands absent rather than zeroed. There is no window to state
+  // then, so the axis falls back to the frame it actually draws.
+  it('falls back to the drawn frame when the provider reports no window', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={{ present: false, lowM: 0, highM: 0, lowQuintileM: 0 }}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    // 5872..5900, padded by 15% of the span with a 5m floor.
+    const heightTicks = screen.getAllByTestId('forecast-upper-air-height-tick')
+    expect(heightTicks.map((tick) => tick.textContent)).toEqual(['5905 m', '5867'])
+  })
+
+  // Moving the labels off the frame edge only works because the window is
+  // always inside the frame: the backend cuts the window from the DAILY MEANS
+  // (upperAirWindowFor over sortedPresentHeights) while the trace is the
+  // sub-daily samples those means average, so the window's low and high can
+  // never sit outside the series' own extremes, let alone outside them plus
+  // 15% padding. This pins that - it is what keeps a label from being drawn
+  // below the plot where nobody can read it.
+  it('keeps both window labels inside the drawn plot', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [1])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        // A window that could actually come off this series: daily means of
+        // sub-daily samples running 5900 down to 5872.
+        upperAirWindow={{ present: true, lowM: 5876, highM: 5896, lowQuintileM: 5878 }}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const heightTicks = screen.getAllByTestId('forecast-upper-air-height-tick')
+    expect(heightTicks.map((tick) => tick.textContent)).toEqual(['5896 m', '5876'])
+    for (const tick of heightTicks) {
+      const y = Number(tick.getAttribute('y'))
+      expect(y).toBeGreaterThanOrEqual(35)
+      expect(y).toBeLessThanOrEqual(125)
+    }
+  })
+
   // Same rule the wind and wave charts already use. A fixed 30kt floor renders
   // a 12kt window as a flat line hugging the bottom of a frame that has
   // nothing to do with it - which is exactly the bug a5f9348 fixed on the
@@ -1936,6 +2036,51 @@ describe('ForecastDrawer upper-air axes', () => {
     const gustTicks = screen.getAllByTestId('forecast-upper-air-gust-tick')
     expect(gustTicks.length).toBeGreaterThan(1)
     expect(gustTicks[gustTicks.length - 1].textContent).toMatch(/ kt$/)
+  })
+})
+
+// --- One axis idiom across all five charts (see the rule block above
+// --- AXIS_LABEL_COLOR in forecast-drawer.tsx) ---
+
+describe('ForecastDrawer cloud chart axes', () => {
+  const PLOT_TOP = 35
+  const PLOT_BOTTOM = 125
+
+  // Rule 1, ownership: the left axis describes one series - temperature - so
+  // it takes that series' colour, the same way the upper-air chart's two axes
+  // do. Rule 2, units: Cloud is dual-axis, so one <h4> cannot disambiguate the
+  // two scales and each axis carries its own unit - once, on its top tick, not
+  // on both.
+  it('colours the temperature axis in the temperature colour and states its unit once', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const ticks = screen.getAllByTestId('forecast-cloud-temp-tick')
+    // Rule 4, density: temperature is read as a range, so extremes only.
+    expect(ticks).toHaveLength(2)
+    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-temp))')).toBe(true)
+    expect(ticks[0].textContent).toMatch(/^-?\d+°C$/)
+    expect(ticks[1].textContent).toMatch(/^-?\d+$/)
+  })
+
+  // Rule 1 again on the right-hand axis, and rule 3: these two labels were
+  // still at a hardcoded y={40}/y={123} left over from an earlier scale, right
+  // only by coincidence. They go through the same axisTickLabelY the other
+  // axes use, over a precipYFor mapping [0, precipMax] onto the plot.
+  it('colours the precipitation axis in the precipitation colour and positions it on its own scale', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const ticks = screen.getAllByTestId('forecast-cloud-precip-tick')
+    expect(ticks).toHaveLength(2)
+    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-precip))')).toBe(true)
+    // Unit on the top tick only, matching the temperature axis opposite it.
+    expect(ticks[0].textContent).toMatch(/^\d+\.\d+mm$/)
+    expect(ticks[1].textContent).toBe('0')
+
+    // precipMax and 0 land on the frame edges, which is where axisTickLabelY's
+    // shared nudge (+8 off the top, -2 off the bottom) applies. The old
+    // hardcoded top label sat at 40, three pixels off what the scale says.
+    expect(Number(ticks[0].getAttribute('y'))).toBeCloseTo(PLOT_TOP + 8, 5)
+    expect(Number(ticks[1].getAttribute('y'))).toBeCloseTo(PLOT_BOTTOM - 2, 5)
   })
 })
 
@@ -2053,5 +2198,204 @@ describe('ForecastDrawer wind warning prominence', () => {
     // Its own block, not a run of text inside the summary paragraph.
     expect(notice.tagName).toBe('P')
     expect(notice.textContent).not.toContain("Today's hourly forecast")
+  })
+})
+
+// --- Visual weight follows consequence, not convention ---
+//
+// A passage decision turns on wind. Temperature is context. The page used to
+// allocate size the other way round: twelve hourly tiles each shouting a
+// near-identical temperature in a display face while the wind sat in the
+// smallest type in the tile, and a ten-chip stat row where every chip carried
+// exactly the same weight, so nothing could be found without reading all ten.
+//
+// These pin the ranking. Deliberately NO colour assertions: ADR 0071 section 2
+// rules out an invented wind threshold, and a window-relative one would light
+// up on a calm week. Size and position carry the ranking, nothing else.
+describe('ForecastDrawer visual weight', () => {
+  const chipFor = (testId: string) => screen.getByTestId(testId).parentElement as HTMLElement
+
+  it('ranks the decision stats above the reference stats in the same row', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        upperAirDays={[buildUpperAirDay('2026-06-14')]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    // Every testid the rest of this suite reads through still resolves to the
+    // same value - this is a re-ranking, not a rewrite of the data.
+    expect(screen.getByTestId('forecast-selected-wind')).toHaveTextContent('10.0 kts')
+    expect(screen.getByTestId('forecast-selected-gust')).toHaveTextContent('14.0 kts')
+    expect(screen.getByTestId('forecast-selected-precip')).toHaveTextContent('5%')
+    expect(screen.getByTestId('forecast-selected-humidity')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-selected-visibility')).toBeInTheDocument()
+
+    const wind = chipFor('forecast-selected-wind')
+    const gust = chipFor('forecast-selected-gust')
+    const upperAir = screen.getByTestId('forecast-upper-air-detail')
+
+    // Tier 1 keeps the chip treatment and gains weight.
+    for (const chip of [wind, gust, upperAir]) {
+      expect(chip.className).toMatch(/\btext-sm\b/)
+      expect(chip.className).toMatch(/\bbg-/)
+    }
+    // A stronger ground than the flat bg-muted/50 every chip used to share.
+    expect(wind.className).not.toMatch(/bg-muted\/50\b/)
+    expect(gust.className).not.toMatch(/bg-muted\/50\b/)
+
+    // Tier 2 drops the chip entirely: plain text, smallest step, muted.
+    const reference = [
+      chipFor('forecast-selected-precip'),
+      chipFor('forecast-selected-humidity'),
+      chipFor('forecast-selected-visibility'),
+    ]
+    for (const stat of reference) {
+      expect(stat.className).toMatch(/\btext-2xs\b/)
+      expect(stat.className).toMatch(/\btext-muted-foreground\b/)
+      expect(stat.className).not.toMatch(/\bbg-/)
+      expect(stat.className).not.toMatch(/\brounded\b/)
+    }
+
+    // Both tiers still live in one wrapping row, decisions first.
+    const row = wind.parentElement as HTMLElement
+    for (const stat of [gust, upperAir, ...reference]) {
+      expect(stat.parentElement).toBe(row)
+    }
+    const order = Array.from(row.children)
+    for (const stat of reference) {
+      expect(order.indexOf(stat)).toBeGreaterThan(order.indexOf(upperAir))
+    }
+
+    // Sunrise/sunset/moon keep their icons even without the chip ground.
+    const moon = screen.getByText('Moon').closest('span') as HTMLElement
+    expect(moon.className).toMatch(/\btext-2xs\b/)
+    expect(moon.querySelector('[aria-hidden]')).not.toBeNull()
+  })
+
+  // The 500mb chip already reads differently when the air aloft supports a
+  // surface low. Now that its whole tier sits on a stronger ground, that
+  // distinction has to survive rather than be swallowed by the new baseline.
+  it('keeps the 500mb chip distinct when the upper air supports a low', () => {
+    const props = {
+      forecast: [buildDay()],
+      upperAirSeries: buildUpperAirSeries(['2026-06-14'], (idx) => 5900 - idx * 4),
+      upperAirWindow: UPPER_AIR_WINDOW,
+      loading: false,
+      error: null,
+      unit: 'metric' as const,
+    }
+
+    const { unmount } = render(
+      <ForecastDrawer {...props} upperAirDays={[buildUpperAirDay('2026-06-14', { troughSupport: false })]} />,
+    )
+    const quiet = screen.getByTestId('forecast-upper-air-detail').className
+    unmount()
+
+    render(<ForecastDrawer {...props} upperAirDays={[buildUpperAirDay('2026-06-14', { troughSupport: true })]} />)
+    const trough = screen.getByTestId('forecast-upper-air-detail').className
+
+    expect(trough).not.toBe(quiet)
+    expect(trough).toMatch(/gauge-secondary/)
+    expect(quiet).not.toMatch(/gauge-secondary/)
+  })
+
+  it('gives the hourly tile display slot to wind, with temperature underneath', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={[
+          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' },
+        ]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const tile = screen.getByTestId('forecast-hour-tile')
+    const headline = within(tile).getByTestId('forecast-hour-headline')
+    const subline = within(tile).getByTestId('forecast-hour-subline')
+
+    // 11 kts big, "kts NE" small beside it; 72F -> 22 degrees on the line the
+    // wind used to occupy.
+    expect(headline).toHaveTextContent('11')
+    expect(headline.textContent).toContain('kts')
+    expect(headline.textContent).toContain('NE')
+    expect(headline.querySelector('.font-display.text-3xl')?.textContent).toBe('11')
+    expect(subline).toHaveTextContent('22°')
+    expect(subline.className).toMatch(/\btext-xs\b/)
+
+    // The Now marker survives the swap.
+    expect(tile.className).toMatch(/shadow-/)
+    expect(tile.querySelector('.bg-gauge-primary')).not.toBeNull()
+  })
+
+  it('keeps Sunset in the hourly display slot', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={[
+          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset' },
+        ]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const sunsetTile = screen.getAllByTestId('forecast-hour-tile')[1]
+    expect(within(sunsetTile).getByTestId('forecast-hour-headline')).toHaveTextContent('Sunset')
+    expect(within(sunsetTile).queryByTestId('forecast-hour-subline')).not.toBeInTheDocument()
+  })
+
+  // Wind only renders when the provider actually gave one. A forecast hour
+  // with no wind must not leave the biggest slot in the tile empty.
+  it('falls back to temperature in the display slot when an hour has no wind', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={[
+          { label: '2PM', condition: 'Clear', temperatureF: 70, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'forecast' },
+        ]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const tile = screen.getByTestId('forecast-hour-tile')
+    const headline = within(tile).getByTestId('forecast-hour-headline')
+    expect(headline).toHaveTextContent('21°')
+    expect(headline.textContent).not.toContain('kts')
+    expect(within(tile).queryByTestId('forecast-hour-subline')).not.toBeInTheDocument()
+  })
+
+  it('gives the day card display slot to wind, with the high/low underneath', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const card = screen.getByRole('button', { name: /Select forecast day Sunday Jun 14/i })
+    const headline = within(card).getByTestId('forecast-day-headline')
+    const subline = within(card).getByTestId('forecast-day-subline')
+
+    expect(headline.querySelector('.font-display.text-lg')?.textContent).toBe('10')
+    expect(headline.textContent).toContain('kts')
+    expect(headline.textContent).toContain('NE')
+
+    // 76F/62F -> 24 / 17, in the shape the card already used. The gaps
+    // between the parts are CSS, as they were before, so textContent runs
+    // them together.
+    expect(subline).toHaveTextContent(/^24\s*°C\s*\/\s*17$/)
+    expect(subline.className).toMatch(/\btext-2xs\b/)
+
+    // The rest of the card is untouched.
+    expect(within(card).getByText('Clear')).toBeInTheDocument()
+    expect(within(card).getByText('5% precip')).toBeInTheDocument()
   })
 })

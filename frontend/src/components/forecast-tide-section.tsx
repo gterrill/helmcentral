@@ -64,7 +64,10 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
     <div className="mt-3 rounded-md border bg-card/70 p-2">
       <div className="mb-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
         <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          <Waves size={13} className="text-gauge-secondary" /> Tide
+          {/* Tide is a single-axis chart, so the unit belongs here rather than
+              on the chart's ticks - the same rule Wind (kts) and Wave (m)
+              follow. See the axis-idiom rule block in forecast-drawer.tsx. */}
+          <Waves size={13} className="text-gauge-secondary" /> Tide ({isImperial ? 'ft' : 'm'})
         </h4>
         {(isCached || updatedAt) && (
           <p className="text-[11px] text-muted-foreground">

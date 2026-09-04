@@ -112,6 +112,77 @@ describe('TideChart', () => {
     expect(screen.queryByTestId('forecast-tide-unavailable')).not.toBeInTheDocument()
   })
 
+  // One axis, one series, so it takes that series' colour - the same rule the
+  // upper-air chart's two axes follow, and the reason the Cloud chart's left
+  // axis is temperature-coloured and its right one precipitation-coloured. The
+  // unit belongs in the section header (see forecast-tide-section.test.tsx),
+  // not repeated on both ticks, and both ticks are positioned through the same
+  // yFor the curve is drawn with rather than pinned at the frame edge.
+  it('labels the height axis in the tide colour, as bare numbers on the height scale', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const { container } = render(
+      <TideChart
+        chart={buildChart({
+          extremes: [
+            { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
+            { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 0.3, high: false },
+          ],
+        })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    const ticks = Array.from(container.querySelectorAll('[data-testid="forecast-tide-height-tick"]'))
+    expect(ticks).toHaveLength(2)
+    expect(ticks.every((tick) => tick.getAttribute('fill') === 'hsl(var(--chart-wave))')).toBe(true)
+    // Bare numbers - no "m"/"ft" on either tick.
+    expect(ticks.map((tick) => tick.textContent)).toEqual([
+      expect.stringMatching(/^-?\d+\.\d+$/),
+      expect.stringMatching(/^-?\d+\.\d+$/),
+    ])
+
+    // yMax/yMin land exactly on the frame edges, which is where the shared
+    // nudge (+8 off the top, -2 off the bottom) applies.
+    const CHART_TOP = 16
+    const CHART_BOTTOM = 125
+    expect(Number(ticks[0].getAttribute('y'))).toBeCloseTo(CHART_TOP + 8, 5)
+    expect(Number(ticks[1].getAttribute('y'))).toBeCloseTo(CHART_BOTTOM - 2, 5)
+  })
+
+  // The <h4> above this chart now states the unit ("Tide (m)"), so repeating
+  // it on every extreme label and again in the legend says it three times for
+  // one scale. The header carries it; these read as bare numbers.
+  it('states the height unit once, in the header, not on the extreme labels or legend', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    const { container } = render(
+      <TideChart
+        chart={buildChart({
+          extremes: [
+            { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
+            { time: new Date(2026, 5, 14, 18, 0, 0).toISOString(), heightM: 3.0, high: false },
+          ],
+        })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    // The per-extreme height labels, which the time labels below them never
+    // match (those are "5:00 AM").
+    const heights = Array.from(container.querySelectorAll('text'))
+      .map((el) => el.textContent ?? '')
+      .filter((text) => /^\d+\.\d+m?$/.test(text))
+    expect(heights).toContain('1.8')
+    expect(heights).toContain('3.0')
+    expect(heights.some((text) => text.endsWith('m'))).toBe(false)
+
+    expect(screen.getByTestId('forecast-tide-legend')).toHaveTextContent('Tide height')
+    expect(screen.getByTestId('forecast-tide-legend').textContent).not.toContain('Tide height (')
+  })
+
   it('shows the Now marker when the window contains the current time', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
