@@ -18,6 +18,7 @@ import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
 import { compassPointFor } from '@/lib/format'
 import { fahrenheitToCelsius } from '@/lib/units'
+import { formatDataAge, isStale } from '@/lib/staleness'
 
 interface ForecastDay {
   dayKey: string
@@ -313,49 +314,79 @@ function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; 
  * rather than the accidental hierarchy that came from each being built at a
  * different time.
  *
- * The span meter is the only structural difference between them, because span
- * is the only thing that actually differs. It also carries the argument
- * Surviving the Storm makes for the 500mb chart in the first place: you plan
- * on the fortnight, not on today, and the proportion is visible here without
- * anyone doing arithmetic.
+ * Span is the only thing that actually differs between them, and it is stated
+ * in words (spanLabel) rather than drawn. A meter used to sit in the header
+ * slot showing the same proportion as a bar, on the argument Surviving the
+ * Storm makes for the 500mb chart: you plan on the fortnight, not on today.
+ * The stale badge took that slot, because a panel that has stopped updating
+ * is a louder thing to say than how long its window is. Restoring the meter
+ * means finding it a second slot, not sharing this one.
  */
+/**
+ * Amber outline badge marking a feed that has stopped updating. Mirrors
+ * ui/tile.tsx's stale badge exactly (same classes, same "Stale {age}" text,
+ * same title) so the vocabulary for "this is frozen" reads the same whether
+ * it is a gauge tile or a forecast panel - the one difference is the named
+ * text-2xs scale step in place of tile.tsx's arbitrary 10px value, because
+ * this file's own guard test ('ForecastDrawer design tokens') forbids
+ * arbitrary bracketed font-size utilities and text-2xs already aliases to
+ * the same 10px in the Tailwind config.
+ */
+function ForecastStaleBadge({ testId, staleLabel }: { testId?: string; staleLabel?: string }) {
+  return (
+    <span
+      data-testid={testId}
+      title={staleLabel ? `No update for ${staleLabel}` : 'Source has stopped updating'}
+      className="ml-1 shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-2xs leading-none text-amber-600 dark:text-amber-400"
+    >
+      Stale{staleLabel ? ` ${staleLabel}` : ''}
+    </span>
+  )
+}
+
 function ForecastPanel({
   title,
   spanLabel,
-  spanDays,
-  maxSpanDays,
   intro,
   testId,
+  stale = false,
+  staleLabel,
   children,
 }: {
   title: string
   spanLabel: string
-  spanDays: number
-  maxSpanDays: number
   intro?: ReactNode
   testId?: string
+  /**
+   * The feed behind this panel has stopped updating. A three-day-old cached
+   * forecast must not render pixel-identical to a live one, so this panel
+   * gets the same loud, colour-blind-safe treatment as every stale Tile:
+   * an amber badge in the header and a grayscale body - never opacity, see
+   * the comment on the body wrapper below.
+   */
+  stale?: boolean
+  /** Age of the last update, already formatted (`1h 39m`). */
+  staleLabel?: string
   children: ReactNode
 }) {
-  // A floor, so the single-day panel still reads as a mark rather than as an
-  // empty track.
-  const spanPercent = maxSpanDays <= 0 ? 100 : Math.max(7, Math.min(100, Math.round((spanDays / maxSpanDays) * 100)))
-
   return (
     <section
       data-testid={testId}
-      className="overflow-hidden rounded-2xl border border-gauge-secondary/15 bg-[linear-gradient(180deg,hsl(var(--card)/0.96),hsl(var(--muted)/0.92))] shadow-[0_14px_32px_hsl(var(--gauge-secondary)/0.08)]"
+      className="rounded-2xl border border-gauge-secondary/15 bg-[linear-gradient(180deg,hsl(var(--card)/0.96),hsl(var(--muted)/0.92))] shadow-[0_14px_32px_hsl(var(--gauge-secondary)/0.08)]"
     >
-      <div className="border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,hsl(var(--gauge-primary)/0.10),hsl(var(--gauge-secondary)/0.08))] px-4 py-3.5">
+      {/* No overflow-hidden here (see the day-selector sticky fix below) - the
+          section's own background still respects rounded-2xl because
+          border-radius clips an element's own background/border painting
+          regardless of overflow. This header's background is a CHILD
+          element flush against the top edge, which border-radius does NOT
+          clip for free, so it carries its own rounded-t-2xl instead. */}
+      <div className="rounded-t-2xl border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,hsl(var(--gauge-primary)/0.10),hsl(var(--gauge-secondary)/0.08))] px-4 py-3.5">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground/70">{title}</h3>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="flex h-1 w-11 overflow-hidden rounded-full bg-gauge-secondary/20" aria-hidden>
-              <span
-                data-testid={testId ? `${testId}-span-meter` : undefined}
-                className="h-full rounded-full bg-gauge-secondary/60"
-                style={{ width: `${spanPercent}%` }}
-              />
-            </span>
+            {stale && (
+              <ForecastStaleBadge testId={testId ? `${testId}-stale-badge` : undefined} staleLabel={staleLabel} />
+            )}
             <span className="whitespace-nowrap text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
               {spanLabel}
             </span>
@@ -363,7 +394,12 @@ function ForecastPanel({
         </div>
         {intro && <div className="mt-2">{intro}</div>}
       </div>
-      {children}
+      {/* Grayscale only, never opacity - an opacity fade reads as "dim screen
+          in the sun," not "this feed is dead," and this is the system's
+          loudest state, not its quietest. Matches ui/tile.tsx's CardContent. */}
+      <div className={stale ? 'grayscale' : undefined} data-testid={testId ? `${testId}-body` : undefined}>
+        {children}
+      </div>
     </section>
   )
 }
@@ -586,6 +622,31 @@ export function formatRefreshAge(value: string | null | undefined, nowMs: number
   return `${elapsedHours} hours ago`
 }
 
+// Age of `updatedAt` in seconds, off the browser clock - the same math
+// formatRefreshAge already uses, so the freshness line and the stale badge
+// never disagree about how old a forecast is. Null when there's no
+// timestamp to measure, which isStale below treats as "unknown," not "stale."
+function ageSecondsFromUpdatedAt(value: string | null | undefined, nowMs: number): number | null {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return Math.max(0, (nowMs - parsed.getTime()) / 1000)
+}
+
+// Whether a forecast feed has gone stale. staleness.ts's 120s default is a
+// SignalK-refresh assumption (a boat instrument that publishes every few
+// seconds); a weather forecast's TTL runs from 15 minutes (WeatherKit) to 12
+// hours (BOM), so this derives the threshold from the feed's own TTL instead
+// - 3x it, so an on-time refresh that lands a poll cycle late doesn't trip
+// it. A missing ttlSeconds carries no cache-lifetime signal at all, so per
+// isStale's own reasoning that reads as "unknown," not "stale" - never
+// falling back to the SignalK default here would misreport a feed we simply
+// have no TTL for as frozen forever.
+function isForecastStale(ageSeconds: number | null, ttlSeconds: number | null | undefined): boolean {
+  if (ttlSeconds === null || ttlSeconds === undefined) return false
+  return isStale(ageSeconds, ttlSeconds * 3)
+}
+
 // Fallback used to compute a "selected day" when the forecast list is empty
 // (loading/error/no-data states). These states render one of the early
 // returns below instead of the chart JSX, so the values derived from this
@@ -693,6 +754,18 @@ export function ForecastDrawer({
   // case (rendered via ChartUnavailableMessage further below); an empty
   // hourlyWave array with no error is the legitimate "no data" case.
   const waveUnavailableDueToError = Boolean(waveError) && selectedWaveDay === null
+
+  // The forecast panel's defining risk: a frozen feed has to look visibly
+  // different from a live one, not pixel-identical. The weather feed drives
+  // both the Today and 10-Day panels; the wave feed carries its own TTL and
+  // can go stale on its own schedule, so it gets a second, independent check.
+  const weatherAgeSeconds = ageSecondsFromUpdatedAt(updatedAt, Date.now())
+  const weatherStale = isForecastStale(weatherAgeSeconds, ttlSeconds)
+  const weatherStaleLabel = weatherStale ? formatDataAge(weatherAgeSeconds) : undefined
+
+  const waveAgeSeconds = ageSecondsFromUpdatedAt(waveUpdatedAt, Date.now())
+  const waveStale = isForecastStale(waveAgeSeconds, waveTtlSeconds)
+  const waveStaleLabel = waveStale ? formatDataAge(waveAgeSeconds) : undefined
 
   const precipitationPct = selectedDay.precipitation
   const humidityPct = selectedDay.humidityPct
@@ -980,11 +1053,6 @@ export function ForecastDrawer({
     }
     return stops
   }, [upperAirTroughSpans, upperAirChartData.length])
-
-  // The three panels are scaled against the longest horizon actually on the
-  // page, so the meter stays meaningful when a boat has no upper-air plugin and
-  // ten days is the whole story.
-  const maxPanelSpanDays = Math.max(1, days.length, upperAirDayStarts.length)
 
   // The per-day charts sit two containers deep inside the extended panel; this
   // one sits directly in its own panel body, so it is wider and has to measure
@@ -1316,8 +1384,8 @@ export function ForecastDrawer({
           testId="forecast-panel-today"
           title="Today"
           spanLabel="Next 24 hours"
-          spanDays={1}
-          maxSpanDays={maxPanelSpanDays}
+          stale={weatherStale}
+          staleLabel={weatherStaleLabel}
           intro={
             <div className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
               <p>{summary ?? "Today's hourly forecast"}</p>
@@ -1395,70 +1463,100 @@ export function ForecastDrawer({
         testId="forecast-panel-extended"
         title="10-Day Forecast"
         spanLabel={`${days.length} days`}
-        spanDays={days.length}
-        maxSpanDays={maxPanelSpanDays}
+        stale={weatherStale}
+        staleLabel={weatherStaleLabel}
         intro={extendedIntro}
       >
         <div className="flex flex-col gap-3 px-2.5 py-2.5">
           <div ref={dayTabsRowRef} className="sticky top-0 z-10 flex gap-1.5 overflow-x-auto bg-card/95 pb-2 pt-0.5">
-            {days.map((day, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className={`min-w-[150px] shrink-0 rounded-lg border px-2.5 py-2 text-left transition-colors ${idx === selectedDayIndex ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background/40 hover:bg-muted/30'}`}
-                aria-label={`Select forecast day ${day.dayName} ${day.date}`}
-                onClick={() => selectDay(idx)}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-semibold uppercase text-muted-foreground">
-                      {idx === 0 ? 'Today' : day.dayName.slice(0, 3)}
-                    </p>
-                    <p className="text-2xs text-muted-foreground">{day.date}</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {upperAirFlaggedDayKeys.has(day.dayKey) && (
-                      <span
-                        data-testid="forecast-upper-air-marker"
-                        title="Upper air supports a surface low developing"
-                        aria-label="Upper air supports a surface low developing"
-                        className="rounded bg-gauge-secondary/20 px-1 py-0.5 text-2xs font-semibold uppercase tracking-wide text-gauge-secondary"
-                      >
-                        TROUGH
-                      </span>
-                    )}
-                    {getWeatherIcon(day.condition, 26)}
-                  </div>
-                </div>
+            {days.map((day, idx) => {
+              const isSelected = idx === selectedDayIndex
+              const hasTrough = upperAirFlaggedDayKeys.has(day.dayKey)
+              // Respect the null path rather than announcing a fabricated
+              // number - precipitation is `number | null` when the provider
+              // reported no chance-of-precipitation data at all.
+              const precipLabel =
+                day.precipitation === null
+                  ? 'no precipitation data'
+                  : `${Math.round(day.precipitation)}% chance of precipitation`
+              // A sighted user reads all of this off the card itself; a
+              // screen-reader user only gets what's in this string, so it
+              // carries the same decision-relevant content: wind (the
+              // display slot's own reasoning applies here too), condition,
+              // high/low, precipitation chance, and the trough flag.
+              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}`
 
-                <p className="mt-1 truncate text-2xs font-medium text-foreground">
-                  {day.condition}
-                </p>
+              return (
+                <button
+                  key={day.dayKey}
+                  type="button"
+                  className={`min-w-[150px] shrink-0 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                    isSelected
+                      ? 'border-primary/40 bg-card'
+                      : 'border-border/60 bg-background/40 hover:bg-muted/30'
+                  }`}
+                  aria-label={dayAriaLabel}
+                  aria-pressed={isSelected}
+                  onClick={() => selectDay(idx)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      {/* The selected day is carried by three cues, none of
+                          them colour alone: the card lifts to the card-white
+                          surface (the one tonal step this theme has), its
+                          border takes the chrome token, and the day name drops
+                          its muting. Type weight is the cue that survives
+                          direct sun, which a tint does not. */}
+                      <p className={`text-xs font-semibold uppercase ${isSelected ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        {idx === 0 ? 'Today' : day.dayName.slice(0, 3)}
+                      </p>
+                      <p className="text-2xs text-muted-foreground">{day.date}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {hasTrough && (
+                        <span
+                          data-testid="forecast-upper-air-marker"
+                          title="Upper air supports a surface low developing"
+                          aria-label="Upper air supports a surface low developing"
+                          role="img"
+                          className="rounded bg-gauge-secondary/20 px-1 py-0.5 text-2xs font-semibold uppercase tracking-wide text-gauge-secondary"
+                        >
+                          TROUGH
+                        </span>
+                      )}
+                      {getWeatherIcon(day.condition, 26)}
+                    </div>
+                  </div>
 
-                {/*
-                  * Same swap as the hourly tile: wind takes the display slot,
-                  * the high/low drops to the line under it. "17kts SE" and
-                  * "6kts SE" used to render identically in a 10px footer, so
-                  * the card said nothing about whether the day was sailable
-                  * until you read it. Size only - no threshold tinting, per
-                  * ADR 0071 section 2.
-                  */}
-                <div className="mt-1.5 flex items-center justify-between gap-2">
-                  <p data-testid="forecast-day-headline" className="flex items-baseline gap-1 whitespace-nowrap text-gauge-secondary">
-                    <span className="font-display text-lg leading-none">{Math.round(day.windSpeed)}</span>
-                    <span className="text-2xs">{windUnit} {day.windDirection}</span>
+                  <p className="mt-1 truncate text-2xs font-medium text-foreground">
+                    {day.condition}
                   </p>
-                  <p className="text-2xs text-muted-foreground">{day.precipitation === null ? '— precip' : `${Math.round(day.precipitation)}% precip`}</p>
-                </div>
 
-                <p data-testid="forecast-day-subline" className="mt-1 flex items-center gap-1 text-2xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">{Math.round(displayTemp(day.high))}</span>
-                  <span>{tempUnit}</span>
-                  <span>/</span>
-                  <span className="font-semibold">{Math.round(displayTemp(day.low))}</span>
-                </p>
-              </button>
-            ))}
+                  {/*
+                    * Same swap as the hourly tile: wind takes the display slot,
+                    * the high/low drops to the line under it. "17kts SE" and
+                    * "6kts SE" used to render identically in a 10px footer, so
+                    * the card said nothing about whether the day was sailable
+                    * until you read it. Size only - no threshold tinting, per
+                    * ADR 0071 section 2.
+                    */}
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <p data-testid="forecast-day-headline" className="flex items-baseline gap-1 whitespace-nowrap text-gauge-secondary">
+                      <span className="font-display text-lg leading-none">{Math.round(day.windSpeed)}</span>
+                      <span className="text-2xs">{windUnit} {day.windDirection}</span>
+                    </p>
+                    <p className="text-2xs text-muted-foreground">{day.precipitation === null ? '— precip' : `${Math.round(day.precipitation)}% precip`}</p>
+                  </div>
+
+                  <p data-testid="forecast-day-subline" className="mt-1 flex items-center gap-1 text-2xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">{Math.round(displayTemp(day.high))}</span>
+                    <span>{tempUnit}</span>
+                    <span>/</span>
+                    <span className="font-semibold">{Math.round(displayTemp(day.low))}</span>
+                  </p>
+                </button>
+              )
+            })}
           </div>
 
           <div ref={detailsCardRef} className="rounded-lg border bg-background/60 p-3">
@@ -1855,6 +1953,11 @@ export function ForecastDrawer({
               <div className="mb-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
                 <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   <Waves size={13} className="text-gauge-secondary" /> Wave (m)
+                  {/* The wave feed carries its own TTL and can go stale on a
+                      different schedule than the weather feed the panel-level
+                      badge above tracks, so it gets its own independent
+                      amber marker here rather than inheriting that state. */}
+                  {waveStale && <ForecastStaleBadge testId="forecast-wave-stale-badge" staleLabel={waveStaleLabel} />}
                 </h4>
                 {(waveIsCached || waveUpdatedAt) && (
                   <p data-testid="forecast-wave-refresh-meta" className="text-xs text-muted-foreground">
@@ -1864,211 +1967,213 @@ export function ForecastDrawer({
                   </p>
                 )}
               </div>
-              {waveLoading ? (
-                <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-loading">
-                  Loading wave forecast...
-                </p>
-              ) : waveUnavailableDueToError ? (
-                <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
-              ) : waveHourly.length > 0 ? (
-                <>
-                  {(() => {
-                    const baseSummary = selectedWaveDay?.waveSummary
-                    if (!baseSummary) return null
-                    if (waveSeaTemperatureF === null) {
-                      return <p className="mb-2 text-base text-foreground/80">{baseSummary}</p>
-                    }
-                    const seaTempDisplay = `${Math.round(displayTemp(waveSeaTemperatureF))}${tempUnit}`
-                    const trimmed = baseSummary.replace(/\.$/, '')
-                    const summaryWithTemp = `${trimmed} and sea surface temperature of ${seaTempDisplay}.`
-                    return <p className="mb-2 text-base text-foreground/80">{summaryWithTemp}</p>
-                  })()}
-                  {wavePeakHeightM > 0 && (
-                    <p data-testid="forecast-wave-largest" className="mb-2 text-sm text-muted-foreground">
-                      Largest wave you are likely to meet: {(wavePeakHeightM * HIGHEST_WAVE_MULTIPLE).toFixed(1)} m.
-                      Roughly one wave in seven reaches the significant height.
-                    </p>
-                  )}
-                  {waveIndicatorMessages.length > 0 && (
-                    <ul
-                      data-testid="forecast-wave-indicators"
-                      className="mb-2 space-y-1 rounded border border-gauge-secondary/40 bg-muted/25 p-2 text-sm text-foreground/90"
-                    >
-                      {waveIndicatorMessages.map((message) => (
-                        <li key={message} className="flex items-start gap-1.5">
-                          <Waves size={12} className="mt-0.5 shrink-0 text-gauge-secondary" aria-hidden />
-                          <span>{message}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <p data-testid="forecast-wave-key" className="mb-2 text-sm text-muted-foreground">
-                    Arrows show the direction the swell is heading, with its period in seconds below each.
+              <div data-testid="forecast-wave-body" className={waveStale ? 'grayscale' : undefined}>
+                {waveLoading ? (
+                  <p className="py-6 text-center text-xs text-muted-foreground" data-testid="forecast-wave-loading">
+                    Loading wave forecast...
                   </p>
-                  <div className="relative">
-                    {waveTooltipEntry && (
-                      <ChartTooltipBubble
-                        pixelX={waveTooltip.tooltipPixelX ?? 0}
-                        time={waveTooltipEntry.label}
-                        primary={`${waveTooltipEntry.waveHeightM.toFixed(1)} m`}
-                        secondary={`Swell ${waveTooltipEntry.swellWaveHeightM.toFixed(1)}m from ${compassLabel(waveTooltipEntry.waveDirectionDeg)} · Chop ${waveTooltipEntry.windWaveHeightM.toFixed(1)}m${
-                          waveTooltipEntry.steepnessBand ? ` · ${formatSteepnessRatio(waveTooltipEntry.steepnessRatio)} ${waveTooltipEntry.steepnessBand}` : ''
-                        }`}
-                      />
+                ) : waveUnavailableDueToError ? (
+                  <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
+                ) : waveHourly.length > 0 ? (
+                  <>
+                    {(() => {
+                      const baseSummary = selectedWaveDay?.waveSummary
+                      if (!baseSummary) return null
+                      if (waveSeaTemperatureF === null) {
+                        return <p className="mb-2 text-base text-foreground/80">{baseSummary}</p>
+                      }
+                      const seaTempDisplay = `${Math.round(displayTemp(waveSeaTemperatureF))}${tempUnit}`
+                      const trimmed = baseSummary.replace(/\.$/, '')
+                      const summaryWithTemp = `${trimmed} and sea surface temperature of ${seaTempDisplay}.`
+                      return <p className="mb-2 text-base text-foreground/80">{summaryWithTemp}</p>
+                    })()}
+                    {wavePeakHeightM > 0 && (
+                      <p data-testid="forecast-wave-largest" className="mb-2 text-sm text-muted-foreground">
+                        Largest wave you are likely to meet: {(wavePeakHeightM * HIGHEST_WAVE_MULTIPLE).toFixed(1)} m.
+                        Roughly one wave in seven reaches the significant height.
+                      </p>
                     )}
-                    <div
-                      data-testid="forecast-wave-chart"
-                      className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
-                      style={{ width: forecastChartWidth }}
-                    >
-                      <ComposedChart width={forecastChartWidth} height={175} margin={waveChartMargin}>
-                        <XAxis
-                          dataKey="hourOfDay"
-                          type="number"
-                          domain={[0, 23]}
-                          allowDataOverflow
-                          ticks={[0, 6, 12, 18]}
-                          tickFormatter={(value: number) => waveLabelByHour.get(value) ?? ''}
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fontSize: Number(AXIS_LABEL_FONT_SIZE), fill: AXIS_LABEL_COLOR }}
-                          height={RECHARTS_XAXIS_HEIGHT}
-                        />
-                        <YAxis domain={[0, waveMax]} hide />
-                        <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
-                        <Area
-                          data={waveChartData}
-                          dataKey="waveHeightM"
-                          type="monotone"
-                          isAnimationActive={false}
-                          dot={false}
-                          stroke="none"
-                          fill={`url(#${waveAreaGradientId})`}
-                        />
-                        <Line
-                          data={waveChartData}
-                          dataKey="swellWaveHeightM"
-                          type="monotone"
-                          isAnimationActive={false}
-                          dot={false}
-                          stroke="hsl(var(--chart-swell) / 0.85)"
-                          strokeWidth={1.5}
-                          strokeDasharray="2 3"
-                        />
-                        <Line
-                          data={waveChartData}
-                          dataKey="windWaveHeightM"
-                          type="monotone"
-                          isAnimationActive={false}
-                          dot={false}
-                          stroke="hsl(var(--chart-gust) / 0.85)"
-                          strokeWidth={1.5}
-                          strokeDasharray="4 3"
-                        />
-                        <Line
-                          data={waveChartData}
-                          dataKey="waveHeightM"
-                          type="monotone"
-                          isAnimationActive={false}
-                          dot={false}
-                          stroke={waveSteepnessStops.length > 0 ? `url(#${waveSteepnessGradientId})` : 'hsl(var(--chart-wave) / 0.9)'}
-                          strokeWidth={2.4}
-                        />
-                        <Customized
-                          component={() => (
-                            <>
-                              {waveHourTicks.map(({ entry, idx }) => {
-                                const x = hourlyXForHour(entry.hourOfDay)
-                                return (
-                                  <g key={idx}>
-                                    <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
-                                    {/* Period and steepness share one baseline: the plot starts at
-                                        HOURLY_CHART_TOP (35) and a second row would land inside it. */}
-                                    <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                                      {entry.wavePeriodS.toFixed(1)}s
-                                      {formatSteepnessRatio(entry.steepnessRatio) && (
-                                        <tspan dx={5}>{formatSteepnessRatio(entry.steepnessRatio)}</tspan>
-                                      )}
-                                    </text>
-                                  </g>
-                                )
-                              })}
-                            </>
-                          )}
-                        />
-                      </ComposedChart>
-
-                      <svg
-                        ref={waveTooltip.svgRef}
-                        viewBox={`0 0 ${forecastChartWidth} 175`}
-                        preserveAspectRatio="none"
-                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        tabIndex={0}
-                        role="img"
-                        aria-label={`Wave height for ${selectedDay.dayName}, hourly. Use arrow keys to read values.`}
-                        onPointerDown={waveTooltip.onPointerDown}
-                        onPointerMove={waveTooltip.onPointerMove}
-                        onPointerLeave={waveTooltip.onPointerLeave}
-                        onKeyDown={waveTooltip.onKeyDown}
-                        onFocus={waveTooltip.onFocus}
+                    {waveIndicatorMessages.length > 0 && (
+                      <ul
+                        data-testid="forecast-wave-indicators"
+                        className="mb-2 space-y-1 rounded border border-gauge-secondary/40 bg-muted/25 p-2 text-sm text-foreground/90"
                       >
-                        <defs>
-                          <linearGradient id={waveAreaGradientId} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="hsl(var(--chart-wave))" stopOpacity="0.28" />
-                            <stop offset="100%" stopColor="hsl(var(--chart-wave))" stopOpacity="0.02" />
-                          </linearGradient>
-                          <linearGradient
-                            id={waveSteepnessGradientId}
-                            gradientUnits="userSpaceOnUse"
-                            x1={hourlyChartLeft}
-                            y1="0"
-                            x2={hourlyChartRight}
-                            y2="0"
-                          >
-                            {waveSteepnessStops.map((stop) => (
-                              <stop
-                                key={stop.key}
-                                data-testid="forecast-wave-steepness-stop"
-                                data-band={stop.band}
-                                offset={`${stop.offset * 100}%`}
-                                stopColor={stop.colour}
-                              />
-                            ))}
-                          </linearGradient>
-                        </defs>
-                        {/*
-                          * Every built tick gets a label. The old
-                          * Number.isInteger filter was right only for the
-                          * fixed 0-3m frame it was written against; on a
-                          * small frame it left [0, 1] and nothing else.
-                          * waveTickStep already picks 1m ticks once the
-                          * window goes past 2m, so integers-only falls out
-                          * of the step rather than out of a filter.
-                          */}
-                        {waveAxisTicks.map((tick) => (
-                          <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
-                            {tick}
-                          </text>
+                        {waveIndicatorMessages.map((message) => (
+                          <li key={message} className="flex items-start gap-1.5">
+                            <Waves size={12} className="mt-0.5 shrink-0 text-gauge-secondary" aria-hidden />
+                            <span>{message}</span>
+                          </li>
                         ))}
-                        <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
-
-                        {waveTooltipEntry && waveTooltipEntry.hourOfDay >= 0 && (
-                          <ChartTooltipMarker
-                            x={hourlyXForHour(waveTooltipEntry.hourOfDay)}
-                            y={waveYFor(Math.max(0, waveTooltipEntry.waveHeightM))}
-                            color="hsl(var(--chart-wave) / 0.9)"
+                      </ul>
+                    )}
+                    <p data-testid="forecast-wave-key" className="mb-2 text-sm text-muted-foreground">
+                      Arrows show the direction the swell is heading, with its period in seconds below each.
+                    </p>
+                    <div className="relative">
+                      {waveTooltipEntry && (
+                        <ChartTooltipBubble
+                          pixelX={waveTooltip.tooltipPixelX ?? 0}
+                          time={waveTooltipEntry.label}
+                          primary={`${waveTooltipEntry.waveHeightM.toFixed(1)} m`}
+                          secondary={`Swell ${waveTooltipEntry.swellWaveHeightM.toFixed(1)}m from ${compassLabel(waveTooltipEntry.waveDirectionDeg)} · Chop ${waveTooltipEntry.windWaveHeightM.toFixed(1)}m${
+                            waveTooltipEntry.steepnessBand ? ` · ${formatSteepnessRatio(waveTooltipEntry.steepnessRatio)} ${waveTooltipEntry.steepnessBand}` : ''
+                          }`}
+                        />
+                      )}
+                      <div
+                        data-testid="forecast-wave-chart"
+                        className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+                        style={{ width: forecastChartWidth }}
+                      >
+                        <ComposedChart width={forecastChartWidth} height={175} margin={waveChartMargin}>
+                          <XAxis
+                            dataKey="hourOfDay"
+                            type="number"
+                            domain={[0, 23]}
+                            allowDataOverflow
+                            ticks={[0, 6, 12, 18]}
+                            tickFormatter={(value: number) => waveLabelByHour.get(value) ?? ''}
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fontSize: Number(AXIS_LABEL_FONT_SIZE), fill: AXIS_LABEL_COLOR }}
+                            height={RECHARTS_XAXIS_HEIGHT}
                           />
-                        )}
-                      </svg>
+                          <YAxis domain={[0, waveMax]} hide />
+                          <CartesianGrid horizontal vertical={false} stroke="hsl(var(--chart-grid) / 0.12)" />
+                          <Area
+                            data={waveChartData}
+                            dataKey="waveHeightM"
+                            type="monotone"
+                            isAnimationActive={false}
+                            dot={false}
+                            stroke="none"
+                            fill={`url(#${waveAreaGradientId})`}
+                          />
+                          <Line
+                            data={waveChartData}
+                            dataKey="swellWaveHeightM"
+                            type="monotone"
+                            isAnimationActive={false}
+                            dot={false}
+                            stroke="hsl(var(--chart-swell) / 0.85)"
+                            strokeWidth={1.5}
+                            strokeDasharray="2 3"
+                          />
+                          <Line
+                            data={waveChartData}
+                            dataKey="windWaveHeightM"
+                            type="monotone"
+                            isAnimationActive={false}
+                            dot={false}
+                            stroke="hsl(var(--chart-gust) / 0.85)"
+                            strokeWidth={1.5}
+                            strokeDasharray="4 3"
+                          />
+                          <Line
+                            data={waveChartData}
+                            dataKey="waveHeightM"
+                            type="monotone"
+                            isAnimationActive={false}
+                            dot={false}
+                            stroke={waveSteepnessStops.length > 0 ? `url(#${waveSteepnessGradientId})` : 'hsl(var(--chart-wave) / 0.9)'}
+                            strokeWidth={2.4}
+                          />
+                          <Customized
+                            component={() => (
+                              <>
+                                {waveHourTicks.map(({ entry, idx }) => {
+                                  const x = hourlyXForHour(entry.hourOfDay)
+                                  return (
+                                    <g key={idx}>
+                                      <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
+                                      {/* Period and steepness share one baseline: the plot starts at
+                                          HOURLY_CHART_TOP (35) and a second row would land inside it. */}
+                                      <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                                        {entry.wavePeriodS.toFixed(1)}s
+                                        {formatSteepnessRatio(entry.steepnessRatio) && (
+                                          <tspan dx={5}>{formatSteepnessRatio(entry.steepnessRatio)}</tspan>
+                                        )}
+                                      </text>
+                                    </g>
+                                  )
+                                })}
+                              </>
+                            )}
+                          />
+                        </ComposedChart>
+
+                        <svg
+                          ref={waveTooltip.svgRef}
+                          viewBox={`0 0 ${forecastChartWidth} 175`}
+                          preserveAspectRatio="none"
+                          className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          tabIndex={0}
+                          role="img"
+                          aria-label={`Wave height for ${selectedDay.dayName}, hourly. Use arrow keys to read values.`}
+                          onPointerDown={waveTooltip.onPointerDown}
+                          onPointerMove={waveTooltip.onPointerMove}
+                          onPointerLeave={waveTooltip.onPointerLeave}
+                          onKeyDown={waveTooltip.onKeyDown}
+                          onFocus={waveTooltip.onFocus}
+                        >
+                          <defs>
+                            <linearGradient id={waveAreaGradientId} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="hsl(var(--chart-wave))" stopOpacity="0.28" />
+                              <stop offset="100%" stopColor="hsl(var(--chart-wave))" stopOpacity="0.02" />
+                            </linearGradient>
+                            <linearGradient
+                              id={waveSteepnessGradientId}
+                              gradientUnits="userSpaceOnUse"
+                              x1={hourlyChartLeft}
+                              y1="0"
+                              x2={hourlyChartRight}
+                              y2="0"
+                            >
+                              {waveSteepnessStops.map((stop) => (
+                                <stop
+                                  key={stop.key}
+                                  data-testid="forecast-wave-steepness-stop"
+                                  data-band={stop.band}
+                                  offset={`${stop.offset * 100}%`}
+                                  stopColor={stop.colour}
+                                />
+                              ))}
+                            </linearGradient>
+                          </defs>
+                          {/*
+                            * Every built tick gets a label. The old
+                            * Number.isInteger filter was right only for the
+                            * fixed 0-3m frame it was written against; on a
+                            * small frame it left [0, 1] and nothing else.
+                            * waveTickStep already picks 1m ticks once the
+                            * window goes past 2m, so integers-only falls out
+                            * of the step rather than out of a filter.
+                            */}
+                          {waveAxisTicks.map((tick) => (
+                            <text key={tick} x={6} y={axisTickLabelY(waveYFor, tick, waveChartTop, waveChartBottom)} fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                              {tick}
+                            </text>
+                          ))}
+                          <line x1={hourlyChartLeft} y1={waveChartBottom} x2={hourlyChartRight} y2={waveChartBottom} stroke="hsl(var(--chart-grid) / 0.25)" strokeWidth="1" />
+
+                          {waveTooltipEntry && waveTooltipEntry.hourOfDay >= 0 && (
+                            <ChartTooltipMarker
+                              x={hourlyXForHour(waveTooltipEntry.hourOfDay)}
+                              y={waveYFor(Math.max(0, waveTooltipEntry.waveHeightM))}
+                              color="hsl(var(--chart-wave) / 0.9)"
+                            />
+                          )}
+                        </svg>
+                      </div>
                     </div>
-                  </div>
-                  <p data-testid="forecast-wave-legend" className="mt-1 text-2xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Total wave height (m)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.85)" strokeWidth={1.5} dasharray="4 3" /> Wind wave (chop)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-swell) / 0.85)" strokeWidth={1.5} dasharray="2 3" /> Swell</span>
-                  </p>
-                </>
-              ) : (
-                <ChartUnavailableMessage testId="forecast-wave-unavailable" message="Wave forecast unavailable for this day" />
-              )}
+                    <p data-testid="forecast-wave-legend" className="mt-1 text-2xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-wave) / 0.9)" strokeWidth={2.4} /> Total wave height (m)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-gust) / 0.85)" strokeWidth={1.5} dasharray="4 3" /> Wind wave (chop)</span> · <span className="inline-flex items-center gap-1 align-middle"><LegendSwatch color="hsl(var(--chart-swell) / 0.85)" strokeWidth={1.5} dasharray="2 3" /> Swell</span>
+                    </p>
+                  </>
+                ) : (
+                  <ChartUnavailableMessage testId="forecast-wave-unavailable" message="Wave forecast unavailable for this day" />
+                )}
+              </div>
             </div>
 
 
@@ -2083,8 +2188,9 @@ export function ForecastDrawer({
           testId="forecast-panel-upper-air"
           title={'Upper Air \u00b7 500mb'}
           spanLabel={`${upperAirDayStarts.length} days`}
-          spanDays={upperAirDayStarts.length}
-          maxSpanDays={maxPanelSpanDays}
+          // No freshness signal is wired for the upper-air provider today
+          // (no updatedAt/ttlSeconds on this feed), so this stays non-stale
+          // rather than guessing at an age it doesn't have.
           intro={
             <p className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
               Upper-level troughs feed surface lows. Expect stronger surface winds 24 to 48 hours later when heights drop into the shaded zone.

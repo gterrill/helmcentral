@@ -1451,31 +1451,235 @@ describe('ForecastDrawer panel hierarchy', () => {
     expect(screen.queryByTestId('forecast-panel-upper-air')).not.toBeInTheDocument()
   })
 
-  // The span meter is the only thing separating the three panels structurally,
-  // so it has to actually track the horizon each one covers.
-  it('scales each span meter to the horizon its panel covers', () => {
-    const dayKeys = Array.from({ length: 16 }, (_, i) => `2026-06-${String(14 + i).padStart(2, '0')}`)
+  // The decorative span meter that used to live here encoded nothing the
+  // adjacent spanLabel text didn't already say, and it sat in the exact slot
+  // the panel-level stale badge needed - see 'ForecastDrawer panel staleness'
+  // below for its replacement.
+})
+
+// The product's stated defining risk is "a frozen dashboard looks exactly
+// like a calm night." Every gauge Tile grayscales and badges itself when its
+// feed dies; ForecastPanel is a bespoke card that split off from Tile and
+// had to grow the same machinery back rather than silently having none.
+describe('ForecastDrawer panel staleness', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-14T12:30:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('shows no stale badge and no grayscale for a fresh forecast', () => {
     render(
       <ForecastDrawer
-        forecast={dayKeys.slice(0, 10).map((dayKey) => buildDay({ dayKey, date: dayKey.slice(5), dayName: 'Sunday' }))}
+        forecast={[buildDay()]}
         hourlyToday={buildHourlyToday()}
-        upperAirDays={dayKeys.map((dayKey) => buildUpperAirDay(dayKey))}
-        upperAirSeries={buildUpperAirSeries(dayKeys, (idx) => 5900 - idx)}
-        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+        updatedAt="2026-06-14T12:29:00Z"
+        ttlSeconds={900}
+      />,
+    )
+
+    expect(screen.queryByTestId('forecast-panel-today-stale-badge')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-panel-extended-stale-badge')).not.toBeInTheDocument()
+    expect(screen.getByTestId('forecast-panel-today-body')).not.toHaveClass('grayscale')
+    expect(screen.getByTestId('forecast-panel-extended-body')).not.toHaveClass('grayscale')
+  })
+
+  // 900s TTL -> 2700s (45min) threshold. 50 minutes old clears it.
+  it('shows the stale badge and grayscales the body once the forecast outlives 3x its TTL', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={buildHourlyToday()}
+        loading={false}
+        error={null}
+        unit="metric"
+        updatedAt="2026-06-14T11:40:00Z"
+        ttlSeconds={900}
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-panel-today-stale-badge')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-panel-today-body')).toHaveClass('grayscale')
+    expect(screen.getByTestId('forecast-panel-extended-stale-badge')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-panel-extended-body')).toHaveClass('grayscale')
+
+    // Grayscale, never opacity - a faded panel reads as "dim screen in the
+    // sun," not "this feed is dead."
+    expect(screen.getByTestId('forecast-panel-today-body')).not.toHaveClass('opacity-50')
+  })
+
+  // A missing TTL is an absence of evidence, not evidence of staleness -
+  // isStale's own documented reasoning, which this must not override with a
+  // borrowed SignalK default.
+  it('does not mark a feed stale when ttlSeconds is absent, no matter its age', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={buildHourlyToday()}
+        loading={false}
+        error={null}
+        unit="metric"
+        updatedAt="2026-06-10T00:00:00Z"
+        ttlSeconds={null}
+      />,
+    )
+
+    expect(screen.queryByTestId('forecast-panel-today-stale-badge')).not.toBeInTheDocument()
+    expect(screen.getByTestId('forecast-panel-today-body')).not.toHaveClass('grayscale')
+  })
+
+  it('carries the age in the badge, formatted the same compact way every other stale Tile uses', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={buildHourlyToday()}
+        loading={false}
+        error={null}
+        unit="metric"
+        updatedAt="2026-06-14T11:40:00Z"
+        ttlSeconds={900}
+      />,
+    )
+
+    const badge = screen.getByTestId('forecast-panel-today-stale-badge')
+    expect(badge).toHaveTextContent('Stale 50m')
+    expect(badge).toHaveAttribute('title', 'No update for 50m')
+  })
+
+  // The wave card carries its own TTL and can die on a schedule independent
+  // of the weather feed the panel-level badge above tracks.
+  it('flags the wave section on its own TTL, independently of a fresh weather feed', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay()]}
+        loading={false}
+        error={null}
+        unit="metric"
+        updatedAt="2026-06-14T12:29:00Z"
+        ttlSeconds={900}
+        waveUpdatedAt="2026-06-14T00:00:00Z"
+        waveTtlSeconds={3600}
+      />,
+    )
+
+    expect(screen.queryByTestId('forecast-panel-extended-stale-badge')).not.toBeInTheDocument()
+    expect(screen.getByTestId('forecast-panel-extended-body')).not.toHaveClass('grayscale')
+
+    expect(screen.getByTestId('forecast-wave-stale-badge')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-wave-body')).toHaveClass('grayscale')
+  })
+})
+
+// Task 2: the day strip is the only control in the panel and drives four
+// charts 800-2000px below it - it has to actually stick, mark its selection
+// with something other than a 5% colour tint, and be usable non-visually.
+describe('ForecastDrawer day selector', () => {
+  it('exposes the selected day via aria-pressed and updates it on click', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay(), buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday' })]}
         loading={false}
         error={null}
         unit="metric"
       />,
     )
 
-    const pct = (testId: string) =>
-      Number.parseFloat(screen.getByTestId(`${testId}-span-meter`).style.width)
+    const tabs = screen.getAllByRole('button', { name: /Select forecast day/i })
+    expect(tabs[0]).toHaveAttribute('aria-pressed', 'true')
+    expect(tabs[1]).toHaveAttribute('aria-pressed', 'false')
 
-    expect(pct('forecast-panel-upper-air')).toBe(100)
-    expect(pct('forecast-panel-extended')).toBeCloseTo(63, 0)
-    // Floored rather than 6%, so a single day still reads as a mark.
-    expect(pct('forecast-panel-today')).toBe(7)
-    expect(pct('forecast-panel-today')).toBeLessThan(pct('forecast-panel-extended'))
+    fireEvent.click(tabs[1])
+
+    expect(tabs[0]).toHaveAttribute('aria-pressed', 'false')
+    expect(tabs[1]).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('carries wind, condition and precipitation in the accessible name', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay({ windSpeed: 22, windDirection: 'SW', condition: 'Cloudy', precipitation: 85 })]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const tab = screen.getByRole('button', { name: /Select forecast day/i })
+    expect(tab).toHaveAccessibleName(/22 kts SW/)
+    expect(tab).toHaveAccessibleName(/Cloudy/)
+    expect(tab).toHaveAccessibleName(/85% chance of precipitation/)
+    expect(tab).toHaveAccessibleName(/high \d+.*low \d+/)
+  })
+
+  // precipitation is `number | null` - announcing a fabricated 0% would be
+  // worse than saying nothing.
+  it('announces missing precipitation data rather than a fabricated number', () => {
+    render(<ForecastDrawer forecast={[buildDay({ precipitation: null })]} loading={false} error={null} unit="metric" />)
+
+    const tab = screen.getByRole('button', { name: /Select forecast day/i })
+    expect(tab).toHaveAccessibleName(/no precipitation data/)
+    expect(tab).not.toHaveAccessibleName(/null/)
+  })
+
+  it('exposes the trough marker to assistive tech via an image role, and names it in the day label', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay(), buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday' })]}
+        upperAirDays={[
+          buildUpperAirDay('2026-06-14', { troughSupport: false }),
+          buildUpperAirDay('2026-06-15', { troughSupport: true }),
+        ]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-upper-air-marker')).toHaveAttribute('role', 'img')
+
+    const flaggedTab = screen.getByRole('button', { name: /Select forecast day Monday Jun 15/i })
+    expect(flaggedTab).toHaveAccessibleName(/upper air trough/)
+  })
+
+  it('marks the selected day with a non-colour indicator, not colour alone', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay(), buildDay({ dayKey: '2026-06-15', date: 'Jun 15', dayName: 'Monday' })]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const tabs = screen.getAllByRole('button', { name: /Select forecast day/i })
+
+    // Selection is carried by a tonal surface step and an un-muted day name,
+    // not by a coloured bar: the board is flat and near-monochrome, and type
+    // weight is the cue that survives direct sun where a tint does not.
+    expect(tabs[0].className).toMatch(/bg-card/)
+    expect(tabs[1].className).not.toMatch(/bg-card/)
+
+    const selectedName = within(tabs[0]).getByText('Today')
+    const unselectedName = within(tabs[1]).getByText('Mon')
+    expect(selectedName.className).toMatch(/text-foreground/)
+    expect(unselectedName.className).toMatch(/text-muted-foreground/)
+  })
+
+  // overflow-hidden on the panel section made it a scroll container of its
+  // own, so the day row's `sticky top-0` stuck to a box that never scrolls
+  // instead of the real scrollport - it never visibly stuck at all.
+  it('keeps the extended panel free of overflow-hidden so its sticky day row can actually engage', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const panel = screen.getByTestId('forecast-panel-extended')
+    expect(panel.className).not.toMatch(/\boverflow-hidden\b/)
   })
 })
 
