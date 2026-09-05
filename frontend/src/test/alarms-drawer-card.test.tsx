@@ -32,13 +32,14 @@ function makeAlarm(overrides: Partial<ActiveAlarm> = {}): ActiveAlarm {
 }
 
 function renderDrawer(alarms: ActiveAlarm[]) {
-  render(
+  const { container } = render(
     <AlarmsDrawer
       alarms={alarms}
       onAcknowledge={vi.fn().mockResolvedValue(undefined)}
       onSilence={vi.fn().mockResolvedValue(undefined)}
     />,
   )
+  return container
 }
 
 describe('AlarmsDrawer active alarm card', () => {
@@ -100,9 +101,46 @@ describe('AlarmsDrawer active alarm card', () => {
     ])
 
     expect(
-      screen.getByText('Radar guard zone 1: target 100000294 acquired Clears when the source clears it.'),
+      screen.getByText('Radar guard zone 1: target 100000294 acquired. Clears when the source clears it.'),
     ).toBeInTheDocument()
     expect(screen.queryByText(/^Raised/)).toBeNull()
+  })
+
+  it('renders the path once when it equals the label, for a bus alarm whose label is the path itself', () => {
+    renderDrawer([
+      makeAlarm({
+        rule_id: 'notifications:radar-guard-zone-1',
+        label: 'radar.fur6424A.guardZone.1',
+        path: 'notifications.radar.fur6424A.guardZone.1',
+        message: 'Radar fur6424A guard zone 1: target 100000294 acquired',
+        state: 'alert',
+        phase: 'active',
+      }),
+    ])
+
+    // The label IS the path (after stripping the notifications. prefix), so
+    // the meta line must not repeat it below the headline.
+    expect(screen.getAllByText('radar.fur6424A.guardZone.1')).toHaveLength(1)
+  })
+
+  it('still renders both the label and the path when they differ, for a rule alarm', () => {
+    renderDrawer([
+      makeAlarm({
+        rule_id: 'house-bank-low',
+        label: 'House bank low',
+        path: 'electrical.batteries.house.voltage',
+        op: 'above',
+        threshold: 14.9,
+        clear_value: 14.4,
+        value: 14.9,
+        unit: 'V',
+        state: 'alarm',
+        phase: 'active',
+      }),
+    ])
+
+    expect(screen.getByText('House bank low')).toBeInTheDocument()
+    expect(screen.getByText('electrical.batteries.house.voltage')).toBeInTheDocument()
   })
 
   it('renders a generic above rule sentence for a voltage alarm', () => {
@@ -122,6 +160,17 @@ describe('AlarmsDrawer active alarm card', () => {
     ])
 
     expect(screen.getByText('Now 14.9 V. Clears below 14.4 V.')).toBeInTheDocument()
+  })
+
+  it('stacks the right column under the text below the sm breakpoint, so a phone gets a row each rather than a squeeze', () => {
+    renderDrawer([makeAlarm({ label: 'Anchor dragging' })])
+
+    const headline = screen.getByText('Anchor dragging')
+    // Headline -> text block (min-w-0) -> outer row. The outer row is the
+    // one that switches from a column on a phone to a row at sm.
+    const outerRow = headline.parentElement?.parentElement
+    expect(outerRow?.className).toContain('flex-col')
+    expect(outerRow?.className).toContain('sm:flex-row')
   })
 
   it('gives alert and warn cards different colour classes', () => {

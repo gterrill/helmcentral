@@ -124,14 +124,28 @@ describe('AlarmsDrawer rules firing pill', () => {
 })
 
 describe('AlarmsDrawer rule condition line', () => {
-  it('formats a below rule with hysteresis and dwell in operator units', () => {
+  it('formats a below rule with hysteresis, dwell, severity, and the rule path as the final segment', () => {
     const container = renderDrawer(
-      [rule({ id: 'rule-1', op: 'below', value: -0.03, hysteresis: 0.01, dwell_seconds: 1800, state: 'warn' })],
+      [rule({
+        id: 'rule-1',
+        path: 'helmcentral.environment.pressureRate',
+        op: 'below',
+        value: -0.03,
+        hysteresis: 0.01,
+        dwell_seconds: 1800,
+        state: 'warn',
+      })],
       [],
-      [{ path: 'environment.pressureRate', units: 'Pa/s' }],
+      [{ path: 'helmcentral.environment.pressureRate', units: 'Pa/s' }],
     )
 
-    expect(container.textContent).toContain('below -1.1 mb/hr · clears at -0.7 mb/hr · for 30m · warn')
+    // The path lives in its own span inside the line, so getByText (which
+    // needs one text node) can't find the whole sentence; match on the
+    // line element's full text content instead.
+    const line = Array.from(container.querySelectorAll('p')).find((p) => p.textContent?.includes('clears at'))
+    expect(line?.textContent).toBe(
+      'below -1.1 mb/hr · clears at -0.7 mb/hr · for 30m · warn · helmcentral.environment.pressureRate',
+    )
   })
 
   it('formats a stale rule as "no data for Ns"', () => {
@@ -140,6 +154,18 @@ describe('AlarmsDrawer rule condition line', () => {
     ])
 
     expect(container.textContent).toContain('no data for 45s · alert')
+  })
+
+  // Two gauge-zone-derived rules can share a label ("RPM": one per engine),
+  // so the path is what actually tells them apart on the card.
+  it('renders each rule row path so two rules with the same label stay distinguishable', () => {
+    const container = renderDrawer([
+      rule({ id: 'rule-1', label: 'RPM', path: 'propulsion.port.revolutions', op: 'above', value: 3000 }),
+      rule({ id: 'rule-2', label: 'RPM', path: 'propulsion.starboard.revolutions', op: 'above', value: 3000 }),
+    ])
+
+    expect(container.textContent).toContain('propulsion.port.revolutions')
+    expect(container.textContent).toContain('propulsion.starboard.revolutions')
   })
 })
 

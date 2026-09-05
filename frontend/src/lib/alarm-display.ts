@@ -70,7 +70,12 @@ export function alarmConditionSentence(alarm: ActiveAlarm): string {
   const { op, unit, value, clear_value: clearValue, message } = alarm
 
   if (op === undefined) {
-    return `${message} Clears when the source clears it.`
+    // SignalK builds this message as a fragment with no terminal
+    // punctuation, so running straight into "Clears..." reads as one
+    // run-on sentence. Add the period it is missing; don't double up one
+    // it already has.
+    const sentence = /[.!?]$/.test(message) ? message : `${message}.`
+    return `${sentence} Clears when the source clears it.`
   }
 
   if (op === 'stale') {

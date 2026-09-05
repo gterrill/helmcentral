@@ -127,13 +127,32 @@ describe('alarmConditionSentence', () => {
     expect(alarmConditionSentence(alarm)).toContain('No data.')
   })
 
-  it('appends the message and the clears-when-the-source-clears line for a bus notification', () => {
+  // The bus message has no terminal punctuation of its own (SignalK builds
+  // it as a fragment), so run straight into "Clears..." reads as one
+  // run-on sentence. A missing period gets exactly one added.
+  it('appends the message and the clears-when-the-source-clears line for a bus notification, adding a period the message lacks', () => {
     const alarm = makeAlarm({
       op: undefined,
       unit: undefined,
       message: 'Radar guard zone 1: target 100000294 acquired',
     })
-    expect(alarmConditionSentence(alarm)).toBe('Radar guard zone 1: target 100000294 acquired Clears when the source clears it.')
+    expect(alarmConditionSentence(alarm)).toBe('Radar guard zone 1: target 100000294 acquired. Clears when the source clears it.')
+  })
+
+  it('does not add a second period when the bus message already ends with one', () => {
+    const alarm = makeAlarm({
+      op: undefined,
+      unit: undefined,
+      message: 'Radar guard zone 1: target 100000294 acquired.',
+    })
+    expect(alarmConditionSentence(alarm)).toBe('Radar guard zone 1: target 100000294 acquired. Clears when the source clears it.')
+  })
+
+  it('does not add a period when the bus message already ends with ! or ?', () => {
+    expect(alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message: 'Anchor dragging!' })))
+      .toBe('Anchor dragging! Clears when the source clears it.')
+    expect(alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message: 'Anchor dragging?' })))
+      .toBe('Anchor dragging? Clears when the source clears it.')
   })
 })
 

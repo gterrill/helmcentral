@@ -156,19 +156,27 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
               // under one namespace on it, so stripping that prefix leaves
               // the part that actually identifies the source.
               const displayPath = alarm.path.replace(/^notifications\./, '')
+              // A bus notification has no rule label of its own, so its
+              // label IS the path already (see use-alarms). Showing it again
+              // on the meta line would just repeat the headline.
+              const showPath = displayPath !== alarm.label
+              const hasMeta = timeParts.length > 0 || showPath
 
               return (
                 <div key={alarm.rule_id} className="rounded-md border bg-background/60 px-3 py-3">
-                  <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
-                      <p className={`truncate font-display text-lg leading-none ${severityClass(alarm.state)}`}>
+                      <p className={`break-words font-display text-lg leading-none sm:truncate ${severityClass(alarm.state)}`}>
                         {alarm.label}
                       </p>
                       <p className="mt-1.5 text-sm text-foreground/90">{alarmConditionSentence(alarm)}</p>
-                      <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                        {timeParts.length > 0 && `${timeParts.join(' · ')} · `}
-                        <span className="font-display">{displayPath}</span>
-                      </p>
+                      {hasMeta && (
+                        <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                          {timeParts.length > 0 && timeParts.join(' · ')}
+                          {timeParts.length > 0 && showPath && ' · '}
+                          {showPath && <span className="font-display">{displayPath}</span>}
+                        </p>
+                      )}
                     </div>
                     {/*
                       The pill describes state (still live after silencing or
@@ -180,8 +188,13 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
                       special-casing is needed to hide them there (ADR 0038:
                       silencing is not acknowledging, and the drawer renders
                       exactly what the server advertises).
+
+                      Below sm this sits in its own row under the text
+                      instead of squeezing it into a narrow column (a phone
+                      at 390px was truncating the headline to a few
+                      characters and wrapping the sentence word by word).
                     */}
-                    <div className="flex shrink-0 flex-col items-end gap-1">
+                    <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
                       <span className={`text-[10px] uppercase tracking-[0.16em] ${severityClass(alarm.state)}`}>
                         {alarm.state}
                       </span>
@@ -298,12 +311,19 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
   )
 })
 
-/** The line-2 condition text for a rule row: what it watches, what clears it, how long it must hold, and its severity. */
+/**
+ * The line-2 condition text for a rule row: what it watches, what clears
+ * it, how long it must hold, its severity, and finally its path. The path
+ * is the last segment (in its own font-display span) because two derived
+ * rules can share a label ("RPM" per engine) and the path is the only
+ * thing on the row that tells them apart.
+ */
 function RuleCondition({ rule, unit }: { rule: AlarmRule; unit?: string }) {
   if (rule.op === 'stale') {
     return (
       <>
         no data for {rule.stale_after_seconds}s · <span className={severityClass(rule.state)}>{rule.state}</span>
+        {' · '}<span className="font-display">{rule.path}</span>
       </>
     )
   }
@@ -324,6 +344,7 @@ function RuleCondition({ rule, unit }: { rule: AlarmRule; unit?: string }) {
   return (
     <>
       {line} · <span className={severityClass(rule.state)}>{rule.state}</span>
+      {' · '}<span className="font-display">{rule.path}</span>
     </>
   )
 }
@@ -378,7 +399,7 @@ function RuleRow({ rule, unit, firing, onEdit, onDelete }: RuleRowProps) {
             </span>
           )}
         </p>
-        <p className="truncate text-[11px] text-muted-foreground">
+        <p className="break-words text-[11px] text-muted-foreground">
           <RuleCondition rule={rule} unit={unit} />
         </p>
       </div>
