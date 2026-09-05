@@ -48,7 +48,14 @@ var (
 // no per-source integration, no translation layer. Every producer already
 // speaks it, so consuming the tree the delta stream already carries is the
 // whole implementation.
-func signalKNotifications(snapshot *signalKSnapshot) []alarmStatus {
+//
+// owned excludes a path Helmcentral itself writes into (alarm_ownership.go).
+// Without it, Helmcentral's own rule alarms — published onto this same tree
+// by signalKNotifyTransport (signalk_publish.go) so a buzzer or MFD can react
+// — read back as a second, foreign-looking alarm, and a path this instance no
+// longer has a rule for but another Helmcentral instance still published to
+// shows up as a ghost with no engine status behind it at all.
+func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) bool) []alarmStatus {
 	tree := snapshot.selfTree()
 	if tree == nil {
 		return nil
@@ -61,6 +68,17 @@ func signalKNotifications(snapshot *signalKSnapshot) []alarmStatus {
 
 	var out []alarmStatus
 	collectSignalKNotifications(root, nil, &out)
+
+	live := out[:0]
+	for _, status := range out {
+		// Label is set to exactly the bare path by notificationStatus below,
+		// which is what owned expects.
+		if owned(status.Label) {
+			continue
+		}
+		live = append(live, status)
+	}
+	out = live
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out

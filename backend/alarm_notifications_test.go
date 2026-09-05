@@ -15,6 +15,10 @@ func snapshotWithNotification(path string, value any) *signalKSnapshot {
 	return snapshot
 }
 
+// ownsNothing is the ownership predicate for tests that are not exercising
+// the ownership guard itself: every notification passes through untouched.
+func ownsNothing(string) bool { return false }
+
 // The payoff of using SignalK's own vocabulary: an alarm raised by any other
 // producer on the bus appears with no per-source integration at all.
 func TestSignalKNotificationsSurfacesAnAlarmFromAnotherProducer(t *testing.T) {
@@ -24,7 +28,7 @@ func TestSignalKNotificationsSurfacesAnAlarmFromAnotherProducer(t *testing.T) {
 		"method":  []any{"visual", "sound"},
 	})
 
-	statuses := signalKNotifications(snapshot)
+	statuses := signalKNotifications(snapshot, ownsNothing)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d (%+v)", len(statuses), statuses)
 	}
@@ -45,7 +49,7 @@ func TestSignalKNotificationsIgnoresNormalState(t *testing.T) {
 		"message": "Depth OK",
 	})
 
-	if statuses := signalKNotifications(snapshot); len(statuses) != 0 {
+	if statuses := signalKNotifications(snapshot, ownsNothing); len(statuses) != 0 {
 		t.Fatalf("normal is the cleared state and must not surface, got %+v", statuses)
 	}
 }
@@ -54,7 +58,7 @@ func TestSignalKNotificationsIgnoresNormalState(t *testing.T) {
 func TestSignalKNotificationsIgnoresClearedNullValue(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.mob", nil)
 
-	if statuses := signalKNotifications(snapshot); len(statuses) != 0 {
+	if statuses := signalKNotifications(snapshot, ownsNothing); len(statuses) != 0 {
 		t.Fatalf("a null notification is cleared and must not surface, got %+v", statuses)
 	}
 }
@@ -65,7 +69,7 @@ func TestSignalKNotificationsIgnoresUnknownState(t *testing.T) {
 		"message": "not a real severity",
 	})
 
-	if statuses := signalKNotifications(snapshot); len(statuses) != 0 {
+	if statuses := signalKNotifications(snapshot, ownsNothing); len(statuses) != 0 {
 		t.Fatalf("an unrecognised state must not raise anything, got %+v", statuses)
 	}
 }
@@ -81,7 +85,7 @@ func TestSignalKNotificationsCollectsSeveralAndOrdersThem(t *testing.T) {
 	}, alarmNow)
 	snapshot.setSelfContext("vessels.self")
 
-	statuses := signalKNotifications(snapshot)
+	statuses := signalKNotifications(snapshot, ownsNothing)
 	if len(statuses) != 2 {
 		t.Fatalf("expected 2 notifications, got %d (%+v)", len(statuses), statuses)
 	}
@@ -95,7 +99,7 @@ func TestSignalKNotificationsCollectsSeveralAndOrdersThem(t *testing.T) {
 func TestSignalKNotificationsNamespaceTheirRuleIDs(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.mob", map[string]any{"state": "emergency"})
 
-	statuses := signalKNotifications(snapshot)
+	statuses := signalKNotifications(snapshot, ownsNothing)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d", len(statuses))
 	}
@@ -107,7 +111,7 @@ func TestSignalKNotificationsNamespaceTheirRuleIDs(t *testing.T) {
 func TestSignalKNotificationsEmptyWhenNoneRaised(t *testing.T) {
 	snapshot := snapshotWithSelfDelta("environment.depth.belowTransducer", 3.0, alarmNow)
 
-	if statuses := signalKNotifications(snapshot); len(statuses) != 0 {
+	if statuses := signalKNotifications(snapshot, ownsNothing); len(statuses) != 0 {
 		t.Fatalf("expected no notifications, got %+v", statuses)
 	}
 }
@@ -143,7 +147,7 @@ func TestSignalKNotificationsSurfacesTheAPIStatusAndCapabilities(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
 		notificationWithStatus("alarm", liveNotificationStatus()))
 
-	statuses := signalKNotifications(snapshot)
+	statuses := signalKNotifications(snapshot, ownsNothing)
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 notification, got %d (%+v)", len(statuses), statuses)
 	}
@@ -162,7 +166,7 @@ func TestSignalKNotificationsReadsAcknowledgedFromTheAPIStatus(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
 		notificationWithStatus("alarm", status))
 
-	got := signalKNotifications(snapshot)[0]
+	got := signalKNotifications(snapshot, ownsNothing)[0]
 	if got.Phase != alarmPhaseAcknowledged {
 		t.Fatalf("phase: got %q, want %q", got.Phase, alarmPhaseAcknowledged)
 	}
@@ -180,7 +184,7 @@ func TestSignalKNotificationsKeepsASilencedAlarmActive(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.arrivalCircleEntered",
 		notificationWithStatus("alarm", status))
 
-	got := signalKNotifications(snapshot)[0]
+	got := signalKNotifications(snapshot, ownsNothing)[0]
 	if !got.Silenced {
 		t.Fatalf("expected silenced")
 	}
@@ -201,7 +205,7 @@ func TestSignalKNotificationsRefusesBothActionsForAnEmergency(t *testing.T) {
 	snapshot := snapshotWithNotification("notifications.mob",
 		notificationWithStatus("emergency", liveNotificationStatus()))
 
-	got := signalKNotifications(snapshot)[0]
+	got := signalKNotifications(snapshot, ownsNothing)[0]
 	if got.CanAcknowledge || got.CanSilence {
 		t.Fatalf("an emergency cannot be silenced or acknowledged, got can_ack %v can_silence %v", got.CanAcknowledge, got.CanSilence)
 	}
@@ -229,7 +233,7 @@ func TestSignalKNotificationsFallsBackToTheMethodArrayWithoutAStatusObject(t *te
 			if tc.method != nil {
 				value["method"] = tc.method
 			}
-			got := signalKNotifications(snapshotWithNotification("notifications.bilge", value))[0]
+			got := signalKNotifications(snapshotWithNotification("notifications.bilge", value), ownsNothing)[0]
 
 			if got.Phase != tc.wantPhase {
 				t.Fatalf("phase: got %q, want %q", got.Phase, tc.wantPhase)
@@ -376,7 +380,7 @@ func TestSignalKNotificationsOffersNoSilenceOnceAcknowledged(t *testing.T) {
 	value := notificationWithStatus("alarm", status)
 	value["method"] = []any{}
 
-	got := signalKNotifications(snapshotWithNotification("notifications.arrivalCircleEntered", value))[0]
+	got := signalKNotifications(snapshotWithNotification("notifications.arrivalCircleEntered", value), ownsNothing)[0]
 
 	if got.Phase != alarmPhaseAcknowledged {
 		t.Fatalf("phase: got %q, want %q", got.Phase, alarmPhaseAcknowledged)
@@ -386,5 +390,90 @@ func TestSignalKNotificationsOffersNoSilenceOnceAcknowledged(t *testing.T) {
 	}
 	if !got.Silenced {
 		t.Fatalf("an acknowledged alarm is silenced by definition, whatever the server's silenced flag says")
+	}
+}
+
+// ── ownership: Helmcentral's own echoes are never shown as bus alarms ──────
+//
+// Helmcentral publishes its own rule alarms onto notifications.<path>
+// (signalk_publish.go). Reading that tree back without knowing which paths
+// are its own turns every one of those echoes into a phantom "bus" alarm --
+// including one left behind by a different Helmcentral instance on the same
+// boat, which this engine holds no rule for at all. The fixture values below
+// are the real shapes captured off the boat, not assumed ones.
+func TestSignalKNotificationsSkipsPathsHelmcentralOwns(t *testing.T) {
+	withTempAlarmRules(t)
+	if _, err := createAlarmRule(validRule()); err != nil { // enabled, path electrical.batteries.house.voltage
+		t.Fatalf("createAlarmRule: %v", err)
+	}
+
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{
+			// The ghost: another Helmcentral instance's echo, with no rule for
+			// it on this engine at all -- ownership here comes only from the
+			// derived-path namespace.
+			{Path: "notifications.helmcentral.environment.pressureRate", Value: map[string]any{
+				"state":   "warn",
+				"message": "Barometer falling: below -0.027777777777777776 (-0.0283)",
+				"method":  []any{},
+				"id":      "89f3b708-602d-4882-8044-182e6e24a134",
+				"status": map[string]any{
+					"silenced": false, "acknowledged": true,
+					"canSilence": true, "canAcknowledge": true, "canClear": false,
+				},
+			}},
+			// Owned via the enabled rule created above.
+			{Path: "notifications.electrical.batteries.house.voltage", Value: map[string]any{
+				"state":   "alarm",
+				"message": "House bank critically low",
+				"method":  []any{"visual", "sound"},
+			}},
+			// Foreign: no rule, no derived-path prefix.
+			{Path: "notifications.radar.fur6424A.guardZone.1", Value: map[string]any{
+				"state":   "alert",
+				"message": "Radar fur6424A guard zone 1: target 100000294 acquired",
+				"method":  []any{},
+				"id":      "7b454514-4b75-4658-89db-2b98a4ef17e8",
+				"status": map[string]any{
+					"silenced": false, "acknowledged": true,
+					"canSilence": true, "canAcknowledge": true, "canClear": false,
+				},
+			}},
+		}}},
+	}, alarmNow)
+	snapshot.setSelfContext("vessels.self")
+
+	statuses := signalKNotifications(snapshot, helmcentralOwnershipPredicate())
+	if len(statuses) != 1 {
+		t.Fatalf("expected exactly the foreign radar notification, got %d: %+v", len(statuses), statuses)
+	}
+	if statuses[0].Path != "notifications.radar.fur6424A.guardZone.1" {
+		t.Fatalf("path: got %q, want the radar guard zone", statuses[0].Path)
+	}
+}
+
+// A disabled rule's path is not owned: disabling a rule does not retract
+// anything already on the bus, and some other producer may legitimately be
+// raising a notification at the same path this engine no longer watches.
+func TestSignalKNotificationsDoesNotOwnAPathOfADisabledRule(t *testing.T) {
+	withTempAlarmRules(t)
+
+	rule := validRule()
+	rule.Enabled = false
+	if _, err := createAlarmRule(rule); err != nil {
+		t.Fatalf("createAlarmRule: %v", err)
+	}
+
+	snapshot := snapshotWithNotification("notifications.electrical.batteries.house.voltage", map[string]any{
+		"state":   "alarm",
+		"message": "House bank critically low",
+		"method":  []any{"visual", "sound"},
+	})
+
+	statuses := signalKNotifications(snapshot, helmcentralOwnershipPredicate())
+	if len(statuses) != 1 {
+		t.Fatalf("a disabled rule's path is not owned, so the bus notification must still show, got %d: %+v", len(statuses), statuses)
 	}
 }

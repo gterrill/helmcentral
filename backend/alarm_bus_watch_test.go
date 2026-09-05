@@ -403,3 +403,22 @@ func TestBusNotificationWatcherRaisesOnceAnAcknowledgedNotificationIsUnacknowled
 		t.Fatalf("expected a raise once the fresh dwell elapses, got %+v", events)
 	}
 }
+
+// A notification under Helmcentral's own derived-path namespace is owned even
+// when no local rule names it -- exactly the case for a ghost left on the bus
+// by a different Helmcentral instance (or a rule since deleted). Before this
+// guard the watcher only recognised paths a locally *configured* rule
+// published, so a ghost like this read back as a foreign alarm and got
+// raised and logged a second time, on top of whatever the engine itself
+// shows for it.
+func TestBusNotificationWatcherIgnoresAGhostUnderItsOwnNamespaceWithNoLocalRule(t *testing.T) {
+	snapshot := snapshotWithNotification("notifications.helmcentral.environment.pressureRate",
+		busTestNotification(alarmStateWarn, "Barometer falling"))
+	watcher := newBusNotificationWatcher(snapshot)
+	watcher.dwell = time.Second
+
+	watcher.check(alarmNow)
+	if events := watcher.check(alarmNow.Add(time.Second)); len(events) != 0 {
+		t.Fatalf("a path under Helmcentral's own namespace must never be raised as a foreign bus alarm, got %+v", events)
+	}
+}

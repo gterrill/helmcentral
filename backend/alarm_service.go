@@ -20,6 +20,10 @@ const alarmEvaluationInterval = 1 * time.Second
 var globalAlarmEngine = newAlarmEngine()
 var globalBusNotificationWatcher = newBusNotificationWatcher(globalSignalKSnapshot)
 
+// globalBusEchoReconciler clears ghosts: notifications Helmcentral owns that
+// are live on the bus but this engine is not currently holding (alarm_reconcile.go).
+var globalBusEchoReconciler = newBusEchoReconciler(globalSignalKSnapshot)
+
 // globalCollisionProfileSyncer keeps the AIS target prioritizer's active
 // profile in step with navigation.state (ADR 0058). It is edge-triggered on
 // that state, so the HTTP round trip happens a handful of times a day rather
@@ -71,6 +75,16 @@ func evaluateAlarmsOnce(now time.Time) {
 	for _, event := range globalCollisionProfileSyncer.check(now) {
 		recordAlarmEvent(event, now)
 	}
+
+	// Clears any owned notification left live on the bus with nothing behind
+	// it in this engine — a ghost. Re-reads the snapshot each tick for the
+	// same reason globalBusNotificationWatcher does above.
+	globalBusEchoReconciler.snapshot = globalSignalKSnapshot
+	liveEnginePaths := map[string]bool{}
+	for _, status := range globalAlarmEngine.active() {
+		liveEnginePaths[status.Path] = true
+	}
+	globalBusEchoReconciler.check(now, helmcentralOwnershipPredicate(), liveEnginePaths)
 }
 
 func recordAlarmEvent(event alarmEvent, now time.Time) {
@@ -121,7 +135,7 @@ func activeAlarms() []alarmStatus {
 	// Always a list, never null: the UI iterates this without a nil guard.
 	combined := make([]alarmStatus, 0)
 	combined = append(combined, globalAlarmEngine.active()...)
-	combined = append(combined, signalKNotifications(globalSignalKSnapshot)...)
+	combined = append(combined, signalKNotifications(globalSignalKSnapshot, helmcentralOwnershipPredicate())...)
 
 	// The clock is read here rather than threaded through as a parameter
 	// because activeAlarms has no caller-supplied now to thread it from:

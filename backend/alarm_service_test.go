@@ -305,3 +305,59 @@ func TestRuleDrivenAlarmsAdvertiseAcknowledgeOnly(t *testing.T) {
 		t.Fatalf("the engine has no silence action, so it must not advertise one")
 	}
 }
+
+// The engine's status is the only representation of a rule alarm. When this
+// engine holds one live AND the SignalK bus still carries the echo
+// Helmcentral itself published for it (signalk_publish.go), activeAlarms must
+// return it exactly once, under the rule's own id and label -- not a second
+// time as a bus-sourced "notifications:<path>" entry, which is Helmcentral
+// hearing its own voice.
+func TestActiveAlarmsShowsARuleAlarmOnceWhenItsEchoIsOnTheBus(t *testing.T) {
+	withTempAlarmRules(t)
+
+	rule := validRule()
+	rule.Path = pressureRatePath // "helmcentral.environment.pressureRate"
+	rule.Label = "Barometer falling"
+	rule.Op = alarmOpBelow
+	rule.Value = -0.02
+	rule.DwellSeconds = 0
+	created, err := createAlarmRule(rule)
+	if err != nil {
+		t.Fatalf("createAlarmRule: %v", err)
+	}
+
+	original := globalAlarmEngine
+	globalAlarmEngine = newAlarmEngine()
+	t.Cleanup(func() { globalAlarmEngine = original })
+
+	// Drives the engine directly with a reading below threshold, the same way
+	// alarm_engine_test.go's own tests do -- this rule watches a derived path,
+	// and evaluate() takes any alarmReader, so there is no need to wire up the
+	// barometer history ring buffer just to make the condition true.
+	globalAlarmEngine.evaluate([]alarmRule{created}, staticReader(-0.03), alarmNow)
+
+	// The live ghost value captured off the boat: another Helmcentral
+	// instance's echo of this very alarm, acknowledged, still on the bus.
+	echo := map[string]any{
+		"state":   "warn",
+		"message": "Barometer falling: below -0.027777777777777776 (-0.0283)",
+		"method":  []any{},
+		"id":      "89f3b708-602d-4882-8044-182e6e24a134",
+		"status": map[string]any{
+			"silenced": false, "acknowledged": true,
+			"canSilence": true, "canAcknowledge": true, "canClear": false,
+		},
+	}
+	withGlobalSnapshot(t, snapshotWithNotification("notifications."+pressureRatePath, echo))
+
+	alarms := activeAlarms()
+	if len(alarms) != 1 {
+		t.Fatalf("expected the rule alarm exactly once, got %d: %+v", len(alarms), alarms)
+	}
+	if alarms[0].RuleID != created.ID {
+		t.Fatalf("rule id: got %q, want the engine's own rule id %q -- not a bus-sourced id", alarms[0].RuleID, created.ID)
+	}
+	if alarms[0].Label != "Barometer falling" {
+		t.Fatalf("label: got %q", alarms[0].Label)
+	}
+}

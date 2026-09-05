@@ -70,7 +70,18 @@ func (w *busNotificationWatcher) check(now time.Time) []alarmEvent {
 	// Collision alarms are raised on the AIS targets' own contexts, which the
 	// self walk never reaches (ADR 0057). Without them here a CPA alarm is
 	// visible only in the live list: no push, no log row, no trace afterwards.
-	busStatuses := signalKNotifications(w.snapshot)
+	//
+	// helmcentralOwnershipPredicate is the same guard signalKNotifications
+	// applies for display (alarm_ownership.go): it recognises a path under
+	// Helmcentral's own derived-value namespace as an echo even when no rule
+	// on this instance is currently configured for it, which is exactly the
+	// shape of a notification a different Helmcentral instance left on the
+	// same boat's bus. ownedNotificationPaths below still runs on top of it —
+	// it also owns a disabled rule's path, which this predicate deliberately
+	// does not (alarm_ownership.go), and this watcher must not re-raise that
+	// one either: disabling a rule does not retract what it already
+	// published.
+	busStatuses := signalKNotifications(w.snapshot, helmcentralOwnershipPredicate())
 	busStatuses = append(busStatuses, signalKCollisionNotifications(w.snapshot, now)...)
 
 	live := map[string]alarmStatus{}
