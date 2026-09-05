@@ -394,10 +394,13 @@ with `py-4`, `px-3` (`px-4` at `sm`), header and body flush.
 - **Header:** a mono uppercase tracked title in muted, optional 14px icon, then
   a hairline rule filling the remaining width, then an optional action slot.
 - **Body:** whatever the widget draws, at the tighter nested density.
-- **Stale state:** the tile's whole content goes to `opacity-50 grayscale` and an
-  amber outlined badge appears beside the title with the age of the last update.
+- **Stale state:** the tile's whole content goes to `grayscale` and an amber
+  outlined badge appears beside the title with the age of the last update.
   This is the system's most important state: a value frozen by a dead feed must
-  never be mistaken for a live measurement.
+  never be mistaken for a live measurement. Grayscale and nothing else, on
+  purpose: a faded tile reads as a dim screen in the sun rather than as a dead
+  feed, so opacity is not stacked on top of it. This is the loudest state the
+  system has, not its quietest.
 - **Do not** invent a shared `MetricTile` or `StatCard`. Each widget composes its
   own KPI stack inside `Tile`. That is the established pattern.
 

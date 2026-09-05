@@ -89,12 +89,14 @@ describe('useWeatherForecast', () => {
             condition: 'Mostly Sunny',
             temperature_f: 72,
             kind: 'forecast',
+            is_daylight: true,
           },
           {
             label: '5:09PM',
             condition: 'Sunset',
             temperature_f: -1,
             kind: 'sunset',
+            is_daylight: false,
           },
         ],
         summary: 'Mostly Sunny conditions will continue through today.',
@@ -114,7 +116,9 @@ describe('useWeatherForecast', () => {
     expect(result.current.forecast).toHaveLength(1)
     expect(result.current.forecast[0].dayKey).toBe('2026-06-14')
     expect(result.current.hourlyToday).toHaveLength(2)
+    expect(result.current.hourlyToday[0].isDaylight).toBe(true)
     expect(result.current.hourlyToday[1].kind).toBe('sunset')
+    expect(result.current.hourlyToday[1].isDaylight).toBe(false)
     expect(result.current.summary).toBe('Mostly Sunny conditions will continue through today.')
     expect(result.current.provider).toBe('open-meteo')
     expect(result.current.isCached).toBe(true)

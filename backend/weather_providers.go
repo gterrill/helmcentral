@@ -551,7 +551,15 @@ func buildDayData(
 	}
 }
 
-// buildWeatherHourlyStrip builds the "next up to 12 hours" strip for the
+// weatherHourlyStripHours is the strip's span - the "24" the forecast
+// drawer's Today panel labels itself with (spanLabel="Next 24 hours"). It
+// used to be 12, which read as a full day's plan while actually stopping
+// around 9PM for anyone reading it at midday: daylight hours only, no
+// overnight, on the one panel a skipper uses to judge whether tonight is
+// safe.
+const weatherHourlyStripHours = 24
+
+// buildWeatherHourlyStrip builds the "next up to 24 hours" strip for the
 // forecast drawer's today view, with a synthetic "Sunset" entry spliced in
 // at the right spot - the typed-contract replacement for the old
 // buildWeatherHourlyEntries, operating on a provider's flat hourly points
@@ -559,15 +567,16 @@ func buildDayData(
 // entries before the current local hour are skipped, the current hour is
 // labeled "Now", a sunset entry (Kind: "sunset", all data sentinel/absent)
 // is inserted once in time order (or appended at the end as a fallback if
-// no hour after it was found), and the strip is capped at 12 entries.
+// no hour after it was found), and the strip is capped at
+// weatherHourlyStripHours entries.
 func buildWeatherHourlyStrip(hourly []weatherHourPoint, referenceDatetime time.Time, localLocation *time.Location, localTodayKey string, sunsetAt time.Time) []weatherHourlyEntryData {
 	referenceLocal := referenceDatetime.In(localLocation)
 	referenceHour := referenceLocal.Truncate(time.Hour)
-	entries := make([]weatherHourlyEntryData, 0, 12)
+	entries := make([]weatherHourlyEntryData, 0, weatherHourlyStripHours)
 	insertedSunset := false
 
 	for _, hp := range hourly {
-		if len(entries) >= 12 {
+		if len(entries) >= weatherHourlyStripHours {
 			break
 		}
 		if hp.Time.IsZero() {
@@ -585,7 +594,7 @@ func buildWeatherHourlyStrip(hourly []weatherHourPoint, referenceDatetime time.T
 				WindDirection: "—", WindDirectionDeg: -1, Kind: "sunset",
 			})
 			insertedSunset = true
-			if len(entries) >= 12 {
+			if len(entries) >= weatherHourlyStripHours {
 				break
 			}
 		}
@@ -608,10 +617,15 @@ func buildWeatherHourlyStrip(hourly []weatherHourPoint, referenceDatetime time.T
 			Label: label, Condition: condition, TemperatureF: sentinelTemperatureF(hp.TemperatureC),
 			WindSpeedKts: windSpeedKts, WindGustKts: windGustKts,
 			WindDirection: windDirection, WindDirectionDeg: windDirectionDeg, Kind: "forecast",
+			// The frontend's night styling reads this per hour rather than
+			// latching "night" on for good the first time the sunset entry
+			// above appears - a latch that never turns back off is wrong
+			// once the strip is long enough to reach the following sunrise.
+			IsDaylight: hp.IsDaylight,
 		})
 	}
 
-	if !insertedSunset && !sunsetAt.IsZero() && sunsetAt.Format("2006-01-02") == localTodayKey && sunsetAt.After(referenceLocal) && len(entries) < 12 {
+	if !insertedSunset && !sunsetAt.IsZero() && sunsetAt.Format("2006-01-02") == localTodayKey && sunsetAt.After(referenceLocal) && len(entries) < weatherHourlyStripHours {
 		entries = append(entries, weatherHourlyEntryData{Label: sunsetAt.Format("3:04PM"), Condition: "Sunset", TemperatureF: -1, Kind: "sunset"})
 	}
 
@@ -653,6 +667,7 @@ type weatherHourlyEntryResponse struct {
 	WindDirection    string  `json:"wind_direction"`
 	WindDirectionDeg float64 `json:"wind_direction_deg"`
 	Kind             string  `json:"kind"`
+	IsDaylight       bool    `json:"is_daylight"`
 }
 
 type weatherHourlyWindResponse struct {
@@ -788,6 +803,7 @@ func mapWeatherHourlyEntryResponse(entries []weatherHourlyEntryData) []weatherHo
 			WindDirection:    entry.WindDirection,
 			WindDirectionDeg: entry.WindDirectionDeg,
 			Kind:             entry.Kind,
+			IsDaylight:       entry.IsDaylight,
 		})
 	}
 	return response

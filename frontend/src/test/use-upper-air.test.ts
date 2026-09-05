@@ -28,6 +28,9 @@ describe('useUpperAir', () => {
             },
           },
         ],
+        cached: true,
+        updated_at: '2026-09-12T20:02:59Z',
+        ttl_seconds: 21600,
       }),
     }))
 
@@ -40,6 +43,41 @@ describe('useUpperAir', () => {
     expect(outlook.height500M).toBe(5835)
     expect(outlook.troughSupport).toBe(true)
     expect(outlook.tendency24hM).toBeCloseTo(-23.1, 2)
+  })
+
+  // The Upper Air panel is the one panel that couldn't say it had gone
+  // stale, purely because the hook dropped these two fields on the floor -
+  // the backend already sends them (backend/upper_air_providers.go).
+  it('surfaces updatedAt and ttlSeconds so the panel can mark itself stale', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        provider: 'open-meteo-upper',
+        days: [],
+        cached: true,
+        updated_at: '2026-09-12T20:02:59Z',
+        ttl_seconds: 21600,
+      }),
+    }))
+
+    const { result } = renderHook(() => useUpperAir())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.updatedAt).toBe('2026-09-12T20:02:59Z')
+    expect(result.current.ttlSeconds).toBe(21600)
+  })
+
+  it('reports updatedAt and ttlSeconds as null when the payload carries none', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ provider: '', days: [] }),
+    }))
+
+    const { result } = renderHook(() => useUpperAir())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.updatedAt).toBeNull()
+    expect(result.current.ttlSeconds).toBeNull()
   })
 
   // A boat with no upper-air plugin is a normal setup, not a broken one, so

@@ -427,7 +427,13 @@ export function App() {
   // Upper air keeps its own refresh cadence: the global models behind it run
   // four times a day, so polling it on the surface-forecast interval would
   // re-fetch the same numbers.
-  const { days: upperAirDays, series: upperAirSeries, windowBand: upperAirWindow } = useUpperAir()
+  const {
+    days: upperAirDays,
+    series: upperAirSeries,
+    windowBand: upperAirWindow,
+    updatedAt: upperAirUpdatedAt,
+    ttlSeconds: upperAirTtlSeconds,
+  } = useUpperAir()
   const anchorWatch = useAnchorWatch(
     latitude,
     longitude,
@@ -1131,6 +1137,8 @@ export function App() {
             upperAirDays={upperAirDays}
             upperAirSeries={upperAirSeries}
             upperAirWindow={upperAirWindow}
+            upperAirUpdatedAt={upperAirUpdatedAt}
+            upperAirTtlSeconds={upperAirTtlSeconds}
             waveSeaTemperatureF={waveSeaTemperatureF}
             waveLoading={waveForecastLoading}
             waveError={waveForecastError}

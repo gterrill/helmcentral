@@ -84,6 +84,14 @@ export interface WeatherHourlyEntry {
   windDirection: string;
   windDirectionDeg: number;
   kind: 'forecast' | 'sunset' | string;
+  /**
+   * The provider's own per-hour daylight reading (same field the cloud
+   * chart's isDaylight already carries) - not derived from whether a sunset
+   * marker has appeared earlier in the strip. A 24-hour window can cross
+   * both sunset and the following sunrise, and a "seen a sunset yet"
+   * latch never turns back off; this per-hour flag does.
+   */
+  isDaylight: boolean;
 }
 
 interface WeatherHourlyWindApi {
@@ -153,6 +161,7 @@ interface WeatherForecastEnvelopeApi {
     wind_direction?: string;
     wind_direction_deg?: number;
     kind?: string;
+    is_daylight?: boolean;
   }>;
   summary?: string;
   cached?: boolean;
@@ -270,6 +279,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                 windDirection: entry.wind_direction || '—',
                 windDirectionDeg: typeof entry.wind_direction_deg === 'number' ? entry.wind_direction_deg : -1,
                 kind: entry.kind || 'forecast',
+                isDaylight: Boolean(entry.is_daylight),
               }))
             : []);
           setSummary(typeof payload.summary === 'string' ? payload.summary : null);

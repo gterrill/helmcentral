@@ -510,6 +510,60 @@ func TestBuildWeatherHourlyStrip_LabelsCurrentHourNow(t *testing.T) {
 	}
 }
 
+// The Today panel labels itself "Next 24 hours" (forecast-drawer.tsx); the
+// strip used to cap at 12, which read as a full day's plan while actually
+// stopping around 9PM for anyone reading it at midday - daylight hours only,
+// no overnight, on the one panel a skipper uses to judge whether tonight is
+// safe.
+func TestBuildWeatherHourlyStrip_CapsAt24(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	now := time.Date(2026, 6, 14, 22, 0, 0, 0, time.UTC) // 08:00 AEST on Jun 15
+	hourly := make([]weatherHourPoint, 30)
+	for i := range hourly {
+		hourly[i] = weatherHourPoint{
+			Time:         now.Add(time.Duration(i) * time.Hour),
+			Condition:    "clear",
+			TemperatureC: 20,
+			WindSpeedMS:  5,
+		}
+	}
+
+	entries := buildWeatherHourlyStrip(hourly, now, loc, "2026-06-15", time.Time{})
+	if len(entries) != weatherHourlyStripHours {
+		t.Fatalf("expected the strip capped at %d entries, got %d", weatherHourlyStripHours, len(entries))
+	}
+}
+
+// The frontend derives its "Night" styling from each hour's own IsDaylight
+// reading rather than from whether a sunset marker appeared earlier in the
+// strip - a latch that never turns back off. This pins the backend half of
+// that fix: IsDaylight has to survive the mapping into weatherHourlyEntryData
+// unmolested, hour by hour, including turning back on after the following
+// sunrise.
+func TestBuildWeatherHourlyStrip_CarriesIsDaylightPerHour(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	now := time.Date(2026, 6, 14, 22, 0, 0, 0, time.UTC) // 08:00 AEST on Jun 15, daylight
+	hourly := []weatherHourPoint{
+		{Time: now, Condition: "clear", TemperatureC: 20, WindSpeedMS: 5, IsDaylight: true},
+		{Time: now.Add(12 * time.Hour), Condition: "clear", TemperatureC: 14, WindSpeedMS: 4, IsDaylight: false}, // 20:00 AEST, after sunset
+		{Time: now.Add(23 * time.Hour), Condition: "clear", TemperatureC: 13, WindSpeedMS: 3, IsDaylight: true},  // 07:00 AEST next day, after sunrise
+	}
+
+	entries := buildWeatherHourlyStrip(hourly, now, loc, "2026-06-15", time.Time{})
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d: %+v", len(entries), entries)
+	}
+	if !entries[0].IsDaylight {
+		t.Fatalf("expected the first hour to carry IsDaylight true, got %+v", entries[0])
+	}
+	if entries[1].IsDaylight {
+		t.Fatalf("expected the evening hour to carry IsDaylight false, got %+v", entries[1])
+	}
+	if !entries[2].IsDaylight {
+		t.Fatalf("expected the hour after the following sunrise to carry IsDaylight true again, got %+v", entries[2])
+	}
+}
+
 // --- day assembly ---
 
 func TestBuildDayData_MapsUnitsAndSummaries(t *testing.T) {

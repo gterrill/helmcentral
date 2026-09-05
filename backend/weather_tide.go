@@ -58,6 +58,13 @@ type weatherHourlyEntryData struct {
 	WindDirection    string
 	WindDirectionDeg float64
 	Kind             string
+	// IsDaylight is the provider's own per-hour daylight reading (the same
+	// field HourlyCloud already carries), not something derived from the
+	// synthetic sunset entry. The frontend's night styling reads this
+	// directly rather than latching "night" on for good the first time a
+	// sunset entry appears, which never turns back off once the strip runs
+	// long enough to cross the following sunrise.
+	IsDaylight bool
 }
 
 type weatherHourlyWindData struct {

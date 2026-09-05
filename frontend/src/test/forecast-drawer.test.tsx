@@ -199,6 +199,34 @@ describe('ForecastDrawer design tokens', () => {
    * so without an explicit alias it would inherit the DARKENED label values
    * onto its dark card and end up worse than before.
    */
+  // SVG ids are document-scoped, not scoped to the <svg> they're declared
+  // in - a <linearGradient> defined once anywhere in the document is
+  // reachable from a url(#id) fill/stroke in any other <svg> on the page
+  // (this is how windAreaGradientId/waveAreaGradientId are already shared
+  // between each chart's <ComposedChart> and its overlay <svg>). Defining
+  // the SAME id twice is a real trap rather than a duplicate: nothing warns
+  // you, both browsers and jsdom silently pick one, and the next edit to
+  // only one copy makes the two chart layers disagree about a gradient with
+  // no error anywhere.
+  it('never defines the same <linearGradient> id twice', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const sourcePath = resolve(testDir, '../components/forecast-drawer.tsx')
+    const source = readFileSync(sourcePath, 'utf8')
+
+    const ids = [...source.matchAll(/<linearGradient[^>]*\bid=\{(\w+)\}/g)].map((m) => m[1])
+    const seen = new Set<string>()
+    const duplicates = new Set<string>()
+    for (const id of ids) {
+      if (seen.has(id)) duplicates.add(id)
+      seen.add(id)
+    }
+
+    expect(
+      [...duplicates],
+      `Found <linearGradient> id(s) defined more than once in forecast-drawer.tsx: ${[...duplicates].join(', ')}`,
+    ).toEqual([])
+  })
+
   it('defines a label variant of every series-coloured axis token in all three themes', () => {
     const testDir = dirname(fileURLToPath(import.meta.url))
     const css = readFileSync(resolve(testDir, '../index.css'), 'utf8')
@@ -329,9 +357,9 @@ describe('ForecastDrawer refresh age', () => {
       <ForecastDrawer
         forecast={[buildDay({ condition: 'Mostly Sunny' })]}
         hourlyToday={[
-          { label: 'Now', condition: 'Mostly Sunny', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' },
-          { label: '11AM', condition: 'Mostly Sunny', temperatureF: 72, windSpeedKts: 12, windGustKts: 19, windDirection: 'NE', windDirectionDeg: 50, kind: 'forecast' },
-          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset' },
+          { label: 'Now', condition: 'Mostly Sunny', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast', isDaylight: true },
+          { label: '11AM', condition: 'Mostly Sunny', temperatureF: 72, windSpeedKts: 12, windGustKts: 19, windDirection: 'NE', windDirectionDeg: 50, kind: 'forecast', isDaylight: true },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset', isDaylight: false },
         ]}
         summary="Sunny conditions will continue all day."
         loading={false}
@@ -352,6 +380,71 @@ describe('ForecastDrawer refresh age', () => {
       .getAllByTestId('forecast-hour-headline')
       .map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim())
     expect(headlines).toEqual(['11kts NE', '12kts NE', 'Sunset'])
+  })
+
+  // Read at midday, a 12-hour strip ends around 9PM - nine hours of daylight
+  // and no overnight, which is the one span a skipper actually needs to judge
+  // whether tonight is safe. The panel already claims "Next 24 hours"; this
+  // pins the strip to actually carry that many hours.
+  it('renders 24 hourly tiles, not 12, so the strip matches its own 24-hour label', () => {
+    const hourly = Array.from({ length: 24 }, (_, idx) => ({
+      label: idx === 0 ? 'Now' : `${idx}:00`,
+      condition: 'Clear',
+      temperatureF: 65,
+      windSpeedKts: 10,
+      windGustKts: 14,
+      windDirection: 'NE',
+      windDirectionDeg: 45,
+      kind: 'forecast' as const,
+      isDaylight: idx < 18,
+    }))
+    render(<ForecastDrawer forecast={[buildDay()]} hourlyToday={hourly} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getAllByTestId('forecast-hour-tile')).toHaveLength(24)
+  })
+
+  it('still caps the strip at 24 tiles when the feed sends more', () => {
+    const hourly = Array.from({ length: 30 }, (_, idx) => ({
+      label: idx === 0 ? 'Now' : `${idx}:00`,
+      condition: 'Clear',
+      temperatureF: 65,
+      windSpeedKts: 10,
+      windGustKts: 14,
+      windDirection: 'NE',
+      windDirectionDeg: 45,
+      kind: 'forecast' as const,
+      isDaylight: true,
+    }))
+    render(<ForecastDrawer forecast={[buildDay()]} hourlyToday={hourly} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getAllByTestId('forecast-hour-tile')).toHaveLength(24)
+  })
+
+  // The old rule marked every hour "Night" once a sunset marker had appeared
+  // anywhere earlier in the strip, with nothing to ever turn it back off -
+  // harmless at a 12-hour window that rarely reached the following sunrise,
+  // wrong at 24, where the strip now regularly spans both. Night mode has to
+  // come from the hour's own isDaylight reading, not from a "seen a sunset
+  // yet" latch.
+  it('turns night mode back off after the real sunrise, not just after a sunset marker', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={[
+          { label: 'Now', condition: 'Clear', temperatureF: 75, windSpeedKts: 10, windGustKts: 14, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast', isDaylight: true },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset', isDaylight: false },
+          { label: '9PM', condition: 'Clear', temperatureF: 60, windSpeedKts: 5, windGustKts: 8, windDirection: 'N', windDirectionDeg: 0, kind: 'forecast', isDaylight: false },
+          { label: '7AM', condition: 'Clear', temperatureF: 62, windSpeedKts: 6, windGustKts: 9, windDirection: 'N', windDirectionDeg: 0, kind: 'forecast', isDaylight: true },
+        ]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const tiles = screen.getAllByTestId('forecast-hour-tile')
+    expect(within(tiles[2]).getByText('Night')).toBeInTheDocument()
+    expect(within(tiles[3]).queryByText('Night')).not.toBeInTheDocument()
   })
 
   it('renders up to 10 day tabs', () => {
@@ -1060,9 +1153,37 @@ describe('ForecastDrawer wave steepness', () => {
 })
 
 describe('ForecastDrawer wave leading indicators', () => {
-  it('shows nothing when the day trips no indicator', () => {
+  // Mirrors extendedIntro's epistemic structure (forecast-extended-intro):
+  // no provider/no data is silence, because nothing was looked at; checked
+  // and found clear is a sentence, because something was. Rendering nothing
+  // here made "the indicators were checked and are clear" indistinguishable
+  // from "the indicators were never run" - the wrong output for a clear
+  // result on a product whose first principle is that a missing feed must
+  // never look like a calm one.
+  it('says so plainly when the indicators ran and nothing tripped, rather than staying silent', () => {
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+
     expect(screen.queryByTestId('forecast-wave-indicators')).not.toBeInTheDocument()
+    expect(screen.getByTestId('forecast-wave-indicators-clear')).toBeInTheDocument()
+  })
+
+  // The silent case survives: a day with no wave data at all (no provider,
+  // or no reading for this day) means the indicators were never run, so
+  // there is nothing to say - neither the tripped list nor the clear
+  // sentence renders.
+  it('stays silent when there is no wave data for the day, since nothing was checked', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay({ hourlyWave: [] })]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.queryByTestId('forecast-wave-indicators')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-wave-indicators-clear')).not.toBeInTheDocument()
   })
 
   it('names each tripped indicator in words', () => {
@@ -1073,6 +1194,8 @@ describe('ForecastDrawer wave leading indicators', () => {
     expect(within(panel).getByText(/Sea building/i)).toBeInTheDocument()
     expect(within(panel).getByText(/Period lengthening/i)).toBeInTheDocument()
     expect(within(panel).queryByText(/danger signal/i)).not.toBeInTheDocument()
+    // The clear-day sentence and the tripped list are mutually exclusive.
+    expect(screen.queryByTestId('forecast-wave-indicators-clear')).not.toBeInTheDocument()
   })
 
   // Page 243: the highest wave runs 1.87 times the significant height, so a
@@ -1435,8 +1558,8 @@ describe('ForecastDrawer upper-air trough bands', () => {
 
 function buildHourlyToday() {
   return [
-    { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' as const },
-    { label: '11AM', condition: 'Clear', temperatureF: 73, windSpeedKts: 12, windGustKts: 19, windDirection: 'NE', windDirectionDeg: 50, kind: 'forecast' as const },
+    { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' as const, isDaylight: true },
+    { label: '11AM', condition: 'Clear', temperatureF: 73, windSpeedKts: 12, windGustKts: 19, windDirection: 'NE', windDirectionDeg: 50, kind: 'forecast' as const, isDaylight: true },
   ]
 }
 
@@ -1643,6 +1766,66 @@ describe('ForecastDrawer panel staleness', () => {
 
     expect(screen.getByTestId('forecast-wave-stale-badge')).toBeInTheDocument()
     expect(screen.getByTestId('forecast-wave-body')).toHaveClass('grayscale')
+  })
+
+  // Upper Air was the one panel left without the stale treatment, purely
+  // because the freshness values were never plumbed from the backend
+  // (which has sent updated_at/ttl_seconds all along) through the hook and
+  // down into this component. It carries its own TTL, independent of both
+  // the weather and wave feeds.
+  it('shows no stale badge for a fresh upper-air feed', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        upperAirUpdatedAt="2026-06-14T12:00:00Z"
+        upperAirTtlSeconds={21600}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.queryByTestId('forecast-panel-upper-air-stale-badge')).not.toBeInTheDocument()
+    expect(screen.getByTestId('forecast-panel-upper-air-body')).not.toHaveClass('grayscale')
+  })
+
+  // 21600s (6h) TTL -> 64800s (18h) threshold. 19 hours old trips it.
+  it('shows the stale badge and grayscales the upper-air panel once its feed outlives 3x its TTL', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        upperAirUpdatedAt="2026-06-13T17:30:00Z"
+        upperAirTtlSeconds={21600}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-panel-upper-air-stale-badge')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-panel-upper-air-body')).toHaveClass('grayscale')
+  })
+
+  it('does not mark the upper-air panel stale when its ttlSeconds is absent, no matter its age', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        upperAirUpdatedAt="2026-06-01T00:00:00Z"
+        upperAirTtlSeconds={null}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    expect(screen.queryByTestId('forecast-panel-upper-air-stale-badge')).not.toBeInTheDocument()
+    expect(screen.getByTestId('forecast-panel-upper-air-body')).not.toHaveClass('grayscale')
   })
 })
 
@@ -2125,6 +2308,21 @@ describe('ForecastDrawer chart decoder keys', () => {
     expect(screen.getByTestId('forecast-wave-legend')).not.toHaveTextContent(/arrows show/i)
   })
 
+  // The wave key explained the period beside each arrow but not the
+  // steepness ratio drawn right next to it (e.g. "7.7s 1:198"), so a reader
+  // had no way to calibrate 1:198 against 1:28. The bands and their edges
+  // come from wave_providers.go's waveSteepnessRollingMax/BreakingMin
+  // (Surviving the Storm pages 231/240/252), not invented thresholds.
+  it('explains the steepness ratio in the wave key, not just the period', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
+
+    const key = screen.getByTestId('forecast-wave-key')
+    expect(key).toHaveTextContent(/1:25/)
+    expect(key).toHaveTextContent(/1:10/)
+    expect(key).toHaveTextContent(/rolls?/i)
+    expect(key).toHaveTextContent(/breaks?/i)
+  })
+
   it('puts the shaded-band key above the upper-air chart, not in the swatch row', () => {
     render(
       <ForecastDrawer
@@ -2509,6 +2707,7 @@ describe('ForecastDrawer wind warning prominence', () => {
           {
             label: 'Now',
             kind: 'forecast',
+            isDaylight: true,
             temperatureF: 70,
             condition: 'Clear',
             windSpeedKts: 10,
@@ -2655,7 +2854,7 @@ describe('ForecastDrawer visual weight', () => {
       <ForecastDrawer
         forecast={[buildDay()]}
         hourlyToday={[
-          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' },
+          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast', isDaylight: true },
         ]}
         loading={false}
         error={null}
@@ -2686,8 +2885,8 @@ describe('ForecastDrawer visual weight', () => {
       <ForecastDrawer
         forecast={[buildDay()]}
         hourlyToday={[
-          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' },
-          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset' },
+          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast', isDaylight: true },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset', isDaylight: false },
         ]}
         loading={false}
         error={null}
@@ -2707,7 +2906,7 @@ describe('ForecastDrawer visual weight', () => {
       <ForecastDrawer
         forecast={[buildDay()]}
         hourlyToday={[
-          { label: '2PM', condition: 'Clear', temperatureF: 70, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'forecast' },
+          { label: '2PM', condition: 'Clear', temperatureF: 70, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'forecast', isDaylight: true },
         ]}
         loading={false}
         error={null}
@@ -2848,8 +3047,8 @@ describe('ForecastDrawer chart keyboard access', () => {
 // visible exactly when scrubbing a chart changes them fastest.
 describe('ForecastDrawer still digits', () => {
   const hourlyBoth = [
-    { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' as const },
-    { label: '2PM', condition: 'Clear', temperatureF: 70, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'forecast' as const },
+    { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' as const, isDaylight: true },
+    { label: '2PM', condition: 'Clear', temperatureF: 70, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'forecast' as const, isDaylight: true },
   ]
 
   it('gives every font-display numeric readout tabular-nums, not just the one that already had it', () => {
@@ -2997,8 +3196,8 @@ describe('ForecastDrawer gauge-primary-label contrast token', () => {
       <ForecastDrawer
         forecast={[buildDay()]}
         hourlyToday={[
-          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' },
-          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset' },
+          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast', isDaylight: true },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset', isDaylight: false },
         ]}
         loading={false}
         error={null}
@@ -3036,8 +3235,8 @@ describe('ForecastDrawer faded small text', () => {
       <ForecastDrawer
         forecast={[buildDay()]}
         hourlyToday={[
-          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset' },
-          { label: '9PM', condition: 'Clear', temperatureF: 60, windSpeedKts: 5, windGustKts: 8, windDirection: 'N', windDirectionDeg: 0, kind: 'forecast' },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset', isDaylight: false },
+          { label: '9PM', condition: 'Clear', temperatureF: 60, windSpeedKts: 5, windGustKts: 8, windDirection: 'N', windDirectionDeg: 0, kind: 'forecast', isDaylight: false },
         ]}
         loading={false}
         error={null}

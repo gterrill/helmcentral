@@ -194,6 +194,8 @@ export function useUpperAir(refreshIntervalSeconds = 21600) {
   const [provider, setProvider] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
   const hasLoadedDataRef = useRef(false);
 
   const fetchUpperAir = useCallback(async () => {
@@ -221,6 +223,8 @@ export function useUpperAir(refreshIntervalSeconds = 21600) {
       setSeries(mapSeries(payload.series));
       setWindowBand(mapWindow(payload.window));
       setProvider(typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null);
+      setUpdatedAt(typeof payload.updated_at === 'string' ? payload.updated_at : null);
+      setTtlSeconds(typeof payload.ttl_seconds === 'number' ? payload.ttl_seconds : null);
       if (rawDays.length > 0) {
         hasLoadedDataRef.current = true;
       }
@@ -239,5 +243,5 @@ export function useUpperAir(refreshIntervalSeconds = 21600) {
     return () => clearInterval(interval);
   }, [fetchUpperAir, refreshIntervalSeconds]);
 
-  return { days, series, windowBand, provider, loading, error, refetch: fetchUpperAir };
+  return { days, series, windowBand, provider, loading, error, updatedAt, ttlSeconds, refetch: fetchUpperAir };
 }

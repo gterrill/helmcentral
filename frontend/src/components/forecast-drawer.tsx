@@ -66,6 +66,9 @@ interface ForecastDrawerProps {
   upperAirSeries?: UpperAirSample[]
   /** The range the window's days are judged against, absent when there is no provider. */
   upperAirWindow?: UpperAirWindow
+  /** When the upper-air provider last answered - drives the panel's own stale badge, independent of the weather and wave feeds. */
+  upperAirUpdatedAt?: string | null
+  upperAirTtlSeconds?: number | null
   waveSeaTemperatureF?: number | null
   waveLoading?: boolean
   waveError?: string | null
@@ -704,6 +707,8 @@ export function ForecastDrawer({
   upperAirDays = [],
   upperAirSeries = [],
   upperAirWindow,
+  upperAirUpdatedAt = null,
+  upperAirTtlSeconds = null,
   waveSeaTemperatureF = null,
   waveLoading = false,
   waveError = null,
@@ -729,7 +734,11 @@ export function ForecastDrawer({
   const windUnit = 'kts'
   const displayTemp = (tempF: number) => (unit === 'metric' ? fahrenheitToCelsius(tempF) : tempF)
   const days = forecast.slice(0, 10)
-  const hourlyEntries = hourlyToday.slice(0, 12)
+  // Matches spanLabel="Next 24 hours" below - the strip used to cap at 12,
+  // which read as a full day's plan while actually stopping around 9PM for
+  // anyone reading it at midday: daylight hours only, no overnight, on the
+  // one panel a skipper uses to judge whether tonight is safe.
+  const hourlyEntries = hourlyToday.slice(0, 24)
 
   useEffect(() => {
     setSelectedDayIndex((prev) => (prev < days.length ? prev : 0))
@@ -779,6 +788,13 @@ export function ForecastDrawer({
   const waveAgeSeconds = ageSecondsFromUpdatedAt(waveUpdatedAt, Date.now())
   const waveStale = isForecastStale(waveAgeSeconds, waveTtlSeconds)
   const waveStaleLabel = waveStale ? formatDataAge(waveAgeSeconds) : undefined
+
+  // Upper air runs on the model cadence (four times a day) rather than the
+  // weather/wave poll interval, so it carries its own TTL and its own
+  // independent stale check, same shape as the wave one above.
+  const upperAirAgeSeconds = ageSecondsFromUpdatedAt(upperAirUpdatedAt, Date.now())
+  const upperAirStale = isForecastStale(upperAirAgeSeconds, upperAirTtlSeconds)
+  const upperAirStaleLabel = upperAirStale ? formatDataAge(upperAirAgeSeconds) : undefined
 
   const precipitationPct = selectedDay.precipitation
   const humidityPct = selectedDay.humidityPct
@@ -1409,7 +1425,18 @@ export function ForecastDrawer({
           <div className="px-2.5 py-2.5">
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {hourlyEntries.map((entry, idx) => {
-            const nightMode = hourlyEntries.slice(0, idx).some((item) => item.kind === 'sunset')
+            /*
+             * Night mode reads the hour's own isDaylight flag (the same
+             * per-hour signal the cloud chart's getCloudChartIcon already
+             * uses) rather than "has a sunset marker appeared earlier in the
+             * strip". That latch never turns back off, which was harmless at
+             * the old 12-hour cap (rarely long enough to reach the following
+             * sunrise) and wrong now the strip runs a full 24: every hour
+             * from sunset to midnight the next day would render as night.
+             * The synthetic sunset entry itself carries no real isDaylight
+             * reading, so it is excluded rather than read as false-for-night.
+             */
+            const nightMode = entry.kind !== 'sunset' && !entry.isDaylight
             const isNowEntry = entry.label === 'Now' && entry.kind === 'forecast'
             const displayTemperature = entry.temperatureF >= 0 ? Math.round(displayTemp(entry.temperatureF)) : null
             /*
@@ -1695,16 +1722,12 @@ export function ForecastDrawer({
                       <YAxis domain={[cloudScaleMin, cloudScaleMax]} hide />
                       <YAxis yAxisId="precip" domain={[0, precipMax]} orientation="right" hide />
                       <YAxis yAxisId="uv" domain={[0, uvMax]} hide />
-                      <defs>
-                        <linearGradient id={tempAreaGradientId} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.28" />
-                          <stop offset="100%" stopColor="hsl(var(--chart-temp))" stopOpacity="0.02" />
-                        </linearGradient>
-                        <linearGradient id={uvAreaGradientId} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="hsl(var(--chart-uv))" stopOpacity="0.30" />
-                          <stop offset="100%" stopColor="hsl(var(--chart-uv))" stopOpacity="0.02" />
-                        </linearGradient>
-                      </defs>
+                      {/* tempAreaGradientId/uvAreaGradientId are defined once,
+                          below, in the overlay <svg> - SVG ids are
+                          document-scoped, so a url(#id) fill here resolves
+                          there regardless of which <svg> declared it. Same
+                          pattern as windAreaGradientId and waveAreaGradientId
+                          further down this file. */}
                       <Area
                         dataKey="uvIndex"
                         yAxisId="uv"
@@ -2006,7 +2029,7 @@ export function ForecastDrawer({
                         Roughly one wave in seven reaches the significant height.
                       </p>
                     )}
-                    {waveIndicatorMessages.length > 0 && (
+                    {waveIndicatorMessages.length > 0 ? (
                       <ul
                         data-testid="forecast-wave-indicators"
                         className="mb-2 space-y-1 rounded border border-gauge-secondary/40 bg-muted/25 p-2 text-sm text-foreground/90"
@@ -2018,9 +2041,23 @@ export function ForecastDrawer({
                           </li>
                         ))}
                       </ul>
+                    ) : (
+                      /*
+                       * Mirrors extendedIntro's epistemic structure: this
+                       * branch only runs once waveHourly.length > 0, i.e.
+                       * once the indicators actually ran for this day, so
+                       * silence here would read as "never checked" when the
+                       * true state is "checked, and clear" - indistinguishable
+                       * from a dead feed on a product whose first principle is
+                       * that a missing feed must never look like a calm one.
+                       */
+                      <p data-testid="forecast-wave-indicators-clear" className="mb-2 text-sm text-muted-foreground">
+                        None of the leading indicators tripped for this day.
+                      </p>
                     )}
                     <p data-testid="forecast-wave-key" className="mb-2 text-sm text-muted-foreground">
-                      Arrows show the direction the swell is heading, with its period in seconds below each.
+                      Arrows show the direction the swell is heading, with its period in seconds below each. The
+                      number after it is height over wavelength: under 1:25 rolls, past 1:10 breaks.
                     </p>
                     <div className="relative">
                       {waveTooltipEntry && (
@@ -2201,9 +2238,13 @@ export function ForecastDrawer({
           testId="forecast-panel-upper-air"
           title={'Upper Air \u00b7 500mb'}
           spanLabel={`${upperAirDayStarts.length} days`}
-          // No freshness signal is wired for the upper-air provider today
-          // (no updatedAt/ttlSeconds on this feed), so this stays non-stale
-          // rather than guessing at an age it doesn't have.
+          // The backend has sent updated_at/ttl_seconds on this feed all
+          // along (backend/upper_air_providers.go); this panel was simply
+          // the one place the hook and the props chain never carried them
+          // through, so a dead upper-air feed rendered pixel-identical to a
+          // live one.
+          stale={upperAirStale}
+          staleLabel={upperAirStaleLabel}
           intro={
             <p className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
               Upper-level troughs feed surface lows. Expect stronger surface winds 24 to 48 hours later when heights drop into the shaded zone.
