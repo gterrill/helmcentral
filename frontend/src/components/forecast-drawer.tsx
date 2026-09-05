@@ -291,8 +291,14 @@ function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; 
   const perpX = -dirY
   const perpY = dirX
 
-  const len = 9
-  const headSize = 4
+  // Scaled with WindBarb's geometry, not independently. The two glyph
+  // families sit in the same 35px band above charts of the same height, one
+  // above the wind plot and one above the wave plot, and a reader moving
+  // between them reads them as one vocabulary. Doubling the barbs and leaving
+  // these behind made the wave row look like the quieter statement, which is
+  // not a claim the data supports.
+  const len = 18
+  const headSize = 8
   const tipX = cx + dirX * len
   const tipY = cy + dirY * len
   const tailX = cx - dirX * len
@@ -306,7 +312,7 @@ function WaveDirectionArrow({ cx, cy, directionDeg }: { cx: number; cy: number; 
 
   return (
     <g data-testid="forecast-wave-arrow">
-      <line x1={tailX} y1={tailY} x2={tipX} y2={tipY} stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+      <line x1={tailX} y1={tailY} x2={tipX} y2={tipY} stroke={color} strokeWidth="2.8" strokeLinecap="round" />
       <polygon points={`${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`} fill={color} />
     </g>
   )
@@ -524,9 +530,12 @@ const RECHARTS_XAXIS_HEIGHT = 30
 
 // Shared top/bottom pixel bounds for every hourly chart's plot rectangle -
 // Wind, Wave, Precipitation and Cloud & Temperature all use the identical
-// 35..125 band before each chart's own per-value Y scaling is applied.
-const HOURLY_CHART_TOP = 35
-const HOURLY_CHART_BOTTOM = 200
+// band before each chart's own per-value Y scaling is applied. Exported
+// (test-only use) so the glyph-band clipping regression tests below assert
+// against the real source of truth rather than a copy that can drift out of
+// sync with it.
+export const HOURLY_CHART_TOP = 50
+const HOURLY_CHART_BOTTOM = 215
 
 // 6-hour-block ticks (12AM/6AM/12PM/6PM), used by every hourly chart below
 // instead of spacing ticks dynamically by count. Hoisted to module scope
@@ -827,7 +836,7 @@ export function ForecastDrawer({
   const hourlyXForHour = (hourOfDay: number) => hourlyChartLeft + (hourOfDay / 23) * hourlyChartWidth
 
   // Shared margin formula for every hourly chart below: same left/right/top,
-  // and a bottom derived from the chart's own SVG viewBox height (250, shared
+  // and a bottom derived from the chart's own SVG viewBox height (265, shared
   // by all four stacked charts) so recharts' plot rectangle lands exactly
   // where the yFor-family pixel math and tooltip overlay already expect it.
   function hourlyChartMargin(viewboxHeight: number) {
@@ -1099,7 +1108,7 @@ export function ForecastDrawer({
     left: hourlyChartLeft,
     right: upperAirChartWidth - upperAirChartRight,
     top: HOURLY_CHART_TOP,
-    bottom: 250 - HOURLY_CHART_BOTTOM - RECHARTS_XAXIS_HEIGHT,
+    bottom: 265 - HOURLY_CHART_BOTTOM - RECHARTS_XAXIS_HEIGHT,
   }
 
   const upperAirTooltip = useChartTooltip(upperAirChartData.length, upperAirChartData.length, hourlyChartLeft, upperAirChartRight)
@@ -1145,7 +1154,7 @@ export function ForecastDrawer({
     [windHourly],
   )
   const windLabelByHour = useMemo(() => buildLabelByHour(windHourly), [windHourly])
-  const windChartMargin = hourlyChartMargin(250)
+  const windChartMargin = hourlyChartMargin(265)
 
   /*
    * Same framing policy as wind, over the wave window: constant across day
@@ -1247,7 +1256,7 @@ export function ForecastDrawer({
 
     return messages
   }, [selectedWaveDay, selectedDay, wavePeakHeightM, waveSeaTemperatureF])
-  const waveChartMargin = hourlyChartMargin(250)
+  const waveChartMargin = hourlyChartMargin(265)
 
   const precipIntensities = precipHourly.map((entry) => Math.max(0, entry.precipIntensityMm))
   const precipMax = Math.max(1, ...precipIntensities)
@@ -1355,7 +1364,7 @@ export function ForecastDrawer({
     return labelMap
   }, [cloudHourly, precipHourly])
 
-  const cloudChartMargin = hourlyChartMargin(250)
+  const cloudChartMargin = hourlyChartMargin(265)
   const cloudChartConfig: ChartConfig = {
     displayTemperature: { label: `Temperature (${tempUnit})`, color: 'hsl(var(--chart-temp) / 0.9)' },
     precipIntensityMm: { label: 'Precipitation (mm/hr)', color: 'hsl(var(--chart-precip) / 0.85)' },
@@ -1698,10 +1707,10 @@ export function ForecastDrawer({
                   )}
                   <div
                     data-testid="forecast-cloud-chart"
-                    className="relative h-[250px] touch-none overflow-hidden rounded bg-muted/15"
+                    className="relative h-[265px] touch-none overflow-hidden rounded bg-muted/15"
                     style={{ width: forecastChartWidth }}
                   >
-                    <ComposedChart width={forecastChartWidth} height={250} data={cloudChartData} margin={cloudChartMargin}>
+                    <ComposedChart width={forecastChartWidth} height={265} data={cloudChartData} margin={cloudChartMargin}>
                       <XAxis
                         dataKey="hourOfDay"
                         type="number"
@@ -1781,7 +1790,7 @@ export function ForecastDrawer({
 
                     <svg
                       ref={cloudTooltip.svgRef}
-                      viewBox={`0 0 ${forecastChartWidth} 250`}
+                      viewBox={`0 0 ${forecastChartWidth} 265`}
                       preserveAspectRatio="none"
                       className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       tabIndex={0}
@@ -1831,7 +1840,7 @@ export function ForecastDrawer({
                     </svg>
                   </div>
 
-                  <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[35px] items-center" style={{ left: `${(hourlyChartLeft / forecastChartWidth) * 100}%`, right: `${100 - (hourlyChartRight / forecastChartWidth) * 100}%` }}>
+                  <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[50px] items-center" style={{ left: `${(hourlyChartLeft / forecastChartWidth) * 100}%`, right: `${100 - (hourlyChartRight / forecastChartWidth) * 100}%` }}>
                     {cloudIconTicks.map(({ entry, idx }) => (
                       <div
                         key={idx}
@@ -1876,10 +1885,10 @@ export function ForecastDrawer({
                     )}
                     <div
                       data-testid="forecast-wind-chart"
-                      className="relative h-[250px] touch-none overflow-hidden rounded bg-muted/15"
+                      className="relative h-[265px] touch-none overflow-hidden rounded bg-muted/15"
                       style={{ width: forecastChartWidth }}
                     >
-                      <ComposedChart width={forecastChartWidth} height={250} margin={windChartMargin}>
+                      <ComposedChart width={forecastChartWidth} height={265} margin={windChartMargin}>
                         <XAxis
                           dataKey="hourOfDay"
                           type="number"
@@ -1929,7 +1938,7 @@ export function ForecastDrawer({
                                 <WindBarb
                                   key={idx}
                                   cx={hourlyXForHour(entry.hourOfDay)}
-                                  cy={16}
+                                  cy={25}
                                   speedKts={entry.windSpeed}
                                   directionDeg={entry.windDirectionDeg}
                                 />
@@ -1941,7 +1950,7 @@ export function ForecastDrawer({
 
                       <svg
                         ref={windTooltip.svgRef}
-                        viewBox={`0 0 ${forecastChartWidth} 250`}
+                        viewBox={`0 0 ${forecastChartWidth} 265`}
                         preserveAspectRatio="none"
                         className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         tabIndex={0}
@@ -2072,10 +2081,10 @@ export function ForecastDrawer({
                       )}
                       <div
                         data-testid="forecast-wave-chart"
-                        className="relative h-[250px] touch-none overflow-hidden rounded bg-muted/15"
+                        className="relative h-[265px] touch-none overflow-hidden rounded bg-muted/15"
                         style={{ width: forecastChartWidth }}
                       >
-                        <ComposedChart width={forecastChartWidth} height={250} margin={waveChartMargin}>
+                        <ComposedChart width={forecastChartWidth} height={265} margin={waveChartMargin}>
                           <XAxis
                             dataKey="hourOfDay"
                             type="number"
@@ -2135,10 +2144,12 @@ export function ForecastDrawer({
                                   const x = hourlyXForHour(entry.hourOfDay)
                                   return (
                                     <g key={idx}>
-                                      <WaveDirectionArrow cx={x} cy={16} directionDeg={entry.waveDirectionDeg} />
-                                      {/* Period and steepness share one baseline: the plot starts at
-                                          HOURLY_CHART_TOP (35) and a second row would land inside it. */}
-                                      <text x={x} y={31} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
+                                      <WaveDirectionArrow cx={x} cy={18} directionDeg={entry.waveDirectionDeg} />
+                                      {/* Period and steepness share one baseline, dropped clear of the
+                                          arrow above it (which spans cy +/- len, i.e. 0..36 at cy=18):
+                                          the plot starts at HOURLY_CHART_TOP (50) and a second row
+                                          would land inside it. */}
+                                      <text x={x} y={46} textAnchor="middle" fontSize={AXIS_LABEL_FONT_SIZE} fill={AXIS_LABEL_COLOR}>
                                         {entry.wavePeriodS.toFixed(1)}s
                                         {formatSteepnessRatio(entry.steepnessRatio) && (
                                           <tspan dx={5}>{formatSteepnessRatio(entry.steepnessRatio)}</tspan>
@@ -2154,7 +2165,7 @@ export function ForecastDrawer({
 
                         <svg
                           ref={waveTooltip.svgRef}
-                          viewBox={`0 0 ${forecastChartWidth} 250`}
+                          viewBox={`0 0 ${forecastChartWidth} 265`}
                           preserveAspectRatio="none"
                           className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           tabIndex={0}
@@ -2279,13 +2290,13 @@ export function ForecastDrawer({
             )}
             <div
               data-testid="forecast-upper-air-chart"
-              className="relative h-[250px] touch-none overflow-hidden rounded bg-muted/15"
+              className="relative h-[265px] touch-none overflow-hidden rounded bg-muted/15"
               style={{ width: upperAirChartWidth }}
             >
               {/* Bands sit behind the traces rather than on the pointer overlay,
                   so a wash never dims the line it is meant to explain. */}
               <svg
-                viewBox={`0 0 ${upperAirChartWidth} 250`}
+                viewBox={`0 0 ${upperAirChartWidth} 265`}
                 preserveAspectRatio="none"
                 className="pointer-events-none absolute inset-0 h-full w-full"
                 style={{ zIndex: 0 }}
@@ -2304,7 +2315,7 @@ export function ForecastDrawer({
               </svg>
 
               <div className="relative" style={{ zIndex: 1 }}>
-                <ComposedChart width={upperAirChartWidth} height={250} data={upperAirChartData} margin={upperAirChartMargin}>
+                <ComposedChart width={upperAirChartWidth} height={265} data={upperAirChartData} margin={upperAirChartMargin}>
                   <XAxis
                     dataKey="idx"
                     type="number"
@@ -2349,7 +2360,7 @@ export function ForecastDrawer({
 
               <svg
                 ref={upperAirTooltip.svgRef}
-                viewBox={`0 0 ${upperAirChartWidth} 250`}
+                viewBox={`0 0 ${upperAirChartWidth} 265`}
                 preserveAspectRatio="none"
                 className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 style={{ zIndex: 2 }}

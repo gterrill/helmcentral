@@ -14,7 +14,7 @@ vi.mock('@/components/forecast-tide-section', () => ({
   ),
 }))
 
-import { ForecastDrawer, formatRefreshAge, smoothUpperAirHeights } from '@/components/forecast-drawer'
+import { ForecastDrawer, HOURLY_CHART_TOP, formatRefreshAge, smoothUpperAirHeights } from '@/components/forecast-drawer'
 
 const HOUR_LABELS = [
   '12AM', '1AM', '2AM', '3AM', '4AM', '5AM', '6AM', '7AM', '8AM', '9AM', '10AM', '11AM',
@@ -565,8 +565,8 @@ describe('ForecastDrawer refresh age', () => {
     // 10+idx (10 at idx 0) and windGust 15+idx (max 38 at idx 23), so
     // windDataMax=38 > 30, meaning windMax rounds up to 40.
     const hourlyChartLeft = 30
-    const windChartTop = 35
-    const windChartBottom = 200
+    const windChartTop = 50
+    const windChartBottom = 215
     const windMax = 40
     const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
 
@@ -655,6 +655,121 @@ describe('ForecastDrawer refresh age', () => {
     expect(
       screen.getByText('Significant wave height 1.0 to 1.2 m from the E, with a period around 6 sec and sea surface temperature of 21°C.'),
     ).toBeInTheDocument()
+  })
+
+  // Regression test for a real clipping bug: WindBarb and WaveDirectionArrow
+  // were doubled in size (staffLen/len roughly 2x) without widening the band
+  // above the plot they're drawn into, so a due-N or due-S glyph (the
+  // vertical worst case - the staff/arrow extends straight up or down rather
+  // than at an angle) either poked above y=0 (clipped by the chart's own
+  // overflow-hidden container) or dropped below HOURLY_CHART_TOP into the
+  // plot itself. This was missed visually because the live wind that day was
+  // nearly horizontal (ESE), so the bug's vertical extent was tiny. Reads the
+  // actual rendered <line>/<polygon> coordinates rather than trusting the
+  // component's own geometry math, and checks against the real
+  // HOURLY_CHART_TOP export rather than a hardcoded copy, so this fails
+  // against the un-fixed source at whatever top value it currently has.
+  function glyphYCoords(glyph: Element): number[] {
+    const ys: number[] = []
+    glyph.querySelectorAll('line').forEach((line) => {
+      ys.push(Number(line.getAttribute('y1')))
+      ys.push(Number(line.getAttribute('y2')))
+    })
+    glyph.querySelectorAll('polygon').forEach((polygon) => {
+      const points = (polygon.getAttribute('points') ?? '').trim().split(/\s+/).filter(Boolean)
+      points.forEach((point) => {
+        const [, y] = point.split(',')
+        ys.push(Number(y))
+      })
+    })
+    return ys
+  }
+
+  describe('glyph band clipping regression', () => {
+    it.each([
+      ['due north', 0],
+      ['due south', 180],
+    ])('keeps every WindBarb line/polygon coordinate inside the glyph band at %s (%d deg)', (_label, directionDeg) => {
+      // High enough speed (20kt) to draw full barb features, not just the
+      // calm-wind circle - the bug is in the staff/barb geometry.
+      const hourlyWind = [
+        { label: '12AM', hourOfDay: 0, windSpeed: 20, windGust: 24, windDirection: 'N', windDirectionDeg: directionDeg },
+      ]
+      render(<ForecastDrawer forecast={[buildDay({ hourlyWind })]} loading={false} error={null} unit="metric" />)
+
+      const barb = screen.getAllByTestId('forecast-wind-barb')[0]
+      const ys = glyphYCoords(barb)
+      expect(ys.length).toBeGreaterThan(0)
+      for (const y of ys) {
+        expect(y).toBeGreaterThanOrEqual(0)
+        expect(y).toBeLessThanOrEqual(HOURLY_CHART_TOP)
+      }
+    })
+
+    it.each([
+      ['due north', 0],
+      ['due south', 180],
+    ])('keeps every WaveDirectionArrow line/polygon coordinate inside the glyph band at %s (%d deg)', (_label, directionDeg) => {
+      const hourlyWave = buildHourlyWave(1, 6, () => 1.0).map((entry) => ({
+        ...entry,
+        hourOfDay: 0,
+        waveDirectionDeg: directionDeg,
+      }))
+      render(
+        <ForecastDrawer
+          forecast={[buildDay()]}
+          waveDays={[buildWaveDay({ hourlyWave })]}
+          loading={false}
+          error={null}
+          unit="metric"
+        />,
+      )
+
+      const arrow = screen.getAllByTestId('forecast-wave-arrow')[0]
+      const ys = glyphYCoords(arrow)
+      expect(ys.length).toBeGreaterThan(0)
+      for (const y of ys) {
+        expect(y).toBeGreaterThanOrEqual(0)
+        expect(y).toBeLessThanOrEqual(HOURLY_CHART_TOP)
+      }
+    })
+
+    // The period/steepness text shares the glyph band with the arrow above
+    // it. Text is anchored by its baseline and visually occupies roughly
+    // 8px above that baseline (the same estimate this file's own comments
+    // use elsewhere for this exact label), so overlap is checked against
+    // (baseline - 8), not the baseline itself.
+    const TEXT_OCCUPIED_HEIGHT_ABOVE_BASELINE = 8
+
+    it.each([
+      ['due north', 0],
+      ['due south', 180],
+    ])('keeps the wave period/steepness text clear of the direction arrow at %s (%d deg)', (_label, directionDeg) => {
+      const hourlyWave = buildHourlyWave(1, 6, () => 1.0).map((entry) => ({
+        ...entry,
+        hourOfDay: 0,
+        waveDirectionDeg: directionDeg,
+      }))
+      render(
+        <ForecastDrawer
+          forecast={[buildDay()]}
+          waveDays={[buildWaveDay({ hourlyWave })]}
+          loading={false}
+          error={null}
+          unit="metric"
+        />,
+      )
+
+      const chart = screen.getByTestId('forecast-wave-chart')
+      const arrow = screen.getAllByTestId('forecast-wave-arrow')[0]
+      const maxArrowY = Math.max(...glyphYCoords(arrow))
+
+      const periodText = Array.from(chart.querySelectorAll('text')).find((el) => el.textContent?.includes('6.0s'))
+      expect(periodText).toBeTruthy()
+      const baselineY = Number(periodText!.getAttribute('y'))
+
+      expect(baselineY - TEXT_OCCUPIED_HEIGHT_ABOVE_BASELINE).toBeGreaterThanOrEqual(maxArrowY)
+    })
   })
 
   it('shows wave provider, cache state and refresh age for the wave card', () => {
@@ -1942,8 +2057,8 @@ describe('ForecastDrawer day selector', () => {
 // wind and wave scale to the WHOLE visible window (deliberately constant
 // across day tabs), temperature carries a unit-aware minimum span.
 describe('ForecastDrawer chart y-axis framing', () => {
-  const PLOT_TOP = 35
-  const PLOT_BOTTOM = 200
+  const PLOT_TOP = 50
+  const PLOT_BOTTOM = 215
   const PLOT_HEIGHT = PLOT_BOTTOM - PLOT_TOP
 
   // The left-hand axis ticks are plain numbers in the manual overlay <svg>;
@@ -2456,8 +2571,8 @@ describe('ForecastDrawer upper-air axes', () => {
 
     // And positioned at the heights they name, on the same scale the trace is
     // drawn with, rather than parked on the frame edge.
-    const PLOT_TOP = 35
-    const PLOT_BOTTOM = 200
+    const PLOT_TOP = 50
+    const PLOT_BOTTOM = 215
     const frameMin = 5872 - 5
     const frameMax = 5900 + 5
     const heightYFor = (value: number) =>
@@ -2513,8 +2628,8 @@ describe('ForecastDrawer upper-air axes', () => {
     expect(heightTicks.map((tick) => tick.textContent)).toEqual(['5896 m', '5876'])
     for (const tick of heightTicks) {
       const y = Number(tick.getAttribute('y'))
-      expect(y).toBeGreaterThanOrEqual(35)
-      expect(y).toBeLessThanOrEqual(200)
+      expect(y).toBeGreaterThanOrEqual(50)
+      expect(y).toBeLessThanOrEqual(215)
     }
   })
 
@@ -2586,8 +2701,8 @@ describe('ForecastDrawer upper-air axes', () => {
 // --- AXIS_LABEL_COLOR in forecast-drawer.tsx) ---
 
 describe('ForecastDrawer cloud chart axes', () => {
-  const PLOT_TOP = 35
-  const PLOT_BOTTOM = 200
+  const PLOT_TOP = 50
+  const PLOT_BOTTOM = 215
 
   // Rule 1, ownership: the left axis describes one series - temperature - so
   // it takes that series' colour, the same way the upper-air chart's two axes
