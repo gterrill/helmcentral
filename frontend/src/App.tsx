@@ -29,6 +29,7 @@ import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
+import type { SettingsSectionId } from '@/components/settings/settings-nav'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -151,8 +152,13 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { SidebarVersion } from '@/components/sidebar-version'
-
-type PanelId = 'forecast' | 'routes' | 'charts' | 'radar' | 'anchor-watch' | 'alarms' | 'settings'
+import {
+  parseAppLocation,
+  formatAppLocation,
+  isCanonicalAppPath,
+  type AppLocation,
+  type PanelId,
+} from '@/lib/app-location'
 
 const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
@@ -182,7 +188,18 @@ export function App() {
   const canAdmin = auth.mode !== 'signalk' || auth.role === 'admin'
 
   const { ui: uiConfig, anchor: anchorConfig } = useAppConfig()
-  const [activePanel, setActivePanel] = useState<PanelId | null>(null)
+  // ADR 0074: seeds the shell's initial panel/section/page from the URL the
+  // app was loaded with. Computed once via a lazy initializer — this only
+  // matters for the very first render, and re-parsing it on every render
+  // would be wasted work (and wrong besides, once the URL sync effect below
+  // starts rewriting the bar to match in-app navigation).
+  const [initialLocation] = useState<AppLocation>(() => parseAppLocation(globalThis.location?.pathname ?? '/'))
+  const [activePanel, setActivePanel] = useState<PanelId | null>(initialLocation.panel)
+  // Lives in App, not in SettingsPage/SettingsNav, because App is the one
+  // place that also writes it to the URL (`/settings/<id>`) — and it is
+  // deliberately NOT reset when leaving Settings, so returning to Settings
+  // later (without a section-specific deep link) lands back where it was.
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(initialLocation.section ?? 'general')
   const [showAnchorImagery, setShowAnchorImagery] = useState(() => {
     const raw = globalThis.localStorage?.getItem(ANCHOR_IMAGERY_ENABLED_KEY)
     return raw === 'true'
@@ -227,12 +244,16 @@ export function App() {
   // put, Discard runs it as-is, Save and Continue runs it only after a
   // successful save). Navigating while NOT on a dirty Settings page (the
   // overwhelmingly common case) is unaffected — `navigate()` runs immediately.
-  const requestNavigate = useCallback((targetPanel: PanelId | null, navigate: () => void) => {
+  // Returns whether it ran `navigate()` (false when it stashed it instead) —
+  // existing call sites ignore this; the popstate handler (ADR 0074) uses it
+  // to know whether it needs to re-push the URL Back just moved away from.
+  const requestNavigate = useCallback((targetPanel: PanelId | null, navigate: () => void): boolean => {
     if (activePanel === 'settings' && targetPanel !== 'settings' && settingsDirty) {
       setPendingNavigation(() => navigate)
-      return
+      return false
     }
     navigate()
+    return true
   }, [activePanel, settingsDirty])
 
   const handleSaveAndContinue = useCallback(async () => {
@@ -296,9 +317,113 @@ export function App() {
     activate: activateRoute,
     deactivate: deactivateRoute,
   } = useRouteActivation()
-  const { pages, error: pagesError, createPage, updatePage, deletePage } = useDashboardPages()
-  const [activePageId, setActivePageId] = useActiveDashboardPageId(pages)
+  const { pages, loading: pagesLoading, error: pagesError, createPage, updatePage, deletePage } = useDashboardPages()
+  const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId)
   const activePage = pages.find((p) => p.id === activePageId) ?? null
+
+  // Gates the two URL-writing effects below on the shell actually being
+  // shown (mirrors the render gate further down): while auth is still
+  // resolving, or a signalk install is waiting on sign-in, `canAdmin` reads
+  // permissive-false rather than a real answer, and without this gate the
+  // sync effect would rewrite an admin's `/settings` deep link to `/`
+  // before they ever get to the login form.
+  const shellVisible = !auth.loading && auth.mode !== null && !(auth.mode === 'signalk' && auth.user === null)
+
+  // Flips to true the first time the URL sync effect below runs (whether or
+  // not it actually writes) — see that effect's own comment for why the
+  // write path needs to know this.
+  const locationInitialisedRef = useRef(false)
+
+  // Applies a parsed location to the shell's own state. Separate from
+  // requestNavigate's plain `() => setActivePanel(...)` callbacks (every
+  // existing sidebar/tile/breadcrumb call site) because a location can also
+  // carry a page id or a settings section, and the dashboard branch has to
+  // reconcile an unknown/absent page id to the first page rather than just
+  // setting it blind.
+  const applyAppLocation = useCallback((loc: AppLocation) => {
+    setActivePanel(loc.panel)
+    if (loc.panel === null && !pagesLoading) {
+      const knownPageId = loc.pageId != null && pages.some((p) => p.id === loc.pageId) ? loc.pageId : null
+      setActivePageId(knownPageId ?? pages[0]?.id ?? null)
+    }
+    if (loc.panel === 'settings') {
+      setSettingsSection(loc.section ?? 'general')
+    }
+  }, [pages, pagesLoading, setActivePageId])
+
+  // The single writer of window.location (ADR 0074). Chosen over pushing at
+  // each of the ~10 existing setActivePanel call sites (sidebar, page
+  // sub-items, breadcrumb, tile onOpen, alarm banner, anchor-watch
+  // auto-close) because it needs no call-site churn and covers programmatic
+  // changes too (e.g. the active page disappearing out from under a user).
+  useEffect(() => {
+    if (!shellVisible) return
+    // Page structure not yet known: leave whatever deep link brought us
+    // here alone rather than guessing at a page id that might still turn
+    // out valid once the list loads.
+    if (activePanel === null && pagesLoading) return
+
+    // Set BEFORE the equality check below, or the first user click right
+    // after a clean deep link (where the write below is skipped because
+    // next === path already) would still see `first` as true and wrongly
+    // replace that click's own entry instead of pushing it.
+    const first = !locationInitialisedRef.current
+    locationInitialisedRef.current = true
+
+    const ctx = { firstPageId: pages[0]?.id ?? null, knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
+    const next = formatAppLocation({ panel: activePanel, pageId: activePageId, section: settingsSection }, ctx)
+    const path = window.location.pathname
+    if (next === path) return // popstate, or a clean deep link, already put us here
+
+    // Normalise (replace) rather than add a history entry for a path this
+    // effect didn't itself write — that only ever happens on first load, or
+    // when the page list/admin role resolve to something that makes the
+    // current bar non-canonical.
+    const replace = first || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
+    window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
+  }, [shellVisible, activePanel, activePageId, settingsSection, pages, pagesLoading, canAdmin])
+
+  // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
+  // page still gets to veto the navigation exactly as a sidebar click
+  // would — window.location has already moved to the previous entry by the
+  // time this fires, so without the re-push below, a guarded Back would
+  // leave the bar on the destination while the guard dialog (and Settings
+  // itself) stay on screen.
+  useEffect(() => {
+    const handlePopState = () => {
+      if (!shellVisible) return
+      const path = window.location.pathname
+      const ctx = { firstPageId: pages[0]?.id ?? null, knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
+      const parsed = parseAppLocation(path)
+      if (!isCanonicalAppPath(path, ctx)) {
+        // So the sync effect's own equality check holds once it runs off
+        // the state change requestNavigate is about to (maybe) apply.
+        window.history.replaceState(null, '', formatAppLocation(parsed, ctx))
+      }
+      if (!requestNavigate(parsed.panel, () => applyAppLocation(parsed))) {
+        // Guarded: the browser already moved off Settings, so push it back —
+        // the bar has to agree with the panel still on screen while the
+        // confirmation dialog is up.
+        window.history.pushState(null, '', formatAppLocation({ panel: 'settings', section: settingsSection }, ctx))
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [shellVisible, requestNavigate, applyAppLocation, settingsSection, pages, pagesLoading, canAdmin])
+
+  // If admin access ends (or was never established) while Settings happens
+  // to be open, drop back to the dashboard. The sync effect above then sees
+  // `/settings` as non-canonical (canAdmin false) and replaces it with `/`.
+  useEffect(() => {
+    if (shellVisible && !canAdmin && activePanel === 'settings') {
+      setActivePanel(null)
+    }
+  }, [shellVisible, canAdmin, activePanel])
+
+  useEffect(() => {
+    const label = activePanel ? PANEL_NAV_ITEMS.find((item) => item.id === activePanel)?.label : null
+    document.title = label ? `${label} · Helmcentral` : 'Helmcentral Dashboard'
+  }, [activePanel])
 
   // Handle anchor watch auto-close notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -1194,6 +1319,8 @@ export function App() {
             autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
             onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
             onDirtyChange={setSettingsDirty}
+            activeSectionId={settingsSection}
+            onSectionChange={setSettingsSection}
           />
         )
       case 'anchor-watch':

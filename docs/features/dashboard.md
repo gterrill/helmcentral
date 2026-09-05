@@ -38,6 +38,33 @@ a given page exists to watch — anchor distance on an anchorage page, apparent
 wind on a passage page — rather than leaving that to whichever tile happens to
 render the biggest text.
 
+## Linking to a page
+
+The address bar tracks what's on screen, so a URL is a real link to a panel,
+not just to the app in general.
+
+| URL | Opens |
+| --- | --- |
+| `/` | The dashboard, first page. |
+| `/dashboard/<page id>` | The dashboard, that page. |
+| `/forecast` | The forecast drawer. |
+| `/routes` | Route planning. |
+| `/charts` | Satellite charts. |
+| `/radar` | Radar targets. |
+| `/anchor-watch` | Anchor watch. |
+| `/alarms` | The alarms panel. |
+| `/settings` | Settings, General section. |
+| `/settings/<section id>` | Settings, that section. |
+
+Your browser's Back and Forward buttons move between panels the same way they
+move between pages on any other site: open Forecast, then Routes, and Back
+returns you to Forecast rather than closing the app. If you've made a change
+on a Settings page and haven't saved it, Back still asks first, the same
+dialog you'd get clicking away in the sidebar.
+
+Tapping an alarm notification on your phone opens the Alarms panel rather
+than the dashboard.
+
 ## When a source goes quiet
 
 A SignalK server keeps serving the last value it received from a source. If the

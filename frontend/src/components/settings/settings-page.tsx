@@ -28,6 +28,15 @@ interface SettingsPageProps {
   autoCloseAnchorWatchEnabled: boolean
   onAutoCloseAnchorWatchToggle?: (enabled: boolean) => void
   onDirtyChange?: (dirty: boolean) => void
+  /**
+   * Controlled active section (ADR 0074): App.tsx owns this so it can mirror
+   * it to `/settings/<id>`. Both props are optional and only meaningful
+   * together — omitted (as `settings-page.test.tsx` and
+   * `settings-alarms-section.test.tsx` do), the page falls back to its own
+   * local `useState`, which is what keeps those tests unchanged.
+   */
+  activeSectionId?: SettingsSectionId
+  onSectionChange?: (id: SettingsSectionId) => void
 }
 
 export interface SettingsPageHandle {
@@ -47,13 +56,29 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
 })
 
 const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(function SettingsPageContent(
-  { autoCloseAnchorWatchEnabled, onAutoCloseAnchorWatchToggle, onDirtyChange },
+  {
+    autoCloseAnchorWatchEnabled,
+    onAutoCloseAnchorWatchToggle,
+    onDirtyChange,
+    activeSectionId: controlledSectionId,
+    onSectionChange,
+  },
   ref,
 ) {
   const { settings, loading, error, save } = useSettingsFormContext()
   const { touched, saveTouchedKeys } = useSecretsStatusContext()
   const transports = useAlarmTransportsFormContext()
-  const [activeSectionId, setActiveSectionId] = useState<SettingsSectionId>(SETTINGS_SECTIONS[0].id)
+  // Uncontrolled fallback for callers that don't pass activeSectionId (e.g.
+  // settings-page.test.tsx, settings-alarms-section.test.tsx) — App.tsx
+  // passes both props and this local state just goes along for the ride,
+  // updated by the same handler so an uncontrolled render never falls behind
+  // a controlled one if a caller starts passing the props later.
+  const [localSectionId, setLocalSectionId] = useState<SettingsSectionId>(SETTINGS_SECTIONS[0].id)
+  const activeSectionId = controlledSectionId ?? localSectionId
+  const handleSectionSelect = useCallback((id: SettingsSectionId) => {
+    setLocalSectionId(id)
+    onSectionChange?.(id)
+  }, [onSectionChange])
   const [draft, setDraft] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState<RegularSettingsDraft>(initialRegularSettingsDraft)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
@@ -195,7 +220,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
 
   return (
     <div className="flex flex-col gap-4 md:flex-row">
-      <SettingsNav activeSectionId={activeSectionId} onSelect={setActiveSectionId} />
+      <SettingsNav activeSectionId={activeSectionId} onSelect={handleSectionSelect} />
 
       <div className="min-w-0 flex-1 space-y-4">
         {activeSection}

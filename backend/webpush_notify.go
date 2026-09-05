@@ -106,7 +106,9 @@ func webPushPayloadFor(msg notificationMessage) webPushPayload {
 		Tag:   msg.RuleID + "|" + msg.Kind,
 		State: msg.State,
 		Kind:  msg.Kind,
-		URL:   "/",
+		// The dashboard now has deep links (ADR 0074); a tapped alarm should
+		// land on the alarms panel, not the dashboard root.
+		URL: "/alarms",
 	}
 }
 

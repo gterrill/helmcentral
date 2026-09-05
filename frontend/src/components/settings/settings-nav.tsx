@@ -30,9 +30,10 @@ interface SettingsNavProps {
 }
 
 /**
- * Small vertical section nav for the settings page. Pure local-state swap
- * — no scroll-spy, no URL state — same "swap not scroll" idiom App.tsx
- * already uses for its own top-level panel switch.
+ * Small vertical section nav for the settings page. Pure controlled list —
+ * no state of its own, no scroll-spy. App owns which section is active
+ * (ADR 0074) and mirrors it to `/settings/<id>`; SettingsPageContent falls
+ * back to its own local state only when no caller is controlling this.
  */
 export function SettingsNav({ activeSectionId, onSelect }: SettingsNavProps) {
   return (

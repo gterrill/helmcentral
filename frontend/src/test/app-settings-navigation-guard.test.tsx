@@ -8,7 +8,7 @@
  * reached and its dirty state driven directly from the test.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { App } from '../App'
 import { SECRET_KEYS, type SecretKey } from '@/hooks/use-secrets-status'
 
@@ -194,9 +194,13 @@ vi.mock('@/hooks/use-app-config', () => ({
   publishAppConfigSettings: vi.fn(),
 }))
 
+// One page, id 'p1' — matching the constant `useActiveDashboardPageId` mock
+// below, so the deep-link tests' page id resolves as the *first* page
+// (canonical `/`) rather than a `/dashboard/p1` this suite has no interest
+// in exercising.
 vi.mock('@/hooks/use-dashboard-pages', () => ({
   useDashboardPages: () => ({
-    pages: [],
+    pages: [{ id: 'p1', name: 'Page 1', widgets: [], created_at: '', updated_at: '' }],
     loading: false,
     error: null,
     refetch: vi.fn(),
@@ -397,5 +401,62 @@ describe('App navigation guard on dirty Settings', () => {
 
     // Still on Settings — save failed, so navigation must not have happened.
     expect(screen.getByLabelText('Vessel prefix')).toBeInTheDocument()
+  })
+
+  // ADR 0074: Back/Forward go through the same guard as a sidebar click.
+  // These three dirty Settings via `mockTouched` (a touched secret field —
+  // the same technique settings-page.test.tsx's own touched-secret case
+  // uses) rather than via navigateToDirtySettings()'s section switch:
+  // switching to another section is itself a navigation that correctly
+  // pushes its own `/settings/<id>` entry (per the sync effect), which would
+  // leave these assertions unable to tell "the guard re-pushed /settings"
+  // apart from "the section switch already put us there". Staying on
+  // General keeps the bar's before/after states unambiguous.
+  it('Back on a dirty Settings page reached via a deep link opens the confirmation dialog and re-pushes /settings', () => {
+    mockTouched = { ...emptyTouched(), SIGNALK_USERNAME: true }
+    window.history.replaceState({}, '', '/settings')
+    render(<App />)
+
+    // Simulate the browser's Back button: it lands the document on the
+    // previous URL and fires popstate, but does not itself re-run any React
+    // effect — jsdom doesn't replay a pushState history stack, so this
+    // reproduces exactly what the popstate handler actually sees.
+    window.history.replaceState({}, '', '/')
+    act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
+
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/settings')
+    // Settings itself is still the panel on screen, not the dashboard — the
+    // modal dialog marks the rest of the tree inert, so this reads it back
+    // with getByText (unfiltered) rather than getByRole (which excludes
+    // inert content).
+    expect(screen.getByText('General')).toBeInTheDocument()
+  })
+
+  it('Cancel on that guarded Back closes the dialog and keeps the bar on /settings', async () => {
+    mockTouched = { ...emptyTouched(), SIGNALK_USERNAME: true }
+    window.history.replaceState({}, '', '/settings')
+    render(<App />)
+
+    window.history.replaceState({}, '', '/')
+    act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+    })
+    expect(window.location.pathname).toBe('/settings')
+  })
+
+  it('Discard on that guarded Back navigates to the dashboard and the bar goes to /', () => {
+    mockTouched = { ...emptyTouched(), SIGNALK_USERNAME: true }
+    window.history.replaceState({}, '', '/settings')
+    render(<App />)
+
+    window.history.replaceState({}, '', '/')
+    act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+
+    expect(window.location.pathname).toBe('/')
   })
 })

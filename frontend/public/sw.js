@@ -45,7 +45,7 @@ function showAlarm(event) {
       requireInteraction: true,
       icon: '/icons/icon-192.png',
       badge: '/icons/badge-72.png',
-      data: { url: '/' },
+      data: { url: '/alarms' },
     })
   }
 
@@ -64,7 +64,9 @@ function showAlarm(event) {
     requireInteraction: urgent,
     icon: '/icons/icon-192.png',
     badge: '/icons/badge-72.png',
-    data: { url: payload.url || '/' },
+    // Push exists only for alarms, so a payload with no url still lands on
+    // the alarms panel rather than the dashboard root.
+    data: { url: payload.url || '/alarms' },
   })
 }
 

@@ -57,3 +57,12 @@ if (typeof globalThis.EventSource === 'undefined') {
 beforeEach(() => {
   setViewportWidth(1280)
 })
+
+// jsdom keeps the URL across tests within a file, and App now reads it on
+// mount to seed a deep link (ADR 0074) — without this, a Forecast click in
+// one test (which pushes /forecast onto the shared jsdom location) would
+// mount the next test's <App> already on the Forecast panel instead of the
+// dashboard.
+beforeEach(() => {
+  window.history.replaceState({}, '', '/')
+})

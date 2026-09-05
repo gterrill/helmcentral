@@ -366,6 +366,7 @@ func TestWebPushPayloadDecryptsToTheAlarmTitleAndBody(t *testing.T) {
 		Body  string `json:"body"`
 		Tag   string `json:"tag"`
 		State string `json:"state"`
+		URL   string `json:"url"`
 	}
 	if err := json.Unmarshal(plaintext, &payload); err != nil {
 		t.Fatalf("decrypted payload is not the JSON the service worker expects: %v (%s)", err, plaintext)
@@ -381,6 +382,20 @@ func TestWebPushPayloadDecryptsToTheAlarmTitleAndBody(t *testing.T) {
 	}
 	if payload.Tag == "" {
 		t.Fatalf("a tag is required so the OS replaces rather than stacks duplicates")
+	}
+	if payload.URL != "/alarms" {
+		t.Fatalf("url: got %q, want /alarms — a tapped alarm should land on the alarms panel", payload.URL)
+	}
+}
+
+// The service worker's notificationclick handler opens whatever url the
+// payload carries (frontend/public/sw.js). Push exists only for alarms today,
+// so that url must point at the alarms panel, not the dashboard root.
+func TestWebPushPayloadLinksToTheAlarmsPanel(t *testing.T) {
+	payload := webPushPayloadFor(testMessage())
+
+	if payload.URL != "/alarms" {
+		t.Fatalf("URL: got %q, want /alarms", payload.URL)
 	}
 }
 

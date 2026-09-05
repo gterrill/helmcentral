@@ -1,0 +1,100 @@
+import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
+
+// ADR 0074: path URLs, hand-rolled (no router library). This module is the
+// only place that knows how a URL string maps to app state — App.tsx's sync
+// effect and popstate handler both go through parseAppLocation and
+// formatAppLocation rather than building or reading path strings themselves.
+// Pure and React-free so it can be unit tested without mounting anything,
+// and so PANEL_IDS can be validated here without importing App.tsx (which
+// would create a cycle: App needs the parser, the parser must not need App).
+export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'settings'] as const
+export type PanelId = (typeof PANEL_IDS)[number]
+
+export interface AppLocation {
+  panel: PanelId | null
+  pageId?: string | null
+  section?: SettingsSectionId
+}
+
+export interface LocationContext {
+  /** The first page in server order, or null while the page list hasn't loaded. */
+  firstPageId: string | null
+  /** All known page ids, or null while the page list hasn't loaded (unknown ids are accepted rather than rejected). */
+  knownPageIds: readonly string[] | null
+  canAdmin: boolean
+}
+
+const PANEL_ID_SET: ReadonlySet<string> = new Set(PANEL_IDS)
+
+function isSettingsSectionId(id: string): id is SettingsSectionId {
+  return SETTINGS_SECTIONS.some((section) => section.id === id)
+}
+
+// decodeURIComponent throws on a malformed escape (`%E0%A4%A`), and a pasted
+// or truncated link is exactly where one turns up. That is "no page named",
+// not a crash: the caller then lands on the first page and the sync effect
+// rewrites the bar, which is the same outcome as any other unknown id.
+function decodePageId(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return null
+  }
+}
+
+// Never throws: an unrecognised shape always resolves to the closest valid
+// ancestor (the dashboard, first page) rather than surfacing a parse error —
+// a mistyped or stale link should degrade gracefully, not break the app.
+export function parseAppLocation(pathname: string): AppLocation {
+  const segments = pathname.split('/').filter(Boolean)
+  const [first, second] = segments
+
+  if (!first || first === 'dashboard') {
+    return { panel: null, pageId: second !== undefined ? decodePageId(second) : null }
+  }
+
+  if (first === 'settings') {
+    const section = second !== undefined && isSettingsSectionId(second) ? second : 'general'
+    return { panel: 'settings', section }
+  }
+
+  if (PANEL_ID_SET.has(first)) {
+    return { panel: first as PanelId }
+  }
+
+  return { panel: null, pageId: null }
+}
+
+// The inverse of parseAppLocation, and the only place that builds a path
+// string. Every AppLocation has exactly one canonical string here (the
+// one-to-one mapping isCanonicalAppPath and the URL sync effect both rely
+// on) — the first page collapses to `/`, General collapses to `/settings`.
+export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, 'firstPageId'>): string {
+  if (loc.panel === null) {
+    if (!loc.pageId || loc.pageId === ctx.firstPageId) return '/'
+    return `/dashboard/${encodeURIComponent(loc.pageId)}`
+  }
+
+  if (loc.panel === 'settings') {
+    const section = loc.section ?? 'general'
+    return section === 'general' ? '/settings' : `/settings/${section}`
+  }
+
+  return `/${loc.panel}`
+}
+
+// A path is canonical when re-formatting what it parses to reproduces it
+// exactly, AND the state it names is actually reachable right now (a settings
+// path when signed in without admin, or a page id that's since been deleted,
+// parse fine but aren't states this app will land on). Both checks matter:
+// the sync effect uses this to decide replaceState vs. pushState, and the
+// popstate handler uses it to decide whether to normalise before navigating.
+export function isCanonicalAppPath(path: string, ctx: LocationContext): boolean {
+  const loc = parseAppLocation(path)
+  if (formatAppLocation(loc, ctx) !== path) return false
+  if (loc.panel === 'settings' && !ctx.canAdmin) return false
+  if (loc.panel === null && loc.pageId != null && ctx.knownPageIds !== null && !ctx.knownPageIds.includes(loc.pageId)) {
+    return false
+  }
+  return true
+}
