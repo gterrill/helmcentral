@@ -48,6 +48,38 @@ describe('AlarmBanner', () => {
     expect(banner.className).not.toMatch(/destructive/)
   })
 
+  // ADR 0038 draws a line between silenced (stopped sounding) and
+  // acknowledged (also stopped the visual alert); the banner used to blur
+  // that by calling every muted alarm "silenced".
+  it('says all acknowledged, still live rather than silenced once every shown alarm is acknowledged', () => {
+    render(<AlarmBanner alarms={[makeAlarm({ phase: 'acknowledged', silenced: true, can_acknowledge: false })]} onOpen={vi.fn()} />)
+
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent('all acknowledged, still live')
+    expect(banner).not.toHaveTextContent(/silenced/i)
+  })
+
+  it('renders the operator condition sentence, not the raw SI message, for a rule alarm', () => {
+    render(
+      <AlarmBanner
+        alarms={[
+          makeAlarm({
+            label: 'Barometer falling',
+            op: 'below',
+            clear_value: -0.02,
+            value: -0.0305,
+            unit: 'Pa/s',
+            message: 'Barometer falling: -0.03 Pa/s, clears above -0.02 Pa/s',
+          }),
+        ]}
+        onOpen={vi.fn()}
+      />,
+    )
+
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent('Falling 1.1 mb/hr. Clears once the fall eases to 0.7 mb/hr.')
+  })
+
   it('prefers the unacknowledged alarm as the headline when both kinds are live', () => {
     render(
       <AlarmBanner

@@ -13,6 +13,7 @@ export type QuantityId =
   | 'potential'
   | 'current'
   | 'pressure'
+  | 'pressureRate'
   | 'temperature'
   | 'volumetricFlow'
   | 'duration'
@@ -52,6 +53,19 @@ export const QUANTITIES: Quantity[] = [
       { id: 'psi', label: 'psi', fromSI: (v) => v / 6894.757, decimals: 1 },
       { id: 'bar', label: 'bar', fromSI: (v) => v / 100000, decimals: 2 },
       { id: 'Pa', label: 'Pa', fromSI: identity, decimals: 0 },
+      { id: 'mb', label: 'mb', fromSI: (v) => v / 100, decimals: 1 },
+    ],
+  },
+  {
+    // Barometer rule alarms fire on pressure rate of change (ADR 0038), which
+    // SignalK carries in Pa/s. No sailor thinks in that; the deckhouse
+    // barometer reads mb/hr.
+    id: 'pressureRate',
+    label: 'Pressure rate',
+    siUnit: 'Pa/s',
+    units: [
+      { id: 'mbph', label: 'mb/hr', fromSI: (v) => v * 36, decimals: 1 },
+      { id: 'Pa/s', label: 'Pa/s', fromSI: identity, decimals: 2 },
     ],
   },
   {

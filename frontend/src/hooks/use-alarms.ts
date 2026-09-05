@@ -20,6 +20,20 @@ export interface ActiveAlarm {
   acked_at?: string
 
   /**
+   * Rule-alarm fields (absent on bus notifications, which have no rule
+   * behind them). `op` is the comparison the rule evaluates; `threshold` and
+   * `hysteresis` are the rule's configured values in SI; `clear_value` is
+   * the SI value the server will accept as cleared, present only for
+   * `above`/`below` (there is no "clears" point for equal/notEqual/stale).
+   */
+  op?: 'above' | 'below' | 'equal' | 'notEqual' | 'stale'
+  threshold?: number
+  hysteresis?: number
+  clear_value?: number
+  /** SI unit string from SignalK meta or the derived-path table; absent when unknown. */
+  unit?: string
+
+  /**
    * SignalK's own alert status and capabilities (ADR 0038). Silencing stops the
    * sound; acknowledging also stops the visual alert and moves the alarm out of
    * the active phase. What a given alarm supports is the server's answer — an

@@ -110,6 +110,29 @@ describe('electrical quantities', () => {
   })
 })
 
+// Barometer rules fire on the rate of change (ADR 0038 rule alarms), which
+// SignalK carries in Pa/s. That is meaningless to a sailor who thinks in mb/hr.
+describe('pressure rate', () => {
+  it('infers pressureRate from Pa/s', () => {
+    expect(quantityForSIUnit('Pa/s').id).toBe('pressureRate')
+  })
+
+  it('formats a falling barometer in millibars per hour', () => {
+    expect(formatQuantity(-0.03, 'pressureRate', 'mbph')).toBe('-1.1')
+  })
+
+  it('passes Pa/s through unchanged', () => {
+    expect(formatQuantity(-0.03, 'pressureRate', 'Pa/s')).toBe('-0.03')
+  })
+})
+
+describe('pressure in millibars', () => {
+  // Millibars are what a barometer alarm's threshold reads in, not kPa.
+  it('formats a pressure value in millibars', () => {
+    expect(formatQuantity(100, 'pressure', 'mb')).toBe('1.0')
+  })
+})
+
 describe('fuel economy', () => {
   // 792950.7 m/m³ is what the vessel published at 10.21 kn burning 23.9 L/h on
   // that engine, which works out to 0.427 nm/L the long way round.

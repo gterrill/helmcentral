@@ -3,6 +3,7 @@ import { memo } from 'react'
 
 import { Button } from '@/components/ui/button'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
+import { alarmConditionSentence } from '@/lib/alarm-display'
 import { cn } from '@/lib/utils'
 
 interface AlarmBannerProps {
@@ -23,7 +24,9 @@ interface AlarmBannerProps {
  * used to make the whole dashboard look calm while that held (the same P0 bug
  * as anchor-watch-tile.tsx's alarm strip): every live alarm renders here,
  * loud while anything is unacknowledged, and in a muted-but-present variant
- * once everything showing has been.
+ * once everything showing has been, labelled "all acknowledged, still live"
+ * rather than "silenced", because ADR 0038 treats those as different states
+ * and the drawer already uses the acknowledged word.
  */
 export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen }: AlarmBannerProps) {
   if (alarms.length === 0) return null
@@ -54,9 +57,9 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen }: AlarmBa
         <p className="truncate text-sm font-semibold">
           <span className="uppercase tracking-[0.08em]">{first.state}</span> — {first.label}
           {others > 0 && <span className="ml-2 font-normal">and {others} more</span>}
-          {!loud && <span className="ml-2 font-normal">· silenced</span>}
+          {!loud && <span className="ml-2 font-normal">· all acknowledged, still live</span>}
         </p>
-        <p className="truncate text-xs">{first.message}</p>
+        <p className="truncate text-xs">{alarmConditionSentence(first)}</p>
       </div>
       <Button size="sm" variant="outline" className="shrink-0" onClick={onOpen}>
         View

@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Tile } from '@/components/ui/tile'
+import { alarmConditionSentence, formatAlarmTime } from '@/lib/alarm-display'
+import { severityClass } from '@/lib/severity'
 import {
   ALARM_OPERATORS,
   RAISABLE_ALARM_STATES,
@@ -15,26 +17,7 @@ import {
   type AlarmRule,
   type AlarmRuleDraft,
 } from '@/hooks/use-alarm-rules'
-import type { ActiveAlarm, AlarmState } from '@/hooks/use-alarms'
-
-/**
- * Severity colours. Raw palette colours are reserved for alert semantics
- * (AGENTS.md), which is exactly what these are.
- */
-function stateClass(state: AlarmState | string): string {
-  switch (state) {
-    case 'emergency':
-      return 'text-red-600'
-    case 'alarm':
-      return 'text-red-500'
-    case 'warn':
-      return 'text-amber-500'
-    case 'alert':
-      return 'text-amber-400'
-    default:
-      return 'text-muted-foreground'
-  }
-}
+import type { ActiveAlarm } from '@/hooks/use-alarms'
 
 function formatTime(value?: string): string {
   if (!value) return '--'
@@ -139,44 +122,73 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
           <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">All clear</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {alarms.map((alarm) => (
-              <div key={alarm.rule_id} className="rounded-md border bg-background/60 px-3 py-3">
-                <div className="flex min-w-0 items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className={`font-display text-lg leading-none ${stateClass(alarm.state)}`}>
-                      <span className="truncate">{alarm.label}</span>
-                    </p>
-                    <p className="mt-1 truncate text-[11px] text-muted-foreground">{alarm.message}</p>
-                    <p className="mt-1 truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                      {alarm.state} · {alarm.path} · {formatTime(alarm.raised_at)}
-                    </p>
-                  </div>
-                  {/*
-                    SignalK reports per notification which actions it offers, so
-                    render exactly those: silencing stops the sound, and
-                    acknowledging also stops the visual alert. An emergency
-                    offers neither, and a rule alarm offers no silence.
-                  */}
-                  <div className="flex shrink-0 items-center gap-2">
-                    {alarm.phase === 'acknowledged' ? (
-                      <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Acknowledged</span>
-                    ) : alarm.silenced ? (
-                      <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Silenced</span>
-                    ) : null}
-                    {alarm.can_silence && (
-                      <Button size="sm" variant="ghost" onClick={() => void silence(alarm.rule_id)}>
-                        Silence
-                      </Button>
-                    )}
-                    {alarm.can_acknowledge && (
-                      <Button size="sm" variant="outline" onClick={() => void acknowledge(alarm.rule_id)}>
-                        Acknowledge
-                      </Button>
-                    )}
+            {alarms.map((alarm) => {
+              // Raised/acknowledged times and the path are the only "when
+              // and where" facts on the card; a missing time is omitted
+              // rather than rendered as "--" (formatAlarmTime already
+              // returns null for that).
+              const raised = formatAlarmTime(alarm.raised_at)
+              const acked = formatAlarmTime(alarm.acked_at)
+              const timeParts = [raised && `Raised ${raised}`, acked && `acknowledged ${acked}`].filter(Boolean)
+              // The path is a SignalK bus topic, and notifications all live
+              // under one namespace on it, so stripping that prefix leaves
+              // the part that actually identifies the source.
+              const displayPath = alarm.path.replace(/^notifications\./, '')
+
+              return (
+                <div key={alarm.rule_id} className="rounded-md border bg-background/60 px-3 py-3">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className={`truncate font-display text-lg leading-none ${severityClass(alarm.state)}`}>
+                        {alarm.label}
+                      </p>
+                      <p className="mt-1.5 text-sm text-foreground/90">{alarmConditionSentence(alarm)}</p>
+                      <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                        {timeParts.length > 0 && `${timeParts.join(' · ')} · `}
+                        <span className="font-display">{displayPath}</span>
+                      </p>
+                    </div>
+                    {/*
+                      The pill describes state (still live after silencing or
+                      acknowledging); it does not replace the actions. SignalK
+                      reports per notification which of those it still
+                      offers, so the buttons render independently, driven
+                      only by can_silence/can_acknowledge. An acknowledged
+                      alarm already gets both false from the server, so no
+                      special-casing is needed to hide them there (ADR 0038:
+                      silencing is not acknowledging, and the drawer renders
+                      exactly what the server advertises).
+                    */}
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <span className={`text-[10px] uppercase tracking-[0.16em] ${severityClass(alarm.state)}`}>
+                        {alarm.state}
+                      </span>
+                      {alarm.phase === 'acknowledged' ? (
+                        <span className="rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                          Acknowledged · still live
+                        </span>
+                      ) : alarm.silenced ? (
+                        <span className="rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                          Silenced · still live
+                        </span>
+                      ) : null}
+                      <div className="flex items-center gap-2">
+                        {alarm.can_silence && (
+                          <Button size="sm" variant="ghost" onClick={() => void silence(alarm.rule_id)}>
+                            Silence
+                          </Button>
+                        )}
+                        {alarm.can_acknowledge && (
+                          <Button size="sm" variant="outline" onClick={() => void acknowledge(alarm.rule_id)}>
+                            Acknowledge
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </Tile>
@@ -215,7 +227,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
                   </p>
                   <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     {rule.path} · {rule.op} {rule.op === 'stale' ? `${rule.stale_after_seconds}s` : formatRuleValue(rule.value)} ·{' '}
-                    <span className={stateClass(rule.state)}>{rule.state}</span>
+                    <span className={severityClass(rule.state)}>{rule.state}</span>
                   </p>
                 </div>
                 {/* A derived rule is edited by editing the gauge zone it comes
@@ -260,7 +272,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
             {entries.slice(0, 25).map((entry) => (
               <div key={entry.id} className="flex min-w-0 items-baseline justify-between gap-3 border-b py-1 last:border-b-0">
                 <span className="min-w-0 truncate text-[11px]">
-                  <span className={stateClass(entry.state)}>{entry.state}</span>
+                  <span className={severityClass(entry.state)}>{entry.state}</span>
                   {' · '}
                   {entry.label}
                   {entry.source === 'signalk' && (
