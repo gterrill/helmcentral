@@ -1,7 +1,6 @@
 package main
 
 import (
-	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -285,8 +284,11 @@ func TestSeedHeavyWeatherRules_RunsOnceAndDoesNotResurrectDeleted(t *testing.T) 
 }
 
 // The thresholds convert the book's millibars into the SI units the derived
-// paths report, and getting that conversion wrong is the difference between
-// a rule that fires on a gale and one that never fires at all.
+// paths report, then round to two decimal places because that raw conversion
+// is what the operator sees and edits in the rules list. Getting the
+// underlying conversion wrong is the difference between a rule that fires on
+// a gale and one that never fires at all; getting the rounding wrong is a
+// seventeen-digit float staring back at whoever opens the rule.
 func TestSeedHeavyWeatherRules_ThresholdsAreInSIUnits(t *testing.T) {
 	withTempAlarmRules(t)
 	if err := seedHeavyWeatherRules(); err != nil {
@@ -302,12 +304,27 @@ func TestSeedHeavyWeatherRules_ThresholdsAreInSIUnits(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected a 'Barometer falling' rule, got %v", byLabel)
 	}
-	// 1 mb/hr is 100 Pa over 3600 s.
-	if math.Abs(falling.Value-(-100.0/3600.0)) > 1e-6 {
-		t.Fatalf("falling threshold = %v Pa/s, want %v", falling.Value, -100.0/3600.0)
+	// 1 mb/hr is 100 Pa over 3600 s, which is -0.02777... Pa/s, rounded to -0.03.
+	if falling.Value != -0.03 {
+		t.Fatalf("falling threshold = %v Pa/s, want exactly -0.03", falling.Value)
+	}
+	if falling.Hysteresis != 0.01 {
+		t.Fatalf("falling hysteresis = %v Pa/s, want exactly 0.01", falling.Hysteresis)
 	}
 	if falling.Op != alarmOpBelow {
 		t.Fatalf("a falling barometer is a 'below' rule, got %q", falling.Op)
+	}
+
+	plummeting, ok := byLabel["Barometer plummeting"]
+	if !ok {
+		t.Fatalf("expected a 'Barometer plummeting' rule, got %v", byLabel)
+	}
+	// 2 mb/hr is -0.05555... Pa/s, rounded to -0.06.
+	if plummeting.Value != -0.06 {
+		t.Fatalf("plummeting threshold = %v Pa/s, want exactly -0.06", plummeting.Value)
+	}
+	if plummeting.Hysteresis != 0.01 {
+		t.Fatalf("plummeting hysteresis = %v Pa/s, want exactly 0.01", plummeting.Hysteresis)
 	}
 
 	squash, ok := byLabel["Squash zone"]

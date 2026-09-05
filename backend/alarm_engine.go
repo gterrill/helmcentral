@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -296,7 +298,16 @@ func alarmMessageFor(rule alarmRule, sample alarmSample) string {
 	if rule.Op == alarmOpStale {
 		return fmt.Sprintf("%s: no data for %ds", rule.Label, rule.StaleAfterSeconds)
 	}
-	return fmt.Sprintf("%s: %s %g (%.4g)", rule.Label, rule.Op, rule.Value, sample.Value)
+	return fmt.Sprintf("%s: %s %s (%s)", rule.Label, rule.Op, formatAlarmValue(rule.Value), formatAlarmValue(sample.Value))
+}
+
+// formatAlarmValue renders a value the way an operator wants to read it, not
+// the way a converted unit happens to come out of a float64. A threshold
+// carried over from millibars or knots is routinely a repeating decimal, and
+// nobody needs 17 digits of that on an alarm banner. Round to two decimal
+// places and drop trailing zeros, so 11.0 reads as "11" and not "11.00".
+func formatAlarmValue(v float64) string {
+	return strconv.FormatFloat(math.Round(v*100)/100, 'f', -1, 64)
 }
 
 // acknowledge silences a live alarm without resolving it. It reports false when

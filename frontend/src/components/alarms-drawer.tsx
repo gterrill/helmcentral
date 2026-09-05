@@ -42,6 +42,16 @@ function formatTime(value?: string): string {
   return Number.isNaN(parsed.getTime()) ? '--' : parsed.toLocaleString()
 }
 
+// A threshold converted from another unit (millibars per hour into pascals
+// per second, say) is routinely a repeating decimal. The rules list is read
+// on a phone screen, not a debugger, so it gets rounded to two decimal
+// places with no padded trailing zeros. The edit form's Threshold input is
+// deliberately exempt. It shows the stored value exactly, because that is
+// what gets saved back if the operator doesn't touch it.
+function formatRuleValue(value: number): string {
+  return Number(value.toFixed(2)).toString()
+}
+
 interface AlarmsDrawerProps {
   alarms: ActiveAlarm[]
   onAcknowledge: (ruleId: string) => Promise<void>
@@ -204,7 +214,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
                     )}
                   </p>
                   <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                    {rule.path} · {rule.op} {rule.op === 'stale' ? `${rule.stale_after_seconds}s` : rule.value} ·{' '}
+                    {rule.path} · {rule.op} {rule.op === 'stale' ? `${rule.stale_after_seconds}s` : formatRuleValue(rule.value)} ·{' '}
                     <span className={stateClass(rule.state)}>{rule.state}</span>
                   </p>
                 </div>

@@ -187,7 +187,7 @@ func buildAlarmEmail(config smtpConfig, msg notificationMessage) []byte {
 	fmt.Fprintf(&b, "%s\r\n\r\n", msg.Message)
 	fmt.Fprintf(&b, "Path:  %s\r\n", msg.Path)
 	fmt.Fprintf(&b, "State: %s\r\n", msg.State)
-	fmt.Fprintf(&b, "Value: %g\r\n", msg.Value)
+	fmt.Fprintf(&b, "Value: %s\r\n", formatAlarmValue(msg.Value))
 	fmt.Fprintf(&b, "Time:  %s\r\n", msg.At.UTC().Format(time.RFC3339))
 	return []byte(b.String())
 }

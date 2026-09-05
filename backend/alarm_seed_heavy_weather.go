@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -34,6 +35,18 @@ func millibarsPerHourToPascalsPerSecond(mbPerHour float64) float64 {
 	return mbPerHour * pascalsPerMillibar / 3600
 }
 
+// roundedForOperator rounds a converted threshold to two decimal places
+// before it goes into a seeded rule. This number is not a measurement, it is
+// a starting point the operator is meant to read, tune and eventually
+// override, and -1 mb/hr into Pa/s comes out of the conversion above as
+// -0.027777777777777776. The book's own figures are round numbers read off a
+// dial to begin with, so the seventeenth digit was never real precision, just
+// float64 noise standing between the operator and the number they need to
+// look at.
+func roundedForOperator(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
 func heavyWeatherSeedRules(now time.Time) []alarmRule {
 	return []alarmRule{
 		{
@@ -42,8 +55,8 @@ func heavyWeatherSeedRules(now time.Time) []alarmRule {
 			Label:        "Barometer falling",
 			Path:         pressureRatePath,
 			Op:           alarmOpBelow,
-			Value:        millibarsPerHourToPascalsPerSecond(-1),
-			Hysteresis:   millibarsPerHourToPascalsPerSecond(0.2),
+			Value:        roundedForOperator(millibarsPerHourToPascalsPerSecond(-1)),
+			Hysteresis:   roundedForOperator(millibarsPerHourToPascalsPerSecond(0.2)),
 			DwellSeconds: 1800,
 			State:        alarmStateWarn,
 		},
@@ -53,8 +66,8 @@ func heavyWeatherSeedRules(now time.Time) []alarmRule {
 			Label:        "Barometer plummeting",
 			Path:         pressureRatePath,
 			Op:           alarmOpBelow,
-			Value:        millibarsPerHourToPascalsPerSecond(-2),
-			Hysteresis:   millibarsPerHourToPascalsPerSecond(0.2),
+			Value:        roundedForOperator(millibarsPerHourToPascalsPerSecond(-2)),
+			Hysteresis:   roundedForOperator(millibarsPerHourToPascalsPerSecond(0.2)),
 			DwellSeconds: 900,
 			State:        alarmStateAlarm,
 		},

@@ -150,6 +150,23 @@ func TestSMTPTransportBuildsAddressedMessage(t *testing.T) {
 	}
 }
 
+// A converted unit (millibars per hour into pascals per second, say) is
+// routinely a repeating decimal, and an operator reading an alarm email on
+// their phone does not need 17 digits of it.
+func TestBuildAlarmEmailRoundsValueToTwoDecimalPlaces(t *testing.T) {
+	msg := testMessage()
+	msg.Value = -100.0 / 3600.0
+
+	body := string(buildAlarmEmail(smtpConfig{From: "boat@example.com"}, msg))
+
+	if !strings.Contains(body, "Value: -0.03\r\n") {
+		t.Fatalf("expected the email body to carry a rounded value, got:\n%s", body)
+	}
+	if strings.Contains(body, "0.0277") {
+		t.Fatalf("email body still carries the unrounded value:\n%s", body)
+	}
+}
+
 // SignalK clears a notification by writing null to its path, so a cleared
 // alarm must not leave a stale one latched on the bus.
 func TestSignalKNotifyTransportWritesNullOnClear(t *testing.T) {

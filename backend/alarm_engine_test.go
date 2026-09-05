@@ -361,3 +361,43 @@ func TestAlarmStatusOmitsUnsetTimestamps(t *testing.T) {
 		t.Fatalf("raised_at must be present on an active alarm: %s", encoded)
 	}
 }
+
+// The reader deals in whatever precision the source path happens to carry
+// (a converted unit is often a repeating decimal), but the operator reads
+// these messages on a phone screen, not a debugger. Both the threshold and
+// the sample get rounded to two decimal places, with no padded ".00".
+func TestAlarmMessageForRoundsValuesToTwoDecimalPlaces(t *testing.T) {
+	cases := []struct {
+		name   string
+		rule   alarmRule
+		sample alarmSample
+		want   string
+	}{
+		{
+			name:   "a repeating-decimal threshold rounds cleanly on both sides",
+			rule:   alarmRule{Label: "Barometer falling", Op: alarmOpBelow, Value: -100.0 / 3600.0},
+			sample: alarmSample{Value: -0.028333, Present: true},
+			want:   "Barometer falling: below -0.03 (-0.03)",
+		},
+		{
+			name:   "a whole-number threshold does not grow a spurious .00",
+			rule:   alarmRule{Label: "Depth", Op: alarmOpBelow, Value: -150},
+			sample: alarmSample{Value: -264.2, Present: true},
+			want:   "Depth: below -150 (-264.2)",
+		},
+		{
+			name:   "the existing House bank low fixture keeps working",
+			rule:   lowVoltageRule(),
+			sample: alarmSample{Value: 11.0, Present: true},
+			want:   "House bank low: below 11.8 (11)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := alarmMessageFor(tc.rule, tc.sample); got != tc.want {
+				t.Fatalf("alarmMessageFor: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
