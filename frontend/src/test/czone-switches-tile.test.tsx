@@ -93,17 +93,18 @@ describe('CZoneSwitchesTile', () => {
   })
 
   // Most bank circuits are status indicators (PGN 127501), not controllable
-  // outputs — SignalK's meta.supportsPut says so. The user explicitly wants
-  // their state shown anyway, just not offered as a control.
-  it('a non-writable switch is disabled but still shows its state', () => {
+  // outputs — SignalK's meta.supportsPut says so. Finding 4: these used to
+  // render as a disabled toggle, indistinguishable from a real control until
+  // tapped. They now render with no toggle affordance at all, but their
+  // state is still shown and still announced as read-only.
+  it('a non-writable switch renders as a read-only indicator, not a toggle', () => {
     const readOnlySwitches: CZoneSwitch[] = [
       { id: 'bank.0.2', display_name: 'Bank 0 Circuit 2', state: 0, writable: false },
     ]
     render(<CZoneSwitchesTile switches={readOnlySwitches} loading={false} pending={new Set()} onToggle={vi.fn()} />)
 
-    const button = screen.getByRole('button', { name: /bank 0 circuit 2/i })
-    expect(button).toBeDisabled()
-    expect(button).toHaveAccessibleName(/read-only/i)
+    expect(screen.queryByRole('button', { name: /bank 0 circuit 2/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('group', { name: /bank 0 circuit 2.*read-only/i })).toBeInTheDocument()
     expect(screen.getByText('OFF')).toBeInTheDocument()
   })
 
@@ -118,7 +119,7 @@ describe('CZoneSwitchesTile', () => {
     expect(button).toHaveAccessibleName(/tap to toggle/i)
   })
 
-  it('readOnly disables every switch regardless of writable', () => {
+  it('readOnly disables the writable switch\'s control, and leaves the indicator a static chip either way', () => {
     const mixedSwitches: CZoneSwitch[] = [
       { id: 'venus-0', display_name: 'Venus 0', state: 1, writable: true },
       { id: 'bank.0.2', display_name: 'Bank 0 Circuit 2', state: 0, writable: false },
@@ -127,8 +128,59 @@ describe('CZoneSwitchesTile', () => {
       <CZoneSwitchesTile switches={mixedSwitches} loading={false} pending={new Set()} onToggle={vi.fn()} readOnly />,
     )
 
-    for (const button of screen.getAllByRole('button')) {
-      expect(button).toBeDisabled()
-    }
+    const buttons = screen.getAllByRole('button')
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /bank 0 circuit 2/i })).not.toBeInTheDocument()
+  })
+
+  // Finding 1: "on" was a raw emerald (an alert-semantics colour), not the
+  // primary token DESIGN.md's Switches spec calls for.
+  it('renders the "on" control on the primary token, not an alert-semantics emerald', () => {
+    const on: CZoneSwitch[] = [{ id: 'sw2', display_name: 'Anchor Light', state: 1, writable: true }]
+    render(<CZoneSwitchesTile switches={on} loading={false} pending={new Set()} onToggle={vi.fn()} />)
+
+    const button = screen.getByRole('button', { name: /anchor light/i })
+    expect(button).toHaveClass('bg-primary')
+    expect(button).not.toHaveClass('bg-emerald-600')
+  })
+
+  it('renders the "off" control on the input token', () => {
+    const off: CZoneSwitch[] = [{ id: 'sw1', display_name: 'Nav Lights', state: 0, writable: true }]
+    render(<CZoneSwitchesTile switches={off} loading={false} pending={new Set()} onToggle={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /nav lights/i })).toHaveClass('bg-input')
+  })
+
+  // Finding 4: fourteen identical toggles made a writable breaker
+  // indistinguishable from a read-only status light until tapped.
+  it('splits writable rows under Controls and read-only rows under Indicators', () => {
+    const mixed: CZoneSwitch[] = [
+      { id: 'w1', display_name: 'Windlass', state: 1, writable: true },
+      { id: 'r1', display_name: 'Bilge Pump', state: 0, writable: false },
+    ]
+    render(<CZoneSwitchesTile switches={mixed} loading={false} pending={new Set()} onToggle={vi.fn()} />)
+
+    expect(screen.getByText('Controls')).toBeInTheDocument()
+    expect(screen.getByText('Indicators')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /windlass/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /bilge pump/i })).not.toBeInTheDocument()
+  })
+
+  it('omits the Controls header when every switch is read-only', () => {
+    const allIndicators: CZoneSwitch[] = [
+      { id: 'r1', display_name: 'Bilge Pump', state: 0, writable: false },
+    ]
+    render(<CZoneSwitchesTile switches={allIndicators} loading={false} pending={new Set()} onToggle={vi.fn()} />)
+
+    expect(screen.queryByText('Controls')).not.toBeInTheDocument()
+    expect(screen.getByText('Indicators')).toBeInTheDocument()
+  })
+
+  it('omits the Indicators header when every switch is writable', () => {
+    render(<CZoneSwitchesTile switches={switches} loading={false} pending={new Set()} onToggle={vi.fn()} />)
+
+    expect(screen.getByText('Controls')).toBeInTheDocument()
+    expect(screen.queryByText('Indicators')).not.toBeInTheDocument()
   })
 })

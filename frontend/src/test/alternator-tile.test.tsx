@@ -52,11 +52,24 @@ test('renders port and starboard data when enginesRunning is true', () => {
 test('renders empty states when enginesRunning is true but data is null', () => {
   render(<AlternatorTile port={emptyData} starboard={emptyData} enginesRunning={true} />)
   expect(screen.getByText('Port')).toBeInTheDocument()
-  
+
   // Power defaults to '—'
   const dashes = screen.getAllByText('—')
   expect(dashes.length).toBeGreaterThan(0)
-  
+
   // Temperature section should not be rendered if null
   expect(screen.queryByText('Temp')).not.toBeInTheDocument()
+})
+
+test('sizes the Amps and Volts KPI labels at the micro-label tier, not the map-annotation floor', () => {
+  render(<AlternatorTile port={mockPort} starboard={mockStarboard} enginesRunning={true} />)
+
+  const ampsLabels = screen.getAllByText('Amps')
+  const voltsLabels = screen.getAllByText('Volts')
+  expect(ampsLabels.length).toBeGreaterThan(0)
+  expect(voltsLabels.length).toBeGreaterThan(0)
+  for (const label of [...ampsLabels, ...voltsLabels]) {
+    expect(label).toHaveClass('text-[10px]')
+    expect(label).not.toHaveClass('text-[9px]')
+  }
 })

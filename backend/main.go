@@ -46,19 +46,34 @@ type vesselStateData struct {
 	Status   string
 	Datetime time.Time
 	Depth    float64
+	// DepthLastUpdateAge is how many seconds old the environment.depth.
+	// belowTransducer reading is, per the ADR 0068 last_update_age_s
+	// mechanism (-1 when the source carries no timestamp). Scoped to
+	// belowTransducer specifically, not the whole environment.depth branch,
+	// so a live belowSurface/belowKeel sensor can never mask a dead
+	// belowTransducer reading — belowTransducer is the value this tile
+	// actually renders, and depth is the number a dead transducer leaves the
+	// operator to run aground on.
+	DepthLastUpdateAge float64
 	// LengthOverallM is the vessel's LOA read from SignalK's design.length
 	// branch (ADR 0047). It carries the lookupNumber -1 sentinel when
 	// unpublished; buildVesselStatePayload nils it out rather than letting
 	// -1 leak into the API response.
-	LengthOverallM              float64
-	CurrentDriftKts             float64
-	CurrentSetDeg               float64
-	CurrentDriftImpactKts       *float64
-	Latitude                    float64
-	Longitude                   float64
+	LengthOverallM        float64
+	CurrentDriftKts       float64
+	CurrentSetDeg         float64
+	CurrentDriftImpactKts *float64
+	Latitude              float64
+	Longitude             float64
+	// PositionLastUpdateAge is the freshest of navigation.position's and
+	// navigation.gnss's own last_update_age_s (ADR 0068): the fix itself and
+	// its quality/HDOP/satellite-count figures are published under two
+	// different parents, and either one still updating means the fix is
+	// current. -1 when neither subtree carries a timestamp.
+	PositionLastUpdateAge       float64
 	GNSSQualityIndicator        int
 	GNSSHDOP                    float64
-	GNSSSatellites              int
+	GNSSSatellites               int
 	GNSSValidationState         string
 	GNSSValidationReason        string
 	GNSSCriticalAlert           bool
@@ -68,6 +83,11 @@ type vesselStateData struct {
 	WindAngleApparentDeg        float64
 	WindSide                    string
 	WindAngleRelativeDeg        float64
+	// WindLastUpdateAge is the freshest last_update_age_s found anywhere
+	// under environment.wind (ADR 0068), scoped to that subtree only —
+	// environment.current is a different sensor with its own health and
+	// must not be folded in. -1 when environment.wind carries no timestamp.
+	WindLastUpdateAge           float64
 	GeneratorState              string
 	GeneratorManualStart        bool
 	GeneratorManualStartTimer   float64
@@ -144,6 +164,11 @@ type tankLevelData struct {
 	Category     string  `json:"category"`
 	Kind         string  `json:"kind"`
 	LevelPercent float64 `json:"level_percent"`
+	// LastUpdateAge mirrors the solar-controller pattern (ADR 0068): each
+	// tank carries its own age, scoped to that tank's own subtree, so one
+	// dead sender does not condemn every tank on the boat. -1 when the
+	// tank's currentLevel carries no timestamp.
+	LastUpdateAge float64 `json:"last_update_age_s"`
 }
 
 func main() {
@@ -650,6 +675,11 @@ func buildVesselStatePayload() map[string]any {
 		WindAngleRelativeDeg: -1,
 		Engine0RPM:           -1,
 		Engine1RPM:           -1,
+		// Unknown, not zero, when SignalK is unconfigured and this fallback
+		// literal never gets overwritten below.
+		DepthLastUpdateAge:    -1,
+		PositionLastUpdateAge: -1,
+		WindLastUpdateAge:     -1,
 	}
 	source := "backend-fallback"
 
@@ -717,12 +747,14 @@ func buildVesselStatePayload() map[string]any {
 		"status":                         state.Status,
 		"datetime":                       state.Datetime.Format(time.RFC3339),
 		"depth":                          state.Depth,
+		"depth_last_update_age_s":        state.DepthLastUpdateAge,
 		"length_overall_m":               lengthOverallM,
 		"current_drift_kts":              state.CurrentDriftKts,
 		"current_set_deg":                state.CurrentSetDeg,
 		"current_drift_impact_kts":       state.CurrentDriftImpactKts,
 		"latitude":                       state.Latitude,
 		"longitude":                      state.Longitude,
+		"position_last_update_age_s":     state.PositionLastUpdateAge,
 		"gnss_quality_indicator":         state.GNSSQualityIndicator,
 		"gnss_hdop":                      state.GNSSHDOP,
 		"gnss_satellites":                state.GNSSSatellites,
@@ -735,6 +767,7 @@ func buildVesselStatePayload() map[string]any {
 		"wind_angle_apparent_deg":        state.WindAngleApparentDeg,
 		"wind_side":                      state.WindSide,
 		"wind_angle_relative_deg":        state.WindAngleRelativeDeg,
+		"wind_last_update_age_s":         state.WindLastUpdateAge,
 		"max_gust_kts":                   maxGustKts,
 		"generator_state":                state.GeneratorState,
 		"generator_manual_start":         state.GeneratorManualStart,
@@ -963,6 +996,9 @@ func buildTanksStatePayload() map[string]any {
 		"datetime": now.Format(time.RFC3339),
 		"source":   source,
 		"tanks":    tanks,
+		// The freshest of the per-tank ages above: what the Tanks tile
+		// itself goes stale on (ADR 0068).
+		"last_update_age_s": tanksFeedAge(tanks),
 	}
 }
 func tanksState(c echo.Context) error {
@@ -1066,6 +1102,11 @@ func buildNearbyVesselsPayload() map[string]any {
 		"datetime": now.Format(time.RFC3339),
 		"source":   source,
 		"vessels":  vessels,
+		// Whether the AIS/radar feed behind the whole list has died — the
+		// freshest contact's age, distinct from each vessel's own
+		// age_seconds. Zero vessels in range stays -1 (unknown), never 0:
+		// silence is not evidence the feed died (ADR 0068).
+		"last_update_age_s": nearbyVesselsFeedAge(vessels),
 	}
 }
 func nearbyVessels(c echo.Context) error {

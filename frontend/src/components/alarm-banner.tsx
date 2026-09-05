@@ -3,6 +3,7 @@ import { memo } from 'react'
 
 import { Button } from '@/components/ui/button'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
+import { cn } from '@/lib/utils'
 
 interface AlarmBannerProps {
   alarms: ActiveAlarm[]
@@ -16,24 +17,44 @@ interface AlarmBannerProps {
  * dismissal there is stored per-browser in localStorage, which is fine for an
  * informational bulletin and wrong for a live vessel condition. Acknowledging is
  * the equivalent action here, and it is server-side so every screen agrees.
+ *
+ * Acknowledging silences the sound, not the condition — the boat can still be
+ * dragging with every alarm on the board acknowledged. Filtering those out
+ * used to make the whole dashboard look calm while that held (the same P0 bug
+ * as anchor-watch-tile.tsx's alarm strip): every live alarm renders here,
+ * loud while anything is unacknowledged, and in a muted-but-present variant
+ * once everything showing has been.
  */
 export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen }: AlarmBannerProps) {
-  const unacknowledged = alarms.filter((alarm) => alarm.phase !== 'acknowledged')
-  if (unacknowledged.length === 0) return null
+  if (alarms.length === 0) return null
 
-  const [first] = unacknowledged
-  const others = unacknowledged.length - 1
+  const unacknowledged = alarms.filter((alarm) => alarm.phase !== 'acknowledged')
+  const loud = unacknowledged.length > 0
+  const shown = loud ? unacknowledged : alarms
+
+  const [first] = shown
+  const others = shown.length - 1
 
   return (
     <div
       role="alert"
-      className="flex min-w-0 items-center gap-3 rounded-lg border border-destructive bg-destructive/10 px-4 py-3 text-destructive shadow-sm"
+      className={cn(
+        'flex min-w-0 items-center gap-3 rounded-lg border px-4 py-3 shadow-sm',
+        loud
+          ? 'border-destructive bg-destructive/10 text-destructive'
+          : 'border-border bg-muted text-muted-foreground',
+      )}
     >
       <TriangleAlert className="size-5 shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold uppercase tracking-[0.08em]">
-          {first.state} — {first.label}
+        {/* The severity word keeps the tracked uppercase idiom; the label does
+            not. An alarm's label is a SignalK path (`radar.fur6424a.guardzone.1`),
+            and 44 characters of shouted dotted identifier is slower to read at
+            arm's length than the same string in its own case. */}
+        <p className="truncate text-sm font-semibold">
+          <span className="uppercase tracking-[0.08em]">{first.state}</span> — {first.label}
           {others > 0 && <span className="ml-2 font-normal">and {others} more</span>}
+          {!loud && <span className="ml-2 font-normal">· silenced</span>}
         </p>
         <p className="truncate text-xs">{first.message}</p>
       </div>

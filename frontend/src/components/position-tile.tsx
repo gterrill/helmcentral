@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { formatCoordinate, formatHeading } from '@/lib/format'
 import { Tile } from '@/components/ui/tile'
+import { formatDataAge, isStale } from '@/lib/staleness'
 
 export interface PositionTileProps {
   latitude: number | null
@@ -12,6 +13,14 @@ export interface PositionTileProps {
   gnssValidationReason: string | null
   gnssSatellites: number | null
   placeName: string | null
+  /**
+   * Seconds since the GNSS fix last updated, or null if the upstream source
+   * publishes no age for it. `fetchSignalKVesselState` (backend/signalk.go)
+   * carries no per-fix timestamp today, so this is always null until a
+   * source actually publishes one — see isStale for why null reads as
+   * "unknown," not "stale."
+   */
+  lastUpdateAgeS: number | null
 }
 
 export const PositionTile = memo(function PositionTile({
@@ -24,7 +33,9 @@ export const PositionTile = memo(function PositionTile({
   gnssValidationReason,
   gnssSatellites,
   placeName,
+  lastUpdateAgeS,
 }: PositionTileProps) {
+  const feedStale = isStale(lastUpdateAgeS)
   const headingLabel = formatHeading(headingTrue)
   const satellitesValueClass = gnssValidationState === 'critical'
     ? 'text-red-600'
@@ -39,7 +50,7 @@ export const PositionTile = memo(function PositionTile({
   ].filter(Boolean).join(' · ')
 
   return (
-    <Tile title="Position">
+    <Tile title="Position" stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
       <div className="mt-2 flex items-start justify-between gap-4">
         <div>
           <p className="font-mono text-sm">{formatCoordinate(latitude, true)}</p>

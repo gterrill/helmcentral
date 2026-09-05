@@ -99,6 +99,74 @@ export function resolveRadarEchoAvailability(params: {
   return { available: true, reason: null }
 }
 
+// ── AIS label collision avoidance ───────────────────────────────────────────
+// Design critique item 4: AIS labels are 9px map annotation (DESIGN.md's
+// legibility floor) and must stay there rather than growing to "fix"
+// legibility -- the fix is keeping them apart, not bigger. Two independent
+// collisions matter: a label sitting under the metric overlay or the control
+// stack (both draw at a much higher z-index and simply blot the text out),
+// and two vessel labels landing close enough on screen to overlap each
+// other. Both are resolved from already-projected screen pixels so the logic
+// stays a pure, deterministic function that needs no live map instance to
+// test.
+export interface ScreenRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+export interface MarkerLabelPoint {
+  id: string
+  x: number
+  y: number
+  // Lower wins a collision with a higher value -- the vessel's distance from
+  // own ship, so the closer (more operationally relevant) vessel keeps its
+  // label and the farther one yields.
+  priority: number
+}
+
+// Half the label block's on-screen footprint (max-w-28 = 112px wide, two
+// lines of 9px text under the marker icon): two labels whose projected
+// centres land closer than this will visibly overlap.
+export const LABEL_COLLISION_RADIUS_PX = 50
+
+export function resolveMarkerLabelSuppression(
+  points: MarkerLabelPoint[],
+  avoidZones: ScreenRect[],
+): Set<string> {
+  const suppressed = new Set<string>()
+
+  for (const point of points) {
+    for (const zone of avoidZones) {
+      if (point.x >= zone.left && point.x <= zone.right && point.y >= zone.top && point.y <= zone.bottom) {
+        suppressed.add(point.id)
+        break
+      }
+    }
+  }
+
+  // Closest (highest-priority) vessel first, so a three-way pile-up keeps
+  // the single most relevant label rather than an arbitrary survivor.
+  const byPriority = [...points].sort((a, b) => a.priority - b.priority)
+  for (let i = 0; i < byPriority.length; i++) {
+    const a = byPriority[i]
+    if (suppressed.has(a.id)) continue
+    for (let j = i + 1; j < byPriority.length; j++) {
+      const b = byPriority[j]
+      if (suppressed.has(b.id)) continue
+      const dx = a.x - b.x
+      const dy = a.y - b.y
+      if (Math.sqrt(dx * dx + dy * dy) < LABEL_COLLISION_RADIUS_PX) {
+        // b comes after a in priority order, so it's the one that yields.
+        suppressed.add(b.id)
+      }
+    }
+  }
+
+  return suppressed
+}
+
 function readStoredZoom(): number | null {
   if (typeof window === 'undefined') return null
   const raw = window.localStorage.getItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY)
@@ -226,6 +294,12 @@ export interface AnchorWatchMapProps {
   currentDriftKts: number | null
   currentSetDeg: number | null
   currentDriftImpactKts?: number | null
+  // No longer read inside this component — the map's own Distance row is
+  // gone (design critique item 1: it duplicated the promoted KPI both
+  // hosts now render above the map). Kept in the prop contract since both
+  // existing hosts (anchor-watch-tile.tsx, anchor-watch-drawer.tsx) still
+  // pass it; dropping the field would be a breaking API change for no
+  // behavioural gain.
   distanceMeters: number | null
   bearingDeg: number | null
   // Rendered as the Scope row in the metric overlay, under Current (ADR 0059
@@ -255,6 +329,12 @@ export interface AnchorWatchMapProps {
   onAnchorReposition: (lat: number, lon: number) => void
   onRadiusChange: (radiusMeters: number) => void
   onFullscreen?: () => void
+  // Design critique item 3: six controls stacked in-tile clipped the bottom
+  // two at tile height. Defaults to the collapsed three (fullscreen + zoom)
+  // every existing host (the tile) already gets for free with no prop
+  // change; the fullscreen drawer opts into the full set explicitly, since
+  // it has the room the tile doesn't.
+  expandedControls?: boolean
   // Session-bound pins shared across every client watching this anchorage.
   placemarks?: AnchorPlacemark[]
   onPlacemarkCreate?: (lat: number, lon: number) => void
@@ -274,7 +354,7 @@ export function AnchorWatchMap({
   currentDriftKts,
   currentSetDeg,
   currentDriftImpactKts = null,
-  distanceMeters,
+  // distanceMeters intentionally not destructured — see the prop doc above.
   bearingDeg: bearingDegProp,
   scopeRecommendation,
   isImperial,
@@ -292,12 +372,16 @@ export function AnchorWatchMap({
   onAnchorReposition,
   onRadiusChange,
   onFullscreen,
+  expandedControls = false,
   placemarks = [],
   onPlacemarkCreate,
   onPlacemarkRemove,
   className,
 }: AnchorWatchMapProps) {
   const hasAnchor = anchorLat !== null && anchorLon !== null
+  const mapWrapperRef = useRef<HTMLDivElement | null>(null)
+  const metricsPanelRef = useRef<HTMLDivElement | null>(null)
+  const mapControlsRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MapRef | null>(null)
   const collapseAttribution = useCollapsedMapAttribution(mapRef)
   const [editMode, setEditMode] = useState<EditMode>('none')
@@ -423,9 +507,6 @@ export function AnchorWatchMap({
 
   // Derived display radius (live during resize, else stored)
   const displayRadius = liveRadius ?? radiusMeters
-  const displayDistanceMeters = editMode === 'reposition' && ghostAnchor
-    ? haversineMeters(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon)
-    : distanceMeters
   const displayBearingDeg = editMode === 'reposition' && ghostAnchor
     ? Math.round(bearingDeg(vesselLat, vesselLon, ghostAnchor.lat, ghostAnchor.lon))
     : bearingDegProp
@@ -941,8 +1022,49 @@ export function AnchorWatchMap({
     onRadarEchoToggle?.(!showRadarEcho)
   }, [showRadarEcho, onRadarEchoToggle])
 
+  // AIS labels (9px map annotation, DESIGN.md's legibility floor) whose
+  // projected screen position lands under the metric overlay, under the
+  // control stack, or within LABEL_COLLISION_RADIUS_PX of a higher-priority
+  // vessel's label — see resolveMarkerLabelSuppression above. `project`
+  // isn't part of every test double for MapRef (only a live maplibre map
+  // provides it), so this degrades to "suppress nothing" — today's
+  // behaviour — wherever it's unavailable, rather than throwing.
+  const [suppressedAisLabelIds, setSuppressedAisLabelIds] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    const map = mapRef.current
+    const wrapper = mapWrapperRef.current
+    if (!map || !wrapper || typeof map.project !== 'function') return
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const avoidZones: ScreenRect[] = []
+    for (const ref of [metricsPanelRef, mapControlsRef]) {
+      const el = ref.current
+      if (!el) continue
+      const rect = el.getBoundingClientRect()
+      avoidZones.push({
+        left: rect.left - wrapperRect.left,
+        top: rect.top - wrapperRect.top,
+        right: rect.right - wrapperRect.left,
+        bottom: rect.bottom - wrapperRect.top,
+      })
+    }
+    const points: MarkerLabelPoint[] = []
+    for (const vessel of aisVessels) {
+      if (vessel.lat === undefined || vessel.lon === undefined) continue
+      const projected = map.project([vessel.lon, vessel.lat])
+      points.push({
+        id: vessel.id,
+        x: projected.x,
+        y: projected.y,
+        priority: haversineMeters(vesselLat, vesselLon, vessel.lat, vessel.lon),
+      })
+    }
+    setSuppressedAisLabelIds(resolveMarkerLabelSuppression(points, avoidZones))
+    // renderKey ticks every 5s (vessels move between AIS polls even with no
+    // pan/zoom); hasAnchor covers the metric overlay gaining/losing rows.
+  }, [aisVessels, currentZoom, renderKey, vesselLat, vesselLon, hasAnchor])
+
   return (
-    <div className={cn('relative overflow-hidden rounded-lg', className)}>
+    <div ref={mapWrapperRef} className={cn('relative overflow-hidden rounded-lg', className)}>
       <Map
         ref={mapRef}
         mapLib={maplibregl}
@@ -1183,12 +1305,20 @@ export function AnchorWatchMap({
                   >
                     <Ship className={cn('text-white', isSelected ? 'h-6 w-6' : 'h-5 w-5')} />
                   </div>
-                  <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-                    <div className="truncate">{vessel.name}</div>
-                    <div className="whitespace-nowrap text-[9px] font-medium tracking-normal">
-                      {formatRange(distanceM)} · {bearing}°
+                  {/* Suppressed when it would sit under the metric overlay,
+                      the control stack, or a closer vessel's own label (see
+                      resolveMarkerLabelSuppression) — but never for the
+                      vessel the operator just tapped; that one is expected
+                      to answer, not disappear. The marker dot itself always
+                      stays put either way. */}
+                  {(isSelected || !suppressedAisLabelIds.has(vessel.id)) && (
+                    <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                      <div className="truncate">{vessel.name}</div>
+                      <div className="whitespace-nowrap text-[9px] font-medium tracking-normal">
+                        {formatRange(distanceM)} · {bearing}°
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </button>
             </Marker>
@@ -1430,46 +1560,46 @@ export function AnchorWatchMap({
         </div>
       )}
 
-      {/* Metric overlay — top of map */}
+      {/* Metric overlay — top of map. Distance is gone from here entirely
+          (design critique item 1): it's promoted to a hero KPI above the
+          map on every host now (anchor-watch-tile.tsx; the drawer's own
+          equivalent lives in anchor-watch-drawer.tsx), so this panel's job
+          is strictly the secondary context — bearing, radius, depth,
+          current, scope. Bearing and Radius are dropped from the row list
+          outright with no anchor set (item 2) rather than rendering a
+          dashed placeholder at full visual weight; Depth/Current/Scope can
+          all be genuinely absent for reasons that have nothing to do with
+          anchor state, so they keep rendering (and dashing) as before.
+          The background is a flat, near-opaque scrim rather than the old
+          bg-black/50 (bg-black/35 while editing): measured contrast against
+          real satellite imagery came in at 4.1:1, short of the 4.5:1 floor
+          AGENTS.md sets for text this small — a translucent ground can't
+          promise 4.5:1 against arbitrary imagery underneath it, so the fix
+          is a ground dark enough that it doesn't have to. */}
       <div
-        className={cn(
-          'pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg backdrop-blur',
-          editMode === 'none' ? 'bg-black/50' : 'bg-black/35',
-        )}
+        ref={metricsPanelRef}
+        className="pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg bg-black/90 backdrop-blur"
         style={{ zIndex: 2000 }}
         data-testid="anchor-watch-metrics"
       >
         {[
-          {
-            label: 'Distance',
-            value: displayDistanceMeters !== null
-              ? isImperial
-                ? `${Math.round(displayDistanceMeters * 3.28084)}`
-                : `${Math.round(displayDistanceMeters)}`
-              : '—',
-            unit: isImperial ? 'ft' : 'm',
-            alert: displayDistanceMeters !== null && displayDistanceMeters > radiusMeters + 4.572,
-          },
-          {
-            label: 'Bearing',
-            value: displayBearingDeg !== null ? `${displayBearingDeg}` : '—',
-            unit: '°',
-            alert: false,
-          },
-          {
-            label: 'Radius',
-            // radiusMeters is a required prop, so without an anchor it's
-            // whatever inactive default the host passed — gate on hasAnchor
-            // instead of a null check, or that default would read as real.
-            value: hasAnchor
-              ? isImperial
-                ? `${Math.round(displayRadius * 3.28084)}`
-                : `${Math.round(displayRadius)}`
-              : '—',
-            unit: isImperial ? 'ft' : 'm',
-            live: editMode === 'radius',
-            alert: false,
-          },
+          ...(hasAnchor
+            ? [
+                {
+                  label: 'Bearing',
+                  value: displayBearingDeg !== null ? `${displayBearingDeg}` : '—',
+                  unit: '°',
+                },
+                {
+                  label: 'Radius',
+                  value: isImperial
+                    ? `${Math.round(displayRadius * 3.28084)}`
+                    : `${Math.round(displayRadius)}`,
+                  unit: isImperial ? 'ft' : 'm',
+                  live: editMode === 'radius',
+                },
+              ]
+            : []),
           {
             label: 'Depth',
             value: depthMeters !== null
@@ -1478,25 +1608,22 @@ export function AnchorWatchMap({
                 : `${depthMeters.toFixed(1)}`
               : '—',
             unit: isImperial ? 'ft' : 'm',
-            alert: false,
           },
           {
             label: 'Current',
             value: currentDriftKts !== null ? currentDriftKts.toFixed(1) : '—',
             unit: 'kts',
-            alert: false,
             setDeg: currentSetDeg,
           },
           {
             label: 'Scope',
             value: scopeRodeDisplay !== null ? `${scopeRodeDisplay}` : '—',
-            // Just the recommended rode and its unit, same as Distance/
-            // Radius/Depth above. The ratio and the MIN_SCOPE_RATIO floor
-            // marker used to ride in this suffix too; they're only reachable
-            // via the row's tooltip now (rowTitle below), which already
-            // carried the full note regardless.
+            // Just the recommended rode and its unit, same as Radius/Depth
+            // above. The ratio and the MIN_SCOPE_RATIO floor marker used to
+            // ride in this suffix too; they're only reachable via the row's
+            // tooltip now (rowTitle below), which already carried the full
+            // note regardless.
             unit: scopeAvailable ? scopeUnit : '',
-            alert: false,
             // The reason (not the unit) renders in the unit slot when
             // unavailable — see the render branch below — so the fallback
             // policy's "surface the reason, never a bare dash" holds here too.
@@ -1507,7 +1634,7 @@ export function AnchorWatchMap({
             // there's a result to describe.
             rowTitle: scopeAvailable ? scopeRecommendation!.note : undefined,
           },
-        ].map(({ label, value, unit, alert, setDeg, live, reason, rowTitle }, index) => (
+        ].map(({ label, value, unit, setDeg, live, reason, rowTitle }, index) => (
           <div
             key={label}
             title={rowTitle}
@@ -1538,12 +1665,7 @@ export function AnchorWatchMap({
                 </p>
               </div>
             ) : (
-              <p
-                className={`font-display tabular-nums leading-tight ${
-                  alert ? 'text-red-400' : 'text-white'
-                }`}
-                style={{ fontSize: '1.1rem' }}
-              >
+              <p className="font-display tabular-nums leading-tight text-white" style={{ fontSize: '1.1rem' }}>
                 {value}
                 {reason ? (
                   <span
@@ -1561,8 +1683,14 @@ export function AnchorWatchMap({
         ))}
       </div>
 
-      {/* Zoom + Recenter controls */}
+      {/* Zoom + Recenter controls. Design critique item 3: six buttons
+          stacked in-tile clipped the bottom two at tile height. The
+          in-tile default (expandedControls unset) keeps only fullscreen and
+          zoom; satellite, radar and recentre move into this same stack
+          under expandedControls, which the fullscreen drawer opts into —
+          same control, same code, just more room to show all of it. */}
       <div
+        ref={mapControlsRef}
         className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1"
         style={{ zIndex: 2100 }}
         data-testid="anchor-watch-controls"
@@ -1593,39 +1721,43 @@ export function AnchorWatchMap({
         >
           <Minus className="h-4 w-4" />
         </button>
-        <button
-          onClick={handleImageryToggle}
-          aria-label="Toggle satellite imagery"
-          className={cn(
-            'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
-            showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-          )}
-          style={{ transition: 'background-color 150ms ease-out' }}
-        >
-          <Satellite className="h-4 w-4" />
-        </button>
-        <button
-          onClick={handleRadarEchoToggle}
-          aria-label="Toggle radar echo overlay"
-          disabled={!radarEchoAvailability.available}
-          title={radarEchoAvailability.available ? undefined : (radarEchoAvailability.reason ?? undefined)}
-          className={cn(
-            'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
-            showRadarEcho ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-            !radarEchoAvailability.available && 'cursor-not-allowed opacity-50',
-          )}
-          style={{ transition: 'background-color 150ms ease-out' }}
-        >
-          <Radar className="h-4 w-4" />
-        </button>
-        <button
-          onClick={handleRecenter}
-          aria-label="Re-centre on anchor"
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
-          style={{ transition: 'background-color 150ms ease-out' }}
-        >
-          <Crosshair className="h-4 w-4" />
-        </button>
+        {expandedControls && (
+          <>
+            <button
+              onClick={handleImageryToggle}
+              aria-label="Toggle satellite imagery"
+              className={cn(
+                'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+                showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+              )}
+              style={{ transition: 'background-color 150ms ease-out' }}
+            >
+              <Satellite className="h-4 w-4" />
+            </button>
+            <button
+              onClick={handleRadarEchoToggle}
+              aria-label="Toggle radar echo overlay"
+              disabled={!radarEchoAvailability.available}
+              title={radarEchoAvailability.available ? undefined : (radarEchoAvailability.reason ?? undefined)}
+              className={cn(
+                'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+                showRadarEcho ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
+                !radarEchoAvailability.available && 'cursor-not-allowed opacity-50',
+              )}
+              style={{ transition: 'background-color 150ms ease-out' }}
+            >
+              <Radar className="h-4 w-4" />
+            </button>
+            <button
+              onClick={handleRecenter}
+              aria-label="Re-centre on anchor"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+              style={{ transition: 'background-color 150ms ease-out' }}
+            >
+              <Crosshair className="h-4 w-4" />
+            </button>
+          </>
+        )}
         {/* No stop/clear control here — both hosts are gaining a labeled
             Raise button with its own confirm dialog (anchor-watch-tile.tsx,
             anchor-watch-drawer.tsx); a one-tap unlabeled destructive icon

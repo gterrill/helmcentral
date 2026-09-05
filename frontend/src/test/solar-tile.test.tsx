@@ -48,6 +48,39 @@ test('renders aggregate solar KPIs and controller rows', () => {
   expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
 })
 
+test('labels the per-controller yesterday figure with its unit, matching the sibling Today readout', () => {
+  // The tile previously showed "YESTERDAY 0.70 kWh" on the aggregate card and
+  // an unlabelled "YDAY: 1404.00" on the per-controller row a few lines
+  // below — same quantity, one with a unit and one without, reading as two
+  // different things.
+  render(
+    <SolarTile
+      currentW={1280}
+      todayKWh={5.43}
+      yesterdayKWh={4.98}
+      peakTodayW={1560}
+      lastUpdateAgeS={2}
+      controllers={[
+        {
+          id: '0',
+          label: 'Port',
+          currentW: 420,
+          todayKWh: 1.82,
+          yesterdayKWh: 1.64,
+          mode: 'bulk',
+          error: null,
+          lastUpdateAgeS: 1,
+          contributionPct: 32.8,
+        },
+      ]}
+    />,
+  )
+
+  const ydayRow = screen.getByText(/Yday:/).closest('p')
+  expect(ydayRow).toHaveTextContent('1.64')
+  expect(ydayRow).toHaveTextContent('kWh')
+})
+
 test('renders fallback state when controller list is empty', () => {
   render(
     <SolarTile

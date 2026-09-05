@@ -463,6 +463,239 @@ func TestPatchDashboardPageHandler_PreservesSkinOnWidgetsOnlyPatch(t *testing.T)
 	}
 }
 
+// ── per-page hero ────────────────────────────────────────────────────────
+//
+// The hero names the one widget on a page that gets the enlarged, full-width
+// treatment (design critique batch, ADR 0072). It follows the same
+// validate-fail-closed pattern ADR 0060 established for skin, with one added
+// rule: a hero must actually exist among the page's own widgets.
+
+func TestCreateDashboardPageHandler_RejectsHeroNamingAWidgetNotOnThePage(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":    "Bad Hero",
+		"widgets": sampleDashboardWidgets(),
+		"hero":    "battery-power",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestDashboardPages_HeroRoundTripsThroughPostAndGet(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":    "Round Trip",
+		"widgets": sampleDashboardWidgets(),
+		"hero":    "wind",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+	if page.Hero != "wind" {
+		t.Fatalf("expected created page to have hero %q, got %q", "wind", page.Hero)
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodGet, "/api/dashboard-pages/"+page.ID, nil)
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := getDashboardPageHandler(c2); err != nil {
+		t.Fatalf("getDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec2.Code)
+	}
+
+	var fetched dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("failed to parse get response: %v", err)
+	}
+	if fetched.Hero != "wind" {
+		t.Fatalf("expected hero to round-trip through GET, got %q", fetched.Hero)
+	}
+}
+
+func TestPatchDashboardPageHandler_HeroOnlyPatchSucceeds(t *testing.T) {
+	setupDashboardPagesTest(t)
+	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	// A hero-only body has neither name, skin nor widgets; it must not trip the
+	// "no patch fields provided" guard.
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"hero": "tanks",
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.Hero != "tanks" {
+		t.Fatalf("expected hero to be updated, got %q", updated.Hero)
+	}
+}
+
+func TestPatchDashboardPageHandler_RejectsHeroNamingAWidgetNotOnThePage(t *testing.T) {
+	setupDashboardPagesTest(t)
+	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"hero": "battery-power",
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestPatchDashboardPageHandler_PreservesHeroOnWidgetsOnlyPatchThatKeepsIt
+// guards the handler's field-by-field rebuild exactly as ADR 0060 §7 guards
+// Skin: a widgets-only PATCH (what every layout drag sends) must not wipe an
+// unrelated page-level field, as long as the hero widget is still present in
+// the new widget list.
+func TestPatchDashboardPageHandler_PreservesHeroOnWidgetsOnlyPatchThatKeepsIt(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":    "Heroed Page",
+		"widgets": sampleDashboardWidgets(),
+		"hero":    "wind",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+
+	// Reposition "wind" rather than dropping it - the hero widget survives.
+	newWidgets := []dashboardLayoutItem{
+		{ID: "wind", X: 4, Y: 0, W: 4, H: 8},
+		{ID: "tanks", X: 0, Y: 0, W: 4, H: 4},
+	}
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"widgets": newWidgets,
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
+	}
+
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.Hero != "wind" {
+		t.Fatalf("expected hero to survive a widgets-only patch that keeps it, got %q", updated.Hero)
+	}
+}
+
+// TestPatchDashboardPageHandler_ClearsHeroWhenWidgetsPatchRemovesTheHeroWidget
+// decides the dangling-hero question: removing the widget that is the hero
+// must not leave the page pointing at nothing. This is exactly the patch the
+// bento grid's "X" remove-widget button sends (widgets only, no hero field),
+// so rejecting it would break ordinary widget removal for the unrelated
+// reason that it happened to be the hero. The hero is repaired instead, the
+// same stance stripRetiredWidgets takes on load: a dangling reference is
+// corrected on write, not treated as the caller's error.
+func TestPatchDashboardPageHandler_ClearsHeroWhenWidgetsPatchRemovesTheHeroWidget(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":    "Heroed Page",
+		"widgets": sampleDashboardWidgets(),
+		"hero":    "wind",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+
+	// Drop "wind" - the hero widget - without mentioning hero at all.
+	newWidgets := []dashboardLayoutItem{{ID: "tanks", X: 0, Y: 0, W: 4, H: 4}}
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"widgets": newWidgets,
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
+	}
+
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.Hero != "" {
+		t.Fatalf("expected hero to be cleared once its widget is removed, got %q", updated.Hero)
+	}
+
+	dashboardPagesMu.RLock()
+	stored := dashboardPagesState[page.ID]
+	dashboardPagesMu.RUnlock()
+	if stored.Hero != "" {
+		t.Fatalf("expected stored page to have cleared hero after widget removal, got %q", stored.Hero)
+	}
+}
+
+// TestPatchDashboardPageHandler_RejectsExplicitHeroPatchThatWidgetsPatchInvalidates
+// covers the other order: when hero is set explicitly in the very same
+// request that removes its target widget, that is an assertion the caller
+// got wrong, not a stale reference to repair - fail closed exactly like an
+// unknown skin.
+func TestPatchDashboardPageHandler_RejectsExplicitHeroPatchThatWidgetsPatchInvalidates(t *testing.T) {
+	setupDashboardPagesTest(t)
+	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	newWidgets := []dashboardLayoutItem{{ID: "tanks", X: 0, Y: 0, W: 4, H: 4}}
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"widgets": newWidgets,
+		"hero":    "wind",
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
 func TestDeleteDashboardPageHandler_DeletesAndReports404Afterward(t *testing.T) {
 	setupDashboardPagesTest(t)
 	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())

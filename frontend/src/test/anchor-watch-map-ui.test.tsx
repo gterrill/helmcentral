@@ -140,14 +140,34 @@ function renderMap(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: Pa
 }
 
 describe('AnchorWatchMap controls and AIS selection', () => {
-  it('puts satellite below the zoom controls and removes control dividers', () => {
+  // Design critique item 3: six buttons stacked in-tile clipped the bottom
+  // two at tile height. The default (no expandedControls) collapses the
+  // in-tile stack to fullscreen + zoom only; satellite, radar and recentre
+  // are only reachable via expandedControls, which the fullscreen drawer
+  // passes (anchor-watch-drawer.tsx) — every control stays reachable, just
+  // relocated rather than deleted.
+  it('collapses to fullscreen and zoom only when expandedControls is unset (the tile default)', () => {
     renderMap()
+
+    const controls = screen.getByTestId('anchor-watch-controls')
+    expect(within(controls).getByRole('button', { name: 'Full screen' })).toBeInTheDocument()
+    expect(within(controls).getByRole('button', { name: 'Zoom in' })).toBeInTheDocument()
+    expect(within(controls).getByRole('button', { name: 'Zoom out' })).toBeInTheDocument()
+    expect(within(controls).queryByRole('button', { name: 'Toggle satellite imagery' })).not.toBeInTheDocument()
+    expect(within(controls).queryByRole('button', { name: 'Toggle radar echo overlay' })).not.toBeInTheDocument()
+    expect(within(controls).queryByRole('button', { name: 'Re-centre on anchor' })).not.toBeInTheDocument()
+  })
+
+  it('puts satellite below the zoom controls and removes control dividers, once expandedControls is set (the fullscreen drawer)', () => {
+    renderMap(defaultAisVessels, { expandedControls: true })
 
     const controls = screen.getByTestId('anchor-watch-controls')
     const zoomOut = within(controls).getByRole('button', { name: 'Zoom out' })
     const satellite = within(controls).getByRole('button', { name: 'Toggle satellite imagery' })
 
     expect(zoomOut.nextElementSibling).toBe(satellite)
+    expect(within(controls).getByRole('button', { name: 'Toggle radar echo overlay' })).toBeInTheDocument()
+    expect(within(controls).getByRole('button', { name: 'Re-centre on anchor' })).toBeInTheDocument()
     expect(screen.getByTestId('anchor-watch-metrics').style.zIndex).toBe('2000')
   })
 
@@ -319,7 +339,7 @@ describe('AnchorWatchMap controls and AIS selection', () => {
   it('clears persisted center on re-centre button click so future loads center on anchor', () => {
     localStorage.setItem('anchor-watch-map-center', JSON.stringify({ latitude: -25.2900, longitude: 152.9200 }))
 
-    renderMap()
+    renderMap(defaultAisVessels, { expandedControls: true })
 
     const recenterBtn = screen.getByRole('button', { name: 'Re-centre on anchor' })
     fireEvent.click(recenterBtn)
@@ -436,19 +456,42 @@ describe('AnchorWatchMap with no anchor set', () => {
   })
 
   it('re-centres on the vessel rather than the absent anchor', () => {
-    renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null })
+    renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null, expandedControls: true })
 
     fireEvent.click(screen.getByRole('button', { name: 'Re-centre on anchor' }))
 
     expect(easeToMock).toHaveBeenLastCalledWith({ center: [152.9103, -25.2939], duration: 600 })
   })
 
-  it('shows — for Radius rather than the inactive radiusMeters default', () => {
+  // Design critique item 2: Bearing/Radius previously rendered "— °"/"— m"
+  // at the same visual weight as a live reading whenever no anchor was
+  // down. Both rows are dropped entirely in that state now, rather than
+  // dashed — there's nothing to promote to a placeholder yet.
+  it('drops the Bearing and Radius rows entirely rather than showing a dash', () => {
     renderMap(defaultAisVessels, { anchorLat: null, anchorLon: null })
 
     const metrics = screen.getByTestId('anchor-watch-metrics')
-    const radiusLabel = within(metrics).getByText('Radius')
-    expect(radiusLabel.nextElementSibling).toHaveTextContent('—')
+    expect(within(metrics).queryByText('Bearing')).not.toBeInTheDocument()
+    expect(within(metrics).queryByText('Radius')).not.toBeInTheDocument()
+  })
+
+  // Depth/Current/Scope can be genuinely unavailable for reasons that have
+  // nothing to do with anchor state (no sounder, no scope recommendation
+  // yet) — those rows must keep rendering, dash and all, rather than being
+  // swept up by the no-anchor suppression above.
+  it('keeps Depth, Current and Scope rendering with no anchor set', () => {
+    renderMap(defaultAisVessels, {
+      anchorLat: null,
+      anchorLon: null,
+      depthMeters: null,
+      currentDriftKts: null,
+      scopeRecommendation: null,
+    })
+
+    const metrics = screen.getByTestId('anchor-watch-metrics')
+    expect(within(metrics).getByText('Depth')).toBeInTheDocument()
+    expect(within(metrics).getByText('Current')).toBeInTheDocument()
+    expect(within(metrics).getByText('Scope')).toBeInTheDocument()
   })
 })
 
@@ -531,5 +574,34 @@ describe('AnchorWatchMap Scope row', () => {
     renderMap(defaultAisVessels, { scopeRecommendation: null })
 
     expect(within(scopeRow()).getByText('—')).toBeInTheDocument()
+  })
+})
+
+// Design critique item 1: the panel's translucent ground (bg-black/50, or
+// bg-black/35 while editing) measured 4.1:1 against real satellite imagery,
+// short of the 4.5:1 AGENTS.md requires for text this small. It's also
+// where Distance used to live — dropped now that both hosts promote a
+// distance KPI above the map (anchor-watch-tile.tsx, anchor-watch-drawer.tsx),
+// so the map's own overlay isn't repeating the headline number it no longer
+// owns.
+describe('AnchorWatchMap metric overlay contrast and duplication', () => {
+  it('drops the Distance row entirely — that reading is promoted above the map on every host now', () => {
+    renderMap()
+
+    expect(within(screen.getByTestId('anchor-watch-metrics')).queryByText('Distance')).not.toBeInTheDocument()
+  })
+
+  it('uses a near-opaque scrim rather than the old translucent ground, in and out of edit mode', () => {
+    renderMap()
+    const metrics = screen.getByTestId('anchor-watch-metrics')
+    expect(metrics.className).not.toMatch(/bg-black\/[0-8]?[0-9](?!\d)/)
+    expect(metrics.className).toMatch(/bg-black\/9\d/)
+
+    // Editing (reposition here, radius drag is the same code path) used to
+    // drop the panel to bg-black/35 — even more transparent during exactly
+    // the state where the operator is reading the overlay most closely.
+    // Confirm entering an edit mode doesn't reintroduce a lighter ground.
+    fireEvent.click(screen.getByRole('button', { name: 'Anchor position — click to reposition' }))
+    expect(screen.getByTestId('anchor-watch-metrics').className).toMatch(/bg-black\/9\d/)
   })
 })

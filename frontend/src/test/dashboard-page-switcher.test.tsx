@@ -127,6 +127,69 @@ describe('DashboardPageSwitcher', () => {
     expect(trashButtons).toHaveLength(0)
   })
 
+  it('clicking the trash icon asks for confirmation instead of deleting immediately', async () => {
+    const onDelete = vi.fn()
+    const mockFns = {
+      onSelect: vi.fn(),
+      onCreate: vi.fn(),
+      onRename: vi.fn(),
+      onDelete,
+      onSetSkin: vi.fn(),
+    }
+
+    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+
+    const deleteButton = await screen.findByLabelText('Delete Page A')
+    fireEvent.click(deleteButton)
+
+    expect(onDelete).not.toHaveBeenCalled()
+    expect(await screen.findByText('Delete "Page A"?')).toBeInTheDocument()
+  })
+
+  it('confirming the dialog deletes the named page', async () => {
+    const onDelete = vi.fn()
+    const mockFns = {
+      onSelect: vi.fn(),
+      onCreate: vi.fn(),
+      onRename: vi.fn(),
+      onDelete,
+      onSetSkin: vi.fn(),
+    }
+
+    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+    fireEvent.click(await screen.findByLabelText('Delete Page A'))
+
+    await screen.findByText('Delete "Page A"?')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    expect(onDelete).toHaveBeenCalledWith('p1')
+  })
+
+  it('cancelling the dialog leaves the page alone', async () => {
+    const onDelete = vi.fn()
+    const mockFns = {
+      onSelect: vi.fn(),
+      onCreate: vi.fn(),
+      onRename: vi.fn(),
+      onDelete,
+      onSetSkin: vi.fn(),
+    }
+
+    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+    fireEvent.click(await screen.findByLabelText('Delete Page A'))
+
+    await screen.findByText('Delete "Page A"?')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(onDelete).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(screen.queryByText('Delete "Page A"?')).not.toBeInTheDocument()
+    })
+  })
+
   it('rename flow: click pencil, type new name, press Enter', async () => {
     const onRename = vi.fn()
     const mockFns = {

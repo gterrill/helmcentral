@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
@@ -35,8 +35,26 @@ vi.mock('@/hooks/use-alarms', () => ({
   findAnchorDragAlarm: () => null,
 }))
 
+// A plain object each test can mutate via anchorAlarmMock.silence / .unsilence
+// (both vi.fn()) and reassign the booleans on — simpler than juggling
+// mockReturnValueOnce across the describe blocks below, and every existing
+// test keeps the pre-P0-fix "nothing going on" defaults.
+const anchorAlarmMock: {
+  isAlarming: boolean
+  isSilenced: boolean
+  isActive: boolean
+  silence: ReturnType<typeof vi.fn>
+  unsilence: ReturnType<typeof vi.fn>
+} = {
+  isAlarming: false,
+  isSilenced: false,
+  isActive: false,
+  silence: vi.fn(),
+  unsilence: vi.fn(),
+}
+
 vi.mock('@/hooks/use-anchor-alarm', () => ({
-  useAnchorAlarm: () => ({ isAlarming: false, isSilenced: false, silence: vi.fn() }),
+  useAnchorAlarm: () => anchorAlarmMock,
 }))
 
 vi.mock('@/lib/audio-utils', () => ({
@@ -109,11 +127,20 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     selectedWindBandId: null,
     planningDepthM: null,
     planningTideHeightFt: null,
+    lastUpdateAgeS: null,
     ...overrides,
   }
 }
 
 describe('AnchorWatchTile', () => {
+  beforeEach(() => {
+    anchorAlarmMock.isAlarming = false
+    anchorAlarmMock.isSilenced = false
+    anchorAlarmMock.isActive = false
+    anchorAlarmMock.silence = vi.fn()
+    anchorAlarmMock.unsilence = vi.fn()
+  })
+
   it('renders the map when no anchor is set but a GPS fix is available', () => {
     render(<AnchorWatchTile {...baseProps()} />)
 
@@ -309,6 +336,153 @@ describe('AnchorWatchTile', () => {
         />,
       )
       expect(screen.getByText(/GPS signal degraded/)).toBeInTheDocument()
+    })
+  })
+
+  // P0: a silenced drag used to render nothing anywhere on this tile — the
+  // red strip was gated on isAlarming alone, which silencing flips straight
+  // to false with no replacement. These tests cover both the surviving red
+  // strip and the amber one that must now stand in for it once silenced.
+  describe('drag alarm strip', () => {
+    it('shows a red, audible strip naming the live distance and radius, and Silence stops it', () => {
+      anchorAlarmMock.isAlarming = true
+      anchorAlarmMock.isActive = true
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            watch: baseWatch({
+              anchorState: 'dragging',
+              anchorLat: -25.1,
+              anchorLon: 152.9,
+              distanceMeters: 38,
+              radiusMeters: 30,
+            }),
+          })}
+        />,
+      )
+
+      const strip = screen.getByTestId('drag-alarm-strip')
+      expect(strip).toHaveAttribute('role', 'alert')
+      expect(strip.textContent).toContain('38')
+      expect(strip.textContent).toContain('30')
+      // The old copy said only "ALARM", with no indication of how far or
+      // past what radius.
+      expect(strip.textContent).not.toBe('ALARM')
+      expect(screen.queryByTestId('drag-silenced-strip')).toBeNull()
+
+      fireEvent.click(within(strip).getByRole('button', { name: /silence/i }))
+      expect(anchorAlarmMock.silence).toHaveBeenCalledTimes(1)
+    })
+
+    it('shows a persistent amber strip — never nothing — once the drag is silenced', () => {
+      anchorAlarmMock.isSilenced = true
+      anchorAlarmMock.isActive = true
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            watch: baseWatch({
+              anchorState: 'dragging',
+              anchorLat: -25.1,
+              anchorLon: 152.9,
+              distanceMeters: 38,
+              radiusMeters: 30,
+            }),
+          })}
+        />,
+      )
+
+      expect(screen.queryByTestId('drag-alarm-strip')).toBeNull()
+      const strip = screen.getByTestId('drag-silenced-strip')
+      expect(strip).toHaveAttribute('role', 'alert')
+      expect(strip.textContent).toContain('38')
+      expect(strip.textContent).toContain('30')
+      expect(strip.textContent?.toLowerCase()).toContain('silenced')
+
+      fireEvent.click(within(strip).getByRole('button', { name: /unsilence/i }))
+      expect(anchorAlarmMock.unsilence).toHaveBeenCalledTimes(1)
+    })
+
+    it('renders neither strip when there is no drag alarm at all', () => {
+      render(<AnchorWatchTile {...baseProps({ watch: baseWatch({ anchorState: 'set', anchorLat: -25.1, anchorLon: 152.9 }) })} />)
+
+      expect(screen.queryByTestId('drag-alarm-strip')).toBeNull()
+      expect(screen.queryByTestId('drag-silenced-strip')).toBeNull()
+    })
+  })
+
+  // Design critique item 4: the operator must be able to answer "is the
+  // boat where I left it" from a hero readout above the map, not by parsing
+  // the map's own overlay panel.
+  describe('distance KPI stack', () => {
+    it('promotes distance-vs-radius above the map once anchored', () => {
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            watch: baseWatch({
+              anchorState: 'set',
+              anchorLat: -25.1,
+              anchorLon: 152.9,
+              distanceMeters: 12,
+              radiusMeters: 20,
+            }),
+          })}
+        />,
+      )
+
+      const kpi = screen.getByTestId('anchor-distance-kpi')
+      expect(kpi.textContent).toContain('Distance')
+      expect(kpi.textContent).toContain('12')
+      expect(kpi.textContent).toContain('20')
+    })
+
+    it('converts to feet when the host is set to imperial units', () => {
+      render(
+        <AnchorWatchTile
+          {...baseProps({
+            isImperial: true,
+            watch: baseWatch({
+              anchorState: 'set',
+              anchorLat: -25.1,
+              anchorLon: 152.9,
+              distanceMeters: 10,
+              radiusMeters: 20,
+            }),
+          })}
+        />,
+      )
+
+      const kpi = screen.getByTestId('anchor-distance-kpi')
+      // 10m -> 33ft, 20m -> 66ft (rounded).
+      expect(kpi.textContent).toContain('33')
+      expect(kpi.textContent).toContain('66')
+      expect(kpi.textContent).toContain('ft')
+    })
+
+    it('does not render the KPI stack — not even as dashes — when no anchor is set', () => {
+      render(<AnchorWatchTile {...baseProps({ watch: baseWatch({ anchorState: 'none' }) })} />)
+
+      expect(screen.queryByTestId('anchor-distance-kpi')).toBeNull()
+    })
+  })
+
+  describe('staleness', () => {
+    it('marks the tile stale once the feed age passes the threshold', () => {
+      render(<AnchorWatchTile {...baseProps({ lastUpdateAgeS: 500 })} />)
+
+      const badge = screen.getByTestId('tile-stale-badge')
+      expect(badge.textContent).toContain('8m')
+    })
+
+    it('does not mark the tile stale for a fresh age', () => {
+      render(<AnchorWatchTile {...baseProps({ lastUpdateAgeS: 5 })} />)
+
+      expect(screen.queryByTestId('tile-stale-badge')).toBeNull()
+    })
+
+    it('does not fabricate staleness when the age is unknown (null)', () => {
+      render(<AnchorWatchTile {...baseProps({ lastUpdateAgeS: null })} />)
+
+      expect(screen.queryByTestId('tile-stale-badge')).toBeNull()
     })
   })
 })

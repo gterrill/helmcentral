@@ -96,6 +96,7 @@ describe('useAnchorAlarm', () => {
 
     expect(result.current.isAlarming).toBe(false)
     expect(result.current.isSilenced).toBe(false)
+    expect(result.current.isActive).toBe(false)
   })
 
   it('alarms when the server raises a drag', () => {
@@ -103,6 +104,7 @@ describe('useAnchorAlarm', () => {
 
     expect(result.current.isAlarming).toBe(true)
     expect(result.current.isSilenced).toBe(false)
+    expect(result.current.isActive).toBe(true)
   })
 
   it('reports silenced once the server has acknowledged it', () => {
@@ -110,6 +112,89 @@ describe('useAnchorAlarm', () => {
 
     expect(result.current.isAlarming).toBe(false)
     expect(result.current.isSilenced).toBe(true)
+    // A silenced drag is still a live condition, not the absence of one —
+    // callers must be able to tell "silenced" apart from "no alarm at all"
+    // without inspecting the raw alarm object themselves.
+    expect(result.current.isActive).toBe(true)
+  })
+
+  // P0 regression: a silenced drag used to be visually indistinguishable
+  // from no alarm at all, because callers had only isAlarming/isSilenced to
+  // go on and isSilenced was easy to read as "nothing to show". isActive is
+  // the explicit third state.
+  it('distinguishes a silenced-but-active drag from no alarm at all via isActive', () => {
+    const { result: noAlarm } = renderHook(() => useAnchorAlarm(null))
+    const { result: silencedAlarm } = renderHook(() => useAnchorAlarm(acknowledged))
+
+    expect(noAlarm.current.isActive).toBe(false)
+    expect(silencedAlarm.current.isActive).toBe(true)
+    expect(silencedAlarm.current.isAlarming).toBe(false)
+    expect(silencedAlarm.current.isSilenced).toBe(true)
+  })
+
+  describe('unsilence', () => {
+    it('resumes the local klaxon for an acknowledged alarm without calling the server', async () => {
+      const acknowledge = vi.fn().mockResolvedValue(undefined)
+      const { result } = renderHook(() => useAnchorAlarm(acknowledged, acknowledge))
+
+      expect(result.current.isAlarming).toBe(false)
+      const callsBefore = mockAudioContext.createOscillator.mock.calls.length
+
+      await act(async () => {
+        result.current.unsilence()
+      })
+
+      expect(result.current.isAlarming).toBe(true)
+      expect(result.current.isSilenced).toBe(false)
+      expect(mockAudioContext.createOscillator.mock.calls.length).toBeGreaterThan(callsBefore)
+      // There is no server-side "un-acknowledge" — the engine treats
+      // acknowledged as terminal until the condition clears and re-raises.
+      // This is a same-device override of the local audio only.
+      expect(acknowledge).not.toHaveBeenCalled()
+    })
+
+    it('silencing again after unsilence stops the klaxon without re-calling acknowledge', async () => {
+      const acknowledge = vi.fn().mockResolvedValue(undefined)
+      const { result } = renderHook(() => useAnchorAlarm(acknowledged, acknowledge))
+
+      await act(async () => {
+        result.current.unsilence()
+      })
+      expect(result.current.isAlarming).toBe(true)
+
+      act(() => {
+        result.current.silence()
+      })
+
+      expect(result.current.isAlarming).toBe(false)
+      expect(result.current.isSilenced).toBe(true)
+      expect(acknowledge).not.toHaveBeenCalled()
+    })
+
+    it('drops the local override once the drag clears, so a later drag does not start pre-unsilenced', async () => {
+      const acknowledge = vi.fn().mockResolvedValue(undefined)
+      const { result, rerender } = renderHook(
+        ({ alarm }: { alarm: ActiveAlarm | null }) => useAnchorAlarm(alarm, acknowledge),
+        { initialProps: { alarm: acknowledged as ActiveAlarm | null } },
+      )
+
+      await act(async () => {
+        result.current.unsilence()
+      })
+      expect(result.current.isAlarming).toBe(true)
+
+      act(() => {
+        rerender({ alarm: null })
+      })
+      expect(result.current.isActive).toBe(false)
+      expect(result.current.isAlarming).toBe(false)
+
+      await act(async () => {
+        rerender({ alarm: acknowledged })
+      })
+      expect(result.current.isSilenced).toBe(true)
+      expect(result.current.isAlarming).toBe(false)
+    })
   })
 
   it('silences by acknowledging server-side so every screen agrees', async () => {

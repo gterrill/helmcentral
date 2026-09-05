@@ -28,9 +28,20 @@ function CardHeader({ className, ...props }: React.ComponentProps<'div'>) {
   )
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<'div'>) {
+/**
+ * Defaults to a plain `div`, matching every existing caller. Pass `as="h2"`
+ * (or another heading level) to give the title real heading semantics —
+ * `Tile` does this so a screen-reader user can jump between the board's 24
+ * tiles instead of traversing the whole thing linearly.
+ */
+function CardTitle({
+  className,
+  as,
+  ...props
+}: React.HTMLAttributes<HTMLElement> & { as?: 'div' | 'h2' | 'h3' | 'h4' }) {
+  const Comp = as ?? 'div'
   return (
-    <div
+    <Comp
       data-slot="card-title"
       className={cn('leading-none font-semibold', className)}
       {...props}

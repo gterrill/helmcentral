@@ -13,6 +13,17 @@ import { AnchorRodePlanner } from '@/components/anchor-rode-planner'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import { computeScopeRecommendation } from '@/lib/rode-plan'
 
+/**
+ * A distance in the host's chosen unit, rounded for display — same shape as
+ * anchor-watch-tile.tsx's helper of the same name. Duplicated locally rather
+ * than imported: that file isn't exported from and isn't owned here.
+ */
+function formatDistanceValue(meters: number, isImperial: boolean): { value: string; unit: string } {
+  return isImperial
+    ? { value: `${Math.round(meters * 3.28084)}`, unit: 'ft' }
+    : { value: `${Math.round(meters)}`, unit: 'm' }
+}
+
 interface AnchorWatchDrawerProps {
   // Resolved by the caller (live fix, falling back to the anchor point), and
   // left null only when neither is available — see the no-fix placeholder
@@ -200,6 +211,30 @@ export function AnchorWatchDrawer({
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
         <div className="flex min-w-0 flex-1 flex-col gap-3">
+          {/* Same promotion as anchor-watch-tile.tsx's KPI stack, and for
+              the same reason: the map's own metric overlay dropped its
+              Distance row (design critique item 1, it duplicated this),
+              which would otherwise leave the drawer with no distance
+              readout at all. */}
+          {isAnchored && (
+            <div
+              data-testid="anchor-distance-kpi"
+              className="flex items-baseline gap-3 rounded-md border bg-background/60 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Distance</p>
+                <p className="font-display text-5xl leading-none tabular-nums text-gauge-primary">
+                  {distanceMeters !== null ? formatDistanceValue(distanceMeters, isImperial).value : '—'}
+                  <span className="ml-1 text-lg text-muted-foreground">
+                    {distanceMeters !== null ? formatDistanceValue(distanceMeters, isImperial).unit : ''}
+                  </span>
+                </p>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                of {formatDistanceValue(radiusMeters, isImperial).value} {formatDistanceValue(radiusMeters, isImperial).unit}
+              </p>
+            </div>
+          )}
           <div className="min-h-0 flex-1 rounded-xl border bg-background/70">
             {vesselLat !== null && vesselLon !== null ? (
               <AnchorWatchMap
@@ -231,6 +266,11 @@ export function AnchorWatchDrawer({
                 onRadarEchoToggle={onRadarEchoToggle}
                 onAnchorReposition={onAnchorReposition}
                 onRadiusChange={onRadiusChange}
+                // The tile trims its own in-map stack to fullscreen+zoom
+                // (design critique item 3); this drawer IS the fullscreen
+                // view, so it gets satellite/radar/recentre back — every
+                // control stays reachable, just relocated.
+                expandedControls
                 placemarks={placemarks}
                 onPlacemarkCreate={onPlacemarkCreate}
                 onPlacemarkRemove={onPlacemarkRemove}

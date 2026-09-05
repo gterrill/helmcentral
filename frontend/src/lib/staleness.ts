@@ -52,3 +52,23 @@ export function formatDataAge(ageSeconds: number | null): string {
   }
   return `${Math.floor(seconds / 86400)}d`
 }
+
+/**
+ * Reads an age off an API payload.
+ *
+ * The backend emits `-1` for "this source publishes no timestamp" (ADR 0068),
+ * because a JSON number field cannot be absent the way a Go zero value can.
+ * The UI contract is `number | null`, where null reads as *not stale* for the
+ * reason `isStale` documents. Mapping the sentinel here keeps that meaning in
+ * one place rather than teaching every tile about `-1`.
+ *
+ * A missing or malformed value is unknown, not fresh: returning 0 would paint
+ * a dead feed as a live one, which is the failure the stale indicator exists
+ * to prevent.
+ */
+export function ageFromPayload(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null
+  }
+  return value
+}

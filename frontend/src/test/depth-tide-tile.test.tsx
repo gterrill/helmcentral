@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { expect, test } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { expect, test, vi } from 'vitest'
 
 import { DepthTideTile } from '@/components/depth-tide-tile'
 import type { DepthTrendData } from '@/hooks/use-depth-trend'
@@ -27,6 +27,7 @@ test('shows estimated depth at the next low tide, in metric units', () => {
       navigationState="anchored"
       depthTrend={emptyTrend}
       tide={baseTide}
+      lastUpdateAgeS={null}
     />,
   )
 
@@ -43,6 +44,7 @@ test('shows estimated depth at the next low tide, in imperial units', () => {
       navigationState="anchored"
       depthTrend={emptyTrend}
       tide={baseTide}
+      lastUpdateAgeS={null}
     />,
   )
 
@@ -61,6 +63,7 @@ test('shows estimated depth at the next high tide when rising, in metric units',
       navigationState="anchored"
       depthTrend={emptyTrend}
       tide={risingTide}
+      lastUpdateAgeS={null}
     />,
   )
 
@@ -78,6 +81,7 @@ test('shows estimated depth at the next high tide when rising, in imperial units
       navigationState="anchored"
       depthTrend={emptyTrend}
       tide={risingTide}
+      lastUpdateAgeS={null}
     />,
   )
 
@@ -94,8 +98,86 @@ test('hides the estimate when depth or tide data is unavailable', () => {
       navigationState="anchored"
       depthTrend={emptyTrend}
       tide={baseTide}
+      lastUpdateAgeS={null}
     />,
   )
 
   expect(screen.queryByText('Est. low')).not.toBeInTheDocument()
+})
+
+// ── clickable-tile semantics ────────────────────────────────────────────
+// Previously a bare <div onClick> with cursor-pointer styling: no role, no
+// keyboard access, no focus ring. A touchscreen mouse-substitute is not a
+// keyboard user's only way in.
+
+test('becomes a real, clickable button when onOpen is provided', () => {
+  const onOpen = vi.fn()
+  render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance={false}
+      navigationState="anchored"
+      depthTrend={emptyTrend}
+      tide={baseTide}
+      lastUpdateAgeS={null}
+      onOpen={onOpen}
+    />,
+  )
+
+  const trigger = screen.getByRole('button')
+  expect(trigger.tagName).toBe('BUTTON')
+  expect(trigger.className).toMatch(/focus-visible:ring/)
+
+  fireEvent.click(trigger)
+  expect(onOpen).toHaveBeenCalledTimes(1)
+})
+
+test('stays a plain, non-interactive wrapper when there is nothing to open', () => {
+  render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance={false}
+      navigationState="anchored"
+      depthTrend={emptyTrend}
+      tide={baseTide}
+      lastUpdateAgeS={null}
+    />,
+  )
+
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+})
+
+// ── staleness ────────────────────────────────────────────────────────────
+// Depth is the number you run aground on. A dead transducer must not leave
+// a confident reading on screen forever.
+
+test('flags the tile stale once the feed age passes the threshold', () => {
+  render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance={false}
+      navigationState="anchored"
+      depthTrend={emptyTrend}
+      tide={baseTide}
+      lastUpdateAgeS={5940}
+    />,
+  )
+
+  const badge = screen.getByTestId('tile-stale-badge')
+  expect(badge).toHaveTextContent('1h 39m')
+})
+
+test('does not flag the tile stale when no update age is known', () => {
+  render(
+    <DepthTideTile
+      depth={4}
+      isImperialDistance={false}
+      navigationState="anchored"
+      depthTrend={emptyTrend}
+      tide={baseTide}
+      lastUpdateAgeS={null}
+    />,
+  )
+
+  expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
 })

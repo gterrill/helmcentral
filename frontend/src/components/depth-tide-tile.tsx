@@ -4,6 +4,7 @@ import type { DepthTrendData } from '@/hooks/use-depth-trend'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { DepthSparkline } from '@/components/depth-sparkline'
 import { Tile } from '@/components/ui/tile'
+import { formatDataAge, isStale } from '@/lib/staleness'
 
 export interface DepthTideTileProps {
   depth: number | null
@@ -12,6 +13,15 @@ export interface DepthTideTileProps {
   depthTrend: DepthTrendData
   tide: TideToday
   onOpen?: () => void
+  /**
+   * Seconds since the depth feed last reported, or null if the upstream
+   * source publishes no age for it. Depth is the number you run aground on:
+   * a dead transducer must not go on showing a confident reading forever.
+   * `null` reads as "unknown," not "stale" (see isStale) — there is no
+   * timestamp on environment.depth in the SignalK payload today, so this is
+   * always null until a source actually publishes one.
+   */
+  lastUpdateAgeS: number | null
 }
 
 export const DepthTideTile = memo(function DepthTideTile({
@@ -21,7 +31,9 @@ export const DepthTideTile = memo(function DepthTideTile({
   depthTrend,
   tide,
   onOpen,
+  lastUpdateAgeS,
 }: DepthTideTileProps) {
+  const feedStale = isStale(lastUpdateAgeS)
   const depthValue =
     depth !== null
       ? isImperialDistance
@@ -45,9 +57,22 @@ export const DepthTideTile = memo(function DepthTideTile({
       : null
   const estimatedExtremeLabel = isRising ? 'Est. high' : 'Est. low'
 
+  // A bare clickable div has no keyboard access and no focus ring — real
+  // button semantics when there's something to open, an inert div otherwise,
+  // so the non-interactive case (no onOpen) renders exactly as before.
+  const Wrapper = onOpen ? 'button' : 'div'
+
   return (
-    <div onClick={onOpen} className={onOpen ? 'cursor-pointer transition-opacity hover:opacity-80' : undefined}>
-      <Tile title="Depth & Tide">
+    <Wrapper
+      type={onOpen ? 'button' : undefined}
+      onClick={onOpen}
+      className={
+        onOpen
+          ? 'block w-full rounded-xl text-left transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+          : undefined
+      }
+    >
+      <Tile title="Depth & Tide" stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
         <div className="mt-1 rounded-md border bg-background/60 px-3 py-3">
           <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Depth</p>
           <div className="mt-1 flex items-center gap-4">
@@ -113,6 +138,6 @@ export const DepthTideTile = memo(function DepthTideTile({
           </div>
         </div>
       </Tile>
-    </div>
+    </Wrapper>
   )
 })

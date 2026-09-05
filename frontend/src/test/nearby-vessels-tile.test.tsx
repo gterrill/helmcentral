@@ -20,6 +20,7 @@ describe('NearbyVesselsTile', () => {
       <NearbyVesselsTile
         loading={false}
         distanceUnits="metric"
+        lastUpdateAgeS={null}
         vessels={[
           {
             id: 'urn:mrn:imo:mmsi:316042555',
@@ -36,11 +37,46 @@ describe('NearbyVesselsTile', () => {
     expect(screen.getByText('Seen 3x before, last 2d ago')).toBeInTheDocument()
   })
 
+  // The nearby-vessels feed carries no top-level "how old is this list"
+  // field today (see buildNearbyVesselsPayload in backend/main.go) — only
+  // each vessel's own age_seconds, a different thing (how long since that
+  // contact was last seen, not whether the AIS/radar feed itself died).
+  // lastUpdateAgeS is null until a source actually publishes a feed age;
+  // these only prove the Tile wiring is correct once one exists.
+
+  it('flags the tile stale once a feed age passes the threshold', () => {
+    render(
+      <NearbyVesselsTile
+        loading={false}
+        distanceUnits="metric"
+        lastUpdateAgeS={5940}
+        vessels={[]}
+      />,
+    )
+
+    const badge = screen.getByTestId('tile-stale-badge')
+    expect(badge).toHaveTextContent('1h 39m')
+  })
+
+  it('does not flag the tile stale when no update age is known', () => {
+    render(
+      <NearbyVesselsTile
+        loading={false}
+        distanceUnits="metric"
+        lastUpdateAgeS={null}
+        vessels={[]}
+      />,
+    )
+
+    expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
+  })
+
   it('hides prior-contact text when no history is available', () => {
     render(
       <NearbyVesselsTile
         loading={false}
         distanceUnits="metric"
+        lastUpdateAgeS={null}
         vessels={[
           {
             id: 'urn:mrn:imo:mmsi:316042555',
@@ -71,6 +107,7 @@ describe('NearbyVesselsTile', () => {
       <NearbyVesselsTile
         loading={false}
         distanceUnits="metric"
+        lastUpdateAgeS={null}
         vessels={[
           {
             id: 'urn:mrn:imo:mmsi:316042555',
@@ -108,6 +145,7 @@ describe('NearbyVesselsTile', () => {
       <NearbyVesselsTile
         loading={false}
         distanceUnits="metric"
+        lastUpdateAgeS={null}
         vessels={[
           {
             id: 'urn:mrn:imo:mmsi:316042555',
@@ -137,6 +175,7 @@ describe('NearbyVesselsTile', () => {
       <NearbyVesselsTile
         loading={false}
         distanceUnits="metric"
+        lastUpdateAgeS={null}
         vessels={[
           { id: 'urn:mrn:imo:mmsi:111111111', name: 'SAME NAME', range_m: 100, age_seconds: 10 },
           { id: 'urn:mrn:imo:mmsi:222222222', name: 'SAME NAME', range_m: 200, age_seconds: 20 },

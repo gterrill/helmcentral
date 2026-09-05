@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { ageFromPayload } from '@/lib/staleness'
+
 import { GUST_WINDOWS, type GustWindow } from '@/lib/gust-windows'
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 
@@ -33,6 +35,9 @@ interface VesselState {
   generator_runtime: number
   engine_0_rpm: number
   engine_1_rpm: number
+  depth_last_update_age_s: number
+  position_last_update_age_s: number
+  wind_last_update_age_s: number
   source: string
 }
 
@@ -65,6 +70,11 @@ export function useVesselState() {
   const [maxGustKts, setMaxGustKts] = useState<Record<GustWindow, number | null>>(
     () => Object.fromEntries(GUST_WINDOWS.map((window) => [window, null])) as Record<GustWindow, number | null>,
   )
+  // Per-source freshness (ADR 0068). Null means the source publishes no
+  // timestamp, which reads as 'not stale' rather than as fresh.
+  const [depthLastUpdateAgeS, setDepthLastUpdateAgeS] = useState<number | null>(null)
+  const [positionLastUpdateAgeS, setPositionLastUpdateAgeS] = useState<number | null>(null)
+  const [windLastUpdateAgeS, setWindLastUpdateAgeS] = useState<number | null>(null)
   const [generatorState, setGeneratorState] = useState<string | null>(null)
   const [generatorManualStart, setGeneratorManualStart] = useState<boolean>(false)
   const [generatorManualStartTimer, setGeneratorManualStartTimer] = useState<number>(0)
@@ -103,6 +113,9 @@ export function useVesselState() {
       setGnssValidationReason(typeof data.gnss_validation_reason === 'string' && data.gnss_validation_reason !== '' ? data.gnss_validation_reason : null)
       setGnssCriticalAlert(data.gnss_critical_alert === true)
       setHeadingTrue(typeof data.heading_true === 'number' && data.heading_true >= 0 ? data.heading_true : null)
+      setDepthLastUpdateAgeS(ageFromPayload(data.depth_last_update_age_s))
+      setPositionLastUpdateAgeS(ageFromPayload(data.position_last_update_age_s))
+      setWindLastUpdateAgeS(ageFromPayload(data.wind_last_update_age_s))
       setWindSpeedApparentKts(typeof data.wind_speed_apparent_kts === 'number' && data.wind_speed_apparent_kts >= 0 ? data.wind_speed_apparent_kts : null)
       setWindAngleApparentDeg(typeof data.wind_angle_apparent_deg === 'number' && data.wind_angle_apparent_deg >= 0 ? data.wind_angle_apparent_deg : null)
       setWindSide(data.wind_side === 'port' || data.wind_side === 'starboard' ? data.wind_side : null)
@@ -141,6 +154,9 @@ export function useVesselState() {
 
   return {
     depth,
+    depthLastUpdateAgeS,
+    positionLastUpdateAgeS,
+    windLastUpdateAgeS,
     vesselLengthOverallM,
     currentDriftKts,
     currentSetDeg,

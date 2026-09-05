@@ -6,3 +6,19 @@
 .react-resizable-handle::after {
   border-color: hsl(var(--muted-foreground)) !important;
 }
+
+/*
+ * The hero tile (ADR 0072). .bento-hero-scale is deliberately rendered
+ * smaller than its frame (100 / --hero-scale %) and then transform-scaled
+ * back up to exactly fill it. That means the widget inside lays itself out
+ * at its normal full-width size — no cramped intermediate box — and the
+ * whole rendered result, text included, comes out --hero-scale times
+ * bigger. overflow-hidden on the frame is a defensive clamp against
+ * sub-pixel rounding in the calc(), not a load-bearing crop.
+ */
+.bento-hero-scale {
+  transform-origin: top left;
+  transform: scale(var(--hero-scale, 1.15));
+  width: calc(100% / var(--hero-scale, 1.15));
+  height: calc(100% / var(--hero-scale, 1.15));
+}

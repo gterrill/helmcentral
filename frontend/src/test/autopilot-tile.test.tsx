@@ -111,6 +111,18 @@ describe('AutopilotTile', () => {
     expect(props.onEngage).toHaveBeenCalledTimes(1)
   })
 
+  // Finding 1: engage used to sit on an alert-semantics emerald ("healthy"),
+  // not the primary token DESIGN.md's Switches spec reserves for an engaged
+  // control.
+  it('renders the engage control on the primary token, not an alert-semantics emerald', () => {
+    const props = baseProps()
+    render(<AutopilotTile {...props} />)
+
+    const engageButton = screen.getByRole('button', { name: /hold to engage/i })
+    expect(engageButton).toHaveClass('bg-primary')
+    expect(engageButton).not.toHaveClass('bg-emerald-600')
+  })
+
   it('shows a hold-to-DISENGAGE control while engaged, not engage', () => {
     const props = baseProps()
     render(<AutopilotTile {...props} state={ENGAGED} />)

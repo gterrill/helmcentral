@@ -141,7 +141,7 @@ export const SolarTile = memo(function SolarTile({
                     <span className="ml-1 text-[10px] text-muted-foreground">kWh</span>
                   </p>
                   <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                    Yday: <span className="text-foreground">{ckwh(controller.yesterdayKWh)}</span>
+                    Yday: <span className="text-foreground">{ckwh(controller.yesterdayKWh)}</span> kWh
                   </p>
                   <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Share:{' '}

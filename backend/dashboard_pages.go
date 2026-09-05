@@ -125,6 +125,21 @@ var validClusterFuelSides = map[string]bool{"left": true, "right": true}
 
 var validPageSkins = map[string]bool{"": true, "default": true, "instrument": true}
 
+// heroWidgetExists reports whether hero is unset, or names a widget actually
+// present in widgets. Shared by create and patch so both fail closed the same
+// way (ADR 0072, following the precedent ADR 0060 set for skin).
+func heroWidgetExists(hero string, widgets []dashboardLayoutItem) bool {
+	if hero == "" {
+		return true
+	}
+	for _, w := range widgets {
+		if w.ID == hero {
+			return true
+		}
+	}
+	return false
+}
+
 // A closed set, mirroring CLUSTER_ICONS in frontend/src/lib/cluster-icons.ts.
 // An allowlist rather than any lucide name, so a saved config can never point
 // at a component that does not exist.
@@ -276,7 +291,15 @@ type dashboardPageData struct {
 	// setting until ADR 0060 moved it here, since a page is already a mode
 	// ("Anchored", "Underway") and the skin is a property of that, not of one
 	// tile. Empty means the app theme, so an unset page needs no value.
-	Skin      string                `json:"skin,omitempty"`
+	Skin string `json:"skin,omitempty"`
+	// Hero names the one widget on this page that gets the enlarged,
+	// full-width treatment (design critique batch, ADR 0072). Empty means no
+	// hero. A dangling hero can never persist: an explicit patch that names a
+	// widget not on the page is rejected the same way an unknown skin is, and
+	// a widgets-only patch that removes the hero's own widget clears it
+	// automatically rather than failing an otherwise-ordinary widget removal
+	// (see patchDashboardPageHandler).
+	Hero      string                `json:"hero,omitempty"`
 	Widgets   []dashboardLayoutItem `json:"widgets"`
 	CreatedAt time.Time             `json:"created_at"`
 	UpdatedAt time.Time             `json:"updated_at"`
@@ -533,6 +556,7 @@ func createDashboardPageHandler(c echo.Context) error {
 	var body struct {
 		Name    string                `json:"name"`
 		Skin    string                `json:"skin"`
+		Hero    string                `json:"hero"`
 		Widgets []dashboardLayoutItem `json:"widgets"`
 	}
 	if err := c.Bind(&body); err != nil {
@@ -556,11 +580,16 @@ func createDashboardPageHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 
+	if !heroWidgetExists(body.Hero, body.Widgets) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "hero must name a widget on this page: " + body.Hero})
+	}
+
 	now := time.Now().UTC()
 	page := &dashboardPageData{
 		ID:        uuid.NewString(),
 		Name:      name,
 		Skin:      body.Skin,
+		Hero:      body.Hero,
 		Widgets:   body.Widgets,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -599,12 +628,13 @@ func patchDashboardPageHandler(c echo.Context) error {
 	var body struct {
 		Name    *string                `json:"name"`
 		Skin    *string                `json:"skin"`
+		Hero    *string                `json:"hero"`
 		Widgets *[]dashboardLayoutItem `json:"widgets"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if body.Name == nil && body.Skin == nil && body.Widgets == nil {
+	if body.Name == nil && body.Skin == nil && body.Hero == nil && body.Widgets == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
@@ -627,10 +657,21 @@ func patchDashboardPageHandler(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "page not found"})
 	}
 
+	finalWidgets := current.Widgets
+	if body.Widgets != nil {
+		finalWidgets = *body.Widgets
+	}
+	// An explicit hero patch is validated against the widget set it will land
+	// on, fail closed exactly like an unknown skin.
+	if body.Hero != nil && !heroWidgetExists(*body.Hero, finalWidgets) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "hero must name a widget on this page: " + *body.Hero})
+	}
+
 	updated := &dashboardPageData{
 		ID:        current.ID,
 		Name:      current.Name,
 		Skin:      current.Skin,
+		Hero:      current.Hero,
 		Widgets:   current.Widgets,
 		CreatedAt: current.CreatedAt,
 		UpdatedAt: time.Now().UTC(),
@@ -641,8 +682,21 @@ func patchDashboardPageHandler(c echo.Context) error {
 	if body.Skin != nil {
 		updated.Skin = *body.Skin
 	}
+	if body.Hero != nil {
+		updated.Hero = *body.Hero
+	}
 	if body.Widgets != nil {
 		updated.Widgets = *body.Widgets
+	}
+	// A hero not named explicitly in this patch can still be orphaned by it,
+	// e.g. a widgets-only patch that drops the widget that was the hero (this
+	// is exactly what the X button's remove-widget patch sends). Rather than
+	// rejecting an ordinary widget removal because of an unrelated field, the
+	// stale reference is repaired here - the same stance stripRetiredWidgets
+	// takes on load: a dangling reference is corrected on write, not treated
+	// as the caller's error.
+	if body.Hero == nil && !heroWidgetExists(updated.Hero, updated.Widgets) {
+		updated.Hero = ""
 	}
 
 	dashboardPagesState[id] = updated

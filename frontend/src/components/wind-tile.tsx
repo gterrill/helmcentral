@@ -6,6 +6,7 @@ import { Tile } from '@/components/ui/tile'
 import { WindCompass } from '@/components/wind-compass'
 import { formatHeading } from '@/lib/format'
 import { GUST_WINDOW_LABELS, GUST_WINDOW_SPOKEN, nextGustWindow, parseGustWindow, type GustWindow } from '@/lib/gust-windows'
+import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
 
 type WindMetricCardProps = {
@@ -24,7 +25,13 @@ function WindMetricCard({ title, value, align = 'left', className = '', valueCla
   const alignmentClass = align === 'right' ? 'items-end text-right' : 'items-start text-left'
   const label = <p key="label" className="text-[10px] leading-none uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
   const reading = <p key="value" className={cn('font-display text-2xl leading-[0.86] text-gauge-primary md:text-3xl', valueClassName)}>{value}</p>
-  const sharedClassName = `relative flex flex-col justify-start gap-0.5 rounded-2xl border bg-background/80 px-4 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ${alignmentClass} ${className}`.trim()
+  // bg-card, not a translucent bg-background/NN: a browser contrast check
+  // measured --gauge-primary against this card's ground at 2.6:1 (below the
+  // 3:1 large-text bar) because a translucent ground composites onto
+  // whatever ends up behind it rather than a known colour. bg-card is opaque
+  // and gives --gauge-primary a fixed backdrop to clear: 3.20:1 in :root,
+  // 8.69:1 in .dark, 8.94:1 in the instrument skin (see wind-tile.test.tsx).
+  const sharedClassName = `relative flex flex-col justify-start gap-0.5 rounded-2xl border bg-card px-4 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ${alignmentClass} ${className}`.trim()
 
   if (onClick) {
     return (
@@ -161,6 +168,14 @@ export interface WindTileProps {
   currentDriftKts: number | null
   currentDriftImpactKts: number | null
   maxGustKts: Record<GustWindow, number | null>
+  /**
+   * Seconds since the wind feed last reported, or null if the upstream
+   * source publishes no age for it. `VesselState` in use-vessel-state.ts
+   * carries no per-field timestamp for wind today, so this is always null
+   * until a source actually publishes one — see isStale for why null reads
+   * as "unknown," not "stale."
+   */
+  lastUpdateAgeS: number | null
 }
 
 const GUST_WINDOW_STORAGE_KEY_LEFT = 'windTile.gustWindow.left'
@@ -178,7 +193,9 @@ export const WindTile = memo(function WindTile({
   currentDriftKts,
   currentDriftImpactKts,
   maxGustKts,
+  lastUpdateAgeS,
 }: WindTileProps) {
+  const feedStale = isStale(lastUpdateAgeS)
   const [gustWindowLeft, setGustWindowLeft] = useState<GustWindow>(() => {
     const raw = globalThis.localStorage?.getItem(GUST_WINDOW_STORAGE_KEY_LEFT) ?? null
     return parseGustWindow(raw) ?? GUST_WINDOW_DEFAULT_LEFT
@@ -243,7 +260,7 @@ export const WindTile = memo(function WindTile({
     : <span className="font-display text-4xl tabular-nums leading-none text-gauge-primary">—</span>
 
   return (
-    <Tile title="Apparent Wind - Course Up">
+    <Tile title="Apparent Wind - Course Up" stale={feedStale} staleLabel={formatDataAge(lastUpdateAgeS)}>
       <WindGaugeCluster
         cfg={WIND_MOBILE_CFG}
         masks={WIND_MOBILE_MASKS}

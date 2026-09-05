@@ -2,9 +2,29 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import type { ActiveAlarm } from './use-alarms'
 
 interface UseAnchorAlarmResult {
+  /** Audible: a live drag, not yet silenced (or force-resumed via
+   *  `unsilence`). The klaxon sounds while this is true. */
   isAlarming: boolean
+  /** A live drag the server has acknowledged, and this device has not
+   *  locally overridden back to audible. Distinct from "no alarm at all" —
+   *  see `isActive`. */
   isSilenced: boolean
+  /** Whether there is a live anchor-drag condition at all, silenced or not.
+   *  Without this, a caller has only isAlarming/isSilenced to go on, and it
+   *  is easy to mistake "silenced" for "nothing to show" — which is exactly
+   *  the P0 bug this hook's callers must not repeat. */
+  isActive: boolean
   silence: () => void
+  /**
+   * Resumes the local klaxon for a drag the server has already
+   * acknowledged. There is no server-side "un-acknowledge" — SignalK's own
+   * notification model and this engine both treat acknowledged as terminal
+   * until the condition clears and re-raises (ADR 0038) — so this is a
+   * same-device override of the local audio only, not a state change every
+   * screen picks up. Calling it while there is nothing acknowledged to
+   * resume is a no-op.
+   */
+  unsilence: () => void
 }
 
 /**
@@ -186,22 +206,48 @@ export function useAnchorAlarm(
     }
   }, [])
 
-  const isSilenced = alarm?.phase === 'acknowledged'
-  const isAlarming = alarm !== null && !isSilenced
+  // A same-device-only override that resumes the klaxon for an alarm the
+  // server has already acknowledged (see `unsilence` below). Reset the
+  // moment the underlying alarm stops being a plain acknowledged drag — the
+  // condition cleared (alarm null) or re-raised fresh (phase back to
+  // 'active') — so a stale override from a previous drag can never make the
+  // next one start pre-unsilenced.
+  const [forcedAudible, setForcedAudible] = useState(false)
+  const isAcknowledged = alarm?.phase === 'acknowledged'
+  useEffect(() => {
+    if (!isAcknowledged) setForcedAudible(false)
+  }, [isAcknowledged])
+
+  const isActive = alarm !== null
+  const isSilenced = isAcknowledged && !forcedAudible
+  const isAlarming = isActive && (!isAcknowledged || forcedAudible)
   const ruleId = alarm?.rule_id ?? null
 
   /**
    * Acknowledges server-side so the alarm is silenced everywhere, and stops the
    * local klaxon immediately rather than waiting for the next stream event.
+   *
+   * If this device had locally resumed an already-acknowledged alarm via
+   * `unsilence`, there is nothing new to tell the server — it already has
+   * this acknowledged — so this only clears the local override and stops
+   * the sound here.
    */
   const silence = useCallback(() => {
     stopKlaxon()
     setSilenceError(null)
+    if (forcedAudible) {
+      setForcedAudible(false)
+      return
+    }
     if (!ruleId || !acknowledge) return
     void acknowledge(ruleId).catch((err: unknown) => {
       setSilenceError(err instanceof Error ? err.message : String(err))
     })
-  }, [ruleId, acknowledge, stopKlaxon])
+  }, [ruleId, acknowledge, stopKlaxon, forcedAudible])
+
+  const unsilence = useCallback(() => {
+    if (isAcknowledged) setForcedAudible(true)
+  }, [isAcknowledged])
 
   // Driven by whether it should currently be sounding, not by a transition, so
   // there is no state in which the loop fails to be (re)created.
@@ -234,5 +280,5 @@ export function useAnchorAlarm(
 
   void silenceError
 
-  return { isAlarming, isSilenced, silence }
+  return { isAlarming, isSilenced, isActive, silence, unsilence }
 }

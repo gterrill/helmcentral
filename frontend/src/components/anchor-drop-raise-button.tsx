@@ -47,7 +47,7 @@ export function AnchorDropRaiseButton({ anchorActive, canDrop, onDrop, onRaise, 
   if (!anchorActive) {
     return (
       <Button
-        className={cn('h-11 bg-teal-600 text-teal-50 hover:bg-teal-700', className)}
+        className={cn('h-11', className)}
         disabled={!canDrop}
         onClick={handleDrop}
       >

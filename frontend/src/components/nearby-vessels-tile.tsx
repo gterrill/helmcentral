@@ -7,6 +7,7 @@ import type { DistanceUnits } from '@/config/app-config'
 import { useVesselSightings, type VesselSighting } from '@/hooks/use-vessel-sightings'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { formatCoordinate } from '@/lib/format'
+import { formatDataAge, isStale } from '@/lib/staleness'
 
 // formatRelativeAge renders a seconds count on the shared s/m/h/d ladder.
 // Both the server-computed age_seconds (currently capped well under an hour
@@ -123,6 +124,15 @@ type NearbyVesselsTileProps = {
   vessels: NearbyVessel[]
   loading: boolean
   distanceUnits: DistanceUnits
+  /**
+   * Seconds since the nearby-vessels feed itself last reported, or null if
+   * the upstream source publishes no age for it. Distinct from each
+   * vessel's own `age_seconds` (how long since that contact was last seen) —
+   * this is whether the AIS/radar feed behind the whole list has died.
+   * `buildNearbyVesselsPayload` (backend/main.go) carries no such field
+   * today, so this is always null until a source actually publishes one.
+   */
+  lastUpdateAgeS: number | null
 }
 
 function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
@@ -132,9 +142,16 @@ function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
   return `${Math.round(rangeMeters)} m`
 }
 
-export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits }: NearbyVesselsTileProps) {
+export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS }: NearbyVesselsTileProps) {
+  const feedStale = isStale(lastUpdateAgeS)
+
   return (
-    <Tile title="Nearby Vessels" icon={<Ship className="h-3.5 w-3.5 text-gauge-secondary" />}>
+    <Tile
+      title="Nearby Vessels"
+      icon={<Ship className="h-3.5 w-3.5 text-gauge-secondary" />}
+      stale={feedStale}
+      staleLabel={formatDataAge(lastUpdateAgeS)}
+    >
       <div className="mt-3 space-y-2">
         {vessels.map((vessel) => (
           <div key={vessel.id} className="flex items-center justify-between gap-2 rounded-md border bg-muted/45 px-3 py-2">

@@ -95,6 +95,15 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'autopilot': { minW: 4, minH: 6 },
 }
 
+// The hero's uniform enlargement (ADR 0072). Applied as a CSS transform rather
+// than a bigger Tailwind text class because a widget's own readout size is
+// baked into that widget's file as viewport-breakpoint classes
+// (`lg:text-7xl`), not a prop this grid can reach — scaling the rendered
+// subtree is the one lever available from here that touches every widget kind
+// alike. 1.15 was picked as "unmistakably bigger" without reading as a
+// distorted blow-up.
+export const HERO_SCALE = 1.15
+
 export interface DashboardBentoGridProps {
   widgets: DashboardLayoutItem[]
   editing: boolean
@@ -105,14 +114,27 @@ export interface DashboardBentoGridProps {
   // Only the token-id kinds can be duplicated; builtins are one per page.
   onDuplicateWidget: (id: DashboardWidgetId) => void
   onLayoutSettle: (next: DashboardLayoutItem[]) => void
+  /**
+   * The id of this page's hero widget (`DashboardPage.hero`), or undefined/empty
+   * for none. The hero renders in its own full-width row above the grid; its
+   * authored x/y/w/h is left completely untouched underneath (see rglLayout's
+   * `static: true` below), so demoting it puts it back exactly where it was
+   * (ADR 0072).
+   */
+  heroId?: string
 }
 
-export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle }: DashboardBentoGridProps) {
+export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle, heroId }: DashboardBentoGridProps) {
   // Below `lg`, render a plain reflowed stack instead of the RGL grid — never both at once.
   // Toggling between them via CSS (rather than this JS media query) would mount both layouts
   // simultaneously, leaving duplicate DOM nodes per widget: wasted render cost for real users,
   // and it breaks any `getByText`-style single-match query in tests.
   const isDesktopGrid = useMinWidth(BREAKPOINTS.lg)
+
+  const heroWidget = useMemo(
+    () => (heroId ? widgets.find((w) => w.id === heroId) : undefined),
+    [widgets, heroId],
+  )
 
   const rglLayout = useMemo<LayoutItem[]>(
     () => widgets.map((w) => ({
@@ -121,6 +143,13 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       y: w.y,
       w: w.w,
       h: w.h,
+      // The hero's grid slot is frozen (ADR 0072): react-grid-layout's own
+      // compaction skips `static` items entirely (they neither move nor get
+      // moved), so every other tile keeps exactly the position it was
+      // authored at whether or not a hero is currently promoted. The hero's
+      // real content renders separately in the row above; this entry exists
+      // purely so the rectangle still reads as occupied.
+      ...(w.id === heroId ? { static: true } : {}),
       ...(isClusterWidgetId(w.id)
         ? { ...CLUSTER_WIDGET_CONSTRAINTS, ...(w.cluster?.fuel ? { minW: CLUSTER_FUEL_MIN_W } : {}) }
         : isLampStripWidgetId(w.id)
@@ -133,12 +162,93 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
             ? GAUGE_WIDGET_CONSTRAINTS
             : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
     })),
-    [widgets],
+    [widgets, heroId],
   )
 
   const commit = useCallback((layout: readonly LayoutItem[]) => {
     onLayoutSettle(mergeLayoutGeometry(widgets, layout))
   }, [widgets, onLayoutSettle])
+
+  // Keyboard parity for the drag handle: arrow keys move exactly one grid
+  // cell and commit through the same path a mouse drag uses, so persistence
+  // and validation behave identically either way. A single-item geometry
+  // array is enough — mergeLayoutGeometry leaves any widget whose id it can't
+  // find in the array unchanged, so every other tile's position survives.
+  const moveWidgetByKeyboard = useCallback((w: DashboardLayoutItem, dx: number, dy: number) => {
+    const nextX = Math.min(Math.max(w.x + dx, 0), Math.max(0, GRID_COLUMNS - w.w))
+    const nextY = Math.max(w.y + dy, 0)
+    if (nextX === w.x && nextY === w.y) return
+    commit([{ i: w.id, x: nextX, y: nextY, w: w.w, h: w.h }])
+  }, [commit])
+
+  const handleHandleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>, w: DashboardLayoutItem) => {
+    switch (e.key) {
+      case 'ArrowLeft':
+        e.preventDefault()
+        moveWidgetByKeyboard(w, -1, 0)
+        break
+      case 'ArrowRight':
+        e.preventDefault()
+        moveWidgetByKeyboard(w, 1, 0)
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        moveWidgetByKeyboard(w, 0, -1)
+        break
+      case 'ArrowDown':
+        e.preventDefault()
+        moveWidgetByKeyboard(w, 0, 1)
+        break
+      default:
+        break
+    }
+  }, [moveWidgetByKeyboard])
+
+  // The hero's own row, shared between the desktop (RGL) and narrow (CSS
+  // grid) branches below so the two never drift apart. Full width, a 1px
+  // token-coloured frame (never a shadow — the Flat Board Rule), and the
+  // uniform HERO_SCALE enlargement via the "render smaller, then scale up to
+  // fill" trick: .bento-hero-scale is sized to 100/HERO_SCALE % of its frame
+  // and transform-scaled back up to exactly fill it, so the widget renders at
+  // its normal (full-width) layout and everything in it — including its own
+  // text — comes out HERO_SCALE times bigger with no reflow surprises.
+  const heroRow = heroWidget && (
+    <div
+      className={cn(
+        'bento-hero-row relative rounded-2xl border border-primary/40 p-1',
+        editing && 'select-none outline-dashed outline-2 outline-primary/30',
+      )}
+      style={{ height: gridPixelHeight(heroWidget.h) * HERO_SCALE, '--hero-scale': HERO_SCALE } as React.CSSProperties}
+    >
+      <div className="bento-hero-frame h-full w-full overflow-hidden rounded-xl">
+        <div className="bento-hero-scale [&>*]:h-full">
+          {renderWidget(heroWidget)}
+        </div>
+      </div>
+      {editing && (
+        <>
+          <button
+            type="button"
+            onClick={() => onRemoveWidget(heroWidget.id)}
+            className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+            aria-label={`Remove ${widgetDisplayName(heroWidget)} widget`}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+          {isMultiInstanceWidgetId(heroWidget.id) && (
+            <button
+              type="button"
+              onClick={() => onDuplicateWidget(heroWidget.id)}
+              className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+              aria-label={`Duplicate ${widgetDisplayName(heroWidget)} widget`}
+            >
+              <Copy className="h-3 w-3" />
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
 
   if (!isDesktopGrid) {
     // Below `lg`, reflow the *same* persisted 12-column layout into a CSS grid — one
@@ -151,76 +261,98 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
     // the backend validator doesn't enforce X+W <= 12 — a bad write-back would be
     // persisted silently and corrupt the desktop layout.
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {[...widgets].sort((a, b) => a.y - b.y || a.x - b.x).map((w) => (
-          <div
-            key={w.id}
-            // min-w-0 so a `1fr` track cannot be widened by its content. A
-            // grid column is minmax(auto, 1fr) by default, and auto resolves to
-            // min-content: the engine cluster lays out on a fixed 520px canvas
-            // that it scales down to fit, so without this the track grew to 520,
-            // the whole grid overflowed the viewport and the tile never scaled
-            // at all because the width it measured was already 520.
-            className={cn('min-w-0', w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
-            // The operator's sizing intent as a floor, not a fixed height: text wraps
-            // more at phone width, so a height copied straight from the desktop grid
-            // would clip. Mirrors RGL's own row maths (rowHeight + margin).
-            style={{ minHeight: w.h * GRID_ROW_HEIGHT + (w.h - 1) * GRID_MARGIN }}
-          >
-            {renderWidget(w)}
-          </div>
-        ))}
+      <div className="flex flex-col gap-4">
+        {heroRow}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {[...widgets].filter((w) => w.id !== heroId).sort((a, b) => a.y - b.y || a.x - b.x).map((w) => (
+            <div
+              key={w.id}
+              // min-w-0 so a `1fr` track cannot be widened by its content. A
+              // grid column is minmax(auto, 1fr) by default, and auto resolves to
+              // min-content: the engine cluster lays out on a fixed 520px canvas
+              // that it scales down to fit, so without this the track grew to 520,
+              // the whole grid overflowed the viewport and the tile never scaled
+              // at all because the width it measured was already 520.
+              className={cn('min-w-0', w.w >= NARROW_FULL_SPAN_MIN_W && 'sm:col-span-2')}
+              // The operator's sizing intent as a floor, not a fixed height: text wraps
+              // more at phone width, so a height copied straight from the desktop grid
+              // would clip. Mirrors RGL's own row maths (rowHeight + margin).
+              style={{ minHeight: w.h * GRID_ROW_HEIGHT + (w.h - 1) * GRID_MARGIN }}
+            >
+              {renderWidget(w)}
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
 
   return (
-    <ReactGridLayout
-      className="layout"
-      layout={rglLayout}
-      cols={GRID_COLUMNS}
-      rowHeight={GRID_ROW_HEIGHT}
-      margin={[GRID_MARGIN, GRID_MARGIN]}
-      containerPadding={[0, 0]}
-      isDraggable={editing}
-      isResizable={editing}
-      draggableHandle=".bento-drag-handle"
-      onDragStop={commit}
-      onResizeStop={commit}
-    >
-      {widgets.map((w) => (
-        <div
-          key={w.id}
-          className={cn('relative rounded-xl', editing && 'select-none outline-dashed outline-2 outline-primary/30')}
-        >
-          <div className="h-full [&>*]:h-full">{renderWidget(w)}</div>
-          {editing && (
-            <>
-              <button
-                type="button"
-                onClick={() => onRemoveWidget(w.id)}
-                className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
-                aria-label={`Remove ${widgetDisplayName(w)} widget`}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-              {isMultiInstanceWidgetId(w.id) && (
-                <button
-                  type="button"
-                  onClick={() => onDuplicateWidget(w.id)}
-                  className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
-                  aria-label={`Duplicate ${widgetDisplayName(w)} widget`}
-                >
-                  <Copy className="h-3 w-3" />
-                </button>
-              )}
-              <div className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm active:cursor-grabbing">
-                <GripVertical className="h-3.5 w-3.5" />
-              </div>
-            </>
-          )}
-        </div>
-      ))}
-    </ReactGridLayout>
+    <div className="flex flex-col gap-4">
+      {heroRow}
+      <ReactGridLayout
+        className="layout"
+        layout={rglLayout}
+        cols={GRID_COLUMNS}
+        rowHeight={GRID_ROW_HEIGHT}
+        margin={[GRID_MARGIN, GRID_MARGIN]}
+        containerPadding={[0, 0]}
+        isDraggable={editing}
+        isResizable={editing}
+        draggableHandle=".bento-drag-handle"
+        onDragStop={commit}
+        onResizeStop={commit}
+      >
+        {widgets.map((w) => (
+          <div
+            key={w.id}
+            className={cn('relative rounded-xl', editing && w.id !== heroId && 'select-none outline-dashed outline-2 outline-primary/30')}
+          >
+            {w.id === heroId ? (
+              // The hero renders above in its own row (heroRow); this slot
+              // stays in the grid only so react-grid-layout keeps treating
+              // the rectangle as occupied (see the `static: true` entry in
+              // rglLayout above) and nothing else compacts into it.
+              <div aria-hidden="true" className="h-full w-full" />
+            ) : (
+              <>
+                <div className="h-full [&>*]:h-full">{renderWidget(w)}</div>
+                {editing && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveWidget(w.id)}
+                      className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+                      aria-label={`Remove ${widgetDisplayName(w)} widget`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    {isMultiInstanceWidgetId(w.id) && (
+                      <button
+                        type="button"
+                        onClick={() => onDuplicateWidget(w.id)}
+                        className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+                        aria-label={`Duplicate ${widgetDisplayName(w)} widget`}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    )}
+                    <div
+                      className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Drag handle for ${widgetDisplayName(w)}. Use arrow keys to reposition, or drag with a pointer.`}
+                      onKeyDown={(e) => handleHandleKeyDown(e, w)}
+                    >
+                      <GripVertical className="h-3.5 w-3.5" />
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        ))}
+      </ReactGridLayout>
+    </div>
   )
 }

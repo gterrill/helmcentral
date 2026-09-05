@@ -8,6 +8,13 @@ export interface DashboardPage {
   widgets: DashboardLayoutItem[]
   /** `instrument` keeps the whole page dark whatever the app theme is (ADR 0060). */
   skin?: 'default' | 'instrument'
+  /**
+   * The id of the one widget on this page that gets the enlarged, full-width
+   * hero treatment, or empty/absent for none (ADR 0072). Always a widget id
+   * present in `widgets` — the backend clears it automatically if that widget
+   * is ever removed, so a stale reference can't persist here.
+   */
+  hero?: string
   created_at: string
   updated_at: string
 }
@@ -78,7 +85,7 @@ export function useDashboardPages() {
 
   const updatePage = useCallback(async (
     id: string,
-    patch: Partial<Pick<DashboardPage, 'name' | 'widgets' | 'skin'>>,
+    patch: Partial<Pick<DashboardPage, 'name' | 'widgets' | 'skin' | 'hero'>>,
   ): Promise<DashboardPage | null> => {
     const res = await fetch(`/api/dashboard-pages/${id}`, {
       method: 'PATCH',

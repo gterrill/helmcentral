@@ -1004,3 +1004,236 @@ func TestFetchSignalKElectricalState_AgeIsUnknownWithoutTimestamps(t *testing.T)
 		t.Fatalf("expected unknown age (-1) with no timestamps present, got %v", state.LastUpdateAge)
 	}
 }
+
+// TestFetchSignalKVesselState_ReportsDepthLastUpdateAge extends the
+// last_update_age_s mechanism (ADR 0068) to depth: the number an operator
+// runs aground on if a dead transducer freezes it forever. Scoped to
+// environment.depth.belowTransducer specifically (not the whole
+// environment.depth branch) so a live belowSurface/belowKeel sensor cannot
+// paper over a dead belowTransducer reading, which is the value this tile
+// actually renders.
+func TestFetchSignalKVesselState_ReportsDepthLastUpdateAge(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"environment": {"depth": {"belowTransducer": {"value": 4.8, "timestamp": "2026-09-04T23:58:00Z"}}}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if !approxEqual(state.DepthLastUpdateAge, 120, 0.01) {
+		t.Fatalf("expected depth age 120s, got %v", state.DepthLastUpdateAge)
+	}
+}
+
+func TestFetchSignalKVesselState_DepthLastUpdateAgeUnknownWithoutTimestamp(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"environment": {"depth": {"belowTransducer": {"value": 4.8}}}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.DepthLastUpdateAge != -1 {
+		t.Fatalf("expected unknown depth age (-1) with no timestamp present, got %v", state.DepthLastUpdateAge)
+	}
+}
+
+// TestFetchSignalKVesselState_ReportsPositionLastUpdateAge covers the GNSS
+// fix age used by both the Position tile and (via the same age, plumbed
+// through separately) the Anchor Watch tile's drag detector. The fix's
+// freshness depends on paths under two different parents -
+// navigation.position (the lat/lon itself) and navigation.gnss (quality,
+// HDOP, satellite count) - so the age is the freshest of the two: either one
+// still updating means the fix is current.
+func TestFetchSignalKVesselState_ReportsPositionLastUpdateAge(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"navigation": {
+			"position": {"value": {"latitude": 1.0, "longitude": 2.0}, "timestamp": "2026-09-04T23:55:00Z"},
+			"gnss": {"satellites": {"value": 9, "timestamp": "2026-09-04T23:59:00Z"}}
+		}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if !approxEqual(state.PositionLastUpdateAge, 60, 0.01) {
+		t.Fatalf("expected position age to track the freshest of position/gnss (60s), got %v", state.PositionLastUpdateAge)
+	}
+}
+
+func TestFetchSignalKVesselState_PositionLastUpdateAgeUnknownWithoutTimestamp(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"navigation": {"position": {"value": {"latitude": 1.0, "longitude": 2.0}}}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.PositionLastUpdateAge != -1 {
+		t.Fatalf("expected unknown position age (-1) with no timestamp present, got %v", state.PositionLastUpdateAge)
+	}
+}
+
+// TestFetchSignalKVesselState_ReportsWindLastUpdateAge covers the Wind
+// tile's age, scoped to the environment.wind subtree only - current
+// (environment.current) is a different sensor with its own health and must
+// not be folded into wind's freshness.
+func TestFetchSignalKVesselState_ReportsWindLastUpdateAge(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"environment": {
+			"wind": {
+				"speedApparent": {"value": 5.1, "timestamp": "2026-09-04T23:59:30Z"},
+				"angleApparent": {"value": 0.5, "timestamp": "2026-09-04T23:59:00Z"}
+			}
+		}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if !approxEqual(state.WindLastUpdateAge, 30, 0.01) {
+		t.Fatalf("expected wind age to track the freshest wind timestamp (30s), got %v", state.WindLastUpdateAge)
+	}
+}
+
+func TestFetchSignalKVesselState_WindLastUpdateAgeUnknownWithoutTimestamp(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"environment": {"wind": {"speedApparent": {"value": 5.1}}}
+	}`)
+
+	state, err := fetchSignalKVesselState()
+	if err != nil {
+		t.Fatalf("fetchSignalKVesselState: %v", err)
+	}
+
+	if state.WindLastUpdateAge != -1 {
+		t.Fatalf("expected unknown wind age (-1) with no timestamp present, got %v", state.WindLastUpdateAge)
+	}
+}
+
+// TestFetchSignalKTanksState_ReportsPerTankLastUpdateAge mirrors the solar
+// controller pattern (ADR 0068): each tank carries its own age, scoped to
+// that tank's own subtree, exactly as each solar controller does.
+func TestFetchSignalKTanksState_ReportsPerTankLastUpdateAge(t *testing.T) {
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"tanks": {
+			"freshWater": {
+				"0": {"currentLevel": {"value": 0.8, "timestamp": "2026-09-04T23:58:00Z"}}
+			},
+			"fuel": {
+				"0": {"currentLevel": {"value": 0.5, "timestamp": "2026-09-04T23:55:00Z"}}
+			}
+		}
+	}`)
+
+	overrides := map[string]string{"freshwater.0": "Fresh Water", "fuel.0": "Diesel"}
+	tanks, _, err := fetchSignalKTanksState(overrides)
+	if err != nil {
+		t.Fatalf("fetchSignalKTanksState: %v", err)
+	}
+	if len(tanks) != 2 {
+		t.Fatalf("expected 2 tanks, got %d: %+v", len(tanks), tanks)
+	}
+
+	byID := map[string]tankLevelData{}
+	for _, tank := range tanks {
+		byID[tank.ID] = tank
+	}
+
+	freshWater, ok := byID["freshWater.0"]
+	if !ok {
+		t.Fatalf("expected a freshWater.0 tank, got %+v", tanks)
+	}
+	if !approxEqual(freshWater.LastUpdateAge, 120, 0.01) {
+		t.Fatalf("expected freshWater.0 age 120s, got %v", freshWater.LastUpdateAge)
+	}
+
+	fuel, ok := byID["fuel.0"]
+	if !ok {
+		t.Fatalf("expected a fuel.0 tank, got %+v", tanks)
+	}
+	if !approxEqual(fuel.LastUpdateAge, 300, 0.01) {
+		t.Fatalf("expected fuel.0 age 300s, got %v", fuel.LastUpdateAge)
+	}
+}
+
+func TestFetchSignalKTanksState_LastUpdateAgeUnknownWithoutTimestamp(t *testing.T) {
+	seedSelfTree(t, `{
+		"timestamp": "2026-09-05T00:00:00Z",
+		"tanks": {"freshWater": {"0": {"currentLevel": {"value": 0.8}}}}
+	}`)
+
+	overrides := map[string]string{"freshwater.0": "Fresh Water"}
+	tanks, _, err := fetchSignalKTanksState(overrides)
+	if err != nil {
+		t.Fatalf("fetchSignalKTanksState: %v", err)
+	}
+	if len(tanks) != 1 {
+		t.Fatalf("expected 1 tank, got %d: %+v", len(tanks), tanks)
+	}
+	if tanks[0].LastUpdateAge != -1 {
+		t.Fatalf("expected unknown tank age (-1) with no timestamp present, got %v", tanks[0].LastUpdateAge)
+	}
+}
+
+func TestFreshestAge_ReturnsMinimumOfKnownAges(t *testing.T) {
+	if got := freshestAge(300, 120, 600); got != 120 {
+		t.Fatalf("expected freshest (minimum) age 120, got %v", got)
+	}
+}
+
+func TestFreshestAge_IgnoresUnknownEntries(t *testing.T) {
+	if got := freshestAge(-1, 45, -1); got != 45 {
+		t.Fatalf("expected the one known age (45) to win over unknowns, got %v", got)
+	}
+}
+
+func TestFreshestAge_AllUnknownReturnsUnknown(t *testing.T) {
+	if got := freshestAge(-1, -1); got != -1 {
+		t.Fatalf("expected -1 when no age is known, got %v", got)
+	}
+}
+
+// TestFreshestAge_NoArgumentsReturnsUnknown matters for nearby vessels: zero
+// vessels in range is silence, not evidence the AIS feed died, so the
+// aggregate age must stay -1 rather than defaulting to 0 ("just measured").
+func TestFreshestAge_NoArgumentsReturnsUnknown(t *testing.T) {
+	if got := freshestAge(); got != -1 {
+		t.Fatalf("expected -1 for an empty set of ages, got %v", got)
+	}
+}

@@ -69,3 +69,32 @@ test('shows live readings and no stale badge when the feed is current', () => {
   expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
   expect(screen.getByText('82')).toBeInTheDocument()
 })
+
+test('uses a readout token, not the alert amber, for the normal discharging current and power', () => {
+  // Discharging at anchor is the ordinary state, not a fault — text-amber-600
+  // is reserved for actual alert thresholds elsewhere in the tile (e.g. a
+  // charger error), so it must not light up permanently just because the
+  // battery is supplying the boat rather than receiving power.
+  render(<BatteryPowerTile {...baseProps} chargingCurrentA={-4.2} chargingPowerW={-120} />)
+
+  const currentValue = screen.getByText('-4.2')
+  const powerValue = screen.getByText('-120')
+  expect(currentValue).not.toHaveClass('text-amber-600')
+  expect(powerValue).not.toHaveClass('text-amber-600')
+  expect(currentValue).toHaveClass('text-gauge-secondary')
+  expect(powerValue).toHaveClass('text-gauge-secondary')
+})
+
+test('does not render the alert amber anywhere while discharging, charge rate falling and time-to-go counting down', () => {
+  const { container } = render(
+    <BatteryPowerTile
+      {...baseProps}
+      chargingCurrentA={-4.2}
+      chargingPowerW={-120}
+      batteryRatePercentPerHour={-1.4}
+      timeToGoHours={-3.2}
+    />,
+  )
+
+  expect(container.querySelectorAll('.text-amber-600')).toHaveLength(0)
+})

@@ -45,14 +45,14 @@ function AlternatorColumn({ label, data }: { label: string; data: AlternatorData
       {/* Current + Voltage */}
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-md border bg-background/60 px-2 py-2">
-          <p className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Amps</p>
+          <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Amps</p>
           <div className="flex items-baseline gap-0.5">
             <span className="font-display text-lg tabular-nums leading-none text-foreground">{currentLabel}</span>
             <span className="text-[10px] leading-none text-muted-foreground">A</span>
           </div>
         </div>
         <div className="rounded-md border bg-background/60 px-2 py-2">
-          <p className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Volts</p>
+          <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Volts</p>
           <div className="flex items-baseline gap-0.5">
             <span className="font-display text-lg tabular-nums leading-none text-foreground">{voltageLabel}</span>
             <span className="text-[10px] leading-none text-muted-foreground">V</span>

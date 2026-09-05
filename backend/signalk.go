@@ -623,7 +623,14 @@ func criticalVesselState(state vesselStateData, reason string) vesselStateData {
 }
 
 func fetchSignalKVesselState() (vesselStateData, error) {
-	state := vesselStateData{Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, LengthOverallM: -1, Latitude: -1, Longitude: -1, HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1}
+	state := vesselStateData{
+		Status: "Unknown", Datetime: time.Now().UTC(), Depth: -1, LengthOverallM: -1, Latitude: -1, Longitude: -1,
+		HeadingTrue: -1, SpeedOverGroundKts: -1, WindSpeedApparentKts: -1, WindAngleApparentDeg: -1, WindAngleRelativeDeg: -1,
+		// Every last_update_age_s field defaults to -1 (unknown), not 0: a
+		// return before the payload is even parsed (signalKSelfPayload
+		// failing below) must never read as "just measured".
+		DepthLastUpdateAge: -1, PositionLastUpdateAge: -1, WindLastUpdateAge: -1,
+	}
 
 	// A stream outage lands here the same way an unreachable REST server does,
 	// so the position freezes at the last trusted fix rather than reading as a
@@ -663,6 +670,10 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	if state.Depth == -1 {
 		state.Depth = lookupNumber(payload, "environment", "depth", "belowTransducer")
 	}
+	// Scoped to belowTransducer alone, not the whole environment.depth
+	// branch: a live belowSurface/belowKeel sensor must never paper over a
+	// dead belowTransducer reading, which is the value actually rendered.
+	state.DepthLastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "environment", "depth", "belowTransducer"), state.Datetime)
 
 	currentDriftKts, currentSetDeg, currentDriftImpactKts := parseSignalKCurrent(payload)
 	state.CurrentDriftKts = currentDriftKts
@@ -697,6 +708,15 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 
 	state.Latitude, state.Longitude = resolveGNSSPosition(rawLatitude, rawLongitude, validation)
 
+	// The fix (navigation.position) and its quality figures
+	// (navigation.gnss) are published under two different parents; either
+	// one still ticking means the fix itself is current, so this is the
+	// freshest of the two rather than a single subtree walk.
+	state.PositionLastUpdateAge = freshestAge(
+		freshestTimestampAge(lookupAnyMap(payload, "navigation", "position"), state.Datetime),
+		freshestTimestampAge(lookupAnyMap(payload, "navigation", "gnss"), state.Datetime),
+	)
+
 	state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue", "value")
 	if state.HeadingTrue == -1 {
 		state.HeadingTrue = lookupNumber(payload, "navigation", "headingTrue")
@@ -714,6 +734,13 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		windSpeedApparent = lookupNumber(payload, "environment", "wind", "speedApparent")
 	}
 	windTimestamp := firstNonEmptyString(lookupString(payload, "environment", "wind", "speedApparent", "timestamp"), lookupString(payload, "environment", "wind", "angleApparent", "timestamp"), lookupString(payload, "environment", "wind", "timestamp"))
+
+	// Scoped to environment.wind only: environment.current is a different
+	// sensor with its own health and must not be folded into wind's own
+	// freshness. Whole-subtree walk (not windTimestamp's first-found
+	// priority list above) so the tile's age tracks whichever of
+	// speedApparent/angleApparent actually updated most recently.
+	state.WindLastUpdateAge = freshestTimestampAge(lookupAnyMap(payload, "environment", "wind"), state.Datetime)
 
 	windDataRecent := isRecentTimestamp(windTimestamp, defaultWindMaxAge)
 	if !windDataRecent {
@@ -1657,7 +1684,12 @@ func fetchSignalKTanksState(labelOverrides map[string]string) ([]tankLevelData, 
 				continue
 			}
 
-			tanks = append(tanks, tankLevelData{ID: category + "." + entryID, Label: label, Category: category, Kind: tankKindFromCategory(category), LevelPercent: level})
+			// Mirrors readSolarController (ADR 0068): each tank's age comes
+			// from its own subtree, so one dead sender does not condemn
+			// every tank on the boat.
+			lastUpdateAge := freshestTimestampAge(entry, datetime)
+
+			tanks = append(tanks, tankLevelData{ID: category + "." + entryID, Label: label, Category: category, Kind: tankKindFromCategory(category), LevelPercent: level, LastUpdateAge: lastUpdateAge})
 		}
 	}
 
@@ -1940,6 +1972,57 @@ func freshestTimestampAge(node any, sampleTime time.Time) float64 {
 		return 0
 	}
 	return roundTo1(age)
+}
+
+// freshestAge reduces several last_update_age_s values (each -1 for
+// "unknown", per freshestTimestampAge) down to the one a tile should show:
+// the freshest (minimum) of whichever inputs are actually known. This is
+// the same "one dead controller among four does not condemn the total"
+// reduction ADR 0068 established for solarStateData.LastUpdateAge across its
+// controllers, generalized here so tanks, nearby vessels, and a GNSS fix
+// split across navigation.position/navigation.gnss can reuse it instead of
+// each re-deriving the same min-ignoring-unknowns logic.
+//
+// An empty call (or every input unknown) returns -1, not 0: no known ages is
+// an absence of evidence, not evidence the source is fresh.
+func freshestAge(ages ...float64) float64 {
+	result := -1.0
+	for _, age := range ages {
+		if age < 0 {
+			continue
+		}
+		if result < 0 || age < result {
+			result = age
+		}
+	}
+	return result
+}
+
+// tanksFeedAge reduces each tank's own last_update_age_s down to the one age
+// the Tanks tile itself goes stale on: the freshest of all reporting tanks
+// (ADR 0068's "one dead controller does not condemn the total" reduction,
+// same as solarStateData.LastUpdateAge across its controllers). Zero tanks
+// configured is absence of evidence, not evidence of a dead feed, so an
+// empty slice correctly falls through to freshestAge's -1.
+func tanksFeedAge(tanks []tankLevelData) float64 {
+	ages := make([]float64, len(tanks))
+	for i, tank := range tanks {
+		ages[i] = tank.LastUpdateAge
+	}
+	return freshestAge(ages...)
+}
+
+// nearbyVesselsFeedAge reduces each contact's own age_seconds (how long
+// since that vessel was last seen) down to the one age the Nearby Vessels
+// tile itself goes stale on: the freshest contact in range. Zero vessels in
+// range is silence, not evidence the AIS/radar feed died, so an empty slice
+// correctly falls through to freshestAge's -1 rather than 0.
+func nearbyVesselsFeedAge(vessels []nearbyVessel) float64 {
+	ages := make([]float64, len(vessels))
+	for i, vessel := range vessels {
+		ages[i] = float64(vessel.AgeSeconds)
+	}
+	return freshestAge(ages...)
 }
 
 func lookupAnyMap(payload map[string]any, keys ...string) map[string]any {

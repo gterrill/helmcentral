@@ -114,7 +114,12 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     ? `${chargingPowerW >= 0 ? '+' : '-'}${Math.abs(Math.round(chargingPowerW))}`
     : '—'
   const isDischarging = (chargingCurrentA !== null && chargingCurrentA < 0) || (chargingPowerW !== null && chargingPowerW < 0)
-  const chargingValueClass = isDischarging ? 'text-amber-600' : 'text-gauge-secondary'
+  // Discharging at anchor is the ordinary state, not a fault: text-amber-600
+  // is the alert palette and belongs to actual alert thresholds (a charger
+  // error, an over-temp alternator), not to a battery quietly running the
+  // fridge. Both directions read as the same readout token; the leading
+  // +/- sign already carries which way the current is flowing.
+  const chargingValueClass = 'text-gauge-secondary'
   const solarOutputLabel = solarOutputW !== null ? Math.round(solarOutputW).toString() : '—'
   const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
   const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
@@ -127,9 +132,11 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
   const chargeRateLabel = batteryRatePercentPerHour !== null
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}`
     : '—'
-  const chargeRateClass = batteryRatePercentPerHour !== null && batteryRatePercentPerHour < 0 ? 'text-amber-600' : 'text-gauge-secondary'
+  // Same reasoning as chargingValueClass above: a falling rate or a
+  // counting-down time-to-go is what discharging looks like, not an alert.
+  const chargeRateClass = 'text-gauge-secondary'
   const timeToGoLabel = formatTimeToGo(timeToGoHours)
-  const timeToGoClass = timeToGoHours !== null && timeToGoHours < 0 ? 'text-amber-600' : 'text-gauge-secondary'
+  const timeToGoClass = 'text-gauge-secondary'
 
   let TimeToGoIcon = BatteryFull
   if (!isDischarging && batteryRatePercentPerHour !== null && batteryRatePercentPerHour > 0) {

@@ -35,6 +35,21 @@ describe('AnchorDropRaiseButton', () => {
       expect(screen.getByRole('button', { name: 'Drop' })).toBeDisabled()
     })
 
+    // DESIGN.md's Two Accents Rule: teal is the instrument-readout token
+    // (text-gauge-secondary), not a colour for interactive chrome. Drop is a
+    // button, so it takes the standard primary variant like every other
+    // button, not a bespoke teal that also measured under the 4.5:1 text
+    // contrast floor.
+    it('uses the standard primary button colour, not the teal readout token', () => {
+      render(<AnchorDropRaiseButton anchorActive={false} canDrop onDrop={vi.fn()} onRaise={vi.fn()} />)
+
+      const dropButton = screen.getByRole('button', { name: 'Drop' })
+      expect(dropButton.className).not.toMatch(/teal/)
+      expect(dropButton.className).toMatch(/\bbg-primary\b/)
+      // Prominence comes from full width and h-11, not hue.
+      expect(dropButton.className).toMatch(/\bh-11\b/)
+    })
+
     it('does not render a Raise button', () => {
       render(<AnchorDropRaiseButton anchorActive={false} canDrop onDrop={vi.fn()} onRaise={vi.fn()} />)
 

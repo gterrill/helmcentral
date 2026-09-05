@@ -50,6 +50,7 @@ import { SatChartsDrawer } from '@/components/sat-charts-drawer'
 import { RouteTile } from '@/components/route-tile'
 import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
 import { PageSkinSelect } from '@/components/page-skin-select'
+import { PageHeroSelect } from '@/components/page-hero-select'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { Toaster } from '@/components/ui/sonner'
 import { useRoutes } from '@/hooks/use-routes'
@@ -357,6 +358,9 @@ export function App() {
     engine1Rpm,
     speedOverGroundKts,
     source: vesselStateSource,
+    depthLastUpdateAgeS,
+    positionLastUpdateAgeS,
+    windLastUpdateAgeS,
   } = useVesselState()
 
   const { alarms, worst: worstAlarmState, acknowledge: acknowledgeAlarm, silence: silenceAlarm } = useAlarms()
@@ -364,9 +368,9 @@ export function App() {
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
   const { settings: currentSettings, loading: currentSettingsLoading } = useSettingsForm()
-  const { vessels: nearbyVessels, loading: nearbyVesselsLoading } = useNearbyVessels()
+  const { vessels: nearbyVessels, loading: nearbyVesselsLoading, lastUpdateAgeS: nearbyVesselsAgeS } = useNearbyVessels()
   const { targets: radarTargets, radars: radarInfos, source: radarSource, loading: radarTargetsLoading } = useRadarTargets()
-  const { tanks, loading: tanksLoading } = useTanksState()
+  const { tanks, loading: tanksLoading, lastUpdateAgeS: tanksAgeS } = useTanksState()
   const {
     lastUpdateAgeS: electricalLastUpdateAgeS,
     batterySocPercent,
@@ -774,6 +778,7 @@ export function App() {
       case 'wind':
         return (
           <WindTile
+            lastUpdateAgeS={windLastUpdateAgeS}
             headingTrue={headingTrue}
             windAngleApparentDeg={windAngleApparentDeg}
             windSide={windSide}
@@ -788,6 +793,7 @@ export function App() {
       case 'depth-tide':
         return (
           <DepthTideTile
+            lastUpdateAgeS={depthLastUpdateAgeS}
             depth={depth}
             isImperialDistance={isImperialDistance}
             navigationState={navigationState}
@@ -799,6 +805,7 @@ export function App() {
       case 'position':
         return (
           <PositionTile
+            lastUpdateAgeS={positionLastUpdateAgeS}
             latitude={latitude}
             longitude={longitude}
             headingTrue={headingTrue}
@@ -824,6 +831,7 @@ export function App() {
       case 'anchor-watch':
         return (
           <AnchorWatchTile
+            lastUpdateAgeS={positionLastUpdateAgeS}
             watch={anchorWatch}
             lat={latitude}
             lon={longitude}
@@ -858,7 +866,7 @@ export function App() {
           />
         )
       case 'tanks':
-        return <TanksTile tanks={tanks} loading={tanksLoading} />
+        return <TanksTile tanks={tanks} loading={tanksLoading} lastUpdateAgeS={tanksAgeS} />
       case 'route':
         return (
           <RouteTile
@@ -869,7 +877,7 @@ export function App() {
           />
         )
       case 'nearby-vessels':
-        return <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} />
+        return <NearbyVesselsTile vessels={nearbyVessels} loading={nearbyVesselsLoading} distanceUnits={uiConfig.distanceUnits} lastUpdateAgeS={nearbyVesselsAgeS} />
       case 'radar-targets':
         return (
           <RadarTargetsTile
@@ -977,6 +985,7 @@ export function App() {
       <DashboardBentoGrid
         widgets={effectiveWidgets}
         editing={layoutEditing}
+        heroId={activePage?.hero}
         renderWidget={renderWidget}
         onRemoveWidget={handleRemoveWidget}
         onDuplicateWidget={handleDuplicateWidget}
@@ -990,6 +999,10 @@ export function App() {
         <PageSkinSelect
           page={activePage ?? null}
           onSetSkin={(id, skin) => { void updatePage(id, { skin }) }}
+        />
+        <PageHeroSelect
+          page={activePage ?? null}
+          onSetHero={(id, hero) => { void updatePage(id, { hero }) }}
         />
         <Popover>
           <PopoverTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">

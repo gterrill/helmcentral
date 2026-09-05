@@ -17,11 +17,14 @@ function pt(angleDeg: number, r: number): [number, number] {
   return [CX + r * Math.sin(a), CY - r * Math.cos(a)]
 }
 
+// True north is the one cardinal worth picking out of the ring, so it takes
+// the SVG-text "emphasis" token; the other three read as ordinary ring
+// labels, same as the degree numbers (SVG Follows the DOM rule).
 const CARDINALS = [
-  { angle: 0,   label: 'N', color: '#dc2626', size: 16 },
-  { angle: 90,  label: 'E', color: '#1e3a5f', size: 14 },
-  { angle: 180, label: 'S', color: '#1e3a5f', size: 14 },
-  { angle: 270, label: 'W', color: '#1e3a5f', size: 14 },
+  { angle: 0,   label: 'N', color: 'hsl(var(--primary))', size: 16 },
+  { angle: 90,  label: 'E', color: 'hsl(var(--muted-foreground))', size: 14 },
+  { angle: 180, label: 'S', color: 'hsl(var(--muted-foreground))', size: 14 },
+  { angle: 270, label: 'W', color: 'hsl(var(--muted-foreground))', size: 14 },
 ] as const
 
 const NUM_LABELS = [30, 60, 120, 150, 210, 240, 300, 330]
@@ -47,6 +50,21 @@ interface WindCompassProps {
   windSide: 'port' | 'starboard' | null
   windAngleRelativeDeg: number | null // 0-180
   windSpeedKts: number | null
+}
+
+/**
+ * The actual readings, for a screen reader. The SVG below carries the same
+ * numbers as `<text>` children, but SVG text accessibility is inconsistent
+ * across screen readers — this is the one deterministic source, so the SVG
+ * itself is `aria-hidden` rather than relied on.
+ */
+function accessibleSummary({ windSide, windAngleRelativeDeg, windSpeedKts }: Pick<WindCompassProps, 'windSide' | 'windAngleRelativeDeg' | 'windSpeedKts'>): string {
+  const speedText = windSpeedKts !== null ? `${Math.round(windSpeedKts)} knots` : 'unknown'
+  const sideWord = windSide === 'starboard' ? 'starboard' : windSide === 'port' ? 'port' : null
+  const angleText = windAngleRelativeDeg !== null ? `${Math.round(windAngleRelativeDeg)}°` : null
+  const relativeText = sideWord && angleText ? `${angleText} off the bow, ${sideWord} side` : 'relative angle unknown'
+
+  return `Wind compass. Apparent wind speed ${speedText}. ${relativeText}.`
 }
 
 export function WindCompass({
@@ -84,130 +102,139 @@ export function WindCompass({
   ].join(' ')
 
   return (
-    <svg viewBox={`0 0 ${V} ${V}`} width="100%" height="100%" aria-label="Wind compass">
-      {/* ── background ─────────────────────────────────────────────── */}
-      <circle cx={CX} cy={CY} r={RO} fill="hsl(var(--card))" />
-      <circle cx={CX} cy={CY} r={RO} fill="none" stroke="hsl(var(--border))" strokeWidth="1.5" />
-      <circle cx={CX} cy={CY} r={RM - 2} fill="none" stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4" />
+    <>
+      <span className="sr-only" data-testid="wind-compass-summary">
+        {accessibleSummary({ windSide, windAngleRelativeDeg, windSpeedKts })}
+      </span>
+      <svg viewBox={`0 0 ${V} ${V}`} width="100%" height="100%" aria-hidden="true">
+        {/* ── background ─────────────────────────────────────────────── */}
+        <circle cx={CX} cy={CY} r={RO} fill="hsl(var(--card))" />
+        <circle cx={CX} cy={CY} r={RO} fill="none" stroke="hsl(var(--border))" strokeWidth="1.5" />
+        <circle cx={CX} cy={CY} r={RM - 2} fill="none" stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4" />
 
-      {/* ── tick marks — rotate with heading ───────────────────────── */}
-      {Array.from({ length: 36 }, (_, i) => {
-        const geo     = i * 10
-        const isMajor = geo % 30 === 0
-        const sa      = geo - hdg
-        const [x1, y1] = pt(sa, RO - 0.5)
-        const [x2, y2] = pt(sa, isMajor ? RM : Rm)
-        return (
-          <line
-            key={geo}
-            x1={x1} y1={y1} x2={x2} y2={y2}
-            stroke={isMajor ? 'hsl(var(--muted-foreground))' : 'hsl(var(--border))'}
-            strokeWidth={isMajor ? 1.5 : 0.75}
-          />
-        )
-      })}
+        {/* ── tick marks — rotate with heading ───────────────────────── */}
+        {Array.from({ length: 36 }, (_, i) => {
+          const geo     = i * 10
+          const isMajor = geo % 30 === 0
+          const sa      = geo - hdg
+          const [x1, y1] = pt(sa, RO - 0.5)
+          const [x2, y2] = pt(sa, isMajor ? RM : Rm)
+          return (
+            <line
+              key={geo}
+              x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke={isMajor ? 'hsl(var(--muted-foreground))' : 'hsl(var(--border))'}
+              strokeWidth={isMajor ? 1.5 : 0.75}
+            />
+          )
+        })}
 
-      {/* ── degree labels — rotate with heading, text stays upright ── */}
-      {NUM_LABELS.map(geo => {
-        const [x, y] = pt(geo - hdg, RL)
-        return (
-          <text
-            key={geo}
-            x={x} y={y}
-            textAnchor="middle" dominantBaseline="central"
-            fontSize="10" fill="hsl(var(--muted-foreground))"
-            fontFamily="ui-monospace, SFMono-Regular, monospace"
-          >
-            {String(geo).padStart(3, '0')}
-          </text>
-        )
-      })}
-
-      {/* ── cardinal letters — rotate with heading, text stays upright */}
-      {CARDINALS.map(({ angle, label, color, size }) => {
-        const [x, y] = pt(angle - hdg, RL)
-        return (
-          <text
-            key={angle}
-            x={x} y={y}
-            textAnchor="middle" dominantBaseline="central"
-            fontSize={size} fontWeight="700"
-            fill={color}
-            fontFamily="ui-sans-serif, system-ui, sans-serif"
-          >
-            {label}
-          </text>
-        )
-      })}
-
-      {/* ── inner clear circle ──────────────────────────────────────── */}
-      <circle cx={CX} cy={CY} r={RI} fill="hsl(var(--card))" />
-      <circle cx={CX} cy={CY} r={RI} fill="none" stroke="hsl(var(--border))" strokeWidth="0.75" />
-
-      {/* ── bow indicator — fixed blue triangle at 12 o'clock ──────── */}
-      <polygon points={bowPts} fill="#3b82f6" />
-
-      {/* ── wind arrow — gradient defined inside the rotating group ───
-          Rotation is driven by the CSS `transform` property (not the SVG
-          `transform` attribute) so the `transition` below actually animates
-          it — browsers don't consistently transition attribute-driven
-          rotation on SVG elements. */}
-      {arrowRotation !== null && (
-        <g
-          style={{
-            transform: `rotate(${arrowRotation}deg)`,
-            transformOrigin: `${CX}px ${CY}px`,
-            transition: 'transform 650ms ease-out',
-          }}
-        >
-          <defs>
-            {/* userSpaceOnUse coords are in the rotated space → gradient rotates with arrow */}
-            <linearGradient
-              id={arrowGradientId}
-              gradientUnits="userSpaceOnUse"
-              x1={CX} y1={CY - 5}
-              x2={CX} y2={TIP_Y}
+        {/* ── degree labels — rotate with heading, text stays upright ── */}
+        {NUM_LABELS.map(geo => {
+          const [x, y] = pt(geo - hdg, RL)
+          return (
+            <text
+              key={geo}
+              x={x} y={y}
+              textAnchor="middle" dominantBaseline="central"
+              fontSize="10" fill="hsl(var(--muted-foreground))"
+              fontFamily="ui-monospace, SFMono-Regular, monospace"
             >
-              <stop offset="0%"   stopColor="#d97706" stopOpacity="0.08" />
-              <stop offset="55%"  stopColor="#d97706" stopOpacity="0.78" />
-              <stop offset="100%" stopColor="#92400e" stopOpacity="0.95" />
-            </linearGradient>
-          </defs>
-          <path d={arrowD} fill={`url(#${arrowGradientId})`} />
-        </g>
-      )}
+              {String(geo).padStart(3, '0')}
+            </text>
+          )
+        })}
 
-      {/* ── center text ─────────────────────────────────────────────── */}
-      <text
-        x={CX} y={CY - 22}
-        textAnchor="middle" dominantBaseline="central"
-        fontSize="16" fontWeight="700"
-        fill="#d97706"
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        letterSpacing="1.5"
-      >
-        {sideLabel}{angleLabel}
-      </text>
+        {/* ── cardinal letters — rotate with heading, text stays upright */}
+        {CARDINALS.map(({ angle, label, color, size }) => {
+          const [x, y] = pt(angle - hdg, RL)
+          return (
+            <text
+              key={angle}
+              x={x} y={y}
+              textAnchor="middle" dominantBaseline="central"
+              fontSize={size} fontWeight="700"
+              fill={color}
+              fontFamily="ui-sans-serif, system-ui, sans-serif"
+            >
+              {label}
+            </text>
+          )
+        })}
 
-      <text
-        x={CX} y={CY + 10}
-        textAnchor="middle" dominantBaseline="central"
-        fontSize="54" fontWeight="700"
-        fill="#d97706"
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-      >
-        {speedLabel}
-      </text>
+        {/* ── inner clear circle ──────────────────────────────────────── */}
+        <circle cx={CX} cy={CY} r={RI} fill="hsl(var(--card))" />
+        <circle cx={CX} cy={CY} r={RI} fill="none" stroke="hsl(var(--border))" strokeWidth="0.75" />
 
-      <text
-        x={CX} y={CY + 44}
-        textAnchor="middle" dominantBaseline="central"
-        fontSize="12" letterSpacing="3"
-        fill="hsl(var(--muted-foreground))"
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-      >
-        kts
-      </text>
-    </svg>
+        {/* ── bow indicator — fixed Signal Blue triangle at 12 o'clock ─── */}
+        <polygon points={bowPts} fill="hsl(var(--primary))" />
+
+        {/* ── wind arrow — gradient defined inside the rotating group ───
+            Rotation is driven by the CSS `transform` property (not the SVG
+            `transform` attribute) so the `transition` below actually animates
+            it — browsers don't consistently transition attribute-driven
+            rotation on SVG elements. */}
+        {arrowRotation !== null && (
+          <g
+            style={{
+              transform: `rotate(${arrowRotation}deg)`,
+              transformOrigin: `${CX}px ${CY}px`,
+              transition: 'transform 650ms ease-out',
+            }}
+          >
+            <defs>
+              {/* userSpaceOnUse coords are in the rotated space → gradient rotates with arrow */}
+              <linearGradient
+                id={arrowGradientId}
+                gradientUnits="userSpaceOnUse"
+                x1={CX} y1={CY - 5}
+                x2={CX} y2={TIP_Y}
+              >
+                <stop offset="0%"   stopColor="hsl(var(--gauge-primary))" stopOpacity="0.08" />
+                <stop offset="55%"  stopColor="hsl(var(--gauge-primary))" stopOpacity="0.78" />
+                <stop offset="100%" stopColor="hsl(var(--gauge-primary))" stopOpacity="1" />
+              </linearGradient>
+            </defs>
+            <path d={arrowD} fill={`url(#${arrowGradientId})`} />
+          </g>
+        )}
+
+        {/* ── center text ─────────────────────────────────────────────── */}
+        <text
+          x={CX} y={CY - 22}
+          textAnchor="middle" dominantBaseline="central"
+          fontSize="16" fontWeight="700"
+          fill="hsl(var(--gauge-primary))"
+          fontFamily="var(--font-display), monospace"
+          style={{ fontVariantNumeric: 'tabular-nums' }}
+          letterSpacing="1.5"
+          data-testid="wind-side-angle-text"
+        >
+          {sideLabel}{angleLabel}
+        </text>
+
+        <text
+          x={CX} y={CY + 10}
+          textAnchor="middle" dominantBaseline="central"
+          fontSize="54" fontWeight="700"
+          fill="hsl(var(--gauge-primary))"
+          fontFamily="var(--font-display), monospace"
+          style={{ fontVariantNumeric: 'tabular-nums' }}
+          data-testid="wind-speed-text"
+        >
+          {speedLabel}
+        </text>
+
+        <text
+          x={CX} y={CY + 44}
+          textAnchor="middle" dominantBaseline="central"
+          fontSize="12" letterSpacing="3"
+          fill="hsl(var(--muted-foreground))"
+          fontFamily="ui-sans-serif, system-ui, sans-serif"
+        >
+          kts
+        </text>
+      </svg>
+    </>
   )
 }

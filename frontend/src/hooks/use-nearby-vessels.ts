@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { ageFromPayload } from '@/lib/staleness'
+
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 
 export type NearbyVessel = {
@@ -22,6 +24,10 @@ type NearbyVesselsResponse = {
 export function useNearbyVessels() {
   const [vessels, setVessels] = useState<NearbyVessel[]>([])
   const [loading, setLoading] = useState(true)
+  // Age of the freshest contact (ADR 0068), distinct from each vessel's
+  // own age_seconds. Null with no contacts: an empty horizon is not a
+  // dead feed.
+  const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
 
   useEffect(() => {
     const applyNearbyVessels = (payload: unknown) => {
@@ -47,6 +53,7 @@ export function useNearbyVessels() {
             last_seen_at: typeof item.last_seen_at === 'string' ? item.last_seen_at : undefined,
           })),
         )
+        setLastUpdateAgeS(ageFromPayload((data as { last_update_age_s?: unknown }).last_update_age_s))
       } catch (err) {
         console.error('Failed to fetch nearby vessels:', err)
       } finally {
@@ -59,5 +66,5 @@ export function useNearbyVessels() {
     })
   }, [])
 
-  return { vessels, loading }
+  return { vessels, loading, lastUpdateAgeS }
 }

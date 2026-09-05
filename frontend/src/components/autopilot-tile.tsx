@@ -344,9 +344,13 @@ function AutopilotControls({
         onConfirm={engaged ? onDisengage : onEngage}
         className={cn(
           'py-3 text-sm',
+          // Disengage is a destructive-confirmation action (Alarm Red is the
+          // sanctioned use); engage is an ordinary control state and belongs
+          // on the primary token per DESIGN.md's Switches spec, not on an
+          // alert-semantics emerald that means "healthy," not "engaged."
           engaged
             ? 'bg-red-600 text-white hover:bg-red-500 dark:bg-red-700 dark:hover:bg-red-600'
-            : 'bg-emerald-600 text-white hover:bg-emerald-500 dark:bg-emerald-700 dark:hover:bg-emerald-600',
+            : 'bg-primary text-primary-foreground hover:bg-primary/90',
         )}
       />
 

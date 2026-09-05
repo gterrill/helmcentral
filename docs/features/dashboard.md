@@ -29,6 +29,15 @@ same arrangement.
 The layout stays usable down to a phone, with three structurally different
 arrangements across the range rather than one grid that squashes.
 
+A page can also nominate one placed widget as its **hero**: pick it from the
+select next to the skin picker in layout mode, and it moves to its own
+full-width row above the rest of the grid, enlarged. Everything else on the
+page keeps the position you gave it; picking a different hero, or clearing it
+back to "No hero", never rearranges anything else. Use it for the one number
+a given page exists to watch — anchor distance on an anchorage page, apparent
+wind on a passage page — rather than leaving that to whichever tile happens to
+render the biggest text.
+
 ## When a source goes quiet
 
 A SignalK server keeps serving the last value it received from a source. If the

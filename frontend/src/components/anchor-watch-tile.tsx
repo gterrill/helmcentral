@@ -15,6 +15,31 @@ import type { TideToday } from '@/hooks/use-tide-today'
 import type { GustWindow } from '@/lib/gust-windows'
 import type { AnchorConfig } from '@/config/app-config'
 import { computeScopeRecommendation, tideHeightFtOrNull } from '@/lib/rode-plan'
+import { formatDataAge, isStale } from '@/lib/staleness'
+
+/** A distance in the host's chosen unit, rounded for display. */
+function formatDistanceValue(meters: number, isImperial: boolean): { value: string; unit: string } {
+  return isImperial
+    ? { value: `${Math.round(meters * 3.28084)}`, unit: 'ft' }
+    : { value: `${Math.round(meters)}`, unit: 'm' }
+}
+
+/**
+ * "38 m of 30 m" — the figure both the drag-alarm strips and the promoted
+ * KPI stack below need: how far the vessel actually is, against the radius
+ * it is meant to stay inside. Falls back to "past {radius}" on the rare
+ * frame where an alarm is live but the tile has no live distance to hand
+ * (e.g. the GPS fix just dropped) — never a bare dash on what is, by
+ * definition, an active alarm condition.
+ */
+function formatDragDistance(distanceMeters: number | null, radiusMeters: number, isImperial: boolean): string {
+  const radius = formatDistanceValue(radiusMeters, isImperial)
+  if (distanceMeters === null) {
+    return `past ${radius.value} ${radius.unit}`
+  }
+  const distance = formatDistanceValue(distanceMeters, isImperial)
+  return `${distance.value} ${distance.unit} of ${radius.value} ${radius.unit}`
+}
 
 interface AnchorWatchTileProps {
   watch: AnchorWatchResult
@@ -61,6 +86,17 @@ interface AnchorWatchTileProps {
   // three surfaces in agreement.
   planningDepthM: number | null
   planningTideHeightFt: number | null
+  /**
+   * Seconds since the position/anchor-watch feed last updated, or null when
+   * the host has no age to report. There is currently no upstream source
+   * for this — the anchor-watch API (backend/anchor.go) carries no
+   * last-update timestamp, and neither does the live GPS fix this tile
+   * otherwise renders from — so every caller today passes null, which
+   * `isStale`/`formatDataAge` already treat as "not stale" rather than a
+   * fabricated freshness. Typed and wired through now so the tile can go
+   * stale the moment a real age is published, without inventing one here.
+   */
+  lastUpdateAgeS: number | null
 }
 
 export const AnchorWatchTile = memo(function AnchorWatchTile({
@@ -95,6 +131,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   selectedWindBandId,
   planningDepthM,
   planningTideHeightFt,
+  lastUpdateAgeS,
 }: AnchorWatchTileProps) {
   const {
     anchorState,
@@ -114,9 +151,17 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   } = watch
 
   // Drag detection is server-side (ADR 0038); this renders the audible half and
-  // silences by acknowledging, so every screen agrees.
+  // silences by acknowledging, so every screen agrees. isAlarming/isSilenced
+  // are mutually exclusive — audible-and-visible vs. active-but-silenced —
+  // and neither implies the other cleared: a silenced drag is still a live
+  // condition and must keep rendering something (see the strips below).
   const { alarms, acknowledge } = useAlarms()
-  const { isAlarming, isSilenced, silence } = useAnchorAlarm(findAnchorDragAlarm(alarms), acknowledge)
+  const { isAlarming, isSilenced, silence, unsilence } = useAnchorAlarm(findAnchorDragAlarm(alarms), acknowledge)
+
+  // "38 m of 30 m" — how far the vessel actually is against the radius it's
+  // meant to stay inside. Shared by both drag-alarm strips below and, once
+  // anchored, the promoted distance KPI above the map.
+  const dragDistanceLabel = formatDragDistance(distanceMeters, radiusMeters, isImperial)
 
   const handleDropHere = useCallback(() => {
     if (lat === null || lon === null) return
@@ -167,7 +212,12 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   )
 
   return (
-    <Tile title="Anchor Watch" icon={<Anchor className="h-3.5 w-3.5" />}>
+    <Tile
+      title="Anchor Watch"
+      icon={<Anchor className="h-3.5 w-3.5" />}
+      stale={isStale(lastUpdateAgeS)}
+      staleLabel={formatDataAge(lastUpdateAgeS)}
+    >
       {/* At lg+ the dashboard grid hands this tile a fixed height (RGL wraps
           widgets in h-full), so the content is a flex column and the map is the
           one row that gives — otherwise the rode readout and Drop/Raise button
@@ -179,21 +229,81 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
           GPS signal degraded — position may be inaccurate
         </div>
       )}
-      {isAlarming && !isSilenced && (
-        <div className="mb-3 flex items-center justify-between rounded-md border border-red-500/60 bg-red-500/20 px-3 py-2">
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-            <span className="text-xs font-semibold text-red-400">ALARM</span>
+      {/* Audible and visible: a live drag, not yet silenced. */}
+      {isAlarming && (
+        <div
+          role="alert"
+          data-testid="drag-alarm-strip"
+          className="mb-3 flex items-center justify-between gap-2 rounded-md border border-red-500/60 bg-red-500/20 px-3 py-2"
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+            <span className="truncate text-xs font-semibold text-red-400">
+              Dragging — {dragDistanceLabel}
+            </span>
           </div>
           <Button
             size="sm"
             variant="outline"
-            className="h-8 gap-1 rounded px-2 text-xs text-red-400 hover:bg-red-500/20 hover:text-red-300"
+            className="shrink-0 gap-1 text-xs text-red-400 hover:bg-red-500/20 hover:text-red-300"
             onClick={silence}
           >
             <Volume2 className="h-3.5 w-3.5" />
             Silence
           </Button>
+        </div>
+      )}
+
+      {/* P0: the same live drag, acknowledged. Silencing stops the klaxon,
+          not the condition, so this must keep the board from looking calm —
+          it is the direct replacement for the red strip disappearing with
+          nothing standing in for it. */}
+      {isSilenced && (
+        <div
+          role="alert"
+          data-testid="drag-silenced-strip"
+          className="mb-3 flex items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+            <span className="truncate text-xs font-semibold text-amber-500">
+              Dragging, silenced — {dragDistanceLabel}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 gap-1 text-xs text-amber-500 hover:bg-amber-500/20"
+            onClick={unsilence}
+          >
+            <Volume2 className="h-3.5 w-3.5" />
+            Unsilence
+          </Button>
+        </div>
+      )}
+
+      {/* Promoted out of the map (design critique item 4): the operator
+          answers "is the boat where I left it" from this hero readout, not
+          by parsing the map's own overlay panel. Suppressed with no anchor
+          set rather than rendering a dash at full visual weight — there is
+          nothing to promote yet. */}
+      {isAnchored && (
+        <div
+          data-testid="anchor-distance-kpi"
+          className="mt-2 flex items-baseline gap-3 rounded-md border bg-background/60 px-3 py-2"
+        >
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Distance</p>
+            <p className="font-display text-5xl leading-none tabular-nums text-gauge-primary">
+              {distanceMeters !== null ? formatDistanceValue(distanceMeters, isImperial).value : '—'}
+              <span className="ml-1 text-lg text-muted-foreground">
+                {distanceMeters !== null ? formatDistanceValue(distanceMeters, isImperial).unit : ''}
+              </span>
+            </p>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            of {formatDistanceValue(radiusMeters, isImperial).value} {formatDistanceValue(radiusMeters, isImperial).unit}
+          </p>
         </div>
       )}
 

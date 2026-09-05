@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { ageFromPayload } from '@/lib/staleness'
+
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 
 export type TankLevel = {
@@ -17,6 +19,9 @@ type TanksStateResponse = {
 export function useTanksState() {
   const [tanks, setTanks] = useState<TankLevel[]>([])
   const [loading, setLoading] = useState(true)
+  // Freshest of the per-tank ages (ADR 0068); null when no tank
+  // publishes a timestamp.
+  const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
 
   useEffect(() => {
     const applyTanksState = (payload: unknown) => {
@@ -35,6 +40,7 @@ export function useTanksState() {
         )
 
         setTanks(valid)
+        setLastUpdateAgeS(ageFromPayload((data as { last_update_age_s?: unknown }).last_update_age_s))
       } catch (err) {
         console.error('Failed to fetch tanks state:', err)
       } finally {
@@ -47,5 +53,5 @@ export function useTanksState() {
     })
   }, [])
 
-  return { tanks, loading }
+  return { tanks, loading, lastUpdateAgeS }
 }

@@ -1,6 +1,16 @@
 import { useState } from 'react'
 import { ChevronDown, Plus, Pencil, Trash2 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 
 interface DashboardPageSwitcherProps {
@@ -22,6 +32,11 @@ export function DashboardPageSwitcher({
 }: DashboardPageSwitcherProps) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
+  // A page holds a whole board of tiles and there is no undo, so the trash
+  // icon confirms before it does anything (design critique batch). Named
+  // pages get named here too: the copy says which page is about to go, not
+  // just "are you sure".
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null)
 
   const activePage = pages.find((p) => p.id === activePageId)
   const displayName = activePage?.name ?? 'Dashboard'
@@ -74,82 +89,118 @@ export function DashboardPageSwitcher({
     setOpen(false)
   }
 
+  const handleConfirmDelete = () => {
+    if (pendingDelete) onDelete(pendingDelete.id)
+    setPendingDelete(null)
+  }
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors border-border bg-background/70 text-muted-foreground hover:border-primary/40 hover:text-primary md:text-[11px]"
-        aria-label="Switch dashboard page"
-      >
-        {/* Icon-only below `sm`: the header has no room for the page name at phone
-            width, and the aria-label above carries the accessible name. The popover
-            itself stays — create/rename/delete live only here, so hiding the whole
-            control would strand them (the sidebar drawer only navigates). */}
-        <span className="hidden sm:inline">{displayName}</span>
-        <ChevronDown className="h-3.5 w-3.5" />
-      </PopoverTrigger>
-      <PopoverContent className="w-56 p-1">
-        <div className="flex flex-col">
-          {pages.map((page) => (
-            <div
-              key={page.id}
-              className="flex items-center justify-between rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
-            >
-              {editing?.id === page.id ? (
-                <input
-                  type="text"
-                  value={editing.name}
-                  onChange={(e) => setEditing({ id: page.id, name: e.target.value })}
-                  onKeyDown={(e) => handleKeyDown(e, page.id, page.name)}
-                  onBlur={() => handleEditConfirm(page.id, page.name)}
-                  autoFocus
-                  onFocus={(e) => e.currentTarget.select()}
-                  className="flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectPage(page.id)}
-                    className="flex-1 text-left"
-                  >
-                    {page.name}
-                  </button>
-                  <div className="flex items-center gap-1">
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors border-border bg-background/70 text-muted-foreground hover:border-primary/40 hover:text-primary md:text-[11px]"
+          aria-label="Switch dashboard page"
+        >
+          {/* Icon-only below `sm`: the header has no room for the page name at phone
+              width, and the aria-label above carries the accessible name. The popover
+              itself stays — create/rename/delete live only here, so hiding the whole
+              control would strand them (the sidebar drawer only navigates). */}
+          <span className="hidden sm:inline">{displayName}</span>
+          <ChevronDown className="h-3.5 w-3.5" />
+        </PopoverTrigger>
+        <PopoverContent className="w-56 p-1">
+          <div className="flex flex-col">
+            {pages.map((page) => (
+              <div
+                key={page.id}
+                className="flex items-center justify-between rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                {editing?.id === page.id ? (
+                  <input
+                    type="text"
+                    value={editing.name}
+                    onChange={(e) => setEditing({ id: page.id, name: e.target.value })}
+                    onKeyDown={(e) => handleKeyDown(e, page.id, page.name)}
+                    onBlur={() => handleEditConfirm(page.id, page.name)}
+                    autoFocus
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                ) : (
+                  <>
                     <button
                       type="button"
-                      onClick={() => handleEditStart(page)}
-                      className="inline-flex items-center rounded p-0.5 hover:bg-accent"
-                      aria-label={`Rename ${page.name}`}
+                      onClick={() => handleSelectPage(page.id)}
+                      className="flex-1 text-left"
                     >
-                      <Pencil className="h-3.5 w-3.5" />
+                      {page.name}
                     </button>
-                    {pages.length > 1 && (
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => onDelete(page.id)}
-                        className="inline-flex items-center rounded p-0.5 hover:bg-accent hover:text-destructive"
-                        aria-label={`Delete ${page.name}`}
+                        onClick={() => handleEditStart(page)}
+                        className="inline-flex items-center rounded p-0.5 hover:bg-accent"
+                        aria-label={`Rename ${page.name}`}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Pencil className="h-3.5 w-3.5" />
                       </button>
-                    )}
-                  </div>
-                </>
-              )}
+                      {pages.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setPendingDelete({ id: page.id, name: page.name })}
+                          className="inline-flex items-center rounded p-0.5 hover:bg-accent hover:text-destructive"
+                          aria-label={`Delete ${page.name}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+            <div className="border-t pt-1 mt-1">
+              <button
+                type="button"
+                onClick={handleCreatePage}
+                className="inline-flex w-full items-center justify-center gap-1 rounded-sm px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New Page
+              </button>
             </div>
-          ))}
-          <div className="border-t pt-1 mt-1">
-            <button
-              type="button"
-              onClick={handleCreatePage}
-              className="inline-flex w-full items-center justify-center gap-1 rounded-sm px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New Page
-            </button>
           </div>
-        </div>
-      </PopoverContent>
-    </Popover>
+        </PopoverContent>
+      </Popover>
+
+      {/* A sibling of Popover, not nested inside PopoverContent: the popover
+          can close itself on an outside click while this is still open, and
+          the confirmation must survive that. pendingDelete lives in this
+          component's own state either way, so it does. */}
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{pendingDelete?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the page and every tile on it. It can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleConfirmDelete}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
