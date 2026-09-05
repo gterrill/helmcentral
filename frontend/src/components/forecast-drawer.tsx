@@ -1862,7 +1862,7 @@ export function ForecastDrawer({
               )}
             </div>
 
-            <div className="rounded-md border bg-card/70 p-2">
+            <div className="mt-3 rounded-md border bg-card/70 p-2">
               <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 <Wind size={13} className="text-gauge-secondary" /> Wind ({windUnit})
               </h4>
