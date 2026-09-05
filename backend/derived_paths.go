@@ -80,6 +80,20 @@ func isDerivedPath(path string) bool {
 	return strings.HasPrefix(path, derivedPathPrefix)
 }
 
+// unitForAlarmPath resolves the SI unit an alarm should report for a path,
+// derived-aware the same way derivedAwareAlarmReader is: a helmcentral.* path
+// reports the unit its own derivation carries (derivedPathUnits), everything
+// else defers to whatever the vessel published under meta.units on the real
+// data node. An unknown path, or one that has never carried meta, reports ""
+// -- absence, not a guessed unit -- and the caller is expected to treat that
+// as "omit", not "unitless".
+func unitForAlarmPath(snapshot *signalKSnapshot, path string) string {
+	if isDerivedPath(path) {
+		return derivedPathUnits[path]
+	}
+	return unitsFor(snapshot.nodeAt(path))
+}
+
 /*
 vesselFuelEconomy is speed over ground divided by the total burn of every
 engine that is reporting one.

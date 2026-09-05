@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -159,6 +160,43 @@ func (s *alarmLogStore) stampOpen(ruleID string, column string, at time.Time) er
 		return fmt.Errorf("stamp %s: %w", column, err)
 	}
 	return nil
+}
+
+// OpenOccurrence returns the newest still-open (uncleared) log row for a rule,
+// if any. This is how a bus notification's raised_at is recovered: the bus
+// itself carries no raised time worth reading (SignalK rewrites a
+// notification's own timestamp to the moment it is acknowledged), but the log
+// row the bus watcher wrote when the notification first crossed its dwell
+// (alarm_bus_watch.go) still has it.
+func (s *alarmLogStore) OpenOccurrence(ruleID string) (alarmLogEntry, bool, error) {
+	if s == nil {
+		return alarmLogEntry{}, false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	row := s.db.QueryRow(
+		`SELECT id, rule_id, source, label, path, state, message, value_at_raise, raised_at, acked_at
+		 FROM alarm_log WHERE rule_id = ? AND cleared_at IS NULL ORDER BY raised_at DESC LIMIT 1`, ruleID)
+
+	var entry alarmLogEntry
+	var raised int64
+	var acked sql.NullInt64
+	err := row.Scan(&entry.ID, &entry.RuleID, &entry.Source, &entry.Label, &entry.Path,
+		&entry.State, &entry.Message, &entry.ValueAtRaise, &raised, &acked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return alarmLogEntry{}, false, nil
+	}
+	if err != nil {
+		return alarmLogEntry{}, false, fmt.Errorf("read open alarm occurrence: %w", err)
+	}
+
+	entry.RaisedAt = time.Unix(raised, 0).UTC()
+	if acked.Valid {
+		t := time.Unix(acked.Int64, 0).UTC()
+		entry.AckedAt = &t
+	}
+	return entry, true, nil
 }
 
 // Recent returns the newest occurrences first.

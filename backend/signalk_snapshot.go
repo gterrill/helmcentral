@@ -208,6 +208,43 @@ func (s *signalKSnapshot) selfTree() map[string]any {
 	return s.treeFor(self)
 }
 
+// nodeAt resolves a dotted SignalK path to its leaf node within the self
+// tree -- the map carrying "value" and, when the source declared one, "meta"
+// -- so a caller can read metadata about a path (its unit, say) rather than
+// only the value snapshotAlarmReader hands back. Returns nil for an unknown
+// path or before the self tree exists, the same "absent, not a guess" answer
+// selfTree itself gives.
+func (s *signalKSnapshot) nodeAt(path string) map[string]any {
+	tree := s.selfTree()
+	if tree == nil {
+		return nil
+	}
+
+	segments := strings.Split(strings.TrimSpace(path), ".")
+	if len(segments) == 0 || segments[0] == "" {
+		return nil
+	}
+
+	var current any = tree
+	for _, segment := range segments {
+		asMap, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		next, ok := asMap[segment]
+		if !ok {
+			return nil
+		}
+		current = next
+	}
+
+	node, ok := current.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return node
+}
+
 // vesselsTree stands in for GET /signalk/v1/api/vessels, which is keyed by bare
 // vessel id rather than by delta context.
 func (s *signalKSnapshot) vesselsTree() map[string]any {

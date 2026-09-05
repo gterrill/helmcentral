@@ -54,6 +54,14 @@ func evaluateAlarmsOnce(now time.Time) {
 	// band on a gauge is the alarm rather than merely looking like one.
 	rules := append(listAlarmRules(), zoneDerivedAlarmRules()...)
 
+	// Re-wired each tick for the same reason globalBusNotificationWatcher's
+	// snapshot is re-read below: production never reassigns
+	// globalSignalKSnapshot, so this is a no-op there, but tests substitute
+	// both the snapshot and globalAlarmEngine itself per case, and a stale
+	// closure would resolve units against whichever snapshot existed when it
+	// was created rather than the one the test just installed.
+	globalAlarmEngine.unitFor = func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) }
+
 	// derivedAwareAlarmReader rather than snapshotAlarmReader, so a rule can
 	// name a helmcentral.* path. Reading through the snapshot alone made those
 	// rules permanently absent, and so permanently silent (ADR 0070).
@@ -135,7 +143,7 @@ func activeAlarms() []alarmStatus {
 	// Always a list, never null: the UI iterates this without a nil guard.
 	combined := make([]alarmStatus, 0)
 	combined = append(combined, globalAlarmEngine.active()...)
-	combined = append(combined, signalKNotifications(globalSignalKSnapshot, helmcentralOwnershipPredicate())...)
+	combined = append(combined, attachLoggedOccurrenceTimes(signalKNotifications(globalSignalKSnapshot, helmcentralOwnershipPredicate()))...)
 
 	// The clock is read here rather than threaded through as a parameter
 	// because activeAlarms has no caller-supplied now to thread it from:
@@ -161,6 +169,32 @@ func activeAlarms() []alarmStatus {
 		return combined[i].RuleID < combined[j].RuleID
 	})
 	return combined
+}
+
+// attachLoggedOccurrenceTimes fills in raised_at, and acked_at when present,
+// for bus notifications from the alarm log's open occurrence.
+//
+// signalKNotifications stays a pure read of the snapshot tree -- no log store,
+// no global state -- so this lives here instead: the bus itself carries no
+// raised time worth reading (SignalK rewrites a notification's own timestamp
+// to the moment it is acknowledged), but the log row the bus watcher wrote at
+// the dwell boundary (alarm_bus_watch.go) still has it.
+func attachLoggedOccurrenceTimes(statuses []alarmStatus) []alarmStatus {
+	for i := range statuses {
+		entry, ok, err := globalAlarmLogStore.OpenOccurrence(statuses[i].RuleID)
+		if err != nil {
+			log.Printf("alarm log: %v", err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		statuses[i].RaisedAt = entry.RaisedAt
+		if entry.AckedAt != nil {
+			statuses[i].AckedAt = *entry.AckedAt
+		}
+	}
+	return statuses
 }
 
 func worstAlarmState() string {

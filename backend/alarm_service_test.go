@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -303,6 +304,78 @@ func TestRuleDrivenAlarmsAdvertiseAcknowledgeOnly(t *testing.T) {
 	}
 	if alarms[0].CanSilence {
 		t.Fatalf("the engine has no silence action, so it must not advertise one")
+	}
+}
+
+// ── raised_at for bus notifications, recovered from the alarm log ──────────
+//
+// The bus itself carries no raised time worth reading: SignalK rewrites a
+// notification's timestamp to the moment it is acknowledged, so by the time an
+// operator looks at an active alarm the bus's own clock no longer says when it
+// went live. The alarm log's open occurrence for "notifications:<path>" -- the
+// row the bus watcher wrote when the notification first crossed its dwell -- is
+// the only place that survives.
+
+func TestActiveAlarmsFillsRaisedAtForABusNotificationFromTheOpenLogOccurrence(t *testing.T) {
+	original := globalAlarmEngine
+	globalAlarmEngine = newAlarmEngine()
+	t.Cleanup(func() { globalAlarmEngine = original })
+
+	store := newTestAlarmLog(t)
+	originalStore := globalAlarmLogStore
+	globalAlarmLogStore = store
+	t.Cleanup(func() { globalAlarmLogStore = originalStore })
+
+	ruleID := "notifications:arrivalCircleEntered"
+	store.RecordRaised(alarmLogEntry{RuleID: ruleID, Label: "Arrival circle", RaisedAt: alarmNow})
+	store.MarkAcknowledged(ruleID, alarmNow.Add(30*time.Second))
+
+	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered",
+		notificationWithStatus("alarm", liveNotificationStatus())))
+
+	alarms := activeAlarms()
+	if len(alarms) != 1 {
+		t.Fatalf("expected 1 active alarm, got %d: %+v", len(alarms), alarms)
+	}
+	if !alarms[0].RaisedAt.Equal(alarmNow) {
+		t.Fatalf("raised_at: got %v, want %v", alarms[0].RaisedAt, alarmNow)
+	}
+	if alarms[0].AckedAt.IsZero() || !alarms[0].AckedAt.Equal(alarmNow.Add(30*time.Second)) {
+		t.Fatalf("acked_at: got %v, want %v", alarms[0].AckedAt, alarmNow.Add(30*time.Second))
+	}
+}
+
+func TestActiveAlarmsOmitsRaisedAtWhenTheLogHasNoOpenOccurrence(t *testing.T) {
+	original := globalAlarmEngine
+	globalAlarmEngine = newAlarmEngine()
+	t.Cleanup(func() { globalAlarmEngine = original })
+
+	store := newTestAlarmLog(t)
+	originalStore := globalAlarmLogStore
+	globalAlarmLogStore = store
+	t.Cleanup(func() { globalAlarmLogStore = originalStore })
+
+	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered",
+		notificationWithStatus("alarm", liveNotificationStatus())))
+
+	alarms := activeAlarms()
+	if len(alarms) != 1 {
+		t.Fatalf("expected 1 active alarm, got %d: %+v", len(alarms), alarms)
+	}
+	if !alarms[0].RaisedAt.IsZero() {
+		t.Fatalf("expected no raised_at with nothing logged, got %v", alarms[0].RaisedAt)
+	}
+
+	encoded, err := json.Marshal(alarms[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := payload["raised_at"]; present {
+		t.Fatalf("raised_at must be absent, not a zero timestamp: %s", encoded)
 	}
 }
 

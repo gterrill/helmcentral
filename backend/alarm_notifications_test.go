@@ -1,9 +1,29 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 )
+
+// snapshotFromSelfTreeJSON builds a local snapshot from a REST-shaped JSON
+// body, the way seedSelfTree does for the global one (signalk_payload_test.go)
+// -- used here because applyDelta's flat path/value shape has nowhere to carry
+// "meta", and a unit lookup needs a real meta.units node sitting alongside a
+// notification in the same tree.
+func snapshotFromSelfTreeJSON(t *testing.T, body string) *signalKSnapshot {
+	t.Helper()
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("seeding self tree: %v", err)
+	}
+
+	snapshot := newSignalKSnapshot()
+	snapshot.contexts["vessels.self"] = payload
+	snapshot.setSelfContext("vessels.self")
+	return snapshot
+}
 
 func snapshotWithNotification(path string, value any) *signalKSnapshot {
 	snapshot := newSignalKSnapshot()
@@ -451,6 +471,89 @@ func TestSignalKNotificationsSkipsPathsHelmcentralOwns(t *testing.T) {
 	}
 	if statuses[0].Path != "notifications.radar.fur6424A.guardZone.1" {
 		t.Fatalf("path: got %q, want the radar guard zone", statuses[0].Path)
+	}
+}
+
+// ── unit: bus notifications report the unit of the path they are ABOUT ─────
+//
+// A bus notification's own node under notifications.* carries no unit --
+// that is metadata on the data path itself. The bare path a notification
+// reports against is its Label, so the unit lookup has to be keyed off that,
+// not off Path (which is notifications.<label>).
+
+func TestSignalKNotificationsSetsUnitFromTheDataPathMeta(t *testing.T) {
+	snapshot := snapshotFromSelfTreeJSON(t, `{
+		"notifications": {"electrical": {"batteries": {"house": {"voltage": {"value": {
+			"state": "alarm", "message": "High voltage", "method": ["visual", "sound"]
+		}}}}}},
+		"electrical": {"batteries": {"house": {"voltage": {"value": 14.9, "meta": {"units": "V"}}}}}
+	}`)
+
+	statuses := signalKNotifications(snapshot, ownsNothing)
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 notification, got %d (%+v)", len(statuses), statuses)
+	}
+	if statuses[0].Unit != "V" {
+		t.Fatalf("unit: got %q, want %q", statuses[0].Unit, "V")
+	}
+}
+
+// The radar guard zone case named in the spec: a notification path with
+// nothing behind it in the data tree, so there is no meta to read at all.
+func TestSignalKNotificationsOmitsUnitWhenDataPathHasNoMeta(t *testing.T) {
+	snapshot := snapshotFromSelfTreeJSON(t, `{
+		"notifications": {"radar": {"fur6424A": {"guardZone": {"1": {"value": {
+			"state": "alert", "message": "Radar fur6424A guard zone 1: target acquired", "method": []
+		}}}}}}
+	}`)
+
+	statuses := signalKNotifications(snapshot, ownsNothing)
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 notification, got %d (%+v)", len(statuses), statuses)
+	}
+	if statuses[0].Unit != "" {
+		t.Fatalf("expected no unit for a path with no data-tree meta, got %q", statuses[0].Unit)
+	}
+
+	encoded, err := json.Marshal(statuses[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := payload["unit"]; present {
+		t.Fatalf("unknown unit must be absent from the JSON, not an empty string: %s", encoded)
+	}
+}
+
+// A bus notification is never a rule alarm, so none of the rule-only fields
+// belong on it -- op, threshold, hysteresis and clear_value all describe a
+// rule this engine holds, and a bus notification is read straight off
+// someone else's tree with no rule behind it at all.
+func TestSignalKNotificationsOmitRuleOnlyJSONFields(t *testing.T) {
+	snapshot := snapshotWithNotification("notifications.electrical.batteries.house.voltage", map[string]any{
+		"state": "alarm", "message": "House bank critically low", "method": []any{"visual", "sound"},
+	})
+
+	statuses := signalKNotifications(snapshot, ownsNothing)
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(statuses))
+	}
+
+	encoded, err := json.Marshal(statuses[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"op", "threshold", "hysteresis", "clear_value"} {
+		if _, present := payload[key]; present {
+			t.Fatalf("%s must be absent from a bus notification, got %v in %s", key, payload[key], encoded)
+		}
 	}
 }
 

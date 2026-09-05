@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 )
@@ -362,42 +363,239 @@ func TestAlarmStatusOmitsUnsetTimestamps(t *testing.T) {
 	}
 }
 
-// The reader deals in whatever precision the source path happens to carry
-// (a converted unit is often a repeating decimal), but the operator reads
-// these messages on a phone screen, not a debugger. Both the threshold and
-// the sample get rounded to two decimal places, with no padded ".00".
-func TestAlarmMessageForRoundsValuesToTwoDecimalPlaces(t *testing.T) {
+// alarmMessageFor now carries the live reading and the point at which the
+// alarm lets go, in the path's own unit, because an operator acknowledging an
+// alarm has no other way to learn what "clears" it. Every number still goes
+// through formatAlarmValue (rounded to two decimal places, no padded ".00").
+func TestAlarmMessageForCarriesLiveValueAndClearPoint(t *testing.T) {
 	cases := []struct {
 		name   string
 		rule   alarmRule
 		sample alarmSample
+		unit   string
 		want   string
 	}{
 		{
-			name:   "a repeating-decimal threshold rounds cleanly on both sides",
-			rule:   alarmRule{Label: "Barometer falling", Op: alarmOpBelow, Value: -100.0 / 3600.0},
-			sample: alarmSample{Value: -0.028333, Present: true},
-			want:   "Barometer falling: below -0.03 (-0.03)",
+			name:   "below with hysteresis clears above the threshold",
+			rule:   alarmRule{Label: "Barometer falling", Op: alarmOpBelow, Value: -0.03, Hysteresis: 0.01},
+			sample: alarmSample{Value: -0.05, Present: true},
+			unit:   "Pa/s",
+			want:   "Barometer falling: -0.05 Pa/s, clears above -0.02 Pa/s",
 		},
 		{
-			name:   "a whole-number threshold does not grow a spurious .00",
-			rule:   alarmRule{Label: "Depth", Op: alarmOpBelow, Value: -150},
-			sample: alarmSample{Value: -264.2, Present: true},
-			want:   "Depth: below -150 (-264.2)",
+			name:   "above with hysteresis clears below the threshold",
+			rule:   alarmRule{Label: "Wind strong", Op: alarmOpAbove, Value: 30, Hysteresis: 2},
+			sample: alarmSample{Value: 35, Present: true},
+			unit:   "kn",
+			want:   "Wind strong: 35 kn, clears below 28 kn",
 		},
 		{
-			name:   "the existing House bank low fixture keeps working",
-			rule:   lowVoltageRule(),
+			name:   "zero hysteresis clears back at the threshold itself",
+			rule:   alarmRule{Label: "Barometer falling", Op: alarmOpBelow, Value: -0.03, Hysteresis: 0},
+			sample: alarmSample{Value: -0.05, Present: true},
+			unit:   "Pa/s",
+			want:   "Barometer falling: -0.05 Pa/s, clears above -0.03 Pa/s",
+		},
+		{
+			name:   "the House bank low fixture in its new shape",
+			rule:   lowVoltageRule(), // below 11.8, hysteresis 0.3
 			sample: alarmSample{Value: 11.0, Present: true},
-			want:   "House bank low: below 11.8 (11)",
+			unit:   "V",
+			want:   "House bank low: 11 V, clears above 12.1 V",
+		},
+		{
+			name:   "unknown unit is omitted with no trailing space",
+			rule:   alarmRule{Label: "Barometer falling", Op: alarmOpBelow, Value: -0.03, Hysteresis: 0.01},
+			sample: alarmSample{Value: -0.05, Present: true},
+			unit:   "",
+			want:   "Barometer falling: -0.05, clears above -0.02",
+		},
+		{
+			name:   "equal carries the value with no clear clause",
+			rule:   alarmRule{Label: "Anchor watch", Op: alarmOpEqual, Value: 1},
+			sample: alarmSample{Value: 1, Present: true},
+			unit:   "",
+			want:   "Anchor watch: 1",
+		},
+		{
+			name:   "notEqual carries the value and its unit with no clear clause",
+			rule:   alarmRule{Label: "Autopilot mode", Op: alarmOpNotEqual, Value: 0},
+			sample: alarmSample{Value: 2, Present: true},
+			unit:   "mode",
+			want:   "Autopilot mode: 2 mode",
+		},
+		{
+			name:   "stale is unchanged by any of this",
+			rule:   alarmRule{Label: "Bilge sensor", Op: alarmOpStale, StaleAfterSeconds: 90},
+			sample: alarmSample{},
+			unit:   "V",
+			want:   "Bilge sensor: no data for 90s",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := alarmMessageFor(tc.rule, tc.sample); got != tc.want {
+			if got := alarmMessageFor(tc.rule, tc.sample, tc.unit); got != tc.want {
 				t.Fatalf("alarmMessageFor: got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// The rule fields (op, threshold, hysteresis, clear_value, unit) let the
+// frontend render "clears above/below Y" without duplicating the engine's own
+// arithmetic. They come from the rule the engine already holds, refreshed
+// every tick alongside Label and Path, so they can never drift from it.
+func TestAlarmStatusJSONCarriesRuleFieldsForBelowRule(t *testing.T) {
+	engine := newAlarmEngine()
+	engine.unitFor = func(path string) string {
+		if path == pressureRatePath {
+			return "Pa/s"
+		}
+		return ""
+	}
+
+	rule := alarmRule{
+		ID: "rule-1", Enabled: true, Path: pressureRatePath, Label: "Barometer falling",
+		Op: alarmOpBelow, Value: -0.03, Hysteresis: 0.01, State: alarmStateWarn,
+	}
+	engine.evaluate([]alarmRule{rule}, staticReader(-0.05), alarmNow)
+
+	payload := marshalStatusToMap(t, engine.statusFor("rule-1"))
+
+	if got := payload["op"]; got != "below" {
+		t.Fatalf("op: got %v, want %q", got, "below")
+	}
+	if got := payload["unit"]; got != "Pa/s" {
+		t.Fatalf("unit: got %v, want %q", got, "Pa/s")
+	}
+	assertJSONNumberNear(t, payload, "threshold", -0.03)
+	assertJSONNumberNear(t, payload, "hysteresis", 0.01)
+	assertJSONNumberNear(t, payload, "clear_value", -0.02)
+}
+
+// above rule: clear_value is threshold minus hysteresis, the mirror image of
+// below's threshold plus hysteresis.
+func TestAlarmStatusJSONClearValueForAboveRuleIsThresholdMinusHysteresis(t *testing.T) {
+	engine := newAlarmEngine()
+	rule := alarmRule{
+		ID: "rule-1", Enabled: true, Path: "environment.wind.speedApparent", Label: "Wind strong",
+		Op: alarmOpAbove, Value: 0.05, Hysteresis: 0.02, State: alarmStateWarn,
+	}
+	engine.evaluate([]alarmRule{rule}, staticReader(0.2), alarmNow)
+
+	payload := marshalStatusToMap(t, engine.statusFor("rule-1"))
+	assertJSONNumberNear(t, payload, "clear_value", 0.03)
+}
+
+// equal, notEqual and stale have no single clearing value worth surfacing --
+// equal clears on any change, notEqual on hitting one exact number, stale on
+// data resuming -- none of which reads as "clears above/below N". Stale also
+// has no threshold or hysteresis: StaleAfterSeconds is the only number that
+// governs it, and it is already in the message.
+func TestAlarmStatusJSONOmitsClearValueForEqualNotEqualAndStale(t *testing.T) {
+	cases := []struct {
+		name              string
+		op                string
+		wantThreshold     bool
+		wantHysteresis    bool
+		staleAfterSeconds int
+	}{
+		{name: "equal", op: alarmOpEqual, wantThreshold: true, wantHysteresis: true},
+		{name: "notEqual", op: alarmOpNotEqual, wantThreshold: true, wantHysteresis: true},
+		{name: "stale", op: alarmOpStale, wantThreshold: false, wantHysteresis: false, staleAfterSeconds: 60},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := newAlarmEngine()
+			rule := alarmRule{
+				ID: "rule-1", Enabled: true, Path: "electrical.batteries.house.voltage", Label: "Test",
+				Op: tc.op, Value: 1, StaleAfterSeconds: tc.staleAfterSeconds, State: alarmStateWarn,
+			}
+			reader := staticReader(1)
+			if tc.op == alarmOpStale {
+				reader = staleReader()
+			}
+			engine.evaluate([]alarmRule{rule}, reader, alarmNow)
+
+			payload := marshalStatusToMap(t, engine.statusFor("rule-1"))
+			if _, present := payload["clear_value"]; present {
+				t.Fatalf("%s: clear_value must be absent, got %v", tc.name, payload["clear_value"])
+			}
+			if _, present := payload["threshold"]; present != tc.wantThreshold {
+				t.Fatalf("%s: threshold present=%v, want %v", tc.name, present, tc.wantThreshold)
+			}
+			if _, present := payload["hysteresis"]; present != tc.wantHysteresis {
+				t.Fatalf("%s: hysteresis present=%v, want %v", tc.name, present, tc.wantHysteresis)
+			}
+			if got := payload["op"]; got != tc.op {
+				t.Fatalf("op: got %v, want %q", got, tc.op)
+			}
+		})
+	}
+}
+
+// clear_value must agree with alarmConditionCleared's own boundary, not a
+// re-derivation of it: a sample exactly at clear_value clears, one short of it
+// does not.
+func TestAlarmClearValueAgreesWithConditionClearedBoundaryForBelow(t *testing.T) {
+	rule := alarmRule{Op: alarmOpBelow, Value: 11.8, Hysteresis: 0.3}
+	clear := alarmClearValueFor(rule)
+	if clear == nil {
+		t.Fatalf("expected a clear value for a below rule")
+	}
+
+	if !alarmConditionCleared(rule, alarmSample{Value: *clear, Present: true}, false) {
+		t.Fatalf("a below rule must clear exactly at its clear value %v", *clear)
+	}
+	if alarmConditionCleared(rule, alarmSample{Value: *clear - 0.001, Present: true}, false) {
+		t.Fatalf("a below rule must not clear just short of its clear value")
+	}
+}
+
+func TestAlarmClearValueAgreesWithConditionClearedBoundaryForAbove(t *testing.T) {
+	rule := alarmRule{Op: alarmOpAbove, Value: 30.0, Hysteresis: 2.0}
+	clear := alarmClearValueFor(rule)
+	if clear == nil {
+		t.Fatalf("expected a clear value for an above rule")
+	}
+
+	if !alarmConditionCleared(rule, alarmSample{Value: *clear, Present: true}, false) {
+		t.Fatalf("an above rule must clear exactly at its clear value %v", *clear)
+	}
+	if alarmConditionCleared(rule, alarmSample{Value: *clear + 0.001, Present: true}, false) {
+		t.Fatalf("an above rule must not clear just short of its clear value")
+	}
+}
+
+// marshalStatusToMap round-trips a status through its real MarshalJSON, the
+// same path the API and the SSE stream use, so "present" and "absent" in
+// these tests mean exactly what the frontend will see.
+func marshalStatusToMap(t *testing.T, status alarmStatus) map[string]any {
+	t.Helper()
+	encoded, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return payload
+}
+
+func assertJSONNumberNear(t *testing.T, payload map[string]any, key string, want float64) {
+	t.Helper()
+	raw, present := payload[key]
+	if !present {
+		t.Fatalf("%s: expected present, was absent", key)
+	}
+	got, ok := raw.(float64)
+	if !ok {
+		t.Fatalf("%s: not a number: %v", key, raw)
+	}
+	if math.Abs(got-want) > 1e-9 {
+		t.Fatalf("%s: got %v, want %v", key, got, want)
 	}
 }

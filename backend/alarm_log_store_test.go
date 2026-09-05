@@ -143,6 +143,79 @@ func TestAlarmLogSurvivesReopen(t *testing.T) {
 	}
 }
 
+// ── OpenOccurrence: recovering a bus notification's raised_at ──────────────
+//
+// A bus notification carries no raised time of its own -- SignalK rewrites its
+// timestamp to the moment of acknowledgement -- so the log row the bus
+// watcher wrote when the notification first crossed its dwell is the only
+// record of when it actually went live.
+
+func TestOpenOccurrenceReturnsTheNewestUnclearedEntry(t *testing.T) {
+	store := newTestAlarmLog(t)
+	ruleID := "notifications:electrical.batteries.house.voltage"
+
+	store.RecordRaised(alarmLogEntry{RuleID: ruleID, Label: "House bank low", RaisedAt: alarmNow})
+	store.MarkCleared(ruleID, alarmNow.Add(time.Minute))
+	store.RecordRaised(alarmLogEntry{RuleID: ruleID, Label: "House bank low", RaisedAt: alarmNow.Add(2 * time.Minute)})
+
+	entry, ok, err := store.OpenOccurrence(ruleID)
+	if err != nil {
+		t.Fatalf("OpenOccurrence: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected an open occurrence")
+	}
+	if !entry.RaisedAt.Equal(alarmNow.Add(2 * time.Minute)) {
+		t.Fatalf("expected the newest open occurrence, got raised_at %v", entry.RaisedAt)
+	}
+}
+
+func TestOpenOccurrenceReportsFalseWhenNoneIsOpen(t *testing.T) {
+	store := newTestAlarmLog(t)
+	ruleID := "notifications:mob"
+
+	store.RecordRaised(alarmLogEntry{RuleID: ruleID, RaisedAt: alarmNow})
+	store.MarkCleared(ruleID, alarmNow.Add(time.Minute))
+
+	_, ok, err := store.OpenOccurrence(ruleID)
+	if err != nil {
+		t.Fatalf("OpenOccurrence: %v", err)
+	}
+	if ok {
+		t.Fatalf("a cleared occurrence must not be reported as open")
+	}
+
+	if _, ok, err := store.OpenOccurrence("notifications:never-logged"); ok || err != nil {
+		t.Fatalf("a rule with no log rows at all must report false with no error, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestOpenOccurrenceIncludesAckedAtWhenPresent(t *testing.T) {
+	store := newTestAlarmLog(t)
+	ruleID := "notifications:arrivalCircleEntered"
+
+	store.RecordRaised(alarmLogEntry{RuleID: ruleID, RaisedAt: alarmNow})
+	store.MarkAcknowledged(ruleID, alarmNow.Add(30*time.Second))
+
+	entry, ok, err := store.OpenOccurrence(ruleID)
+	if err != nil || !ok {
+		t.Fatalf("OpenOccurrence: ok=%v err=%v", ok, err)
+	}
+	if entry.AckedAt == nil || !entry.AckedAt.Equal(alarmNow.Add(30*time.Second)) {
+		t.Fatalf("expected acked_at carried through, got %+v", entry.AckedAt)
+	}
+}
+
+// A nil store is inert, matching every other method on this type.
+func TestOpenOccurrenceNilStoreIsInert(t *testing.T) {
+	var store *alarmLogStore
+
+	_, ok, err := store.OpenOccurrence("notifications:mob")
+	if ok || err != nil {
+		t.Fatalf("nil store OpenOccurrence: ok=%v err=%v", ok, err)
+	}
+}
+
 // A nil store is what tests and any not-yet-wired code path see; it must be
 // inert rather than panic, matching how globalSecretsStore is handled.
 func TestAlarmLogNilStoreIsInert(t *testing.T) {

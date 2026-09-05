@@ -76,6 +76,13 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 		if owned(status.Label) {
 			continue
 		}
+		// Label is also the real SignalK data path the notification is
+		// about -- Path is "notifications."+Label, which carries no meta of
+		// its own -- so the unit lookup is keyed off Label, derived-aware for
+		// the same reason a rule alarm's is (a Helmcentral echo of one of its
+		// own derived-path rules can turn up here before ownership filters it
+		// out on some other instance).
+		status.Unit = unitForAlarmPath(snapshot, status.Label)
 		live = append(live, status)
 	}
 	out = live

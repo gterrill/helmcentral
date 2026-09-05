@@ -67,6 +67,28 @@ type alarmStatus struct {
 	Value   float64    `json:"value"`
 	Message string     `json:"message"`
 
+	// Op, Threshold, Hysteresis and ClearValue exist so the frontend can render
+	// "clears above/below Y" without re-deriving the engine's own arithmetic.
+	// They describe a rule this engine holds, so they are set only for
+	// rule-driven alarms, never for a bus notification raised by something
+	// else on the network. Threshold and Hysteresis are pointers, and
+	// ClearValue is always a pointer, because 0 is a legitimate threshold and
+	// omitempty on a bare float64 would swallow it along with the genuinely
+	// absent case.
+	Op         string   `json:"op,omitempty"`
+	Threshold  *float64 `json:"threshold,omitempty"`
+	Hysteresis *float64 `json:"hysteresis,omitempty"`
+	// ClearValue is the value at which a live alarm lets go, derived from
+	// alarmConditionCleared's own boundary (see alarmClearValueFor) so the two
+	// can never disagree. nil for equal, notEqual and stale, none of which
+	// clears at a single number the way above/below do.
+	ClearValue *float64 `json:"clear_value,omitempty"`
+
+	// Unit is the SI unit for the alarm's path, when known -- set for rule
+	// alarms and for bus notifications alike, since an operator reading
+	// "-0.03" needs to know it is pascals per second whichever raised it.
+	Unit string `json:"unit,omitempty"`
+
 	// Silenced and the two capability flags mirror the SignalK Notifications
 	// API's own status object. Silencing is not acknowledging — a silenced
 	// alarm has stopped sounding but is still demanding attention — so it is a
@@ -122,10 +144,30 @@ type alarmEvent struct {
 type alarmEngine struct {
 	mu       sync.RWMutex
 	statuses map[string]*alarmStatus
+
+	// unitFor resolves a rule's path to its SI unit, for status.Unit and for
+	// the raised message. nil in a bare newAlarmEngine() (every unit-testing
+	// caller in this package drives the engine with alarmReader funcs and no
+	// snapshot at all, so there is nothing to resolve against); production
+	// wires it in evaluateAlarmsOnce, re-read every tick for the same reason
+	// globalBusNotificationWatcher.snapshot is: tests substitute
+	// globalSignalKSnapshot per case, and this must never resolve against a
+	// snapshot from a previous one.
+	unitFor func(path string) string
 }
 
 func newAlarmEngine() *alarmEngine {
 	return &alarmEngine{statuses: map[string]*alarmStatus{}}
+}
+
+// unitForPath is nil-safe: a bare engine (every test in this package but the
+// ones exercising the unit fields themselves) has no lookup wired at all, and
+// "no unit known" is the correct answer for that, not a panic.
+func (e *alarmEngine) unitForPath(path string) string {
+	if e.unitFor == nil {
+		return ""
+	}
+	return e.unitFor(path)
 }
 
 // evaluate advances every rule's state machine and returns the transitions that
@@ -154,6 +196,21 @@ func (e *alarmEngine) evaluate(rules []alarmRule, read alarmReader, now time.Tim
 		}
 		status.Label = rule.Label
 		status.Path = rule.Path
+		status.Op = rule.Op
+		status.Unit = e.unitForPath(rule.Path)
+		if rule.Op == alarmOpStale {
+			// StaleAfterSeconds is the only number that governs a stale rule,
+			// and it is already in the message; a threshold and hysteresis
+			// left over from a previous op would be pure confusion.
+			status.Threshold = nil
+			status.Hysteresis = nil
+		} else {
+			threshold := rule.Value
+			hysteresis := rule.Hysteresis
+			status.Threshold = &threshold
+			status.Hysteresis = &hysteresis
+		}
+		status.ClearValue = alarmClearValueFor(rule)
 
 		sample := read(rule.Path)
 		status.Value = sample.Value
@@ -227,7 +284,7 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 	status.RaisedAt = now
 	status.AckedAt = time.Time{}
 	status.escalated = false
-	status.Message = alarmMessageFor(rule, sample)
+	status.Message = alarmMessageFor(rule, sample, status.Unit)
 	return alarmEvent{Kind: alarmEventRaised, Rule: rule, Status: *status}, true
 }
 
@@ -294,11 +351,63 @@ func alarmConditionCleared(rule alarmRule, sample alarmSample, stale bool) bool 
 	return true
 }
 
-func alarmMessageFor(rule alarmRule, sample alarmSample) string {
+// alarmClearValueFor is the value at which a live alarm will let go, derived
+// from alarmConditionCleared's own boundary so the two can never disagree:
+// below clears once the value rises back to threshold+hysteresis, above once
+// it falls back to threshold-hysteresis. equal, notEqual and stale have no
+// single number worth surfacing this way -- equal clears on any change,
+// notEqual on hitting one exact value, stale on data resuming -- so they
+// report nil rather than a value that would misdescribe how they clear.
+func alarmClearValueFor(rule alarmRule) *float64 {
+	switch rule.Op {
+	case alarmOpBelow:
+		v := rule.Value + rule.Hysteresis
+		return &v
+	case alarmOpAbove:
+		v := rule.Value - rule.Hysteresis
+		return &v
+	default:
+		return nil
+	}
+}
+
+// alarmMessageFor builds the one-line summary an operator reads on the alarm
+// banner. Unit is passed in rather than looked up here so this stays testable
+// with a bare rule and sample -- no snapshot required -- while the caller
+// (the engine, which does have a unit lookup wired) decides what "known" means.
+func alarmMessageFor(rule alarmRule, sample alarmSample, unit string) string {
 	if rule.Op == alarmOpStale {
 		return fmt.Sprintf("%s: no data for %ds", rule.Label, rule.StaleAfterSeconds)
 	}
-	return fmt.Sprintf("%s: %s %s (%s)", rule.Label, rule.Op, formatAlarmValue(rule.Value), formatAlarmValue(sample.Value))
+
+	valueText := formatAlarmValueWithUnit(sample.Value, unit)
+
+	switch rule.Op {
+	case alarmOpBelow, alarmOpAbove:
+		// A below rule clears by rising, so what the operator needs to see it
+		// travel back UP past is worded "clears above"; above is the mirror.
+		direction := "above"
+		if rule.Op == alarmOpAbove {
+			direction = "below"
+		}
+		clearText := formatAlarmValueWithUnit(*alarmClearValueFor(rule), unit)
+		return fmt.Sprintf("%s: %s, clears %s %s", rule.Label, valueText, direction, clearText)
+	default: // equal, notEqual
+		// Neither clears at a single crossing point, so there is no clear
+		// clause to add -- just the label and the value that tripped it.
+		return fmt.Sprintf("%s: %s", rule.Label, valueText)
+	}
+}
+
+// formatAlarmValueWithUnit appends a unit when one is known, with no dangling
+// space when it is not -- "-0.03" reads as a bare number, "-0.03 Pa/s" as a
+// measurement, and "-0.03 " would read as neither.
+func formatAlarmValueWithUnit(value float64, unit string) string {
+	formatted := formatAlarmValue(value)
+	if unit == "" {
+		return formatted
+	}
+	return formatted + " " + unit
 }
 
 // formatAlarmValue renders a value the way an operator wants to read it, not
