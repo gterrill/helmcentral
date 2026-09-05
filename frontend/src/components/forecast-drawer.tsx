@@ -73,6 +73,13 @@ interface ForecastDrawerProps {
   waveIsCached?: boolean
   waveUpdatedAt?: string | null
   waveTtlSeconds?: number | null
+  /**
+   * Retries the wave feed alone (its own fetch, distinct from onRetry's
+   * whole-forecast retry) - wired to the amber wave-error state's Retry
+   * button. A day with no wave data for a non-error reason gets no Retry at
+   * all, since retrying would not produce anything different.
+   */
+  onWaveRetry?: () => void
 }
 
 // Simple weather icon selector
@@ -155,7 +162,7 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
   const color = 'hsl(var(--chart-wind) / 0.85)'
 
   if (speedKts < 3) {
-    return <circle data-testid="forecast-wind-barb" cx={cx} cy={cy} r="2.5" fill="none" stroke={color} strokeWidth="1.2" />
+    return <circle data-testid="forecast-wind-barb" cx={cx} cy={cy} r="5" fill="none" stroke={color} strokeWidth="2.4" />
   }
 
   const angleRad = (directionDeg * Math.PI) / 180
@@ -164,9 +171,11 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
   const perpX = -dirY
   const perpY = dirX
 
-  const staffLen = 12
-  const barbLen = 5
-  const barbSpacing = 3.5
+  // Doubled from the original 12/5/3.5 - a direction glyph read at arm's
+  // length in direct sun on the raised plot band, not up close.
+  const staffLen = 24
+  const barbLen = 10
+  const barbSpacing = 7
 
   let remaining = Math.round(speedKts / 5) * 5
   const pennants = Math.floor(remaining / 50)
@@ -195,7 +204,7 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
     const baseY = cy + dirY * pos
     const outerX = baseX + perpX * barbLen
     const outerY = baseY + perpY * barbLen
-    features.push(<line key={`full-${i}`} x1={baseX} y1={baseY} x2={outerX} y2={outerY} stroke={color} strokeWidth="1.4" strokeLinecap="round" />)
+    features.push(<line key={`full-${i}`} x1={baseX} y1={baseY} x2={outerX} y2={outerY} stroke={color} strokeWidth="2.8" strokeLinecap="round" />)
     pos -= barbSpacing
   }
 
@@ -204,13 +213,13 @@ function WindBarb({ cx, cy, speedKts, directionDeg }: { cx: number; cy: number; 
     const baseY = cy + dirY * pos
     const outerX = baseX + perpX * (barbLen / 2)
     const outerY = baseY + perpY * (barbLen / 2)
-    features.push(<line key="half" x1={baseX} y1={baseY} x2={outerX} y2={outerY} stroke={color} strokeWidth="1.4" strokeLinecap="round" />)
+    features.push(<line key="half" x1={baseX} y1={baseY} x2={outerX} y2={outerY} stroke={color} strokeWidth="2.8" strokeLinecap="round" />)
   }
 
   return (
     <g data-testid="forecast-wind-barb">
-      <line x1={cx} y1={cy} x2={cx + dirX * staffLen} y2={cy + dirY * staffLen} stroke={color} strokeWidth="1.4" strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r="1.4" fill={color} />
+      <line x1={cx} y1={cy} x2={cx + dirX * staffLen} y2={cy + dirY * staffLen} stroke={color} strokeWidth="2.8" strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r="2.8" fill={color} />
       {features}
     </g>
   )
@@ -372,15 +381,18 @@ function ForecastPanel({
   return (
     <section
       data-testid={testId}
-      className="rounded-2xl border border-gauge-secondary/15 bg-[linear-gradient(180deg,hsl(var(--card)/0.96),hsl(var(--muted)/0.92))] shadow-[0_14px_32px_hsl(var(--gauge-secondary)/0.08)]"
+      className="rounded-2xl border border-gauge-secondary/15 bg-card"
     >
       {/* No overflow-hidden here (see the day-selector sticky fix below) - the
           section's own background still respects rounded-2xl because
           border-radius clips an element's own background/border painting
           regardless of overflow. This header's background is a CHILD
           element flush against the top edge, which border-radius does NOT
-          clip for free, so it carries its own rounded-t-2xl instead. */}
-      <div className="rounded-t-2xl border-b border-gauge-secondary/14 bg-[linear-gradient(90deg,hsl(var(--gauge-primary)/0.10),hsl(var(--gauge-secondary)/0.08))] px-4 py-3.5">
+          clip for free, so it carries its own rounded-t-2xl instead.
+
+          DESIGN.md's Flat Board Rule: the header/body split is a tonal step
+          (bg-muted on bg-card) plus the border-b below, not a gradient. */}
+      <div className="rounded-t-2xl border-b border-gauge-secondary/14 bg-muted/60 px-4 py-3.5">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground/70">{title}</h3>
           <div className="flex shrink-0 items-center gap-2">
@@ -511,7 +523,7 @@ const RECHARTS_XAXIS_HEIGHT = 30
 // Wind, Wave, Precipitation and Cloud & Temperature all use the identical
 // 35..125 band before each chart's own per-value Y scaling is applied.
 const HOURLY_CHART_TOP = 35
-const HOURLY_CHART_BOTTOM = 125
+const HOURLY_CHART_BOTTOM = 200
 
 // 6-hour-block ticks (12AM/6AM/12PM/6PM), used by every hourly chart below
 // instead of spacing ticks dynamically by count. Hoisted to module scope
@@ -699,6 +711,7 @@ export function ForecastDrawer({
   waveIsCached = false,
   waveUpdatedAt = null,
   waveTtlSeconds = null,
+  onWaveRetry,
 }: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
@@ -798,7 +811,7 @@ export function ForecastDrawer({
   const hourlyXForHour = (hourOfDay: number) => hourlyChartLeft + (hourOfDay / 23) * hourlyChartWidth
 
   // Shared margin formula for every hourly chart below: same left/right/top,
-  // and a bottom derived from the chart's own SVG viewBox height (175, shared
+  // and a bottom derived from the chart's own SVG viewBox height (250, shared
   // by all four stacked charts) so recharts' plot rectangle lands exactly
   // where the yFor-family pixel math and tooltip overlay already expect it.
   function hourlyChartMargin(viewboxHeight: number) {
@@ -1070,7 +1083,7 @@ export function ForecastDrawer({
     left: hourlyChartLeft,
     right: upperAirChartWidth - upperAirChartRight,
     top: HOURLY_CHART_TOP,
-    bottom: 175 - HOURLY_CHART_BOTTOM - RECHARTS_XAXIS_HEIGHT,
+    bottom: 250 - HOURLY_CHART_BOTTOM - RECHARTS_XAXIS_HEIGHT,
   }
 
   const upperAirTooltip = useChartTooltip(upperAirChartData.length, upperAirChartData.length, hourlyChartLeft, upperAirChartRight)
@@ -1116,7 +1129,7 @@ export function ForecastDrawer({
     [windHourly],
   )
   const windLabelByHour = useMemo(() => buildLabelByHour(windHourly), [windHourly])
-  const windChartMargin = hourlyChartMargin(175)
+  const windChartMargin = hourlyChartMargin(250)
 
   /*
    * Same framing policy as wind, over the wave window: constant across day
@@ -1218,7 +1231,7 @@ export function ForecastDrawer({
 
     return messages
   }, [selectedWaveDay, selectedDay, wavePeakHeightM, waveSeaTemperatureF])
-  const waveChartMargin = hourlyChartMargin(175)
+  const waveChartMargin = hourlyChartMargin(250)
 
   const precipIntensities = precipHourly.map((entry) => Math.max(0, entry.precipIntensityMm))
   const precipMax = Math.max(1, ...precipIntensities)
@@ -1326,7 +1339,7 @@ export function ForecastDrawer({
     return labelMap
   }, [cloudHourly, precipHourly])
 
-  const cloudChartMargin = hourlyChartMargin(175)
+  const cloudChartMargin = hourlyChartMargin(250)
   const cloudChartConfig: ChartConfig = {
     displayTemperature: { label: `Temperature (${tempUnit})`, color: 'hsl(var(--chart-temp) / 0.9)' },
     precipIntensityMm: { label: 'Precipitation (mm/hr)', color: 'hsl(var(--chart-precip) / 0.85)' },
@@ -1365,7 +1378,7 @@ export function ForecastDrawer({
         <p className="mt-2 font-medium text-foreground">Unable to load forecast data right now</p>
         <p className="mt-1 text-xs text-muted-foreground">{error}</p>
         <div className="mt-4 flex justify-center">
-          <Button type="button" size="sm" variant="outline" className="h-9 min-w-24" onClick={onRetry}>
+          <Button type="button" size="sm" variant="outline" className="h-10 min-w-24" onClick={onRetry}>
             Retry
           </Button>
         </div>
@@ -1422,12 +1435,12 @@ export function ForecastDrawer({
                 {isNowEntry && (
                   <span className="absolute left-1/2 top-1.5 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-gauge-primary" />
                 )}
-                <p className={`text-base font-semibold tabular-nums ${isNowEntry ? 'text-gauge-primary' : nightMode ? 'text-gauge-secondary' : 'text-foreground/75'}`}>{entry.label}</p>
+                <p className={`text-base font-semibold tabular-nums ${isNowEntry ? 'text-gauge-primary-label' : nightMode ? 'text-gauge-secondary' : 'text-foreground/75'}`}>{entry.label}</p>
                 <div className="mt-3.5 flex h-8 items-center justify-center">
                   {getHourlyWeatherIcon(entry, nightMode)}
                 </div>
                 {entry.kind === 'sunset' ? (
-                  <p data-testid="forecast-hour-headline" className="mt-4 text-sm font-semibold uppercase tracking-[0.08em] text-gauge-primary">
+                  <p data-testid="forecast-hour-headline" className="mt-4 text-sm font-semibold uppercase tracking-[0.08em] text-gauge-primary-label">
                     Sunset
                   </p>
                 ) : hasWind ? (
@@ -1435,21 +1448,21 @@ export function ForecastDrawer({
                     data-testid="forecast-hour-headline"
                     className={`mt-4 flex items-baseline justify-center gap-0.5 whitespace-nowrap ${displaySlotClass}`}
                   >
-                    <span className="font-display text-3xl leading-none">{Math.round(entry.windSpeedKts)}</span>
+                    <span className="font-display text-3xl leading-none tabular-nums">{Math.round(entry.windSpeedKts)}</span>
                     <span className="text-2xs">{windUnit} {entry.windDirection}</span>
                   </p>
                 ) : (
-                  <p data-testid="forecast-hour-headline" className={`mt-4 font-display text-3xl leading-none ${displaySlotClass}`}>
+                  <p data-testid="forecast-hour-headline" className={`mt-4 font-display text-3xl leading-none tabular-nums ${displaySlotClass}`}>
                     {displayTemperature !== null ? `${displayTemperature}°` : '—'}
                   </p>
                 )}
                 {hasWind && (
-                  <p data-testid="forecast-hour-subline" className={`mt-1 whitespace-nowrap text-xs ${nightMode ? 'text-gauge-secondary/80' : 'text-muted-foreground'}`}>
+                  <p data-testid="forecast-hour-subline" className={`mt-1 whitespace-nowrap text-xs tabular-nums ${nightMode ? 'text-gauge-secondary/80' : 'text-muted-foreground'}`}>
                     {displayTemperature !== null ? `${displayTemperature}°` : '—'}
                   </p>
                 )}
                 {nightMode && entry.kind === 'forecast' && (
-                  <span className="mt-1 text-2xs font-medium uppercase tracking-[0.12em] text-gauge-secondary/80">Night</span>
+                  <span className="mt-1 text-2xs font-medium uppercase tracking-[0.12em] text-gauge-secondary">Night</span>
                 )}
               </div>
             )
@@ -1542,13 +1555,13 @@ export function ForecastDrawer({
                     */}
                   <div className="mt-1.5 flex items-center justify-between gap-2">
                     <p data-testid="forecast-day-headline" className="flex items-baseline gap-1 whitespace-nowrap text-gauge-secondary">
-                      <span className="font-display text-lg leading-none">{Math.round(day.windSpeed)}</span>
+                      <span className="font-display text-lg leading-none tabular-nums">{Math.round(day.windSpeed)}</span>
                       <span className="text-2xs">{windUnit} {day.windDirection}</span>
                     </p>
-                    <p className="text-2xs text-muted-foreground">{day.precipitation === null ? '— precip' : `${Math.round(day.precipitation)}% precip`}</p>
+                    <p className="text-2xs tabular-nums text-muted-foreground">{day.precipitation === null ? '— precip' : `${Math.round(day.precipitation)}% precip`}</p>
                   </div>
 
-                  <p data-testid="forecast-day-subline" className="mt-1 flex items-center gap-1 text-2xs text-muted-foreground">
+                  <p data-testid="forecast-day-subline" className="mt-1 flex items-center gap-1 text-2xs tabular-nums text-muted-foreground">
                     <span className="font-semibold text-foreground">{Math.round(displayTemp(day.high))}</span>
                     <span>{tempUnit}</span>
                     <span>/</span>
@@ -1563,7 +1576,7 @@ export function ForecastDrawer({
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <div className="flex items-end gap-1">
                 {getWeatherIcon(selectedDay.condition, 22)}
-                <span className="font-display text-4xl leading-none text-gauge-primary">{Math.round(displayTemp(selectedDay.high))}</span>
+                <span className="font-display text-4xl leading-none tabular-nums text-gauge-primary">{Math.round(displayTemp(selectedDay.high))}</span>
                 <span className="pb-1 text-lg text-muted-foreground">{tempUnit}</span>
               </div>
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{selectedDay.condition}</p>
@@ -1579,15 +1592,15 @@ export function ForecastDrawer({
                 * against and an invented one is worse than none.
                 */}
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
-                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Wind <span data-testid="forecast-selected-wind" className="font-semibold text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
-                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Gusts <span data-testid="forecast-selected-gust" className="font-semibold text-chart-gust">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Wind <span data-testid="forecast-selected-wind" className="font-semibold tabular-nums text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Gusts <span data-testid="forecast-selected-gust" className="font-semibold tabular-nums text-chart-gust">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
                 {selectedUpperAir?.present && (
                   <span
                     data-testid="forecast-upper-air-detail"
                     /* The trough tint has to stay legible against a tier
                        baseline that is now bg-muted/80 rather than /50, so it
                        goes up to /35 and keeps its own hue. */
-                    className={`rounded px-2 py-1 text-sm ${selectedUpperAir.troughSupport ? 'bg-gauge-secondary/35 text-foreground' : 'bg-muted/80'}`}
+                    className={`rounded px-2 py-1 text-sm tabular-nums ${selectedUpperAir.troughSupport ? 'bg-gauge-secondary/35 text-foreground' : 'bg-muted/80'}`}
                   >
                     500mb <span className="font-semibold">{Math.round(selectedUpperAir.height500M)} m</span>
                     {selectedUpperAir.troughSupport
@@ -1595,20 +1608,20 @@ export function ForecastDrawer({
                       : ` \u00b7 jet ${Math.round(selectedUpperAir.peakWind500Kts)} kt`}
                   </span>
                 )}
-                <span className="text-2xs text-muted-foreground">Precip <span data-testid="forecast-selected-precip" className="font-semibold">{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
-                <span className="text-2xs text-muted-foreground">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold">{humidityPct === null ? '—' : `${Math.round(humidityPct)}%`}</span></span>
-                <span className="text-2xs text-muted-foreground">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
-                <span className="text-2xs text-muted-foreground">UV Index <span className="font-semibold text-gauge-secondary">{uvIndex}</span></span>
+                <span className="text-2xs text-muted-foreground">Precip <span data-testid="forecast-selected-precip" className="font-semibold tabular-nums">{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
+                <span className="text-2xs text-muted-foreground">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold tabular-nums">{humidityPct === null ? '—' : `${Math.round(humidityPct)}%`}</span></span>
+                <span className="text-2xs text-muted-foreground">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold tabular-nums">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
+                <span className="text-2xs text-muted-foreground">UV Index <span data-testid="forecast-selected-uv" className="font-semibold tabular-nums text-gauge-secondary">{uvIndex}</span></span>
                 {selectedDay.sunriseTime && (
                   <span className="flex items-center gap-1 text-2xs text-muted-foreground">
                     <Sunrise size={12} className="text-gauge-primary" />
-                    Sunrise <span className="font-semibold">{selectedDay.sunriseTime}</span>
+                    Sunrise <span className="font-semibold tabular-nums">{selectedDay.sunriseTime}</span>
                   </span>
                 )}
                 {selectedDay.sunsetTime && (
                   <span className="flex items-center gap-1 text-2xs text-muted-foreground">
                     <Sunset size={12} className="text-gauge-primary" />
-                    Sunset <span className="font-semibold">{selectedDay.sunsetTime}</span>
+                    Sunset <span className="font-semibold tabular-nums">{selectedDay.sunsetTime}</span>
                   </span>
                 )}
                 {selectedDay.moonPhase && (
@@ -1658,10 +1671,10 @@ export function ForecastDrawer({
                   )}
                   <div
                     data-testid="forecast-cloud-chart"
-                    className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+                    className="relative h-[250px] touch-none overflow-hidden rounded bg-muted/15"
                     style={{ width: forecastChartWidth }}
                   >
-                    <ComposedChart width={forecastChartWidth} height={175} data={cloudChartData} margin={cloudChartMargin}>
+                    <ComposedChart width={forecastChartWidth} height={250} data={cloudChartData} margin={cloudChartMargin}>
                       <XAxis
                         dataKey="hourOfDay"
                         type="number"
@@ -1745,7 +1758,7 @@ export function ForecastDrawer({
 
                     <svg
                       ref={cloudTooltip.svgRef}
-                      viewBox={`0 0 ${forecastChartWidth} 175`}
+                      viewBox={`0 0 ${forecastChartWidth} 250`}
                       preserveAspectRatio="none"
                       className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       tabIndex={0}
@@ -1840,10 +1853,10 @@ export function ForecastDrawer({
                     )}
                     <div
                       data-testid="forecast-wind-chart"
-                      className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+                      className="relative h-[250px] touch-none overflow-hidden rounded bg-muted/15"
                       style={{ width: forecastChartWidth }}
                     >
-                      <ComposedChart width={forecastChartWidth} height={175} margin={windChartMargin}>
+                      <ComposedChart width={forecastChartWidth} height={250} margin={windChartMargin}>
                         <XAxis
                           dataKey="hourOfDay"
                           type="number"
@@ -1905,7 +1918,7 @@ export function ForecastDrawer({
 
                       <svg
                         ref={windTooltip.svgRef}
-                        viewBox={`0 0 ${forecastChartWidth} 175`}
+                        viewBox={`0 0 ${forecastChartWidth} 250`}
                         preserveAspectRatio="none"
                         className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         tabIndex={0}
@@ -1973,7 +1986,7 @@ export function ForecastDrawer({
                     Loading wave forecast...
                   </p>
                 ) : waveUnavailableDueToError ? (
-                  <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
+                  <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" onRetry={onWaveRetry} />
                 ) : waveHourly.length > 0 ? (
                   <>
                     {(() => {
@@ -2022,10 +2035,10 @@ export function ForecastDrawer({
                       )}
                       <div
                         data-testid="forecast-wave-chart"
-                        className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+                        className="relative h-[250px] touch-none overflow-hidden rounded bg-muted/15"
                         style={{ width: forecastChartWidth }}
                       >
-                        <ComposedChart width={forecastChartWidth} height={175} margin={waveChartMargin}>
+                        <ComposedChart width={forecastChartWidth} height={250} margin={waveChartMargin}>
                           <XAxis
                             dataKey="hourOfDay"
                             type="number"
@@ -2104,7 +2117,7 @@ export function ForecastDrawer({
 
                         <svg
                           ref={waveTooltip.svgRef}
-                          viewBox={`0 0 ${forecastChartWidth} 175`}
+                          viewBox={`0 0 ${forecastChartWidth} 250`}
                           preserveAspectRatio="none"
                           className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           tabIndex={0}
@@ -2225,13 +2238,13 @@ export function ForecastDrawer({
             )}
             <div
               data-testid="forecast-upper-air-chart"
-              className="relative h-[175px] touch-none overflow-hidden rounded bg-muted/15"
+              className="relative h-[250px] touch-none overflow-hidden rounded bg-muted/15"
               style={{ width: upperAirChartWidth }}
             >
               {/* Bands sit behind the traces rather than on the pointer overlay,
                   so a wash never dims the line it is meant to explain. */}
               <svg
-                viewBox={`0 0 ${upperAirChartWidth} 175`}
+                viewBox={`0 0 ${upperAirChartWidth} 250`}
                 preserveAspectRatio="none"
                 className="pointer-events-none absolute inset-0 h-full w-full"
                 style={{ zIndex: 0 }}
@@ -2250,7 +2263,7 @@ export function ForecastDrawer({
               </svg>
 
               <div className="relative" style={{ zIndex: 1 }}>
-                <ComposedChart width={upperAirChartWidth} height={175} data={upperAirChartData} margin={upperAirChartMargin}>
+                <ComposedChart width={upperAirChartWidth} height={250} data={upperAirChartData} margin={upperAirChartMargin}>
                   <XAxis
                     dataKey="idx"
                     type="number"
@@ -2295,7 +2308,7 @@ export function ForecastDrawer({
 
               <svg
                 ref={upperAirTooltip.svgRef}
-                viewBox={`0 0 ${upperAirChartWidth} 175`}
+                viewBox={`0 0 ${upperAirChartWidth} 250`}
                 preserveAspectRatio="none"
                 className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 style={{ zIndex: 2 }}

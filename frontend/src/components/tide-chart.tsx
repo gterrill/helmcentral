@@ -236,7 +236,13 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
   )
 
   if (!hasExtremesInWindow) {
-    return <ChartUnavailableMessage testId="forecast-tide-unavailable" message="Tide forecast unavailable for this day" />
+    // Quiet, not the default alarm treatment: this is a real tidal state (no
+    // high/low falls inside the selected day), not an absent feed, and a
+    // genuine tide fetch failure already gets its own louder red-and-Retry
+    // state in ForecastTideSection's `error && !chart` branch.
+    return (
+      <ChartUnavailableMessage testId="forecast-tide-unavailable" message="Tide forecast unavailable for this day" tone="quiet" />
+    )
   }
 
   return (

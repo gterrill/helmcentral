@@ -422,6 +422,7 @@ export function App() {
     ttlSeconds: waveForecastTtlSeconds,
     loading: waveForecastLoading,
     error: waveForecastError,
+    refetch: refetchWaveForecast,
   } = useWaveForecast(FORECAST_REFRESH_SECONDS)
   // Upper air keeps its own refresh cadence: the global models behind it run
   // four times a day, so polling it on the surface-forecast interval would
@@ -1137,6 +1138,7 @@ export function App() {
             waveIsCached={waveForecastIsCached}
             waveUpdatedAt={waveForecastUpdatedAt}
             waveTtlSeconds={waveForecastTtlSeconds}
+            onWaveRetry={refetchWaveForecast}
           />
         )
       case 'alarms':

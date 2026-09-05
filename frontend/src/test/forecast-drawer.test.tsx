@@ -384,6 +384,41 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getAllByTestId('forecast-wind-barb').length).toBeGreaterThan(0)
   })
 
+  // A wind barb is a direction glyph read at a glance in direct sun; at the
+  // old 12px staff length it read as a speck against the taller plot band.
+  // Pins the doubled geometry directly off the rendered SVG rather than an
+  // unexported constant.
+  it('draws the wind barb staff at roughly double the old length', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const barb = screen.getAllByTestId('forecast-wind-barb')[0]
+    const staff = barb.querySelector('line')
+    expect(staff).toBeTruthy()
+    const x1 = Number(staff!.getAttribute('x1'))
+    const y1 = Number(staff!.getAttribute('y1'))
+    const x2 = Number(staff!.getAttribute('x2'))
+    const y2 = Number(staff!.getAttribute('y2'))
+    expect(Math.hypot(x2 - x1, y2 - y1)).toBeCloseTo(24, 0)
+  })
+
+  // Same story for the calm-wind (<3kt) marker: a lone 2.5px circle
+  // disappears at arm's length.
+  it('draws the calm-wind circle at roughly double the old radius', () => {
+    const calmWind = buildHourlyWind().map((entry) => ({ ...entry, windSpeed: 0, windGust: 0 }))
+    render(
+      <ForecastDrawer
+        forecast={[buildDay({ hourlyWind: calmWind, windSpeed: 0, windGust: 0 })]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const barb = screen.getAllByTestId('forecast-wind-barb')[0]
+    expect(barb.tagName.toLowerCase()).toBe('circle')
+    expect(Number(barb.getAttribute('r'))).toBeCloseTo(5, 1)
+  })
+
   it('uses 6-hour-block labels on the wind chart', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
@@ -438,7 +473,7 @@ describe('ForecastDrawer refresh age', () => {
     // windDataMax=38 > 30, meaning windMax rounds up to 40.
     const hourlyChartLeft = 30
     const windChartTop = 35
-    const windChartBottom = 125
+    const windChartBottom = 200
     const windMax = 40
     const windYFor = (value: number) => windChartTop + (1 - value / windMax) * (windChartBottom - windChartTop)
 
@@ -1455,6 +1490,40 @@ describe('ForecastDrawer panel hierarchy', () => {
   // adjacent spanLabel text didn't already say, and it sat in the exact slot
   // the panel-level stale badge needed - see 'ForecastDrawer panel staleness'
   // below for its replacement.
+
+  // DESIGN.md's Flat Board Rule: surfaces on the default board are flat: a
+  // border, a tonal step or a token colour, never a shadow - and depth is
+  // reserved for [data-skin="instrument"], which this is not. ForecastPanel's
+  // section and header used to carry a gradient background plus a shadow;
+  // this pins the replacement to flat token surfaces, one tonal step apart,
+  // with the header/body split still carried by the existing border-b.
+  it('keeps the panel surface flat - no gradients or shadows, one tonal step between header and body', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={buildHourlyToday()}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const panel = screen.getByTestId('forecast-panel-today')
+    expect(panel.className).not.toMatch(/linear-gradient/)
+    expect(panel.className).not.toMatch(/shadow-\[/)
+    expect(panel.className).toMatch(/\bbg-card\b/)
+    // The rounded corners survive the gradient's removal.
+    expect(panel.className).toMatch(/\brounded-2xl\b/)
+
+    const header = panel.firstElementChild as HTMLElement
+    expect(header.className).not.toMatch(/linear-gradient/)
+    expect(header.className).not.toMatch(/shadow-\[/)
+    // A tonal step off the card body, not a gradient - and the corner/border
+    // that already carried the header/body split are untouched.
+    expect(header.className).toMatch(/\bbg-muted\b/)
+    expect(header.className).toMatch(/\brounded-t-2xl\b/)
+    expect(header.className).toMatch(/\bborder-b\b/)
+  })
 })
 
 // The product's stated defining risk is "a frozen dashboard looks exactly
@@ -1691,7 +1760,7 @@ describe('ForecastDrawer day selector', () => {
 // across day tabs), temperature carries a unit-aware minimum span.
 describe('ForecastDrawer chart y-axis framing', () => {
   const PLOT_TOP = 35
-  const PLOT_BOTTOM = 125
+  const PLOT_BOTTOM = 200
   const PLOT_HEIGHT = PLOT_BOTTOM - PLOT_TOP
 
   // The left-hand axis ticks are plain numbers in the manual overlay <svg>;
@@ -2190,7 +2259,7 @@ describe('ForecastDrawer upper-air axes', () => {
     // And positioned at the heights they name, on the same scale the trace is
     // drawn with, rather than parked on the frame edge.
     const PLOT_TOP = 35
-    const PLOT_BOTTOM = 125
+    const PLOT_BOTTOM = 200
     const frameMin = 5872 - 5
     const frameMax = 5900 + 5
     const heightYFor = (value: number) =>
@@ -2247,7 +2316,7 @@ describe('ForecastDrawer upper-air axes', () => {
     for (const tick of heightTicks) {
       const y = Number(tick.getAttribute('y'))
       expect(y).toBeGreaterThanOrEqual(35)
-      expect(y).toBeLessThanOrEqual(125)
+      expect(y).toBeLessThanOrEqual(200)
     }
   })
 
@@ -2320,7 +2389,7 @@ describe('ForecastDrawer upper-air axes', () => {
 
 describe('ForecastDrawer cloud chart axes', () => {
   const PLOT_TOP = 35
-  const PLOT_BOTTOM = 125
+  const PLOT_BOTTOM = 200
 
   // Rule 1, ownership: the left axis describes one series - temperature - so
   // it takes that series' colour, the same way the upper-air chart's two axes
@@ -2410,10 +2479,10 @@ describe('ForecastDrawer upper-air smoothing', () => {
     const ys = pathYs(curve!.getAttribute('d')!)
     const drawnSpan = Math.max(...ys) - Math.min(...ys)
 
-    // The raw 40m ripple would fill 40/52 of the 90px plot, about 69px. The
-    // 3-sample mean leaves a 13m ripple, about 23px.
+    // The raw 40m ripple would fill 40/52 of the 165px plot, about 127px. The
+    // 3-sample mean leaves a 13m ripple, about 41px.
     expect(drawnSpan).toBeGreaterThan(5)
-    expect(drawnSpan).toBeLessThan(40)
+    expect(drawnSpan).toBeLessThan(50)
   })
 
   // ADR 0071 section 5: the drawn band and the marked days must not disagree.
@@ -2690,7 +2759,7 @@ describe('ForecastDrawer chart keyboard access', () => {
   // width the way a browser would.
   function layOut(svg: Element, width = 720) {
     ;(svg as SVGSVGElement).getBoundingClientRect = () =>
-      ({ width, height: 175, left: 0, top: 0, right: width, bottom: 175, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+      ({ width, height: 250, left: 0, top: 0, right: width, bottom: 250, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
   }
 
   function renderAllCharts() {
@@ -2768,5 +2837,310 @@ describe('ForecastDrawer chart keyboard access', () => {
     // window collapses to the raw value at the series end).
     expect(screen.getByText('5872 m')).toBeInTheDocument()
     expect(screen.getByText(/^Jet 30 kt/)).toBeInTheDocument()
+  })
+})
+
+// DESIGN.md's Still Digits Rule: "Every number that updates carries
+// tabular-nums and leading-none." font-display appeared exactly once in this
+// file before this suite (an hour *label*, not a value) - every wind speed,
+// temperature, gust, precipitation, humidity, visibility, 500mb height and
+// chart tooltip number rendered on proportional figures, which is most
+// visible exactly when scrubbing a chart changes them fastest.
+describe('ForecastDrawer still digits', () => {
+  const hourlyBoth = [
+    { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' as const },
+    { label: '2PM', condition: 'Clear', temperatureF: 70, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'forecast' as const },
+  ]
+
+  it('gives every font-display numeric readout tabular-nums, not just the one that already had it', () => {
+    const { container } = render(
+      <ForecastDrawer forecast={[buildDay()]} hourlyToday={hourlyBoth} loading={false} error={null} unit="metric" />,
+    )
+
+    const fontDisplayEls = container.querySelectorAll('.font-display')
+    // Hour tile (wind), hour tile (temperature fallback), day card, details
+    // hero - four spots, all pre-existing, none of them tabular before.
+    expect(fontDisplayEls.length).toBeGreaterThanOrEqual(4)
+    for (const el of Array.from(fontDisplayEls)) {
+      expect(el.className, `expected tabular-nums on: ${el.className}`).toMatch(/\btabular-nums\b/)
+    }
+  })
+
+  it('gives the hour-tile temperature subline tabular-nums', () => {
+    render(
+      <ForecastDrawer forecast={[buildDay()]} hourlyToday={[hourlyBoth[0]]} loading={false} error={null} unit="metric" />,
+    )
+
+    expect(screen.getByTestId('forecast-hour-subline').className).toMatch(/\btabular-nums\b/)
+  })
+
+  it('gives the day-card precip readout and the high/low subline tabular-nums', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const card = screen.getByRole('button', { name: /Select forecast day Sunday Jun 14/i })
+    expect(within(card).getByTestId('forecast-day-subline').className).toMatch(/\btabular-nums\b/)
+    expect(within(card).getByText(/precip$/).className).toMatch(/\btabular-nums\b/)
+  })
+
+  it('gives every details-card chip value tabular-nums', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        upperAirDays={[buildUpperAirDay('2026-06-14')]}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    for (const testId of [
+      'forecast-selected-wind',
+      'forecast-selected-gust',
+      'forecast-selected-precip',
+      'forecast-selected-humidity',
+      'forecast-selected-visibility',
+      'forecast-selected-uv',
+      'forecast-upper-air-detail',
+    ]) {
+      expect(screen.getByTestId(testId).className, testId).toMatch(/\btabular-nums\b/)
+    }
+  })
+
+  it('gives the sunrise and sunset times tabular-nums', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByText('6:32AM').className).toMatch(/\btabular-nums\b/)
+    expect(screen.getByText('5:47PM').className).toMatch(/\btabular-nums\b/)
+  })
+
+  it('gives the chart tooltip bubble numbers tabular-nums, since they are DOM text and change fastest while scrubbing', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const overlay = screen.getByRole('img', { name: /Wind and gusts for Sunday/i })
+    ;(overlay as unknown as SVGSVGElement).getBoundingClientRect = () =>
+      ({ width: 720, height: 250, left: 0, top: 0, right: 720, bottom: 250, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+
+    fireEvent.focus(overlay)
+
+    const gusts = screen.getByText('Gusts: 15 kts')
+    expect(gusts.className).toMatch(/\btabular-nums\b/)
+  })
+})
+
+// FIX 2: --gauge-primary measures 3.2:1 on the white card - fine for the
+// text-4xl hero numerals (large text, 3:1 bar) but not for the two small-text
+// usages that share the token. Follows the existing --chart-*-label
+// precedent: a darkened text-sized twin, aliased straight back to the base
+// token in both dark themes where it already clears 4.5:1.
+describe('ForecastDrawer gauge-primary-label contrast token', () => {
+  function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+    s /= 100
+    l /= 100
+    const k = (n: number) => (n + h / 30) % 12
+    const a = s * Math.min(l, 1 - l)
+    const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))
+    return [f(0) * 255, f(8) * 255, f(4) * 255]
+  }
+  function srgbToLinear(c: number) {
+    c /= 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  function relativeLuminance([r, g, b]: [number, number, number]) {
+    return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b)
+  }
+  function contrastRatio(l1: number, l2: number) {
+    const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  it('defines --gauge-primary-label in all three themes', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const css = readFileSync(resolve(testDir, '../index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    const block = (selector: string) => {
+      const start = css.indexOf(selector)
+      expect(start, `${selector} not found in index.css`).toBeGreaterThan(-1)
+      return css.slice(start, css.indexOf('}', start))
+    }
+    for (const selector of [':root {', '.dark {', '[data-skin="instrument"] {']) {
+      expect(block(selector), selector).toMatch(/--gauge-primary-label:\s*[^;]+;/)
+    }
+  })
+
+  it('darkens --gauge-primary-label in :root to at least 4.5:1 against a white card, holding hue and saturation', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const css = readFileSync(resolve(testDir, '../index.css'), 'utf8')
+    const baseMatch = css.match(/--gauge-primary:\s*(\d+)\s+(\d+)%\s+(\d+)%;/)
+    const labelMatch = css.match(/--gauge-primary-label:\s*(\d+)\s+(\d+)%\s+(\d+)%;/)
+    expect(baseMatch, '--gauge-primary not found in :root').not.toBeNull()
+    expect(labelMatch, '--gauge-primary-label not found in :root').not.toBeNull()
+
+    const [, bh, bs] = baseMatch!.map(Number)
+    const [, h, s, l] = labelMatch!.map(Number)
+
+    // Same hue and saturation as the base token - darkened, not re-hued.
+    expect(h).toBe(bh)
+    expect(s).toBe(bs)
+
+    const whiteLum = relativeLuminance([255, 255, 255])
+    const labelLum = relativeLuminance(hslToRgb(h, s, l))
+    expect(contrastRatio(labelLum, whiteLum)).toBeGreaterThanOrEqual(4.5)
+
+    // The base token itself must be untouched - it is correct for the hero
+    // numerals and changing it would repaint every other gauge-primary use.
+    expect(`${bh} ${bs}%`).toBe('39 100%')
+  })
+
+  it('uses the label token for the small-text amber usages, and leaves the text-4xl hero on the base token', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={[
+          { label: 'Now', condition: 'Clear', temperatureF: 72, windSpeedKts: 11, windGustKts: 18, windDirection: 'NE', windDirectionDeg: 45, kind: 'forecast' },
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset' },
+        ]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const tiles = screen.getAllByTestId('forecast-hour-tile')
+    const nowLabel = within(tiles[0]).getByText('Now')
+    const sunsetHeadline = within(tiles[1]).getByTestId('forecast-hour-headline')
+
+    for (const el of [nowLabel, sunsetHeadline]) {
+      const classes = el.className.split(' ')
+      expect(classes).toContain('text-gauge-primary-label')
+      expect(classes).not.toContain('text-gauge-primary')
+    }
+
+    const hero = document.querySelector('.font-display.text-4xl')
+    expect(hero, 'text-4xl hero readout not found').not.toBeNull()
+    expect(hero!.className.split(' ')).toContain('text-gauge-primary')
+  })
+
+  it('wires gauge-primary-label into the Tailwind config beside the other gauge tokens', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const config = readFileSync(resolve(testDir, '../../tailwind.config.ts'), 'utf8')
+    expect(config).toMatch(/'gauge-primary-label':\s*'hsl\(var\(--gauge-primary-label\)\)'/)
+  })
+})
+
+// DESIGN.md's No Faded Small Text Rule: no low-opacity modifier at or below
+// text-[11px] (text-2xs is the named 10px step).
+describe('ForecastDrawer faded small text', () => {
+  it('does not fade the Night micro-label with an opacity modifier', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={[
+          { label: '5:09PM', condition: 'Sunset', temperatureF: -1, windSpeedKts: -1, windGustKts: -1, windDirection: '—', windDirectionDeg: -1, kind: 'sunset' },
+          { label: '9PM', condition: 'Clear', temperatureF: 60, windSpeedKts: 5, windGustKts: 8, windDirection: 'N', windDirectionDeg: 0, kind: 'forecast' },
+        ]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const nightLabel = screen.getByText('Night')
+    expect(nightLabel.className).toMatch(/\btext-2xs\b/)
+    // No color-opacity modifier anywhere in the class list (a bracketed size
+    // like text-2xs itself never contains a "/digit", so this is unambiguous).
+    expect(nightLabel.className).not.toMatch(/\/\d/)
+  })
+})
+
+// DESIGN.md, Buttons: "a 40px floor on both axes ... The floor is not
+// negotiable; this is touched on a moving boat."
+describe('ForecastDrawer touch floor', () => {
+  it('meets the 40px touch floor on the offline-state Retry button', () => {
+    render(<ForecastDrawer forecast={[]} loading={false} error="offline" unit="metric" onRetry={() => {}} />)
+
+    const button = screen.getByRole('button', { name: /retry/i })
+    expect(button.className).toMatch(/\bh-10\b/)
+    expect(button.className).not.toMatch(/\bh-9\b/)
+  })
+})
+
+// FIX 5: ChartUnavailableMessage used to render smaller and fainter than the
+// live prose beside it - the opposite of "a missing feed is an alarm, not a
+// blank tile" (PRODUCT.md principle 1). The drawer already distinguishes a
+// true fetch failure (waveUnavailableDueToError) from a day that legitimately
+// has no data; that distinction now shows up as a Retry affordance rather
+// than only in the message string.
+describe('ForecastDrawer chart unavailable emphasis', () => {
+  it('gives a missing-for-this-day feed (wind) the loud amber treatment', () => {
+    render(<ForecastDrawer forecast={[buildDay({ hourlyWind: [] })]} loading={false} error={null} unit="metric" />)
+
+    const message = screen.getByTestId('forecast-wind-unavailable')
+    expect(message.className).toMatch(/\bborder-amber-500\/40\b/)
+    expect(message.className).toMatch(/\bbg-amber-500\/10\b/)
+    expect(within(message).getByText('Wind forecast unavailable for this day').className).toMatch(/\btext-sm\b/)
+  })
+
+  it('gives the wave-error state (a true fetch failure) the loud amber treatment plus a working Retry button', () => {
+    const onWaveRetry = vi.fn()
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[]}
+        loading={false}
+        error={null}
+        waveLoading={false}
+        waveError="HTTP error! status: 502"
+        onWaveRetry={onWaveRetry}
+        unit="metric"
+      />,
+    )
+
+    const message = screen.getByTestId('forecast-wave-error')
+    expect(message.className).toMatch(/\bborder-amber-500\/40\b/)
+    const retryButton = within(message).getByRole('button', { name: /retry/i })
+    expect(retryButton.className).toMatch(/\bh-10\b/)
+
+    fireEvent.click(retryButton)
+    expect(onWaveRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not offer a Retry affordance for the legitimate no-data wave state - there is nothing to retry', () => {
+    const onWaveRetry = vi.fn()
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay({ hourlyWave: [] })]}
+        loading={false}
+        error={null}
+        waveLoading={false}
+        waveError={null}
+        onWaveRetry={onWaveRetry}
+        unit="metric"
+      />,
+    )
+
+    const message = screen.getByTestId('forecast-wave-unavailable')
+    // Still loud - a missing feed is worth noticing even when the gap is
+    // expected - but no Retry: this day simply has no data to fetch again.
+    expect(message.className).toMatch(/\bborder-amber-500\/40\b/)
+    expect(within(message).queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
+  })
+
+  it('does not render a Retry button for the wave-error state when no onWaveRetry callback is wired', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[]}
+        loading={false}
+        error={null}
+        waveLoading={false}
+        waveError="HTTP error! status: 502"
+        unit="metric"
+      />,
+    )
+
+    const message = screen.getByTestId('forecast-wave-error')
+    expect(within(message).queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
   })
 })

@@ -26,6 +26,7 @@ const config: Config = {
   			destructive: 'hsl(var(--destructive))',
   			'destructive-foreground': 'hsl(var(--destructive-foreground))',
   			'gauge-primary': 'hsl(var(--gauge-primary))',
+  			'gauge-primary-label': 'hsl(var(--gauge-primary-label))',
   			'gauge-secondary': 'hsl(var(--gauge-secondary))',
   			'chart-precip': 'hsl(var(--chart-precip))',
   			'chart-uv': 'hsl(var(--chart-uv))',

@@ -66,6 +66,30 @@ describe('TideChart', () => {
     expect(screen.getByText('Tide forecast unavailable for this day')).toBeInTheDocument()
   })
 
+  // ChartUnavailableMessage defaults to a loud amber treatment (a missing
+  // feed is an alarm, not a blank tile - PRODUCT.md principle 1), but this
+  // is the one consumer that genuinely needs the quiet exception: "no
+  // extremes fall inside this day's window" is a real tidal state, not an
+  // absent feed, and a true tide fetch failure already gets its own louder
+  // red-and-Retry treatment in ForecastTideSection (see
+  // forecast-tide-section.tsx's `error && !chart` branch).
+  it('keeps the no-extremes-this-day message in the quiet, muted treatment', () => {
+    const { windowStart, windowEnd } = todayWindow()
+    render(
+      <TideChart
+        chart={buildChart({ extremes: [] })}
+        isImperial={false}
+        windowStart={windowStart}
+        windowEnd={windowEnd}
+      />,
+    )
+
+    const message = screen.getByTestId('forecast-tide-unavailable')
+    expect(message.className).toMatch(/\btext-xs\b/)
+    expect(message.className).toMatch(/\btext-muted-foreground\b/)
+    expect(message.className).not.toMatch(/amber/)
+  })
+
   it('shows the unavailable message when extremes exist but none fall inside the given window', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(

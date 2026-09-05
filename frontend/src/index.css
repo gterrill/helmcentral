@@ -26,6 +26,16 @@
     --radius: 0.5rem;
     --gauge-primary: 39 100% 39%;
     --gauge-secondary: 175 42% 32%;
+    /*
+     * Text-sized twin of --gauge-primary, same idea as the --chart-*-label
+     * split below: --gauge-primary measures 3.19:1 on this white card, which
+     * clears the 3:1 large-text bar (the text-4xl hero numerals it colours
+     * stay on the base token) but not the 4.5:1 normal-text bar. Two small
+     * usages need the normal-text bar - the hour-tile "Now" label and the
+     * Sunset headline - so they take this token instead: nearest lightness
+     * that clears 4.5:1 with the hue and saturation held, 4.54:1 measured.
+     */
+    --gauge-primary-label: 39 100% 32%;
     --chart-wind: 226 72% 53%;
     --chart-gust: 38 92% 50%;
     --chart-wave: 173 80% 40%;
@@ -166,6 +176,9 @@
     --destructive-foreground: 214 96% 97%;
     --gauge-primary: 199 89% 62%;
     --gauge-secondary: 199 60% 48%;
+    /* 8.94:1 on this dark card (222 47% 8%) already, so the label alias
+       inherits it unchanged rather than the :root darkened value. */
+    --gauge-primary-label: var(--gauge-primary);
     /* This block defines no --chart-* of its own and inherits them from
        :root, so var(--chart-temp) here resolves to the LIGHT series colour -
        which is what measures 5.21:1 to 8.85:1 on this dark card (222 47% 8%)
@@ -259,6 +272,9 @@
     --ring: 226 52% 50%;
     --gauge-primary: 39 90% 52%;
     --gauge-secondary: 175 50% 45%;
+    /* 8.64:1 on this dark card (0 0% 9.5%) already, so the label alias
+       inherits it unchanged rather than the :root darkened value. */
+    --gauge-primary-label: var(--gauge-primary);
     --chart-wind: 226 85% 68%;
     --chart-gust: 38 95% 64%;
     --chart-wave: 173 70% 55%;
