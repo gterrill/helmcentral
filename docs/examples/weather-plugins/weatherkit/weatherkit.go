@@ -308,6 +308,13 @@ type weatherHourOutput struct {
 	PrecipitationMM        float64 `json:"precipitation_mm"`
 	UVIndex                float64 `json:"uv_index"`
 	IsDaylight             bool    `json:"is_daylight"`
+	// HumidityPct/VisibilityM are *float64 - nil means "WeatherKit sent
+	// nothing for this hour", mirroring weatherKitHourForecast.Humidity/
+	// Visibility below. The host maps nil to its own -1 sentinel
+	// (sentinelHumidityPct/sentinelVisibilityNm in
+	// backend/weather_providers.go), never a fabricated 0.
+	HumidityPct *float64 `json:"humidity_pct"`
+	VisibilityM *float64 `json:"visibility_m"`
 }
 
 type fetchForecastOutput struct {
@@ -378,6 +385,13 @@ type weatherKitHourForecast struct {
 	PrecipitationIntensity *float64 `json:"precipitationIntensity"`
 	UVIndex                float64  `json:"uvIndex"`
 	Daylight               bool     `json:"daylight"`
+	// Humidity/Visibility are already on WeatherKit's wire (confirmed via a
+	// live capture, see testdata/weatherkit_response_dry_nearterm.json) but
+	// were silently dropped by this struct until now. Humidity is a 0-1
+	// fraction (see precipitationChancePct's identical convention);
+	// visibility is already metres.
+	Humidity   *float64 `json:"humidity"`
+	Visibility *float64 `json:"visibility"`
 }
 
 // parseWeatherKitResponse parses a raw WeatherKit API response body and maps
@@ -565,6 +579,12 @@ func mapForecastHours(rawHours []weatherKitHourForecast) []weatherHourOutput {
 			precipMM = math.Max(0, *h.PrecipitationIntensity)
 		}
 
+		var humidityPct *float64
+		if h.Humidity != nil {
+			pct := *h.Humidity * 100
+			humidityPct = &pct
+		}
+
 		hourly = append(hourly, weatherHourOutput{
 			Time:                   h.ForecastStart,
 			TemperatureC:           h.Temperature,
@@ -576,6 +596,8 @@ func mapForecastHours(rawHours []weatherKitHourForecast) []weatherHourOutput {
 			PrecipitationMM:        precipMM,
 			UVIndex:                math.Max(0, h.UVIndex),
 			IsDaylight:             h.Daylight,
+			HumidityPct:            humidityPct,
+			VisibilityM:            h.Visibility,
 		})
 	}
 	return hourly

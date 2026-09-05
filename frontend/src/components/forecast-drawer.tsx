@@ -33,6 +33,9 @@ interface ForecastDay {
   precipitationSummary: string | null
   /** null when the provider reported no chance-of-precipitation data at all - distinct from a real 0%. */
   precipitation: number | null
+  /** null when the provider reported no humidity/visibility data at all - distinct from a real 0. */
+  humidityPct: number | null
+  visibilityNm: number | null
   sunriseTime: string | null
   sunsetTime: string | null
   moonPhase: string | null
@@ -600,6 +603,8 @@ const EMPTY_DAY: ForecastDay = {
   windSummary: null,
   precipitationSummary: null,
   precipitation: null,
+  humidityPct: null,
+  visibilityNm: null,
   sunriseTime: null,
   sunsetTime: null,
   moonPhase: null,
@@ -689,13 +694,9 @@ export function ForecastDrawer({
   // hourlyWave array with no error is the legitimate "no data" case.
   const waveUnavailableDueToError = Boolean(waveError) && selectedWaveDay === null
 
-  // Humidity and visibility are both derived from the precipitation chance,
-  // so when that is unavailable they have nothing to stand on - showing a
-  // computed-from-nothing number would be as misleading as the "0% precip"
-  // this null-handling exists to prevent.
   const precipitationPct = selectedDay.precipitation
-  const humidityPct = precipitationPct === null ? null : Math.max(35, Math.min(95, Math.round(45 + (precipitationPct * 0.4))))
-  const visibilityNm = precipitationPct === null ? null : Math.max(1, 12 - (precipitationPct * 0.06))
+  const humidityPct = selectedDay.humidityPct
+  const visibilityNm = selectedDay.visibilityNm
 
   const windHourly = selectedDay.hourlyWind ?? []
   const waveHourly = selectedWaveDay?.hourlyWave ?? []
@@ -1497,7 +1498,7 @@ export function ForecastDrawer({
                   </span>
                 )}
                 <span className="text-2xs text-muted-foreground">Precip <span data-testid="forecast-selected-precip" className="font-semibold">{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
-                <span className="text-2xs text-muted-foreground">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold">{humidityPct === null ? '—' : `${humidityPct}%`}</span></span>
+                <span className="text-2xs text-muted-foreground">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold">{humidityPct === null ? '—' : `${Math.round(humidityPct)}%`}</span></span>
                 <span className="text-2xs text-muted-foreground">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
                 <span className="text-2xs text-muted-foreground">UV Index <span className="font-semibold text-gauge-secondary">{uvIndex}</span></span>
                 {selectedDay.sunriseTime && (

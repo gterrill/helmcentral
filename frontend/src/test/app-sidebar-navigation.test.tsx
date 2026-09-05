@@ -138,6 +138,8 @@ vi.mock('@/hooks/use-weather-forecast', () => ({
       waveSummary: null,
       precipitationSummary: null,
       precipitation: 5,
+      humidityPct: 58,
+      visibilityNm: 9.5,
       sunriseTime: null,
       sunsetTime: null,
       moonPhase: null,

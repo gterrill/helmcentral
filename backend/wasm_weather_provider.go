@@ -123,6 +123,15 @@ type wasmWeatherHourOutput struct {
 	PrecipitationMM        float64 `json:"precipitation_mm"`
 	UVIndex                float64 `json:"uv_index"`
 	IsDaylight             bool    `json:"is_daylight"`
+	// HumidityPct/VisibilityM are *float64, deliberately - see
+	// sentinelHumidityPct/sentinelVisibilityNm (weather_providers.go). A bare
+	// float64 field decodes a JSON-absent key to exactly 0.0, indistinguishable
+	// from a real 0% humidity or (far worse) a real 0.0m visibility reading -
+	// fog thick enough that the bow is out of sight. nil means "this plugin
+	// build never sends this field"; a present-but-negative value means "this
+	// plugin has the field but had nothing to report for this hour".
+	HumidityPct *float64 `json:"humidity_pct"`
+	VisibilityM *float64 `json:"visibility_m"`
 }
 
 type wasmFetchForecastOutput struct {
@@ -225,6 +234,8 @@ func mapWasmFetchForecastOutput(out wasmFetchForecastOutput) (weatherForecastBun
 			PrecipitationMM:        math.Max(0, h.PrecipitationMM),
 			UVIndex:                math.Max(0, h.UVIndex),
 			IsDaylight:             h.IsDaylight,
+			HumidityPct:            sentinelHumidityPct(h.HumidityPct),
+			VisibilityNm:           sentinelVisibilityNm(h.VisibilityM),
 		})
 	}
 

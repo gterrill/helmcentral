@@ -35,8 +35,26 @@
 //	            sunrise, sunset}],
 //	  "hourly": [{time, temperature_c, condition, wind_speed_ms, wind_gust_ms,
 //	              wind_direction_deg, precipitation_chance_pct,
-//	              precipitation_mm, uv_index, is_daylight}]
+//	              precipitation_mm, uv_index, is_daylight,
+//	              humidity_pct, visibility_m}]
 //	}
+//
+// humidity_pct/visibility_m are hourly-only - there is no daily aggregate in
+// this contract, deliberately: the host derives the day figure itself
+// (humidity as the mean of the day's valid hourly samples, visibility as
+// their minimum - see buildDayData/reduceHumidityPct/reduceVisibilityNm)
+// rather than trusting a provider's own daily rollup, so both reference
+// providers reduce the same way regardless of what daily aggregates they do
+// or don't expose.
+//
+// humidity_pct/visibility_m are the ONE exception to the "any numeric field
+// may be omitted/zero" rule below: on the WASM host boundary
+// (wasmWeatherHourOutput in wasm_weather_provider.go) they are *float64, not
+// float64, so "the plugin never sends this field" (nil) is distinguishable
+// from "the plugin sent a genuine zero". A bare float64 would decode a
+// missing JSON key to exactly 0.0 - 0% humidity or 0.0 nm visibility - and
+// 0.0 nm is a catastrophic false reading on a helm display: it means the bow
+// is out of sight. See sentinelHumidityPct/sentinelVisibilityNm below.
 //
 // "timezone" is an IANA zone identifier (from vesselLocalTimezoneName in
 // weather_tide.go, e.g. "Etc/GMT-10" for a vessel at UTC+10). A plugin whose
@@ -54,7 +72,13 @@
 // the host treats an exactly-zero value for wind speed/gust/direction and
 // temperature as "no data", the same -1-sentinel convention
 // weatherHourlyEntryData/weatherHourlyWindData/weatherHourlyCloudData
-// already used for WeatherKit's raw JSON.
+// already used for WeatherKit's raw JSON. precipitation_chance_pct,
+// humidity_pct and visibility_m are the exceptions: each has a legitimate
+// real-zero reading (a dry day, a still-air/calm humidity trough, dense fog),
+// so "omitted" must be signalled some other way rather than by zero - a
+// plugin-emitted negative for precipitation_chance_pct, or the wire's
+// *float64 nil for humidity_pct/visibility_m - see
+// sentinelPrecipitationPct/sentinelHumidityPct/sentinelVisibilityNm below.
 package main
 
 import (
@@ -97,6 +121,14 @@ type weatherDayPoint struct {
 
 // weatherHourPoint is a single hour's forecast, SI units, as returned by one
 // entry of a plugin's fetch_forecast "hourly" field.
+//
+// HumidityPct/VisibilityNm are already the final -1-for-absent sentinel by
+// the time they land here (sentinelHumidityPct/sentinelVisibilityNm run in
+// mapWasmFetchForecastOutput, off the wire's *float64 fields) - unlike
+// PrecipitationChancePct, whose raw plugin-emitted value already IS the
+// sentinel convention and needs no further pointer indirection. See this
+// file's top doc comment and sentinelHumidityPct/sentinelVisibilityNm below
+// for why humidity/visibility need the pointer step precipitation does not.
 type weatherHourPoint struct {
 	Time                   time.Time
 	TemperatureC           float64
@@ -108,6 +140,8 @@ type weatherHourPoint struct {
 	PrecipitationMM        float64
 	UVIndex                float64
 	IsDaylight             bool
+	HumidityPct            float64
+	VisibilityNm           float64
 }
 
 // weatherForecastBundle is one provider round-trip's worth of data - the
@@ -337,6 +371,58 @@ func sentinelPrecipitationPct(pct float64) float64 {
 	return pct
 }
 
+// metersPerNauticalMile converts a metres reading to nautical miles
+// (1nm == 1852m exactly, by international definition), the same way
+// sentinelSpeedKts uses metersPerSecondToKnots.
+const metersPerNauticalMile = 1852.0
+
+// sentinelHumidityPct normalizes an optional relative-humidity percentage,
+// taking a POINTER input deliberately - unlike sentinelPrecipitationPct,
+// which normalizes a bare float64 the plugin itself already encodes -1 into.
+//
+// Humidity's wire field (wasmWeatherHourOutput.HumidityPct) is a *float64
+// because there are two distinct kinds of "no data" to represent, not one:
+// a plugin built before this field existed simply omits the JSON key
+// (decodes to nil), while a plugin that HAS the field but lacks a value for
+// a particular hour emits an explicit negative (mirroring the precipitation
+// convention). A bare float64 could only ever represent the second case -
+// omission would silently decode to exactly 0.0, indistinguishable from a
+// real (if unusual) 0% humidity reading. Both nil and negative collapse to
+// the -1 sentinel here; a genuine 0 survives. See docs/adr/0035-weather-local-day-boundaries.md
+// for the "0% precip during actual rainfall" incident this same collapse
+// caused for a different field.
+func sentinelHumidityPct(pct *float64) float64 {
+	if pct == nil || *pct < 0 {
+		return -1
+	}
+	if *pct > 100 {
+		return 100
+	}
+	return *pct
+}
+
+// sentinelVisibilityNm normalizes an optional visibility reading (metres, the
+// wire unit) to nautical miles, applying the same nil-or-negative -> -1 rule
+// as sentinelHumidityPct - for a graver reason. Visibility is a navigation-
+// safety number: a real 0.0nm reading means fog thick enough that the bow is
+// out of sight, and it MUST survive as "0.0 nm", never collapse into the same
+// sentinel as "the provider never sent this field". That collapse is exactly
+// what a bare (non-pointer) float64 would force, since JSON-absent and
+// JSON-zero both decode to 0.0 - the same failure mode ADR 0035 records for
+// precipitation ("0% precip" rendered during actual rainfall because absence
+// and zero were conflated), one step more dangerous here because the
+// consequence is a false "you can see clearly" on a helm display instead of
+// a false "it won't rain". Only nil (field missing from the wire entirely)
+// or an explicit negative (the plugin's own "no value this hour" signal, per
+// the guest contract doc comment above) maps to -1; a genuine 0.0 metres
+// passes through as 0.0nm.
+func sentinelVisibilityNm(metres *float64) float64 {
+	if metres == nil || *metres < 0 {
+		return -1
+	}
+	return *metres / metersPerNauticalMile
+}
+
 // buildHourlySeriesByDay buckets a provider's flat hourly points into
 // per-day (local date) wind/precipitation/UV/cloud series, keyed by
 // "2006-01-02" in localLocation - the typed-contract replacement for the old
@@ -399,6 +485,8 @@ func buildHourlySeriesByDay(hourly []weatherHourPoint, localLocation *time.Locat
 			Condition:    condition,
 			TemperatureF: sentinelTemperatureF(hp.TemperatureC),
 			IsDaylight:   hp.IsDaylight,
+			HumidityPct:  hp.HumidityPct,
+			VisibilityNm: hp.VisibilityNm,
 		})
 	}
 
@@ -454,6 +542,8 @@ func buildDayData(
 		SunriseTime:          sunriseTime,
 		SunsetTime:           sunsetTime,
 		MoonPhase:            moonPhase(dayPoint.Start),
+		HumidityPct:          reduceHumidityPct(cloudSeries),
+		VisibilityNm:         reduceVisibilityNm(cloudSeries),
 		HourlyWind:           windSeries,
 		HourlyPrecip:         precipSeries,
 		HourlyUV:             uvSeries,
@@ -592,6 +682,8 @@ type weatherHourlyCloudResponse struct {
 	Condition    string  `json:"condition"`
 	TemperatureF float64 `json:"temperature_f"`
 	IsDaylight   bool    `json:"is_daylight"`
+	HumidityPct  float64 `json:"humidity_pct"`
+	VisibilityNm float64 `json:"visibility_nm"`
 }
 
 // weatherForecastDayResponse mirrors weatherForecastDayData for JSON output.
@@ -614,6 +706,8 @@ type weatherForecastDayResponse struct {
 	SunriseTime          string                               `json:"sunrise_time"`
 	SunsetTime           string                               `json:"sunset_time"`
 	MoonPhase            string                               `json:"moon_phase"`
+	HumidityPct          float64                              `json:"humidity_pct"`
+	VisibilityNm         float64                              `json:"visibility_nm"`
 	HourlyWind           []weatherHourlyWindResponse          `json:"hourly_wind"`
 	HourlyPrecip         []weatherHourlyPrecipitationResponse `json:"hourly_precip"`
 	HourlyUV             []weatherHourlyUVResponse            `json:"hourly_uv"`
@@ -675,6 +769,8 @@ func mapWeatherHourlyCloudResponse(entries []weatherHourlyCloudData) []weatherHo
 			Condition:    entry.Condition,
 			TemperatureF: entry.TemperatureF,
 			IsDaylight:   entry.IsDaylight,
+			HumidityPct:  entry.HumidityPct,
+			VisibilityNm: entry.VisibilityNm,
 		})
 	}
 	return response
@@ -714,6 +810,8 @@ func mapWeatherForecastDayResponse(day weatherForecastDayData, dayKey string) we
 		SunriseTime:          day.SunriseTime,
 		SunsetTime:           day.SunsetTime,
 		MoonPhase:            day.MoonPhase,
+		HumidityPct:          day.HumidityPct,
+		VisibilityNm:         day.VisibilityNm,
 		HourlyWind:           mapWeatherHourlyWindResponse(day.HourlyWind),
 		HourlyPrecip:         mapWeatherHourlyPrecipitationResponse(day.HourlyPrecip),
 		HourlyUV:             mapWeatherHourlyUVResponse(day.HourlyUV),

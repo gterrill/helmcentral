@@ -83,6 +83,8 @@ function buildHourlyCloud(count = 24) {
     // gives deterministic, easy-to-assert L/H marker positions.
     temperatureF: 60 + Math.round(10 * Math.sin((idx / 24) * Math.PI)),
     isDaylight: idx >= 6 && idx <= 18,
+    humidityPct: 50 + (idx % 10),
+    visibilityNm: 10 - (idx % 4) * 0.5,
   }))
 }
 
@@ -100,6 +102,8 @@ function buildDay(overrides: Record<string, unknown> = {}) {
     windSummary: 'Winds 10 to 19 kts, with gusts up to 24 kts.',
     precipitationSummary: 'Slight chance of rain after 5PM.',
     precipitation: 5,
+    humidityPct: 58,
+    visibilityNm: 9.5,
     sunriseTime: '6:32AM',
     sunsetTime: '5:47PM',
     moonPhase: 'waningCrescent',
@@ -699,13 +703,37 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByTestId('forecast-selected-precip')).toHaveTextContent('0%')
   })
 
-  it('does not derive humidity or visibility from an unavailable precipitation chance', () => {
-    render(<ForecastDrawer forecast={[buildDay({ precipitation: null })]} loading={false} error={null} unit="metric" />)
+  // Humidity and visibility are now real provider fields (hourly mean/min,
+  // reduced host-side), not arithmetic on the precipitation chance - see
+  // backend/weather_providers.go's sentinelHumidityPct/sentinelVisibilityNm.
+  // The backend sends null (mapped from its own -1 sentinel) when a provider
+  // never reported either field for the day; that must render as the dash,
+  // never as a fabricated-but-plausible number.
+  it('shows a dash for humidity and visibility when the provider has no reading', () => {
+    render(<ForecastDrawer forecast={[buildDay({ humidityPct: null, visibilityNm: null })]} loading={false} error={null} unit="metric" />)
 
-    // Both are computed from precipitation; with no precipitation reading
-    // they would otherwise render a fabricated but plausible number.
     expect(screen.getByTestId('forecast-selected-humidity')).toHaveTextContent('—')
     expect(screen.getByTestId('forecast-selected-visibility')).toHaveTextContent('—')
+  })
+
+  it('shows the real humidity and visibility values the provider reported', () => {
+    render(<ForecastDrawer forecast={[buildDay({ humidityPct: 62, visibilityNm: 8.5 })]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByTestId('forecast-selected-humidity')).toHaveTextContent('62%')
+    expect(screen.getByTestId('forecast-selected-visibility')).toHaveTextContent('8.5 nm')
+  })
+
+  // The most important assertion in this suite: a genuine 0.0nm visibility
+  // reading (real fog thick enough to hide the bow) must render as "0.0 nm",
+  // not be mistaken for "no reading" and collapse into the dash. This is
+  // exactly the "0% precip during actual rainfall" failure mode one level
+  // worse - see the sentinelVisibilityNm doc comment in weather_providers.go.
+  it('renders a genuine 0.0 nm visibility as a real reading, not the absent dash', () => {
+    render(<ForecastDrawer forecast={[buildDay({ visibilityNm: 0 })]} loading={false} error={null} unit="metric" />)
+
+    const visibility = screen.getByTestId('forecast-selected-visibility')
+    expect(visibility).toHaveTextContent('0.0 nm')
+    expect(visibility).not.toHaveTextContent('—')
   })
 
   it('shows the precipitation summary sentence for the selected day', () => {

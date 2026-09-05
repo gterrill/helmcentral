@@ -14,10 +14,20 @@
 //	GET https://api.open-meteo.com/v1/forecast
 //	  ?latitude=<lat>&longitude=<lon>
 //	  &current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,precipitation_probability
-//	  &hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day
+//	  &hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day,relative_humidity_2m,visibility
 //	  &daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max,sunrise,sunset
 //	  &wind_speed_unit=ms&timezone=auto&forecast_days=<days>
 //	-> {"latitude":..,"longitude":..,"current":{...},"hourly":{...},"daily":{...},"utc_offset_seconds":...,"timezone":"..."}
+//
+// relative_humidity_2m/visibility (added alongside humidity_pct/visibility_m
+// on this plugin's fetch_forecast output) are both hourly-only - Open-Meteo
+// has no daily aggregate for either that is part of its documented, stable
+// API (see open-meteo.go's Hourly struct doc comment). A live 16-day capture
+// (testdata/open_meteo_response_16day_sydney.json) showed visibility going
+// null for the window's last several hours while relative_humidity_2m stayed
+// populated the whole way - both real, not shortened arrays in that
+// particular capture, though a shorter array is also possible and guarded
+// against separately.
 //
 // IMPORTANT: Open-Meteo returns naive local times (not RFC3339), coupled with
 // an explicit utc_offset_seconds field. This plugin converts every timestamp

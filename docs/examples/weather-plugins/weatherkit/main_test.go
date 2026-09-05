@@ -338,6 +338,87 @@ func TestParseWeatherKitResponse_MapsCannedResponseCorrectly(t *testing.T) {
 	if hour1.WindGustMS != 0 {
 		t.Errorf("expected hourly[1].wind_gust_ms=0 (absent from source, no self-fallback), got %v", hour1.WindGustMS)
 	}
+
+	// This fixture predates humidity/visibility - neither key is present in
+	// its JSON at all. Both must decode to nil, not a fabricated 0, which on
+	// visibility would be a false "you cannot see the bow" reading.
+	if hour0.HumidityPct != nil {
+		t.Errorf("expected hourly[0].humidity_pct=nil (absent from this fixture), got %v", *hour0.HumidityPct)
+	}
+	if hour0.VisibilityM != nil {
+		t.Errorf("expected hourly[0].visibility_m=nil (absent from this fixture), got %v", *hour0.VisibilityM)
+	}
+}
+
+// weatherkit_response_dry_nearterm.json is a real, live-captured WeatherKit
+// response (unlike the hand-written sample fixture above) whose
+// forecastHourly.hours[] entries already carry genuine humidity (a 0-1
+// fraction) and visibility (metres) fields - confirming the plan's assumption
+// about WeatherKit's wire units before this plugin ever reads them.
+func TestParseWeatherKitResponse_MapsHumidityAndVisibilityFromLiveFixture(t *testing.T) {
+	body, err := os.ReadFile("testdata/weatherkit_response_dry_nearterm.json")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+
+	out, err := parseWeatherKitResponse(body, 0)
+	if err != nil {
+		t.Fatalf("parseWeatherKitResponse returned error: %v", err)
+	}
+	if len(out.Hourly) == 0 {
+		t.Fatalf("expected at least 1 hourly entry")
+	}
+
+	hour0 := out.Hourly[0]
+	// The fixture's hours[0].humidity is 0.9 (a fraction) -> 90.0 pct.
+	if hour0.HumidityPct == nil || *hour0.HumidityPct != 90.0 {
+		t.Fatalf("expected hourly[0].humidity_pct=90.0 (0.9 fraction * 100), got %v", hour0.HumidityPct)
+	}
+	// The fixture's hours[0].visibility is 14661.0 (already metres) -> passes through.
+	if hour0.VisibilityM == nil || *hour0.VisibilityM != 14661.0 {
+		t.Fatalf("expected hourly[0].visibility_m=14661.0 (metres, unconverted), got %v", hour0.VisibilityM)
+	}
+}
+
+// WeatherKit's humidity is a 0-1 fraction (see this file's top doc comment
+// and the precipitationChance precedent) but the guest contract's field is
+// "*_pct", so it must be multiplied by 100 here - visibility is already
+// metres and passes through unconverted.
+func TestMapForecastHours_ConvertsHumidityFractionAndPassesVisibilityThrough(t *testing.T) {
+	humidity := 0.62
+	visibility := 9260.0
+	hours := mapForecastHours([]weatherKitHourForecast{
+		{ForecastStart: "2026-08-09T14:00:00Z", ConditionCode: "Clear", Humidity: &humidity, Visibility: &visibility},
+	})
+	if len(hours) != 1 {
+		t.Fatalf("expected 1 hour, got %d", len(hours))
+	}
+	if hours[0].HumidityPct == nil || *hours[0].HumidityPct != 62.0 {
+		t.Fatalf("expected humidity_pct=62.0 (0.62 fraction * 100), got %v", hours[0].HumidityPct)
+	}
+	if hours[0].VisibilityM == nil || *hours[0].VisibilityM != 9260.0 {
+		t.Fatalf("expected visibility_m=9260.0 (already metres, unconverted), got %v", hours[0].VisibilityM)
+	}
+}
+
+// Both fields are ALREADY on WeatherKit's wire (confirmed by the live fixture
+// above) but were being silently dropped by this plugin's struct before this
+// change - a plugin built before today never populated
+// weatherKitHourForecast.Humidity/Visibility at all, so this pins that a
+// genuinely absent source field yields nil, not 0.
+func TestMapForecastHours_MissingHumidityAndVisibilityYieldNil(t *testing.T) {
+	hours := mapForecastHours([]weatherKitHourForecast{
+		{ForecastStart: "2026-08-09T14:00:00Z", ConditionCode: "Clear"}, // no humidity/visibility
+	})
+	if len(hours) != 1 {
+		t.Fatalf("expected 1 hour, got %d", len(hours))
+	}
+	if hours[0].HumidityPct != nil {
+		t.Errorf("expected a missing humidity to map to nil, got %v", *hours[0].HumidityPct)
+	}
+	if hours[0].VisibilityM != nil {
+		t.Errorf("expected a missing visibility to map to nil, got %v", *hours[0].VisibilityM)
+	}
 }
 
 func TestParseWeatherKitResponse_CapsDaysAtInputDaysWhenPositive(t *testing.T) {

@@ -672,6 +672,211 @@ func TestWeatherForecast_RejectsSentinelPosition(t *testing.T) {
 	}
 }
 
+// --- humidity/visibility sentinels ---
+//
+// Humidity and visibility mirror precipitation's absence problem, one level
+// worse: precipitation's wire field is a bare float64 that the plugin itself
+// already writes -1 into for "no data" (see sentinelPrecipitationPct above).
+// Humidity/visibility's wire field is a POINTER
+// (wasmWeatherHourOutput.HumidityPct / VisibilityM), so there is a second,
+// distinct absence a bare float64 could never represent: a plugin built
+// before this feature shipped simply omits the JSON key, which decodes to
+// nil. Both nil and a plugin-emitted negative must collapse to -1; a genuine
+// 0.0 nm visibility - real fog thick enough to hide the bow - must not.
+func TestSentinelHumidityPct_DistinguishesRealZeroFromAbsent(t *testing.T) {
+	zero := 0.0
+	real := 62.5
+	over := 140.0
+	negative := -5.0
+	for _, tc := range []struct {
+		name string
+		in   *float64
+		want float64
+	}{
+		{"nil (field absent from the wire entirely) means absent", nil, -1},
+		{"a real zero stays zero", &zero, 0},
+		{"a real reading passes through", &real, 62.5},
+		{"a negative from the plugin means absent", &negative, -1},
+		{"out-of-range high clamps to 100", &over, 100},
+	} {
+		if got := sentinelHumidityPct(tc.in); got != tc.want {
+			t.Errorf("%s: sentinelHumidityPct(%v) = %v, want %v", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+// This is the whole point of the pointer-based convention sentinelVisibilityNm
+// documents: a real 0.0 metre reading (dense fog) MUST survive as 0.0 nm, not
+// collapse into the same -1 sentinel as "field absent". A bare float64 field
+// could never make this distinction, because JSON-absent and JSON-zero both
+// decode to 0.0 - the same failure mode that once rendered a confident "0%
+// precip" during real rainfall (see docs/adr/0035-weather-local-day-boundaries.md).
+// This is the most important test in this change.
+func TestSentinelVisibilityNm_RealZeroSurvivesButAbsenceDoesNot(t *testing.T) {
+	zero := 0.0
+	oneNm := 1852.0
+	negative := -1.0
+	for _, tc := range []struct {
+		name string
+		in   *float64
+		want float64
+	}{
+		{"nil (field absent from the wire entirely) means absent", nil, -1},
+		{"a genuine 0.0m reading (real fog) survives as 0.0nm, not absent", &zero, 0},
+		{"1852m converts to exactly 1nm", &oneNm, 1},
+		{"a negative from the plugin means absent", &negative, -1},
+	} {
+		if got := sentinelVisibilityNm(tc.in); got != tc.want {
+			t.Errorf("%s: sentinelVisibilityNm(%v) = %v, want %v", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestBuildHourlySeriesByDay_CarriesHumidityAndVisibilityIntoCloudSeries(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	// 03:00/04:00 UTC = 13:00/14:00 AEST - both land on the same local date,
+	// unlike the day-boundary-crossing times TestBuildHourlySeriesByDay_BucketsHoursByLocalDate uses.
+	hourly := []weatherHourPoint{
+		{Time: time.Date(2026, 6, 14, 3, 0, 0, 0, time.UTC), TemperatureC: 18, Condition: "cloudy", HumidityPct: 55, VisibilityNm: 8},
+		{Time: time.Date(2026, 6, 14, 4, 0, 0, 0, time.UTC), TemperatureC: 17, Condition: "cloudy", HumidityPct: -1, VisibilityNm: -1},
+	}
+
+	_, _, _, cloudByDay := buildHourlySeriesByDay(hourly, loc)
+
+	day := cloudByDay["2026-06-14"]
+	if len(day) != 2 {
+		t.Fatalf("expected 2 cloud entries, got %d", len(day))
+	}
+	if day[0].HumidityPct != 55 || day[0].VisibilityNm != 8 {
+		t.Fatalf("expected the real hour's humidity/visibility to pass through, got %+v", day[0])
+	}
+	if day[1].HumidityPct != -1 || day[1].VisibilityNm != -1 {
+		t.Fatalf("expected the absent hour's sentinel to pass through, got %+v", day[1])
+	}
+}
+
+// buildWindSummary's exact shape - `< 0` skip, `found` flag, absent when
+// nothing qualifies - applied to humidity: an absent hour must not drag the
+// mean down toward a fabricated low reading.
+func TestReduceHumidityPct_MeansValidSamplesSkippingAbsent(t *testing.T) {
+	hourly := []weatherHourlyCloudData{
+		{HumidityPct: 40},
+		{HumidityPct: -1}, // absent hour must not drag the mean down
+		{HumidityPct: 60},
+	}
+	if got := reduceHumidityPct(hourly); got != 50 {
+		t.Fatalf("expected mean of valid samples (40,60) = 50, got %v", got)
+	}
+}
+
+func TestReduceHumidityPct_AllAbsentStaysSentinel(t *testing.T) {
+	hourly := []weatherHourlyCloudData{{HumidityPct: -1}, {HumidityPct: -1}}
+	if got := reduceHumidityPct(hourly); got != -1 {
+		t.Fatalf("expected -1 when every hour is absent, not a fabricated 0, got %v", got)
+	}
+}
+
+// Visibility is hazard-shaped in the low direction: the worst (minimum)
+// reading of the day is what a skipper needs, not a mean that would smooth a
+// 0.5nm fog bank into a comfortable-looking 8nm.
+func TestReduceVisibilityNm_TakesMinimumOfValidSamplesSkippingAbsent(t *testing.T) {
+	hourly := []weatherHourlyCloudData{
+		{VisibilityNm: 10},
+		{VisibilityNm: -1}, // absent hour must not win as the "worst" reading
+		{VisibilityNm: 3},
+		{VisibilityNm: 6},
+	}
+	if got := reduceVisibilityNm(hourly); got != 3 {
+		t.Fatalf("expected the minimum of valid samples (3), got %v", got)
+	}
+}
+
+func TestReduceVisibilityNm_AllAbsentStaysSentinel(t *testing.T) {
+	hourly := []weatherHourlyCloudData{{VisibilityNm: -1}, {VisibilityNm: -1}}
+	if got := reduceVisibilityNm(hourly); got != -1 {
+		t.Fatalf("expected -1 when every hour is absent, not a fabricated 0, got %v", got)
+	}
+}
+
+// The single most important test in this change: a genuine 0.0nm visibility
+// reading - fog thick enough that the bow is out of sight - must survive the
+// day-level MIN reduction as a real 0.0, not be mistaken for "no data" and
+// reported as the -1 sentinel.
+func TestReduceVisibilityNm_GenuineZeroSurvivesAsTheWorstReading(t *testing.T) {
+	hourly := []weatherHourlyCloudData{
+		{VisibilityNm: 8},
+		{VisibilityNm: 0}, // real fog - must win as the day's minimum
+		{VisibilityNm: 5},
+	}
+	if got := reduceVisibilityNm(hourly); got != 0 {
+		t.Fatalf("expected a genuine 0.0nm reading to survive as the day's minimum, got %v", got)
+	}
+}
+
+func TestBuildDayData_SetsHumidityAndVisibilityFromCloudSeries(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	referenceDatetime := time.Date(2026, 6, 14, 23, 0, 0, 0, time.UTC)
+	dayPoint := weatherDayPoint{
+		Start:     time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC),
+		Condition: "cloudy",
+	}
+	cloudSeries := []weatherHourlyCloudData{
+		{HumidityPct: 40, VisibilityNm: 10},
+		{HumidityPct: 60, VisibilityNm: 4},
+	}
+
+	day := buildDayData(dayPoint, referenceDatetime, loc, nil, nil, nil, cloudSeries)
+
+	if day.HumidityPct != 50 {
+		t.Fatalf("expected day humidity to be the mean (50), got %v", day.HumidityPct)
+	}
+	if day.VisibilityNm != 4 {
+		t.Fatalf("expected day visibility to be the minimum (4), got %v", day.VisibilityNm)
+	}
+}
+
+// ALL hours absent must report -1 for the day, not 0 - the same "0% precip
+// during actual rainfall" failure mode ADR 0035 documents, but graver here:
+// a fabricated 0.0nm visibility on a clear day would read as "you cannot see
+// the bow" when nobody ever measured visibility at all.
+func TestBuildDayData_AllHoursAbsentHumidityAndVisibilityStaySentinelNotZero(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*60*60)
+	referenceDatetime := time.Date(2026, 6, 14, 23, 0, 0, 0, time.UTC)
+	dayPoint := weatherDayPoint{Start: time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC), Condition: "cloudy"}
+	cloudSeries := []weatherHourlyCloudData{
+		{HumidityPct: -1, VisibilityNm: -1},
+		{HumidityPct: -1, VisibilityNm: -1},
+	}
+
+	day := buildDayData(dayPoint, referenceDatetime, loc, nil, nil, nil, cloudSeries)
+
+	if day.HumidityPct != -1 {
+		t.Fatalf("expected an all-absent day to report humidity -1, not a fabricated 0, got %v", day.HumidityPct)
+	}
+	if day.VisibilityNm != -1 {
+		t.Fatalf("expected an all-absent day to report visibility -1, not a fabricated 0, got %v", day.VisibilityNm)
+	}
+}
+
+func TestMapWeatherForecastDayResponse_IncludesHumidityAndVisibility(t *testing.T) {
+	day := weatherForecastDayData{HumidityPct: 62, VisibilityNm: 7.5}
+	got := mapWeatherForecastDayResponse(day, "2026-06-14")
+	if got.HumidityPct != 62 || got.VisibilityNm != 7.5 {
+		t.Fatalf("expected humidity/visibility to pass through to the response, got %+v", got)
+	}
+}
+
+func TestMapWeatherHourlyCloudResponse_IncludesHumidityAndVisibility(t *testing.T) {
+	entries := []weatherHourlyCloudData{{Label: "6AM", HourOfDay: 6, HumidityPct: 71, VisibilityNm: -1}}
+	got := mapWeatherHourlyCloudResponse(entries)
+	if got[0].HumidityPct != 71 {
+		t.Fatalf("expected humidity to pass through, got %v", got[0].HumidityPct)
+	}
+	if got[0].VisibilityNm != -1 {
+		t.Fatalf("expected absent visibility sentinel to pass through, got %v", got[0].VisibilityNm)
+	}
+}
+
 // The vessel's local zone - not UTC - must reach the plugin, so the provider
 // rolls its daily summaries up on the same boundaries the host buckets on.
 func TestWeatherForecast_PassesVesselLocalTimezoneToProvider(t *testing.T) {

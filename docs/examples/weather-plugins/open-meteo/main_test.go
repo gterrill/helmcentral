@@ -163,16 +163,18 @@ func TestParseOpenMeteoForecast_FullResponse(t *testing.T) {
 			Sunset:                      []string{"2026-07-19T17:15"},
 		},
 		Hourly: &struct {
-			Time                     []string  `json:"time"`
-			Temperature2m            []float64 `json:"temperature_2m"`
-			WeatherCode              []int     `json:"weather_code"`
-			WindSpeed10m             []float64 `json:"wind_speed_10m"`
-			WindGusts10m             []float64 `json:"wind_gusts_10m"`
-			WindDirection10m         []int     `json:"wind_direction_10m"`
-			PrecipitationProbability []int     `json:"precipitation_probability"`
-			Precipitation            []float64 `json:"precipitation"`
-			UVIndex                  []float64 `json:"uv_index"`
-			IsDay                    []int     `json:"is_day"`
+			Time                     []string   `json:"time"`
+			Temperature2m            []float64  `json:"temperature_2m"`
+			WeatherCode              []int      `json:"weather_code"`
+			WindSpeed10m             []float64  `json:"wind_speed_10m"`
+			WindGusts10m             []float64  `json:"wind_gusts_10m"`
+			WindDirection10m         []int      `json:"wind_direction_10m"`
+			PrecipitationProbability []int      `json:"precipitation_probability"`
+			Precipitation            []float64  `json:"precipitation"`
+			UVIndex                  []float64  `json:"uv_index"`
+			IsDay                    []int      `json:"is_day"`
+			RelativeHumidity2m       []*float64 `json:"relative_humidity_2m"`
+			Visibility               []*float64 `json:"visibility"`
 		}{
 			Time:                     []string{"2026-07-19T17:00", "2026-07-19T18:00"},
 			Temperature2m:            []float64{15.2, 14.5},
@@ -184,6 +186,9 @@ func TestParseOpenMeteoForecast_FullResponse(t *testing.T) {
 			Precipitation:            []float64{0.0, 0.1},
 			UVIndex:                  []float64{0.0, 0.0},
 			IsDay:                    []int{0, 0},
+			// RelativeHumidity2m/Visibility deliberately omitted here - this
+			// test predates humidity/visibility and pins the rest of the
+			// mapping; see TestParseOpenMeteoForecast_MapsHumidityAndVisibility.
 		},
 	}
 
@@ -389,5 +394,212 @@ func TestOpenMeteoRequestURL_ClampsDaysToSupportedRange(t *testing.T) {
 		if !strings.Contains(url, tc.want) {
 			t.Errorf("days=%d: expected %q in URL, got: %s", tc.days, tc.want, url)
 		}
+	}
+}
+
+// Confirmed via a live capture (docs/examples/weather-plugins/open-meteo/testdata/open_meteo_response_16day_sydney.json)
+// that Open-Meteo requires these to be explicitly requested; they are not
+// included in the plugin's pre-existing hourly parameter list.
+func TestOpenMeteoRequestURL_RequestsHumidityAndVisibility(t *testing.T) {
+	url := openMeteoRequestURL(wasmFetchForecastInput{Lat: 1, Lon: 2, Days: 7, Timezone: "UTC"})
+	if !strings.Contains(url, "relative_humidity_2m") {
+		t.Errorf("expected relative_humidity_2m in the hourly parameter list, got: %s", url)
+	}
+	if !strings.Contains(url, "visibility") {
+		t.Errorf("expected visibility in the hourly parameter list, got: %s", url)
+	}
+}
+
+// Open-Meteo reports relative_humidity_2m as a 0-100 percentage already (see
+// hourly_units in the live fixture) and visibility in metres - both pass
+// through unconverted onto this plugin's *float64 wire fields.
+func TestParseOpenMeteoForecast_MapsHumidityAndVisibility(t *testing.T) {
+	humidity := []float64{55.0, 62.0}
+	visibility := []float64{24140.0, 18000.0}
+	resp := &openMeteoResponse{
+		UTCOffsetSeconds: 0,
+		Current: &struct {
+			Time                     string  `json:"time"`
+			Temperature2m            float64 `json:"temperature_2m"`
+			WeatherCode              int     `json:"weather_code"`
+			WindSpeed10m             float64 `json:"wind_speed_10m"`
+			WindGusts10m             float64 `json:"wind_gusts_10m"`
+			WindDirection10m         int     `json:"wind_direction_10m"`
+			IsDay                    int     `json:"is_day"`
+			PrecipitationProbability int     `json:"precipitation_probability"`
+		}{Time: "2026-07-19T18:30"},
+		Hourly: &struct {
+			Time                     []string   `json:"time"`
+			Temperature2m            []float64  `json:"temperature_2m"`
+			WeatherCode              []int      `json:"weather_code"`
+			WindSpeed10m             []float64  `json:"wind_speed_10m"`
+			WindGusts10m             []float64  `json:"wind_gusts_10m"`
+			WindDirection10m         []int      `json:"wind_direction_10m"`
+			PrecipitationProbability []int      `json:"precipitation_probability"`
+			Precipitation            []float64  `json:"precipitation"`
+			UVIndex                  []float64  `json:"uv_index"`
+			IsDay                    []int      `json:"is_day"`
+			RelativeHumidity2m       []*float64 `json:"relative_humidity_2m"`
+			Visibility               []*float64 `json:"visibility"`
+		}{
+			Time:                     []string{"2026-07-19T17:00", "2026-07-19T18:00"},
+			Temperature2m:            []float64{15.2, 14.5},
+			WeatherCode:              []int{2, 3},
+			WindSpeed10m:             []float64{5.0, 5.5},
+			WindGusts10m:             []float64{11.0, 12.3},
+			WindDirection10m:         []int{175, 180},
+			PrecipitationProbability: []int{20, 25},
+			Precipitation:            []float64{0.0, 0.1},
+			UVIndex:                  []float64{0.0, 0.0},
+			IsDay:                    []int{0, 0},
+			RelativeHumidity2m:       []*float64{&humidity[0], &humidity[1]},
+			Visibility:               []*float64{&visibility[0], &visibility[1]},
+		},
+	}
+
+	out, err := parseOpenMeteoForecast(resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if len(out.Hourly) != 2 {
+		t.Fatalf("expected 2 hourly entries, got %d", len(out.Hourly))
+	}
+	if out.Hourly[0].HumidityPct == nil || *out.Hourly[0].HumidityPct != 55.0 {
+		t.Errorf("hourly[0].humidity_pct = %v, want 55.0", out.Hourly[0].HumidityPct)
+	}
+	if out.Hourly[0].VisibilityM == nil || *out.Hourly[0].VisibilityM != 24140.0 {
+		t.Errorf("hourly[0].visibility_m = %v, want 24140.0", out.Hourly[0].VisibilityM)
+	}
+	if out.Hourly[1].HumidityPct == nil || *out.Hourly[1].HumidityPct != 62.0 {
+		t.Errorf("hourly[1].humidity_pct = %v, want 62.0", out.Hourly[1].HumidityPct)
+	}
+}
+
+// A live 16-day Sydney capture (see this package's testdata) showed
+// visibility going null for the last several hours of the window while
+// relative_humidity_2m stayed populated - a real null entry within an
+// otherwise-full-length array. json.Unmarshal decodes a JSON null into a nil
+// *float64 element, which must reach the wire contract as nil, not a
+// fabricated 0.0.
+func TestParseOpenMeteoForecast_NullVisibilityEntryBecomesNilNotZero(t *testing.T) {
+	humidity := 70.0
+	resp := &openMeteoResponse{
+		Current: &struct {
+			Time                     string  `json:"time"`
+			Temperature2m            float64 `json:"temperature_2m"`
+			WeatherCode              int     `json:"weather_code"`
+			WindSpeed10m             float64 `json:"wind_speed_10m"`
+			WindGusts10m             float64 `json:"wind_gusts_10m"`
+			WindDirection10m         int     `json:"wind_direction_10m"`
+			IsDay                    int     `json:"is_day"`
+			PrecipitationProbability int     `json:"precipitation_probability"`
+		}{Time: "2026-07-19T18:30"},
+		Hourly: &struct {
+			Time                     []string   `json:"time"`
+			Temperature2m            []float64  `json:"temperature_2m"`
+			WeatherCode              []int      `json:"weather_code"`
+			WindSpeed10m             []float64  `json:"wind_speed_10m"`
+			WindGusts10m             []float64  `json:"wind_gusts_10m"`
+			WindDirection10m         []int      `json:"wind_direction_10m"`
+			PrecipitationProbability []int      `json:"precipitation_probability"`
+			Precipitation            []float64  `json:"precipitation"`
+			UVIndex                  []float64  `json:"uv_index"`
+			IsDay                    []int      `json:"is_day"`
+			RelativeHumidity2m       []*float64 `json:"relative_humidity_2m"`
+			Visibility               []*float64 `json:"visibility"`
+		}{
+			Time:                     []string{"2026-07-19T17:00"},
+			Temperature2m:            []float64{15.2},
+			WeatherCode:              []int{2},
+			WindSpeed10m:             []float64{5.0},
+			WindGusts10m:             []float64{11.0},
+			WindDirection10m:         []int{175},
+			PrecipitationProbability: []int{20},
+			Precipitation:            []float64{0.0},
+			UVIndex:                  []float64{0.0},
+			IsDay:                    []int{0},
+			RelativeHumidity2m:       []*float64{&humidity},
+			Visibility:               []*float64{nil}, // real JSON null, not a shorter array
+		},
+	}
+
+	out, err := parseOpenMeteoForecast(resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if out.Hourly[0].VisibilityM != nil {
+		t.Fatalf("expected a JSON-null visibility entry to map to nil, got %v", *out.Hourly[0].VisibilityM)
+	}
+	if out.Hourly[0].HumidityPct == nil || *out.Hourly[0].HumidityPct != 70.0 {
+		t.Fatalf("expected the populated humidity entry to pass through, got %v", out.Hourly[0].HumidityPct)
+	}
+}
+
+// A live 16-day Sydney response can also return a visibility array SHORTER
+// than the time array outright (see this file's sibling test's doc comment
+// and the plan risk notes) - not just individual nulls within a full-length
+// array. Indexing past the end of a shorter slice must degrade to nil, never
+// panic.
+func TestParseOpenMeteoForecast_GuardsVisibilityArrayShorterThanTime(t *testing.T) {
+	humidity := []float64{70.0, 71.0, 72.0}
+	visibility := 24140.0
+	resp := &openMeteoResponse{
+		Current: &struct {
+			Time                     string  `json:"time"`
+			Temperature2m            float64 `json:"temperature_2m"`
+			WeatherCode              int     `json:"weather_code"`
+			WindSpeed10m             float64 `json:"wind_speed_10m"`
+			WindGusts10m             float64 `json:"wind_gusts_10m"`
+			WindDirection10m         int     `json:"wind_direction_10m"`
+			IsDay                    int     `json:"is_day"`
+			PrecipitationProbability int     `json:"precipitation_probability"`
+		}{Time: "2026-07-19T18:30"},
+		Hourly: &struct {
+			Time                     []string   `json:"time"`
+			Temperature2m            []float64  `json:"temperature_2m"`
+			WeatherCode              []int      `json:"weather_code"`
+			WindSpeed10m             []float64  `json:"wind_speed_10m"`
+			WindGusts10m             []float64  `json:"wind_gusts_10m"`
+			WindDirection10m         []int      `json:"wind_direction_10m"`
+			PrecipitationProbability []int      `json:"precipitation_probability"`
+			Precipitation            []float64  `json:"precipitation"`
+			UVIndex                  []float64  `json:"uv_index"`
+			IsDay                    []int      `json:"is_day"`
+			RelativeHumidity2m       []*float64 `json:"relative_humidity_2m"`
+			Visibility               []*float64 `json:"visibility"`
+		}{
+			Time:                     []string{"2026-07-19T15:00", "2026-07-19T16:00", "2026-07-19T17:00"},
+			Temperature2m:            []float64{15.0, 15.1, 15.2},
+			WeatherCode:              []int{2, 2, 2},
+			WindSpeed10m:             []float64{5.0, 5.0, 5.0},
+			WindGusts10m:             []float64{11.0, 11.0, 11.0},
+			WindDirection10m:         []int{175, 175, 175},
+			PrecipitationProbability: []int{20, 20, 20},
+			Precipitation:            []float64{0.0, 0.0, 0.0},
+			UVIndex:                  []float64{0.0, 0.0, 0.0},
+			IsDay:                    []int{0, 0, 0},
+			RelativeHumidity2m:       []*float64{&humidity[0], &humidity[1], &humidity[2]},
+			Visibility:               []*float64{&visibility}, // only 1 entry for 3 hours
+		},
+	}
+
+	out, err := parseOpenMeteoForecast(resp)
+	if err != nil {
+		t.Fatalf("parseOpenMeteoForecast failed: %v", err)
+	}
+	if len(out.Hourly) != 3 {
+		t.Fatalf("expected 3 hourly entries, got %d", len(out.Hourly))
+	}
+	if out.Hourly[0].VisibilityM == nil || *out.Hourly[0].VisibilityM != 24140.0 {
+		t.Fatalf("expected hourly[0] visibility to pass through, got %v", out.Hourly[0].VisibilityM)
+	}
+	if out.Hourly[1].VisibilityM != nil {
+		t.Fatalf("expected hourly[1] (past the end of the shorter visibility array) to be nil, not zero, got %v", *out.Hourly[1].VisibilityM)
+	}
+	if out.Hourly[2].VisibilityM != nil {
+		t.Fatalf("expected hourly[2] (past the end of the shorter visibility array) to be nil, not zero, got %v", *out.Hourly[2].VisibilityM)
+	}
+	if out.Hourly[2].HumidityPct == nil || *out.Hourly[2].HumidityPct != 72.0 {
+		t.Fatalf("expected humidity (full-length array) to still populate hourly[2], got %v", out.Hourly[2].HumidityPct)
 	}
 }

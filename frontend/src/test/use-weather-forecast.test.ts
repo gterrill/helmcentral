@@ -215,4 +215,59 @@ describe('useWeatherForecast', () => {
 
     expect(result.current.forecast[0].precipitation).toBeNull()
   })
+
+  // Humidity/visibility follow the exact same -1-sentinel convention as
+  // precipitation (see backend/weather_providers.go's sentinelHumidityPct/
+  // sentinelVisibilityNm) - absence maps to null, and a genuine 0 must
+  // survive as 0, not collapse into "unavailable".
+  it('maps absent humidity/visibility to null and keeps a real 0 as 0, at both the day and hourly level', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        provider: 'open-meteo',
+        days: [
+          {
+            day_key: '2026-08-09',
+            date: 'Aug 9',
+            day_name: 'Sunday',
+            condition: 'Foggy',
+            humidity_pct: -1,
+            visibility_nm: 0,
+            hourly_cloud: [
+              { label: '6AM', hour_of_day: 6, humidity_pct: -1, visibility_nm: -1 },
+              { label: '7AM', hour_of_day: 7, humidity_pct: 0, visibility_nm: 0 },
+              { label: '8AM', hour_of_day: 8, humidity_pct: 71, visibility_nm: 6.2 },
+            ],
+          },
+          {
+            day_key: '2026-08-10',
+            date: 'Aug 10',
+            day_name: 'Monday',
+            condition: 'Clear',
+            // humidity_pct/visibility_nm omitted entirely on this day
+          },
+        ],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.forecast[0].humidityPct).toBeNull()
+    expect(result.current.forecast[0].visibilityNm).toBe(0)
+    expect(result.current.forecast[1].humidityPct).toBeNull()
+    expect(result.current.forecast[1].visibilityNm).toBeNull()
+
+    const hourly = result.current.forecast[0].hourlyCloud
+    expect(hourly[0].humidityPct).toBeNull()
+    expect(hourly[0].visibilityNm).toBeNull()
+    expect(hourly[1].humidityPct).toBe(0)
+    expect(hourly[1].visibilityNm).toBe(0)
+    expect(hourly[2].humidityPct).toBe(71)
+    expect(hourly[2].visibilityNm).toBe(6.2)
+  })
 })

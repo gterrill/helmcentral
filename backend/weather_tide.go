@@ -38,10 +38,15 @@ type weatherForecastDayData struct {
 	SunriseTime          string
 	SunsetTime           string
 	MoonPhase            string
-	HourlyWind           []weatherHourlyWindData
-	HourlyPrecip         []weatherHourlyPrecipitationData
-	HourlyUV             []weatherHourlyUVData
-	HourlyCloud          []weatherHourlyCloudData
+	// HumidityPct/VisibilityNm are the day's reduceHumidityPct/
+	// reduceVisibilityNm results (mean / min of the day's hourly cloud
+	// series), -1 when no valid hourly sample exists for the day.
+	HumidityPct  float64
+	VisibilityNm float64
+	HourlyWind   []weatherHourlyWindData
+	HourlyPrecip []weatherHourlyPrecipitationData
+	HourlyUV     []weatherHourlyUVData
+	HourlyCloud  []weatherHourlyCloudData
 }
 
 type weatherHourlyEntryData struct {
@@ -82,6 +87,11 @@ type weatherHourlyCloudData struct {
 	Condition    string
 	TemperatureF float64
 	IsDaylight   bool
+	// HumidityPct/VisibilityNm carry the -1-for-absent sentinel from
+	// weatherHourPoint (see its doc comment) - already reduced to their final
+	// units (percentage, nautical miles) by the time they land here.
+	HumidityPct  float64
+	VisibilityNm float64
 }
 
 type tideTodayData struct {
@@ -396,6 +406,59 @@ func buildPrecipitationSummary(hourly []weatherHourlyPrecipitationData) string {
 	}
 
 	return fmt.Sprintf("%s expected %s.", phrase, when)
+}
+
+// reduceHumidityPct summarizes a day's relative humidity as the MEAN of its
+// valid hourly samples, skipping any hour whose HumidityPct is the -1 "no
+// data" sentinel (sentinelHumidityPct) - the same `< 0` skip / `found` flag
+// shape buildWindSummary uses. Humidity is characteristic-shaped (there is no
+// "worst" reading the way there is for visibility), so a mean best represents
+// the day. Absent when nothing qualifies - never a fabricated 0.
+func reduceHumidityPct(hourly []weatherHourlyCloudData) float64 {
+	sum := 0.0
+	count := 0
+
+	for _, entry := range hourly {
+		if entry.HumidityPct < 0 {
+			continue
+		}
+		sum += entry.HumidityPct
+		count++
+	}
+
+	if count == 0 {
+		return -1
+	}
+	return sum / float64(count)
+}
+
+// reduceVisibilityNm summarizes a day's visibility as the MINIMUM of its
+// valid hourly samples, skipping any hour whose VisibilityNm is the -1 "no
+// data" sentinel (sentinelVisibilityNm) - mirroring reduceHumidityPct's shape
+// but taking the worst reading rather than the mean. Visibility is
+// hazard-shaped in the low direction: the worst visibility of the day is the
+// number a skipper needs, and a mean would smooth a 0.5nm fog bank into a
+// comfortable-looking 8nm. Absent when nothing qualifies - never a fabricated
+// 0, which on this field would read as "you cannot see the bow" rather than
+// "unknown".
+func reduceVisibilityNm(hourly []weatherHourlyCloudData) float64 {
+	min := math.MaxFloat64
+	found := false
+
+	for _, entry := range hourly {
+		if entry.VisibilityNm < 0 {
+			continue
+		}
+		found = true
+		if entry.VisibilityNm < min {
+			min = entry.VisibilityNm
+		}
+	}
+
+	if !found {
+		return -1
+	}
+	return min
 }
 
 func summarizeHourlyForecast(entries []weatherHourlyEntryData) string {

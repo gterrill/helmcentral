@@ -18,13 +18,15 @@ export interface WeatherHourlyPrecipPoint {
 }
 
 /**
- * The backend sends -1 for "the provider reported nothing here", because 0%
- * is itself a legitimate precipitation reading and so cannot double as the
- * absent marker (see sentinelPrecipitationPct in
- * backend/weather_providers.go). Absence becomes null so the UI can render
- * "unavailable" instead of a confident 0%.
+ * The backend sends -1 for "the provider reported nothing here" on several
+ * fields - precipitation chance, humidity, visibility - because 0 is itself a
+ * legitimate reading on every one of them (0% precip, 0% humidity, and most
+ * gravely 0.0nm visibility in real fog) and so cannot double as the absent
+ * marker (see sentinelPrecipitationPct/sentinelHumidityPct/sentinelVisibilityNm
+ * in backend/weather_providers.go). Absence becomes null so the UI can render
+ * "unavailable" instead of a confident-looking number.
  */
-function precipitationPctOrNull(value: number | undefined): number | null {
+function sentinelValueOrNull(value: number | undefined): number | null {
   if (typeof value !== 'number' || value < 0) {
     return null;
   }
@@ -42,6 +44,9 @@ export interface WeatherHourlyCloudPoint {
   condition: string;
   temperatureF: number;
   isDaylight: boolean;
+  /** null when the provider reported no humidity/visibility data for this hour - distinct from a real 0. */
+  humidityPct: number | null;
+  visibilityNm: number | null;
 }
 
 export interface WeatherForecastDay {
@@ -58,6 +63,9 @@ export interface WeatherForecastDay {
   precipitationSummary: string | null;
   /** null when the provider reported no chance-of-precipitation data at all - distinct from a real 0%. */
   precipitation: number | null;
+  /** null when the provider reported no humidity/visibility data at all - distinct from a real 0. */
+  humidityPct: number | null;
+  visibilityNm: number | null;
   sunriseTime: string | null;
   sunsetTime: string | null;
   moonPhase: string | null;
@@ -105,6 +113,8 @@ interface WeatherHourlyCloudApi {
   condition?: string;
   temperature_f?: number;
   is_daylight?: boolean;
+  humidity_pct?: number;
+  visibility_nm?: number;
 }
 
 interface WeatherForecastDayApi {
@@ -120,6 +130,8 @@ interface WeatherForecastDayApi {
   wind_summary?: string;
   precipitation_summary?: string;
   precipitation_pct?: number;
+  humidity_pct?: number;
+  visibility_nm?: number;
   sunrise_time?: string;
   sunset_time?: string;
   moon_phase?: string;
@@ -198,7 +210,9 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
               windDirection: day.wind_direction || '—',
               windSummary: typeof day.wind_summary === 'string' && day.wind_summary !== '' ? day.wind_summary : null,
               precipitationSummary: typeof day.precipitation_summary === 'string' && day.precipitation_summary !== '' ? day.precipitation_summary : null,
-              precipitation: precipitationPctOrNull(day.precipitation_pct),
+              precipitation: sentinelValueOrNull(day.precipitation_pct),
+              humidityPct: sentinelValueOrNull(day.humidity_pct),
+              visibilityNm: sentinelValueOrNull(day.visibility_nm),
               sunriseTime: typeof day.sunrise_time === 'string' && day.sunrise_time !== '' ? day.sunrise_time : null,
               sunsetTime: typeof day.sunset_time === 'string' && day.sunset_time !== '' ? day.sunset_time : null,
               moonPhase: typeof day.moon_phase === 'string' && day.moon_phase !== '' ? day.moon_phase : null,
@@ -216,7 +230,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                 ? day.hourly_precip.map((entry) => ({
                     label: entry.label || '—',
                     hourOfDay: typeof entry.hour_of_day === 'number' ? entry.hour_of_day : -1,
-                    precipChancePct: precipitationPctOrNull(entry.precipitation_chance_pct),
+                    precipChancePct: sentinelValueOrNull(entry.precipitation_chance_pct),
                     precipIntensityMm: typeof entry.precipitation_intensity_mm === 'number' ? entry.precipitation_intensity_mm : 0,
                   }))
                 : [],
@@ -233,6 +247,8 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600) {
                     condition: entry.condition || 'Unknown',
                     temperatureF: typeof entry.temperature_f === 'number' ? entry.temperature_f : -1,
                     isDaylight: Boolean(entry.is_daylight),
+                    humidityPct: sentinelValueOrNull(entry.humidity_pct),
+                    visibilityNm: sentinelValueOrNull(entry.visibility_nm),
                   }))
                 : [],
             };

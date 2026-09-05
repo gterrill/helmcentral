@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,6 +76,77 @@ func TestWasmWeatherProvider_FetchForecast_MapsFixtureFieldsCorrectly(t *testing
 	}
 	if bundle.CachedAt.IsZero() {
 		t.Errorf("expected CachedAt to be set")
+	}
+
+	// weathervalid.wasm predates humidity/visibility and never emits either
+	// field - the real "field entirely absent from the wire" case, exercised
+	// end-to-end through an actual compiled plugin rather than a literal Go
+	// struct. It must map to the -1 sentinel, never a fabricated 0.
+	for _, h := range bundle.Hourly {
+		if h.HumidityPct != -1 {
+			t.Errorf("expected the fixture plugin (which never emits humidity_pct) to map to -1, got %v", h.HumidityPct)
+		}
+		if h.VisibilityNm != -1 {
+			t.Errorf("expected the fixture plugin (which never emits visibility_m) to map to -1, got %v", h.VisibilityNm)
+		}
+	}
+}
+
+// wasmWeatherHourOutput.HumidityPct/VisibilityM are *float64, deliberately -
+// see sentinelHumidityPct/sentinelVisibilityNm in weather_providers.go. A
+// bare float64 would decode a JSON-absent field to 0.0, indistinguishable
+// from a real 0% humidity or 0.0nm visibility reading. This test pins the
+// unmarshal behavior the whole convention depends on.
+func TestWasmWeatherHourOutput_MissingHumidityAndVisibilityUnmarshalToNilNotZero(t *testing.T) {
+	raw := []byte(`{"time":"2026-06-14T00:00:00Z","temperature_c":18}`)
+	var out wasmWeatherHourOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if out.HumidityPct != nil {
+		t.Fatalf("expected HumidityPct to unmarshal to nil when the JSON key is absent, got %v", *out.HumidityPct)
+	}
+	if out.VisibilityM != nil {
+		t.Fatalf("expected VisibilityM to unmarshal to nil when the JSON key is absent, got %v", *out.VisibilityM)
+	}
+}
+
+func TestMapWasmFetchForecastOutput_MissingHumidityAndVisibilityBecomeSentinel(t *testing.T) {
+	out := wasmFetchForecastOutput{
+		Current: wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:    []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+		Hourly:  []wasmWeatherHourOutput{{Time: "2026-06-14T00:00:00Z"}}, // no humidity_pct/visibility_m at all
+	}
+
+	bundle, err := mapWasmFetchForecastOutput(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bundle.Hourly[0].HumidityPct != -1 {
+		t.Fatalf("expected an entirely-missing humidity field to map to the -1 sentinel, got %v", bundle.Hourly[0].HumidityPct)
+	}
+	if bundle.Hourly[0].VisibilityNm != -1 {
+		t.Fatalf("expected an entirely-missing visibility field to map to the -1 sentinel, got %v", bundle.Hourly[0].VisibilityNm)
+	}
+}
+
+// The most important test in this change, repeated at the mapping boundary:
+// a genuine 0.0m visibility reading (real fog) must survive mapWasmFetchForecastOutput
+// as 0.0nm, not collapse into the same -1 sentinel as an absent field.
+func TestMapWasmFetchForecastOutput_GenuineZeroVisibilitySurvives(t *testing.T) {
+	zero := 0.0
+	out := wasmFetchForecastOutput{
+		Current: wasmWeatherCurrentOutput{Time: "2026-06-14T00:00:00Z"},
+		Days:    []wasmWeatherDayOutput{{Start: "2026-06-14T00:00:00Z"}},
+		Hourly:  []wasmWeatherHourOutput{{Time: "2026-06-14T00:00:00Z", VisibilityM: &zero}},
+	}
+
+	bundle, err := mapWasmFetchForecastOutput(out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bundle.Hourly[0].VisibilityNm != 0 {
+		t.Fatalf("expected a genuine 0.0m reading to survive as 0.0nm, not collapse to the -1 sentinel, got %v", bundle.Hourly[0].VisibilityNm)
 	}
 }
 

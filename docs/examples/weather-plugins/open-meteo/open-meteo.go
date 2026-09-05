@@ -55,6 +55,17 @@ type openMeteoResponse struct {
 		Precipitation            []float64 `json:"precipitation"`
 		UVIndex                  []float64 `json:"uv_index"`
 		IsDay                    []int     `json:"is_day"`
+		// RelativeHumidity2m/Visibility are POINTER slices, deliberately -
+		// unlike every other hourly field above. Open-Meteo sends real JSON
+		// nulls in these two (confirmed via a live 16-day capture, see this
+		// package's testdata/open_meteo_response_16day_sydney.json - the
+		// window's last few hours null out visibility while temperature/wind/
+		// etc. stay populated the whole way). A []float64 would silently
+		// decode each null to 0.0 - exactly the latent bug ADR 0035 flags as
+		// an unfixed follow-up for this plugin's other []int/[]float64
+		// fields. Do not add a third instance of it here.
+		RelativeHumidity2m []*float64 `json:"relative_humidity_2m"`
+		Visibility         []*float64 `json:"visibility"`
 	} `json:"hourly"`
 }
 
@@ -99,7 +110,7 @@ func openMeteoRequestURL(input wasmFetchForecastInput) string {
 	return fmt.Sprintf(
 		"https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"+
 			"&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,precipitation_probability"+
-			"&hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day"+
+			"&hourly=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability,precipitation,uv_index,is_day,relative_humidity_2m,visibility"+
 			"&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_probability_max,sunrise,sunset"+
 			"&wind_speed_unit=ms&timezone=%s&forecast_days=%d",
 		input.Lat, input.Lon, neturl.QueryEscape(strings.TrimSpace(input.Timezone)), days,
@@ -150,6 +161,14 @@ type wasmWeatherHourOutput struct {
 	PrecipitationMM        float64 `json:"precipitation_mm"`
 	UVIndex                float64 `json:"uv_index"`
 	IsDaylight             bool    `json:"is_daylight"`
+	// HumidityPct/VisibilityM are *float64 - see the doc comment on
+	// openMeteoResponse.Hourly.RelativeHumidity2m/Visibility above. nil here
+	// means "Open-Meteo had no value for this hour" (either a real JSON null
+	// or an index past the end of a shorter-than-time array); the host maps
+	// nil to its own -1 sentinel (sentinelHumidityPct/sentinelVisibilityNm in
+	// backend/weather_providers.go), never a fabricated 0.
+	HumidityPct *float64 `json:"humidity_pct"`
+	VisibilityM *float64 `json:"visibility_m"`
 }
 
 type wasmFetchForecastOutput struct {
@@ -311,6 +330,21 @@ func parseOpenMeteoForecast(resp *openMeteoResponse) (wasmFetchForecastOutput, e
 
 			isDaylight := resp.Hourly.IsDay[i] == 1
 
+			// Guarded on index bounds AND nil: a live 16-day Sydney capture
+			// showed visibility both going null mid-array and, on other
+			// requests, arriving as an array shorter than time outright - see
+			// the doc comment on openMeteoResponse.Hourly.Visibility above.
+			// Either case must degrade to nil, never a zero-value panic or a
+			// fabricated 0.0.
+			var humidityPct *float64
+			if i < len(resp.Hourly.RelativeHumidity2m) {
+				humidityPct = resp.Hourly.RelativeHumidity2m[i]
+			}
+			var visibilityM *float64
+			if i < len(resp.Hourly.Visibility) {
+				visibilityM = resp.Hourly.Visibility[i]
+			}
+
 			hour := wasmWeatherHourOutput{
 				Time:                   hourTime.UTC().Format(time.RFC3339),
 				TemperatureC:           resp.Hourly.Temperature2m[i],
@@ -322,6 +356,8 @@ func parseOpenMeteoForecast(resp *openMeteoResponse) (wasmFetchForecastOutput, e
 				PrecipitationMM:        resp.Hourly.Precipitation[i],
 				UVIndex:                resp.Hourly.UVIndex[i],
 				IsDaylight:             isDaylight,
+				HumidityPct:            humidityPct,
+				VisibilityM:            visibilityM,
 			}
 			out.Hourly = append(out.Hourly, hour)
 		}
