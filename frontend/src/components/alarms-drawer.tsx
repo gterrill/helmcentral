@@ -1,11 +1,12 @@
 import { BellRing, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
-import { memo, useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Tile } from '@/components/ui/tile'
-import { alarmConditionSentence, formatAlarmTime } from '@/lib/alarm-display'
+import { alarmConditionSentence, formatAlarmReading, formatAlarmTime } from '@/lib/alarm-display'
+import { groupRulesByDomain } from '@/lib/alarm-rules-view'
 import { severityClass } from '@/lib/severity'
 import {
   ALARM_OPERATORS,
@@ -18,6 +19,7 @@ import {
   type AlarmRuleDraft,
 } from '@/hooks/use-alarm-rules'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
+import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 
 function formatTime(value?: string): string {
   if (!value) return '--'
@@ -25,14 +27,13 @@ function formatTime(value?: string): string {
   return Number.isNaN(parsed.getTime()) ? '--' : parsed.toLocaleString()
 }
 
-// A threshold converted from another unit (millibars per hour into pascals
-// per second, say) is routinely a repeating decimal. The rules list is read
-// on a phone screen, not a debugger, so it gets rounded to two decimal
-// places with no padded trailing zeros. The edit form's Threshold input is
-// deliberately exempt. It shows the stored value exactly, because that is
-// what gets saved back if the operator doesn't touch it.
-function formatRuleValue(value: number): string {
-  return Number(value.toFixed(2)).toString()
+// The dwell field is stored in seconds but read on a phone screen, so it
+// gets the coarsest unit that keeps it a whole number: seconds under a
+// minute, minutes under an hour, hours beyond that.
+function formatDwell(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  return `${Math.round(seconds / 3600)}h`
 }
 
 interface AlarmsDrawerProps {
@@ -44,6 +45,7 @@ interface AlarmsDrawerProps {
 export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, onSilence }: AlarmsDrawerProps) {
   const { rules, loading, error, createRule, updateRule, deleteRule } = useAlarmRules()
   const { entries, refresh: refreshLog } = useAlarmLog(true)
+  const { paths: signalKPaths } = useSignalKPaths(true)
   const [draft, setDraft] = useState<AlarmRuleDraft | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -51,6 +53,26 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
 
   // Acknowledging or clearing changes history, so keep the log in step.
   useEffect(() => { void refreshLog() }, [alarms.length, refreshLog])
+
+  // A rule's threshold is stored in SI, same as a gauge binding; this reuses
+  // the same path->units lookup the gauge picker already fetches, so a rule
+  // row and the edit form can both show the reading in operator units.
+  const unitsByPath = useMemo(() => {
+    const map = new Map<string, string | undefined>()
+    for (const path of signalKPaths) map.set(path.path, path.units)
+    return map
+  }, [signalKPaths])
+
+  // A rule is "firing" when it currently has a live alarm on the board,
+  // acknowledged or not (an acknowledged alarm is still live, ADR 0038); the
+  // pill ties the rule list back to the Active Alarms tile above it.
+  const firingRuleIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const alarm of alarms) {
+      if (alarm.phase === 'active' || alarm.phase === 'acknowledged') ids.add(alarm.rule_id)
+    }
+    return ids
+  }, [alarms])
 
   const startCreate = useCallback(() => {
     setEditingId(null)
@@ -210,43 +232,25 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
             No rules configured
           </p>
         ) : (
-          <div className="flex flex-col gap-2">
-            {rules.map((rule) => (
-              <div key={rule.id} className="flex min-w-0 items-center justify-between gap-3 rounded-md border bg-background/60 px-3 py-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm">
-                    {rule.label}
-                    {!rule.enabled && (
-                      <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Disabled</span>
-                    )}
-                    {rule.derived && (
-                      <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                        From a gauge zone
-                      </span>
-                    )}
-                  </p>
-                  <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                    {rule.path} · {rule.op} {rule.op === 'stale' ? `${rule.stale_after_seconds}s` : formatRuleValue(rule.value)} ·{' '}
-                    <span className={severityClass(rule.state)}>{rule.state}</span>
-                  </p>
+          <div className="flex flex-col gap-4">
+            {/* Grouped by the domain segment already in the path (electrical,
+                environment, radar, ...) rather than a second taxonomy the
+                operator would have to maintain; see lib/alarm-rules-view. */}
+            {groupRulesByDomain(rules).map((group) => (
+              <div key={group.domain}>
+                <p className="mb-1.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{group.domain}</p>
+                <div className="flex flex-col gap-2">
+                  {group.rules.map((rule) => (
+                    <RuleRow
+                      key={rule.id}
+                      rule={rule}
+                      unit={unitsByPath.get(rule.path)}
+                      firing={firingRuleIds.has(rule.id)}
+                      onEdit={startEdit}
+                      onDelete={(id) => void deleteRule(id)}
+                    />
+                  ))}
                 </div>
-                {/* A derived rule is edited by editing the gauge zone it comes
-                    from, so offering controls that would only 400 is worse
-                    than offering none. */}
-                {rule.derived ? (
-                  <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                    Edit on the gauge
-                  </span>
-                ) : (
-                  <div className="flex shrink-0 gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => startEdit(rule)} aria-label={`Edit ${rule.label}`}>
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => void deleteRule(rule.id)} aria-label={`Delete ${rule.label}`}>
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -254,9 +258,11 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
 
         {draft && (
           <RuleForm
+            key={editingId ?? 'new'}
             draft={draft}
             error={formError}
             isEditing={editingId !== null}
+            unitsByPath={unitsByPath}
             onChange={setDraft}
             onCancel={() => { setDraft(null); setEditingId(null); setFormError(null) }}
             onSave={() => void save()}
@@ -292,20 +298,137 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, 
   )
 })
 
+/** The line-2 condition text for a rule row: what it watches, what clears it, how long it must hold, and its severity. */
+function RuleCondition({ rule, unit }: { rule: AlarmRule; unit?: string }) {
+  if (rule.op === 'stale') {
+    return (
+      <>
+        no data for {rule.stale_after_seconds}s · <span className={severityClass(rule.state)}>{rule.state}</span>
+      </>
+    )
+  }
+
+  let line = `${rule.op} ${formatAlarmReading(rule.value, unit)}`
+
+  // Only above/below have a clear point; equal/notEqual clear the instant
+  // the value stops matching, so there is nothing extra to say.
+  if (rule.hysteresis > 0 && (rule.op === 'above' || rule.op === 'below')) {
+    const clear = rule.op === 'below' ? rule.value + rule.hysteresis : rule.value - rule.hysteresis
+    line += ` · clears at ${formatAlarmReading(clear, unit)}`
+  }
+
+  if (rule.dwell_seconds > 0) {
+    line += ` · for ${formatDwell(rule.dwell_seconds)}`
+  }
+
+  return (
+    <>
+      {line} · <span className={severityClass(rule.state)}>{rule.state}</span>
+    </>
+  )
+}
+
+interface RuleRowProps {
+  rule: AlarmRule
+  unit?: string
+  firing: boolean
+  onEdit: (rule: AlarmRule) => void
+  onDelete: (id: string) => void
+}
+
+function RuleRow({ rule, unit, firing, onEdit, onDelete }: RuleRowProps) {
+  // Delete confirms inline rather than as a modal, so a mis-tap on the trash
+  // icon isn't the fastest way to lose a rule (Thaler & Sunstein 2008).
+  const [pendingDelete, setPendingDelete] = useState(false)
+
+  const rowClassName = `flex min-w-0 items-center justify-between gap-3 rounded-md border bg-background/60 px-3 py-2 ${firing ? 'border-amber-300' : ''}`
+
+  if (pendingDelete) {
+    return (
+      <div className={rowClassName}>
+        <p className="min-w-0 truncate text-sm">
+          Delete {rule.label}?{firing ? ' It is firing now.' : ''}
+        </p>
+        <div className="flex shrink-0 gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setPendingDelete(false)}>Keep</Button>
+          <Button size="sm" className="bg-red-600 text-white hover:bg-red-700" onClick={() => onDelete(rule.id)}>
+            Delete rule
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={rowClassName}>
+      <div className="min-w-0">
+        <p className="truncate text-sm">
+          {rule.label}
+          {!rule.enabled && (
+            <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Disabled</span>
+          )}
+          {rule.derived && (
+            <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              From a gauge zone
+            </span>
+          )}
+          {firing && (
+            <span className="ml-2 rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-amber-700">
+              firing
+            </span>
+          )}
+        </p>
+        <p className="truncate text-[11px] text-muted-foreground">
+          <RuleCondition rule={rule} unit={unit} />
+        </p>
+      </div>
+      {/* A derived rule is edited by editing the gauge zone it comes from, so
+          offering controls that would only 400 is worse than offering none. */}
+      {rule.derived ? (
+        <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          Edit on the gauge
+        </span>
+      ) : (
+        <div className="flex shrink-0 gap-1">
+          <Button size="sm" variant="ghost" onClick={() => onEdit(rule)} aria-label={`Edit ${rule.label}`}>
+            <Pencil className="size-3.5" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setPendingDelete(true)} aria-label={`Delete ${rule.label}`}>
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface RuleFormProps {
   draft: AlarmRuleDraft
   error: string | null
   isEditing: boolean
+  unitsByPath: Map<string, string | undefined>
   onChange: (draft: AlarmRuleDraft) => void
   onCancel: () => void
   onSave: () => void
 }
 
-function RuleForm({ draft, error, isEditing, onChange, onCancel, onSave }: RuleFormProps) {
+function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, onSave }: RuleFormProps) {
   const set = <K extends keyof AlarmRuleDraft>(key: K, value: AlarmRuleDraft[K]) =>
     onChange({ ...draft, [key]: value })
 
   const isStale = draft.op === 'stale'
+  const unit = unitsByPath.get(draft.path)
+  const hasUnit = typeof unit === 'string' && unit.trim() !== ''
+
+  // Advanced starts open only when the rule already departs from the plain
+  // defaults (an operator editing a tuned rule should see the tuning), never
+  // just because a rule is being edited, since most rules never touch these three.
+  const [advancedOpen, setAdvancedOpen] = useState(() => {
+    const defaults = newAlarmRuleDraft()
+    return draft.hysteresis !== defaults.hysteresis
+      || draft.dwell_seconds !== defaults.dwell_seconds
+      || draft.escalate_after_seconds !== defaults.escalate_after_seconds
+  })
 
   return (
     <div className="mt-3 rounded-md border bg-background/60 p-3">
@@ -346,8 +469,11 @@ function RuleForm({ draft, error, isEditing, onChange, onCancel, onSave }: RuleF
           </Field>
         ) : (
           <Field>
-            <FieldLabel htmlFor="alarm-value">Threshold</FieldLabel>
+            <FieldLabel htmlFor="alarm-value">{hasUnit ? `Threshold (${unit})` : 'Threshold'}</FieldLabel>
             <Input id="alarm-value" type="number" step="any" value={draft.value} onChange={(e) => set('value', Number(e.target.value))} />
+            {hasUnit && (
+              <p className="text-[10px] text-muted-foreground">= {formatAlarmReading(draft.value, unit)}</p>
+            )}
           </Field>
         )}
         <Field>
@@ -361,38 +487,52 @@ function RuleForm({ draft, error, isEditing, onChange, onCancel, onSave }: RuleF
             {RAISABLE_ALARM_STATES.map((state) => <option key={state} value={state}>{state}</option>)}
           </select>
         </Field>
-        {!isStale && (
-          <Field>
-            <FieldLabel htmlFor="alarm-hysteresis">Deadband</FieldLabel>
-            <Input
-              id="alarm-hysteresis"
-              type="number"
-              step="any"
-              value={draft.hysteresis}
-              onChange={(e) => set('hysteresis', Number(e.target.value))}
-            />
-            <p className="text-[10px] text-muted-foreground">How far back past the threshold before it clears.</p>
-          </Field>
-        )}
-        <Field>
-          <FieldLabel htmlFor="alarm-dwell">Must hold for (seconds)</FieldLabel>
-          <Input
-            id="alarm-dwell"
-            type="number"
-            value={draft.dwell_seconds}
-            onChange={(e) => set('dwell_seconds', Number(e.target.value))}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="alarm-escalate">Escalate after (seconds, 0 = never)</FieldLabel>
-          <Input
-            id="alarm-escalate"
-            type="number"
-            value={draft.escalate_after_seconds}
-            onChange={(e) => set('escalate_after_seconds', Number(e.target.value))}
-          />
-        </Field>
       </div>
+
+      <button
+        type="button"
+        className="mt-3 text-[11px] uppercase tracking-[0.16em] text-muted-foreground"
+        aria-expanded={advancedOpen}
+        onClick={() => setAdvancedOpen((open) => !open)}
+      >
+        Advanced
+      </button>
+
+      {advancedOpen && (
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          {!isStale && (
+            <Field>
+              <FieldLabel htmlFor="alarm-hysteresis">Deadband</FieldLabel>
+              <Input
+                id="alarm-hysteresis"
+                type="number"
+                step="any"
+                value={draft.hysteresis}
+                onChange={(e) => set('hysteresis', Number(e.target.value))}
+              />
+              <p className="text-[10px] text-muted-foreground">How far back past the threshold before it clears.</p>
+            </Field>
+          )}
+          <Field>
+            <FieldLabel htmlFor="alarm-dwell">Must hold for (seconds)</FieldLabel>
+            <Input
+              id="alarm-dwell"
+              type="number"
+              value={draft.dwell_seconds}
+              onChange={(e) => set('dwell_seconds', Number(e.target.value))}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="alarm-escalate">Escalate after (seconds, 0 = never)</FieldLabel>
+            <Input
+              id="alarm-escalate"
+              type="number"
+              value={draft.escalate_after_seconds}
+              onChange={(e) => set('escalate_after_seconds', Number(e.target.value))}
+            />
+          </Field>
+        </div>
+      )}
 
       <label className="mt-3 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
         <input type="checkbox" checked={draft.enabled} onChange={(e) => set('enabled', e.target.checked)} />

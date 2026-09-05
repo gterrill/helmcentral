@@ -63,6 +63,18 @@ describe('formatAlarmReading', () => {
   it('formats an unknown-unit reading as a bare number, no trailing space', () => {
     expect(formatAlarmReading(3.14, undefined)).toBe('3.14')
   })
+
+  // The unknown-unit branch used to just be formatQuantity's own
+  // fixed-decimals output, which pads a whole number to "-150.00". This is
+  // the same rounded-and-trimmed rule the alarm rules list has always used
+  // for a threshold with no known unit (formerly its own formatRuleValue),
+  // so a repeating decimal reads at two places and a whole number reads
+  // clean.
+  it('rounds an unknown-unit reading to two decimals and trims trailing zeros', () => {
+    expect(formatAlarmReading(-150)).toBe('-150')
+    expect(formatAlarmReading(0.5)).toBe('0.5')
+    expect(formatAlarmReading(-0.027777)).toBe('-0.03')
+  })
 })
 
 describe('alarmConditionSentence', () => {

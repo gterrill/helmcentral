@@ -43,7 +43,13 @@ export function alarmDisplayUnitId(siUnit?: string): string | null {
 export function formatAlarmReading(value: number, siUnit?: string): string {
   const unitId = alarmDisplayUnitId(siUnit)
   if (unitId === null) {
-    return formatQuantity(value, 'raw', 'raw') ?? String(value)
+    // No unit is known, so this is a bare number rather than a converted
+    // reading. It is rounded to two decimals and trimmed of trailing zeros,
+    // the same rule the rules list has always applied to an unconverted
+    // threshold, so a whole number reads "-150" rather than "-150.00".
+    const formatted = formatQuantity(value, 'raw', 'raw')
+    if (formatted === null) return String(value)
+    return Number(formatted).toString()
   }
 
   const quantity = quantityForSIUnit(siUnit)
