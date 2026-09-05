@@ -23,6 +23,14 @@ There is no way to configure a rule without them. Alarm storms are the most
 common reason people switch marine alarms off, and a switched-off alarm is worse
 than no alarm at all, because you still think something is watching.
 
+The deadband is also why acknowledging does not clear an alarm. Acknowledge
+says you have seen it; it stops the sound and the visual alert, and the alarm
+stays on the board until the value has actually recovered. So that you are not
+left guessing, every alarm card says what it is waiting for, in the units you
+think in: "Falling 1.1 mb/hr. Clears once the fall eases to 0.7 mb/hr." An
+alarm raised by something else on the bus, which has no rule behind it, says
+so and clears when its source clears it.
+
 **Absence is not a value.** A missing path does not satisfy a threshold, so a
 freshly booted boat does not fire every rule at once while the bus comes up. The
 same rule applies in reverse: a live alarm does not clear when its path goes
@@ -59,6 +67,25 @@ Five transports, none of which needs a paid subscription:
 
 `POST /api/alarm-transports/test` probes every enabled transport. Discovering at
 3am that the ntfy topic was mistyped is the failure that justifies one button.
+
+Writing to `notifications.*` has a consequence worth knowing. Helmcentral reads
+the same tree to pick up alarms from other producers, so it has to recognise its
+own output coming back. It does that by path: anything under `helmcentral.` is
+its own, and so is the path of any enabled rule. Those it never shows as a
+second, foreign-looking alarm. A notification under its own namespace that no
+rule here is holding, left behind by a restart or by another Helmcentral
+install pointed at the same SignalK, is cleared from the bus automatically.
+For that reason a development copy of Helmcentral should keep the SignalK
+transport switched off if it talks to the boat's server.
+
+## The rules list
+
+Rules are grouped by what they watch, using the first part of the SignalK path:
+`electrical`, `environment`, `propulsion`, `tanks`, `radar` and so on, in
+alphabetical order. There is nothing to categorise by hand; the path already
+says which system a rule belongs to. A rule whose alarm is live is marked as
+firing. Each rule shows its threshold and the point it clears at in your units,
+and deleting one asks first.
 
 ## Gauge bands are alarm rules
 
