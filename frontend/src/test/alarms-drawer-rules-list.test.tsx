@@ -5,19 +5,12 @@ import { AlarmsDrawer } from '@/components/alarms-drawer'
 import type { AlarmRule } from '@/hooks/use-alarm-rules'
 
 /**
- * The actions test file (alarms-drawer-actions.test.tsx) stubs useAlarmRules
- * with an empty `rules` array, since it only exercises the Active Alarms
- * tile. The rules list itself needs real rule fixtures, so it gets its own
- * file with its own module-level mock rather than reworking a shared one.
+ * Rules are a prop now (lifted into App, see alarms-drawer-actions.test.tsx),
+ * so this file passes real rule fixtures straight into the component;
+ * useAlarmLog is the only hook left to stub.
  */
-const rulesMock = vi.hoisted(() => ({ rules: [] as AlarmRule[] }))
-
 vi.mock('@/hooks/use-alarm-rules', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-alarm-rules')>()),
-  useAlarmRules: () => ({
-    rules: rulesMock.rules, loading: false, error: null,
-    createRule: vi.fn(), updateRule: vi.fn(), deleteRule: vi.fn(),
-  }),
   useAlarmLog: () => ({ entries: [], refresh: vi.fn().mockResolvedValue(undefined) }),
 }))
 
@@ -46,8 +39,19 @@ function rule(overrides: Partial<AlarmRule> = {}): AlarmRule {
 // single node's own text, so the row's full textContent is asserted on
 // directly instead.
 function renderDrawer(rules: AlarmRule[]) {
-  rulesMock.rules = rules
-  const { container } = render(<AlarmsDrawer alarms={[]} onAcknowledge={vi.fn()} onSilence={vi.fn()} />)
+  const { container } = render(
+    <AlarmsDrawer
+      alarms={[]}
+      onAcknowledge={vi.fn()}
+      onSilence={vi.fn()}
+      rules={rules}
+      loading={false}
+      error={null}
+      createRule={vi.fn()}
+      updateRule={vi.fn()}
+      deleteRule={vi.fn()}
+    />,
+  )
   return container
 }
 

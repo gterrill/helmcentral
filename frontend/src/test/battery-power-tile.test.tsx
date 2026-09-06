@@ -202,3 +202,86 @@ test('does not render the alert amber anywhere while discharging, charge rate fa
 
   expect(container.querySelectorAll('.text-amber-600')).toHaveLength(0)
 })
+
+const bands = { warnBelow: 20, alarmBelow: 10 }
+
+test('SoC in band keeps the plain gauge colour and draws both band markers at their threshold widths', () => {
+  render(<BatteryPowerTile {...baseProps} batterySocPercent={63} socBands={bands} />)
+
+  expect(screen.getByText('63')).toHaveClass('text-gauge-primary')
+  expect(screen.getByTestId('soc-band-alarm')).toHaveStyle({ width: '10%' })
+  expect(screen.getByTestId('soc-band-warn')).toHaveStyle({ width: '10%' })
+})
+
+test('SoC below the warn band colours the numeral amber', () => {
+  render(<BatteryPowerTile {...baseProps} batterySocPercent={18} socBands={bands} />)
+
+  expect(screen.getByText('18')).toHaveClass('text-amber-600')
+})
+
+test('SoC below the alarm band colours the numeral red', () => {
+  render(<BatteryPowerTile {...baseProps} batterySocPercent={8} socBands={bands} />)
+
+  expect(screen.getByText('8')).toHaveClass('text-red-600')
+})
+
+test('discharging above the warn band reads "To {warn}%" with the hours to reach it', () => {
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={63}
+      batteryRatePercentPerHour={-2.0}
+      timeToGoHours={-21.5}
+      socBands={bands}
+    />,
+  )
+
+  expect(screen.getByText('To 20%')).toBeInTheDocument()
+  // (63 - 20) / 2.0 = 21.5h, and formatTimeToGo rounds anything >= 10h to a
+  // whole number of hours.
+  expect(screen.getByText('22h')).toBeInTheDocument()
+})
+
+test('discharging between the warn and alarm bands reads "To {alarm}%"', () => {
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={18}
+      batteryRatePercentPerHour={-2.0}
+      timeToGoHours={-4}
+      socBands={bands}
+    />,
+  )
+
+  expect(screen.getByText('To 10%')).toBeInTheDocument()
+})
+
+test('discharging below the alarm band falls back to the plain "To empty" label', () => {
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={8}
+      batteryRatePercentPerHour={-2.0}
+      timeToGoHours={-1}
+      socBands={bands}
+    />,
+  )
+
+  expect(screen.getByText('To empty')).toBeInTheDocument()
+})
+
+test('with no socBands prop the tile behaves exactly as before: no band markers, plain colour, "To empty"', () => {
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={8}
+      batteryRatePercentPerHour={-2.0}
+      timeToGoHours={-1}
+    />,
+  )
+
+  expect(screen.queryByTestId('soc-band-alarm')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('soc-band-warn')).not.toBeInTheDocument()
+  expect(screen.getByText('8')).toHaveClass('text-gauge-primary')
+  expect(screen.getByText('To empty')).toBeInTheDocument()
+})

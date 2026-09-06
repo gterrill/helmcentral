@@ -6,18 +6,14 @@ import type { AlarmRule } from '@/hooks/use-alarm-rules'
 import type { SignalKPath } from '@/hooks/use-signalk-paths'
 
 /**
- * Same mocking approach as alarms-drawer-rules.test.tsx: the form lives
- * inside the same drawer component, so it needs the same two hook mocks.
+ * Rules are a prop now (lifted into App, see alarms-drawer-actions.test.tsx),
+ * so this file passes a rules array straight into the component; only
+ * useAlarmLog and useSignalKPaths still need stubbing.
  */
-const rulesMock = vi.hoisted(() => ({ rules: [] as AlarmRule[] }))
 const pathsMock = vi.hoisted(() => ({ paths: [] as SignalKPath[] }))
 
 vi.mock('@/hooks/use-alarm-rules', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-alarm-rules')>()),
-  useAlarmRules: () => ({
-    rules: rulesMock.rules, loading: false, error: null,
-    createRule: vi.fn(), updateRule: vi.fn(), deleteRule: vi.fn(),
-  }),
   useAlarmLog: () => ({ entries: [], refresh: vi.fn().mockResolvedValue(undefined) }),
 }))
 
@@ -45,9 +41,20 @@ function rule(overrides: Partial<AlarmRule> = {}): AlarmRule {
 }
 
 function renderDrawer(rules: AlarmRule[], paths: SignalKPath[] = []) {
-  rulesMock.rules = rules
   pathsMock.paths = paths
-  render(<AlarmsDrawer alarms={[]} onAcknowledge={vi.fn()} onSilence={vi.fn()} />)
+  render(
+    <AlarmsDrawer
+      alarms={[]}
+      onAcknowledge={vi.fn()}
+      onSilence={vi.fn()}
+      rules={rules}
+      loading={false}
+      error={null}
+      createRule={vi.fn()}
+      updateRule={vi.fn()}
+      deleteRule={vi.fn()}
+    />,
+  )
 }
 
 describe('RuleForm advanced disclosure', () => {

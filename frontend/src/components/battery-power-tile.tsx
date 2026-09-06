@@ -1,6 +1,8 @@
 import { memo } from 'react'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { hoursToBand, socSeverity, type SocBands } from '@/lib/soc-bands'
+import { severityFill, severityTextClass } from '@/lib/severity'
 
 export interface BatteryPowerTileProps {
   batterySocPercent: number | null
@@ -18,6 +20,13 @@ export interface BatteryPowerTileProps {
   timeToGoHours: number | null
   /** Seconds since the electrical feed last reported, or null if unknown. */
   lastUpdateAgeS: number | null
+  /**
+   * Warn/alarm SoC thresholds derived from the operator's alarm rules
+   * (use-soc-bands.ts). Undefined or both-null means no rule exists yet, and
+   * the tile falls back to today's plain, uncoloured behaviour rather than
+   * inventing a threshold.
+   */
+  socBands?: SocBands
 }
 
 function hasChargerError(errorValue: string | null): boolean {
@@ -105,8 +114,21 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     timeToGoHours,
   } = feedStale ? NO_READINGS : props
 
+  // No rule on the pinned SoC path means no bands, so the tile falls back to
+  // today's plain, uncoloured reading rather than inventing a threshold.
+  const socBands = props.socBands ?? { warnBelow: null, alarmBelow: null }
+  // Bands are configuration, not a reading, so they still draw on a stale
+  // feed; the severity check below uses the (possibly blanked) SoC value, so
+  // the numeral and bar fill still go plain the moment the feed is stale.
+  const socSeverityState = socSeverity(batterySocPercent, socBands)
+  const socClass = severityTextClass(socSeverityState, 'text-gauge-primary')
+
   const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
   const socBarWidth = `${Math.max(0, Math.min(100, batterySocPercent ?? 0))}%`
+  const socFillStyle: { width: string; backgroundColor?: string } = { width: socBarWidth }
+  if (socSeverityState !== null) {
+    socFillStyle.backgroundColor = severityFill(socSeverityState)
+  }
 
   const chargingCurrentLabel = chargingCurrentA !== null
     ? `${chargingCurrentA >= 0 ? '+' : '-'}${Math.abs(chargingCurrentA).toFixed(1)}`
@@ -137,7 +159,6 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}`
     : '—'
 
-  const timeToGoValue = formatTimeToGo(timeToGoHours !== null ? Math.abs(timeToGoHours) : null)
   // Direction now lives in the label rather than a battery glyph. The rate's
   // sign decides it; when the rate hasn't reported but a signed time-to-go
   // has, fall back to that, since use-electrical-state.ts already signs it
@@ -146,7 +167,20 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
   const timeToGoIsToFull = batteryRatePercentPerHour !== null
     ? batteryRatePercentPerHour > 0
     : timeToGoHours !== null && timeToGoHours > 0
-  const timeToGoLabel = timeToGoValue === '—' ? '—' : (timeToGoIsToFull ? 'To full' : 'To empty')
+  // While discharging, a configured band below the current SoC is a more
+  // useful figure than time to fully flat: hoursToBand already returns null
+  // while charging, with no rate, or with no lower band to reach, so this
+  // falls through to the plain "To empty" figure exactly as before in those
+  // cases.
+  const bandTarget = hoursToBand(batterySocPercent, batteryRatePercentPerHour, socBands)
+  const timeToGoValue = bandTarget
+    ? formatTimeToGo(bandTarget.hours)
+    : formatTimeToGo(timeToGoHours !== null ? Math.abs(timeToGoHours) : null)
+  const timeToGoLabel = timeToGoValue === '—'
+    ? '—'
+    : bandTarget
+      ? `To ${Math.round(bandTarget.targetPercent)}%`
+      : (timeToGoIsToFull ? 'To full' : 'To empty')
 
   // The charger becomes one status line rather than four separate fields:
   // shown when any of them has reported, so an error surfaces even if the
@@ -167,7 +201,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
         <div className="rounded-md border bg-background/60 px-3 py-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex min-w-0 items-baseline gap-1">
-              <span className="font-display text-6xl leading-none tabular-nums text-gauge-primary md:text-5xl lg:text-7xl">
+              <span className={`font-display text-6xl leading-none tabular-nums md:text-5xl lg:text-7xl ${socClass}`}>
                 {socLabel}
               </span>
               <span className="shrink-0 font-display text-2xl leading-none text-muted-foreground md:text-xl lg:text-2xl">
@@ -184,7 +218,27 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
             </div>
           </div>
           <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-muted/60">
-            <div className="h-full rounded-full bg-gauge-primary" style={{ width: socBarWidth }} />
+            {socBands.alarmBelow !== null && (
+              <div
+                data-testid="soc-band-alarm"
+                className="absolute inset-y-0 left-0 bg-red-600/15"
+                style={{ width: `${socBands.alarmBelow}%` }}
+              />
+            )}
+            {socBands.warnBelow !== null && (
+              <div
+                data-testid="soc-band-warn"
+                className="absolute inset-y-0 bg-amber-500/15"
+                style={{
+                  left: `${socBands.alarmBelow ?? 0}%`,
+                  width: `${Math.max(0, socBands.warnBelow - (socBands.alarmBelow ?? 0))}%`,
+                }}
+              />
+            )}
+            <div
+              className={`h-full rounded-full ${socSeverityState === null ? 'bg-gauge-primary' : ''}`}
+              style={socFillStyle}
+            />
           </div>
           <div className="mt-2 flex items-center justify-between font-display text-[11px] tabular-nums text-muted-foreground">
             <span className="truncate">

@@ -13,7 +13,6 @@ import {
   RAISABLE_ALARM_STATES,
   newAlarmRuleDraft,
   useAlarmLog,
-  useAlarmRules,
   type AlarmOperator,
   type AlarmRule,
   type AlarmRuleDraft,
@@ -40,10 +39,29 @@ interface AlarmsDrawerProps {
   alarms: ActiveAlarm[]
   onAcknowledge: (ruleId: string) => Promise<void>
   onSilence: (ruleId: string) => Promise<void>
+  // Rules are lifted into App and passed down (rather than the drawer
+  // calling useAlarmRules() itself) so a rule saved here is immediately
+  // visible to other consumers of the same list, such as the battery tile's
+  // SoC bands, without a reload.
+  rules: AlarmRule[]
+  loading: boolean
+  error: string | null
+  createRule: (draft: AlarmRuleDraft) => Promise<void>
+  updateRule: (id: string, draft: AlarmRuleDraft) => Promise<void>
+  deleteRule: (id: string) => Promise<void>
 }
 
-export const AlarmsDrawer = memo(function AlarmsDrawer({ alarms, onAcknowledge, onSilence }: AlarmsDrawerProps) {
-  const { rules, loading, error, createRule, updateRule, deleteRule } = useAlarmRules()
+export const AlarmsDrawer = memo(function AlarmsDrawer({
+  alarms,
+  onAcknowledge,
+  onSilence,
+  rules,
+  loading,
+  error,
+  createRule,
+  updateRule,
+  deleteRule,
+}: AlarmsDrawerProps) {
   const { entries, refresh: refreshLog } = useAlarmLog(true)
   const { paths: signalKPaths } = useSignalKPaths(true)
   const [draft, setDraft] = useState<AlarmRuleDraft | null>(null)

@@ -4,14 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { AlarmsDrawer } from '@/components/alarms-drawer'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
 
-// Only the two data hooks are stubbed; the drawer renders exactly as it does
-// in the app otherwise (see alarms-drawer-actions.test.tsx for the pattern).
+// useAlarmLog is the one hook the drawer still owns itself; rules now come
+// in as props (see alarms-drawer-actions.test.tsx for the pattern), so this
+// file passes empty rules directly instead of mocking useAlarmRules.
 vi.mock('@/hooks/use-alarm-rules', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-alarm-rules')>()),
-  useAlarmRules: () => ({
-    rules: [], loading: false, error: null,
-    createRule: vi.fn(), updateRule: vi.fn(), deleteRule: vi.fn(),
-  }),
   useAlarmLog: () => ({ entries: [], refresh: vi.fn().mockResolvedValue(undefined) }),
 }))
 
@@ -37,6 +34,12 @@ function renderDrawer(alarms: ActiveAlarm[]) {
       alarms={alarms}
       onAcknowledge={vi.fn().mockResolvedValue(undefined)}
       onSilence={vi.fn().mockResolvedValue(undefined)}
+      rules={[]}
+      loading={false}
+      error={null}
+      createRule={vi.fn()}
+      updateRule={vi.fn()}
+      deleteRule={vi.fn()}
     />,
   )
   return container

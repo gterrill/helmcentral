@@ -7,20 +7,16 @@ import type { ActiveAlarm } from '@/hooks/use-alarms'
 import type { SignalKPath } from '@/hooks/use-signalk-paths'
 
 /**
- * Copied from alarms-drawer-rules-list.test.tsx's module-mock setup: the
- * Rules tile needs real rule fixtures, plus (new for this fix) SignalK path
- * units so the row can convert a threshold into operator units.
+ * Rules are a prop now (lifted into App, see alarms-drawer-actions.test.tsx),
+ * so this file passes real rule fixtures straight into the component, plus
+ * (new for this fix) SignalK path units so the row can convert a threshold
+ * into operator units.
  */
-const rulesMock = vi.hoisted(() => ({ rules: [] as AlarmRule[] }))
 const pathsMock = vi.hoisted(() => ({ paths: [] as SignalKPath[] }))
 const deleteRuleMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/use-alarm-rules', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-alarm-rules')>()),
-  useAlarmRules: () => ({
-    rules: rulesMock.rules, loading: false, error: null,
-    createRule: vi.fn(), updateRule: vi.fn(), deleteRule: deleteRuleMock,
-  }),
   useAlarmLog: () => ({ entries: [], refresh: vi.fn().mockResolvedValue(undefined) }),
 }))
 
@@ -48,10 +44,21 @@ function rule(overrides: Partial<AlarmRule> = {}): AlarmRule {
 }
 
 function renderDrawer(rules: AlarmRule[], alarms: ActiveAlarm[] = [], paths: SignalKPath[] = []) {
-  rulesMock.rules = rules
   pathsMock.paths = paths
   deleteRuleMock.mockClear()
-  const { container } = render(<AlarmsDrawer alarms={alarms} onAcknowledge={vi.fn()} onSilence={vi.fn()} />)
+  const { container } = render(
+    <AlarmsDrawer
+      alarms={alarms}
+      onAcknowledge={vi.fn()}
+      onSilence={vi.fn()}
+      rules={rules}
+      loading={false}
+      error={null}
+      createRule={vi.fn()}
+      updateRule={vi.fn()}
+      deleteRule={deleteRuleMock}
+    />,
+  )
   return container
 }
 

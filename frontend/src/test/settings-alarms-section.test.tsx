@@ -229,7 +229,19 @@ describe('Settings Alarms section saving', () => {
 
 describe('AlarmsDrawer', () => {
   it('no longer carries the notifications panel', () => {
-    render(<AlarmsDrawer alarms={[]} onAcknowledge={vi.fn()} onSilence={vi.fn()} />)
+    render(
+      <AlarmsDrawer
+        alarms={[]}
+        onAcknowledge={vi.fn()}
+        onSilence={vi.fn()}
+        rules={[]}
+        loading={false}
+        error={null}
+        createRule={vi.fn()}
+        updateRule={vi.fn()}
+        deleteRule={vi.fn()}
+      />,
+    )
 
     expect(screen.getByText('Active Alarms')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /send test/i })).not.toBeInTheDocument()

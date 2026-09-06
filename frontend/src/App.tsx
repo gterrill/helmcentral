@@ -75,6 +75,8 @@ import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
 import { useAlarms } from '@/hooks/use-alarms'
+import { useAlarmRules } from '@/hooks/use-alarm-rules'
+import { useSocBands } from '@/hooks/use-soc-bands'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useServerTrails } from '@/hooks/use-server-trails'
@@ -492,6 +494,17 @@ export function App() {
   } = useVesselState()
 
   const { alarms, worst: worstAlarmState, acknowledge: acknowledgeAlarm, silence: silenceAlarm } = useAlarms()
+  // Lifted out of AlarmsDrawer so a rule saved there reaches the battery
+  // tile's SoC bands (useSocBands below) without a reload.
+  const {
+    rules: alarmRules,
+    loading: alarmRulesLoading,
+    error: alarmRulesError,
+    createRule: createAlarmRule,
+    updateRule: updateAlarmRule,
+    deleteRule: deleteAlarmRule,
+  } = useAlarmRules()
+  const socBands = useSocBands(alarmRules)
   // Only for deciding whether to offer SignalK discovery. Gated on `loading`
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
@@ -1040,6 +1053,7 @@ export function App() {
             batteryRatePercentPerHour={batteryRatePercentPerHour}
             timeToGoHours={timeToGoHours}
             lastUpdateAgeS={electricalLastUpdateAgeS}
+            socBands={socBands}
           />
         )
       case 'solar':
@@ -1278,7 +1292,19 @@ export function App() {
           />
         )
       case 'alarms':
-        return <AlarmsDrawer alarms={alarms} onAcknowledge={acknowledgeAlarm} onSilence={silenceAlarm} />
+        return (
+          <AlarmsDrawer
+            alarms={alarms}
+            onAcknowledge={acknowledgeAlarm}
+            onSilence={silenceAlarm}
+            rules={alarmRules}
+            loading={alarmRulesLoading}
+            error={alarmRulesError}
+            createRule={createAlarmRule}
+            updateRule={updateAlarmRule}
+            deleteRule={deleteAlarmRule}
+          />
+        )
       case 'routes':
         return (
           <RoutePlannerDrawer
