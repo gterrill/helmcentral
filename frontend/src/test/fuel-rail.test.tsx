@@ -199,8 +199,8 @@ describe('zones', () => {
     low.bars[0].level = level('tanks.fuel.5.currentLevel', 'Fwd', [{ from: 0, to: 90, state: 'warn' }])
     renderRail(low)
 
-    expect(screen.getByTestId('fuel-readout-0').innerHTML).toContain('text-amber-500')
-    expect(screen.getByTestId('fuel-readout-1').innerHTML).not.toContain('text-amber-500')
+    expect(screen.getByTestId('fuel-readout-0').innerHTML).toContain('text-amber-600')
+    expect(screen.getByTestId('fuel-readout-1').innerHTML).not.toContain('text-amber-600')
   })
 })
 

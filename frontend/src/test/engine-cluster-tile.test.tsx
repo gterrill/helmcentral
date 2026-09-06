@@ -135,7 +135,7 @@ describe('temperature telltales', () => {
 
     rerender(<EngineClusterTile config={withTelltales()}
       values={{ ...values, 'propulsion.port.temperature': 380.15 }} editing={false} onConfigure={vi.fn()} />)
-    expect(coolant()).toContain('text-red-500')
+    expect(coolant()).toContain('text-red-600')
   })
 
   /**
@@ -154,7 +154,7 @@ describe('temperature telltales', () => {
         })}
         values={{ ...values, 'propulsion.port.temperature': 361.15 }} editing={false} onConfigure={vi.fn()} />,
     )
-    expect(container.querySelector('[data-telltale="coolant"]')!.className).toContain('text-amber-500')
+    expect(container.querySelector('[data-telltale="coolant"]')!.className).toContain('text-amber-600')
   })
 
   // The row belongs with the hours badge inside the dial, not on a strip of its

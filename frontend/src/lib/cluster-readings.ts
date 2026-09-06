@@ -1,5 +1,6 @@
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { convertFromSI, formatQuantity, unitOption } from '@/lib/quantities'
+import { severityTextClass } from '@/lib/severity'
 
 /**
  * Turning a bound path into something an instrument can draw (ADR 0054).
@@ -36,16 +37,5 @@ export function zoneFor(
 }
 
 export function zoneTextClass(state: ReturnType<typeof zoneFor>): string {
-  switch (state) {
-    case 'emergency':
-    case 'alarm':
-      return 'text-red-500'
-    case 'warn':
-    case 'outside':
-      return 'text-amber-500'
-    case 'alert':
-      return 'text-amber-400'
-    default:
-      return 'text-gauge-primary'
-  }
+  return severityTextClass(state, 'text-gauge-primary')
 }

@@ -1,6 +1,7 @@
 import { useId, type CSSProperties, type ReactNode } from 'react'
 
 import type { GaugeZone } from '@/lib/dashboard-widgets'
+import { severityFill } from '@/lib/severity'
 
 /**
  * A ticked instrument dial (ADR 0054).
@@ -43,18 +44,7 @@ function pt(angleDeg: number, r: number): [number, number] {
  * a skin that could recolour these is a skin that could hide an alarm.
  */
 export function zoneColor(state: GaugeZone['state']): string {
-  switch (state) {
-    case 'emergency':
-      return 'hsl(0 72% 42%)'
-    case 'alarm':
-      return 'hsl(0 72% 51%)'
-    case 'warn':
-      return 'hsl(38 92% 50%)'
-    case 'alert':
-      return 'hsl(43 96% 56%)'
-    default:
-      return 'hsl(142 71% 45%)'
-  }
+  return severityFill(state)
 }
 
 /**

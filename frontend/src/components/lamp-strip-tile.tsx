@@ -4,6 +4,7 @@ import { memo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import type { LampConfig, LampStripWidgetConfig } from '@/lib/dashboard-widgets'
+import { severityFill } from '@/lib/severity'
 
 /**
  * Three states, not two. An absent path is not a zero — a lamp lit or darkened
@@ -26,22 +27,6 @@ function lampFill(state: LampState): string {
       return 'hsl(var(--muted-foreground))'
     default:
       return 'hsl(var(--border))'
-  }
-}
-
-/** The CHK rollup reuses the alarm severity vocabulary (ADR 0038). */
-function checkFill(state: string): string {
-  switch (state) {
-    case 'emergency':
-      return 'hsl(0 72% 42%)'
-    case 'alarm':
-      return 'hsl(0 72% 51%)'
-    case 'warn':
-      return 'hsl(38 92% 50%)'
-    case 'alert':
-      return 'hsl(43 96% 56%)'
-    default:
-      return 'hsl(var(--muted-foreground))'
   }
 }
 
@@ -127,7 +112,11 @@ export const LampStripTile = memo(function LampStripTile({
           <Lamp
             label="CHK"
             state={worstAlarmState}
-            fill={checkFill(worstAlarmState)}
+            // normal stays this tile's own muted grey rather than
+            // severityFill's green: the lamp already drops to 0.3 opacity for
+            // it, and a dim grey dot reads as "nothing to report" more
+            // plainly than a dim green one does.
+            fill={worstAlarmState === 'normal' ? 'hsl(var(--muted-foreground))' : severityFill(worstAlarmState)}
             opacity={worstAlarmState === 'normal' ? 0.3 : 1}
             onClick={onOpenAlarms}
             ariaLabel={`CHK: ${worstAlarmState}`}

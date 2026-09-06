@@ -66,7 +66,7 @@ describe('GaugeGroupTile', () => {
     rerender(
       <GaugeGroupTile config={config} values={{ 'propulsion.port.oilPressure': 68947 }} editing={false} onConfigure={vi.fn()} />,
     )
-    expect(screen.getByText('10.0').className).toContain('text-red-500')
+    expect(screen.getByText('10.0').className).toContain('text-red-600')
   })
 
   test('offers the config button only in layout mode', () => {

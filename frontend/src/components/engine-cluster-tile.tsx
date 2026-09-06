@@ -12,6 +12,7 @@ import { CLUSTER_CANVAS, CLUSTER_RAIL, clusterDesignWidth, computeCornerMasks, u
 import { FuelRail } from '@/components/ui/fuel-rail'
 import type { ClusterCorner, EngineClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { majorStepFor } from '@/components/gauge-tile'
+import { severityTextClass } from '@/lib/severity'
 
 /**
  * An engine cluster (ADR 0054).
@@ -150,24 +151,16 @@ function telltaleIcon(path: string) {
  */
 function telltaleClass(state: ReturnType<typeof zoneFor>, value: number | null): string {
   if (value === null) return 'text-muted-foreground'
-  switch (state) {
-    case 'emergency':
-    case 'alarm':
-      return 'text-red-500'
-    // Above the band the profile calls normal, but this engine's warn and alarm
-    // thresholds are null in the profile - nobody has filled them in from the
-    // manual yet - so every reading over the normal band lands here. Red would
-    // claim an overheat the configuration cannot actually know about.
-    case 'outside':
-    case 'warn':
-      return 'text-amber-500'
-    case 'alert':
-      return 'text-amber-400'
-    // A reading with no bands configured still means the engine is turning and
-    // nothing has flagged it, which is what green says.
-    default:
-      return 'text-emerald-500'
-  }
+  // A reading with no bands configured, or one sitting inside its normal
+  // band, still means the engine is turning and nothing has flagged it,
+  // which is what green says - the telltale's own fallback rather than
+  // severityTextClass's caller-supplied default. Above the band the profile
+  // calls normal, but this engine's warn and alarm thresholds are null in
+  // the profile - nobody has filled them in from the manual yet - so every
+  // reading over the normal band lands on `outside`, which severityTextClass
+  // maps to warn's amber. Red would claim an overheat the configuration
+  // cannot actually know about.
+  return severityTextClass(state, 'text-emerald-500')
 }
 
 /**

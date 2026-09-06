@@ -7,45 +7,7 @@ import { DialRing } from '@/components/ui/dial-ring'
 import { useTelemetryHistory, type TelemetryHistoryPoint } from '@/hooks/use-telemetry-history'
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { formatQuantity, convertFromSI, unitOption } from '@/lib/quantities'
-
-/**
- * Zone colours reuse the alarm severities (ADR 0038). AGENTS.md reserves raw
- * palette colours for alert semantics, which is exactly what a red zone is.
- */
-function zoneColorFor(state: GaugeZone['state']): string {
-  switch (state) {
-    case 'emergency':
-      return 'hsl(0 72% 42%)'
-    case 'alarm':
-      return 'hsl(0 72% 51%)'
-    case 'warn':
-      return 'hsl(38 92% 50%)'
-    case 'alert':
-      return 'hsl(43 96% 56%)'
-    case 'normal':
-      // Green for "operating correctly", completing the colour language the
-      // lamp strip already speaks (ADR 0052). It was the border colour, which
-      // made an advisory band invisible — advice you cannot see is not advice.
-      return 'hsl(142 71% 45%)'
-    default:
-      return 'hsl(var(--border))'
-  }
-}
-
-function zoneTextClass(state: GaugeZone['state'] | null): string {
-  switch (state) {
-    case 'emergency':
-      return 'text-red-600'
-    case 'alarm':
-      return 'text-red-500'
-    case 'warn':
-      return 'text-amber-500'
-    case 'alert':
-      return 'text-amber-400'
-    default:
-      return 'text-gauge-primary'
-  }
-}
+import { severityFill, severityTextClass } from '@/lib/severity'
 
 /** The zone a converted reading falls in, or null when it is in no zone. */
 function activeZone(value: number | null, zones: GaugeZone[] | undefined): GaugeZone['state'] | null {
@@ -137,7 +99,7 @@ export const GaugeTile = memo(function GaugeTile({ config, value, editing, onCon
 function Readout({ text, unitLabel, zone, size }: { text: string | null; unitLabel: string; zone: GaugeZone['state'] | null; size: string }) {
   return (
     <div className="flex items-baseline gap-1 min-w-0">
-      <span className={`font-display ${size} tabular-nums leading-none tracking-tight truncate ${zoneTextClass(zone)}`}>
+      <span className={`font-display ${size} tabular-nums leading-none tracking-tight truncate ${severityTextClass(zone, 'text-gauge-primary')}`}>
         {text ?? '--'}
       </span>
       {unitLabel && <span className="text-[11px] leading-none text-muted-foreground">{unitLabel}</span>}
@@ -155,7 +117,7 @@ function NumericGauge({ text, unitLabel, zone, density }: { text: string | null;
 
 function LampGauge({ value, zone, text, density }: { value: number | null; zone: GaugeZone['state'] | null; text: string | null; density: GaugeDensity }) {
   const lit = value !== null && value !== 0
-  const color = zone ? zoneColorFor(zone) : lit ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))'
+  const color = zone ? severityFill(zone) : lit ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))'
   const compact = density === 'compact'
 
   return (
@@ -220,12 +182,12 @@ function BarGauge({ value, zone, config, text, unitLabel, density }: {
           const to = clampFraction(z.to, min, max) ?? 0
           return (
             <rect key={index} x={from * 100} y="2" width={Math.max(0, (to - from) * 100)} height="4"
-              fill={zoneColorFor(z.state)} opacity="0.35" />
+              fill={severityFill(z.state)} opacity="0.35" />
           )
         })}
         {fraction !== null && (
           <rect x="0" y="2" width={fraction * 100} height="4" rx="2"
-            fill={zone ? zoneColorFor(zone) : 'hsl(var(--primary))'} />
+            fill={zone ? severityFill(zone) : 'hsl(var(--primary))'} />
         )}
       </svg>
     </div>
@@ -315,14 +277,14 @@ function RadialGauge({ value, zone, config, text, unitLabel, density }: {
           const to = clampFraction(z.to, min, max) ?? 0
           if (to <= from) return null
           return (
-            <path key={index} d={arcPath(from, to)} fill="none" stroke={zoneColorFor(z.state)}
+            <path key={index} d={arcPath(from, to)} fill="none" stroke={severityFill(z.state)}
               strokeWidth="8" strokeLinecap="butt" opacity="0.4" />
           )
         })}
 
         {fraction !== null && fraction > 0 && (
           <path d={arcPath(0, fraction)} fill="none"
-            stroke={zone ? zoneColorFor(zone) : `url(#${gradientId})`}
+            stroke={zone ? severityFill(zone) : `url(#${gradientId})`}
             strokeWidth="8" strokeLinecap="round" />
         )}
       </svg>
@@ -399,7 +361,7 @@ function TrendLine({ points, config, window }: {
           const bottom = y(Math.min(z.from, z.to))
           return (
             <rect key={index} x="0" y={top} width={width} height={Math.max(0, bottom - top)}
-              fill={zoneColorFor(z.state)} opacity="0.18" />
+              fill={severityFill(z.state)} opacity="0.18" />
           )
         })}
         <path data-testid="gauge-trend-line" d={d} fill="none" stroke="hsl(var(--primary))" strokeWidth="1.5"

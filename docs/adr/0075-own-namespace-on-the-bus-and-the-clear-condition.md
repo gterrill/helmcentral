@@ -3,7 +3,7 @@
 ## Status
 Accepted
 
-Amends ADR 0038 (alarms): the bus reader no longer treats every live notification as foreign, and the alarm status carries the rule's clear condition. Relates to ADR 0070 (heavy-weather rules), whose seeded set was the vehicle for the incident below.
+Amends ADR 0038 (alarms): the bus reader no longer treats every live notification as foreign, and the alarm status carries the rule's clear condition. Relates to ADR 0070 (heavy-weather rules), whose seeded set triggered the incident below.
 
 ## Context
 
@@ -13,7 +13,7 @@ They had come from the laptop. The development backend's local rules file had th
 
 That reader was written for ADR 0038's purpose, surfacing alarms from a Victron GX or an N2K device with no per-source integration. It had no notion of Helmcentral's own output coming back round. In the ordinary single-instance case the engine's status and its echo were both on the list; in the two-instance case only the echo was.
 
-Two more things made the incident worse than a duplicate row.
+Two other issues complicated the incident.
 
 **The operator could not tell what would clear the alarm.** Acknowledge stops the sound and the visual alert; the condition stays live until the value travels back past the deadband, which ADR 0038 decided and which is right. But the deadband was a stored field rendered nowhere except the rule editor. The message read `Barometer falling: below -0.027777777777777776 (-0.0283)`, a threshold that had already been crossed and a current value in pascals per second. Acknowledging looked broken because nothing on screen said what it was waiting for.
 
@@ -48,7 +48,7 @@ Each rule alarm's status now reports `op`, `threshold`, `hysteresis`, `clear_val
 
 Bus notifications get `unit` the same way, and their `raised_at` and `acked_at` from the alarm log's open occurrence, because the bus timestamp is the acknowledge time.
 
-The message is one sentence in SI with the unit: `Barometer falling: -0.03 Pa/s, clears above -0.02 Pa/s`. It no longer repeats the threshold. A threshold that has already been crossed tells the reader nothing; the clear point does.
+The message is one sentence in SI with the unit: `Barometer falling: -0.03 Pa/s, clears above -0.02 Pa/s`. It gives the clear point instead of repeating the already-crossed threshold, so the operator can see what must change for the alarm to clear.
 
 ### 5. The card leads with the label and says what clears it
 
@@ -80,4 +80,4 @@ The rules list groups by the first path segment after any `helmcentral.` prefix 
 - A foreign producer that raises on a path an enabled Helmcentral rule watches is hidden from the board. Accepted: for that path the rule is the authority, and two alarms about one value is the state this ADR removes. The bus notification itself is untouched; only this engine's own echoes are cleared.
 - A bus notification the alarm log never recorded, one that was already live when the box started, shows no raised time until it next raises.
 - Off-boat messages (ntfy, email, webhook, web push), the notification's `message` on the bus and the alarm log all carry the value and clear point in operator units, converted by a table in `backend/alarm_units.go` that mirrors the frontend's `alarm-display.ts` and `quantities.ts`. The two tables must move together; each says so in its header. Added after the initial release, once the SI messages had been seen in the wild.
-- Gauge-zone colouring in the gauge tiles keeps its own amber-400 against amber-500 pair. That is a separate concern from alarm text and was not changed here.
+- Gauge-zone colouring (dial arcs, lamp fills, cluster readouts) now draws from the same ladder in `frontend/src/lib/severity.ts`: alert sky, warn amber, alarm red, emergency a clearly deeper red, normal green. The five components that each carried their own copy of the amber-400 against amber-500 pair now call it. The check lamp keeps grey, not green, for its at-rest state, since that was its existing appearance.
