@@ -3,6 +3,7 @@ import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { hoursToBand, socSeverity, type SocBands } from '@/lib/soc-bands'
 import { severityFill, severityTextClass } from '@/lib/severity'
+import { projectSocAtDawn, type OvernightProjection } from '@/lib/soc-projection'
 
 export interface BatteryPowerTileProps {
   batterySocPercent: number | null
@@ -27,6 +28,15 @@ export interface BatteryPowerTileProps {
    * inventing a threshold.
    */
   socBands?: SocBands
+  /**
+   * The overnight dawn projection from use-overnight-projection.ts.
+   * Undefined or null means the backend has no sunrise for the vessel's
+   * position (a 503) or the response didn't parse, and the tile omits the
+   * whole Dawn segment rather than showing a guess. When present but its
+   * basis is 'none' (not enough history and the linear fallback is off),
+   * the segment still renders with a dash and the backend's reason.
+   */
+  overnight?: OvernightProjection | null
 }
 
 function hasChargerError(errorValue: string | null): boolean {
@@ -195,6 +205,26 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     || charger0ChargingMode !== null
     || charger0Error !== null
 
+  // The dawn estimate reads the same (possibly blanked) SoC and rate as the
+  // rest of the tile above, so a stale feed yields a dash here too rather
+  // than projecting forward from a frozen reading as if it were live.
+  // overnight is null on a 503 (no vessel position) or an unparsable
+  // response, and in that case the whole Dawn segment is omitted below
+  // instead of showing a guess.
+  const overnightProjection = props.overnight ?? null
+  const dawn = projectSocAtDawn({
+    socPercent: batterySocPercent,
+    liveRatePercentPerHour: batteryRatePercentPerHour,
+    projection: overnightProjection,
+    now: new Date(),
+  })
+  // Teal by default, ladder colour when the estimate itself lands in a
+  // band: an amber dawn figure is the cue to run the generator before bed.
+  const dawnEstimateClass = dawn !== null
+    ? severityTextClass(socSeverity(dawn.socPercent, socBands), 'text-gauge-secondary')
+    : 'text-muted-foreground'
+  const dawnEstimateText = dawn !== null ? `${Math.round(dawn.socPercent)}%` : '—'
+
   return (
     <Tile title="Battery & Power" stale={feedStale} staleLabel={formatDataAge(props.lastUpdateAgeS)}>
       <div className="mt-1 space-y-2">
@@ -240,15 +270,41 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
               style={socFillStyle}
             />
           </div>
-          <div className="mt-2 flex items-center justify-between font-display text-[11px] tabular-nums text-muted-foreground">
-            <span className="truncate">
+          {/* Two rows, not one: at the 768 band a single row has to truncate and the
+              first thing the ellipsis eats is the dawn percentage, which is the
+              figure the footer exists to show. */}
+          <div className="mt-2 space-y-1 font-display text-[11px] tabular-nums text-muted-foreground">
+            <span className="block truncate">
               {dc24vVoltageLabel}
               <span className="font-display text-muted-foreground">V</span>
               {' · '}
               <span className={readoutClass}>{chargeRateLabel}</span>
               <span className="ml-1 font-display text-muted-foreground">%/h</span>
             </span>
-            <span />
+            {overnightProjection !== null && (
+              <span
+                className="block truncate"
+                title={
+                  dawn === null
+                    ? (overnightProjection.reason ?? 'No estimate')
+                    : dawn.basis === 'history'
+                      ? `Median of ${overnightProjection.nightsUsed} of ${overnightProjection.nightsConsidered} recent nights, then the current rate until sunset`
+                      : `Current rate held until sunrise${overnightProjection.reason ? `; ${overnightProjection.reason}` : ''}`
+                }
+              >
+                {'Dawn '}
+                {overnightProjection.sunrise.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                {' · '}
+                <span data-testid="dawn-estimate" className={dawnEstimateClass}>{dawnEstimateText}</span>
+                {dawn !== null && (
+                  dawn.basis === 'history' ? (
+                    <span className="hidden lg:inline"> · {overnightProjection.nightsUsed} nights</span>
+                  ) : (
+                    <span className="hidden lg:inline"> · at current rate</span>
+                  )
+                )}
+              </span>
+            )}
           </div>
         </div>
 

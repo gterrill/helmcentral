@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react'
-import { expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 
 import { BatteryPowerTile } from '@/components/battery-power-tile'
+import { projectSocAtDawn, type OvernightProjection } from '@/lib/soc-projection'
 
 const baseProps = {
   batterySocPercent: 82,
@@ -284,4 +285,130 @@ test('with no socBands prop the tile behaves exactly as before: no band markers,
   expect(screen.queryByTestId('soc-band-warn')).not.toBeInTheDocument()
   expect(screen.getByText('8')).toHaveClass('text-gauge-primary')
   expect(screen.getByText('To empty')).toBeInTheDocument()
+})
+
+// Dawn projection (Phase 4). now/sunset/sunrise below are the daytime
+// fixture from the plan: sunset comes before sunrise, so it's the
+// afternoon and the next sunset is still hours away.
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+const DAYTIME_NOW = new Date('2026-09-07T02:00:00Z')
+
+function overnightFixture(overrides: Partial<OvernightProjection> = {}): OvernightProjection {
+  return {
+    socPath: 'electrical.batteries.0.capacity.stateOfCharge',
+    sunset: new Date('2026-09-07T07:56:00Z'),
+    sunrise: new Date('2026-09-07T20:07:00Z'),
+    basis: 'history',
+    nightRatePercentPerHour: -2.5,
+    nightsUsed: 4,
+    nightsConsidered: 7,
+    reason: null,
+    ...overrides,
+  }
+}
+
+test('renders the dawn estimate for a history basis with the nights-used token', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture({ nightRatePercentPerHour: -2.5, nightsUsed: 4 })
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={63}
+      batteryRatePercentPerHour={2.8}
+      overnight={overnight}
+    />,
+  )
+
+  const expected = projectSocAtDawn({
+    socPercent: 63,
+    liveRatePercentPerHour: 2.8,
+    projection: overnight,
+    now: DAYTIME_NOW,
+  })
+
+  expect(screen.getByText(/Dawn/)).toBeInTheDocument()
+  expect(screen.getByTestId('dawn-estimate')).toHaveTextContent(`${Math.round(expected!.socPercent)}%`)
+  expect(screen.getByText(/4 nights/)).toBeInTheDocument()
+})
+
+test('renders the dawn estimate for a linear basis with the backend reason in its title', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture({
+    basis: 'linear',
+    nightRatePercentPerHour: null,
+    reason: 'influxdb not configured',
+  })
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={63}
+      batteryRatePercentPerHour={2.8}
+      overnight={overnight}
+    />,
+  )
+
+  expect(screen.getByText(/at current rate/)).toBeInTheDocument()
+  const outer = screen.getByText(/Dawn/)
+  expect(outer).toHaveAttribute('title', expect.stringContaining('influxdb not configured'))
+})
+
+test('colours the dawn estimate by the SoC severity ladder when it lands in a band', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture({ nightRatePercentPerHour: -1.0 })
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={30}
+      batteryRatePercentPerHour={0}
+      overnight={overnight}
+      socBands={{ warnBelow: 20, alarmBelow: 10 }}
+    />,
+  )
+
+  const estimate = screen.getByTestId('dawn-estimate')
+  expect(estimate).toHaveClass('text-amber-600')
+  expect(estimate).toHaveTextContent('18%')
+})
+
+test('shows a dash and the backend reason when the basis is none', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture({
+    basis: 'none',
+    nightRatePercentPerHour: null,
+    reason: 'need 2 usable nights, have 1',
+  })
+  render(<BatteryPowerTile {...baseProps} overnight={overnight} />)
+
+  const estimate = screen.getByTestId('dawn-estimate')
+  expect(estimate).toHaveTextContent('—')
+  const outer = screen.getByText(/Dawn/)
+  expect(outer).toHaveAttribute('title', expect.stringContaining('need 2 usable nights, have 1'))
+})
+
+test('omits the dawn segment entirely when no overnight projection is supplied', () => {
+  render(<BatteryPowerTile {...baseProps} />)
+
+  expect(screen.queryByText(/Dawn/)).not.toBeInTheDocument()
+})
+
+test('blanks the dawn estimate on a stale feed even though the overnight projection is present', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture()
+  render(<BatteryPowerTile {...baseProps} lastUpdateAgeS={5940} overnight={overnight} />)
+
+  const estimate = screen.getByTestId('dawn-estimate')
+  expect(estimate).toHaveTextContent('—')
 })

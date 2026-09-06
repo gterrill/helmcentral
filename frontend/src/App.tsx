@@ -77,6 +77,8 @@ import { useVesselState } from '@/hooks/use-vessel-state'
 import { useAlarms } from '@/hooks/use-alarms'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
 import { useSocBands } from '@/hooks/use-soc-bands'
+import { useOvernightProjection } from '@/hooks/use-overnight-projection'
+import { DEFAULT_SOC_PATH } from '@/lib/soc-bands'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useServerTrails } from '@/hooks/use-server-trails'
@@ -504,7 +506,8 @@ export function App() {
     updateRule: updateAlarmRule,
     deleteRule: deleteAlarmRule,
   } = useAlarmRules()
-  const socBands = useSocBands(alarmRules)
+  const { projection: overnight } = useOvernightProjection()
+  const socBands = useSocBands(alarmRules, overnight?.socPath ?? DEFAULT_SOC_PATH)
   // Only for deciding whether to offer SignalK discovery. Gated on `loading`
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
@@ -1054,6 +1057,7 @@ export function App() {
             timeToGoHours={timeToGoHours}
             lastUpdateAgeS={electricalLastUpdateAgeS}
             socBands={socBands}
+            overnight={overnight}
           />
         )
       case 'solar':
