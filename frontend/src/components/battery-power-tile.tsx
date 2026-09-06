@@ -39,6 +39,19 @@ export interface BatteryPowerTileProps {
   overnight?: OvernightProjection | null
 }
 
+/**
+ * Title for the history-basis Dawn tooltip: the nights used out of the
+ * lookback window, plus, when the backend actually dropped any, why some of
+ * the window's nights weren't clean enough to use.
+ */
+function historyBasisTitle(overnightProjection: OvernightProjection): string {
+  const { nightsUsed, lookbackNights, nightsExcludedShore, nightsExcludedGenerator } = overnightProjection
+  const skippedClause = nightsExcludedShore + nightsExcludedGenerator > 0
+    ? `; skipped ${nightsExcludedShore} on shore power and ${nightsExcludedGenerator} with the generator running`
+    : ''
+  return `Median of ${nightsUsed} clean nights from the last ${lookbackNights}${skippedClause}, then the current rate until sunset`
+}
+
 function hasChargerError(errorValue: string | null): boolean {
   if (errorValue === null) {
     return false
@@ -230,6 +243,15 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
       ? `${overnightProjection?.nightsUsed ?? 0} nights`
       : 'at current rate'
 
+  // charger0AcIn1CurrentA has already been through the feedStale swap above,
+  // so it reads null on a stale feed and this is false without a separate
+  // staleness check here. A charger actually drawing current in means the
+  // bank isn't going to spend tonight discharging, so projecting a dawn
+  // figure from the discharge rate would be the same mistake the overnight
+  // history basis just learned to exclude from its own nights, applied to
+  // the night ahead instead of a night behind.
+  const onShorePower = charger0AcIn1CurrentA !== null && charger0AcIn1CurrentA > 0.5
+
   return (
     <Tile title="Battery & Power" stale={feedStale} staleLabel={formatDataAge(props.lastUpdateAgeS)}>
       <div className="mt-1 space-y-2">
@@ -290,18 +312,22 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
               <span
                 className="block truncate"
                 title={
-                  dawn === null
-                    ? (overnightProjection.reason ?? 'No estimate')
-                    : dawn.basis === 'history'
-                      ? `Median of ${overnightProjection.nightsUsed} of ${overnightProjection.nightsConsidered} recent nights, then the current rate until sunset`
-                      : `Current rate held until sunrise${overnightProjection.reason ? `; ${overnightProjection.reason}` : ''}`
+                  onShorePower
+                    ? 'The charger is on shore power; the bank is not expected to discharge overnight'
+                    : dawn === null
+                      ? (overnightProjection.reason ?? 'No estimate')
+                      : dawn.basis === 'history'
+                        ? historyBasisTitle(overnightProjection)
+                        : `Current rate held until sunrise${overnightProjection.reason ? `; ${overnightProjection.reason}` : ''}`
                 }
               >
                 {'Dawn '}
                 {overnightProjection.sunrise.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                 {' · '}
-                <span data-testid="dawn-estimate" className={dawnEstimateClass}>{dawnEstimateText}</span>
-                {dawn !== null && (
+                <span data-testid="dawn-estimate" className={onShorePower ? 'text-muted-foreground' : dawnEstimateClass}>
+                  {onShorePower ? 'on shore power' : dawnEstimateText}
+                </span>
+                {!onShorePower && dawn !== null && (
                   <span className="hidden lg:inline"> · {dawnBasisLabel}</span>
                 )}
               </span>
@@ -310,8 +336,9 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
                 a tablet has no hover, so a tooltip-only basis would leave the
                 iPad, the primary helm target, unable to tell "4 nights" from
                 "at current rate", which is the one distinction the label exists
-                to make. */}
-            {overnightProjection !== null && dawn !== null && (
+                to make. On shore power there is no basis to show, so this row
+                is skipped along with the inline token above. */}
+            {overnightProjection !== null && dawn !== null && !onShorePower && (
               <span className="block truncate lg:hidden">{dawnBasisLabel}</span>
             )}
           </div>

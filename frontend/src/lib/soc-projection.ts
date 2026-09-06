@@ -21,6 +21,12 @@ export interface OvernightProjection {
   nightRatePercentPerHour: number | null
   nightsUsed: number
   nightsConsidered: number
+  /** Size of the backend's rolling lookback window, in nights (e.g. 30). */
+  lookbackNights: number
+  /** Nights within the lookback window dropped because shore power was on. */
+  nightsExcludedShore: number
+  /** Nights within the lookback window dropped because the generator ran. */
+  nightsExcludedGenerator: number
   reason: string | null
 }
 
@@ -75,6 +81,13 @@ export function parseOvernightProjection(payload: unknown): OvernightProjection 
     return null
   }
 
+  // These three are counts an older backend simply doesn't report yet, not
+  // readings it failed to take, so an absent or malformed value means zero
+  // rather than an unparsable payload.
+  const lookbackNights = typeof body.lookback_nights === 'number' ? body.lookback_nights : 0
+  const nightsExcludedShore = typeof body.nights_excluded_shore === 'number' ? body.nights_excluded_shore : 0
+  const nightsExcludedGenerator = typeof body.nights_excluded_generator === 'number' ? body.nights_excluded_generator : 0
+
   return {
     socPath: body.soc_path,
     sunset,
@@ -83,6 +96,9 @@ export function parseOvernightProjection(payload: unknown): OvernightProjection 
     nightRatePercentPerHour: nightRate,
     nightsUsed: body.nights_used,
     nightsConsidered: body.nights_considered,
+    lookbackNights,
+    nightsExcludedShore,
+    nightsExcludedGenerator,
     reason: body.reason,
   }
 }

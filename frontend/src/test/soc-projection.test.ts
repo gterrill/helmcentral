@@ -81,6 +81,28 @@ describe('parseOvernightProjection', () => {
   it('rejects a night rate that is neither a number nor null', () => {
     expect(parseOvernightProjection({ ...validPayload, night_rate_percent_per_hour: '-2.4' })).toBeNull()
   })
+
+  it('parses the lookback window and exclusion counts when the backend reports them', () => {
+    const result = parseOvernightProjection({
+      ...validPayload,
+      lookback_nights: 30,
+      nights_excluded_shore: 3,
+      nights_excluded_generator: 1,
+      nights_excluded_gap: 2,
+      nights_excluded_rise: 0,
+      oldest_night_start: '2026-08-08T00:00:00Z',
+    })
+    expect(result?.lookbackNights).toBe(30)
+    expect(result?.nightsExcludedShore).toBe(3)
+    expect(result?.nightsExcludedGenerator).toBe(1)
+  })
+
+  it('defaults the lookback window and exclusion counts to zero when an older backend omits them', () => {
+    const result = parseOvernightProjection(validPayload)
+    expect(result?.lookbackNights).toBe(0)
+    expect(result?.nightsExcludedShore).toBe(0)
+    expect(result?.nightsExcludedGenerator).toBe(0)
+  })
 })
 
 function baseProjection(overrides: Partial<OvernightProjection> = {}): OvernightProjection {
@@ -92,6 +114,9 @@ function baseProjection(overrides: Partial<OvernightProjection> = {}): Overnight
     nightRatePercentPerHour: -2.5,
     nightsUsed: 4,
     nightsConsidered: 7,
+    lookbackNights: 30,
+    nightsExcludedShore: 0,
+    nightsExcludedGenerator: 0,
     reason: null,
     ...overrides,
   }

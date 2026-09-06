@@ -305,6 +305,9 @@ function overnightFixture(overrides: Partial<OvernightProjection> = {}): Overnig
     nightRatePercentPerHour: -2.5,
     nightsUsed: 4,
     nightsConsidered: 7,
+    lookbackNights: 30,
+    nightsExcludedShore: 0,
+    nightsExcludedGenerator: 0,
     reason: null,
     ...overrides,
   }
@@ -336,6 +339,47 @@ test('renders the dawn estimate for a history basis with the nights-used token',
   // Twice on purpose: inline at lg and up, and as its own footer row below
   // lg, where a tablet has no hover to reveal the tooltip.
   expect(screen.getAllByText(/4 nights/)).toHaveLength(2)
+  const outer = screen.getByText(/Dawn/)
+  expect(outer).toHaveAttribute('title', 'Median of 4 clean nights from the last 30, then the current rate until sunset')
+})
+
+test('the history title names the nights skipped for shore power and the generator', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture({ nightsExcludedShore: 3, nightsExcludedGenerator: 1 })
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={63}
+      batteryRatePercentPerHour={2.8}
+      overnight={overnight}
+    />,
+  )
+
+  const outer = screen.getByText(/Dawn/)
+  expect(outer).toHaveAttribute(
+    'title',
+    'Median of 4 clean nights from the last 30; skipped 3 on shore power and 1 with the generator running, then the current rate until sunset',
+  )
+})
+
+test('the history title omits the skipped clause when no nights were excluded', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture({ nightsExcludedShore: 0, nightsExcludedGenerator: 0 })
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={63}
+      batteryRatePercentPerHour={2.8}
+      overnight={overnight}
+    />,
+  )
+
+  const outer = screen.getByText(/Dawn/)
+  expect(outer).toHaveAttribute('title', expect.not.stringContaining('skipped'))
 })
 
 test('renders the dawn estimate for a linear basis with the backend reason in its title', () => {
@@ -410,6 +454,81 @@ test('blanks the dawn estimate on a stale feed even though the overnight project
 
   const overnight = overnightFixture()
   render(<BatteryPowerTile {...baseProps} lastUpdateAgeS={5940} overnight={overnight} />)
+
+  const estimate = screen.getByTestId('dawn-estimate')
+  expect(estimate).toHaveTextContent('—')
+})
+
+// Tonight on shore power (Phase 5). A charger actually pushing current in
+// means the bank isn't going to spend the night discharging, so the dawn
+// figure would otherwise be projecting a mistake the overnight history
+// basis has just learned to exclude.
+test('reads "on shore power" instead of a numeric estimate when the charger is drawing current', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture()
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={63}
+      batteryRatePercentPerHour={2.8}
+      overnight={overnight}
+      charger0AcIn1CurrentA={12.0}
+    />,
+  )
+
+  const estimate = screen.getByTestId('dawn-estimate')
+  expect(estimate).toHaveTextContent('on shore power')
+  expect(estimate).toHaveClass('text-muted-foreground')
+  expect(screen.queryByText(/nights/)).not.toBeInTheDocument()
+
+  const outer = screen.getByText(/Dawn/)
+  expect(outer).toHaveAttribute(
+    'title',
+    'The charger is on shore power; the bank is not expected to discharge overnight',
+  )
+})
+
+test('a charger current of zero (plugged in but not drawing) leaves the normal dawn estimate in place', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture()
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={63}
+      batteryRatePercentPerHour={2.8}
+      overnight={overnight}
+      charger0AcIn1CurrentA={0}
+    />,
+  )
+
+  const expected = projectSocAtDawn({
+    socPercent: 63,
+    liveRatePercentPerHour: 2.8,
+    projection: overnight,
+    now: DAYTIME_NOW,
+  })
+
+  const estimate = screen.getByTestId('dawn-estimate')
+  expect(estimate).toHaveTextContent(`${Math.round(expected!.socPercent)}%`)
+})
+
+test('a stale feed still blanks the dawn estimate even with the charger drawing shore power', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture()
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      lastUpdateAgeS={5940}
+      overnight={overnight}
+      charger0AcIn1CurrentA={12.0}
+    />,
+  )
 
   const estimate = screen.getByTestId('dawn-estimate')
   expect(estimate).toHaveTextContent('—')

@@ -31,6 +31,16 @@ import (
 // history" with a plausible-looking number), approved by the operator on
 // 2026-09-07, gated behind DAWN_LINEAR_FALLBACK, logged at startup and on
 // every recompute that lands on it.
+//
+// The history scan excludes any night shore power or the generator ran
+// (electrical_overnight.go's shore/generator constants below), on top of the
+// pre-existing gap and net-rise checks. This was added after a marina week
+// of shore-power nights passed the net-rise check outright - a charger in
+// float holds the state of charge flat, which reads as a quiet night at
+// anchor rather than the charged night it actually was, and pulled the
+// median toward zero. The scan now looks back up to overnightLookbackNights
+// nights, most recent first, and stops once overnightTargetNights usable
+// nights are found.
 
 // nightWindow is the span of one night's discharge sample, offset from the
 // raw sunset/sunrise so neither boundary's transient (the evening's last
@@ -104,6 +114,14 @@ func recentNightWindows(now time.Time, lat, lon float64, nights int) []nightWind
 // its own, so a flat or rising reading means a generator or shore charger
 // ran, and that night says nothing about the boat's baseline overnight
 // draw.
+//
+// By the time a night reaches this function, computeOvernight has already
+// excluded it for shore power or the generator if either of those series
+// showed one. The net-rise check here stays anyway as the backstop for a
+// source those two paths didn't see - a charger reading, a shared circuit,
+// or a misnamed measurement path - so a night that quietly charged never
+// gets counted as a discharge just because computeOvernight's own two
+// checks missed it.
 func nightSlopePercentPerHour(points []telemetryPoint, w nightWindow, every time.Duration) (slope float64, usable bool, reason string) {
 	var inWindow []telemetryPoint
 	for _, p := range points {
@@ -168,15 +186,31 @@ type overnightResult struct {
 	Sunrise                 time.Time `json:"sunrise"`
 	Basis                   string    `json:"basis"` // "history" | "linear" | "none"
 	NightRatePercentPerHour *float64  `json:"night_rate_percent_per_hour"`
-	NightsUsed              int       `json:"nights_used"`
+	LookbackNights          int       `json:"lookback_nights"`
 	NightsConsidered        int       `json:"nights_considered"`
+	NightsUsed              int       `json:"nights_used"`
+	NightsExcludedShore     int       `json:"nights_excluded_shore"`
+	NightsExcludedGenerator int       `json:"nights_excluded_generator"`
+	NightsExcludedGap       int       `json:"nights_excluded_gap"`
+	NightsExcludedRise      int       `json:"nights_excluded_rise"`
+	OldestNightStart        time.Time `json:"oldest_night_start"`
 	Reason                  *string   `json:"reason"`
 	ComputedAt              time.Time `json:"computed_at"`
 }
 
-// overnightNightsConsidered is how many trailing nights the history branch
-// scans for usable slopes (Phase 4 of the plan: "the last 7 nights").
-const overnightNightsConsidered = 7
+// overnightLookbackNights bounds how far back the history scan looks for
+// usable nights: up to 30 completed nights, most recent first, before it
+// gives up on finding more. overnightTargetNights is how many usable nights
+// are enough to stop on - a boat with a long run of clean nights shouldn't
+// pay for 30 nights of scanning every time when 7 will do.
+//
+// Both are constants, not env vars: they shape what "typical" means
+// statistically (a wider or narrower lookback changes the answer), which
+// isn't something an operator should be tuning per deployment.
+const (
+	overnightLookbackNights = 30
+	overnightTargetNights   = 7
+)
 
 // overnightQueryEvery and overnightSampleInterval describe the same
 // aggregation cadence in two forms InfluxDB and Go respectively need - the
@@ -228,10 +262,34 @@ func nextSunEvents(now time.Time, lat, lon float64) (sunset, sunrise time.Time, 
 	return sunset, sunrise, haveSunset && haveSunrise
 }
 
+// anyPointExceedsInWindow reports whether any point of points that falls
+// inside w has a value strictly greater than threshold. It backs both the
+// shore-power and generator exclusion checks below, which differ only in
+// which series they scan and what threshold counts as "running".
+func anyPointExceedsInWindow(points []telemetryPoint, w nightWindow, threshold float64) bool {
+	for _, p := range points {
+		if p.Timestamp.Before(w.Start) || p.Timestamp.After(w.End) {
+			continue
+		}
+		if p.Value > threshold {
+			return true
+		}
+	}
+	return false
+}
+
 // computeOvernight resolves the dawn projection's basis and, when it lands
 // on history, the median overnight rate. query is injected so tests never
 // need a live InfluxDB - see queryInfluxPathRange, which satisfies this
 // signature directly.
+//
+// The history scan asks for the SoC, shore-power and generator series each
+// exactly once, covering the whole lookback in a single [start, now] range
+// per path, then slices each series per night in Go - not one query per
+// night as before. It scans nights most recent first, excluding a night for
+// shore power or a generator before its slope is even judged, and stops as
+// soon as overnightTargetNights usable nights have been collected or the
+// overnightLookbackNights bound is exhausted, whichever comes first.
 func computeOvernight(
 	now time.Time,
 	lat, lon float64,
@@ -241,8 +299,9 @@ func computeOvernight(
 	query func(path string, start, stop time.Time, every string) ([]telemetryPoint, error),
 ) overnightResult {
 	result := overnightResult{
-		SocPath:    socPath,
-		ComputedAt: now,
+		SocPath:        socPath,
+		ComputedAt:     now,
+		LookbackNights: overnightLookbackNights,
 	}
 
 	sunset, sunrise, ok := nextSunEvents(now, lat, lon)
@@ -260,27 +319,75 @@ func computeOvernight(
 		return result
 	}
 
-	windows := recentNightWindows(now, lat, lon, overnightNightsConsidered)
-	result.NightsConsidered = len(windows)
+	windows := recentNightWindows(now, lat, lon, overnightLookbackNights)
+	if len(windows) == 0 {
+		result.Basis = resolveNonHistoryBasis(linearFallback)
+		result.Reason = stringPtr("need 2 usable nights, have 0")
+		return result
+	}
+
+	// One query per path, covering every night the lookback could possibly
+	// need, rather than one query per night - the oldest window in the list
+	// is the earliest data any of the nights below could touch.
+	queryStart := windows[len(windows)-1].Start
+	socSeries, err := query(socPath, queryStart, now, overnightQueryEvery)
+	if err != nil {
+		result.Basis = resolveNonHistoryBasis(linearFallback)
+		result.Reason = stringPtr("influxdb query failed: " + err.Error())
+		return result
+	}
+	shoreSeries, err := query(shoreMeasurementPath(), queryStart, now, overnightQueryEvery)
+	if err != nil {
+		// Fail fast exactly as a SoC query failure does: an errored shore
+		// query must never be read as "shore power was never seen", which
+		// would silently let marina nights back into the median.
+		result.Basis = resolveNonHistoryBasis(linearFallback)
+		result.Reason = stringPtr("influxdb query failed: " + err.Error())
+		return result
+	}
+	generatorSeries, err := query(generatorMeasurementPath(), queryStart, now, overnightQueryEvery)
+	if err != nil {
+		result.Basis = resolveNonHistoryBasis(linearFallback)
+		result.Reason = stringPtr("influxdb query failed: " + err.Error())
+		return result
+	}
 
 	var slopes []float64
+	var nightsConsidered, excludedShore, excludedGenerator, excludedGap, excludedRise int
+	var oldestScanned nightWindow
 	for _, w := range windows {
-		points, err := query(socPath, w.Start, w.End, overnightQueryEvery)
-		if err != nil {
-			// Fail fast rather than skip this night and keep going: a
-			// failing query almost always means Influx itself is down, and
-			// silently scoring fewer nights would misreport "not enough
-			// clean nights" when the real problem is "couldn't ask".
-			result.Basis = resolveNonHistoryBasis(linearFallback)
-			result.Reason = stringPtr("influxdb query failed: " + err.Error())
-			return result
+		nightsConsidered++
+		oldestScanned = w
+
+		switch {
+		case anyPointExceedsInWindow(shoreSeries, w, shorePowerPresentAmps):
+			excludedShore++
+		case anyPointExceedsInWindow(generatorSeries, w, 0):
+			excludedGenerator++
+		default:
+			slope, usable, reason := nightSlopePercentPerHour(socSeries, w, overnightSampleInterval)
+			switch {
+			case usable:
+				slopes = append(slopes, slope)
+			case reason == "insufficient samples":
+				excludedGap++
+			case reason == "net rise":
+				excludedRise++
+			}
 		}
-		slope, usable, _ := nightSlopePercentPerHour(points, w, overnightSampleInterval)
-		if usable {
-			slopes = append(slopes, slope)
+
+		if len(slopes) >= overnightTargetNights {
+			break
 		}
 	}
+
+	result.NightsConsidered = nightsConsidered
 	result.NightsUsed = len(slopes)
+	result.NightsExcludedShore = excludedShore
+	result.NightsExcludedGenerator = excludedGenerator
+	result.NightsExcludedGap = excludedGap
+	result.NightsExcludedRise = excludedRise
+	result.OldestNightStart = oldestScanned.Start
 
 	if median, ok := medianNightRate(slopes); ok {
 		result.Basis = "history"
@@ -300,6 +407,41 @@ const defaultSocMeasurement = "electrical.batteries.0.capacity.stateOfCharge"
 
 func socMeasurementPath() string {
 	return trimEnvValue(getEnv("INFLUX_SOC_MEASUREMENT", defaultSocMeasurement))
+}
+
+// defaultShoreMeasurement and defaultGeneratorMeasurement are the two
+// exclusion checks a night's window has to clear before its slope is judged
+// at all. Confirmed against the live InfluxDB on 2026-09-07: the shore path
+// has points only while shore power is actually connected (a charger in
+// float can hold the state of charge flat for the whole night, which passes
+// the net-rise check and would otherwise score a marina night as a quiet
+// one at anchor); the generator path is recorded continuously and reads > 0
+// while the generator runs. electrical.chargers.0.chargingMode was also
+// considered and rejected - it is a string and InfluxDB cannot aggregate it.
+//
+// A misnamed path here yields no points at all, and no points means no
+// exclusions - silently, since an absent series looks identical to "never
+// ran". That is why nights_excluded_shore and nights_excluded_generator are
+// both in the response and in the recompute log line: an operator who
+// watches a marina week go by with nights_excluded_shore stuck at 0 knows
+// the path is wrong, not that the boat was quietly at anchor the whole
+// time.
+const (
+	defaultShoreMeasurement     = "electrical.chargers.0.acin.1.current"
+	defaultGeneratorMeasurement = "electrical.generator.0.stateNumber"
+)
+
+// shorePowerPresentAmps is the current above which the shore path counts as
+// "shore power connected" for one sample - comfortably above sensor noise
+// on an idle AC-in circuit and comfortably below any real charger current.
+const shorePowerPresentAmps = 0.5
+
+func shoreMeasurementPath() string {
+	return trimEnvValue(getEnv("INFLUX_SHORE_MEASUREMENT", defaultShoreMeasurement))
+}
+
+func generatorMeasurementPath() string {
+	return trimEnvValue(getEnv("INFLUX_GENERATOR_MEASUREMENT", defaultGeneratorMeasurement))
 }
 
 // dawnLinearFallbackEnabled resolves DAWN_LINEAR_FALLBACK, defaulting to
@@ -337,31 +479,73 @@ func logOvernightStartupMode() {
 	log.Printf("overnight model: InfluxDB configured; dawn projection uses overnight history when at least two clean nights exist")
 }
 
-// overnightCacheTTL keeps the 7-day-spanning history query (up to 7 range
-// queries, one per night) off the request path - the tile polls this
-// endpoint far more often than the answer can meaningfully change.
+// overnightCacheTTL keeps the lookback-spanning history query (three range
+// queries - SoC, shore, generator - each covering up to overnightLookbackNights
+// nights) off the request path - the tile polls this endpoint far more often
+// than the answer can meaningfully change.
 const overnightCacheTTL = 15 * time.Minute
 
 type overnightCache struct {
 	mu        sync.Mutex
 	result    overnightResult
 	expiresAt time.Time
+	// Whole-degree position the cached result was computed for. Sunrise
+	// moves about four minutes per degree of longitude, so a result is
+	// only reusable near where it was made; a passage invalidates it.
+	latKey, lonKey int
 }
 
 var globalOvernightCache = &overnightCache{}
 
-// get returns the cached result if still fresh, otherwise recomputes via
-// compute and caches the new result for overnightCacheTTL.
-func (c *overnightCache) get(now time.Time, compute func() overnightResult) overnightResult {
+// fresh returns the cached result when it has not expired. It does not care
+// about position: a fresh result was computed from a valid fix within the
+// last fifteen minutes, and the GNSS gate flapping in the meantime (it
+// suppresses the position while it waits for a stable fix) does not move
+// the sun.
+func (c *overnightCache) fresh(now time.Time) (overnightResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if now.Before(c.expiresAt) {
+		return c.result, true
+	}
+	return overnightResult{}, false
+}
+
+// get returns the cached result if still fresh and computed near this
+// position, otherwise recomputes via compute and caches the new result for
+// overnightCacheTTL.
+func (c *overnightCache) get(now time.Time, lat, lon float64, compute func() overnightResult) overnightResult {
+	latKey, lonKey := int(math.Round(lat)), int(math.Round(lon))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if now.Before(c.expiresAt) && c.latKey == latKey && c.lonKey == lonKey {
 		return c.result
 	}
 	result := compute()
 	c.result = result
 	c.expiresAt = now.Add(overnightCacheTTL)
+	c.latKey, c.lonKey = latKey, lonKey
 	return result
+}
+
+// positionForSun is the one place that decides whether the vessel state
+// carries a position the sun calculation may use. Three things say no: the
+// GNSS validation gate holding the position back (gnss_critical_alert), the
+// -1/-1 pair the backend publishes when it has no position at all, and a
+// value outside the coordinate range. The range check alone was not enough:
+// -1,-1 is a legal coordinate in the Gulf of Guinea, and computing sunrise
+// there put every night window twelve hours off the boat's own.
+func positionForSun(state vesselStateData) (lat, lon float64, ok bool) {
+	if state.GNSSCriticalAlert {
+		return 0, 0, false
+	}
+	if state.Latitude == -1 && state.Longitude == -1 {
+		return 0, 0, false
+	}
+	if state.Latitude < -90 || state.Latitude > 90 || state.Longitude < -180 || state.Longitude > 180 {
+		return 0, 0, false
+	}
+	return state.Latitude, state.Longitude, true
 }
 
 // electricalOvernightHandler serves GET /api/electrical/overnight. Position
@@ -369,17 +553,27 @@ func (c *overnightCache) get(now time.Time, compute func() overnightResult) over
 // handler reads (fetchSignalKVesselState) - this never opens its own
 // connection to SignalK.
 func electricalOvernightHandler(c echo.Context) error {
+	now := time.Now().UTC()
+	if cached, ok := globalOvernightCache.fresh(now); ok {
+		return c.JSON(http.StatusOK, cached)
+	}
+
 	state, err := fetchSignalKVesselState()
-	if err != nil || state.Latitude < -90 || state.Latitude > 90 || state.Longitude < -180 || state.Longitude > 180 {
+	lat, lon, havePosition := positionForSun(state)
+	if err != nil || !havePosition {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"error": "vessel position unavailable; dawn projection needs it for sunrise",
 		})
 	}
 
-	now := time.Now().UTC()
-	result := globalOvernightCache.get(now, func() overnightResult {
-		r := computeOvernight(now, state.Latitude, state.Longitude, socMeasurementPath(), dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
-		if r.Basis != "history" {
+	result := globalOvernightCache.get(now, lat, lon, func() overnightResult {
+		r := computeOvernight(now, lat, lon, socMeasurementPath(), dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
+		if r.Basis == "history" {
+			log.Printf(
+				"overnight model: basis=history nights_used=%d scanned=%d excluded shore=%d generator=%d gap=%d rise=%d oldest=%s",
+				r.NightsUsed, r.NightsConsidered, r.NightsExcludedShore, r.NightsExcludedGenerator, r.NightsExcludedGap, r.NightsExcludedRise, r.OldestNightStart.Format(time.RFC3339),
+			)
+		} else {
 			reason := ""
 			if r.Reason != nil {
 				reason = *r.Reason
