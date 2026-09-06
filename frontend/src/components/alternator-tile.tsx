@@ -16,6 +16,11 @@ interface AlternatorTileProps {
   enginesRunning: boolean
 }
 
+function hasAlternatorData(data: AlternatorData | null | undefined): boolean {
+  if (!data) return false
+  return data.currentA !== null || data.voltageV !== null || data.powerW !== null || data.temperatureC !== null
+}
+
 function tempClass(tempC: number | null): string {
   if (tempC === null) return 'text-gauge-secondary'
   if (tempC >= 100) return 'text-red-500'
@@ -23,7 +28,7 @@ function tempClass(tempC: number | null): string {
   return 'text-gauge-secondary'
 }
 
-function AlternatorColumn({ label, data }: { label: string; data: AlternatorData }) {
+function AlternatorColumn({ label, data }: { label?: string; data: AlternatorData }) {
   const powerLabel = data.powerW !== null ? Math.round(data.powerW).toString() : '—'
   const currentLabel = data.currentA !== null ? data.currentA.toFixed(1) : '—'
   const voltageLabel = data.voltageV !== null ? data.voltageV.toFixed(1) : '—'
@@ -31,7 +36,7 @@ function AlternatorColumn({ label, data }: { label: string; data: AlternatorData
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-[10px] uppercase tracking-[0.20em] text-muted-foreground">{label}</p>
+      {label && <p className="text-[10px] uppercase tracking-[0.20em] text-muted-foreground">{label}</p>}
 
       {/* Power */}
       <div className="rounded-md border bg-background/60 px-3 py-3">
@@ -75,16 +80,27 @@ function AlternatorColumn({ label, data }: { label: string; data: AlternatorData
 }
 
 export const AlternatorTile = memo(function AlternatorTile({ port, starboard, enginesRunning }: AlternatorTileProps) {
+  const hasPort = hasAlternatorData(port)
+  const hasStarboard = hasAlternatorData(starboard)
+  const isSingleAlternator = (hasPort && !hasStarboard) || (!hasPort && hasStarboard)
+  const singleData = hasPort ? port : starboard
+
   return (
-    <Tile title="Alternators" icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
+    <Tile title={isSingleAlternator ? 'Alternator' : 'Alternators'} icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
       {enginesRunning ? (
-        <div className="mt-1 grid grid-cols-2 gap-4">
-          <AlternatorColumn label="Port" data={port} />
-          <AlternatorColumn label="Starboard" data={starboard} />
-        </div>
+        isSingleAlternator ? (
+          <div className="mt-1">
+            <AlternatorColumn data={singleData} />
+          </div>
+        ) : (
+          <div className="mt-1 grid grid-cols-2 gap-4">
+            <AlternatorColumn label="Port" data={port} />
+            <AlternatorColumn label="Starboard" data={starboard} />
+          </div>
+        )
       ) : (
         <div className="mt-1 flex h-24 items-center justify-center rounded-md border bg-background/60">
-          <p className="text-sm text-muted-foreground">Engines not running</p>
+          <p className="text-sm text-muted-foreground">{isSingleAlternator ? 'Engine not running' : 'Engines not running'}</p>
         </div>
       )}
     </Tile>

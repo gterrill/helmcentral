@@ -24,15 +24,37 @@ const emptyData = {
   temperatureC: null,
 }
 
-test('renders "Engines not running" when enginesRunning is false', () => {
+test('renders "Engines not running" when enginesRunning is false and no alternator data is present', () => {
   render(<AlternatorTile port={emptyData} starboard={emptyData} enginesRunning={false} />)
   expect(screen.getByText('Engines not running')).toBeInTheDocument()
   expect(screen.queryByText('Port')).not.toBeInTheDocument()
   expect(screen.queryByText('Starboard')).not.toBeInTheDocument()
 })
 
-test('renders port and starboard data when enginesRunning is true', () => {
+test('renders single alternator layout without Port/Starboard headers when only one alternator is active', () => {
+  render(<AlternatorTile port={mockPort} starboard={emptyData} enginesRunning={true} />)
+
+  // Header should be singular
+  expect(screen.getByText('Alternator')).toBeInTheDocument()
+  expect(screen.queryByText('Port')).not.toBeInTheDocument()
+  expect(screen.queryByText('Starboard')).not.toBeInTheDocument()
+
+  // Readings
+  expect(screen.getByText('50.5')).toBeInTheDocument()
+  expect(screen.getByText('13.8')).toBeInTheDocument()
+  expect(screen.getByText('697')).toBeInTheDocument()
+  expect(screen.getByText('85°')).toBeInTheDocument()
+})
+
+test('renders "Engine not running" when enginesRunning is false on a single-alternator vessel', () => {
+  render(<AlternatorTile port={mockPort} starboard={emptyData} enginesRunning={false} />)
+  expect(screen.getByText('Engine not running')).toBeInTheDocument()
+  expect(screen.getByText('Alternator')).toBeInTheDocument()
+})
+
+test('renders port and starboard data when enginesRunning is true and both report data', () => {
   render(<AlternatorTile port={mockPort} starboard={mockStarboard} enginesRunning={true} />)
+  expect(screen.getByText('Alternators')).toBeInTheDocument()
   expect(screen.getByText('Port')).toBeInTheDocument()
   expect(screen.getByText('Starboard')).toBeInTheDocument()
   
