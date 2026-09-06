@@ -224,6 +224,11 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     ? severityTextClass(socSeverity(dawn.socPercent, socBands), 'text-gauge-secondary')
     : 'text-muted-foreground'
   const dawnEstimateText = dawn !== null ? `${Math.round(dawn.socPercent)}%` : '—'
+  const dawnBasisLabel = dawn === null
+    ? ''
+    : dawn.basis === 'history'
+      ? `${overnightProjection?.nightsUsed ?? 0} nights`
+      : 'at current rate'
 
   return (
     <Tile title="Battery & Power" stale={feedStale} staleLabel={formatDataAge(props.lastUpdateAgeS)}>
@@ -297,13 +302,17 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
                 {' · '}
                 <span data-testid="dawn-estimate" className={dawnEstimateClass}>{dawnEstimateText}</span>
                 {dawn !== null && (
-                  dawn.basis === 'history' ? (
-                    <span className="hidden lg:inline"> · {overnightProjection.nightsUsed} nights</span>
-                  ) : (
-                    <span className="hidden lg:inline"> · at current rate</span>
-                  )
+                  <span className="hidden lg:inline"> · {dawnBasisLabel}</span>
                 )}
               </span>
+            )}
+            {/* Below lg the basis gets a row of its own instead of being dropped:
+                a tablet has no hover, so a tooltip-only basis would leave the
+                iPad, the primary helm target, unable to tell "4 nights" from
+                "at current rate", which is the one distinction the label exists
+                to make. */}
+            {overnightProjection !== null && dawn !== null && (
+              <span className="block truncate lg:hidden">{dawnBasisLabel}</span>
             )}
           </div>
         </div>

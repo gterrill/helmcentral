@@ -333,7 +333,9 @@ test('renders the dawn estimate for a history basis with the nights-used token',
 
   expect(screen.getByText(/Dawn/)).toBeInTheDocument()
   expect(screen.getByTestId('dawn-estimate')).toHaveTextContent(`${Math.round(expected!.socPercent)}%`)
-  expect(screen.getByText(/4 nights/)).toBeInTheDocument()
+  // Twice on purpose: inline at lg and up, and as its own footer row below
+  // lg, where a tablet has no hover to reveal the tooltip.
+  expect(screen.getAllByText(/4 nights/)).toHaveLength(2)
 })
 
 test('renders the dawn estimate for a linear basis with the backend reason in its title', () => {
@@ -354,7 +356,7 @@ test('renders the dawn estimate for a linear basis with the backend reason in it
     />,
   )
 
-  expect(screen.getByText(/at current rate/)).toBeInTheDocument()
+  expect(screen.getAllByText(/at current rate/)).toHaveLength(2)
   const outer = screen.getByText(/Dawn/)
   expect(outer).toHaveAttribute('title', expect.stringContaining('influxdb not configured'))
 })
