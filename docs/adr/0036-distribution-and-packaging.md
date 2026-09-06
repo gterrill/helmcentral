@@ -12,7 +12,7 @@ Helmcentral is being published as a public repository. The onboarding target is
 that the only prerequisite is an existing SignalK server and an internet
 connection — no toolchain, no checkout, no config file to hand-edit.
 
-What existed fell well short of that. The only published artifact was a GHCR
+The only published artifact was a GHCR
 image built for `linux/amd64` alone, which fails with `exec format error` on a
 Raspberry Pi — the single most common SignalK host. The documented install
 required cloning the repo, editing `settings.yaml` by hand, and running a
@@ -20,12 +20,11 @@ TinyGo container to compile seven WASM plugins from source. `docker-compose.yml`
 carried hardcoded `dns:` entries pointing at a private LAN resolver, which
 would have broken DNS for every other user.
 
-Three properties of the codebase made native binaries the obvious primary
-channel rather than a nice-to-have:
+Three properties support native binaries as the primary distribution channel:
 
 - The backend is `CGO_ENABLED=0` throughout — SQLite is `modernc.org/sqlite`
   and the WASM runtime is wazero, both pure Go (a constraint ADR 0023 already
-  defends). Cross-compiling to every SignalK-capable platform is free.
+  defends). Cross-compilation does not require a target-specific C toolchain.
 - The React frontend is already embedded via `//go:embed all:dist`
   (`backend/static.go`), so one binary serves the UI and the API.
 - Build metadata is already injected by ldflags and surfaced on
@@ -35,8 +34,7 @@ Against that, SignalK itself is most often installed natively via npm on Pi OS.
 Requiring Docker to run a companion dashboard is a real barrier for that
 audience, while the homelab audience already has Compose working.
 
-Two latent defects blocked either channel, both of which had been invisible
-because the Docker build happened to paper over them.
+Two latent defects blocked distribution. The Docker build had masked both.
 
 **The API base URL pinned port 8080.** Five frontend modules each carried
 `import.meta.env.VITE_API_BASE_URL ?? \`${location.protocol}//${location.hostname}:8080\``.
@@ -90,7 +88,7 @@ its `.wasm`, which the default-deny network allowlist depends on.
 `cacheFilePath` (`backend/weather_tide.go`) already resolves every piece of
 state through one choke point, rooting relative paths at
 `HELMCENTRAL_STATE_DIR`. That variable existed only for E2E isolation
-(ADR 0026); it is now the load-bearing mechanism for native installs, set by
+(ADR 0026); native installs now depend on it, set by
 the systemd unit alongside `SETTINGS_FILE=/var/lib/helmcentral/settings.yaml`.
 
 `settings.yaml` goes in the writable state directory rather than `/etc`
@@ -142,8 +140,7 @@ GET for data the app was just handed.
 
 ### 6. CI gates releases
 
-There was no test workflow — the only automation built the image. Publishing
-signed archives from an untested tree is not defensible in public, so
+The only existing automation built the image. To validate releases,
 `.github/workflows/ci.yml` runs `go vet`, `go test -short`, the frontend suite,
 lint, and a full `goreleaser build --snapshot` on every push and PR.
 
@@ -166,9 +163,8 @@ installer's closing output and the GoReleaser release notes footer: trusted LAN
 only, do not port-forward, use a VPN or an authenticating reverse proxy for
 remote access. Authentication is the first item on the roadmap.
 
-This is a conscious trade-off, and the honest framing matters: the software is
-no less safe than it was, but its audience is about to grow, and an operator
-who is told the constraint can act on it.
+This accepts the existing security limitations for release while making them
+explicit to new operators.
 
 ## Consequences
 

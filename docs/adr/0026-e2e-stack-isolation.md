@@ -17,23 +17,23 @@ await page.getByRole('button', { name: 'Save and Continue' }).click();
 
 `192.168.50.243` was an arbitrary throwaway value chosen to differ from the current one. "Save and Continue" did exactly what it says: `POST /api/settings` persisted it to the real `settings.yaml`, repointing the dashboard at an address with no host on it. Vessel state served `source: "signalk-unreachable"` until someone noticed and investigated.
 
-Three properties turned a harmless test keystroke into an outage:
+Three properties allowed the test edit to cause an outage:
 
 1. **`POST /api/settings` does not validate the SignalK address.** Its sibling `POST /api/settings/signalk` probes the server and returns 502 rather than persist something unreachable; the bulk endpoint writes `settings["signalk"]` straight from the payload. The sectioned settings page's Save goes through the bulk path — and "Save and Continue", which fires when navigating away from a half-finished edit, makes persisting an in-progress value the *default* outcome rather than a deliberate one.
 2. **`settings.yaml` is gitignored**, so there was no history to restore from. The original value was only recovered because the `influxdb` stanza still pointed at the same host.
-3. **Nothing distinguished "look at the app" from "drive the app".** Both used the same URL, so the choice was never presented.
+3. **Read-only checks and tests that changed state used the same URL.** There was no separate test target.
 
-An obvious narrow fix — snapshot `settings.yaml` before a run and restore after — was rejected: it is racy against the running backend, it restores only the one file out of a dozen state paths, and it leaves the hazard in place for anyone who forgets the wrapper.
+Saving a copy of `settings.yaml` before a run and restoring it afterwards was rejected: it can race with the running backend, restores only one of a dozen state paths, and leaves unwrapped tests able to change live settings.
 
 ## Decision
 
 1. **A single runtime state root, `HELMCENTRAL_STATE_DIR`.** Every state path in the backend already funnels through one helper, `cacheFilePath(envKey, fallback)` (`backend/weather_tide.go`). It now resolves in this precedence: an explicit per-file env override (`ROUTES_FILE`, `SECRETS_DB_PATH`, …) wins outright; otherwise a relative fallback is rooted at `HELMCENTRAL_STATE_DIR` when set; otherwise the bare fallback, unchanged. Absolute fallbacks are never re-rooted.
 
-   The alternative was enumerating a dozen per-file env vars in the compose config. Rejected because it is not merely verbose but *silently* incomplete: a state path added later would default back into the working tree with nothing to signal it. One root means new state paths are isolated by construction.
+   Enumerating a dozen per-file env vars in the compose config was rejected because a later state path could default back into the working tree without warning. A single root also isolates new paths that use the helper.
 
-2. **An `e2e` compose profile serving the same UI from a throwaway substrate.** `backend-e2e` (`:8090`) and `frontend-e2e` (`:5174`) build from the same sources with hot-reload intact, but set `HELMCENTRAL_STATE_DIR=/state` and `SETTINGS_FILE=/state/settings.yaml` against a container-local volume, and — critically — **do not mount `./settings.yaml` at all**. Settings are seeded from a committed `e2e/settings.seed.yaml` on every container start, so a restart returns the stack to a known state. `frontend-e2e` gets its own `node_modules` volume; sharing one with `frontend-dev` would race two concurrent `npm install`s against the same volume.
+2. **An `e2e` compose profile serves the same UI with disposable state.** `backend-e2e` (`:8090`) and `frontend-e2e` (`:5174`) build from the same sources with hot-reload intact, but set `HELMCENTRAL_STATE_DIR=/state` and `SETTINGS_FILE=/state/settings.yaml` against a container-local volume. They do not mount `./settings.yaml`. Settings are seeded from a committed `e2e/settings.seed.yaml` on every container start, so a restart returns the stack to a known state. `frontend-e2e` gets its own `node_modules` volume; sharing one with `frontend-dev` would race two concurrent `npm install`s against the same volume.
 
-   `frontend-e2e` must also set **`VITE_API_BASE_URL=http://localhost:8090`**, and this is load-bearing rather than defensive. Several hooks do not use the Vite proxy at all — `use-settings-form.ts` (the sole caller of `POST /api/settings`), `signalk-connection-section.tsx`, `use-secrets-status.ts` and `use-vessel-identity.ts` each build an absolute URL defaulting to `` `${window.location.protocol}//${window.location.hostname}:8080` ``. Redirecting only the proxy therefore isolates the read path while leaving the *write* path pointed at the dev backend: an E2E run on `:5174` would still have written to the live `settings.yaml`, reproducing the exact incident. This was caught during verification — the E2E dashboard rendered the real vessel's name and model instead of the seed's — not by reasoning about the config.
+   `frontend-e2e` must also set `VITE_API_BASE_URL=http://localhost:8090`. `use-settings-form.ts` (the sole caller of `POST /api/settings`), `signalk-connection-section.tsx`, `use-secrets-status.ts` and `use-vessel-identity.ts` bypass the Vite proxy and build absolute URLs defaulting to `` `${window.location.protocol}//${window.location.hostname}:8080` ``. Redirecting only the proxy would leave writes pointed at the dev backend and live `settings.yaml`. Verification caught this when the E2E dashboard rendered the real vessel's name and model instead of the seed values.
 
    The seed points SignalK at `127.0.0.1:9` deliberately. E2E here verifies layout, forms and flows; an unreachable source renders the documented `—` placeholders rather than hanging on a live fetch, and no real vessel configuration is committed to the repo.
 
@@ -44,7 +44,7 @@ An obvious narrow fix — snapshot `settings.yaml` before a run and restore afte
 ## Consequences
 
 Positive:
-- The incident is not reproducible. Replaying the original script — same `#signalk-address` fill, same navigate-away, same "Save and Continue" — against `:5174` leaves `settings.yaml` byte-identical (verified by checksum), with the write landing on the E2E backend and the page's `/api` requests provably confined to `:8090` and `:5174`.
+- Replaying the original script against `:5174`, including the `#signalk-address` edit, navigation, and "Save and Continue", left the live `settings.yaml` byte-identical (verified by checksum). The write reached the E2E backend, and the page's `/api` requests were confined to `:8090` and `:5174`.
 - Isolation covers all runtime state, not just settings: the E2E backend generates its own `secrets.key`, `secrets.sqlite`, `dashboard-pages.json` and caches inside its volume, and the repo's `backend/data` is untouched.
 - `HELMCENTRAL_STATE_DIR` is generally useful beyond E2E — it is the missing knob for running a second instance, or for a deployment that wants state outside the working directory.
 - Unset, the variable changes nothing: existing dev, prod and CI paths keep their current relative-path behaviour.
@@ -60,4 +60,4 @@ Tradeoffs:
 
 **Superseded by ADR 0027**, which added the validation described below. The reasoning is kept for the record.
 
-`POST /api/settings` still persists an unvalidated, possibly unreachable SignalK address, and "Save and Continue" still makes that the default outcome of navigating away from an edit. This ADR removes the *blast radius* (a test can no longer reach the real config) but not the underlying asymmetry between the two save endpoints — a hand-typed typo in that field will still silently take the dashboard offline with no feedback. Whether the bulk path should validate the SignalK stanza, warn, or leave it to the operator is a separate decision.
+`POST /api/settings` still persists an unvalidated, possibly unreachable SignalK address, and "Save and Continue" still makes that the default outcome of navigating away from an edit. This ADR isolates test writes from live configuration but leaves the two save endpoints' validation inconsistent. A typo can still take the dashboard offline without feedback. Whether the bulk path should validate the SignalK stanza, warn, or leave it to the operator is a separate decision.

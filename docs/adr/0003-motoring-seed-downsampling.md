@@ -10,7 +10,7 @@ sampling; this document is retained for historical context only.
 ## Context
 On startup the server seeds the motoring ring buffer from InfluxDB so `/api/tracks/motoring` is useful before any live server-side sampling has occurred.
 
-Raw `navigation.position` data from Influx can be extremely dense and can include multiple SignalK sources. Loading raw points into a 1000-point ring buffer caused the buffer to fill with the final cluster near anchor drop instead of representing the full approach.
+Raw `navigation.position` data from Influx can contain frequent samples and multiple SignalK sources. Loading raw points into a 1000-point ring buffer caused the buffer to fill with the final cluster near anchor drop instead of representing the full approach.
 
 ## Decision
 Downsample the startup seed from Influx before inserting into the motoring ring buffer.

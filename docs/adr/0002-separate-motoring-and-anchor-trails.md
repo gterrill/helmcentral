@@ -9,7 +9,7 @@ The pre-anchor motoring approach and the post-anchor watch trail are visually an
 - The motoring track is used when repositioning the anchor to see where the vessel came from before anchoring.
 - The post-anchor trail shows movement after anchor watch becomes active.
 
-Earlier implementations mixed these concerns together, which made the code brittle and made endpoint semantics unclear.
+Earlier implementations combined these trails, making changes harder and endpoint semantics unclear.
 
 ## Decision
 Keep motoring and anchor-watch trails separate.

@@ -15,7 +15,7 @@ The same file that knows an engine's gauges also knows its service intervals, be
 
 ### 1. JSON, not a WASM plugin
 
-Every other `plugins/` directory holds `.wasm`. This one holds `.json`, and the reason is specific rather than convenient.
+Every other `plugins/` directory holds `.wasm`. This one holds `.json` so operators can inspect the profile values directly.
 
 The existing categories (ADR 0017/0018/0019) fetch data over a network, and the sandbox exists to run *untrusted code* safely. A profile runs no code and fetches nothing — it is a table of numbers. And since ADR 0050 those numbers are **alarm thresholds**.
 
@@ -27,9 +27,9 @@ If a profile ever needs to *compute* or *fetch* — look a spec up by engine ser
 
 ADR 0043 put service schedules in a WASM plugin category with `search_models` and `fetch_schedule`. Its scope rested on "records are planned to live in a separate application" — HelmLocker. HelmLocker is inventory management, not maintenance, so that premise does not hold, and Helmcentral will own maintenance and service history.
 
-0043 rejected a data format because "real schedules need computation, not lookup". Its own decision 3 undercuts that: the plugin returns raw intervals and *the host derives everything*. "250 hours or 12 months, whichever comes first" is two fields plus host-side logic. "Conditional on engine variant" collapses into the profile id — `cummins-qsb67-550` and `-480` are separate files. "Items that supersede one another" is a `supersedes` list. 0043 also expected schedule plugins to ship no `allowed_hosts.json` and run entirely offline; a plugin category that uses none of the plugin system is a data file wearing a sandbox. 0043 explicitly invited this revisit, and it is warranted.
+0043 rejected a data format because "real schedules need computation, not lookup", but its decision 3 assigned derivation to the host and raw intervals to the plugin. "250 hours or 12 months, whichever comes first" needs two fields plus host-side logic. Engine variants use separate profile ids, such as `cummins-qsb67-550` and `-480`. Items that supersede one another use a `supersedes` list. 0043 also expected schedule plugins to ship no `allowed_hosts.json` and run entirely offline. These requirements can be met by a data file without executable plugin code, the case 0043 identified as grounds to revisit the decision.
 
-**0043's strongest objection dissolves outright.** It argued a service reminder cannot be an alarm: "runtime is monotonic, so such a rule fires once at the threshold and can never clear." That was true when written. ADR 0050 has since established rules *derived* from config the backend owns, re-evaluated every tick. A service-due rule is `runTime above (last_completed_hours + interval)` — logging work **moves the threshold**. The value never comes back down; the bar goes up. It clears and re-arms through the existing engine with no new state machine and no change to `alarmRule`.
+0043 also argued that a service reminder cannot be an alarm: "runtime is monotonic, so such a rule fires once at the threshold and can never clear." That was true when written. ADR 0050 has since established rules derived from config the backend owns, re-evaluated every tick. A service-due rule is `runTime above (last_completed_hours + interval)`. Logging work moves the threshold, allowing the alarm to clear and re-arm through the existing engine with no new state machine or change to `alarmRule`.
 
 What 0043 got right and is kept: the host derives what is due, there is no default provider, and a completion record stops at the fact that work happened.
 
@@ -37,7 +37,7 @@ What 0043 got right and is kept: the host derives what is due, there is no defau
 
 Cummins does not publish QSB 6.7 setpoints; they are in the operator's manual and QuickServe. What *is* publicly sourceable, from Seaboard Marine, is **normal operating guidance**: coolant "in the 160F to 185F range", oil pressure "40-80 PSI at medium to high RPM's" and "10-20 PSI when idling (engine hot)".
 
-Those are not alarm points, and the distinction is critical now that a zone fires an alarm. A profile that alarmed at 25 psi because a forum says cruise pressure is 40–80 would raise alarms the engine's own ECU does not, and would teach the operator to ignore them. **That is a worse outcome than shipping no profile at all.**
+Those are not alarm points. Now that a zone fires an alarm, a profile using 25 psi because a forum says cruise pressure is 40–80 would raise alarms the engine's own ECU does not, encouraging operators to ignore them.
 
 The format separates the two, and the existing code already supported it exactly: `normal`-state zones colour the gauge and are explicitly skipped by `zoneDerivedAlarmRules()` and by `validateGaugeConfig`'s threshold check. A shipped profile is all-`normal` advisory bands, each citing its source, with `warn` and `alarm` slots present but **null** until the owner fills them from the manual.
 
@@ -57,9 +57,8 @@ Stored zones are `{from, to}`, but a profile authors them as a direction and a t
 
 Applying a profile to a tile that already exists fills in the settings of members
 already there *and* appends the ones the profile has that the tile lacks. The first
-version only updated, and a half-built Port tile stayed half-built — the gauges you had
-not thought to add were exactly the ones still missing, which is the opposite of what a
-profile is for.
+version only updated existing members, leaving an incomplete Port tile without the
+profile's other gauges.
 
 The instance prefix for those appended gauges comes from **the tile's own gauges**, not
 from the first path the server happens to publish. Seeding from the published list would
@@ -77,7 +76,7 @@ There is deliberately **no apply endpoint**. Applying produces an ordinary `PATC
 ## Consequences
 
 - An engine tile is two clicks: pick the profile, pick the instance. The instance prefix is what makes one profile serve both engines, which is the same problem ADR 0049's find/replace solves, moved to before the tile exists.
-- Nothing bundled can raise a false alarm, and a test enforces it. The cost is that the bundled profile's alarm slots are empty on delivery and the operator must fill them once from the manual.
+- Bundled profiles contain no active alarm thresholds, enforced by a test. The operator must fill the empty alarm slots from the manual.
 - The format generalises beyond engines. `path_suffix` plus an instance prefix works the same for `tanks.fuel.0` or a genset.
 - `normal` zones needed two small fixes to be usable at all: the severity select had no `normal` option, so a profile's bands would have landed un-editable, and `zoneColorFor` rendered them in the border colour, which made an advisory band invisible. They are now green, completing the colour language the ADR 0052 lamps already speak.
 - Applying is additive but never subtractive: a gauge the tile has and the profile does not is left alone. Removing it is a deliberate act, not a side effect of applying a profile.

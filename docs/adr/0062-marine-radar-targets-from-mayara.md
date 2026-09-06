@@ -7,17 +7,17 @@ Extends ADR 0057 (AIS collision alarms from target contexts) and ADR 0029 (Signa
 
 ## Context
 
-ADR 0057 said this out loud in its own consequences:
+ADR 0057 recorded this limitation in its consequences:
 
 > The Furuno tracks radar ARPA targets, and a radar-only contact transmits no AIS, so this will never see it. This is a second opinion covering AIS traffic, not a mirror of the plotter, and the UI should not imply otherwise.
 
-That was honest and it was also a hole. A steel fishing boat with a dead transponder, a tender, an unlit mooring ball, a squall cell: the DRS4D-NXT paints all of them and Helmcentral sees none of them. The alarms we have are the ones that only fire for vessels considerate enough to announce themselves.
+AIS-only alarms cannot cover contacts that do not transmit AIS. The DRS4D-NXT can detect returns from fishing boats with inactive transponders, tenders, mooring balls and squall cells that Helmcentral does not receive.
 
 ### mayara closes it without a protocol project
 
 [mayara-server](https://github.com/MarineYachtRadar/mayara-server) is an Apache-2.0 Rust server that speaks the proprietary radar wire formats and republishes them as a Signal K flavoured HTTP and WebSocket API. It carries a full ARPA implementation: blob detection off the spokes, an IMM filter running three Kalman models, target lifecycle, and CPA/TCPA. The Furuno DRS-NXT series is on its tested-against-real-hardware list.
 
-That means the expensive part is already written by someone with the hardware to test it. What is left for us is a client.
+Helmcentral can consume mayara's target data without implementing the radar protocols or ARPA processing.
 
 ### It is already running, and it already works
 
@@ -44,7 +44,7 @@ One physical radar presents two keys:
 
 mayara numbers targets within a radar. Two ranges on one antenna means target id 3 exists twice on day one, on a boat that owns exactly one radar.
 
-That same capture corrected the envelope field. Reading mayara's Rust source suggested `apiVersion`; the wire says `version`. The fixture rule earned its keep before a line of client code existed.
+That capture also corrected the envelope field before client implementation: mayara's Rust source suggested `apiVersion`, but the response used `version`.
 
 ### Why it produces nothing today
 
@@ -54,7 +54,7 @@ That same capture corrected the envelope field. Reading mayara's Rust source sug
 
 The radar is transmitting (`power: 2`) but `doppler: 0` and both guard zones report `enabled: false`. ARPA acquires through a guard zone, through Doppler, or through a manual MARPA click. With all three unavailable there is nothing to acquire with.
 
-Neither is a Helmcentral problem, and neither is fixed by writing client code. They are listed here because the integration is unverifiable until they are resolved, and because a reader finding an empty target list six months from now should find the explanation before the bug report.
+Both conditions must be resolved on the radar side before the target integration can be verified. They also explain why a reachable radar can return an empty target list.
 
 ## Decision
 
@@ -70,7 +70,7 @@ Radar presence, model, range and transmit state come along because an empty targ
 
 `danger.cpa`, `danger.tcpa` and `danger.isDangerous` are passed through unchanged.
 
-This is not a shortcut, it is the pattern already in the building. Helmcentral computes no CPA anywhere: ADR 0057 ingests figures from `signalk-ais-target-prioritizer` and reads its notification. Radar targets trusting mayara is the same arrangement with a different producer. Recomputing would mean writing a collision solver to second-guess an IMM Kalman filter fed by data we do not have, which is a worse calculation dressed as a safer one.
+This follows ADR 0057, which ingests CPA figures and notifications from `signalk-ais-target-prioritizer` rather than computing them in Helmcentral. Radar targets use mayara as the producer. Recomputing CPA would require another collision solver without access to the data feeding mayara's IMM Kalman filter.
 
 The consequence is accepted deliberately: radar alarms use mayara's IMO defaults (CPA under 0.5 nm, TCPA within 6 minutes) and do not follow the vessel-state profile ADR 0058 built for AIS. The two alarm families will disagree. They are different instruments.
 
@@ -80,7 +80,7 @@ The consequence is accepted deliberately: radar alarms use mayara's IMO defaults
 
 ADR 0029 ruled out mDNS for SignalK on this stack: musl with no NSS-mDNS, a bridge container, multicast that never reaches the LAN. Nothing about mayara changes the constraint, and the container test above reproduces it for mayara specifically rather than inheriting the argument. `mayara.local` does not resolve from where the code runs.
 
-There is a second reason that survives even where mDNS works. `mayara.local` resolves to two addresses on that host, and from the development Mac it answered with the ZeroTier address ahead of the LAN one. A name on a seven-interface machine is a coin toss. An IP is not.
+Even where mDNS works, `mayara.local` resolves to two addresses on that host. From the development Mac it returned the ZeroTier address ahead of the LAN address. An explicit IP avoids this address-selection ambiguity.
 
 So `POST /api/radar/discover` sweeps port 6502 across the derived `/24`, reusing `resolveDiscoveryNetwork`, `hostsInNetwork` and the RFC1918 refusal from ADR 0029 unchanged. A TCP open is not evidence: the responder has to answer the radars endpoint with a decodable envelope, and the discovered radar names are reported so the operator can tell their radar from a neighbour's. Discovery persists nothing; accepting a result saves through `POST /api/settings` as ADR 0028 requires.
 
@@ -142,7 +142,7 @@ Nine of the twenty-one carried `is_dangerous: true`, with CPAs down to 3.7 m and
 
 Wiring the alarm path to that flag today would have produced nine simultaneous collision alarms on a boat at anchor. That is ADR 0057 section 6 and the whole of ADR 0058 arriving again on a new input, and for the same underlying reason: with own ship stationary the relative velocity vector is noise, CPA collapses toward present range, and TCPA becomes range divided by jitter. A boolean computed from that inherits every bit of it.
 
-So: `status == "tracking"` and a non-nil `danger` are necessary and are visibly not sufficient. What else radar alarms need is deliberately not decided here, because the honest answer is that we do not yet have the data to decide it. The capture that would settle it is one taken underway, where the geometry is real. Until then the alarm phase stays unshipped, which is what decision 8 already sequences.
+`status == "tracking"` and a non-nil `danger` are necessary but insufficient. Further alarm criteria are deferred until an underway capture provides evidence beyond the stationary case. Until then the alarm phase stays unshipped, following the sequence in decision 8.
 
 Two candidates worth weighing when that capture exists, neither adopted yet: gate on `navigation.state` the way ADR 0058 gates the AIS profile, since "anchored" is exactly when this degenerates; or require a minimum track age, since a real vessel persists across many rotations and a wave does not. The second is attractive because it needs no external input and mayara already carries a promotion threshold internally.
 
@@ -260,7 +260,7 @@ The first capture with the radar transmitting continuously, once TimeZero Pro an
 
 Three and a half minutes at anchor, own ship making 0.3 knots, sampled every 6 seconds. Raw capture in `backend/testdata/mayara/target-persistence-anchored.jsonl`.
 
-**Track age is a powerful filter.** 111 distinct target ids appeared across 36 samples. The median id was present in 4 of them, about 24 seconds. Requiring a target to persist cuts the population hard:
+**Track age filters short-lived targets.** 111 distinct target ids appeared across 36 samples. The median id was present in 4 of them, about 24 seconds. Requiring a target to persist reduces the population:
 
 | Minimum persistence | Targets surviving | Ever flagged dangerous |
 | --- | --- | --- |
@@ -278,7 +278,7 @@ A 60-second floor removes 97% of them. The clutter is ephemeral: it appears for 
 
 Constant range, constant bearing, stationary. Almost certainly an anchored boat or a fixed object. And its CPA of 156 m against a present range of 155 m is the exact signature ADR 0058 recorded for the AIS path: with both vessels stopped the relative velocity vector is noise, CPA collapses to present range, and TCPA becomes range over GPS jitter. Persistence filtering keeps this target precisely because it is stationary, which is the opposite of what is wanted.
 
-So the two candidates in decision 7b are not alternatives. Track age kills the ephemeral clutter that dominates by count; something else has to kill the degenerate stationary case that survives it. ADR 0058 solved the same problem for AIS with a speed floor, and its lesson applies unchanged: `speed: 0` there did not mean "no minimum", it disabled the filter and let a motionless boat raise a collision alarm.
+The two candidates in decision 7b address different cases. Track age filters the short-lived clutter that dominates by count, but a separate criterion is needed for persistent stationary targets. ADR 0058 addressed the AIS case with a speed floor: `speed: 0` disabled the filter and let a motionless boat raise a collision alarm.
 
 Deliberately not fixing thresholds here. What the measurement settles is the shape of the answer: a persistence requirement plus a relative-motion or speed floor, not either alone. What it cannot settle is the numbers, because every capture so far is at anchor, where own-ship motion is the degenerate input. That part still wants a passage.
 
@@ -292,7 +292,7 @@ That headroom is finite and the arithmetic is worth stating, because it has a da
 
 It also argues against the change the previous correction implied. Reading targets from the snapshot instead of polling would mean consuming that frame and filtering 875-of-928 nulls on every reconnect, and holding every dead id in our own snapshot, which never evicts either. Polling reads the live set and nothing else. The correction stands, in that the premise for polling was false, but the conclusion happens to survive on grounds nobody had measured yet.
 
-**Our own presence detection had the same disease.** `radarsFromSnapshot` read `vessels.self.radars` with no freshness check. The SignalK tree never evicts, so with mayara gone it still listed both radars, controls 17.9 hours old, power frozen at Transmit. Two consequences: the poller kept polling a radar that no longer existed, logging a 404 every two seconds against the live server, and `Transmitting` read true off an eighteen-hour-old value, feeding the standby gate exactly the stale input it exists to reject. Only mayara's 404 stopped stale targets reaching the map.
+**Helmcentral's presence detection also retained stale state.** `radarsFromSnapshot` read `vessels.self.radars` with no freshness check. The SignalK tree never evicts, so with mayara gone it still listed both radars, controls 17.9 hours old, power frozen at Transmit. The poller kept requesting an unavailable radar, logging a 404 every two seconds, and `Transmitting` read true from the stale value. Only mayara's 404 stopped stale targets reaching the map.
 
 This is ADR 0057 section 6 for the fourth time in this integration, and the first time in code written for it. Presence is now gated on `radarPresenceMaxAge` (5 minutes) judged on `snapshot.lastSeen`, our own receive clock, matching `aisTargetPositionFresh`.
 

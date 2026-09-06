@@ -6,7 +6,7 @@ Accepted
 ## Context
 ADR 0006 added manual route planning (CRUD + waypoint/distance/ETA helpers) but explicitly excluded any form of active route-following: no cross-track error, no bearing-to-waypoint live nav UI, no autopilot integration. That scope boundary remains unchanged here.
 
-Separately, the operator's chartplotter (Timezero Professional) already pushes its active route onto the boat's SignalK server, which other NMEA2000 devices (autopilots, MFDs) can read and follow — only the next few waypoints are broadcast at a time, sliding forward as the vessel progresses, which is normal PGN 129285 windowing handled entirely by the existing SignalK→N2K bridge already on the boat. The operator wants HelmCentral's saved routes to be activatable the same way — i.e. HelmCentral becomes another producer of SignalK's standard "active route" state, not a consumer/follower of it. HelmCentral itself still does no live navigation; this is purely a "publish this route as the vessel's active route, for other equipment to consume" feature.
+The operator's chartplotter (Timezero Professional) already pushes its active route onto the boat's SignalK server, which other NMEA2000 devices (autopilots, MFDs) can read and follow. Only the next few waypoints are broadcast at a time, advancing as the vessel progresses. The existing SignalK→N2K bridge handles this PGN 129285 windowing. The operator wants to activate HelmCentral's saved routes the same way. HelmCentral publishes SignalK's standard active-route state for other equipment to consume; it does not perform live navigation or follow the route itself.
 
 The SignalK ecosystem defines two relevant standard APIs for this:
 - The Resources API (`PUT /signalk/v1/api/resources/routes/{id}`), which stores route geometry as a GeoJSON-bearing resource.
@@ -43,13 +43,13 @@ With those two fixes, a full activate → status → deactivate cycle was confir
 ## Consequences
 Positive:
 - Other NMEA2000 devices on the bus (autopilots, MFDs) can follow a HelmCentral-planned route exactly as they already do for Timezero-activated routes, without HelmCentral needing to implement any live navigation itself.
-- Clear separation of concerns: three independent hooks/controls (CRUD, dashboard pin, activation) instead of one hook trying to do all three.
-- Activation failures surface SignalK's exact error text to the operator, who would otherwise be debugging this fully blind since the dev sandbox cannot reach the real boat.
+- CRUD, dashboard pinning, and activation have independent hooks and controls.
+- Activation failures show SignalK's exact error text, helping diagnose problems against a boat server that the dev sandbox cannot reach.
 
 Negative / explicitly deferred:
-- No support for activating a route at a `pointIndex` other than 0, or in `reverse`. Needs UI that doesn't exist yet — deferred until there's a concrete need.
+- No support for activating a route at a `pointIndex` other than 0, or in `reverse`. This needs additional UI and is deferred until needed.
 - No SignalK resource deletion on deactivate, or when a HelmCentral route itself is deleted; SignalK's `resources/routes/` collection will accumulate one stale entry per route ever activated.
-- Still no cross-track error, bearing-to-waypoint nav, or any other live-following UI in HelmCentral itself — this remains entirely a "publish state for other equipment" feature, consistent with ADR 0006's original scope boundary.
+- No cross-track error, bearing-to-waypoint nav, or other live-following UI in HelmCentral. The feature publishes state for other equipment, consistent with ADR 0006's scope.
 
 ## Related
 - ADR 0006: Manual Route Planning with Smart Helpers (the feature this extends)

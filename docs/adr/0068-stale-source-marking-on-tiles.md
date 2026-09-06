@@ -17,9 +17,8 @@ Every `venus.com.victronenergy.*` path froze at 06:30:29 local, fifteen minutes
 after sunrise, at which point the panels genuinely were producing nothing. The
 tile faithfully rendered the last thing it was told.
 
-That is the worst shape this failure can take. A tile showing `—` reads as
-"no data" and sends the operator looking. A tile showing `0 W` reads as a
-measurement, and 0 W is a plausible reading for a solar array. The same frozen
+Unlike `—`, which indicates no data, `0 W` looks like a valid measurement for
+a solar array. The same frozen
 snapshot also drove the Battery & Power tile, which reported a state of charge
 that was six points stale and falling.
 
@@ -35,8 +34,7 @@ same false-alarm problem in a new place.
 
 ## Decision
 
-Sources report their own age, and tiles refuse to present a value they cannot
-vouch for.
+Source ages determine when tiles stop displaying stale readings.
 
 - The backend computes ages against the vessel clock at sample time, so the
   browser clock is never involved. `solarStateData` and `electricalStateData`
@@ -65,10 +63,9 @@ operator to ignore the marker, which costs more than it buys.
 
 ## Consequences
 
-The dashboard now distinguishes "the panels are making nothing" from "this feed
-died before dawn". The failure that prompted this becomes visible in the place
-the operator was already looking, rather than requiring them to go and query the
-GX over MQTT to find out the array was working the whole time.
+The dashboard now distinguishes a current zero-power reading from a stale feed.
+The failure is visible on the tile without requiring an MQTT query to the GX
+to check whether the array is producing power.
 
 Blanking a stale tile does discard the last known reading, which some operators
 would rather still see. The header carries the age, so the reading is

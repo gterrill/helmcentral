@@ -3,7 +3,7 @@
 ## Status
 Accepted
 
-Depends on ADR 0037. Like alarms (ADR 0038), this was never blocked on its own design — it was blocked on ingestion. A widget can bind to any path only because the delta stream put every path the server publishes into a snapshot.
+Depends on ADR 0037. As with alarms (ADR 0038), the delta-stream snapshot makes every published SignalK path available for widget binding.
 
 Extends ADR 0031, which explicitly anticipated this: *"The per-instance config field is now precedent. A second widget wanting per-instance settings extends `dashboardLayoutItem` the same way instead of inventing another mechanism."*
 
@@ -11,7 +11,7 @@ Extends ADR 0031, which explicitly anticipated this: *"The per-instance config f
 
 The dashboard had 16 widgets, each hand-wired to one data domain. An owner could not display a value the developer had not anticipated — the `embed:` iframe was the only escape hatch, and it means running Grafana to show a number.
 
-The products Helmcentral's users come from do not work this way. N2KView offers 52 component types bindable to any of 400+ N2K data points; MConnect ships 87 screen templates plus a visual editor. The gap is not gauge *count*, it is that Helmcentral's widget set is a developer-gated list.
+N2KView offers 52 component types bindable to any of 400+ N2K data points; MConnect ships 87 screen templates plus a visual editor. Helmcentral instead required a developer to add support for each data domain.
 
 Engine data is the sharpest instance. `propulsion.*` was read for RPM only, rendered nowhere, and nothing else under that tree was read at all — so oil pressure, coolant temperature, fuel rate and engine hours were unreachable however well the boat published them.
 
@@ -33,7 +33,7 @@ Zones reuse the alarm severity vocabulary (ADR 0038) rather than inventing gauge
 
 `AGENTS.md` says **"Do not introduce new primitives"** — each widget builds its own KPI stack inside `components/ui/tile.tsx`. A shared, reusable gauge component is precisely what that forbids.
 
-The carve-out, recorded rather than assumed: **that rule governs bespoke domain tiles**, where per-tile layout is a feature and a shared abstraction would flatten deliberate differences. A user-configurable widget cannot be bespoke by definition — there is no domain to tailor it to, because the operator picks the domain at runtime. `GaugeTile` is therefore a generic renderer, and it is the only one.
+The exception applies to `GaugeTile`: it is a generic renderer because the operator chooses its data domain at runtime. The rule continues to govern bespoke domain tiles, whose layouts remain tailored to their data. No other generic renderer is introduced.
 
 Everything else in `AGENTS.md` still binds: KPI stacking, `text-gauge-primary`/`text-gauge-secondary` for hero numbers with raw palette colours reserved for alert semantics (which is exactly what zone colours are), the `text-[11px]`/`text-[10px]`/`text-[9px]` micro-type scale, no hex improvisation, and the structural dash for absent data.
 
@@ -47,7 +47,7 @@ Everything else in `AGENTS.md` still binds: KPI stacking, `text-gauge-primary`/`
 
 `lib/quantities.ts` defines quantities with their SI unit and display options. Picking a path preselects the quantity from SignalK's own `meta.units`, so the operator never has to know that oil pressure is in pascals — the server already said so.
 
-Absent values format to `null` and render the structural dash, never a zero. **A gauge reading 0 when it means "no data" is the dangerous failure**, and it is the one this rule exists to prevent.
+Absent values format to `null` and render the structural dash, keeping unavailable data distinct from a measured zero.
 
 ### 5. The path picker allows free text, and must
 
@@ -57,14 +57,14 @@ But the snapshot only holds paths seen **since the stream connected**. With the 
 
 ### 6. The server decides what to push, because it already knows
 
-Gauge values ride the existing telemetry stream as a `gauge-values` event. The backend owns `dashboard-pages.json`, so it can collect every bound path itself and send exactly those, deduplicated across pages. No subscription protocol, no client registration, nothing to keep in sync.
+Gauge values use a `gauge-values` event on the existing telemetry stream. The backend reads bound paths from `dashboard-pages.json` and sends them deduplicated across pages, without a separate subscription protocol or client registration.
 
 ## Consequences
 
 - Any value the SignalK server publishes can be put on the dashboard without code changes — the structural gap against N2KView's bindable component library.
 - A fourth pair of hand-maintained widget id lists is now implied (`DASHBOARD_WIDGET_IDS` and `validDashboardWidgetIDs`), the wart ADR 0031 already flagged. Multi-instance ids sidestep both lists via their prefix, so this adds prefix handling rather than list entries, but the underlying duplication is unaddressed.
 - `lib/units.ts` and `lib/quantities.ts` now overlap: the former holds two conversions used by tiles that predate this. Folding it in is worth doing when those tiles are next touched.
-- **Bilge run-rate is not implemented.** It is not a bound path but a derived metric — cycles or minutes-run per hour, computed from edges on a boolean over a rolling window — and needs `telemetry_history.go` generalised from its two hardcoded ring buffers to a per-path store. It was scoped separately from the outset for that reason. A rising bilge run-rate feeding an alarm rule remains the single highest-value outcome still outstanding across all three plans.
+- **Bilge run-rate is not implemented.** It is a derived metric: cycles or minutes-run per hour, computed from edges on a boolean over a rolling window. It needs `telemetry_history.go` generalized from two hardcoded ring buffers to a per-path store, so it was scoped separately. Using bilge run-rate in an alarm rule remains a priority across the three plans.
 - Gauges show instantaneous values only. Trend and history for an arbitrary path need the same generic history store as bilge run-rate.
 
 ## Verification

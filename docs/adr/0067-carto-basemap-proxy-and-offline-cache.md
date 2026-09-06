@@ -6,9 +6,8 @@ Accepted
 ## Context
 
 Both charts, routes and anchor-watch, load the Carto Positron / Dark Matter basemap straight
-from `basemaps.cartocdn.com`. Nothing about it passes through the Go backend, so nothing about
-it survives losing the uplink. Anchored somewhere with no phone coverage, which is most of the
-interesting anchorages, the chart is blank.
+from `basemaps.cartocdn.com`, without passing through the Go backend. Without an uplink,
+the basemap cannot load and the chart is blank.
 
 That gap sat awkwardly next to the rest of the imagery stack. ADR 0016 already built a
 cache-through proxy and a SQLite tile store for Esri World Imagery, with a user-initiated
@@ -26,8 +25,8 @@ load order.
 MapLibre fetches `style.json` first. The style is what names the sources, so until it loads
 the map does not know a tile endpoint exists and never requests one. With the style still
 coming from the CDN, an offline start fails at step one and no cached tile is ever asked for.
-A vector-tile-only cache would have been dead code on the boat and only ever visible as a
-bandwidth saving when the uplink was already working.
+A vector-tile-only cache would therefore save bandwidth while online but would not support
+an offline start.
 
 Serving the basemap offline therefore means serving all five asset classes the style
 transitively pulls in:
@@ -41,8 +40,8 @@ transitively pulls in:
 | Sprite | `tiles.basemaps.cartocdn.com/gl/{style}/sprite{,@2x}.{json,png}` | under 1 KB total |
 
 Everything except the vector tiles comes to well under a megabyte, one time. The Whitsundays
-at z0 to z14 is 1,829 vector tiles. The full set is small enough that the "cache all of it"
-answer is clearly correct, and the "cache only part of it" answer is what needed justifying.
+at z0 to z14 is 1,829 vector tiles. These sizes support caching all five asset classes
+needed for offline use.
 
 ## Decision
 
@@ -62,8 +61,8 @@ feature needs.
 
 ### Vector tiles do not get the imagery resolver
 
-This is the one place where reusing the existing machinery would have been actively wrong, so
-it gets its own resolver, `resolveCartoVectorTile`, rather than `resolveWorldImageryTile`.
+Vector tiles need their own resolver, `resolveCartoVectorTile`, because
+`resolveWorldImageryTile`'s parent-tile fallback does not apply to vector geometry.
 
 `resolveWorldImageryTile` implements ADR 0016's graceful degradation: when an upstream tile is
 unavailable it walks to progressively coarser zooms and, on success, caches those bytes under
@@ -132,8 +131,7 @@ The style handler decodes the upstream JSON, rewrites exactly three fields, and 
 The TileJSON handler likewise rewrites only its `tiles` array, leaving `minzoom`, `maxzoom`,
 `attribution`, `bounds` and `vector_layers` untouched.
 
-Everything else in the style document is load-bearing frontend state and must survive byte for
-byte in meaning:
+The rest of the style document must retain its meaning because the frontend depends on it:
 
 - **The source id `carto`.** `map-place-labels.tsx` pins `BASE_VECTOR_SOURCE_ID = 'carto'` and
   attaches all five of ADR 0066's place-name layers to a source with that exact id.
@@ -207,8 +205,8 @@ fetcher at all.
 
 ### Prefetch
 
-"Cache this area" now pulls basemap vector tiles alongside Esri imagery for the same bbox, so
-one deliberate action makes an area genuinely usable offline rather than half-usable. Basemap
+"Cache this area" now pulls basemap vector tiles alongside Esri imagery for the same bbox,
+making both available offline. Basemap
 tiles are capped at z14; imagery keeps its existing range. `tileCoord` gained a `kind`
 discriminator so the worker pool routes each tile to the right resolver, and an unrecognised
 kind is treated as a bug rather than quietly falling through to either one.
@@ -226,8 +224,7 @@ way, which is what makes offline work; these headers only govern the browser's o
 
 ### Terms of service
 
-This caches a third-party basemap, so it deserves the same explicit treatment ADR 0016 gave
-Esri rather than being waved through.
+Third-party basemap caching requires a terms-of-service review, as in ADR 0016 for Esri.
 
 CARTO offers these basemap styles publicly with no API key and no paid plan, and asks for
 attribution. What is being cached here is bounded and single-vessel: demand-driven caching of
@@ -274,16 +271,14 @@ JS, so the class names never appear in the source and the rules would be dropped
 
 ### Cache clearing
 
-`DELETE /api/world-imagery/cache` now clears `basemap_assets` as well as `tiles`. A stale
-basemap asset has exactly the same shape of problem as a stale tile and wants the same escape
-hatch, and a second narrower endpoint would be one more thing to know about for no real gain.
+`DELETE /api/world-imagery/cache` now clears `basemap_assets` as well as `tiles`, so the same
+operation removes stale basemap assets and tiles without a separate endpoint.
 The endpoint keeps its existing name despite the widened scope; renaming it would break the
 frontend caller for no functional benefit.
 
 ## Consequences
 
-- Both charts work with no uplink, for any area that has been viewed or prefetched. This is the
-  point of the change.
+- Both charts work with no uplink for areas that have been viewed or prefetched.
 - No API key, no paid plan, no new runtime dependency. The upstream endpoints are the same
   public ones the browser was already hitting.
 - The backend is now on the critical path for the basemap. If it is down, the charts do not

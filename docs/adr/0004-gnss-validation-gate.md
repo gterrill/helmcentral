@@ -74,6 +74,6 @@ No legacy fallbacks:
 ## Consequences
 
 - Reduces false anchor dragging alarms during GNSS attacks or outages.
-- Preserves operator trust by separating position-integrity failures from true anchor movement.
+- Distinguishes position-integrity failures from true anchor movement.
 - Adds a stable contract for UI and alarm behavior around GNSS integrity transitions.
-- Improves resilience to spoofing-like teleports and transient data spikes without alarm flapping.
+- Handles implausible position jumps and transient data spikes without repeated alarm transitions.

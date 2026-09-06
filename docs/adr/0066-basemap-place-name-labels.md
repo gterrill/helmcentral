@@ -7,7 +7,7 @@ Accepted
 
 Sitting in the Whitsundays, the routes chart and the anchor-watch chart show no names for the
 features a skipper actually navigates by: no Cid Harbour, no Nara Inlet, no Hook Island, no
-Coral Sea Marina. Both maps read as plainer than the water actually is.
+Coral Sea Marina.
 
 The cause is not missing data. Both maps load the Carto Positron / Dark Matter basemap
 (`https://basemaps.cartocdn.com/gl/positron-gl-style/style.json` and the dark-matter equivalent),
@@ -40,9 +40,8 @@ survive the light/dark theme's full `setStyle` swap without any extra plumbing o
 
 We considered proxying a second vector tile source (e.g. through `backend/tile_cache.go`, whose
 `source` column is free-text and needs no schema change) carrying a curated place-name layer. We
-rejected it for this pass: every name we need is already in tiles the map fetches regardless, so a
-second source would mean a second live dependency and a second set of glyph/sprite concerns to
-pay for information already sitting on the wire.
+rejected it for this pass: the required names are already in tiles the map fetches, so a
+second source would add a live dependency and glyph/sprite handling for duplicate data.
 
 Five layers, each `type: symbol`, attached to the existing source-layers:
 
@@ -95,7 +94,7 @@ explicit z-index bookkeeping on the label layers themselves:
   background anchor - so before this change, satellite mode buried Carto's own (already mostly
   undrawn) labels under the raster entirely. Mounting the label layers right after `alarm-circle`
   is what makes names visible over imagery on this map for the first time; the `overImagery`
-  white/black-halo paint here is load-bearing, not cosmetic.
+  white/black-halo paint keeps them legible over imagery.
 
 ### Fail-fast guard
 

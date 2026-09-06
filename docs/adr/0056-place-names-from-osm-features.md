@@ -5,7 +5,7 @@ Accepted
 
 ## Context
 
-Anchored at Goldsmith Island, the position tile read "Lindeman Islands", about 29 km away. That's not a rounding error, it's a different island group. Digging into `backend/geonames.go` turned up two independent faults, either one of which causes this on its own.
+Anchored at Goldsmith Island, the position tile read "Lindeman Islands", a different island group about 29 km away. Inspection of `backend/geonames.go` found two independent causes.
 
 **The cache cell was 56 km across.** The handler rounded position to 0.5 degrees to build its cache key:
 
@@ -15,11 +15,11 @@ Lindeman Island     -20.4467, 149.0353 -> key "-20.5,149.0"
 separation 28.9 km, cell 56 km N-S by 52 km E-W
 ```
 
-Same key. One cache entry. Pass within a few nautical miles of Lindeman on the way in and its name gets served at Goldsmith for the next hour, by design, not by bug.
+Both positions share a cache entry. Passing within a few nautical miles of Lindeman could therefore cause its name to be served at Goldsmith for the next hour.
 
 **The query only ever returns populated places.** The handler called GeoNames' `findNearbyPlaceNameJSON` with `radius=300`. That endpoint returns feature class P only, towns and villages. Goldsmith Island is uninhabited national park, so it can never come back from that call at any radius. A 300 km radius on that endpoint isn't "what island am I near", it's "what's the nearest town", and Airlie Beach or the Lindeman resort will always win that contest from most of the Whitsundays.
 
-Fixing the cache key alone gets you the wrong name faster. Fixing the query alone still serves it from a 56 km cell. Both had to go.
+Both the cache key and the query needed to change: a finer cache would still store town names, and a corrected query would still share results across a 56 km cell.
 
 ### What actually answers the question
 
@@ -34,7 +34,7 @@ Three things fall out of that table:
 
 1. A tight first ring gives an unambiguous, correct answer at both points. No ranking needed when there's one candidate.
 2. Widening is mandatory, not an optimization. Overpass's `around:` filter measures distance to the element's *linework*, not containment. A point sitting well inside a wide bay or a large island's interior can be further from that island's mapped coastline than a 400 m ring reaches, which is exactly why Lindeman's own 400 m ring comes back empty even though the point is on the island.
-3. Stopping at the first non-empty ring matters. At 5000 m the Lindeman point pulls in 13 candidates: Shaw, Pentecost, Brush, several bays, an unnamed islet. Picking a winner out of thirteen is guesswork. Picking a winner out of one is not a decision at all.
+3. Stopping at the first non-empty ring limits ambiguity. At 5000 m the Lindeman point returns 13 candidates, including Shaw, Pentecost, Brush, several bays and an unnamed islet, compared with one candidate at 1500 m.
 
 For comparison, Nominatim's plain reverse geocode at the Goldsmith anchorage returns "Sir James Smith Group" at both zoom 14 and zoom 16, because on water it falls back to the nearest place *node* rather than the nearest polygon. Same centroid trap as GeoNames, different vendor. Overpass avoids it because `around:` does real geometric filtering server-side instead of nearest-point matching.
 
@@ -86,7 +86,7 @@ The published name is tagged with the cache cell it was resolved for. A backgrou
 
 ### Anchor-bound name
 
-`anchorWatchData` gains `PlaceName string`. `setAnchorWatch` kicks off resolution through the same single-flight guard so the anchor-drop response isn't held hostage to an Overpass round trip, then persists the result via the existing `saveAnchorWatch`. A resolution failure logs explicitly and leaves the field empty, the regular tick keeps retrying at the anchor's position until it succeeds.
+`anchorWatchData` gains `PlaceName string`. `setAnchorWatch` starts resolution through the same single-flight guard without delaying the anchor-drop response, then persists the result via the existing `saveAnchorWatch`. A resolution failure is logged and leaves the field empty; the regular tick keeps retrying at the anchor's position until it succeeds.
 
 Once a name is pinned, both the tick and `/api/place-name` serve `anchorWatchState.PlaceName` and skip live resolution entirely for the duration of that watch. Without this, the name would drift as the boat swings on its rode and occasionally crosses into a neighboring OSM feature's tighter ring, which is worse than picking one name and holding it, the whole point of anchoring somewhere is that you're not moving to a different place.
 

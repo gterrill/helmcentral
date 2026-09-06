@@ -12,7 +12,7 @@ The `/settings` panel (reached via `App.tsx`'s local `activePanel` state — the
 This had grown two concrete problems as more pluggable providers (tide/weather/wave/forecast-warnings, each backed by a WASM plugin per ADR 0017/0018) were added:
 
 1. **Provider selection was just a name in a dropdown.** Choosing `stormglass` as the tide provider gave no indication it needed `STORMGLASS_API_KEY` (configured in a completely different panel), no indication of what the provider actually does, and — once ADR 0023's `allowed_hosts.json`/`allowed_secrets.json` allowlists existed for sandboxed WASM plugins — no way to see or adjust a plugin's network/secret allowlist from the UI at all.
-2. **Everything lived in one scroll-forever page.** Two flat panels with 12+ field-sets between them made the settings page hard to scan, and secrets were disconnected from the settings that actually consume them.
+2. **The page was hard to scan.** Two flat panels contained 12+ field-sets, and secrets were separated from the settings that use them.
 
 ## Decision
 
@@ -27,18 +27,18 @@ This had grown two concrete problems as more pluggable providers (tide/weather/w
 
 4. **Secrets get their own equally-shared read path.** `useSecretsStatus()` fetches `GET /api/settings/secrets` once, wrapped in a `SecretsStatusProvider` context alongside `SettingsFormProvider`, because the new layout has 5+ simultaneous consumers (SignalK, InfluxDB, GeoNames sections, plus up to two provider-settings modals open across the page's lifetime) where the old layout had exactly one. `SecretFieldGroup` extracts the old panel's touched-tracking (`touchedKeys` state, separate from `fieldValues`, so an untouched blank field is never sent and can't accidentally wipe an already-set secret), the per-field Clear-with-`window.confirm` action (POSTs `{ [key]: '' }` as its own independent request), and the set/not-set placeholder conventions, and renders it for whatever subset of `SecretKey`s a section or modal gives it.
 
-5. **`PROVIDER_SECRET_FIELDS` is a deliberate, hand-maintained coupling point.** There is no backend equivalent of "this provider id needs these secret fields" — the plugin info endpoint (`GET /api/plugins/:type/:id`, added alongside this change) reports `allowed_secrets` (which secrets a sandboxed plugin is *permitted* to read, per ADR 0023's allowlist model), not which secrets its Settings modal should *prompt for*. `provider-settings-modal.tsx` hard-codes a `Partial<Record<domain, Record<providerId, SecretFieldSpec[]>>>` table (currently just `stormglass` → `STORMGLASS_API_KEY`, `weatherkit` → the four `WEATHERKIT_*` fields) that must be updated by hand whenever a new provider requiring secrets ships. This is a real sharp edge, not swept under the rug — see Tradeoffs.
+5. **`PROVIDER_SECRET_FIELDS` is a hand-maintained mapping.** The plugin info endpoint (`GET /api/plugins/:type/:id`, added alongside this change) reports `allowed_secrets`, the secrets a sandboxed plugin is permitted to read under ADR 0023. It does not report which fields its Settings modal should prompt for. `provider-settings-modal.tsx` therefore hard-codes a `Partial<Record<domain, Record<providerId, SecretFieldSpec[]>>>` table (currently `stormglass` → `STORMGLASS_API_KEY`, `weatherkit` → the four `WEATHERKIT_*` fields). It must be updated whenever a new provider requires secrets; see Tradeoffs.
 
 ## Consequences
 
 Positive:
 - Provider selection now shows what a provider actually is (name + description, sourced from the plugin's own `description()` export via `GET /api/plugins/:type/:id`) instead of a bare id in a dropdown, and its secret/allowlist configuration lives one click away instead of in an unrelated panel.
-- The full-payload-replace hazard of splitting one save into many is closed by construction: there is exactly one function in the frontend that can call `POST /api/settings`, and every section/card goes through it.
+- Every section and card uses the same function to merge and POST the full settings payload, avoiding conflicting partial saves.
 - Secrets are contextually placed next to the settings that consume them, and the touched-tracking/clear-with-confirm correctness of the old panel is preserved unchanged, just extracted into a reusable component instead of duplicated.
 - Sandboxed (WASM) plugins' `allowed_hosts`/`allowed_secrets` overrides are now editable from the UI at all, which they were not before this change (ADR 0023 only exposed them as files on disk).
 
 Tradeoffs:
-- `PROVIDER_SECRET_FIELDS` (decision 5) is a frontend-only table with no backend source of truth. If the backend ships a new provider that needs a secret, the modal will silently show no secret fields for it until someone remembers to add an entry here — this is not caught by any automated check across the two agents' contracts, only by manual review. Documented here explicitly so it isn't rediscovered as a mystery bug later.
+- `PROVIDER_SECRET_FIELDS` (decision 5) is a frontend-only table with no backend source of truth. A new provider that needs secrets will show no secret fields until an entry is added. No automated check compares the frontend and backend contracts; this requires manual review.
 - The regular-sections "Save Settings" button and the Widgets tab's per-card immediate save are two different UX patterns living on the same page (deferred-batch vs. instant-on-click). This is intentional — provider activation benefits from instant feedback the way a settings form field does not — but it does mean the page doesn't have one single uniform "everything is dirty until you click Save" mental model, which is worth calling out to anyone extending this page later.
 - `SecretFieldGroup` owns a small inline "Save" button scoped to just the fields it's given (one save button per section/modal that has secrets) rather than one page-wide secrets save — this trades a few extra small buttons for keeping the touched-only-sent invariant simple and local to each group, without needing to lift secret-field state up to `SettingsPage`.
 

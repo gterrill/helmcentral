@@ -36,9 +36,9 @@ We need deterministic behavior when daily metrics are partially missing, without
 
 ## Consequences
 Positive:
-- Operators get robust daily yield and peak metrics even when SignalK omits those fields.
+- InfluxDB can supply daily yield and peak metrics when SignalK omits those fields.
 - Native SignalK data is never overwritten when present.
-- API source tagging is explicit, making diagnostics straightforward.
+- API source tags identify which source supplied the data for diagnostics.
 
 Tradeoffs:
 - Influx fallback quality depends on measurement and field mapping (`INFLUX_SOLAR_MEASUREMENT`, `INFLUX_SOLAR_FIELD`).

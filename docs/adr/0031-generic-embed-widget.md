@@ -40,13 +40,13 @@ So a `grafana` widget id would have permitted exactly one embedded panel per pag
 
 4. **`crypto.randomUUID()` is unusable here.** It is secure-context-only, and Helmcentral is normally served over plain HTTP from a LAN address, where it is `undefined`. Wrapping it in a runtime fallback would be exactly the kind of masking this repo's fallback policy forbids — the API is not intermittently unavailable, it is reliably absent in the deployment that matters.
 
-   `newEmbedWidgetId` therefore mints `Date.now().toString(36)` plus eight base-36 random characters, retrying on the (vanishingly unlikely) collision with an id already on the page. The token is a layout key needing uniqueness within one page, not a secret, so this is the honest tool for the job. The backend validates the shape (`^[A-Za-z0-9_-]{8,64}$`) rather than a UUID.
+   `newEmbedWidgetId` uses `Date.now().toString(36)` plus eight base-36 random characters, retrying if the id already exists on the page. The token needs page-local uniqueness, not secrecy. The backend validates the shape (`^[A-Za-z0-9_-]{8,64}$`) rather than a UUID.
 
 5. **URLs are validated on both sides, and the two rule sets are deliberately duplicated.** `validateEmbedWidget` in Go and `isValidEmbedUrl` in TypeScript both require an `http`/`https` scheme, a non-empty host, and lengths within 2048 (URL) / 64 (title). The dialog needs synchronous feedback; the server must not trust the client.
 
-   The two parsers disagree on one input, and the frontend carries an explicit guard for it: the WHATWG `URL` parser silently rewrites an empty authority, turning `http:///d-solo/a` into host `d-solo`, while Go's `net/url` leaves the host blank and rejects it. Without the guard the dialog would happily accept a URL the server then 400s. Documented here so it isn't rediscovered as a mystery rejection later.
+   The two parsers disagree on one input: the WHATWG `URL` parser rewrites an empty authority, turning `http:///d-solo/a` into host `d-solo`, while Go's `net/url` leaves the host blank and rejects it. A frontend guard rejects this input before the server returns 400.
 
-   Config attached to a **builtin** widget id is rejected rather than silently dropped. Config the renderer will never read means the caller has misunderstood the model, and saying so beats swallowing it.
+   Config attached to a builtin widget id is rejected rather than dropped, because the renderer does not read it.
 
 6. **A new embed is not persisted until it has a URL.** The backend rejects a blank URL, so `handleAddEmbed` holds the new item in local state and opens the dialog; only Save calls `updatePage`. Cancel discards it.
 
@@ -73,11 +73,11 @@ So a `grafana` widget id would have permitted exactly one embedded panel per pag
 - Any number of embeds per page, each independently configured, on any page.
 - No backend proxy, no auth plumbing, no CSP work — the direct-iframe path is the whole feature for a LAN Grafana.
 - The per-instance config field is now precedent. A second widget wanting per-instance settings extends `dashboardLayoutItem` the same way instead of inventing another mechanism.
-- `widgetDisplayName` fixes a small pre-existing wart: the remove button's `aria-label` interpolated the raw widget id.
+- `widgetDisplayName` fixes the remove button's `aria-label`, which previously interpolated the raw widget id.
 
 **Tradeoffs:**
 
-- The frontend's `DASHBOARD_WIDGET_IDS` and the backend's `validDashboardWidgetIDs` remain two hand-maintained lists (ADR 0013's known wart). This change does not fix that, and adds a third pair to keep in step: the URL validation rules.
+- The frontend's `DASHBOARD_WIDGET_IDS` and the backend's `validDashboardWidgetIDs` remain two hand-maintained lists, as noted in ADR 0013. This change adds URL validation rules that also need to stay aligned.
 - The operator pastes a full URL per widget. Moving Grafana to a new host means editing every embed. A Settings section holding named base URLs was considered and deferred; it is a pure addition on top of this design.
 - If Helmcentral is ever served over HTTPS, `http://` panels break as mixed content. The dialog warns about this; nothing enforces it.
 - Grafana still requires `security.allow_embedding = true` server-side. Nothing in this app can detect or report that — a frame refused by `X-Frame-Options` simply renders blank.

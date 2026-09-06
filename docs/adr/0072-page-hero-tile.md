@@ -13,11 +13,9 @@ tracked title, so `Depth & Tide` and `Switches` are typographically identical.
 Nothing on a page can be more important than anything else, by construction.
 The one exception is accidental: battery state of charge happens to be
 authored at `text-7xl`, so it is the biggest thing on screen on every page
-that carries it, whether or not it is the number that page exists to watch. On
-an anchorage page the number that decides whether the boat is where you left
-it is the anchor distance, and it is small. The board's visual hero and its
-operational hero were different numbers, and nothing on the page model let an
-operator say which one mattered.
+that carries it, whether or not it is the page's main reading. On an anchorage
+page, anchor distance may be more important but is displayed smaller. The page
+model gave the operator no way to choose which tile to emphasise.
 
 The decision: a page nominates one placed widget as its hero, and that widget
 gets a visibly different treatment — its own full-width row above the grid,
@@ -91,7 +89,7 @@ exactly where it was.
 
 ### 4. The enlargement is a transform, because the readout size is not this component's to change
 
-The "genuinely different treatment" the hero needed included a larger type
+The hero treatment needed a larger type
 scale, not just more width. That size is baked into each widget's own file as
 Tailwind viewport-breakpoint classes (`lg:text-7xl` in `battery-power-tile.tsx`
 and similar per widget) — a prop the bento grid has no way to reach, and
@@ -148,14 +146,11 @@ and fixing it is out of scope here.
 
 ## Consequences
 
-A page can now say which one number matters, and the rest of the board
-answers to it rather than to whichever widget happened to author itself with
-the biggest font. The mechanism cost some real complexity — the `static`
-placeholder and the reverse-scale CSS trick both exist only because this
-change is scoped to the bento grid and cannot reach into nineteen other widget
-files — but neither leaks past `dashboard-bento-grid.tsx` and
-`dashboard-bento-grid.css`; every other widget is unmodified and unaware a
-hero feature exists.
+An operator can choose a page's most prominent tile independently of the
+widgets' default font sizes. The `static` placeholder and reverse-scale CSS
+add complexity because the change is scoped to the bento grid rather than
+nineteen widget files. Both mechanisms remain in `dashboard-bento-grid.tsx`
+and `dashboard-bento-grid.css`; other widgets are unchanged.
 
 The dangling-hero repair means a hero can go away silently from an operator's
 point of view: remove the widget, and the page quietly has no hero anymore,

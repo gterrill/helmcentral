@@ -14,20 +14,19 @@ The user wants to send `http://192.168.50.240:9091/forecast` to someone and
 have it open the forecast panel rather than the dashboard with an extra click
 to make.
 
-There is exactly one navigation choke point already: `requestNavigate` in
+Navigation already passes through `requestNavigate` in
 `App.tsx`. Every sidebar click, breadcrumb click, page sub-item and the alarm
 banner's "open" action already calls it rather than `setActivePanel` directly,
 because it is also the guard that stops a click from leaving a dirty Settings
 page unsaved. Any URL mechanism that bypassed this function would bypass the
-guard too, and Back/Forward navigation has to go through the same door as a
-click for the guard to mean anything.
+guard too, so Back/Forward navigation must also call it.
 
 Push notifications need somewhere to land. The service worker already opens
 whatever `url` a push payload carries when the notification is tapped; today
 that url is always `/`, so a tapped alarm opens the dashboard rather than the
 Alarms panel.
 
-Two things already in place made this easier than it looks. The backend's
+Existing deployment behaviour supports deep links. The backend's
 static handler serves the embedded app shell for any path it doesn't
 recognise as a file, rather than a 404 (`/anchor`, `/routes`, and now
 `/forecast` all reach the same `index.html`), and the Vite dev server does the
@@ -109,25 +108,22 @@ mid-navigation, which is a worse experience than one harmless extra entry.
 
 ## Alternatives considered and rejected
 
-**Hash URLs** (`/#/forecast`). Nothing forced a real path on us except that a
-real path was already available and better on every count: the backend
-already serves the app shell for a deep path, so there is no fragment-based
-workaround to build or maintain, and both the PWA manifest scope and the
-service worker's push `url` want an actual path rather than a fragment tacked
-onto `/`.
+**Hash URLs** (`/#/forecast`). Rejected because the backend already serves the
+app shell for deep paths, so fragment-based routing is unnecessary. Path URLs
+also align with the PWA manifest scope and the service worker's push `url`.
 
 **A router library.** Three pieces of URL state (panel, page, settings
 section) is not enough surface to justify the dependency, and every option
 available assumes a sidebar built from `<Route>` or `<Link>` elements, which
 would mean rewriting the sidebar and breadcrumb around the router's navigation
-model rather than keeping `requestNavigate` as the one guarded door state
-changes go through. A hand-rolled `pushState`/`popstate` pair the size of one
+model rather than retaining `requestNavigate` as the navigation guard. A
+`pushState`/`popstate` pair in one
 module and one effect does what three states need without that rewrite.
 
 ## Related
 
 - [ADR 0038: Alarms](0038-alarms.md), the push transport whose notification
-  `url` this ADR gives an honest target.
+  `url` this ADR gives a destination in the app.
 - [ADR 0045: Web push needs a secure context, so Helmcentral becomes an
   installable PWA served over Tailscale](0045-web-push-secure-context-and-pwa-shell.md),
   the manifest scope and no-`fetch`-handler service worker this ADR relies on

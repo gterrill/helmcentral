@@ -12,15 +12,15 @@ After ADR 0027 the SignalK address had two endpoints that could persist it, and 
 - `POST /api/settings/signalk` — the "Connect" button. Probed, then wrote just the SignalK stanza.
 - `POST /api/settings` — the sectioned settings page's Save. Probes on change (ADR 0027), then writes everything.
 
-Two write paths for one field is a maintenance hazard on its own — ADR 0027's validation had to be added twice over, and any future rule has to be remembered in both places. But the sharper problem was the button's semantics. "Connect" read as a connectivity check and behaved as a save, which meant:
+Two write paths required duplicate validation in ADR 0027 and would require future rules to be maintained in both places. The button label was also misleading: "Connect" suggested a connectivity check but saved the address, which meant:
 
 - It bypassed the page's own save model. Every other field on the sectioned settings page is a draft that persists via the pinned "Save Settings" button; the address alone committed the moment you clicked a button that didn't say "save".
-- **You could not check an address without committing to it.** The only way to find out whether an address worked was to make it live. That is precisely backwards for a diagnostic, and it is the operation an operator most wants to perform speculatively.
+- **You could not check an address without committing to it.** Testing an address also made it the live configuration.
 - Its response rewrote the form. The handler echoed back the address/port it had persisted and the component fed that into the draft, so the server could overwrite what the operator had typed.
 
 ## Decision
 
-1. **`POST /api/settings/signalk` is deleted, not deprecated.** With it goes `saveSignalKSettings`, which had no other caller. Persisting the address is now solely `POST /api/settings`' job, where `validateSettingsChange` applies the probe. One field, one write path, one place to change the rules.
+1. **Delete `POST /api/settings/signalk` and `saveSignalKSettings`, which had no other caller.** Only `POST /api/settings` now persists the address, with `validateSettingsChange` applying the probe.
 
 2. **`POST /api/settings/signalk/test` is a pure read.** It probes the address in the *request body* — not the persisted one, so an operator can evaluate a value before committing to it — and returns `{connected, url, vessel_name}`, or 502 with `{error, field, connected: false}`. It never touches `settings.yaml`. Tests assert the file is byte-identical after both successful and failed probes.
 
@@ -38,7 +38,7 @@ Two write paths for one field is a maintenance hazard on its own — ADR 0027's 
 
 Positive:
 - The address has exactly one write path, and it validates.
-- Testing an address is now free of consequence, which is what makes it worth doing before saving rather than after.
+- An address can be tested before saving without changing persisted settings.
 - The section follows the same draft-then-save model as every other part of the settings page; "Test Connection" describes what the button does.
 - Verified end-to-end against the ADR 0026 stack: probing the real vessel from the E2E stack returns `{"connected":true,"vessel_name":"Pikorua"}` while the E2E stack's own persisted address stays at its seed value, and the UI shows `CONNECTED — PIKORUA RESPONDED. SAVE SETTINGS TO APPLY.` after a single POST to `/api/settings/signalk/test` and no other write.
 

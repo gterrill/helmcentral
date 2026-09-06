@@ -3,13 +3,13 @@
 ## Status
 Accepted
 
-Supersedes the scope decision in ADR 0054 §5. The rest of §5, which is what made this change cheap, still stands.
+Supersedes the scope decision in ADR 0054 §5. The rest of §5 still stands.
 
 ## Context
 
 ADR 0054 §5 shipped the instrument skin as a per-tile setting: `EngineClusterConfig.skin`, read by the engine cluster tile, which wrapped itself in a div carrying `data-skin="instrument"`. The reasoning was that a real MFD is dark whatever time it is, so the look should not be tied to the app theme.
 
-That part was right. The scope was wrong, and living with it made three things obvious.
+The skin remains independent of the app theme, but use revealed three problems with per-tile scope.
 
 **A page is already a mode.** The pages on this boat are called Anchored, Underway and Cluster preview. They exist because what you want to look at depends on what the boat is doing. Night-helm-dark is a property of that situation, not of one widget in it. Building a night page meant setting the skin on every cluster by hand and remembering to set it on anything added later.
 
@@ -17,7 +17,7 @@ That part was right. The scope was wrong, and living with it made three things o
 
 **Nineteen other tile kinds could not have the look at all.** The skin field existed on exactly one widget config. Lamps, gauges, tanks and battery all consume the same tokens and all rendered in the app theme regardless.
 
-And the seam. A dark cluster on a light page reads as a mis-styled widget rather than as an instrument, which is the opposite of what the skin was for.
+A dark cluster also contrasts with the surrounding light page rather than giving the page a consistent instrument appearance.
 
 ## Decision
 
@@ -25,7 +25,7 @@ And the seam. A dark cluster on a light page reads as a mis-styled widget rather
 
 `data-skin` now sits on the dashboard grid's root element and is driven by `DashboardPage.skin`. Every tile beneath it re-skins.
 
-The entire rendering change is that one attribute moving up the tree, and this is ADR 0054 §5 paying off rather than luck. `[data-skin="instrument"]` is an attribute-only selector that redefines the same token names every component already consumes, and no component branches on the skin value. A selector like that has no opinion about how much of the tree it covers, so widening the scope is a DOM move and not a refactor.
+The rendering change moves one attribute up the tree. As defined in ADR 0054 §5, `[data-skin="instrument"]` redefines the tokens every component consumes, and no component branches on the skin value. Moving the attribute therefore widens its scope without component changes.
 
 The header, breadcrumb, page switcher and alarm banner stay on the app theme. Taking the skin to the document root instead would have made it a third theme competing with the dark-mode toggle, and left the toggle doing nothing visible on a skinned page. The cost of stopping at the grid is a visible seam where the board meets the header, which was checked by eye rather than assumed acceptable.
 
@@ -71,7 +71,7 @@ The one genuinely dangerous line was in the page PATCH handler, which rebuilds t
 
 ## Consequences
 
-The instrument look is now available to every tile kind rather than to clusters only, which was never a design goal and is the main thing that makes the change worth doing.
+The instrument look is now available to every tile kind rather than only to clusters.
 
 Raw Tailwind palette classes do not follow the skin and cannot be made to. There are 44 of them across 15 grid tiles, 16 tuned for a light ground. AGENTS.md reserves the raw palette for alert semantics, so they are correct as written and outside the token system on purpose. The bound on the exposure is dark mode: the skin's ground is `222 47% 8%` against `.dark`'s black, so anything already legible in dark mode is legible here, and the only tiles at risk are ones nobody ever looked at in dark. They were screenshotted under the skin rather than rewritten pre-emptively.
 

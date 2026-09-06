@@ -1,7 +1,7 @@
 # Configuration reference
 
 Helmcentral does not require a configuration file to start. A missing
-`settings.yaml` is tolerated, and on first run the dashboard sweeps your
+`settings.yaml` is tolerated, and on first run the dashboard searches your
 network for a SignalK server and offers what it finds. The information below
 is for tuning an existing installation.
 
@@ -26,8 +26,7 @@ plugins mounted separately at `/app/plugins`.
 `data/secrets.key` decrypts the secrets store. **Lose it and every stored
 credential is unrecoverable**: SignalK login, InfluxDB token, and WeatherKit
 keys must all be re-entered. Back up the whole state directory; at minimum
-back up that file. There is no key-recovery mechanism by design, because a
-recoverable key would defeat the purpose of encrypting at rest.
+back up that file. There is no key-recovery mechanism.
 
 ## Environment variables
 
@@ -109,8 +108,8 @@ is deliberate: every WASM plugin's `${VAR}` configuration expansion reads
 from the environment, so a value placed there is accessible to any plugin.
 
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to being managed
-from the UI. They are generated automatically on first start and never rotate,
-because there is nowhere to obtain a VAPID keypair from: it is self-issued.
+from the UI. The VAPID keypair is self-issued, generated automatically on first
+start, and never rotated.
 **Losing them is unrecoverable.** Every registered web push device stores the
 public key it subscribed with, so a new pair requires every phone to
 re-subscribe. Helmcentral discards orphaned registrations at boot and logs
@@ -146,7 +145,7 @@ sudo systemctl restart helmcentral
 
 ## Startup behaviour
 
-Startup is fail-fast by design. If the secrets store, session store,
+Startup is fail-fast. If the secrets store, session store,
 plugin-override store, tile cache or nearby-contacts store cannot be opened,
 the process exits rather than running degraded: this is usually a permissions
 problem on the state directory, or a `secrets.key` that no longer matches the
@@ -154,13 +153,13 @@ store. Check `journalctl -u helmcentral -n 50`.
 
 `auth.mode: signalk` adds one more fail-fast check: Helmcentral probes the
 SignalK server's security status once at startup and refuses to boot if
-SignalK's own security is disabled. A login-required requirement against a
-server with no login cannot be satisfied. Enable security on the SignalK
+SignalK's own security is disabled. Delegated login requires authentication on
+the upstream server. Enable security on the SignalK
 server first, or set `auth.mode: none` in `settings.yaml` to boot without it.
 
-You should not normally reach that state: Settings → Security refuses to save
+Settings → Security refuses to save
 `signalk` unless SignalK reports security is already active, preventing an
-unsatisfiable configuration from being saved. Reaching this state means
+invalid configuration. This startup failure means
 `settings.yaml` was edited manually, or SignalK security was disabled after
 Helmcentral was configured. Either way the fix is the same: turn SignalK
 security back on, or set `auth.mode: none` in `settings.yaml` and restart.
@@ -190,7 +189,7 @@ then enable web push under Alarms → Notifications.
 **Do not use `tailscale funnel`.** The push service never calls back into
 Helmcentral; the only component that requires the secure origin is the
 browser, which is already on the tailnet. Funnel exposes the local network to
-the public internet to solve a problem that does not exist.
+the public internet and is not needed for web push.
 
 **On iPhone and iPad**, add Helmcentral to the Home Screen first (Share → Add to
 Home Screen) and open it from that icon: iOS grants the Push API only to

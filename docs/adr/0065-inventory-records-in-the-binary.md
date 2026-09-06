@@ -2,8 +2,8 @@
 
 ## Status
 
-*Proposed.* This records a design ahead of its implementation, so the data model
-can be argued with before code freezes it. Follows the precedent of
+*Proposed.* This records the data model for review before implementation.
+Follows the precedent of
 [ADR 0043](0043-service-schedule-provider-plugins.md), which did the same.
 
 Reverses the remaining scope boundary of ADR 0043 and completes the direction
@@ -17,9 +17,9 @@ tile and the SignalK notifications tree. ADR 0053 moved half of that line when
 maintenance and service history came back in-house. This moves the rest.
 Inventory tracking, and behind it document management, are built here.
 
-The reason is deployment arithmetic rather than architecture. Three applications
-means three deployments, three backup regimes and three auth models on a boat
-with one operator and one box. Nothing about the split earned that.
+Three applications require three deployments, backup procedures and auth models
+on a boat with one operator and one box. Consolidating them reduces that
+operational work.
 
 ### The objection ADR 0043 raised, and why it does not survive
 
@@ -30,10 +30,10 @@ the same binary means "a CRUD store's problem can refuse to boot the anchor
 alarm", and the escapes it named were a two-tier fatality policy inside one
 process or a weakened invariant.
 
-Both escapes exist to protect other people's installations from a bad upgrade.
-There are no other installations. One operator, no installed base, and an
-inventory database that fails to open is a broken box that gets looked at, not a
-fleet incident that needs a policy. The store follows the same convention as
+There is one operator and no other installed base. The proposal accepts that an
+inventory database failure will require attention on that installation rather
+than introducing a separate startup policy for it. The store follows the same
+convention as
 `nearby_contacts.go` and `plugin_overrides_store.go`: its own SQLite file,
 `CREATE TABLE IF NOT EXISTS` at boot, and that is the whole of it.
 
@@ -44,10 +44,9 @@ backup obligations, unlike the deliberately ephemeral telemetry ring buffer of
 
 ### What makes this worth building at all
 
-Cheap EPC Gen 2 passive UHF tags, read through a USB reader in HID
-keyboard-wedge mode, turn a stocktake into a walk through the boat instead of a
-morning spent opening lockers. That is the differentiator, and every decision
-below is downstream of what that hardware can and cannot actually do.
+Low-cost EPC Gen 2 passive UHF tags, read through a USB reader in HID
+keyboard-wedge mode, can reduce manual inspection during stocktake. The design
+below accounts for the reader's capabilities and limits.
 
 ## Decision
 
@@ -56,7 +55,7 @@ below is downstream of what that hardware can and cannot actually do.
 The item is the record. An identifier is a label bound to it, and one item may
 carry several: an RFID EPC, a printed barcode, a typed part number.
 
-This separation is load-bearing because the two identifier kinds mean different
+This separation is necessary because the two identifier kinds mean different
 things. A GTIN identifies a **product**, and sixteen identical tins of tomatoes
 share one. An EPC identifies an **instance**, and no two tags match. Collapsing
 them into a single "code" column produces a schema that cannot represent either
@@ -74,8 +73,6 @@ behaviour are identical across both and only counting differs. Two tables would
 duplicate all of it to distinguish one column.
 
 ### 3. A scan never infers absence
-
-**This is the rule the feature is built around, and it is not negotiable.**
 
 Passive UHF is absorbed by liquid and reflected by metal, and a boat locker is
 mostly liquid and metal. A closed aluminium locker of tinned food may read
@@ -126,9 +123,8 @@ endpoint. Four constraints:
    the library. No photo leaves the boat without the operator asking for that
    photo to be read.
 2. **It proposes, the operator confirms.** Extracted fields land in the form as
-   editable suggestions. An unreviewed serial number is worse than an empty
-   field, because it gets trusted months later when ordering a part and fails
-   at the worst moment.
+  editable suggestions. An incorrect serial number could otherwise be trusted
+  later when ordering a part.
 3. **Failure is visible and never blocking.** Boat internet is intermittent by
    nature. The call runs off the request path with a timeout, a failure says so,
    and the item saves without it.
@@ -146,7 +142,7 @@ ADR.
 
 ### 6. Expiry reaches the alarm engine as a derived path
 
-Expiry dates are the part of a boat inventory that bites: flares, EPIRB
+Expiry dates matter for items such as flares, EPIRB
 batteries, liferaft service, extinguishers, medications.
 
 A date is not a SignalK path, so it does not fit an `alarmRule`, which is
@@ -194,10 +190,8 @@ Tradeoffs:
   a second deployment.
 - The state directory grows without bound in photos, and backup guidance has to
   keep up.
-- RFID coverage on a boat is genuinely partial. The feature is honest about it
-  rather than tuned around it, which means a stocktake is a confirming pass, not
-  an authoritative one. An operator expecting warehouse-grade completeness will
-  be disappointed, and the documentation says so up front.
+- RFID coverage on a boat is partial. A stocktake confirms the items read but
+  cannot establish a complete inventory; documentation must state that limit.
 - One paid third-party dependency exists, for one optional feature.
 
 ## Build order
@@ -210,8 +204,7 @@ Tradeoffs:
 5. Widgets, then the derived expiry path and its alarm rule.
 6. Floor plans.
 
-Each stage is usable alone. A typed inventory with working search already beats
-what the boat has now; everything after it is speed.
+Each stage is usable alone, starting with manual inventory entry and search.
 
 ## Open questions
 

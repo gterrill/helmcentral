@@ -19,15 +19,15 @@ This was planned against a live path list rather than an assumption, and three t
 - **Exhaust temperature is published under `propulsion.0` / `propulsion.1`** — orphan nodes carrying nothing else, both reading an identical 304.749 K. Nothing on the bus says which maps to which engine.
 - **Not one path carries `units` metadata**, so ADR 0039's `quantityForSIUnit` inference has nothing to work from and every hand-added gauge starts as "Unitless".
 
-The last point quietly raises the stakes for ADR 0053: on this vessel a profile is the only thing that gets units right.
+Without units metadata, profiles supply the units that would otherwise need to be configured by hand (ADR 0053).
 
 ## Decision
 
 ### 1. The bundled Cummins profile was wrong, and is fixed here
 
-ADR 0053 shipped `coolantTemperature`, `oilTemperature` and `exhaustTemperature` as suffixes. All three match nothing. The profile applied cleanly and produced three permanently dashed gauges — the structural dash working exactly as intended, about a mistake in a file we wrote.
+ADR 0053 shipped `coolantTemperature`, `oilTemperature` and `exhaustTemperature` as suffixes. None matched a path under the engine node. The profile applied without error but produced three permanently dashed gauges because the configured paths were absent.
 
-Corrected to `temperature`, `transmission.oilTemperature` (relabelled **Gearbox**, since calling gearbox oil "Oil Temp" was wrong twice over), with exhaust dropped because no suffix under the engine node can reach it. `fuel.rate`, `engineLoad` and `transmission.oilPressure` added.
+Corrected to `temperature`, `transmission.oilTemperature` (relabelled from "Oil Temp" to **Gearbox** to distinguish it from engine oil), with exhaust dropped because no suffix under the engine node can reach it. `fuel.rate`, `engineLoad` and `transmission.oilPressure` added.
 
 A new test asserts every bundled suffix resolves against a captured path list from the real vessel. The fixture is captured, not assumed — the failure mode this is guarding against is precisely a plausible-looking suffix nobody checked.
 
@@ -96,17 +96,17 @@ Cluster slot indices are flat and stable — ring, centre, then corner rows in o
 ## Consequences
 
 - An engine reads as one instrument, and a second engine is Duplicate plus one find/replace (ADR 0049). Verified against the live vessel at 698/699 RPM.
-- The mask cuts a real bite out of each card, so corner content is padded away from the ring-facing side and aligned to the outer corner. Laid out edge to edge it loses its unit — found by screenshotting, not by a test, and worth remembering as the failure mode this layout has.
+- The mask clips each card's inner corner, so content is padded away from the ring-facing side and aligned to the outer corner. Screenshot inspection found that edge-to-edge content lost its unit label; tests had not caught this.
 - `wind-tile.tsx` now imports `computeCornerMasks` and `useFitScale` from `lib/cluster-canvas.ts`. Its own tests were the regression net for that extraction and passed unchanged. The corner **card** was deliberately not extracted: AGENTS.md's no-shared-KPI-primitive rule still governs card layout, and the instrument-skinned card looks nothing like the wind one.
 - Exhaust temperature has to be typed by hand per cluster. Mapping `propulsion.0` to port would bake in an ordering nothing on the bus confirms, and both nodes currently read identically.
-- Five widget kinds now carry per-instance config on the layout item. The pattern has absorbed embed, gauge, group, lamps and cluster without strain.
+- Five widget kinds now carry per-instance config on the layout item: embed, gauge, group, lamps and cluster.
 - The dial shipped without a needle: the value arc plus the centred number reads clearly at helm distance, and a needle looked like a lot of geometry for a second encoding of the same number. That was wrong and it was reversed shortly after. The arc says how much and the pointer says where, which is the redundancy every mechanical instrument uses and the reason a dial reads faster than a bare number at a glance. `Needle` draws a blade riding the rim rather than a full pointer pivoting at the centre, because a centre-pivoted needle crosses the readout it is meant to accompany.
 
 ## Verification
 
 `go test -short ./...` and 799 frontend tests pass; `tsc` clean, no lint errors.
 
-Verified against the live vessel, which is the point of having read its paths first — every number below was predicted from the raw SI before the tile existed:
+Verified against the live vessel. Each expected value below was calculated from the raw SI readings before the tile was implemented:
 
 | | Port | Starboard |
 |---|---|---|

@@ -1,6 +1,6 @@
 ---
 name: Helmcentral
-description: A quiet, dense instrument board for a boat, where colour means a reading or an alarm and nothing else.
+description: A dense boat dashboard with distinct colours for readings, controls and alarms.
 colors:
   background: "hsl(0 0% 98%)"
   foreground: "hsl(0 0% 0%)"
@@ -134,30 +134,21 @@ components:
 
 ## Overview
 
-**Creative North Star: "The Quiet Watch"**
+The default dashboard uses flat, near-greyscale surfaces: white tiles on an
+almost-white page, hairline borders, and no decorative gradients or
+illustrations. Amber and teal identify instrument readings, blue identifies
+interactive controls, and red identifies alarms.
 
-Nothing on this board raises its voice until something is actually wrong. The
-chrome is near-greyscale and flat: white tiles on an almost-white page, hairline
-borders, no gradients, no illustration, nothing decorative competing with a
-number. What colour there is has been rationed on purpose. Amber and teal belong
-to instrument readings, blue belongs to things you can click, and red means an
-alarm. A screen with colour on it is a screen telling you something.
+Tiles use a dense layout with a small, letter-spaced mono title, a divider to
+the edge, and tabular figures to keep values aligned as they update. Small
+labels need sufficient contrast for a helm screen read at arm's length in
+direct sun. Use the muted foreground token for secondary text; do not reduce
+the opacity of small text.
 
-The density is deliberate and high. Tiles carry a small tracked mono title, a
-rule running out to the edge, and then as much readout as will fit, with every
-value on tabular figures so digits do not dance as they update. Type below 12px
-exists and is used constantly for labels, which is why contrast is treated as
-non-negotiable rather than a preference: this is read in direct sun on a helm
-screen, at arm's length, by someone who has other things to do. De-emphasis is
-done with the muted foreground token, never by dropping opacity on small text.
-
-The system has a second face. `[data-skin="instrument"]` is an opt-in dark board
-that redefines the same token names every component already reads, so a tile
-re-skins with no per-component branching. It is the one place real depth lives:
-a bezel gradient, an inset rim, a bloom under the needle. That is not decoration,
-it is what a real MFD looks like at night, and it stops at instrument chrome.
-Alert red and amber survive both skins largely intact, because a warning has to
-look like a warning whichever face is on.
+The optional `[data-skin="instrument"]` dark board redefines the tokens used by
+each component, without per-component branching. Its instrument chrome uses a
+bezel gradient, an inset rim and a needle glow to resemble an MFD at night.
+Red and amber retain their alert meanings in both skins.
 
 **Key Characteristics:**
 
@@ -169,8 +160,8 @@ look like a warning whichever face is on.
 
 ## Colors
 
-Two near-greyscale grounds carrying three rationed accents: one for readings, one
-for interactive chrome, one for alarm.
+Near-greyscale surfaces with separate accent colours for readings, interactive
+controls and alarms.
 
 ### Primary
 
@@ -185,26 +176,26 @@ for interactive chrome, one for alarm.
 
 - **Deep Amber** (`hsl(39 100% 39%)`): the primary instrument readout token
   (`--gauge-primary`). Depth, battery state of charge, wind, AC and DC draw:
-  the hero numeral in a tile is almost always this. Darkened well below a
-  decorative amber so it clears text contrast on a white card.
+  the main numeral in a tile usually uses this token. Darkened for text contrast
+  on a white card.
 - **Muted Teal** (`hsl(175 42% 32%)`): the secondary readout token
   (`--gauge-secondary`). The second-rank numbers in a tile, and the tide and
   depth figures that pair against amber.
 
 ### Tertiary
 
-The chart series are their own closed vocabulary, one hue per measured quantity,
+Chart series use one hue per measured quantity,
 so a colour means the same thing across every graph: wind
 (`hsl(226 72% 53%)`), gust (`hsl(38 92% 50%)`), wave (`hsl(173 80% 40%)`),
 swell (`hsl(258 90% 66%)`), temperature (`hsl(32 95% 44%)`), precipitation
 (`hsl(217 91% 60%)`), UV (`hsl(48 96% 53%)`), and a grid line
 (`hsl(214 20% 39%)`).
 
-Four of them carry a darkened `-label` twin (`--chart-temp-label`,
+Four have a darkened `-label` variant (`--chart-temp-label`,
 `--chart-precip-label`, `--chart-wave-label`, `--chart-gust-label`). A plotted
-line answers to the 3:1 graphics bar; an axis label is text and owes 4.5:1, and
-on a white card those four fell short. The split exists so labels can clear the
-text bar without dulling the plotted colour.
+line requires 3:1 contrast; an axis label requires 4.5:1. Those four colours
+needed darker variants to meet text contrast on a white card without changing
+the plotted line colours.
 
 ### Neutral
 
@@ -213,8 +204,8 @@ text bar without dulling the plotted colour.
   that one step is most of the depth in the light theme.
 - **Ink** (`hsl(0 0% 0%)`) and **Card Ink** (`hsl(0 0% 9.5%)`): body and tile
   text.
-- **Muted Ink** (`hsl(0 0% 32%)`): every label, unit, caption and axis. The
-  workhorse. This token is the only sanctioned way to de-emphasise text.
+- **Muted Ink** (`hsl(0 0% 32%)`): labels, units, captions and axes. Use this
+  token to de-emphasise text.
 - **Hairline** (`hsl(0 0% 90%)`): borders, dividers, tick minors.
 - **Alarm Red** (`hsl(359 75% 50%)`): raised alarms and destructive
   confirmation only. Brightened to `hsl(359 100% 70%)` on dark grounds so it
@@ -222,17 +213,16 @@ text bar without dulling the plotted colour.
 
 ### Named Rules
 
-**The Rationed Colour Rule.** Follow 60-30-10. Surfaces are `bg-background` and
+**Colour proportions.** Follow 60-30-10. Surfaces are `bg-background` and
 `bg-card` (60%). Structure is `text-muted-foreground` and `border-border` (30%).
 The remaining 10% is `text-primary` for chrome, `text-gauge-primary` /
 `text-gauge-secondary` for readouts, and raw palette colours (`amber-*`, `red-*`,
 `emerald-*`) for alert semantics only. No colour is ever decorative.
 
-**The Two Accents Rule.** Blue is what you touch, amber and teal are what you
-read. A hero numeral in Signal Blue or a button in Deep Amber is a bug, not a
-variation.
+**Controls and readouts.** Use blue for controls and amber or teal for readings.
+Do not use Signal Blue for a main readout or Deep Amber for a button.
 
-**The Alarm Survives the Skin Rule.** Red and amber alert states are not
+**Alert colours.** Red and amber alert states are not
 reskinnable. The instrument skin may brighten red for a dark board; it may not
 recolour it, and it defines no alert palette of its own.
 
@@ -242,10 +232,8 @@ recolour it, and it defines no alert palette of its own.
 `var(--font-display)`
 **Body Font:** Geist Sans (falling back to `sans-serif`), as `var(--font-sans)`
 
-**Character:** The mono is not a stylistic choice, it is what makes a changing
-number sit still. Every readout, every unit, every instrument label is mono with
-tabular figures; prose, form labels and settings copy are the sans. The pairing
-reads as an instrument that also knows how to write a sentence.
+**Usage:** Readouts, units and instrument labels use mono with tabular figures
+to keep changing numbers aligned. Prose, form labels and settings text use sans.
 
 ### Hierarchy
 
@@ -264,28 +252,26 @@ reads as an instrument that also knows how to write a sentence.
 - **Body** (Geist Sans, 400, `text-sm` 0.875rem, 1.5): help text, descriptions,
   settings prose.
 - **Micro-label** (Geist Sans, 400, `text-[10px]`, uppercase,
-  `tracking-[0.16em]`, muted): axis labels, chart legends, KPI identifiers. The
-  most-used single idiom in the codebase.
+  `tracking-[0.16em]`, muted): axis labels, chart legends and KPI identifiers.
 
 ### Named Rules
 
-**The Three Sizes Rule.** Below `text-xs` (12px) there are exactly three sizes
+**Small text sizes.** Below `text-xs` (12px) there are exactly three sizes
 and no others. `text-[11px]` for inline secondary values and unit suffixes.
 `text-[10px]` for uppercase micro-labels, the default for anything else small.
 `text-[9px]` for dense map and marker annotation, and that is the floor. Never
 `text-[8px]`.
 
-**The No Faded Small Text Rule.** Do not stack low-opacity modifiers
+**Small text contrast.** Do not stack low-opacity modifiers
 (`text-white/50`, `text-white/60`) on anything at or below `text-[11px]`.
 Reduced contrast on already-tiny glyphs is illegible in daylight glare. Use
 `text-muted-foreground` on themed surfaces; on non-themed overlays such as map
 HUDs, never below `/80`.
 
-**The Still Digits Rule.** Every number that updates carries `tabular-nums` and
-`leading-none`. A readout that reflows or jitters as its value changes is
-broken, however pretty it looks at rest.
+**Number alignment.** Every number that updates carries `tabular-nums` and
+`leading-none` to prevent reflow as its value changes.
 
-**The SVG Follows the DOM Rule.** Chart `<text>` uses a size from the three-size
+**SVG text.** Chart `<text>` uses a size from the three-size
 scale as a bare string (`fontSize="10"`) and takes `fill` from a token
 (`hsl(var(--muted-foreground))` for axis and legend, `hsl(var(--primary))` for
 emphasis). A hardcoded `rgba()` or hex silently stops adapting to dark mode.
@@ -299,44 +285,39 @@ two-column CSS grid, where any tile authored at half the board or wider goes
 full-bleed rather than being squeezed into a half. Breakpoints are Tailwind
 stock and unoverridden: `sm` 640, `md` 768, `lg` 1024.
 
-Spacing is a strict two-tier rhythm. The outer board uses `gap-4 p-4` (or
+Spacing has two levels. The outer board uses `gap-4 p-4` (or
 `gap-6 p-6`); nested KPI sub-cards inside a tile tighten to `gap-2` and
-`p-2`–`p-3`. Every tile at a given level shares identical inner padding, because
-Gestalt grouping is doing real work on a board this dense. Tile padding itself
+`p-2`–`p-3`. Every tile at a given level shares identical inner padding to keep
+groups visually consistent. Tile padding itself
 is `py-4` with `px-3` tightening from `px-4` at phone width, and the title's
 letter-spacing gives up before the padding does.
 
-Overflow is handled structurally, not hopefully: `min-w-0` on flex children and
+Prevent overflow with `min-w-0` on flex children and
 `minmax(0, 1fr)` in grids, and `truncate` or `line-clamp-1` on anything of
 variable length. Nothing wraps to a second line and breaks the vertical grid
 unless it is a graph or a log.
 
 ### Named Rules
 
-**The Never Stretch Rule.** No string, however long, may widen its parent. An
+**Text overflow.** No string, however long, may widen its parent. An
 operator-supplied embed title, a vessel name, a unit label: all of them truncate.
 
 ## Elevation & Depth
 
-Flat by default, and depth is a skin. In the light and dark themes a tile is a
-white or near-black surface on a slightly different ground, with a hairline
-border and `shadow-sm` doing almost nothing. There is no elevation ladder to
-climb; separation comes from the one tonal step between page and card, and from
-borders. Overlays that genuinely float (dialogs, popovers, toasts, the switch
-thumb) carry the only real shadows in the default board.
+The default board is flat. In light and dark themes, tile surfaces differ
+slightly from the page, with hairline borders and a subtle `shadow-sm`.
+Stronger shadows are reserved for dialogs, popovers, toasts and switch thumbs.
 
-The instrument skin is where depth lives, and it is earned rather than
-decorative: it reproduces a lit MFD. A radial bezel gradient behind the dial, an
-inset rim at 30% opacity, a 60px outer glow, a vignette hub that lifts the
-readout off its own band, and a two-stop drop-shadow bloom on the fuel rail
-because a single shadow could not make both a tight emissive core and a wide
-halo. All of it is off by default: `--dial-bezel`, `--dial-hub` and
+The instrument skin resembles a lit MFD. It uses a radial bezel gradient behind
+the dial, an inset rim at 30% opacity, a 60px outer glow, a vignette hub that
+separates the readout from its band, and two drop shadows on the fuel rail for
+a bright core and a wider halo. These effects are off by default: `--dial-bezel`, `--dial-hub` and
 `--fuel-bar-glow` are `none` on `:root`, so an unskinned page renders flat.
 
 ### Shadow Vocabulary
 
-- **Tile rest** (`box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05)`): a hairline, not a
-  lift. It exists to seat the card, and if it reads as elevation it is too much.
+- **Tile rest** (`box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05)`): subtle separation
+  from the page, without making the card appear raised.
 - **Instrument bezel** (`inset 0 0 0 3px hsl(var(--dial-rim) / 0.30), inset 0 8px
   40px hsl(230 60% 3% / 0.6), 0 0 60px hsl(var(--dial-glow) / 0.35)`): the lit
   rim and ambient glow of a skinned dial. Skin only.
@@ -347,13 +328,13 @@ halo. All of it is off by default: `--dial-bezel`, `--dial-hub` and
 
 ### Named Rules
 
-**The Flat Board Rule.** Surfaces on the default board are flat. If something
+**Default surfaces.** Surfaces on the default board are flat. If something
 needs to stand out, it gets a border, a tonal step or a token colour, not a
 shadow.
 
-**The Depth Is Earned Rule.** Depth appears only where it reproduces real
+**Instrument depth.** Depth appears only where it reproduces real
 instrument hardware, and only inside the instrument skin. Glass, gloss and
-drop-shadowed chrome applied to app UI are not on the table.
+drop-shadowed chrome must not be applied to the rest of the app UI.
 
 ## Shapes
 
@@ -366,8 +347,8 @@ inert (`0px`) when unskinned so an unskinned page's layout is byte-identical.
 
 Borders are the primary separator: a single hairline at `--border`, and inside a
 tile a `h-px` rule at 70% border opacity running from the title out to the edge.
-The dial is the one place geometry gets expressive, and even there it is a thin
-rim (3px track at r130) until the skin widens it into a real band (40px at r96)
+The dial has a thin rim (3px track at r130) in the default skin. The instrument
+skin widens it into a band (40px at r96)
 with major and minor tick rings.
 
 ## Components
@@ -377,7 +358,7 @@ with major and minor tick rings.
 - **Shape:** softly rounded (`rounded-md`, 6px), never pill, never square.
 - **Size:** a 40px floor on both axes (`min-h-10 min-w-10`), with `h-10 px-4` the
   default, `h-9 px-3` small, `h-11 px-8` large, and a 40×40 icon square. The
-  floor is not negotiable; this is touched on a moving boat.
+  minimum supports touch use on a moving boat.
 - **Primary:** Signal Blue ground, pale blue ink, `text-sm font-semibold`,
   hovering to 90% opacity of the same blue.
 - **Focus:** a 2px ring in `--secondary` with a 2px offset against the
@@ -388,7 +369,7 @@ with major and minor tick rings.
 
 ### Tiles
 
-The signature component, and the wrapper every widget builds inside. A `Card`
+Every widget uses the tile wrapper. It is a `Card`
 with `py-4`, `px-3` (`px-4` at `sm`), header and body flush.
 
 - **Header:** a mono uppercase tracked title in muted, optional 14px icon, then
@@ -396,11 +377,9 @@ with `py-4`, `px-3` (`px-4` at `sm`), header and body flush.
 - **Body:** whatever the widget draws, at the tighter nested density.
 - **Stale state:** the tile's whole content goes to `grayscale` and an amber
   outlined badge appears beside the title with the age of the last update.
-  This is the system's most important state: a value frozen by a dead feed must
-  never be mistaken for a live measurement. Grayscale and nothing else, on
-  purpose: a faded tile reads as a dim screen in the sun rather than as a dead
-  feed, so opacity is not stacked on top of it. This is the loudest state the
-  system has, not its quietest.
+  This distinguishes stale values from live measurements. Do not also reduce
+  opacity: faded values are harder to read in sunlight and may look like a dim
+  screen rather than a stale feed.
 - **Do not** invent a shared `MetricTile` or `StatCard`. Each widget composes its
   own KPI stack inside `Tile`. That is the established pattern.
 
@@ -435,7 +414,7 @@ control set. State comes from `data-[checked]` / `data-[unchecked]`.
 
 Full-width, `rounded-lg`, alarm red border over a 10% red wash, red text, with
 an uppercase tracked `text-sm font-semibold` headline and a `text-xs` message
-under it. Both truncate. This is the one component allowed to be loud.
+under it. Both truncate. The banner must stand out from ordinary tile content.
 
 ### Dial (Signature)
 
@@ -488,11 +467,10 @@ one and not the other could put a bar through its neighbour.
 - **Don't** add shadows to the default board to create hierarchy. Border, tonal
   step or token colour instead.
 - **Don't** dress the app in a generic SaaS dashboard: rounded pastel cards,
-  gradient hero statistics, decorative illustration, purple-on-white. This is a
-  boat, not a metrics product.
+  gradient hero statistics, decorative illustration or purple-on-white.
 - **Don't** apply skeuomorphic marine gloss. No brushed steel, teak, leather or
-  chrome bezels for their own sake. The instrument skin's depth is legitimate
-  because it reproduces a real MFD; nothing else gets to borrow it.
+  decorative chrome bezels. MFD-style depth effects are limited to the
+  instrument skin.
 - **Don't** style forecasts like a consumer weather app: no photographic
   backdrops, animated precipitation or saturated gradient skies behind the
   numbers.

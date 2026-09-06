@@ -1,32 +1,25 @@
 # Inventory tracking
 
-Knowing what is aboard, and where it is, is a problem every boat has and almost
-no boat solves. The parts inventory lives in someone's head, the spares live in
-whichever locker had room at the time, and the answer to "do we have a spare
-impeller for the genset" is found by opening lockers until one turns up or the
-trip is over.
-
-Inventory tracking gives that a home: storage zones and numbered bins that match
-the boat, items you can search by name or part number, and a stocktake you do by
-walking around with a scanner instead of emptying cupboards.
+Inventory tracking records what is aboard and where it is stored, so you can
+check for a spare impeller for the genset without searching every locker. The
+design uses storage zones and numbered bins that match the boat, items
+searchable by name or part number, and scanner-assisted stocktakes.
 
 > **Status: not built yet.** This page describes the feature as designed. It is
-> here so the shape can be argued with before it is code.
+> open for review before implementation.
 
 ## Scanning, or not
 
-Items are found three ways, and all three coexist. Nothing here requires
-hardware you do not want to buy.
+Items can be found by RFID, barcode or manual entry. These methods can be used
+together, and scanning hardware is optional.
 
 ### RFID tags
 
-The interesting one. Cheap EPC Gen 2 passive tags, a few cents each, no battery,
-stuck on items and on the bins themselves. A USB reader in keyboard mode reads
-them, so a stocktake becomes a walk through the boat rather than a morning
-spent opening every locker.
+EPC Gen 2 passive tags cost a few cents each and need no battery. They attach
+to items and bins and are read by a USB reader in keyboard mode during a
+stocktake.
 
-What that actually gets you, stated honestly, because RFID is sold with numbers
-it does not hit on a boat:
+RFID has several limitations aboard:
 
 - **Range depends on what is in the way.** Passive UHF is absorbed by liquid and
   reflected by metal. A boat locker is mostly liquid and metal. A closed
@@ -42,21 +35,20 @@ it does not hit on a boat:
   work out which locker something is in. Tagging the bins solves it: scan bin
   `SAL-04`, and everything you scan next is recorded as being in it.
 
-The consequence that shapes everything else: **not seeing a tag does not mean
-the item is gone.** A stocktake confirms what it finds and never concludes
-anything from silence. Nothing you scan can mark an item lost, move it
+**An unread tag does not establish that an item is missing.** A stocktake
+confirms what it finds and makes no changes based on unread tags. Nothing you
+scan can mark an item lost, move it
 somewhere, or delete it. Items a pass did not see are listed as "not seen
 since", with the date they were last confirmed, and you decide what that means.
-An empty locker and a locker lined with foil look identical to a reader, and
-only one of them is a problem.
+A reader may receive no tags from either an empty locker or one lined with foil.
 
 ### Barcodes and QR codes
 
 The same readers and the same workflow. A barcode scanner in keyboard mode needs
 no separate support, so a shop-bought USB scanner works out of the box.
 
-Barcodes and RFID tags identify different things, and the app treats them
-differently on purpose. A barcode on a tin of tomatoes identifies the *product*,
+Barcodes and RFID tags identify different things. A barcode on a tin of
+tomatoes identifies the *product*,
 and sixteen identical tins share it. An RFID tag identifies *that one item*, and
 no two tags match. So an item is either:
 
@@ -67,19 +59,18 @@ no two tags match. So an item is either:
 
 ### Typing it in
 
-Not a fallback. It is the normal way to record anything not worth a tag, and
-every field a scanner fills in can be typed or corrected by hand. An item with
-no scannable identifier at all is perfectly valid.
+Manual entry is a standard way to record items without tags. Every field a
+scanner fills in can be typed or corrected by hand, and an item does not need
+a scannable identifier.
 
 ## Browsing and searching
 
-The default view walks the boat the way you would: zones, then the bins in a
-zone, then what is in a bin. A zone shows how many bins and items it holds; a
+The default view shows zones, then the bins in a zone, then each bin's contents.
+A zone shows how many bins and items it holds; a
 bin shows its contents and when they were last confirmed.
 
 Search is fuzzy and runs across names, part numbers, manufacturers and serials.
-It highlights the bins holding matches as well as listing the items, because on
-a boat "which locker" is usually the question, not "do we own one".
+It lists matching items and highlights the bins that hold them.
 
 ## Doing a stocktake
 
@@ -88,33 +79,32 @@ confirms the item, and if it was recorded somewhere else, moves it and notes
 when.
 
 Scanning a tag the system does not know offers to add it there and then, against
-a new item or an existing one. That is how a locker full of untagged spares
-actually gets tagged: during a stocktake, not in a separate setup session.
+a new item or an existing one. This lets you tag spares during a stocktake
+without a separate setup session.
 
 At the end you get a summary: confirmed, moved, newly tagged, and the items
-expected in those bins that did not turn up. That last list is information, not
-an instruction, per the rule above.
+expected in those bins that were not scanned. As described above, that last
+list does not change the items' records.
 
 ## Photos and reading labels
 
 Items can carry photos, taken from the device camera when you first record them
 or uploaded later. They are downscaled on the way in and capped per item, so the
-library does not quietly become the largest thing on the boat's disk.
+library's disk usage is limited.
 
 Optionally, a photo of a label can be read by a vision model to pull out the
 manufacturer, model, serial number and part number, so you do not have to type a
 serial off a sticker behind an engine. This needs an OpenRouter account and is
 configured in settings.
 
-Four things about it are deliberate:
+Label reading has four constraints:
 
 1. **It is off until you turn it on, and it runs when you ask.** No photo leaves
    the boat unless you press the button on that photo. Nothing scans your
    library in the background.
 2. **It suggests, you confirm.** Extracted values appear in the form for you to
-   accept or correct. Nothing is saved unchecked, because a wrong serial number
-   that nobody looked at is worse than a blank field. You find out when the part
-   arrives and does not fit.
+  accept or correct before saving, to avoid recording incorrect details that
+  could lead to ordering the wrong part.
 3. **It needs internet, and says so when there is none.** A failed read tells
    you it failed and the item saves without it. It never blocks recording an
    item.
@@ -133,18 +123,18 @@ An **Inventory** section in settings holds:
   `SAL-04` rather than something generated.
 - **Floor plans.** A zone can carry a plan image with its bins pinned on it, so
   "where is `LAZ-02`" has a visual answer for anyone aboard who did not stow it.
-  A rough sketch is the point; this is not a deck drawing tool.
+  A rough sketch is sufficient; deck drawing tools are not included.
 - **Master data.** Manufacturers, suppliers and categories, kept as lists so
   they stay consistent and can be used to filter.
 - **Label reading.** The OpenRouter key, the model, and the switch.
 
 ## On the dashboard
 
-Three widgets, aimed at the things that have a deadline rather than at counts:
+Three widgets track expiry dates, stock levels and stocktakes:
 
 - **Expiring soon.** Flares, EPIRB battery, liferaft service, fire
-  extinguishers, medications, first aid. Expiry dates are the part of a boat
-  inventory that actually bites, usually during an inspection.
+  extinguishers, medications, first aid. These dates help identify items that
+  need attention before an inspection.
 - **Low stock.** Quantity items that have dropped below the minimum you set.
 - **Last stocktake.** When you last did one, and what it did not find.
 
@@ -158,7 +148,7 @@ designed but not yet built.
 - Not provisioning or meal planning.
 - Not fleet inventory. One boat.
 - Not a warehouse system. No pick lists, purchase orders or receiving.
-- Not something that deletes your records because a scanner had a bad day.
+- No automatic deletion of records after a failed scan.
 
 ## Your data
 

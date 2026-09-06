@@ -2,28 +2,27 @@
 
 A reference Helmcentral tide-provider plugin backed by NOAA's public
 CO-OPS (Center for Operational Oceanographic Products and Services) Tides
-& Currents API, covering US stations. It exists to show what wiring up a
-real government tide API into Helmcentral's WASM plugin contract looks
-like, end to end — clone this, change the URLs/field mappings, and you
-have a starting point for your own region's tide source.
+& Currents API, covering US stations. It demonstrates Helmcentral's WASM
+plugin contract and can be adapted to another region's tide source by
+changing the URLs and field mappings.
 
-It is **not** a production-hardened client (no pagination, no
-retry/backoff — see the comments at the top of `main.go`), and it is a
-different plugin from [../bom](../bom) (the real, only "bom" provider,
-ported from the formerly-native `backend/tide_provider_bom.go`) — see
+It is not a production-hardened client: it has no pagination or retry/backoff
+(see the comments at the top of `main.go`). It is separate from
+[../bom](../bom), the sole "bom" provider, ported from the formerly-native
+`backend/tide_provider_bom.go`. See
 [docs/adr/0017-wasm-plugin-tide-providers.md](../../../adr/0017-wasm-plugin-tide-providers.md)'s
 "Update: BOM ported to WASM" section for why that port was made.
 
-Written in TinyGo — the most approachable option given Helmcentral's own
-Go backend. The Extism plugin contract isn't TinyGo-specific: Rust, Zig,
+Written in TinyGo. The Extism plugin contract
+isn't TinyGo-specific: Rust, Zig,
 C, AssemblyScript, C++, and Haskell PDKs all implement the same contract
 identically; see [Extism's PDK list](https://extism.org/docs/concepts/pdk)
 if you'd rather use one of those.
 
 ## Building it
 
-Requires only Docker (no local TinyGo install needed) — this mirrors the
-exact build pattern Helmcentral's own test fixtures use
+Requires only Docker (no local TinyGo install needed). This uses the
+same build pattern as Helmcentral's test fixtures
 (`backend/wasm_tide_provider_test.go`'s regeneration comment), pointed at
 this directory instead. From the repo root:
 
@@ -61,19 +60,18 @@ this plugin:
    ["api.tidesandcurrents.noaa.gov"]
    ```
 
-   This is not optional — a plugin with no companion `<name>.allowed_hosts.json`
-   file gets **no network access at all** (Helmcentral's default-deny
+   This file is required for network access. A plugin with no companion
+   `<name>.allowed_hosts.json` file gets no network access (Helmcentral's default-deny
    sandboxing). NOAA CO-OPS is the only host this plugin talks to, so it's
    the only host that needs to be allowlisted.
 3. Restart the Helmcentral container (or the dev backend). "NOAA CO-OPS"
-   should now appear in the tide-provider dropdown in Settings, with zero
+   should now appear in the tide-provider dropdown in Settings, with no
    frontend changes required.
 
-`plugins/tides/` lives at the repo root and is gitignored — it's operator
-runtime content, not part of the repo, the same treatment `backend-data/`
-already gets. A fresh Helmcentral checkout ships with **no** plugins
-active by default, specifically so there's no surprise outbound traffic to
-a foreign government API on a default install.
+`plugins/tides/` lives at the repo root and is gitignored, like `backend-data/`,
+because it contains operator runtime files. A fresh Helmcentral checkout
+ships with no plugins active by default, to avoid contacting external
+government APIs before a provider is chosen.
 
 ## NOAA endpoints this plugin uses
 

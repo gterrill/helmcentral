@@ -8,15 +8,14 @@ If you are installing fresh, none of this applies.
 ## Checking what you are running
 
 The release version sits in the footer of the menu sidebar, below the
-navigation items. It is the fastest way to confirm an upgrade actually took:
-if the footer still reads the old tag after a restart, the container is running
+navigation items. Use it to confirm an upgrade: if the footer still reads the
+old tag after a restart, the container is running
 the previous image.
 
-The version comes from the running backend, not the browser, so a stale page
-cannot show you a version you are not on. Hovering it gives the full build
+The version comes from the running backend rather than the browser. Hovering it gives the full build
 stamp including the git revision, which is what to quote when reporting a
 problem. A build made outside the release workflow reports `dev` or `(devel)`
-instead of a tag, because there is no tag to report.
+instead of a tag.
 
 The same values are served by `GET /api/health` if you would rather read it
 from the shell:
@@ -29,7 +28,7 @@ curl -s http://localhost:8080/api/health
 
 This is not a breaking change: no action is required. `auth.mode` defaults to
 `none` (no authentication, matching every prior release's behaviour), so an
-upgrade will not lock you out of a running boat.
+upgrade does not introduce a login requirement.
 
 **Recommended:** Once your SignalK server has security enabled, set
 `auth.mode: signalk` in `settings.yaml` to require login before the API and

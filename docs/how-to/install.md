@@ -7,10 +7,10 @@ curl -fsSL https://raw.githubusercontent.com/gterrill/helmcentral/main/install.s
 ```
 
 Then open `http://<this-machine>:8080/`. On first run Helmcentral searches the
-network for a SignalK server and offers what it finds, so there is nothing to
-edit by hand.
+network for a SignalK server and offers what it finds, without requiring manual
+configuration.
 
-This page covers the other routes and what each one does.
+The other installation options are described below.
 
 > [!WARNING]
 > **Authentication is off by default** (`auth.mode: none`). A fresh install's
@@ -22,7 +22,7 @@ This page covers the other routes and what each one does.
 
 ## Install script
 
-What the script does: detects the platform, verifies the download against the
+The script detects the platform, verifies the download against the
 published checksums, installs to `/usr/local/bin`, creates `/var/lib/helmcentral`
 for state, installs the reference plugin bundle, and enables a systemd service
 on Linux.
@@ -82,7 +82,7 @@ docker compose pull
 docker compose up -d --force-recreate
 ```
 
-Dashboard and API land on <http://localhost:9091>. Change the left-hand side of
+The dashboard and API are served at <http://localhost:9091>. Change the left-hand side of
 the port mapping to serve it elsewhere. State goes to `./backend-data`, created
 on first run, so nothing needs to exist beforehand.
 

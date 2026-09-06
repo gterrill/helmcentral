@@ -9,9 +9,7 @@ Extends ADR 0038 (alarms) and ADR 0055 (host-derived vessel paths). Fixes a defe
 
 Steve and Linda Dashew's *Surviving the Storm* (Beowulf, 1999) was read against the forecast page and the alarm engine to see what of it could be encoded. The book is a heavy-weather seamanship text built from first-hand accounts and interviews with NOAA and Bureau of Meteorology forecasters, and it carries an unusual amount of quantitative advice: thresholds with numbers attached, most of them attributed.
 
-Almost none of it was expressible, for one structural reason.
-
-**The book's advice is rates and relationships. An alarm rule is a level.** `alarmRule` compares one path against one scalar. The barometer's rate of fall carries the warning, not its value. Wind climbing while the barometer sits still is a signature no single-path threshold can express. Sea building faster than its period lengthens is what says the waves will break.
+The existing alarm model could not express most of the advice: `alarmRule` compares one path against one scalar, while the book describes rates and relationships. Examples include falling pressure, rising wind with steady pressure, and sea height increasing faster than its period lengthens.
 
 The forecast page had the opposite problem. It already received everything it needed, hourly, and displayed the wrong part. Wave height was the headline number, and the book is blunt about why that is wrong (p613): "Regardless of size or steepness, if the wave isn't breaking, there's nothing to fear." A 3m sea at 12 seconds is a non-event. A 2m sea at 5 seconds is breaking. Both rendered as a height.
 
@@ -19,7 +17,7 @@ Two findings shaped the work.
 
 `derived_paths.go` already existed and was exactly the right mechanism: `helmcentral.`-namespaced synthetic paths, host-computed, riding the gauge-values stream so anything that binds a path binds them. It had one entry.
 
-And ADR 0055's stated consequence, that a derived path can be bound by an alarm rule, was **not true in the code**. `evaluateAlarmsOnce` read through `snapshotAlarmReader`, which walks the SignalK tree alone. A rule naming `helmcentral.*` resolved to absence, and since absence never satisfies a threshold, the rule silently never fired. That is the worst failure an alarm has, because the operator believes something is watching.
+ADR 0055 stated that an alarm rule could bind a derived path, but the implementation did not support it. `evaluateAlarmsOnce` used `snapshotAlarmReader`, which reads only the SignalK tree. A rule naming `helmcentral.*` resolved to absence and never fired, without reporting that the configured rule could not evaluate its input.
 
 ## Decision
 
@@ -77,7 +75,7 @@ Two things were then found by querying the provider at the vessel's own position
 
 A regression rather than first-versus-last, because the barometer is noisy at sensor resolution and one bad sample at either end would set the whole figure. History comes from ring buffers alongside the existing gust and depth ones, fed from the delta-stream snapshot rather than the vessel-state struct, since nothing else needs these three there.
 
-The squash-zone path is the one worth having. Page 89 calls squash zones the cause of "the majority of all weather difficulties encountered by yachts" and says they are the phenomenon onboard data is worst at spotting, "because wind direction and barometric pressure typically remain steady while the wind increases". Page 188 names the western South Pacific around New Zealand and Australia as getting more than its share. A barometer alarm cannot catch this by construction. This can.
+Page 89 calls squash zones the cause of "the majority of all weather difficulties encountered by yachts" and describes the difficulty of detecting them from onboard data, "because wind direction and barometric pressure typically remain steady while the wind increases". Page 188 identifies the western South Pacific around New Zealand and Australia as particularly affected. The squash-zone path combines wind, direction and pressure to detect a pattern that a barometer threshold alone cannot express.
 
 The index is a number rather than a bool because the engine compares values, and a rule binds it with "above 0.5". A boolean path would need a new operator, and the point of a derived path is that the rule engine does not change.
 
@@ -93,7 +91,7 @@ Five rules, created once per installation and keyed on a `seeded_sets` marker in
 | Squash zone | `squashZoneIndex` | above 0.5 | warn | p89, p188 |
 | Tropical barometer anomaly | `pressureChange3h` | below -1.5 mb | alert | p187 |
 
-**They ship disabled, and that is the honest part of this ADR.** Every threshold above is one very experienced crew's number, published in 1999, several attributed in the text to forecasters rather than derived from data the book shows. None is calibrated against this vessel or this coast. They are a far better starting point than an empty alarm centre and they are not measurements. Enabling them unasked would assert a confidence nobody has earned.
+**The rules ship disabled.** The thresholds come from a book published in 1999, several attributed to forecasters rather than derived from data shown in the text. None is calibrated against this vessel or coast. They are starting points for operator review, not measurements or rules to enable automatically.
 
 ### What was rejected
 
@@ -107,7 +105,7 @@ Five rules, created once per installation and keyed on a `seeded_sets` marker in
 - The `helmcentral.*` namespace grew from one entry to four, and the mechanism is now genuinely usable by alarm rules rather than only claimed to be.
 - Three ring buffers now record whether or not anything binds them. At a five-second poll over 24 hours that is a bounded, known cost, the same one the gust buffer already carries.
 - The wave guest contract gained four fields. A plugin that omits them sends zeros, which read as "component absent" rather than "due north", so older plugins degrade to no cross-sea detection instead of to false positives.
-- The seeded set is a new category of thing in this repo: configuration the software proposes rather than the operator writes. The marker mechanism is what keeps that from being presumptuous, and it generalises to any future set.
+- The seeded set introduces proposed configuration. The marker prevents deleted rules from being recreated and can be reused for future sets.
 - The alert-colour ramp is the first use of `--destructive` in a chart. It is deliberately not reskinnable, per the standing rule that a warning has to look like a warning in either skin.
 
 ## Verification

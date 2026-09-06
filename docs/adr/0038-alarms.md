@@ -3,18 +3,18 @@
 ## Status
 Accepted
 
-Depends on ADR 0037: rules can name any SignalK path only because the delta stream put every path the server publishes into a snapshot. This was not a feature blocked on its own design, it was blocked on ingestion.
+Depends on ADR 0037: the delta-stream snapshot makes every published SignalK path available for rules.
 
 ## Context
 
 Helmcentral had no alarm subsystem. There was exactly one hardcoded alarm — the anchor drag klaxon in `use-anchor-alarm.ts` — implemented as Web Audio **in a browser tab**. Closing the tab silenced it. There were no user-configurable thresholds for anything: not battery voltage, tank levels, depth, bilge, engine temperature, or wind. No severities, no acknowledgement, no history, and no notification transports at all — no email, SMS, push, or webhook.
 
-Against the products Helmcentral's users are most likely coming from, this is the gap. N2KView's premise is alarms on *any* N2K data with two severities, an alert log, three-stage audible escalation, and email/SMS delivery; Maretron's cloud services exist to carry that off the boat. A dashboard that renders beautifully and cannot tell you the bilge is cycling is a different category of product.
+Comparable products support configurable alarms. N2KView offers alarms on any N2K data with two severities, an alert log, three-stage audible escalation, and email/SMS delivery; Maretron's cloud services support delivery off the boat. Helmcentral lacked equivalent monitoring, including alerts for bilge activity.
 
-Two failures are invisible from inside the boat and matter more than any threshold:
+Threshold rules alone cannot detect two failures:
 
-1. **The data source dies.** Under a delta stream (ADR 0037) values persist until superseded, so a dead sensor holds its last reading and a frozen dashboard looks like a calm boat.
-2. **The boat goes off.** Power, internet, or hardware fails and nothing can be sent. Silence is indistinguishable from "nothing is wrong".
+1. **The data source stops.** Under a delta stream (ADR 0037), values persist until superseded, so a failed sensor can leave its last reading displayed as current.
+2. **The boat loses connectivity.** Power, internet, or hardware failure can prevent notifications from being sent. A remote recipient cannot distinguish this from an absence of alarms.
 
 ## Decision
 
@@ -22,7 +22,7 @@ Two failures are invisible from inside the boat and matter more than any thresho
 
 Severities are `normal | alert | warn | alarm | emergency` verbatim, and notifications are the objects the spec defines (`state`, `message`, `method`). Nothing in the codebase consumed `notifications.*` before this.
 
-This is the load-bearing decision. It means Helmcentral is both a **consumer** and a **producer** on that tree:
+Helmcentral both reads and publishes notifications on that tree:
 
 - Alarms raised by anything else on the bus — Victron GX, N2K devices, other SignalK plugins — appear in Helmcentral's alarm list with **no per-source integration and no translation layer**. `signalKNotifications` walks a subtree the stream already carries; that is the entire implementation.
 - Helmcentral's own rule hits are written back to `notifications.*`, so a buzzer plugin or an MFD reacts without knowing Helmcentral exists.
@@ -41,7 +41,7 @@ Secrets never enter those files. `SMTP_PASSWORD` and `NTFY_TOKEN` are registered
 
 Each rule carries a dwell (how long the condition must hold before firing) and a hysteresis deadband (how far the value must travel back before clearing). Clearing is deliberately **not** the negation of raising.
 
-Without these, a value hovering at a threshold produces an alarm storm, which is the single most common reason people switch marine alarms off entirely — and an alarm system that has been switched off is worth less than none, because it is still trusted. A test drives 20 oscillations across the threshold and asserts exactly one raise.
+Without dwell and hysteresis, a value hovering at a threshold can repeatedly raise and clear an alarm, encouraging operators to disable it. A test drives 20 oscillations across the threshold and asserts exactly one raise.
 
 Recovery before the dwell elapses restarts the timer, so an intermittent condition never accumulates enough time to fire.
 
@@ -59,7 +59,7 @@ Lifted from `escalateValidation` in `gnss_validation.go` rather than reinvented,
 
 Five transports, none requiring a paid subscription: **ntfy** (self-hostable, or the free public server with no account — the default), **SMTP**, **webhook**, **SignalK `notifications.*`** which needs no internet at all, and **web push** (added later; see the addendum below). Twilio/SMS and a Maretron-style cloud relay are excluded on exactly that ground.
 
-A boat's internet comes and goes, so a failed delivery is queued in the alarm-log database and retried with backoff from 30s to 30m, every attempt logged — the fallback policy requires retry behaviour to be loud, since a silent retry is indistinguishable from one that never happened. Deliveries still failing after 24h are discarded, because eventually delivering a day-old alarm as if it were current is its own kind of wrong. Disabling a transport keeps its queued items so re-enabling still delivers them.
+A failed delivery is queued in the alarm-log database and retried with backoff from 30s to 30m. Every attempt is logged, as required by the fallback policy. Deliveries still failing after 24h are discarded to avoid presenting a day-old alarm as current. Disabling a transport keeps its queued items for delivery after re-enabling.
 
 ### 7. The watchdog and heartbeat cover what rules cannot
 
@@ -97,7 +97,7 @@ So the decision: **actions go to the notification's id, and the server owns the 
 - `POST /{id}/silence` — removes `sound`, sets `status.silenced`
 - `POST /{id}/acknowledge` — removes `sound` **and** `visual`, sets `status.acknowledged`
 
-The hand-rolled write was reimplementing `silence` badly, at the wrong layer, without maintaining the status flags. It is deleted rather than kept as a fallback: the API is the mechanism, and a second path that half-works would only mask the case where the real one does not.
+The manual write did not maintain the status flags required by `silence`. It was deleted rather than retained as a fallback, so Notifications API failures remain visible.
 
 ### Silencing is not acknowledging
 
@@ -119,7 +119,7 @@ Publishing is now a **delta**, which is what every other producer on the bus sen
 
 Two things about publishing had to be found against a real server, and both were invisible to a stub:
 
-- **An empty `context` is not the same as no `context`.** signalk-server files a delta with no context under the sending connection's own vessel, and **silently drops** one carrying `"context": ""` — no error frame, no rejection, just nothing. Go's `encoding/json` emits the empty string for a field without `omitempty`, so reusing `signalKDelta` for publishing sent exactly that. A test asserting `delta.Context == ""` after round-tripping passes either way, because absent and empty both decode to `""`; the assertion has to be on the wire bytes. `omitempty` on that field is now load-bearing behaviour, not tidiness.
+- **An empty `context` is not the same as no `context`.** signalk-server assigns a delta without context to the sending connection's vessel but drops `"context": ""` without an error frame. Go's `encoding/json` emits that empty string unless the field has `omitempty`, so reusing `signalKDelta` initially sent the wrong form. A round-trip assertion of `delta.Context == ""` cannot distinguish absent and empty fields; the regression test checks wire bytes. `omitempty` is required for delivery.
 - **A cleared notification is not an absent one.** Writing `null` does not delete the path: the notifications API keeps it and normalises it to `state: "normal"` with an empty method. Confirming a clear by absence therefore fails against every real server while passing against a stub that deletes. The test is liveness, and it is the *same* rule the read path uses (`notificationValueIsLive`), so publishing and reading cannot disagree about what "cleared" means.
 
 **The publish is then confirmed by reading the value back.** A WebSocket write succeeds locally whether or not the server accepts what it carried, so returning success on the write alone would report a delivery that never happened — which is precisely how the REST version went its whole life unnoticed. Confirmation is what makes the next such failure loud instead of silent, and a failed confirmation feeds the existing delivery queue and retry (§6).
@@ -142,7 +142,7 @@ Zero registered devices is an error, not a quiet success. "Enabled but silently 
 
 The queue retries per **transport**, not per subscription: `dispatch` marshals the message once and enqueues it under one transport id. Three phones and one transient failure therefore means all three receive the alarm again on retry.
 
-That is accepted. §6 already holds that a late alarm beats a lost one, and the same reasoning makes a duplicate alarm beat a missed one. A per-subscription queue would need a `notification_queue` schema change, a fan-out of one alarm into N rows with N independent backoff timers, and a new failure mode where a partially drained fan-out is indistinguishable from a partially failed one — a lot of machinery whose whole benefit is suppressing a second buzz.
+Duplicate delivery is accepted to avoid missing alarms, consistent with §6's retry policy. A per-subscription queue was rejected because it would require a `notification_queue` schema change, N rows and independent backoff timers per alarm, and handling partially drained or failed deliveries to suppress duplicates.
 
 Instead the duplicates are collapsed at the two layers that can actually do it:
 
@@ -155,7 +155,7 @@ Instead the duplicates are collapsed at the two layers that can actually do it:
 
 ### Nothing else changed
 
-`dispatch`, `drain`, `notifyBackoffFor`, the queue schema, `testAlarmTransportsHandler` and the watchdog are untouched. A transport that required the retry contract to be rewritten around it would be the wrong shape; web push participates in the test button and the heartbeat for free, and reports "no devices are subscribed" when that is the truth — the single most useful thing that button can say about it.
+`dispatch`, `drain`, `notifyBackoffFor`, the queue schema, `testAlarmTransportsHandler` and the watchdog are untouched. Web push uses the existing retry contract, test button, and heartbeat, and reports "no devices are subscribed" when none are registered.
 
 The secure-context requirement, the PWA shell this needs on iOS, and the `tailscale serve` deployment answer are not alarm concerns and live in [ADR 0045](0045-web-push-secure-context-and-pwa-shell.md).
 
@@ -181,8 +181,8 @@ The guard keys on a new `loaded` flag rather than on `error`, because the two an
 ## Consequences
 
 - Any path the SignalK server publishes can be alarmed on, without code changes. This is the first feature to use ADR 0037's generic ingestion, and the precondition ADR 0039 (bindable widgets) also depends on.
-- Alarms from other producers on the bus appear for free, which is a capability N2KView does not have in the other direction.
-- Notification config is a new surface an operator can get wrong silently, so `POST /api/alarm-transports/test` probes every enabled transport. Discovering at 3am that the ntfy topic was mistyped is the failure that justifies one button.
+- Alarms from other producers on the bus appear without per-source integration.
+- `POST /api/alarm-transports/test` probes every enabled transport so operators can detect configuration errors, such as a mistyped ntfy topic, before an alarm occurs.
 - The alarm-log database is a new SQLite store, opened fail-fast at boot like the others. It carries both history and the delivery queue.
 - Each SSE client already costs a goroutine (ADR 0037); the evaluator adds one more at 1s, plus the drainer, watchdog, and heartbeat tickers.
 - Anchor drag detection moved to the server (`alarm_anchor.go`) rather than being derived in the React hook. Closing the tab no longer silences it, and it now flows through the normal path: logged, acknowledgeable, and delivered off the boat. Silencing is the server acknowledgement, so a second browser cannot be left ringing. It also fixed the old bug where the klaxon loop was created only on the transition into `dragging`, so un-silencing never restarted it.

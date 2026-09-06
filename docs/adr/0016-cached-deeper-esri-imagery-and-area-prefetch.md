@@ -11,8 +11,7 @@ visible. The operator wanted this without reaching for a separate desktop
 tool (Sat Planner, headless QGIS): fast, fine-grained, and built into the
 existing route planner.
 
-Checked directly against the code (not assumed) before building anything:
-most of the PhotoFusion mechanic already existed. `route-planner-map.tsx`
+Code review found that most of the PhotoFusion behavior already existed. `route-planner-map.tsx`
 already renders a hybrid satellite layer that fades in between a zoom
 handoff band (`computeWorldImageryOpacity`, `anchor-watch-map.tsx`), with
 base-style land/water fills hidden and labels re-themed for legibility over
@@ -43,9 +42,9 @@ caching prohibition in its ToS; Esri's World Imagery service (used here via
 the same public REST tile endpoint already proxied by this codebase, with
 no API key or paid plan) has reasonable-use expectations rather than a
 blanket "no offline caching, ever" clause. Confirmed with the operator:
-keep Esri, not Google, for this — it's already free, already working, and
-zero setup, and this feature's bounded/on-demand shape keeps it well
-within reasonable single-vessel use (more on this in Consequences).
+keep Esri rather than Google because it is already integrated, free, and
+requires no additional setup. The bounded, on-demand design targets
+single-vessel use (see Consequences).
 
 ## Decision
 
@@ -66,12 +65,11 @@ a real Esri network call. `*http.Client` (specifically `http.DefaultClient`
 at registration) satisfies the injected `tileFetcher` interface directly,
 no adapter needed.
 
-There is deliberately no TTL/expiry: satellite basemap imagery doesn't
-change on human timescales, and `sat_charts.go`'s uploaded packages already
-work the same way (cached forever, cleared only by explicit deletion). A
-`DELETE /api/world-imagery/cache` escape hatch clears the whole cache if a
-stale or blank result ever needs to go (e.g. once Esri adds coverage
-somewhere that previously degraded).
+There is no TTL/expiry: satellite basemap imagery is treated as long-lived,
+matching `sat_charts.go`'s uploaded packages (retained until explicitly
+deleted). `DELETE /api/world-imagery/cache` clears the whole cache when a
+stale or blank result needs replacing, for example after Esri adds coverage
+where requests previously degraded.
 
 ### Deeper zoom with graceful degradation, not a blank tile
 `worldImageryMaxZoom` moves from 18 to 20 — Esri's World Imagery layer
@@ -81,9 +79,8 @@ of being capped from ever asking. Previously, any non-200 upstream
 response (deeper zoom not available at that location) rendered a blank
 transparent tile. Now the proxy retries at the parent tile
 `(z-1, x>>1, y>>1)`, then its parent, up to 4 levels coarser, before
-falling back to blank — standard slippy-map degradation, and a real
-improvement for a lagoon entrance sitting right at the edge of Esri's
-high-res coverage: a coarser but real image beats nothing.
+falling back to blank. This can retain coarser imagery at locations near
+the edge of Esri's high-resolution coverage.
 
 Whatever ends up served — success at the original zoom, a degraded
 coarser tile, or the final blank fallback — is cached under the
@@ -112,11 +109,11 @@ already applied to its own SQLite usage.
 `POST /api/world-imagery/prefetch` takes a bbox
 (`{west, south, east, north}`) and a zoom range (`{minZoom, maxZoom}`).
 The tile count across that range is computed with plain slippy-map
-arithmetic (no per-tile loop) so an absurdly large request can be rejected
+arithmetic (no per-tile loop) so an oversized request can be rejected
 cheaply. If the count exceeds 8000 tiles, the endpoint responds `400` with
 the computed count, so the frontend can warn the user immediately rather
-than starting something that would hammer the boat's uplink. Otherwise it
-kicks off a background job — a bounded pool of 6 concurrent workers, each
+than starting a transfer that could overload the boat's uplink. Otherwise it
+starts a background job with a bounded pool of 6 concurrent workers, each
 running tiles through the exact same cache-through/degradation logic the
 live proxy uses — and responds `202` with `{jobId, totalTiles}`.
 
@@ -145,11 +142,10 @@ before self-dismissing.
 ## Consequences
 
 Positive:
-- Repeat views of the same cruising ground are now instant (backend cache
-  hit) instead of re-fetching from Esri on every load, on every device.
+- Repeat views of the same cruising ground use the backend cache instead
+  of re-fetching from Esri on every load and device.
 - Zoom 18→20 plus graceful degradation means a lagoon entrance at the edge
-  of Esri's high-res coverage now shows *something real* — degraded but
-  legible imagery — instead of a blank tile.
+  of Esri's high-res coverage can show coarser imagery instead of a blank tile.
 - The prefetch feature lets the operator deliberately warm the cache for a
   specific entrance before losing signal approaching it, entirely inside
   Helmcentral.
@@ -161,8 +157,8 @@ Negative / explicitly deferred:
 - Esri's free World Imagery service has its own reasonable-use
   expectations, not a paid SLA. This feature's shape (demand-driven cache
   plus a capped, explicit, user-initiated prefetch — not an unbounded
-  background bulk-caching job) is designed to stay well inside that for a
-  single vessel or small fleet. A heavier commercial deployment serving
+  background bulk-caching job) is intended for a single vessel or small
+  fleet. A heavier commercial deployment serving
   many simultaneous users would outgrow this and need a paid Esri (or
   Mapbox) plan instead.
 - No TTL means a blank/degraded result cached today never automatically

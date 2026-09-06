@@ -7,9 +7,9 @@ Depends on ADR 0037 (delta-stream ingestion) for live state, and follows ADR 001
 
 ## Context
 
-[halos-org/skip](https://github.com/halos-org/skip) ships an autopilot widget; Helmcentral had none, and an autopilot control at the helm is one of the more consequential things a boat dashboard can offer — consequential because a wrong command, or a wrong *belief* about the pilot's state, changes who is steering the boat.
+[halos-org/skip](https://github.com/halos-org/skip) ships an autopilot widget; Helmcentral had none. An incorrect command or misleading pilot state can affect who is steering the boat, so the widget needs reliable state reporting and command safeguards.
 
-Helmcentral already had every other piece this needed: a delta-stream snapshot (ADR 0037), authenticated SignalK writes (`generatorPut`, route activation), a widget registry, and a bento grid. This was mostly assembly, with the assembly itself needing to be careful.
+Helmcentral already had the required infrastructure: a delta-stream snapshot (ADR 0037), authenticated SignalK writes (`generatorPut`, route activation), a widget registry, and a bento grid.
 
 ## Decision
 
@@ -17,19 +17,19 @@ Helmcentral already had every other piece this needed: a delta-stream snapshot (
 
 `/signalk/v2/api/vessels/self/autopilots/*` (SK server 2.x plus an autopilot provider plugin) is the only interface implemented. The legacy `steering.autopilot.*` PUT convention is deliberately not implemented and never silently substituted: v2 providers advertise `availableActions`, and that advertisement is precisely what lets the tile grey out what a given pilot cannot do instead of guessing from silence. A v1-only fallback would either have to guess at capability (unsafe) or expose every control unconditionally (worse). Where v2 is absent, `GET /api/autopilot` answers `{"present": false}` and the tile says so in plain text — it does not degrade to a v1 write path.
 
-This project's fallback policy (`AGENTS.md`) forbids masking an upstream absence with a compatibility path; a missing v2 API is exactly that kind of absence, not a shape to paper over.
+This project's fallback policy (`AGENTS.md`) requires a missing upstream v2 API to be reported rather than replaced with a compatibility path.
 
 ### 2. One honest limitation, stated rather than hidden: the exact v2 JSON shapes are unverified against a live provider
 
 No SK 2.x server with an autopilot provider plugin was reachable from this environment. The endpoint paths and methods below come from the community-documented v2 Autopilot API and were implemented and tested against an `httptest` stub built to that documented shape — not against real hardware or `signalk-autopilot`/Raymarine/Garmin providers.
 
-Rather than quietly hoping the shapes are right, the design deliberately minimizes how much of that guess is load-bearing:
+The design limits its dependence on these unverified response shapes:
 
 - **`GET /api/autopilot` proxies SignalK's own JSON verbatim**, adding only `present` and `id`. It does not re-model a typed status shape this codebase can't verify — if a real provider's field names differ from the docs, the proxy still relays them faithfully rather than dropping or mis-mapping them.
 - **The safety-critical live state (`engaged`, `state`, `mode`, `target`, `available_actions`, `stale`) comes from the existing delta-stream snapshot**, not from a guessed REST shape — see decision 4.
 - Every endpoint **path, method, and body envelope** (the part that commands steering gear) is covered by `backend/autopilot_test.go` against a recording stub, so a wrong assumption there fails loudly in CI rather than silently at the helm.
 
-This is recorded here, not glossed over, because it is the one place this ADR's confidence is lower than the rest of the codebase's verified-against-a-live-vessel norm (see ADR 0039's Verification section for contrast). **Before this widget is trusted against real steering gear, it needs the manual smoke test in this ADR's Verification section, against a real SK 2.x autopilot provider.**
+Unlike the live-vessel verification recorded in ADR 0039, this implementation has only been tested against a stub. **Before this widget is trusted against real steering gear, it needs the manual smoke test in this ADR's Verification section, against a real SK 2.x autopilot provider.**
 
 ### 3. Body envelope is per-endpoint, not uniform
 
@@ -53,7 +53,7 @@ The tile's displayed `engaged`/`state`/`mode`/`target` come *only* from the `aut
 
 Engage, disengage, tack and gybe change who is steering the boat, so each requires an ~800ms hold (`HoldToConfirmButton` in `autopilot-tile.tsx`) — releasing early cancels silently rather than firing on release, so a brushed tile can't trigger one. The ±1°/±10° heading nudges are deliberately exempt: they are the controls used constantly underway, and a confirm gesture on them would make the widget useless for its main job. Mode switching takes the same hold, for the same reason: changing from `compass` to `wind` changes what the pilot steers to, which is a change of who is effectively in command of the course.
 
-Tack and gybe are offered as **four separate controls** (tack port/starboard, gybe port/starboard), each gated on its own advertised action id. An earlier revision showed a single directional pair relabelled from the pilot's current `mode` — `gybe` in a wind-referenced mode, `tack` otherwise. That was rejected: a provider may advertise one manoeuvre and not the other, and inferring which one the crew meant from `mode` is a guess about an action that swings the boom. The two extra buttons are cheap; guessing wrong is not.
+Tack and gybe are offered as **four separate controls** (tack port/starboard, gybe port/starboard), each gated on its own advertised action id. An earlier revision showed a single directional pair relabelled from the pilot's current `mode`: `gybe` in a wind-referenced mode, `tack` otherwise. That was rejected because a provider may advertise one manoeuvre and not the other, and the pilot's mode does not establish which manoeuvre the crew intends.
 
 Dodge is the one control that steers the boat without a hold. It exists to avoid something in the water *now*, and requiring an 800ms press with a pot buoy coming up is the wrong trade — it is a ±5° nudge that does not disturb the target course, and `Cancel` returns to it.
 

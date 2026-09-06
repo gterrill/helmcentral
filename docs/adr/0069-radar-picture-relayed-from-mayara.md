@@ -9,7 +9,7 @@ Extends [ADR 0062](0062-marine-radar-targets-from-mayara.md), whose first decisi
 
 ADR 0062 decision 1 said it plainly: "We want collision awareness, not a second plotter, and the boat already has a plotter that renders this radar properly." That reasoning held for targets. What it did not anticipate is the operator wanting the echo picture on the anchor map itself, next to the AIS contacts and the anchor circle, on a screen that is already open.
 
-This is not a reversal. Targets and the picture are two different data products, and the second one cannot travel the same road.
+Target ingestion remains unchanged. The picture requires a separate transport.
 
 ### The plugin does not carry spokes
 
@@ -17,7 +17,7 @@ Measured: `GET {signalk}/signalk/v2/api/vessels/self/radars/{id}/spokes` returns
 
 ### Why the browser does not connect to mayara directly
 
-That was the first design, on the sound argument that megabytes per second should not pass through a backend whose telemetry transport is a 2-second JSON tick. Two findings killed it.
+The first design connected directly to avoid sending a high-bandwidth stream through a backend whose telemetry transport is a 2-second JSON tick. Two findings ruled it out.
 
 **Mixed content.** [ADR 0045](0045-web-push-secure-context-and-pwa-shell.md) makes `tailscale serve` at `https://<machine>.<tailnet>.ts.net` the supported way to get web push, because push needs a secure context and Helmcentral ships no TLS. On that origin a `ws://192.168.50.81:6502` connection is mixed content and the browser refuses it outright. VAPID keys are already configured on this boat. Browser-direct would have meant the overlay silently not existing on the origin the project treats as supported, which is the masking failure AGENTS.md forbids, dressed as a deployment detail.
 
@@ -31,13 +31,13 @@ Relaying also fixes routability. A phone on the tailnet from ashore reaches Helm
 
 `GET /api/radar/spokes?radar=<id>`, upgraded to a WebSocket, holding one upstream connection to mayara per radar and fanning frames out to every browser client. Ref-counted: the upstream opens on the first client and closes on the last. `github.com/coder/websocket` was already a direct dependency, so this adds nothing to `go.mod`.
 
-Frames are relayed **verbatim**. No protobuf in Go, no server-side decimation. See decision 2 for why that is a measured choice rather than laziness.
+Frames are relayed **verbatim**, without protobuf parsing in Go or server-side decimation. Decision 2 records the bandwidth measurements behind this choice.
 
 `GET /api/radar/capabilities?radar=<id>` proxies the legend through the plugin, cached briefly per radar, and returns an explicit error rather than an empty legend when the radar is gone. A radar whose capabilities we cannot read is one whose picture must not be drawn.
 
 ### 2. Backpressure drops frames per client rather than buffering or blocking.
 
-Measured on the live DRS4D-NXT: 4.13 to 4.54 Mbit/s, about 2.4 frames per second, 232 KB per frame, every spoke a full 1024 bytes. Confirmed again through the relay at 4.15 Mbit/s, so the relay costs nothing in throughput.
+Measured on the live DRS4D-NXT: 4.13 to 4.54 Mbit/s, about 2.4 frames per second, 232 KB per frame, every spoke a full 1024 bytes. The relay delivered 4.15 Mbit/s in a subsequent check, within that range.
 
 That rate is proportional to antenna rotation, and this antenna was turning at about 8 rpm. At a normal 24 rpm the same stream would be near 13 Mbit/s. Rather than build server-side decimation on that uncertainty, which would need a Go protobuf dependency, each client gets a small buffered channel and a full buffer means the frame is dropped for that client alone, logged once.
 
@@ -45,9 +45,9 @@ Spokes are independent and the browser accumulates them into a persistent buffer
 
 ### 3. The picture is centred on own ship, not on the radar's reported fix.
 
-This is a correction to a Phase 0 conclusion and it is the most important thing in this ADR.
+This corrects a Phase 0 conclusion.
 
-The capture measured `Spoke.lat`/`lon` populated on all 48,056 spokes, and concluded the antenna-offset caveat ADR 0062 line 163 parked was solved for free: centre on the radar's own fix and the offset disappears by construction.
+The capture found `Spoke.lat`/`lon` populated on all 48,056 spokes. The initial conclusion was that centring on the radar's fix would resolve the antenna-offset caveat in ADR 0062 line 163.
 
 Populated is not live. Sampled three times over 36 seconds while making way:
 
@@ -57,7 +57,7 @@ Populated is not live. Sampled three times over 36 seconds while making way:
 
 Byte-identical every time while own ship moved. mayara captures that fix once and does not refresh it. Centring on it put the overlay **13.7 km** away and off the visible map, with the layer, the source, the palette and 26,221 drawn canvas pixels all perfectly correct. Everything was right except where it was.
 
-So own ship is the reference, and the divergence from the radar's claimed fix is logged once per enable rather than swallowed, following `logRadarProjectionMismatch`: surface the disagreement, never silently pick one and hope. The antenna offset is metres. Trusting a frozen fix is kilometres and grows without bound.
+Own ship is therefore the reference, and the divergence from the radar's fix is logged once per enable, following `logRadarProjectionMismatch`. This retains the metre-scale antenna offset but avoids the kilometre-scale error caused by the frozen fix.
 
 This is the fifth time in this integration that data has been present, well formed, and stale. The others are catalogued at ADR 0062. The pattern is now the single most reliable predictor of where this breaks, and checking that a field is populated is not the same as checking that it moves.
 
@@ -83,7 +83,7 @@ ADR 0062's amendment removed all mayara host configuration on the grounds that e
 
 ## Consequences
 
-The operator gets the radar picture on the chart they are already looking at, with AIS contacts, radar targets, the anchor circle and the trail in one view. That is a different thing from the MFD, which shows the picture beautifully and knows nothing about the rest.
+The anchor map now combines the radar picture, AIS contacts, radar targets, the anchor circle and the trail in one view.
 
 **No plugin, no picture, and no targets either.** The coupling ADR 0062 accepted now covers both products.
 
@@ -95,4 +95,4 @@ The operator gets the radar picture on the chart they are already looking at, wi
 
 **Alignment against the plotter is unverified.** The echoes trace the coast and ring the boat plausibly, but plausible is not verified, and the antenna offset is now a real quantity rather than a cancelled one. Compare against the MFD at close range before trusting the overlay for anything navigational.
 
-**This is the first canvas, custom layer and image source in the codebase.** There is no in-repo precedent to calibrate render cost against, and it has not been profiled on the helm tablet. The frame cap is the dial with the most headroom: drop it to 4 fps before dropping resolution, because a jerkier rotation is a smaller lie than a blurrier picture.
+**This is the first canvas, custom layer and image source in the codebase.** There is no in-repo precedent for its rendering cost, and it has not been profiled on the helm tablet. If performance requires adjustment, reduce the frame cap to 4 fps before reducing resolution to preserve picture detail.

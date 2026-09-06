@@ -5,7 +5,7 @@ Accepted
 
 ## Context
 
-ADR 0012 gave the dashboard a single, drag-and-drop-configurable widget layout, but still only one layout for the whole vessel. In practice, the widgets an operator wants visible differ sharply by activity — anchored vs. underway wants a different mix entirely (e.g. anchor watch and rode/scope matter at anchor; alternator and engine-adjacent widgets matter underway), the same idea behind N2KView's "displays" and Grafana engine/power dashboards referenced when this was requested. Forcing one layout to cover every situation means constant re-editing or a layout that's a compromise for all of them.
+ADR 0012 gave the dashboard one drag-and-drop-configurable widget layout for the vessel. Operators need different widgets by activity: anchor watch and rode/scope at anchor, alternator and engine widgets underway. The request referenced N2KView's "displays" and Grafana engine/power dashboards as examples. Supporting these activities with one layout required repeated editing or leaving less relevant widgets visible.
 
 This remains a single-vessel, single-user embedded dashboard (per ADR 0012) — the change here is from one layout to several *named* layouts ("pages"), manually switched by the operator, not from single-user to multi-user.
 
@@ -41,7 +41,7 @@ Layout edit mode (`layoutEditing`) remains a single global toggle, unaffected by
 
 ### Mutation pattern: local patch, not refetch
 
-`useDashboardPages()` initially mirrored `useRoutes()`'s shape — every `createPage`/`updatePage`/`deletePage` call refetched the full page list afterward. In practice this meant every widget drag/resize round-tripped a `GET` of all pages just to learn back the one page it already had the full contents of (`updatePage`'s response body *is* the updated page). That was replaced with patching local state directly from each mutation's own response: `createPage` appends the returned page (the pages list is sorted oldest-first server-side, and a new page is always the newest, so appending preserves order without a refetch); `updatePage` replaces the matching entry by id; `deletePage` filters it out. `refetch` (the initial-load fetcher) is still exposed and still used for the mount-time `GET`, only the post-mutation refetch calls were removed. This is a straightforward optimization once the round-trip was recognized as pure waste, not a rejection of the routes.go precedent for its own sake.
+`useDashboardPages()` initially mirrored `useRoutes()`: every `createPage`/`updatePage`/`deletePage` call refetched the full page list. Every widget drag/resize therefore triggered a `GET` of all pages even though `updatePage` had already returned the updated page. The hook now patches local state from each mutation's response: `createPage` appends the returned page, preserving the server's oldest-first order; `updatePage` replaces the matching entry by id; `deletePage` filters it out. `refetch` remains exposed and handles the mount-time `GET`; only post-mutation refetches were removed.
 
 ### Render-cost cleanup: memoized tiles, deduped localStorage hook, stale active-page reconciliation
 

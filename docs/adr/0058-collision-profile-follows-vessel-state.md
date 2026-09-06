@@ -9,7 +9,7 @@ Extends ADR 0057 (AIS collision alarms from target contexts).
 
 ADR 0057 landed the alarms and the first night at anchor produced three of them: MINNOW, TARA IV and MY TERMS all in `alarm`, none of them moving. That is the failure mode the ADR warned about in its own consequences, arriving faster than expected.
 
-It is not a threshold that needs nudging. It is the wrong profile, on top of a calculation that goes unstable in exactly this situation.
+The selected profile was inappropriate at anchor, where the CPA/TCPA calculation also becomes unstable.
 
 ### The profile is wrong
 
@@ -65,18 +65,18 @@ The syncer remembers the last `navigation.state` it acted on and does nothing un
 
 This is what makes a manual override stick. Under way the mapping says `coastal`, so a syncer that corrected any disagreement would stomp a deliberate switch to `offshore` on its next tick and the operator would never work out why the setting refuses to hold. Acting only on transitions means a manual choice survives until the boat next anchors or gets under way, which is exactly when a fresh decision is wanted anyway.
 
-It also keeps the cost at nothing. The state is read from the in-memory snapshot every tick; the HTTP round trip happens only on a real transition, a handful of times a day.
+The state is read from the in-memory snapshot every tick; the HTTP round trip happens only on a transition, typically a handful of times a day.
 
 ### 3. Refuse to select a profile that cannot fire, and say so
 
-The shipped `anchor` profile is `cpa: 0` for both tiers and `guard.range: 0`. The comparisons are `cpa < 0` and `range < 0`, so nothing can ever trip it. It is not a quiet profile, it is a silent one.
+The shipped `anchor` profile is `cpa: 0` for both tiers and `guard.range: 0`. The comparisons are `cpa < 0` and `range < 0`, so no target can trigger it.
 
 Selecting it on anchoring would take the AIS collision alarm offline at the moment the boat is unattended, and would look exactly like a well-behaved night. That is the masking pattern the fallback policy exists to prevent, so the syncer validates before it writes:
 
 - the named profile must exist in the document (`getActiveCollisionProfile` returns `collisionProfiles[current]`, and an undefined profile makes `calcAlarms` throw inside a `try/catch` that swallows it, which is total silent failure)
 - it must be able to fire at all: `warning.cpa > 0 || danger.cpa > 0 || guard.range > 0`
 
-Failing either, the profile is left alone and Helmcentral raises its own alarm saying which profile was refused and why. Staying loud on the wrong profile is a worse night's sleep and a better outcome than going quiet on the right one.
+Failing either, the profile is left alone and Helmcentral raises its own alarm saying which profile was refused and why. This retains the existing alarms rather than selecting a profile that cannot raise any.
 
 ### 4. The refusal clears itself
 

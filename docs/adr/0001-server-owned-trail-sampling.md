@@ -18,7 +18,7 @@ The server owns trail sampling.
 Positive:
 - Trail history is consistent across clients.
 - Sampling rate is independent of browser tabs.
-- The frontend becomes a consumer of trail state rather than a recorder of trail state.
+- The frontend reads trail state without recording it.
 
 Negative:
 - The backend is responsible for polling cadence and retention.

@@ -26,9 +26,9 @@ Charger card fields (572277c) were confirmed to have zero Influx dependency and 
 
 ## Consequences
 Positive:
-- Zero-dependency default install: solar's `today_kwh`/`yesterday_kwh`/`peak_today_w`/`trend_24h_total` now all work out of the box against SignalK alone, matching wind-gust/depth-trend/tide-detection (ADR-0020).
+- Solar's `today_kwh`/`yesterday_kwh`/`peak_today_w`/`trend_24h_total` use SignalK alone by default, matching wind-gust/depth-trend/tide-detection (ADR-0020).
 - One dispatch pattern for all Influx-backed telemetry (wind, depth, solar), rather than a bespoke per-field cascade unique to solar.
-- `source` is a single, simple signal again, consistent with every other state endpoint.
+- `source` reports live SignalK fetch status, consistent with the other state endpoints.
 
 Tradeoffs:
 - **No cross-midnight integration**: the sample interval spanning the UTC day boundary is dropped from both days rather than split at the boundary — an accepted simplification versus Influx's own boundary-aware query.

@@ -1,15 +1,14 @@
 # Open-Meteo Marine wave provider plugin
 
 A Helmcentral wave-provider plugin backed by Open-Meteo's free, keyless Marine
-API. **This is the default wave provider for fresh Helmcentral installs
-specifically because it needs no API key** — no config.json required.
+API. It is the default wave provider for fresh Helmcentral installs because
+it needs no API key or config.json.
 
 The plugin fetches hourly wave forecasts (wave height, period, direction, wind
 swell, and swell components) and optionally sea surface temperature, converted
 to SI units and RFC3339 timestamps per the plugin contract.
 
-Written in TinyGo — the most approachable option given Helmcentral's own Go
-backend. The Extism plugin contract isn't TinyGo-specific: Rust, Zig, C,
+Written in TinyGo. The Extism plugin contract isn't TinyGo-specific: Rust, Zig, C,
 AssemblyScript, C++, and Haskell PDKs all implement the same contract
 identically; see [Extism's PDK list](https://extism.org/docs/concepts/pdk) if
 you'd rather use one of those.
@@ -26,14 +25,14 @@ The plugin makes two separate HTTP calls to the Marine API:
    noticeably lower/different here.
 
 2. **Sea surface temperature (OPTIONAL)**: Fetches current sea surface
-   temperature. This call deliberately does NOT pin a `models=` param (unlike
-   the wave-data fetch) — the wave-specific NOAA GFS-Wave model does not carry
+   temperature. This call does not pin a `models=` param (unlike the wave-data
+   fetch), because the wave-specific NOAA GFS-Wave model does not carry
    sea surface temperature at all (returns null/"undefined" units); only
    Open-Meteo's default model blend does. If this fetch fails or the value is
    absent/null (confirmed live: inland coordinates return 200 with
-   sea_surface_temperature:null), the whole fetch_waves call still succeeds —
-   sea_surface_temperature_c is simply omitted from the output JSON entirely
-   (never a masked zero placeholder).
+   sea_surface_temperature:null), the fetch_waves call still succeeds.
+   sea_surface_temperature_c is omitted from the output JSON rather than
+   replaced with zero.
 
 ## Why this plugin is two files
 
@@ -43,13 +42,13 @@ host Go toolchain with no TinyGo or wasm target needed. `main.go` holds only
 the thin `//go:wasmexport` wrapper functions and is gated `//go:build tinygo`
 so it's excluded from that plain host build (TinyGo defines the `tinygo` build
 tag automatically; plain `go test` doesn't). Because of this split, always
-build the whole package directory (`.`), not just `main.go` by name — see
+build the whole package directory (`.`), not just `main.go` by name, as described
 below.
 
 ## Building it
 
 Requires only Docker (no local TinyGo install needed), pinned to
-`tinygo/tinygo:0.41.1` — the same version already pinned for this repo's own
+`tinygo/tinygo:0.41.1`, the same version pinned for this repo's
 WASM test fixtures (see `backend/wasm_tide_provider_test.go`'s regeneration
 comment), to avoid `:latest` drift. From the repo root:
 
@@ -61,8 +60,8 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:0.41.1 sh -c "
 "
 ```
 
-Note the trailing `.` (build the whole package directory), not `main.go` —
-naming `main.go` alone would exclude `open-meteo-marine.go` and fail with
+Use the trailing `.` to build the whole package directory. Naming `main.go`
+alone would exclude `open-meteo-marine.go` and fail with
 `undefined:` errors, since Go/TinyGo's single/multi-file build mode only
 compiles the files explicitly listed.
 
@@ -79,9 +78,8 @@ tinygo build -o open-meteo-marine.wasm -target wasip1 -buildmode c-shared .
 ```
 
 Both the Open-Meteo and other wave plugins are also built and installed
-automatically as part of Docker Compose startup (see the repo's compose files)
-— manual builds via this README are for anyone who wants to build/inspect this
-plugin outside that automation.
+automatically as part of Docker Compose startup (see the repo's compose files).
+Use the manual build instructions to build or inspect this plugin separately.
 
 ## Installing it
 
@@ -98,24 +96,23 @@ plugin manually:
    ["marine-api.open-meteo.com"]
    ```
 
-   This is not optional — a plugin with no companion
-   `<name>.allowed_hosts.json` file gets **no network access at all**
+   This file is required for network access. A plugin with no companion
+   `<name>.allowed_hosts.json` file gets no network access
    (Helmcentral's default-deny sandboxing). `marine-api.open-meteo.com` is the
    only host this plugin talks to.
 3. Restart the Helmcentral container (or the dev backend). "Open-Meteo Marine"
-   should now appear in the wave-provider dropdown in Settings, with zero
+   should now appear in the wave-provider dropdown in Settings, with no
    frontend changes required.
 
-`plugins/waves/` lives at the repo root and is gitignored — it's operator
-runtime content, not part of the repo, the same treatment `backend-data/`
-already gets. A fresh Helmcentral checkout ships with **no** plugins active by
-default, specifically so there's no surprise outbound traffic to a foreign API
-on a default install.
+`plugins/waves/` lives at the repo root and is gitignored, like `backend-data/`,
+because it contains operator runtime files. A fresh Helmcentral checkout ships
+with no plugins active by default, to avoid contacting external APIs before a
+provider is chosen.
 
 ## Testing
 
 `main_test.go` unit-tests the parsing logic directly, entirely on the host Go
-toolchain — no TinyGo or WASM runtime needed:
+toolchain, with no TinyGo or WASM runtime needed:
 
 ```sh
 cd docs/examples/wave-plugins/open-meteo-marine && go mod tidy && go vet ./... && go test ./...
@@ -142,16 +139,14 @@ details and coverage.
 
 The query asks for `wind_wave_direction`, `wind_wave_period`,
 `swell_wave_direction` and `swell_wave_period` alongside the combined figures,
-because the combined ones smear two wave trains into one and that is exactly
-what hides a crossing sea.
+because combined figures can hide crossing seas by merging two wave trains.
 
-One thing to know if you are writing another wave plugin against a different
-model. **Open-Meteo reports a component that is not there as three zeros, not
-as null.** An hour with no swell in it comes back with swell height 0, swell
+**Open-Meteo reports an absent component as three zeros, not null.** An hour
+with no swell comes back with swell height 0, swell
 period 0 and swell direction 0, and that last one is indistinguishable from a
 genuine northerly swell if you read it on its own.
 
-Verified against a live response at a real vessel position:
+Verified against a live response at a vessel position:
 
 ```
 time                  Hs     T   wwH   wwD   wwT   swH   swD   swT
@@ -159,7 +154,7 @@ time                  Hs     T   wwH   wwD   wwT   swH   swD   swT
 2026-09-03T18:00     0.5   7.7  0.26   109  2.35  0.44    65   7.7
 ```
 
-The first hour is a single wind sea with no swell. The second is a genuine
+The first hour is a single wind sea with no swell. The second is a
 two-system sea. The host treats a **zero period** as the marker for "this
 component is absent", so pass the provider's zeros through unchanged rather
 than substituting anything. A plugin whose model does not carry these fields

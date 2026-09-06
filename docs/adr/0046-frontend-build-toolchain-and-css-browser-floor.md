@@ -39,7 +39,7 @@ Two alternatives were measured and rejected:
 - **ES2020-era browsers** (`chrome80`, `safari13.1`) would have preserved whatever compatibility the old build incidentally had, at 78.89 kB gzip. Rejected because "whatever it happened to do before" is not a support policy, and the project already has one written down.
 - **`esnext`**, no downlevelling at all, at 78.78 kB gzip. Rejected as relying on every viewing device being current, with silent breakage as the failure mode.
 
-The spread across all three is 0.12 kB gzip. **The choice is about which devices are supported, not about output size** — which is precisely why it belongs in an ADR rather than in a build file alone.
+The spread across all three is 0.12 kB gzip, so browser support determined the choice rather than output size.
 
 ### 2. `build.target` stays `ES2020` for JS
 

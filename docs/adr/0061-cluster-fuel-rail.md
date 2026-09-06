@@ -22,7 +22,7 @@ dialog. That gauge has been removed in favour of the rail.
 
 ### Reading the vessel first changed the design, again
 
-Same discipline as ADR 0054, and it paid the same way.
+As in ADR 0054, inspecting the live vessel data established the available inputs.
 
 - **Capacity is on the delta stream.** The backend has no REST read path
   (`signalk_payload.go`), so a value that never arrives as a delta is invisible
@@ -83,17 +83,14 @@ does, so a cluster carrying a rail gets a floor of 5 columns rather than 4.
 
 ### 3. Both fuel slots must declare their quantity, and the save is refused otherwise
 
-The most important rule here.
-
 A tank's level is a 0..1 ratio and its capacity is m3, and litres is the product.
 Because no tank path publishes `meta.units`, `GaugeFields` preselects Unitless
 whenever a path is picked. Left that way `convertFromSI` is the identity and the
 rail reads 1.2 where it should read 890.
 
-A fuel figure that is wrong but plausible is worse on a helm than no figure at
-all, so `validateClusterFuelRail` rejects a level that is not `ratio` and a
-capacity that is not `volume`. Fail fast rather than guess a unit, per the
-fallback policy.
+To prevent incorrect fuel readings, `validateClusterFuelRail` rejects a level
+that is not `ratio` and a capacity that is not `volume`. It does not guess the
+unit, consistent with the fallback policy.
 
 The dialog then pins those quantities on every change, so the rule is one the
 operator never meets. That pinning is not a nicety: without it the form produces
@@ -143,8 +140,8 @@ showed up until it was on a board next to a real dial:
   *is* the scale.
 - Mirroring put the port rail's scale on its right and the starboard rail's on
   its left, so the two engines' fuel gauges were handed differently. Reading the
-  second one meant re-learning it. Symmetry of the composition is worth less
-  than one instrument you read the same way twice.
+  second one required switching scale orientation. A consistent orientation was
+  preferred over a symmetrical layout.
 
 So the bars run straight up their own columns, ticks and numbers sit to their
 right on both tiles, and the `%` marks the right-hand side of the scale in both.
@@ -160,9 +157,8 @@ the panel is 112px wide before the canvas scales down, and eleven numbers at the
 legibility floor do not survive that. Tick density matches the reference; label
 density does not.
 
-The hairline that ran outside the bars went with the curve. It existed to make
-the bow read as the shape of the scale rather than as a drawing error, and a
-straight scale does not need telling.
+The hairline outside the bars was removed with the curve. It clarified the
+curved scale's outline but was unnecessary for the straight scale.
 
 ### 7. Zones alarm, and at a fixed index
 

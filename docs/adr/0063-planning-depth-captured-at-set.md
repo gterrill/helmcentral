@@ -18,8 +18,8 @@ reads "Scope Insufficient" over 6 m without a link of chain moving.
 
 The chain was paid out against the depth at the drop. That is the denominator, and nothing
 recorded it. `anchorWatchData` persisted rode, sea state, seabed, `set_at`, the bow offset
-and the heading at set, but no depth at all. This was never the planner choosing the wrong
-one of two numbers. It only ever had one, and it was the wrong one for the question.
+and the heading at set, but no depth. The planner therefore had only the live reading,
+not the drop-time depth needed for this calculation.
 
 ADR 0047 retired a badge that graded deployed rode against an input nobody entered. This is
 the other half of the same problem: the input that *is* known, and was being thrown away an
@@ -33,10 +33,9 @@ instant after it mattered.
 to a sounder depth. That works today only because both halves are read in the same instant.
 Feed it a depth captured at 19:00 and a tide height sampled at 02:00 and the answer is wrong
 by the difference between the two tide heights, and wrong in the direction that recommends too
-little chain whenever the tide has risen since the reading. A safety calculation does not get
-to be approximately right in the unsafe direction.
+little chain whenever the tide has risen since the reading.
 
-So a depth never travels alone. The unit of currency in this code is a pair:
+The calculation therefore uses a depth paired with the tide height at capture:
 
     planningDepth = planning_depth + max(0, high_ft - planning_tide_height_ft) / 3.28084
 
@@ -71,8 +70,7 @@ The server's job is to store what the drop handed it, and to keep it.
 
 ### 3. One editable number, not a capture plus an override
 
-The field is seeded at the drop and the operator can type over it. Editing overwrites. That is
-the whole model, and it fits in one sentence on purpose.
+The field is seeded at the drop, and an operator edit overwrites it.
 
 An earlier revision of this ADR specified something more elaborate: an immutable capture taken at
 the drop, a separate override pair that shadowed it without overwriting, a three-way
@@ -80,19 +78,16 @@ the drop, a separate override pair that shadowed it without overwriting, a three
 revert control offering "Use depth at set" or "Use live depth" depending on state. It was built,
 and then cut on review.
 
-The revert was the load-bearing piece, and it was gold plating. Everything else existed only to
-serve it: the capture had to stay immutable so there was something to revert *to*, which forced
-the override into its own pair of fields, which forced the provenance union so the UI could say
-which one was winning, which put "At set" in front of an operator who has no reason to know what
-that means while anchoring a boat. Removing one button removed four concepts.
+The revert control required an immutable capture, a separate override pair, a provenance union
+and labels such as "At set" to identify the selected input. Review judged that complexity
+unnecessary for one editable depth field and removed the control and its supporting state.
 
-What the operator loses is a safety net on a typo. Enter 85 for 8.5 and the drop-time reading is
-gone; retype it. That is a real cost and it was argued for at the time. It was judged not worth
-the four concepts, which is a legitimate call: the number is one field on screen, the boat is
-right there, and an operator who mistypes a depth will see a recommendation that is obviously
-wrong.
+The trade-off is that a typo overwrites the drop-time reading: entering 85 for 8.5 requires
+manually correcting the field. Review accepted that loss of recovery in favour of the simpler
+model, reasoning that the depth field and resulting recommendation would make such an error
+noticeable.
 
-Two rules survive the simplification because they are correctness, not polish:
+Two correctness rules remain:
 
 - **No silent fallback to live depth once the anchor is down.** With a watch active and no depth
   recorded and nothing typed, the planner names the reason and shows no figure. Substituting the
@@ -146,13 +141,10 @@ leaking into a real set.
 - Reading that caption, note that "tide adjusted" does not mean the number moved. The rise clamps
   at zero so a falling tide never reduces the planning depth, which means a correction of exactly
   nothing still reports as adjusted. That asymmetry is deliberate and predates this ADR.
-- The watch currently running on the boat has no recorded depth, so the field is empty until one is
-  typed. That is the honest reading of a record that genuinely does not contain the field, and one
-  number fixes it. No migration, no backfill, and no guessed value standing in for a measurement
-  nobody took.
-- Dropping with a dead sounder leaves the planner unable to answer until a depth is typed. Before
-  the drop, live depth drove it; after, nothing does. That is intended. A planner that answers
-  confidently from the wrong depth is worse than one that asks.
+- The watch currently running on the boat has no recorded depth, so the field is empty until one
+  is typed. There is no migration or backfill because no drop-time measurement was recorded.
+- Dropping with a dead sounder leaves the planner unable to answer until a depth is typed. It does
+  not substitute a later live reading for the missing drop-time depth.
 - `RodePlanInput.sounderDepthM` is gone and `computeScopeRecommendation` takes the resolved depth
   inputs rather than a bare `depthMeters`. Every call site is compiler-checked, which is the point
   of changing the type rather than adding an optional field beside it.

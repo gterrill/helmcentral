@@ -15,7 +15,7 @@ This was not theoretical. `commit` in `dashboard-bento-grid.tsx` rebuilt the wid
 
 What the operator saw was a widget sliding back to the bottom of the grid after a reload. The grid still showed the drag because that is RGL's local state; only a reload revealed the server had never accepted it. Diagnosing it took a full session of reading the save path, when the server had been naming the exact problem in every response body the whole time.
 
-The backend was right at every step. Both defects were on the client: one dropping data, one hiding the complaint.
+The backend rejected invalid data correctly. The client both dropped the embed configuration and failed to report the rejection.
 
 ## Decision
 
@@ -23,7 +23,7 @@ The backend was right at every step. Both defects were on the client: one droppi
 
 `toast.error(...)` fires in `createPage`, `updatePage` and `deletePage` on `!res.ok`.
 
-The alternative — throwing, or returning a result object, and having each caller report — was rejected on coverage grounds. It requires editing ~8 call sites, and more importantly it makes silence the default for the *ninth*: a new `void updatePage(...)` written later would reintroduce exactly this bug. Reporting at the single point every mutation already funnels through makes the guarantee structural rather than a convention to remember.
+Reporting at each caller, by throwing or returning a result object, was rejected because it would require changes at ~8 call sites and could be omitted by future callers. Reporting inside each mutation also covers callers that discard its return value.
 
 The cost is that a data hook now imports a UI library, which is accepted at app level.
 
@@ -31,15 +31,15 @@ The cost is that a data hook now imports a UI library, which is accepted at app 
 
 `error` stays reserved for the initial `fetchPages` load failure.
 
-This is the load-bearing distinction, and it is not stylistic: `App.tsx` gates the entire dashboard render on `!pagesError`. Routing a save failure through the same state would blank the whole screen because a drag was rejected. A failed load means there is nothing to show; a failed mutation means the last known-good state is still on screen and still correct. They are different severities and need different surfaces.
+`App.tsx` gates the dashboard render on `!pagesError`, so using that state for a rejected save would blank the screen. A failed initial load leaves nothing to show; a failed mutation can leave the last known-good state visible and report the error separately.
 
 **Convention for other hooks:** fatal-on-load → `error` state; recoverable mutation → toast.
 
 ### 3. The server's message is shown, not a generic one
 
-The backend returns `{"error": "<message>"}` with 400. That string becomes the toast description under a short human prefix (`Could not save dashboard`), because `embed widget requires embed config` is the sentence that would have collapsed the debugging session above into one glance.
+The backend returns `{"error": "<message>"}` with 400. That string becomes the toast description under `Could not save dashboard`. For the failure above, `embed widget requires embed config` identifies the missing data directly.
 
-Parsing must never throw — a non-JSON or empty body (a 500 from a proxy, say) falls back to `HTTP <status>`. An error handler that can itself fail is worse than the silence it replaces.
+Parsing must not throw. A non-JSON or empty body, such as a proxy's 500 response, falls back to `HTTP <status>`.
 
 ### 4. Return values are unchanged
 
@@ -55,7 +55,7 @@ The shadcn `sonner` registry item reads the theme via `useTheme()` from `next-th
 
 **Positive:**
 
-- No dashboard mutation can fail silently, by construction rather than by discipline.
+- Rejected dashboard mutation responses produce a toast even when callers discard the return value.
 - Backend validation messages reach the operator. `validateDashboardWidgets` already produced precise, human-readable strings; nothing consumed them until now.
 - A toast primitive exists for the rest of the app.
 

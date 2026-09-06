@@ -33,7 +33,7 @@ With mobile's compass sized close to its original ~220px, the cut intruded into 
 
 The arrow's rotation was originally driven by the SVG `transform` *attribute* (matching the existing code and the mockup's conceptual approach), with a `transition` set via inline `style`. Live testing (Playwright against headless Chromium) showed `getComputedStyle(g).transform` stayed `"none"` throughout — the browser does not reliably animate a `transition: transform` declaration when it's the attribute, not the CSS property, that's changing. Fixed by driving rotation via the CSS `transform` property directly (`style={{ transform: 'rotate(${deg}deg)', transformOrigin: '${CX}px ${CY}px' }}`) instead of the SVG attribute. Confirmed working via a burst-screenshot capture mid-transition showing the needle sweeping through intermediate angles.
 
-Easing was deliberately changed from the mockup's bouncy `cubic-bezier(.34,1.2,.44,1)` (overshoot) to a plain `ease-out` over 650ms — an overshoot would briefly show an incorrect heading on what's read as a precision instrument. Vessel state polls every 10s with no other smoothing, so 650ms reads as smooth without ever lagging behind the next reading.
+Easing changed from the mockup's `cubic-bezier(.34,1.2,.44,1)` to `ease-out` over 650ms to avoid overshoot, which would briefly show an incorrect heading. Vessel state polls every 10s with no other smoothing, so the 650ms transition finishes before the next reading.
 
 ### Border continuity on the cut edge
 Masking a bordered card removes the curved edge's border along with its background — the straight edges keep their `border` (the global `* { @apply border-border; }` reset), but the cut arc had none, leaving an inconsistent outline. Fixed by adding a second background layer per corner: a thin radial-gradient "ring" in the card's border color (`hsl(var(--border))`), positioned just outside the mask's cut radius (in the always-visible zone), 1px wide to match the existing border width. It survives masking and reads as a continuous border tracing both the straight edges and the arc.
@@ -42,7 +42,7 @@ Masking a bordered card removes the curved edge's border along with its backgrou
 Positive:
 - The 4 gauge cards visually wrap the compass with a precise, consistent gap on both breakpoints, matching the mockup's intent, without adopting any of its bespoke styling.
 - `WindGaugeCluster` / `computeWindMasks` / `useFitScale` are generic enough that a future third breakpoint size, if ever needed, is a new `WindCanvasConfig`, not new markup.
-- Both the corner masks and the arrow animation degrade gracefully: `useFitScale` only ever shrinks, never overflows a narrow column; the angle unwrap has no failure mode for `null` wind data (it resets cleanly when the arrow unmounts).
+- `useFitScale` shrinks the canvas to fit narrow columns; the angle unwrap resets when `null` wind data causes the arrow to unmount.
 
 Negative / explicitly deferred:
 - The desktop and mobile canvas dimensions (`WIND_DESKTOP_CFG` / `WIND_MOBILE_CFG`) are hand-tuned constants verified empirically via screenshots, not derived from a formula guaranteed to hold if `WindMetricCard`'s padding or font sizes change later — such a change would need re-verifying the corner cut doesn't clip title text again.

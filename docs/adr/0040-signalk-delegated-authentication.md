@@ -9,7 +9,7 @@ Independent of ADR 0041 (autopilot widget), but if both ship, ADR 0041's write-t
 
 Helmcentral had no authentication at all. It was the top item on the README roadmap, and the README carried a warning naming the exposure: the API can start a generator, throw CZone switches, and rewrite the encrypted secrets store, and the server sent `Access-Control-Allow-Origin: *`.
 
-[halos-org/skip](https://github.com/halos-org/skip) solves the equivalent problem by riding the SignalK server's own session, so it has no user database and no second set of credentials to manage. Helmcentral wanted the same property — SignalK stays the only place accounts exist — without inheriting a design that doesn't fit its deployment shape.
+[halos-org/skip](https://github.com/halos-org/skip) uses the SignalK server's session, so it has no user database or second set of credentials to manage. Helmcentral also keeps accounts in SignalK, but needs an authentication design suited to its separate deployment.
 
 ## Decision
 
@@ -23,7 +23,7 @@ Instead, Helmcentral presents its own login form, forwards the submitted credent
 
 SignalK's login response carries a JWT that does **not** include the user's access level — confirmed against [SignalK/signalk-server issue #1336](https://github.com/SignalK/signalk-server/issues/1336), where clients only get an `APPROVED`-style status back, not a role claim. The authoritative source is `GET {sk}/skServer/loginStatus`, called *with* that JWT, which returns `{"status":"loggedIn","username":"...","userLevel":"admin"|"readonly"|...}`.
 
-`backend/auth_handlers.go` implements exactly that two-step flow (`signalKLoginWithCredentials` then `signalKLoginStatus`) and deliberately does **not** also decode the JWT locally as a cross-check — the two-step call is authoritative, and a belt-and-braces decode would just be dead code pretending to add safety it doesn't.
+`backend/auth_handlers.go` implements that two-step flow (`signalKLoginWithCredentials` then `signalKLoginStatus`). It does not decode the JWT locally as a cross-check because the role comes from `loginStatus`, not the JWT.
 
 **One value in the mapping is unverified.** `admin` and `readonly` are documented SignalK/signalk-server `userLevel` values. `readwrite` is strongly implied — a three-tier ACL needs something between readonly and admin — but was never observed against a live server in this environment. `skUserLevelToRole` (`backend/auth_handlers.go`) is the single function this mapping lives in, with the gap recorded in a comment there, so confirming it against a live server later touches exactly one place. Any `userLevel` string not in the map is rejected outright — login fails, naming the unexpected value — rather than defaulted to a permissive tier: fail closed on anything auth-related, per this project's policy.
 
@@ -31,7 +31,7 @@ SignalK's login response carries a JWT that does **not** include the user's acce
 
 The session row is `sessions(token_hash, sk_username, role, created_at, expires_at, last_seen_at)` — the resolved role, not the JWT. Storing the JWT would create a second, confusing credential path with its own independent expiry that Helmcentral would then have to reason about on every request; discarding it once `loginStatus` has answered means there is exactly one expiry to manage (the session's own, below), and exactly one thing a leaked session row can be used for (Helmcentral API access, not direct SignalK access).
 
-Only a SHA-256 hash of the 32-byte `crypto/rand` session token is persisted — the base64url-encoded token itself only ever exists in the cookie and the moment `Create()` returns it. This mirrors the encrypted-secrets-store precedent (ADR 0023) of never keeping a credential in a form a database read alone can weaponize: a stolen `sessions.sqlite` file yields hashes, not usable cookies.
+Only a SHA-256 hash of the 32-byte `crypto/rand` session token is persisted; the base64url-encoded token itself exists only in the cookie and when `Create()` returns it. This follows the encrypted-secrets-store precedent (ADR 0023): a stolen `sessions.sqlite` file yields hashes, not usable cookies.
 
 Sessions are a 7-day sliding window: `Validate()` extends `expires_at` by a fresh 7 days whenever a session is used and its `last_seen_at` is more than an hour stale, so a tablet left on the nav station overnight isn't logged out by morning, without writing to the database on every single request. A sweep on startup and hourly (`startSessionSweeper`) removes expired rows on top of `Validate`'s lazy per-row cleanup.
 
@@ -74,7 +74,7 @@ The lockout it was meant to undo is now **prevented** instead. `validateSettings
 
 Turning authentication on also **signs the current browser out immediately**. `performSave` (`settings-page.tsx`) re-reads `/api/auth/mode` and `/api/auth/me` after every save, and App's gate (`mode === 'signalk' && user === null`) then renders the login screen. Without this the operator saves "require login", sees the dashboard carry on exactly as before, and gets no signal anything happened — while every request from that tab is in fact already unauthenticated and failing. The refresh is deliberately *not* awaited: it is a side effect of saving, not part of it, and awaiting it would make "Save and Continue" navigation wait on an unrelated request.
 
-**`probeSignalKSecurityEnabled`'s method is an assumption, stated rather than hidden**, matching ADR 0041's precedent for recording an unverified-against-a-live-server detail instead of glossing over it: it POSTs deliberately bad credentials to `/signalk/v1/auth/login` and reads a `404` as "security disabled" (signalk-server only wires that route when a security strategy is active) versus any other response as "security enabled" (the route exists and answered, even to reject the bad credentials). This was implemented and tested against an `httptest` stub built to that assumption, not against a real SignalK server with security switched off. If a live check finds signalk-server actually 200s (or otherwise doesn't 404) that route with security off, this is the one function that needs to change.
+**`probeSignalKSecurityEnabled`'s method is unverified against a live server**, as is the provider detail recorded in ADR 0041. It POSTs deliberately bad credentials to `/signalk/v1/auth/login` and reads a `404` as "security disabled" (assuming signalk-server only wires that route when a security strategy is active) versus any other response as "security enabled" (the route exists and answered, even to reject the bad credentials). This was implemented and tested against an `httptest` stub built to that assumption, not against a real SignalK server with security switched off. If a live check finds that route returns something other than 404 with security off, this function needs to change.
 
 ### 7. Default is `none` for this release
 
@@ -109,7 +109,7 @@ The cost is that tests rendering `<App />` must state their auth precondition ra
    - `main_test.go` — `checkAuthModeAtStartup` against a security-off stub returning the fail-fast error, an unrecognised `auth.mode` value doing the same, and `mode: none` never probing SignalK at all.
    - `cors_test.go` — the allowlist reflects the request's own origin (not `*`), rejects an origin outside it, and honours `CORS_ALLOWED_ORIGINS`.
    - `alarm_notify_test.go`'s `TestPutSignalKNotification_ReachableWithNoUserSessionPresent` — the regression check from decision 4.
-2. **Outstanding, not yet run** (no security-enabled SignalK server was reachable in this environment, matching ADR 0041's precedent for recording this rather than hiding it):
+2. **Outstanding, not yet run** (no security-enabled SignalK server was reachable in this environment, as in ADR 0041):
    - Confirm `readwrite` is really the `userLevel` string a live server reports for a readwrite user (decision 2).
    - Confirm `probeSignalKSecurityEnabled`'s 404-means-disabled assumption against a real security-off SignalK server (decision 6).
    - Log in as each of readonly/readwrite/admin against a real server and confirm the Settings page, generator button, and switches respond per tier.

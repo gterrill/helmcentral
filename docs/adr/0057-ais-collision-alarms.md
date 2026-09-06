@@ -7,7 +7,7 @@ Extends ADR 0038 (SignalK notifications as the alarm vocabulary).
 
 ## Context
 
-The Furuno raised a CPA/TCPA alarm on watch and I went looking for it on the bus. It is not there, and it never was.
+After the Furuno raised a CPA/TCPA alarm on watch, a bus capture found no corresponding alarm.
 
 The TZT2BB sits at N2K address 2 and is close to a listener. Across a 45 second capture of every delta on the network it transmitted nothing, and over the whole data model it contributes three paths, all route data: `navigation.currentRoute.name`, `navigation.currentRoute.waypoints`, `navigation.courseRhumbline.nextPoint.timeToGo`. No alert PGNs (126983/126984/126985/126986) crossed the wire. No target on the model carried a CPA figure.
 
@@ -37,7 +37,7 @@ And on each target's context, `notifications.navigation.closestApproach`, state 
 
 **`bearing` is degrees, not radians.** Measured across 21 live targets the values span 4.20 to 358.48, which cannot be radians. The plugin's README claims rad True and the SignalK convention is radians, but the schema-supplied `meta` only documents `distance` and `timeTo`, so nothing in the model declares a unit for `bearing` and nothing catches the mismatch. Consumed raw it is wrong by a factor of 57.
 
-**The self context reuses the collision path for a sensor fault.** When the plugin loses our own GPS fix it raises `notifications.navigation.closestApproach` under self at state `alarm` with a "No GPS position received" message. That is a sensor-health problem wearing a collision alarm's clothes.
+**The self context reuses the collision path for a sensor fault.** When the plugin loses our own GPS fix it raises `notifications.navigation.closestApproach` under self at state `alarm` with a "No GPS position received" message. This reports a sensor fault, not a collision risk.
 
 ## Decision
 
@@ -63,7 +63,7 @@ Live values run to six significant figures (208628.33, 400022.70). It orders tar
 
 ### 5. The distress plugin needs no work
 
-`@sailingnaturali/signalk-ais-distress` raises `notifications.received.distress.ais-<id>` under **self** at state `emergency`. That is the self tree, in standard vocabulary, at a state the alarm engine already understands. It flows through `signalKNotifications` with zero code changes, which is the ADR 0038 bargain paying out exactly as intended.
+`@sailingnaturali/signalk-ais-distress` raises `notifications.received.distress.ais-<id>` under **self** at state `emergency`. The existing `signalKNotifications` collector supports that context and state, so no code changes are needed (ADR 0038).
 
 ### 6. A target that stops transmitting stops holding its alarm up
 
@@ -93,4 +93,4 @@ Helmcentral gains a CPA/TCPA alarm the Furuno was never going to give it, comput
 
 The four threshold profiles (anchored, harbor, coastal, offshore) live in plugin config, not in Helmcentral. Profile selection stays in the plugin's webapp for now; surfacing it in the dashboard is a later decision.
 
-The bearing conversion is a wart we are carrying for an upstream bug. It is worth an issue against the plugin, and the guard in step 2 is what tells us when the fix lands.
+The bearing conversion compensates for an upstream unit mismatch that should be reported to the plugin. Step 2 records the guard intended to detect a change in units.

@@ -80,11 +80,9 @@ disagree:
   then re-arms one interval later.
 - Runtime is monotonic, so such a rule fires once at the threshold and can never clear.
 
-Hysteresis and dwell exist precisely to make raising and clearing a function of the
-value. Bending them to accommodate an event that is not a value change would blur the
-one subsystem whose semantics are the strongest thing Helmcentral can claim over a
-closed competitor. Service schedules therefore get a provider category, and the alarm
-engine is left alone.
+Hysteresis and dwell make raising and clearing a function of the value. Using them for
+an event that is not a value change would alter those semantics. Service schedules
+therefore get a provider category, and the alarm engine is left alone.
 
 ## Decision
 
@@ -173,30 +171,26 @@ Two keys on the UI settings payload (`backend/signalk.go`), mirroring the existi
 
 ## Alternatives considered and rejected
 
-**A YAML or JSON interval table instead of a WASM plugin.** This is the closest call in
-this ADR and deserves to be recorded as such: schedules are static, and a data file
+**A YAML or JSON interval table instead of a WASM plugin.** Schedules are static, and a data file
 would carry no sandbox, no toolchain and no build step. It was rejected on two grounds.
 Real schedules need computation, not lookup - "every 250 hours or 12 months, whichever
 comes first", intervals conditional on engine variant or duty rating, and items that
 supersede one another - and expressing that in a data format means inventing an
 expression language. A plugin also inherits discovery, per-plugin overrides
 (`backend/plugin_overrides_store.go`), the Settings dropdown and the versioned release
-bundle for free, where a bespoke file format inherits none of them. This is nonetheless
-the weakest-fitting category so far, and if a schedule plugin in practice turns out to
-be a table with no logic in it, that is evidence to revisit this decision, not to
-defend it.
+bundle, where a bespoke file format inherits none of them. If a schedule plugin in
+practice turns out to be a table with no logic in it, this decision should be revisited.
 
 **A "maintenance provider" that returns due items directly.** Rejected under decision 3
 - it moves derivation into the guest and inverts the category's contract.
 
 **Storing "last serviced at hours" in Helmcentral.** It would make the feature
-self-sufficient immediately, and it is rejected anyway: a per-item completion record is
-the thin end of maintenance records, and it contradicts the boundary the whole design
-rests on. The first field would be `last_serviced_hours`; the tenth would be a parts
-list and an attachment.
+self-sufficient, but a per-item completion record contradicts the decision to keep
+maintenance records outside Helmcentral. Adding `last_serviced_hours` could lead to
+requests for related records such as parts lists and attachments.
 
 **Extending the alarm engine with a resettable recurring rule type.** Rejected under
-Context - a different state machine wearing the same struct.
+Context because it requires a different state machine within the same struct.
 
 ## Consequences
 
@@ -206,9 +200,8 @@ Context - a different state machine wearing the same struct.
   completions and feeds them back. This is a real limitation of the shipped feature,
   not a phase of it, and should be stated plainly in user-facing documentation rather
   than implied away.
-- A category whose plugins are expected to have no `allowed_hosts.json` makes the
-  sidecar's absence load-bearing for the first time. The absence already means "no
-  network"; nothing changes mechanically, but a missing sidecar stops being a smell.
+- This is the first category whose plugins are expected to omit `allowed_hosts.json`.
+  The absence already means "no network"; the sandbox behaviour is unchanged.
 - Reference plugins for this category embed vendor-published intervals, which raises a
   content question the other categories do not have (the others call an API at runtime
   and redistribute nothing). Which schedules can be bundled, and under what terms, is

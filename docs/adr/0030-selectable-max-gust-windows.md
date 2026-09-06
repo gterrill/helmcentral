@@ -13,7 +13,7 @@ Which window is useful is a matter of what the operator is doing. Deciding wheth
 
 Two of the four wanted windows did not exist server-side. 30 minutes was simply never computed. 24 hours was **unreachable in memory**: `telemetryHistoryCapacity` was 4320 samples — ~6h at the 5s poll cadence — a figure ADR 0020 chose for depth-trend's 3h window and which `windGustHistory` inherited by sharing the same constant.
 
-Widening the ladder from two windows to four, and the buffer from ~6h to 24h, also turned two pre-existing inefficiencies from negligible into significant. Both are addressed here, because this change is what made them bite.
+Expanding from two windows to four and the buffer from ~6h to 24h increased the cost of two existing inefficiencies. Both are addressed here.
 
 ## Decision
 
@@ -23,7 +23,7 @@ Widening the ladder from two windows to four, and the buffer from ~6h to 24h, al
 
 2. **One `max_gust_kts` object keyed by window replaces both old fields.** The response carries `{"10m": …, "30m": …, "1h": …, "24h": …}` rather than four `max_gust_*_kts` scalars, which would grow a new field per window forever.
 
-   The old fields are **removed, not deprecated in place**. Keeping them alongside would leave two sources for the same number and an open question about which is authoritative — the speculative-compatibility trap this codebase avoids elsewhere. This is a private API between this backend and this frontend, both updated in the same commit; there is no third consumer to strand.
+   The old fields are removed to avoid exposing two sources for the same value. This is a private API between the backend and frontend, both updated in the same commit, with no third consumer to support.
 
 3. **`windGustHistory` gets its own capacity; `depthHistory` keeps the old one.** `windGustHistoryCapacity` is 17280 samples (~24h at 5s). `telemetryHistoryCapacity` stays 4320 and is now documented as sized for depth-trend's 3h window, which is all it ever needed.
 
@@ -69,7 +69,7 @@ Positive:
 - The operator picks the averaging window per card, and the choice survives a reload.
 - Adding a window is a one-line change to two ladders, with no new response fields.
 - 24h max gust works with no InfluxDB, keeping ADR 0020's zero-dependency default install intact across the widened ladder.
-- The in-memory read path costs 6.1× less time and ~4,900× less allocation per request; Influx-backed deployments no longer pay for it at all.
+- In the benchmark above, the in-memory read path took about one-sixth the time and allocated about 1/4,900 as much per request. Influx-backed deployments skip it.
 - Verified end-to-end against live vessel data, not only in tests: cycling through the ladder read 18.8 / 19.3 / 19.3 / 26.6 kts, monotonic across the ladder as intended.
 
 Tradeoffs:

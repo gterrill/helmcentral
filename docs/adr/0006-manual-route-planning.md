@@ -6,14 +6,14 @@ Accepted
 ## Context
 Operators wanted a way to plan multi-leg routes (sequences of waypoints) ahead of a passage, with automatic distance/bearing/ETA so they don't have to do chart math by hand.
 
-A feasibility review considered three tiers of "auto-assist":
+A feasibility review considered three levels of routing assistance:
 - Manual waypoints with automatic distance/bearing/ETA helpers.
 - Hazard-aware route suggestions (avoid shallow water / no-go zones), which requires bathymetry data and a pathfinding algorithm.
 - Full weather-optimized routing (isochrone routing using wind/current forecasts), which requires a boat polar/performance model and a routing solver.
 
-Commercial chart providers (Navionics, C-MAP, Garmin) generally do not license their data for embedding in a third-party app, so that door is effectively closed regardless of budget. Free alternatives exist (OpenSeaMap, already integrated as a tile overlay; NOAA's public-domain ENC/RNC for US waters; GEBCO bathymetry globally) but the cruising area for this deployment is international/mixed, which rules out the US-only NOAA option as a differentiator.
+Commercial chart providers (Navionics, C-MAP, Garmin) generally do not license their data for embedding in a third-party app, so budget alone would not resolve access. Free alternatives exist (OpenSeaMap, already integrated as a tile overlay; NOAA's public-domain ENC/RNC for US waters; GEBCO bathymetry globally), but the cruising area for this deployment is international/mixed, so the US-only NOAA option does not cover it.
 
-Given the above, the decision was to ship the first tier only: no hazard-avoidance pathfinding, no weather-optimized routing, no chart licensing of any kind, no autopilot/active-route-following (cross-track error, bearing-to-waypoint live nav), no GPX import/export.
+The decision was to ship the first tier only: no hazard-avoidance pathfinding, no weather-optimized routing, no chart licensing of any kind, no autopilot/active-route-following (cross-track error, bearing-to-waypoint live nav), no GPX import/export.
 
 ## Decision
 
@@ -38,8 +38,8 @@ A route is `{id, name, waypoints: [{lat, lon, name?}], created_at, updated_at}`.
 
 ## Consequences
 Positive:
-- No chart licensing dependency of any kind; reuses infrastructure (map chrome, geometry math, JSON persistence pattern) that was already 60-70% in place before this feature.
-- Geometry math has a single source of truth (`lib/geo.ts`) instead of two diverging copies.
+- No chart licensing dependency; reuses existing map chrome, geometry math, and the JSON persistence pattern.
+- Geometry math is shared in `lib/geo.ts` instead of maintained in two copies.
 - Full CRUD test coverage on the backend (`routes_test.go`) and frontend (hooks, pure calculations, map interactions, summary panel, tile) without needing a browser for most of it.
 
 Negative / explicitly deferred:

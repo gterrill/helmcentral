@@ -6,7 +6,7 @@ Accepted. Amends ADR 0012 (Configurable Bento Dashboard), which is otherwise unc
 
 ## Context
 
-The UI targets a helm-station touchscreen at ~1600×1000. Below `lg` (1024px) it did not adapt so much as give up:
+The UI targets a helm-station touchscreen at ~1600×1000. Below `lg` (1024px), it had three layout problems:
 
 - `DashboardBentoGrid` fell back to a `flex flex-col` stack. At 768px — iPad portrait, a common second screen on board — that produced a single ~900px-wide column, which wastes the screen rather than fitting it.
 - The header was `h-16` with no wrapping and no responsive hiding, packing SidebarTrigger, Separator, Breadcrumb, DashboardPageSwitcher, LayoutModeToggle and VesselStatusBar into roughly 550px of content. Neither of its two child flex containers carried `min-w-0`, so at 320px they refused to shrink and pushed the right-hand cluster off-screen — a standing violation of the AGENTS.md rule against viewport overflows.
@@ -27,15 +27,15 @@ Below `lg`, the same persisted 12-column layout is reflowed into a CSS grid:
 | Span | `w >= 6` (half the 12-column grid) gets `sm:col-span-2`; everything else one column |
 | Height | `minHeight: h * 32 + (h - 1) * 16` — RGL's own row maths, as a **floor** |
 
-Nothing extra is written. ADR 0012's one-global-layout constraint is confirmed, not violated: the narrow view is a pure function of the coordinates already stored.
+No additional layout is persisted. The narrow view is derived from stored coordinates, preserving ADR 0012's one-global-layout constraint.
 
-`minHeight` rather than `height` is the load-bearing choice. It honours the operator's sizing intent while letting a tile whose text wraps at phone width grow instead of clipping — and it gives `EmbedTile`'s percentage chain a resolvable ancestor, fixing the iframe collapse as a side effect.
+`minHeight` preserves the operator's minimum size while allowing a tile to grow when text wraps at phone width. It also gives `EmbedTile`'s percentage chain a resolvable ancestor, fixing the iframe collapse.
 
 ### RGL is not reused at a reduced column count
 
 Considered and rejected. RGL rows are fixed height, so a `h=6` tile sized against a 400px desktop column overflows its absolutely-positioned box at 320px where text wraps more, and RGL v2 legacy has no auto-height rows — an active regression, not a neutral trade. At one or two columns there is no relative `x` left to preserve that `(y, x)` document order doesn't already capture. It would also keep drag/resize machinery mounted on touch devices, fighting native scroll.
 
-A second *persisted* narrow layout was rejected outright: real schema surface, real validation surface, and a "which one did I just edit?" failure mode, to serve a device that cannot express 12-column intent.
+A second persisted narrow layout was rejected because it would require additional schema and validation and could leave operators unsure which layout they were editing. Narrow devices also cannot directly express 12-column placement.
 
 ### Edit mode stays desktop-only
 
@@ -70,7 +70,7 @@ This is the clearest argument yet for container queries: a viewport breakpoint c
 - iPad portrait gets a usable two-up layout instead of one ~900px column.
 - Phone users still cannot rearrange the dashboard. Unchanged from ADR 0012, now for a stated fail-fast reason rather than a density claim.
 - `sm:`/`md:` prefixes added to tiles are **viewport-scoped and will be semantically wrong** if container queries land — they should be re-expressed as `@sm:`/`@lg:` at that point. This is the main reason the tile pass was kept confined to `ui/tile.tsx` plus the two tiles that demonstrably overflowed.
-- Horizontal overflow is **screenshot-verified, not unit-verified**. jsdom has no layout engine, so `scrollWidth > clientWidth` cannot be asserted in Vitest; a test that appeared to check it would be theatre. `.claude/skills/run-dashboard/SKILL.md` now carries a four-viewport matrix (390 / 430 / 768 / 1600), with 768 called out as the case that catches overflow.
+- Horizontal overflow is checked in browser screenshots rather than unit tests. jsdom has no layout engine, so Vitest cannot meaningfully check `scrollWidth > clientWidth`. `.claude/skills/run-dashboard/SKILL.md` now carries a four-viewport matrix (390 / 430 / 768 / 1600), with 768 identified as the case that catches overflow.
 - `frontend/src/test/setup.ts` previously stubbed `matchMedia` to always-false with a no-op `addEventListener`. Every test therefore rendered the mobile stack and **no breakpoint transition was testable at all**. It now defaults to 1280 via `setViewportWidth`, so the RGL grid is exercised in tests for the first time.
 
 ## Deferred

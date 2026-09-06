@@ -13,13 +13,13 @@ Also removes the last consumer of the encrypted `STORMGLASS_API_KEY` secret intr
 
 Storm Glass was the only tide provider compiled into the Go binary. Everything else — BOM, NOAA, and every weather, wave, and forecast-warnings source — had already become a sandboxed WASM plugin under ADRs 0017 and 0018. It was registered unconditionally at startup whether or not an operator had a key for it.
 
-It was also load-bearing in three ways that had nothing to do with tides, which is what made removing it a larger change than deleting one file:
+Three dependencies made removal broader than deleting the provider file:
 
 - **It owned the JSON tide cache.** `tideCacheStore`, its hit/miss counters, and the `loadTideCacheFromDisk`/`persistTideCacheToDisk` pair lived inside `tide_provider_stormglass.go`, but were read by `/api/caches`. WASM tide plugins never used them — they use the generic `wasmPluginCache[T]` from `wasm_plugin.go`.
 - **It was the last entry in `jsonCacheDescriptors`.** Weather and waves had already migrated to per-plugin caches. The `"tide"` descriptor — whose TTL was literally `stormGlassTideCacheTTL` — was the only thing left for the `/admin` page's Cache Control panel to report on.
 - **It was the last non-sandboxed provider anywhere**, in any of the four domains.
 
-The reason to remove it is that it was never really a *default*. It requires a paid API key, so on a fresh install it registers, appears in the settings dropdown, and then fails at fetch time with "Storm Glass API key not configured". Commit 5cf27d8 had already had to stop two separate code paths from silently forcing `ui.tide_provider` to `"stormglass"`, precisely because presenting a keyed paid service as a fallback produced confusing failures. A provider that cannot work out of the box is not a default; it is a plugin that happens to be compiled in.
+Storm Glass requires a paid API key. On a fresh install it registered and appeared in the settings dropdown, but failed at fetch time with "Storm Glass API key not configured". Commit 5cf27d8 had already stopped two code paths from forcing `ui.tide_provider` to `"stormglass"` because using it as a fallback without credentials produced confusing failures. Its compiled-in status did not provide a working default.
 
 ## Decision
 
@@ -56,9 +56,9 @@ The reason to remove it is that it was never really a *default*. It requires a p
 
 ## Consequences
 
-- **Anyone outside Australia and the United States now has no tide data at all** until they install or write a plugin. This is the real cost, accepted deliberately. It is less of a regression than it appears — the alternative was a provider that also did nothing without a paid key — but it is a genuine narrowing, and Decision 1 exists so the way back is written down rather than remembered.
-- Tides now match every other provider domain exactly. There is one plugin mechanism, one sandbox story, one place a provider can come from.
-- The app ships with no compiled-in third-party API dependency for tides, and no key to leak or bill.
+- Operators outside Australia and the United States need to install or write a plugin to receive tide data. Removing Storm Glass narrows coverage for operators who had a paid key; Decision 1 records a possible future port.
+- Tides use the same WASM plugin and sandbox mechanism as the other provider domains.
+- The app has no compiled-in third-party tide API dependency or Storm Glass key requirement.
 - **Per-plugin cache state is now unobservable.** Plugins still cache to disk with TTLs; there is simply no UI or endpoint reporting hits, misses, sizes, or ages, and no way to invalidate one short of deleting its file. This was already true for weather and waves since ADR 0018; it is now true for tides too. If cache observability is wanted, it should be rebuilt against `wasmPluginCache` for all four domains at once, not restored for one.
 - `sandboxed` is now always true, so the settings modal always renders the allowlist editor. The flag is retained for contract stability, not because it varies.
 - **Four display bugs existed before this change and would have survived it** had the removal only deleted the Storm Glass branches. Using one provider id as a stand-in for "not that other provider" is the pattern to watch: it stays correct exactly as long as there are two providers.

@@ -24,9 +24,9 @@ That publishes the dashboard at `https://<machine>.<tailnet>.ts.net` with a real
 
 The alternatives were considered and rejected:
 
-- **A self-signed certificate** would work on a bare LAN with no internet, but every phone must install and manually trust a CA — on iOS that is a configuration profile plus a separate toggle buried in Settings → General → About → Certificate Trust Settings. Shipping a feature whose setup instructions are that is worse than not shipping it.
+- **A self-signed certificate** would work on a bare LAN with no internet, but every phone must install and manually trust a CA. On iOS that requires a configuration profile plus a separate toggle in Settings → General → About → Certificate Trust Settings. This setup was considered too cumbersome for the supported approach.
 - **ACME/autocert** cannot work: a boat has no public DNS name and usually no inbound reachability.
-- **Requiring an operator-supplied reverse proxy** is what the docs already suggest for remote access, and remains fine — but it is not an *answer*, it is a deferral, and it leaves the settings UI unable to say anything actionable.
+- **Requiring an operator-supplied reverse proxy** remains supported and is already suggested in the remote-access docs, but does not provide a specific setup procedure for the settings UI.
 
 **Tailscale Funnel is not required and must not be used.** The push service never calls back into Helmcentral: the only party needing the secure origin is the browser, and that browser is already on the tailnet. Funnel would expose the boat to the public internet to solve a problem it does not have.
 
@@ -36,7 +36,7 @@ This decision generalises. Anything else needing a secure context — Geolocatio
 
 A web app manifest, an icon set, and a service worker, because **iOS grants the Push API only to a site added to the Home Screen** (16.4+). Until then Safari exposes `navigator.serviceWorker` in an ordinary tab but withholds `window.PushManager` — which is precisely detectable, so the UI says "add to Home Screen" rather than "unsupported".
 
-Three details are load-bearing and each fails silently when wrong:
+Three implementation details can fail without an explicit error:
 
 - **iOS ignores the manifest's icons** and uses `apple-touch-icon`, which must be a PNG. Missing or SVG gives a screenshot of the page as the Home Screen icon.
 - **Go's builtin MIME table has no `.webmanifest`**, and the release container ships no `/etc/mime.types`, so `http.FileServer` sniffs the manifest as `text/plain` and Firefox rejects it outright. `static.go` registers the type explicitly.
@@ -46,7 +46,7 @@ The icon is lucide's `Anchor` — already the brand mark on the login screen —
 
 ### 3. The service worker does push, and nothing else
 
-No `fetch` handler, no offline caching, no precache manifest. Caching the app shell would serve stale JavaScript after an upgrade, and this project has no cache-busting story for a service worker — a bug class that does not exist today and would be tedious to diagnose on a boat. The fence is written in the worker's own header comment as well as here, because "add offline support while you're in there" is the obvious scope creep.
+No `fetch` handler, no offline caching, no precache manifest. Caching the app shell could serve stale JavaScript after an upgrade, and this project has no service-worker cache-busting mechanism. The worker's header comment also records this restriction to prevent caching from being added without an update strategy.
 
 It registers **lazily**, on the operator's Enable click, never on app load: a helm kiosk that will never want push should not have a service worker installed on first paint, changing the app's update semantics to fix nothing.
 
@@ -55,7 +55,7 @@ It also handles `pushsubscriptionchange` by re-subscribing and re-registering. A
 ## Consequences
 
 - **Push is unavailable on a plain-LAN install, and the UI says so.** The settings section detects the insecure context first — before capability checks, because on `http://` those are absent as a *consequence* — and shows the `tailscale serve` recipe inline rather than a toggle that cannot work.
-- **Helmcentral now has an identity on a phone's Home Screen** for every user who installs it, whether or not they use alarms.
+- **Helmcentral can be launched from a phone's Home Screen** after installation, whether or not the user uses alarms.
 - **Tailscale becomes a documented, optional dependency** for one feature. It was already suggested for remote access; this makes it load-bearing for push specifically.
 - **A future contributor adding caching to `sw.js`** would introduce a stale-asset risk that does not exist today, which is why the scope fence is stated twice.
 - The manifest MIME registration is easy to lose in a `static.go` refactor and fails silently on Firefox, so it carries a comment naming the consequence.

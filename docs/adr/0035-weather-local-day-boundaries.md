@@ -9,11 +9,11 @@ Changes the `fetch_forecast` guest contract: a new required `timezone` input, an
 
 ## Context
 
-The forecast tab reported **0% chance of rain for today** while it was drizzling on deck at Mackay. Investigation found one upstream data problem and three separate code defects that between them made a wrong number look authoritative.
+The forecast tab reported 0% chance of rain for today while it was drizzling on deck at Mackay. Investigation found one upstream data problem and three code defects that concealed missing, stale, or misaligned data.
 
 The upstream problem is not ours to fix. A raw capture of Apple's response for the vessel's position (saved as `docs/examples/weather-plugins/weatherkit/testdata/weatherkit_response_dry_nearterm.json`) shows WeatherKit explicitly sending `precipitationChance: 0.0` for days 0–5, then real values (`0.43`, `0.58`) from day 6 — with normal metadata, correct coordinates and no degradation flag. Open-Meteo, queried for the same coordinates in the same minute, reported light drizzle falling and a 91% daily maximum. WeatherKit's near-term data was simply wrong there; the plugin mapped it faithfully.
 
-What made that undiagnosable was ours:
+The local defects made diagnosis harder:
 
 **Day boundaries came from the wrong timezone.** The weatherkit plugin hardcoded `timezone=UTC` in its request URL, so `forecastStart` landed on UTC midnight. The host buckets and labels its hourly series on the vessel's *local* date (`buildHourlySeriesByDay`, `vesselLocalLocation`). At UTC+10 the two disagreed by ten hours: the card labelled "today" actually summarised 10:00 today → 10:00 tomorrow, and the daily record covering local midnight → 10:00 was dropped outright by the `dayKey < localTodayKey` filter — precisely the window the rain fell in. Open-Meteo had a quieter version of the same bug via `timezone=auto`, which picks the civil IANA zone and so disagrees with the host's longitude-derived offset anywhere the two differ (eastern Spain, western China).
 
@@ -33,7 +33,7 @@ The zone is a **fixed offset** (`Etc/GMT-10` for UTC+10 — note the POSIX sign 
 
 The timezone is folded into `weatherWasmCacheKey`, because a bundle rolled up on different boundaries is different data.
 
-An absent timezone is rejected by `validateFetchForecastInput` in both reference plugins rather than defaulted to UTC. Defaulting is what caused this bug; a loud failure is cheaper than a plausible wrong forecast.
+Both reference plugins reject an absent timezone in `validateFetchForecastInput` rather than defaulting to UTC, which caused the day-boundary mismatch.
 
 ### 2. `-1` means absent; `0` means zero
 
@@ -51,7 +51,7 @@ The prior code carried a comment acknowledging the mm/hr quirk as "pre-existing,
 
 ### 4. Provenance is always on screen
 
-The forecast drawer renders provider, cache state and refresh age, mirroring the line `forecast-tide-section.tsx` already shows and reusing its `formatRefreshAge` helper. The stale-on-error cache fallback is retained — a stale forecast beats no forecast at sea — but it is no longer silent, which is what the fallback policy actually requires.
+The forecast drawer renders provider, cache state and refresh age, mirroring `forecast-tide-section.tsx` and reusing its `formatRefreshAge` helper. The stale-on-error cache fallback is retained so a forecast remains available during outages, but its age and cache status are visible as required by the fallback policy.
 
 ### 5. One position predicate, not a range check per handler
 

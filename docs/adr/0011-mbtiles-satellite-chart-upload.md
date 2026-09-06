@@ -24,7 +24,7 @@ A new `backend/sat_charts.go` stores uploaded files at `<SAT_CHARTS_DIR>/<uuid>.
 `modernc.org/sqlite` (pure-Go) is the SQLite driver, pinned to v1.34.4 specifically — the latest release at the time required bumping the Go toolchain directive to 1.25, which would conflict with the production `Dockerfile`'s `golang:1.22-alpine` build stage; v1.34.4 has no such requirement. `mattn/go-sqlite3` was not an option at all, since the production Dockerfile sets `CGO_ENABLED=0`.
 
 ### Fixing a discovered durability gap
-The production `docker-compose.yml` mounted only `./settings.yaml:/app/settings.yaml` — `backend/data/` (which holds `routes.json`, real user route data) was not volume-mounted, so it lived in the container's ephemeral layer and would be lost on container recreation (e.g. a routine image update). This ADR adds `./backend-data:/app/data`. This was necessary for the new `sat-charts/` directory (losing a multi-hundred-MB satellite chart on the next update would defeat the point of uploading it) and incidentally fixes the same pre-existing risk for `routes.json` for free.
+The production `docker-compose.yml` mounted only `./settings.yaml:/app/settings.yaml`. `backend/data/`, which holds user routes in `routes.json`, was in the container's ephemeral layer and would be lost on container recreation (e.g. a routine image update). This ADR adds `./backend-data:/app/data` to preserve both the new `sat-charts/` directory and the existing `routes.json`.
 
 ### Frontend
 `hooks/use-sat-charts.ts` mirrors `use-routes.ts`'s fetch/mutate-then-refetch shape, with an `uploadChart(file)` mutator posting `FormData` instead of a JSON body. A new `components/sat-charts-drawer.tsx` provides the upload UI and chart list (name, bounds, zoom range, size, delete), surfaced as a new "Charts" tab in the bottom drawer next to "Routes". `route-planner-map.tsx` renders one `bounds`-scoped raster `Source`/`Layer` per uploaded chart — MapLibre's `bounds` prop means each chart only requests/renders tiles within its own coverage rectangle automatically, with no manual viewport-intersection code needed.
@@ -33,12 +33,12 @@ Uploaded charts always render when present, **not** gated by the existing Esri-i
 
 ## Consequences
 Positive:
-- The Windows-only conversion+import half of the workflow (Sat2Chart, OpenCPN) is replaced by a clean in-app upload, with zero new licensing exposure since acquisition is unchanged and helmcentral never bulk-fetches from a live provider.
+- The Windows-only conversion+import half of the workflow (Sat2Chart, OpenCPN) is replaced by an in-app upload. Acquisition remains outside helmcentral, avoiding the live-provider bulk-fetching licensing issue described above.
 - `routes.json`'s pre-existing durability gap is fixed as a side effect of the same volume-mount change this feature needed anyway.
-- Full test coverage including a property-based test of the TMS/XYZ row-flip math, the single highest-risk detail in this feature.
+- Test coverage includes a property-based test of the TMS/XYZ row-flip math.
 
 Negative / explicitly deferred:
-- `anchor-watch-map.tsx` does not get this layer in this pass, consistent with ADR 0009's same scoping decision for the same file — a natural, low-risk future extension.
+- `anchor-watch-map.tsx` does not get this layer in this pass, consistent with ADR 0009's scope. It could be extended later.
 - No z-order/overlap handling for multiple uploaded charts that happen to cover the same area — charts for distinct reef-spotting areas aren't expected to overlap much in practice; not designed here.
 - Each tile request opens a fresh SQLite connection rather than pooling/caching open handles — the simplest correct choice at this scale (personal dashboard, low concurrent request volume); an LRU of open handles is the natural follow-up if this ever becomes a measured bottleneck.
 - No real chart-coverage detection exists (per ADR 0009) — an uploaded satellite chart and the GSHHG fallback layer can both render in the same view with no awareness of each other; this hasn't been an issue in practice since satellite imagery and the muted coastline fallback read as visually distinct, but isn't a coordinated design.

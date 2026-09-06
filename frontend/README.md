@@ -6,7 +6,7 @@ React + TypeScript dashboard for Helmcentral, styled with Tailwind CSS and shadc
 
 - React component architecture
 - TypeScript for type safety
-- Vite for fast development and building
+- Vite for development and building
 - Tailwind CSS utility styling
 - shadcn/ui component foundation
 - Real-time data visualization from SignalK and InfluxDB

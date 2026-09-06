@@ -34,8 +34,8 @@ For wind-gust and depth-trend, the 5s server-owned poller (`sampleTracks`) alrea
 
 ## Consequences
 Positive:
-- Zero-dependency default install: wind-gust-max, depth-trend, and tide detection all work out of the box against SignalK alone, no InfluxDB or `signalk-to-influxdb-v2` plugin required.
-- Motoring-trail startup seeding removes ~200 lines of now-dead-adjacent Influx query code with no behavioral loss (live sampling already fully populates the trail within one poll cycle).
+- Wind-gust-max, depth-trend, and tide detection use SignalK alone by default, without InfluxDB or the `signalk-to-influxdb-v2` plugin.
+- Removing motoring-trail startup seeding removes ~200 lines of Influx query code. Live sampling begins filling the trail on the next poll cycle.
 - InfluxDB remains available for operators who want it, now configured consistently through the same Settings UI as every other provider/section, rather than as bespoke env vars.
 - Wind-gust and depth-trend share identical output types (`depthTrendPoint`, float64 sentinel) across both code paths, so `findLastTideTurningPoint` and the frontend (`use-vessel-state`, `use-depth-trend`) need zero changes.
 

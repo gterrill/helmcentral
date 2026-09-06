@@ -13,7 +13,7 @@ A twin-engine boat needs more than that. "Port" is not five separate readings th
 
 Maretron's N2KView is the reference point here, and it is the product Helmcentral's users are coming from. Two things it takes for granted are missing here. First, a screen is composed of *components arranged into meaningful clusters*, not a flat pile of gauges. Second, **duplication is the normal way to build the second of anything** — the second engine, the second battery bank, the second tank. You build one, copy it, and repoint it. Nothing in Helmcentral could be copied at all: building "Starboard" after "Port" meant placing five more widgets and typing five more paths, with the near-certainty of a typo somewhere in `propulsion.starboard.exhaustTemperature`.
 
-The gap was never the gauge. It was that a gauge is the wrong unit of composition, and that there was no way to say "another one of those, but over there".
+The dashboard needed to group related gauges and duplicate those groups.
 
 ## Decision
 
@@ -45,7 +45,7 @@ The walker now covers both, feeding one dedup map so a path bound by a standalon
 
 The affordance is a Copy button in the layout-edit overlay, alongside the existing remove and drag handles, shown for `gauge-group:`, `gauge:` and `embed:` and withheld from builtins — which are one-per-page and have nothing to duplicate. One `duplicateWidget` function serves all three: fresh token, deep copy, same geometry at the bottom of the page.
 
-The copy is **deep**. A shallow one would leave both tiles sharing the same `gauges` array, and retargeting the copy would silently rewrite the original — the exact failure the feature exists to prevent, delivered by the feature itself.
+The copy is **deep**. A shallow copy would leave both tiles sharing the same `gauges` array, so retargeting the copy would also rewrite the original.
 
 Duplicating persists immediately and *then* opens the copy's config dialog. Unlike a fresh draft, a duplicate is already valid, and the copy exists to be retargeted, so retargeting is the next step rather than something to remember.
 
@@ -55,7 +55,7 @@ The group dialog carries a two-field replace row. Type `port` → `starboard`, a
 
 It previews rather than acting: the dialog shows "2 of 3 paths will change" with each rewritten path listed, and Apply is disabled when nothing matches. A mistyped search term producing silence is the ordinary case, and finding that out before pressing the button rather than after is most of the value.
 
-**Paths only.** Labels and the title are left alone. "Port RPM" → "Starboard RPM" is a two-word edit an operator will make anyway; a wrong bulk label rewrite is silent and hard to spot later. That asymmetry — a wrong path shows a dash, a wrong label shows a confident lie — is the reason for the split.
+**Paths only.** Labels and the title are left for the operator to edit, for example "Port RPM" → "Starboard RPM". A wrong path shows a dash, but a wrong label can misidentify a valid reading and be harder to detect. This is why bulk replacement excludes labels.
 
 ### 6. `GaugeBody` extends ADR 0039's carve-out, deliberately
 
@@ -67,8 +67,8 @@ The per-gauge *form* was extracted the same way, into `GaugeFields`, shared by t
 
 ## Consequences
 
-- An instrument cluster is now a thing the dashboard can express, and the second engine is a copy rather than a retype — the two things N2KView assumes and Helmcentral could not do.
-- Duplication arriving for embeds and standalone gauges at the same time is free: one function, one button, three widget kinds.
+- The dashboard can group an engine's gauges into one tile and duplicate that group for a second engine, as N2KView supports.
+- Embeds and standalone gauges share the same duplication function and button as groups.
 - Groups show instantaneous values only, like every gauge since ADR 0039. Trend and history for an arbitrary path still need the generic per-path history store that bilge run-rate also waits on.
 - Zone editing still has no UI — zones are in the type, validated, and rendered, but only reachable by editing `dashboard-pages.json` by hand. Grouping made this more visible, not worse: a five-gauge engine cluster is exactly where red bands earn their keep.
 - Gauges cannot be dragged between groups, and a group cannot be split back into standalone tiles. Both are re-entering paths in a dialog, which is tolerable at the sizes involved.

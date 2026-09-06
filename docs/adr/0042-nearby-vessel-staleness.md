@@ -16,7 +16,7 @@ Two independent defects produced this:
 1. **The snapshot never expires anything.** `signalKSnapshot.applyDelta` (`backend/signalk_snapshot.go`) only inserts and merges; nothing in the backend ever deletes a context. A vessel that transmitted AIS once and sailed away stays in `contexts` for the life of the process with its last position and SOG frozen.
 2. **Nothing downstream filtered on age.** `fetchSignalKNearbyVessels` (`backend/signalk.go`) filtered only on position sanity, excluded name, and range, then sorted by range ascending and truncated to 10. `age_seconds` was computed and shipped to the client but was never used to drop, sort, or de-emphasise anything.
 
-Because the list is sorted by distance and capped at 10, frozen ghosts near the anchorage actively **crowded out live targets**. The same array is also passed to the anchor-watch map as `aisVessels`, so ghost contacts were drawn there too.
+Because the list is sorted by distance and capped at 10, stale contacts near the anchorage displaced live targets. The same array is also passed to the anchor-watch map as `aisVessels`, so stale contacts were drawn there too.
 
 There was also a **third, quieter bug** the same fix resolves. `recordNearbyVesselContacts` (`backend/tracks.go`) calls `fetchSignalKNearbyVessels` on every 5s poll tick and feeds each result to `recordContactIfNew`. For a ghost, that call refreshed the in-memory `lastSeen[key]` on every tick with a position that never moved, so `contactSessionGap` (1h) never elapsed and `contactSessionMoveThresholdMeters` (100m) was never crossed. The encounter never closed, so when that boat genuinely returned days later no new sighting row was written and `seen_count` never incremented. Relatedly, `nearbyContactStore.summary` (`backend/nearby_contacts.go`) documents a hard contract - "this assumes vesselKey is currently visible" - that ghosts silently violated. Filtering restores that guarantee rather than weakening it: `summary`'s only caller is the `/api/nearby-vessels` handler, iterating vessels it just received from SignalK, and that iteration is now guaranteed to be live traffic.
 
@@ -31,7 +31,7 @@ Two adjacent defects in the same data path were folded into this change, since t
 
 `nearbyVesselMaxAge = 10 * time.Minute` in `fetchSignalKNearbyVessels`. AIS Class A transmits at least every 3 minutes when stationary, and Class B does too; 10 minutes is roughly 3 missed reports - enough headroom never to drop a genuinely anchored neighbour overnight, tight enough that ghosts clear quickly.
 
-The filter runs server-side, inside `fetchSignalKNearbyVessels`, so the tile, the anchor-watch map, and the sighting-history poller (`recordNearbyVesselContacts`) are all fixed at one choke point rather than three.
+The filter runs server-side, inside `fetchSignalKNearbyVessels`, so it applies to the tile, the anchor-watch map, and the sighting-history poller (`recordNearbyVesselContacts`).
 
 It is applied **after the range check and before the sort/top-10 truncation** (`backend/signalk.go`). Sorting by range and capping at 10 is exactly the mechanism that let close ghosts crowd out a live, more distant target, so the filter has to run before the cap, not after.
 
@@ -63,7 +63,7 @@ The boundary shifts by well under a metre versus the old whole-feet comparison, 
 
 ## Consequences
 
-- Ghost AIS contacts disappear from the tile and the anchor-watch map within `nearbyVesselMaxAge` of their last real position update, freeing the top-10 slots the range sort had let them squat in.
+- Stale AIS contacts disappear from the tile and the anchor-watch map within `nearbyVesselMaxAge` of their last real position update, freeing top-10 slots for live contacts.
 - `recordNearbyVesselContacts`'s session-gap/move-threshold logic now only ever sees live traffic, so an encounter with a ghost can no longer be kept artificially open by a vessel that has actually left.
 - The wire contract changes: `range_ft` is gone, `range_m` and `id` are new required fields. `frontend/src/hooks/use-nearby-vessels.ts` validates both before accepting an item, matching its existing per-item validation style.
 - `frontend/src/hooks/use-ais-trails.ts` still keys on `vessel.name` and was deliberately left alone - it is exported but never imported anywhere, and is out of scope here as dead code, not as an overlooked consumer.

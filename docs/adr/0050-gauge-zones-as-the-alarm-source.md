@@ -9,9 +9,9 @@ Extends ADR 0038 (Alarms) and ADR 0039 (Bindable Gauge Widgets), which were buil
 
 Helmcentral had two threshold systems that did not know about each other.
 
-`GaugeZone` (ADR 0039) coloured a band of a gauge's range using the alarm severity vocabulary, deliberately, "so a red band on a dial means the same thing as a red alarm". It meant nothing of the sort. A gauge rendering a red band raised nothing, logged nothing and notified nobody. Meanwhile alarm rules (ADR 0038) carried their own thresholds, on their own paths, coloured nothing on the dashboard.
+`GaugeZone` (ADR 0039) coloured a band of a gauge's range using the alarm severity vocabulary, with the intent that "a red band on a dial means the same thing as a red alarm". However, a red band did not raise, log or notify an alarm. Alarm rules (ADR 0038) carried separate thresholds and paths without colouring the dashboard.
 
-Worse, zones had **no editing UI at all**. They were in the type, validated by the backend and rendered by every display kind, and the only way to set one was to hand-edit `dashboard-pages.json` and restart. ADR 0039 shipped the feature and never shipped the way to use it.
+Zones also had no editing UI. They were in the type, validated by the backend and rendered by every display kind, but setting one required hand-editing `dashboard-pages.json` and restarting.
 
 The reference point is N2KView, where the three-level scan — glance at the colour, read the gauge, check the history — works because the colour *is* the alarm. An operator who drags an engine-temperature band into the red has said what they mean. Making them then go to a separate screen and re-enter the same number against the same path, in different units, is asking them to say it twice and keep the two in step forever.
 
@@ -37,8 +37,6 @@ Rather than accept such a band and quietly never alarm on it, the editor is buil
 
 ### 3. The backend needed unit conversion, and did not have any
 
-This is the part that would have been got quietly wrong.
-
 Zones are authored in **display units** — oil pressure in psi, temperature in °C — because that is what the operator sets them against on the gauge scale. `alarmReader` reads **SI** from the SignalK snapshot: pascals, kelvin. Comparing 15 against 103421 produces an alarm that never fires and says nothing about why.
 
 `lib/quantities.ts` is frontend-only, so `backend/quantities.go` now mirrors it in the toSI direction. Both directions are defined per unit and round-trip-tested against each other, and the table is asserted against the same values as `quantities.test.ts` — 35.0 psi ⇄ 241325 Pa, 1800 rpm ⇄ 30 Hz, 25 °C ⇄ 298.15 K — so the two cannot drift apart without a test failing.
@@ -49,7 +47,7 @@ Hysteresis is a *span*, not a point, so it is converted as the difference betwee
 
 ### 4. Defaults that a zone has no opinion about
 
-A zone says nothing about dwell or hysteresis, and both default to zero in the struct. Zero on both is worse than no alarm at all: a value hovering at a threshold produces an alarm storm, which ADR 0038 already identifies as "the most common reason people switch marine alarms off entirely".
+A zone says nothing about dwell or hysteresis, and both default to zero in the struct. With both at zero, a value hovering at a threshold can repeatedly raise and clear an alarm, a problem identified in ADR 0038.
 
 Derived rules get a 10-second dwell and a deadband of 2% of the gauge's own range, so it scales with the scale.
 
@@ -57,15 +55,15 @@ Derived rules get a 10-second dwell and a deadband of 2% of the gauge's own rang
 
 They appear in the alarms drawer alongside stored rules, flagged `derived: true`, rendered read-only with "From a gauge zone" and "Edit on the gauge". `PUT` and `DELETE` on a `zone:` id return 400 with that instruction rather than 404.
 
-Showing them is not optional: an operator seeing an alarm they cannot find a rule for is worse than one seeing a rule they cannot edit here. Offering edit controls that would only 400 is worse than offering none, the same reasoning `czone-switches-tile.tsx` already applies to role-gated circuits.
+Displaying derived rules lets operators identify the source of an alarm. Edit controls are omitted because those requests would return 400, following `czone-switches-tile.tsx`'s treatment of role-gated circuits.
 
 ## Consequences
 
-- Setting a red band on a gauge now raises a real alarm, through the full ADR 0038 pipeline — notification transports, acknowledge, silence, history. That is the single largest behaviour change since alarms shipped.
+- Setting a red band on a gauge now raises an alarm through the full ADR 0038 pipeline: notification transports, acknowledge, silence, history.
 - Zones are editable at all for the first time. ADR 0039's zone support went from unreachable to the primary way thresholds get set.
 - The CHK rollup in ADR 0052 is truthful because of this. Without it, a lamp claiming "all clear" while three gauges showed red would have been actively misleading.
 - Two unit tables now exist, in two languages. They are pinned to each other by shared test values, which is weaker than sharing code and stronger than nothing. Generating one from the other was considered and rejected as more machinery than 25 unit definitions justify.
-- An operator cannot express "alarm when this value is between X and Y". No marine instrument alarm the authors could find works that way, and the honest refusal is better than a silent non-alarm.
+- An operator cannot express "alarm when this value is between X and Y". No marine instrument alarm the authors could find works that way; unsupported bands are rejected rather than accepted without an alarm.
 - Zone thresholds do not carry per-zone dwell or hysteresis. If one turns out to need them, they belong on the zone rather than as more defaults here.
 
 ## Verification

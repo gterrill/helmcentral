@@ -11,17 +11,16 @@ boat-lengths off the starboard quarter, or the rock shelf the stern swings towar
 low water, is a hazard you want to *watch closing* — but nothing on the map measured
 range to anything except the anchor and AIS targets.
 
-Clicking the map already dropped a `MapPin`, but it was a three-second readout: a
-`showTransient` call that erased itself on a timer. It answered "how far is that point"
-once, then forgot. There was no way to keep a mark, and no Pin control anywhere in the
-app.
+Clicking the map already dropped a `MapPin`, but `showTransient` removed the readout
+after three seconds. There was no way to keep a mark, and no Pin control anywhere in
+the app.
 
 Two properties turn a mark into a useful one:
 
 - **It must be shared.** The crew member on the bow and the one at the nav station are
   looking at different devices at the same anchorage. A pin dropped on one that is
-  invisible on the other is worse than no pin, because the person who dropped it assumes
-  it is being watched.
+  invisible on the other could leave the person who dropped it assuming another crew
+  member can see it.
 - **It must expire with the anchoring.** A hazard mark is meaningful relative to *this*
   anchorage. Carrying yesterday's bombie into tonight's bay puts a fictional hazard on
   the chart, which is exactly the kind of thing that trains an operator to distrust the

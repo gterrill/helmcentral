@@ -8,9 +8,8 @@ Extends ADR 0047 (rode planner replaces the Rode & Scope tile).
 ## Context
 
 The Anchor Watch tile and the fullscreen panel both rendered their map only after a watch
-was active. Before the hook went down there was no chart at all: no look at the seamarks,
-the AIS traffic, or the swing room around the spot you were about to commit to. The one
-moment the chart matters most is the moment it wasn't there.
+was active. Before dropping the anchor, operators could not use the map to check
+seamarks, AIS traffic or swing room at the proposed spot.
 
 Raising the anchor had the opposite problem. Dropping was a labelled button, but raising
 was a small unlabelled `CircleStop` icon inside the map's overlay control stack, hidden
@@ -37,7 +36,7 @@ without an active watch, so the UI never offers one).
 There is no separate mode prop; a mode flag would restate what the props already say and
 the two could disagree.
 
-The load-bearing detail is layer ordering. The seamark and imagery rasters pin themselves
+Layer ordering must be preserved. The seamark and imagery rasters pin themselves
 below the alarm circle with `beforeId="alarm-circle-fill"`, and react-map-gl defers adding
 a layer until its `beforeId` target exists. Unmounting the circle layers when there is no
 anchor would leave the rasters detached in no-watch mode and scramble the stack when a
@@ -59,8 +58,8 @@ dialog stating what raising actually does: stops the watch, clears the vessel tr
 clears the session's placemarks. That is precisely what `DELETE /api/anchor-watch` does
 server-side, so the dialog describes the deletion rather than euphemising it.
 
-The map's `CircleStop` icon is gone, along with its `onClearAnchor` prop. Two affordances
-for the same destructive action, one confirmed and one not, is worse than either alone.
+The map's `CircleStop` icon is gone, along with its `onClearAnchor` prop, so the action
+cannot bypass confirmation.
 
 Audio priming moved into the shared button. The tile's Drop handler had always primed the
 audio context so a later alarm could sound; the panel's Drop handler never did. The
@@ -175,5 +174,5 @@ from the row, so the field was removed along with it once nothing else read it.
 - Raising now takes two taps. That is the point: the one-tap version deleted a night's
   trail without asking.
 - The empty-FeatureCollection technique is now the documented way to keep a
-  `beforeId`-targeted layer alive while it has nothing to draw. Anyone conditionally
-  unmounting `alarm-circle-fill` will rediscover the raster detachment the hard way.
+  `beforeId`-targeted layer alive while it has nothing to draw. Conditionally unmounting
+  `alarm-circle-fill` would detach the raster layers again.

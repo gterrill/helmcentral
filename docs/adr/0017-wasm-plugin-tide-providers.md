@@ -44,7 +44,7 @@ That left two genuinely competitive, embeddable, `CGO_ENABLED=0`-safe options: `
 | New dependency surface | 1 new dependency. | 2 new dependencies (`extism/go-sdk`, transitively `wazero`) — heavier, but both are actively maintained and purpose-built for exactly this "host app + untrusted third-party plugin" pattern. |
 | Security-critical code we own | All of it — the `http_get`/`json_decode`/`json_encode` binding layer and its safety properties are entirely our own bespoke code. | Mostly inherited — HTTP access control, host-function linking, timeout enforcement, and sandboxing primitives are upstream Extism/wazero's problem to get right and keep maintained. |
 
-This plugin mechanism's entire premise is running **untrusted code from other people**, fetched over the internet — a materially higher bar than most "drop a file in" precedents in this codebase (ADR-0011's `sat_charts.go` uploads are inert data, never executed). The dimensions that matter most here are the sandbox boundary and how much security-critical glue code we end up owning, not authoring convenience — WASM wins clearly on both, at the real but one-time cost of a compiler toolchain instead of a text editor for plugin authors. **WASM via `wazero` + `extism/go-sdk` was chosen.**
+Plugins execute untrusted third-party code, unlike the inert uploads in ADR-0011's `sat_charts.go`. The decision prioritizes runtime-enforced isolation and reducing custom security-critical code over authoring convenience. WASM via `wazero` + `extism/go-sdk` was chosen for those reasons, accepting that plugin authors need a compiler toolchain.
 
 ### Design
 
@@ -83,7 +83,7 @@ DoubleLowToday  bool   `json:"double_low_today,omitempty"`
 
 Source: `signalk/signalk#213` flagged both spring/neap labeling and double-tide-day detection as a common gap in tide implementations.
 
-**Known limitation, stated plainly rather than hidden**: this is "days from nearest locally-observed range extremum," an approximation of true astronomical spring/neap phase (which tracks lunar synodic position, not just locally observed range — coastal/amphidromic effects can distort it at some sites). This is the same simplification the existing frontend heuristic already makes.
+**Known limitation**: days from the nearest locally observed range extremum approximate astronomical spring/neap phase, which tracks lunar synodic position. Coastal/amphidromic effects can distort the local range at some sites. The existing frontend heuristic makes the same simplification.
 
 ## Consequences
 
@@ -100,7 +100,7 @@ Negative / explicitly deferred:
 
 ## Update
 
-Nearest-station geo lookup is now generalized host-side. A new `nearestStation(p tideProvider, lat, lon float64)` function in `backend/tide_providers.go` calls `p.SearchStations("", maxStationsForNearestLookup)` and runs the existing shared `haversineMeters` over the results, relying on the "empty query → full catalog with real `Lat`/`Lon`" convention that `SearchStations` implementations already followed — now stated explicitly in the `tideProvider` interface's doc comment as part of the plugin contract. No interface method was added; every current and future provider (native or WASM plugin) gets nearest-station support for free as long as it honors that convention.
+Nearest-station lookup is now generalized host-side. `nearestStation(p tideProvider, lat, lon float64)` in `backend/tide_providers.go` calls `p.SearchStations("", maxStationsForNearestLookup)` and applies the shared `haversineMeters` function to the results. It relies on the existing convention that an empty query returns the full catalog with valid `Lat`/`Lon`, now documented in the `tideProvider` interface as part of the plugin contract. No interface method was added; native and WASM providers that honor the convention support nearest-station lookup.
 
 This closes reason #1 from the "Reference example, not a BOM port" section above: the `p.(*bomTideProvider)` Go concrete-type assertion in `tideNearestHandler` (and in `tide_auto_update.go`'s `updateNearestTideStation`) is gone; both now resolve any registered provider generically via `getTideProvider` and call `nearestStation`.
 
@@ -112,7 +112,7 @@ Blocker #1 from "Reference example, not a BOM port" above (`tideNearestHandler`'
 
 Blocker #2 (BOM's HTML-scraping fragility) has now been evaluated in practice, not just in theory, and found technically sound: TinyGo 0.41.1 — already the pinned version for this repo's own WASM test fixtures (see `backend/wasm_tide_provider_test.go`'s regeneration comment) — compiles Go's `regexp` and `//go:embed` without issue for BOM's two specific regexes (`bomTideTimeRegex`, `bomTideHeightRegex` — both simple, no pathological bounded-repetition quantifiers) and its ~361KB embedded station file. The Extism Go PDK's `pdk.NewHTTPRequest(...).SetHeader(...)` also supports the custom `User-Agent` header BOM's scraper requires, confirmed by porting it directly.
 
-This does not make the original concern disappear. The real, accepted cost is debuggability: diagnosing a future BOM markup change (a broken regex match, a changed HTML class name) is genuinely harder inside a sandboxed WASM guest — no attached debugger, no easy print-and-rerun loop, just redeploy-and-observe — than it would be in native Go with normal tooling. That tradeoff is deliberate and accepted, not a risk that was resolved away.
+Debugging remains an accepted cost. Diagnosing a future BOM markup change, such as a broken regex match or changed HTML class name, is harder inside a sandboxed WASM guest than in native Go. Without an attached debugger or a simple print-and-rerun loop, diagnosis requires redeployment and observation.
 
 Given both blockers are now addressed (#1 structurally, #2 as an accepted tradeoff), `backend/tide_provider_bom.go` and `backend/data/bom_tide_sites.json` have been deleted. `docs/examples/tide-plugins/bom/` is now the source of truth for BOM tide data, built the same way as the NOAA reference plugin. Unlike NOAA (which a fresh install ships inactive, requiring the operator to build and install it manually), both the BOM and NOAA plugins are now built and installed automatically as part of Docker Compose startup — see the compose-file changes tracked separately from this document for the exact mechanism.
 

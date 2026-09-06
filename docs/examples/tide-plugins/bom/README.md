@@ -2,26 +2,26 @@
 
 A Helmcentral tide-provider plugin backed by the Australian Bureau of
 Meteorology's public tide-table pages, covering Australian ports. Unlike
-[../noaa](../noaa) (a teaching example backed by a clean JSON API), this is
-the real, only implementation of the `"bom"` provider — ported 1:1 from the
+[../noaa](../noaa), a teaching example backed by a JSON API, this is the
+sole implementation of the `"bom"` provider, ported 1:1 from the
 formerly-native `backend/tide_provider_bom.go` (now deleted). See
 [docs/adr/0017-wasm-plugin-tide-providers.md](../../../adr/0017-wasm-plugin-tide-providers.md)'s
 "Update: BOM ported to WASM" section for why this port was made and what
 tradeoffs were accepted.
 
 Existing `settings.yaml` configs with `tide_provider: bom` (and any
-previously-working BOM `tide_station_id` AAC code) keep working unchanged —
+previously-working BOM `tide_station_id` AAC code) keep working unchanged.
 this plugin uses the identical station IDs the native provider did, since
 it's built from the same embedded station list (`data/bom_tide_sites.json`).
 
-BOM has no public JSON tide API — this plugin scrapes
+BOM has no public JSON tide API. This plugin scrapes
 `https://www.bom.gov.au/australia/tides/scripts/getTidesTable.php` HTML
 output with two regexes ported verbatim from the native Go version. If BOM
 ever changes that page's markup, this plugin breaks until the regexes are
-updated — an accepted tradeoff (debugging a WASM guest is harder than
-debugging native Go with normal tooling), not a hidden risk.
+updated. Debugging a WASM guest is also harder than debugging native Go with
+normal tooling.
 
-Written in TinyGo — see [../noaa/README.md](../noaa/README.md) for notes on
+Written in TinyGo. See [../noaa/README.md](../noaa/README.md) for notes on
 alternative Extism PDK languages.
 
 ## Why this plugin is two files
@@ -33,12 +33,12 @@ the thin `//go:wasmexport` wrapper functions and is gated
 `//go:build tinygo` so it's excluded from that plain host build (TinyGo
 defines the `tinygo` build tag automatically; plain `go test` doesn't).
 Because of this split, always build the whole package directory (`.`), not
-just `main.go` by name — see below.
+just `main.go` by name, as described below.
 
 ## Building it
 
 Requires only Docker (no local TinyGo install needed), pinned to
-`tinygo/tinygo:0.41.1` — the same version already pinned for this repo's own
+`tinygo/tinygo:0.41.1`, the same version pinned for this repo's
 WASM test fixtures (see `backend/wasm_tide_provider_test.go`'s regeneration
 comment), to avoid `:latest` drift. From the repo root:
 
@@ -50,8 +50,8 @@ docker run --rm -v $(pwd):/src -w /src tinygo/tinygo:0.41.1 sh -c "
 "
 ```
 
-Note the trailing `.` (build the whole package directory), not `main.go` —
-naming `main.go` alone would exclude `bom.go` and fail with `undefined:`
+Use the trailing `.` to build the whole package directory. Naming `main.go`
+alone would exclude `bom.go` and fail with `undefined:`
 errors, since Go/TinyGo's single/multi-file build mode only compiles the
 files explicitly listed.
 
@@ -68,9 +68,8 @@ tinygo build -o bom.wasm -target wasip1 -buildmode c-shared .
 ```
 
 Both the BOM and NOAA plugins are also built and installed automatically as
-part of Docker Compose startup (see the repo's compose files) — manual
-builds via this README are for anyone who wants to build/inspect this
-plugin outside that automation.
+part of Docker Compose startup (see the repo's compose files). Use the manual
+build instructions to build or inspect this plugin separately.
 
 ## Installing it
 
@@ -85,8 +84,8 @@ plugin manually:
    ["www.bom.gov.au"]
    ```
 
-   This is not optional — a plugin with no companion
-   `<name>.allowed_hosts.json` file gets **no network access at all**
+   This file is required for network access. A plugin with no companion
+   `<name>.allowed_hosts.json` file gets no network access
    (Helmcentral's default-deny sandboxing). `www.bom.gov.au` is the only
    host this plugin talks to.
 3. Restart the Helmcentral container (or the dev backend). "Bureau of
@@ -98,7 +97,7 @@ plugin manually:
 `main_test.go` unit-tests the HTML tide-table parsing logic
 (`parseBomTidesTable`), the embedded station-list parsing
 (`parseBomStations`), and the station search filter (`searchBomStations`)
-against fixtures, entirely on the host Go toolchain — no TinyGo or WASM
+against fixtures, entirely on the host Go toolchain, with no TinyGo or WASM
 runtime needed:
 
 ```sh

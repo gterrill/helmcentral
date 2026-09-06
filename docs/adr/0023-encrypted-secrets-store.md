@@ -19,7 +19,7 @@ We wanted secrets to be encrypted at rest, editable from the Settings UI instead
    - `backend/data/secrets.key` (32 raw bytes, `0600`) — read if present.
    - Otherwise, a new 32-byte key is generated via `crypto/rand` and written to `secrets.key` (`0600`, parent dir `0700`) on first run. No configuration is required for a fresh install to work.
 
-   On every open, every existing row is decrypted once as an integrity check. If any row fails — wrong key, rotated key, mismatched `HELMCENTRAL_MASTER_KEY` vs. `secrets.key` — the store refuses to open and the backend fails fast (`log.Fatalf`) rather than silently proceeding with some secrets unreadable. This follows the repo's fallback policy: a wrong key means something is actually broken, and that must be surfaced immediately, not patched over.
+   On every open, every existing row is decrypted once as an integrity check. If any row fails to decrypt, the store refuses to open and the backend stops (`log.Fatalf`). Possible causes include a wrong or rotated key, or a mismatch between `HELMCENTRAL_MASTER_KEY` and `secrets.key`. This follows the repo's fallback policy by reporting unreadable secrets immediately.
 
 3. **Trusted host code vs. WASM plugins get secrets differently, on purpose.** `secretsStore.LoadIntoEnv()` sets only `coreEnvSecretKeys` (`SIGNALK_USERNAME`, `SIGNALK_PASSWORD`, `INFLUXDB_TOKEN`, `STORMGLASS_API_KEY`, `GEONAMES_USERNAME`) into the process environment via `os.Setenv`, because that's how trusted, non-sandboxed Go code already reads them (`getEnv`/`os.Getenv`). `WEATHERKIT_*` is deliberately excluded from `LoadIntoEnv` — it is plugin-only and must never become globally visible in the process environment, because every WASM plugin's `configForWasmPlugin` expansion currently reads straight from `os.LookupEnv`, and a value in the process env is a value every plugin's `config.json` could reference.
 
@@ -37,7 +37,7 @@ Positive:
 - The build stays CGO-free; no SQLCipher toolchain dependency introduced.
 
 Tradeoffs:
-- `backend/data/secrets.key` must be backed up alongside `backend/data/secrets.sqlite`. Losing the key makes every encrypted secret unrecoverable — there is no key-recovery mechanism, by design (a recoverable key would defeat the point of encrypting at rest). This is intentional, not a bug: operators relying on the auto-generated key should include `backend/data/` in their backup strategy the same way they would any other stateful volume.
+- `backend/data/secrets.key` must be backed up alongside `backend/data/secrets.sqlite`. Losing the key makes every encrypted secret unrecoverable; no key-recovery mechanism is provided. Operators relying on the auto-generated key need to include `backend/data/` in their backups.
 - The allowlist is a host-enforced convention, not a sandbox boundary (see point 3) — it requires the same operator vigilance as `allowed_hosts.json` already does.
 - `ImportFromEnv` being explicit means an operator upgrading from the `.env`-based setup must remember to call it (or use the Settings UI's equivalent action) once; nothing migrates secrets for them automatically.
 

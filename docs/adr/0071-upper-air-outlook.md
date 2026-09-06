@@ -9,7 +9,7 @@ Extends ADR 0070 (heavy-weather indicators). Adds a fifth provider category alon
 
 ADR 0070 encoded the surface half of *Surviving the Storm*. This is the upper-air half, and the book is emphatic that it is the more important one (p61): "Of all the skills you can acquire to keep yourself out of difficult weather, understanding what happens at the 500mb level is the most important."
 
-The reason is mechanical rather than mystical. The upper trough is what vents a surface low and lets it deepen. Without one, "the surface low will be anemic, or won't develop at all" (p62). The book's worked example (p62-63) tracks two upper troughs converging across four charts and concludes that even with benign surface forecasts, "these 500mb charts indicate a high probability of the weather bombing." Its instruction is to watch the pattern "for ten days to two weeks before your departure date."
+An upper trough allows a surface low to deepen. Without one, "the surface low will be anemic, or won't develop at all" (p62). The book's worked example (p62-63) tracks two upper troughs converging across four charts and concludes that even with benign surface forecasts, "these 500mb charts indicate a high probability of the weather bombing." Its instruction is to watch the pattern "for ten days to two weeks before your departure date."
 
 That window is now available. Open-Meteo exposes 500hPa and 1000hPa geopotential height, 500mb wind and 500mb temperature at 16 days, which is a close match for what the book asks you to watch.
 
@@ -35,7 +35,7 @@ The contract carries an unused optional `grid` field from the start, so trough d
 
 So each day is judged against the rest of the window at this position: where its mean 500mb height sits among the other days, and how far heights fell coming into it. A day is marked when it sits in the **lowest quintile of the window after a real fall**.
 
-This travels. At the vessel this week 500mb heights ran 5835 to 5907m; in the Southern Ocean they would be hundreds of metres lower, and a percentile needs no retuning between them. The claim it supports is honest and relative: the lowest heights of the coming fortnight, after a sustained fall.
+At the vessel this week 500mb heights ran 5835 to 5907m; in the Southern Ocean they would be hundreds of metres lower. A percentile compares days within the local window without retuning an absolute height threshold. It identifies the lowest heights of the coming fortnight after a sustained fall.
 
 Two guards stop it firing on arithmetic:
 
@@ -44,13 +44,13 @@ Two guards stop it firing on arithmetic:
 
 ### 3. The run-up is measured across two days, not one
 
-This is worth recording because the first version was wrong in a way tests did not catch.
+Live-data checks found a problem in the first version that tests had not caught.
 
-The rule was originally "lowest quintile and still falling", using the 24-hour tendency. Against live data it marked the trough bottom on a tendency of **-0.167 m/24h**, which is indistinguishable from flat. Had the model produced +0.167 instead, the lowest day of the fortnight would not have been marked at all. A flag that turns on the sign of a meaningless number is a coin toss.
+The rule was originally "lowest quintile and still falling", using the 24-hour tendency. Against live data it marked the trough bottom on a tendency of **-0.167 m/24h**, effectively flat. At +0.167, the lowest day of the fortnight would not have been marked. The result was too sensitive to negligible changes.
 
 What is actually meaningful is the fall *into* a day. The trough bottom sits at the end of a large fall even when its own last 24 hours are flat. Measuring the run-up over two days marks both the approach and the bottom, excludes the recovery, and has no knife-edge.
 
-A day in the first two of the window reports no run-up rather than a partial one. Whether heights are arriving or leaving is genuinely unknowable with no history behind them, and saying nothing is the honest answer.
+A day in the first two of the window reports no run-up because there is insufficient preceding history for the two-day calculation.
 
 ### 4. A marker on the card, the reasoning in the panel
 
@@ -66,8 +66,7 @@ successive charts; the strip presented that as one scalar per day. "500mb
 5899 m, jet 23 kt" is a statement about a sequence with the sequence removed,
 and it cannot be correlated against anything.
 
-So the forecast page now carries a trace of the whole window, and three
-decisions inside it are worth recording.
+The forecast page now carries a trace of the whole window.
 
 It sits in a panel of its own. The first cut put it inside the selected day's
 detail card, between the wave and tide charts, which are both 24-hour views of
@@ -122,7 +121,7 @@ At 2.5° over a 238-point grid, 16 days at 6-hourly resolution costs 484 KB and 
 2026-09-10  40S/172E -191   35S/170E -152
 ```
 
-**Calling a bomb** is deliberately not attempted, and would not be even with the grid. The book's actual precursor is two troughs coming into phase, which it judges by eye across successive charts. The raw material is visibly present in the data above, but deciding two features are phasing is a meteorological judgement this codebase is not in a position to encode, and a wrong call on that particular signal is exactly the confident nonsense the fallback policy exists to prevent.
+**Calling a bomb** is not attempted, even with the grid. The book's precursor is two troughs coming into phase, judged by eye across successive charts. The data above contains candidate features, but this implementation has no validated method for deciding whether they are phasing. Reporting such a conclusion would imply unsupported certainty, contrary to the fallback policy.
 
 **A fixed metre-per-24h threshold** was rejected with the percentile approach for the reasons in section 2.
 

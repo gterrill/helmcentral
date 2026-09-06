@@ -3,7 +3,7 @@
 ## Status
 Accepted
 
-The fourth multi-instance widget, following ADR 0031 (embed), ADR 0039 (gauge) and ADR 0049 (gauge group). Depends on ADR 0050 for the CHK rollup to mean anything.
+The fourth multi-instance widget, following ADR 0031 (embed), ADR 0039 (gauge) and ADR 0049 (gauge group). Depends on ADR 0050 to include gauge-zone alarms in the CHK rollup.
 
 ## Context
 
@@ -25,7 +25,7 @@ A pinned cross-page strip was the closer match to Dirona and was not taken. It w
 
 `on`, `off`, and **`no data`**.
 
-A boolean is the easiest place to lose this distinction and the worst place to lose it. A generator lamp dark because the path reports zero and a generator lamp dark because nothing has ever reported that path look identical, and mean opposite things about whether you can trust the display. The third state renders at low opacity in the border colour and reads as "no data" to a screen reader, the same commitment as the gauges' structural dash.
+A dark generator lamp must distinguish a reported zero from a path that has never reported. The third state renders at low opacity in the border colour and reads as "no data" to a screen reader, consistent with the gauges' structural dash.
 
 `invert` handles signals whose healthy state is off — a bilge float, a fault line — and inverts only the on/off pair, never `no data`. Absence is not a state to be flipped.
 
@@ -33,7 +33,7 @@ A boolean is the easiest place to lose this distinction and the worst place to l
 
 The rollup is not new logic. `worstAlarmState()` already existed for the alarm banner, and `useAlarms()` already exposed it as `worst`. The CHK lamp colours from it and opens the alarms drawer on click.
 
-**This is only truthful because of ADR 0050.** Before gauge zones became the alarm source, a CHK lamp reading "all clear" while three gauges showed red would have been actively misleading — worse than no lamp, because it would have been trusted. The two ADRs are ordered for that reason.
+ADR 0050 makes gauge zones an alarm source, so the CHK lamp cannot report "all clear" while omitting active gauge-zone alarms. This dependency determines the order of the two ADRs.
 
 A strip with no lamps but CHK enabled is valid: the rollup alone is a reasonable thing to pin to a page. A strip with neither renders nothing at all, and is rejected as a mistake rather than a choice.
 
@@ -54,7 +54,7 @@ This walker has now had to learn about a new widget kind three times (ADR 0039, 
 - The first level of Dirona's three-level scan exists: a dense row of states, with a rollup that says whether to look further.
 - Duplicating a strip across pages leaves copies that drift when one is edited. Accepted for now, and the reason a pinned strip remains the obvious follow-up if it becomes annoying in practice.
 - Lamps are on/off/absent only. A three-colour lamp driven by a value's zones — Dirona's engine temperature going red, then yellow, then green as it warms — is expressible today as a `bar` or `trend` gauge with zones, but not as a lamp. Worth revisiting once there is a real case for it.
-- Four widget kinds now carry per-instance config on the layout item. The pattern has held without strain across embed, gauge, group and lamps, which is a reasonable signal it is the right one.
+- Four widget kinds now carry per-instance config on the layout item: embed, gauge, group and lamps.
 
 ## Verification
 

@@ -1,14 +1,13 @@
 # Helmcentral documentation
 
 Documentation here is split by what you are trying to do, following the
-[Diátaxis](https://diataxis.fr/) idea that a page answering "how do I" and a
-page answering "what are the fields" are different documents and should stop
-pretending to be one.
+[Diátaxis](https://diataxis.fr/) distinction between task instructions and
+reference material.
 
 ## Features
 
-What a part of Helmcentral does, what it gives you, and where it stops. Start
-here if you are working out whether to install it or what it will bring aboard.
+What each feature does and its limits. Start here to see whether Helmcentral
+meets your needs.
 
 - [The dashboard](features/dashboard.md), widgets, gauges, embeds and pages.
 - [Forecast](features/forecast.md), weather, wind, wave and tide, and the
@@ -19,7 +18,7 @@ here if you are working out whether to install it or what it will bring aboard.
 
 ## How-to guides
 
-Task recipes. You know what you want, this tells you the steps.
+Steps for specific tasks.
 
 - [Installing Helmcentral](how-to/install.md), including Docker and manual binaries.
 - [Upgrading across a breaking release](how-to/upgrading.md)
@@ -27,8 +26,7 @@ Task recipes. You know what you want, this tells you the steps.
 
 ## Reference
 
-Lookup material: fields, formats, environment variables, file paths. Written to
-be scanned, not read.
+Lookup material: fields, formats, environment variables and file paths.
 
 - [Configuration](reference/configuration.md), covering every environment
   variable, state path and startup behaviour.
@@ -39,14 +37,12 @@ be scanned, not read.
 
 ## Architecture decision records
 
-[docs/adr/](adr/) is **not part of this tree.** It is the engineering record:
-why a thing was built the way it was, what was rejected, and which decisions
-have since been reversed. It is written for whoever maintains the code,
-including the wrong turns, because those are the useful part.
+[docs/adr/](adr/) is separate from the user-facing documentation. It records
+engineering decisions, rejected alternatives and later reversals for code
+maintainers.
 
-Nothing above needs an ADR to make sense of it. If a page in `features/`,
-`how-to/` or `reference/` only reads correctly once you have followed a
-decision record, that page is not finished.
+Pages in `features/`, `how-to/` and `reference/` should be understandable
+without consulting a decision record.
 
 ## What goes where
 
@@ -55,8 +51,8 @@ decision record, that page is not finished.
 | What a feature does and its limits | `features/` |
 | Steps to accomplish a task | `how-to/` |
 | Fields, formats, variables, paths | `reference/` |
-| Why a design choice was made, and what lost | `adr/` |
+| Why a design choice was made, and which alternatives were rejected | `adr/` |
 
 Tutorials, in the Diátaxis sense of a guided first run, do not exist yet. The
 README's install section covers that ground for now, and a `tutorials/`
-directory gets created when something outgrows it rather than in advance.
+directory will be added when a longer guided introduction is needed.

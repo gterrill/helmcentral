@@ -5,9 +5,9 @@ Accepted
 
 ## Context
 
-The tide chart lived in its own standalone "Tides" sidebar panel (`TideDrawer`), a separate navigation-level entry alongside Forecast, Routes, Charts, Radar, Anchor Watch, and Settings. Tide state is forecast-adjacent marine data in exactly the same sense as wind, wave, precipitation, and cloud/temperature — all of which already live as chart cards inside one Forecast panel, day-scoped to whichever of the 10 forecast days the operator has selected. Tide was the odd one out: its own panel, its own nav entry, and a chart windowed as a fixed 96-hour rolling span from `Date.now()` rather than scoped to a selected day.
+The tide chart lived in its own "Tides" sidebar panel (`TideDrawer`), alongside Forecast, Routes, Charts, Radar, Anchor Watch, and Settings. Wind, wave, precipitation, and cloud/temperature already appeared as chart cards in Forecast, scoped to the selected day of a 10-day forecast. Tide instead used a fixed 96-hour rolling window from `Date.now()`.
 
-Folding Tide into Forecast removes a redundant navigation surface and puts all forecast-adjacent charts (Wind, Wave, Precipitation, Cloud & Temperature, Tide) in one place, selectable by the same day-tabs row. That relocation is not just a cut-and-paste: `TideChart`'s windowing, "Now" marker, phase-classification reference, and axis ticks were all hardcoded around a fixed 96-hour window from "now," which only made sense as the sole content of a standalone panel. Sitting among day-scoped siblings, it needed to become day-scoped too.
+Moving Tide into Forecast puts Wind, Wave, Precipitation, Cloud & Temperature, and Tide under the same day selector. This requires changing `TideChart`'s windowing, "Now" marker, phase-classification reference, and axis ticks from the fixed 96-hour window to the selected day.
 
 ## Decision
 

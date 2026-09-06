@@ -16,7 +16,7 @@ Two decisions were made explicitly, before finalizing the design:
 
 ### New capability: the `ftp_fetch` custom Extism host function
 
-Verified via a disposable, hard-gate feasibility spike (`backend/wasm_ftp_spike_test.go`, `backend/testdata/wasm_plugins/src/ftpfetchspike/`) before any real code was built on top of it: a TinyGo guest can call a custom host function and get real anonymous-FTP-fetched bytes back through the WASM sandbox boundary. Confirmed against real, live BOM data (fetched `IDQ20085.txt`, the actual QLD marine wind warning bulletin), not a mock.
+A feasibility spike (`backend/wasm_ftp_spike_test.go`, `backend/testdata/wasm_plugins/src/ftpfetchspike/`) verified the approach before implementation. A TinyGo guest called a custom host function and received bytes fetched over anonymous FTP across the WASM sandbox boundary. The test fetched BOM's live `IDQ20085.txt` QLD marine wind warning bulletin.
 
 **Host side** (`github.com/extism/go-sdk@v1.7.1`): a `HostFunction` is built via `extism.NewHostFunctionWithStack(name, callback, params, returns)`. The callback (`func(ctx, plugin *extism.CurrentPlugin, stack []uint64)`) is low-level — no automatic JSON marshaling like a normal exported guest-function call gets. A `uint64` on the stack is a memory offset; the host reads the guest's request via `plugin.ReadBytes(offset)` and writes a response back via `plugin.WriteBytes(...)`, returning the new offset on the stack. Registered via the same already-present `[]extism.HostFunction{...}` argument to `extism.NewCompiledPlugin` that every plugin type already passes (previously always empty).
 
@@ -24,7 +24,7 @@ Verified via a disposable, hard-gate feasibility spike (`backend/wasm_ftp_spike_
 
 **Security model**: `Manifest.AllowedHosts` enforcement lives entirely inside Extism's *built-in* `http_request` function — it has zero automatic effect on a custom host function. `backend/wasm_ftp_fetch.go` reuses the exact same `<name>.allowed_hosts.json` file every plugin already has for HTTP: `newFTPFetchHostFunction(manifest.AllowedHosts)` builds a per-plugin closure over that list at construction time (`wasm_plugin.go`'s `newWasmPluginBase`, which already has the built manifest), enforcing identical host-matching semantics to Extism's own `http_request` (`github.com/gobwas/glob`, exact match or glob match, mirrored verbatim by reading Extism's own enforcement code). One file governs both protocols. A disallowed host **panics** — mirroring Extism's own `http_request` behavior for a disallowed host — caught by `wasmPluginBase.call()`'s existing `defer recover()` and converted into a clean Go error, no new panic-handling machinery needed. A legitimate fetch failure (dial timeout, 550 no such file, etc.) is instead a structured `{"body":"", "error":"..."}` response the guest can inspect and react to — never a panic, since one product ID failing shouldn't necessarily fail an entire `fetch_warnings` call.
 
-**Made generic**, not special-cased to the warnings plugin type — every WASM plugin (tide, weather, wave, and any future type) gets `ftp_fetch` for free, gated by its own allowlist, with zero additional host-side wiring. Confirmed by the full existing test suite passing unchanged after wiring — a plugin that never calls `ftp_fetch` is completely unaffected by its presence.
+`ftp_fetch` is available to every WASM plugin type through the shared host layer, gated by each plugin's allowlist. The existing test suite passed unchanged after registration, including plugins that do not call it.
 
 ### The Forecast Warnings plugin contract — a deliberate departure from tide/weather/wave
 
@@ -66,11 +66,11 @@ While live-verifying this feature's Settings UI dropdown, `ui.forecast_warnings_
 Positive:
 - Zero-rebuild extensibility for warnings, matching tide/weather/wave — a new warnings source is a `.wasm` file (+ allowlist) dropped into `plugins/forecast-warnings/`, picked up on restart.
 - A fresh install is useful for both Australian and US-coastal operators out of the box (BOM/NWS, both keyless) — previously Australia-only.
-- The `ftp_fetch` host function is a genuinely reusable, generic capability, not a one-off hack — any future plugin type needing FTP inherits it for free, gated by the same allowlist file every plugin already has.
-- A real, previously-unnoticed settings-persistence bug (affecting weather/wave provider selection too, not just this feature) was found and fixed as a direct result of this work's live-verification discipline.
+- Any plugin type needing FTP can use `ftp_fetch`, gated by its existing allowlist file.
+- Live verification found a settings-persistence bug affecting weather, wave, and forecast-warnings provider selection; the bug was fixed in this change.
 
 Negative / explicitly deferred:
-- The custom host function is genuinely new territory for this codebase (no prior precedent, hand-written low-level guest-side glue via `//go:wasmimport`) — a materially higher-complexity mechanism than everything else in the plugin system, accepted specifically because it keeps BOM sandboxed rather than carving out a native exception.
+- The custom host function adds low-level guest-side code via `//go:wasmimport`, which this codebase had not used before. This complexity was accepted to keep BOM sandboxed rather than native.
 - No plugin hot-reload, same limitation every prior WASM plugin type already has — `plugins/forecast-warnings/` is scanned once at startup.
 - BOM's known zone-coverage gaps (SA/NT, TAS/WA) are carried forward unresolved — out of scope for this port, same as the native implementation before it.
 - Debugging a future BOM bulletin-format change is harder inside a sandboxed WASM guest than it would be in native Go — the same accepted tradeoff ADR-0017 made for BOM's tide-table scraping, now extended to a second BOM plugin.

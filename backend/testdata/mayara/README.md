@@ -1,6 +1,6 @@
 # mayara fixtures
 
-Captured from the live rig, not hand-authored. Re-capture rather than edit.
+These fixtures were captured from the live rig. Re-capture rather than edit.
 
 Source: mayara-server 3.10.0 (radar API 3.4.0) running natively on the Windows
 ship computer at 192.168.50.81:6502, driving a Furuno DRS4D-NXT (serial 6424,
@@ -26,7 +26,7 @@ enabled from 20 m to 500 m.
 | `target-removed-delta.json` | `value: null` |
 
 Target 100000003 appears in the capture going tracking, then lost, then null,
-so the whole eviction lifecycle is real rather than constructed.
+so the capture covers the whole eviction lifecycle.
 
 ## What these captures corrected
 
@@ -66,10 +66,9 @@ From `target-deltas-timed.jsonl`, four minutes of frames stamped on arrival:
     burst 195-198s
 
 Every inter-burst gap was 60 seconds, and 224 of 878 per-target gaps exceeded
-thirty seconds. Within a burst the spacing is 1.6 seconds at p50, which is
-about the antenna rotation rate and is what makes the raw number misleading:
-that is how often a target is restated inside a burst, not how often a burst
-happens.
+thirty seconds. Within a burst the spacing is 1.6 seconds at p50, about the
+antenna rotation rate. This measures how often a target is restated within a
+burst; it does not measure the interval between bursts.
 
 `radarTargetMaxAge` was 30 seconds on the rotation-rate reasoning and is now
 150. At 30 every target aged out between bursts, so the map would blink once a
@@ -86,13 +85,13 @@ median speed 10.5 knots, maximum 20.3, and 14 of 21 above 5 knots. Nothing was
 moving. These are waves, rain and shoreline return being tracked, not vessels.
 
 Nine of the 21 carried `is_dangerous: true`, including CPAs of 3.7 m and 5.6 m.
-Wiring alarms straight to that flag today would have produced nine simultaneous
-collision alarms at anchor, which is ADR 0057 section 6 and ADR 0058 repeating
-on a new input: the collision calculation goes degenerate when own ship is
+Wiring alarms straight to that flag would have produced nine simultaneous
+collision alarms at anchor. As described in ADR 0057 section 6 and ADR 0058,
+the collision calculation becomes degenerate when own ship is
 stationary, and a flag computed from it inherits the problem.
 
 Treat these fixtures as correct wire shape and unrepresentative content. Before
-the alarm phase ships, capture again underway, where the geometry is real, and
+the alarm phase ships, capture again underway, with non-degenerate geometry, and
 decide then what gating radar alarms need beyond `status == "tracking"`.
 
 ## Still missing

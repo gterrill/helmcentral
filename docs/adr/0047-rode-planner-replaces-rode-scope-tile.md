@@ -15,8 +15,7 @@ only works if the boat knows how much chain is actually deployed — and this bo
 Lewmar windlass has no chain counter, so `rodeDeployedM` sits at whatever was last typed
 by hand (usually 0). The tile therefore showed a permanent red **"Scope Insufficient"**
 badge, not because scope was actually insufficient, but because the input was unknown.
-A red alarm-coloured badge that is red for a missing-input reason, not a real condition,
-trains the operator to ignore red — which is worse than not showing the badge at all.
+A red badge for missing input can lead operators to ignore genuine alarms.
 
 The useful moment for this calculation is **before the anchor goes down**, not after:
 you want to know how much chain to pay out and how big the swing circle will be, so you
@@ -63,8 +62,8 @@ dashboard grid where it can only ever look backward at a number nobody entered.
 ### Mounting a second sidebar without breaking the left nav
 
 The planner reuses the vendored `components/ui/sidebar.tsx` primitives, but three facts
-about that implementation make the obvious approach (`<SidebarProvider><Sidebar
-side="right">...`) actively dangerous:
+about that implementation make a second provider (`<SidebarProvider><Sidebar
+side="right">...`) unsuitable:
 
 1. Default `Sidebar` (`collapsible="offcanvas" | "icon"`) renders `fixed inset-y-0 h-svh`
    — it pins to the *viewport*, not its container. Mounted inside the anchor watch panel

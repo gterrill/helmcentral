@@ -3,7 +3,7 @@
 ## Status
 Accepted. The single-global-layout persistence described here (`dashboard-layout.json`, `GET`/`PUT /api/dashboard-layout`) was superseded by ADR 0013 (Multi-Page Dashboard), which replaces it with multiple named pages. The grid-rendering mechanics, widget catalog, and validation described below are unchanged and still apply per-page.
 
-Amended by ADR 0032 (Responsive Dashboard Below the Grid Breakpoint), which replaces the "plain reflowed stack" below `lg` with a two-column CSS grid derived from the same persisted layout. Both decisions below survive intact: the legacy non-responsive RGL API, and one global layout per page. ADR 0032 persists nothing additional — it only changes how the existing coordinates are *rendered* on narrow screens.
+Amended by ADR 0032 (Responsive Dashboard Below the Grid Breakpoint), which replaces the plain reflowed stack below `lg` with a two-column CSS grid derived from the same persisted layout. The legacy non-responsive RGL API and one global layout per page remain unchanged. ADR 0032 changes only narrow-screen rendering, with no additional persisted data.
 
 ## Context
 
@@ -79,13 +79,13 @@ Positive:
 - Operators can rearrange, show, and hide all 13 widgets without a code redeploy.
 - Higher information density is available when operators want it — e.g., viewing both Anchor Watch and Alternator simultaneously, which was impossible in the rigid 3-column grid.
 - Layout is persisted server-side, consistent across client reconnects (or future multi-device support, if added).
-- No dependency on a charting library or complex layout solver; `react-grid-layout` is a battle-tested, lightweight grid utility.
+- Uses `react-grid-layout` for layout without adding a charting library or a separate layout solver.
 - Extraction of inline widgets into standalone components improves code modularity and test isolation.
 
 Negative / explicitly deferred:
 - Layout mode is desktop/tablet-landscape only (below `lg` breakpoint, the grid is unavailable and all widgets render as a stacked list, always read-only). Phone users cannot rearrange their dashboard, but phone screen density makes a dense grid layout impractical anyway.
 
-  *Amended by ADR 0032.* Edit mode remaining desktop-only still holds, and for a firmer reason than density (a narrow-view drag has no non-arbitrary mapping back to 12-column coordinates). But "renders as a stacked list" no longer describes the behaviour, and the density claim was doing too much work: it conflated "can't be edited" with "can't be laid out". Below `lg` the widgets now reflow into a one- or two-column CSS grid derived from the same persisted coordinates.
+  *Amended by ADR 0032.* Edit mode remains desktop-only because a narrow-view drag has no non-arbitrary mapping back to 12-column coordinates. Rendering does not have that restriction: below `lg` the widgets now reflow into a one- or two-column CSS grid derived from the same persisted coordinates.
 - A fully-emptied layout is indistinguishable from "never configured" (both show the default), so there is no easy way to detect operator intent to create an empty dashboard. This is acceptable for a single-operator embedded device.
 - No per-device or per-user layouts (each vessel has one global layout). Multi-user or multi-device support would require auth/identity infrastructure, explicitly out of scope for this single-station dashboard.
 - The "Hot Water" control block inside Battery & Power remains non-functional (pre-existing, unrelated to this feature, carried over unchanged during component extraction).

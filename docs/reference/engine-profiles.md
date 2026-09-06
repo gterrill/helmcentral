@@ -15,7 +15,6 @@ for declarative data that contains no executable logic.
 ## What ships, and what does not
 
 The bundled `cummins-qsb67-550.json` file contains **no alarm thresholds**.
-This is intentional.
 
 Cummins does not publish QSB 6.7 setpoints in public documentation: they are
 located in the operator's manual and in QuickServe. Publicly available material
@@ -42,7 +41,7 @@ untouched.
 ## Filling in your thresholds
 
 You can configure thresholds in two ways: either edit the JSON file and restart
-the server, or, more conveniently, apply the profile to a tile and edit the
+the server, or apply the profile to a tile and edit the
 zones on each gauge through the standard gauge configuration dialog. Both
 methods produce the same configuration; the UI dialog provides immediate visual
 reference to the gauge layout during configuration.

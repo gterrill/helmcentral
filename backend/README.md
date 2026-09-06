@@ -27,7 +27,7 @@ go build -o helmcentral .
 ./helmcentral
 ```
 
-Or straight from source — `go run .`, not `go run main.go`: `package main`
+Or run from source with `go run .`, not `go run main.go`: `package main`
 spans every file in this directory, so naming one file fails to compile.
 
 ```bash
@@ -73,7 +73,7 @@ docker run -p 8080:8080 helmcentral-backend
 
 ## Configuration
 
-Non-secret knobs are set as real environment variables. There is no `.env` file and nothing loads one — the backend reads these via `os.Getenv` only, so putting them in a file has no effect. Set them in your shell, the compose service's `environment:` block, or your process manager.
+Non-secret settings use environment variables. The backend reads them through `os.Getenv` and does not load a `.env` file. Set them in your shell, the compose service's `environment:` block, or your process manager.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -88,11 +88,11 @@ Individual state paths (`ROUTES_FILE`, `SECRETS_DB_PATH`, `TILE_CACHE_PATH`, …
 
 Secrets (SignalK credentials, `INFLUXDB_TOKEN`, `WEATHERKIT_*`) live in an encrypted-at-rest SQLite store instead, managed via the Settings UI's Secrets panel (`GET`/`POST /api/settings/secrets`). See [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md).
 
-Wind-gust-max and depth-trend/tide-detection work out of the box from an in-memory ring buffer fed by the server's live SignalK polling — no InfluxDB required. InfluxDB is an optional enhancement (longer retention than the in-memory windows — ~24h for wind gust, ~6h for depth — and history that survives a restart) configured from the Settings UI's InfluxDB section (`enabled`/`url`/`org`/`bucket`, stored in `settings.yaml`'s `influxdb` section) plus the `INFLUXDB_TOKEN` secret. See [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md).
+Wind-gust-max and depth-trend/tide-detection use an in-memory ring buffer fed by the server's live SignalK polling, with no InfluxDB required. The in-memory windows retain ~24h for wind gust and ~6h for depth. Optional InfluxDB storage provides longer retention and history that survives a restart. Configure it from the Settings UI's InfluxDB section (`enabled`/`url`/`org`/`bucket`, stored in `settings.yaml`'s `influxdb` section) plus the `INFLUXDB_TOKEN` secret. See [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md).
 
 ## Architecture Decisions
 
-The durable rationale for trail handling is documented in:
+Trail-handling decisions are documented in:
 
 - [../docs/adr/0001-server-owned-trail-sampling.md](../docs/adr/0001-server-owned-trail-sampling.md)
 - [../docs/adr/0002-separate-motoring-and-anchor-trails.md](../docs/adr/0002-separate-motoring-and-anchor-trails.md)

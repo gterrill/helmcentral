@@ -23,7 +23,7 @@ SignalK offers a delta WebSocket at `/signalk/v1/stream`, previously unused. It 
 
 2. **Reassemble deltas into the nested tree shape the REST API returns.** Deltas carry flat dotted paths; `environment.depth.belowTransducer = 1.7` is stored as `{"environment":{"depth":{"belowTransducer":{"value":1.7}}}}`, with `timestamp` and `$source` as siblings of `value` when the update provides them. An empty path merges its object's keys at top level without a `value` wrapper, which is how `name` arrives.
 
-   This is not merely convenient. `parseGNSSPositionValidation` (ADR 0004) consumes the **whole payload map**, and `applyGNSSHeuristics` is stateful across calls — it expects one coherent snapshot per call. Field-level delta application would break it; a rebuilt tree does not. The same reassembly preserves all ~40 `lookup*` call sites and every `fetchSignalK*` signature, so the 13 `fetchSignalKVesselState` call sites across 10 files were not touched.
+   `parseGNSSPositionValidation` (ADR 0004) consumes the whole payload map, and the stateful `applyGNSSHeuristics` expects one coherent snapshot per call. Rebuilding the tree preserves that requirement; applying validation separately to each delta would not. Reassembly also preserves all ~40 `lookup*` call sites and every `fetchSignalK*` signature, so the 13 `fetchSignalKVesselState` call sites across 10 files were unchanged.
 
 3. **`signalKSnapshot` holds the trees**, guarded by an embedded `sync.RWMutex` — the codebase's established background-writer/handler-reader idiom, the same shape as `telemetryRingBuffer` (ADR 0020) and `anchor.go`'s `vesselTrail`. `treeFor` returns a **deep copy**: handlers read while the stream writes, so returning the live map would race.
 
@@ -33,7 +33,7 @@ SignalK offers a delta WebSocket at `/signalk/v1/stream`, previously unused. It 
 
 6. **The stream is the only ingestion path. There is no REST fallback and no toggle.**
 
-   `AGENTS.md`'s Fallback Policy prohibits masking upstream problems, and the cleanest way to honour it is to have nothing to fall back *to*. `signalKSelfPayload` returns an error whenever the snapshot is empty; `fetchSignalKVesselState` routes that into `criticalVesselState`, freezing position at the last trusted fix so a stream outage cannot read as a jump and trip the anchor alarm.
+   To avoid masking stream failures with REST data, `signalKSelfPayload` returns an error whenever the snapshot is empty. `fetchSignalKVesselState` routes that into `criticalVesselState`, freezing position at the last trusted fix so a stream outage does not appear as a jump and trip the anchor alarm. This follows `AGENTS.md`'s Fallback Policy.
 
 7. **REST survives in exactly one place: probing.** Connection *setup* has to reach a server that is not the configured one and has no stream open — discovery names every host it finds on the LAN, and the settings screen verifies a new address before saving it (ADR 0028). Answering either from the snapshot would report the currently configured vessel, so discovery would label every result with the same boat name and a broken address would validate clean and take the dashboard offline on save. `backend/signalk_probe.go` holds `probeSignalKTree`/`probeSignalKReachable`/`probeSignalKVesselName` for that, and nothing else may use them.
 
@@ -49,11 +49,11 @@ See also ADR 0042 (nearby-vessel staleness filtering), which works around a cons
 
 ## Consequences
 
-- Latency drops from the 5s poll floor to source cadence, and upstream load collapses from ~8 fetches/10s/tab plus the poller to a single subscription.
+- Ingestion updates at source cadence instead of the 5s poll interval, replacing ~8 upstream fetches/10s/tab plus the poller with a single subscription.
 - Ingestion is no longer limited to a hardcoded path list. Every path the server publishes is in the snapshot, which is the precondition ADR 0038 (alarms) and ADR 0039 (bindable widgets) both depend on.
 - There is one ingestion path, not two. The REST telemetry reads and their toggle were removed once the stream had been verified against a live vessel, rather than left in place as a permanent fallback.
-- Test fixtures moved from HTTP stubs to snapshot seeding. `seedSelfTree`/`seedVesselTrees` install a REST-shaped JSON body directly as snapshot state, so existing fixtures stayed valid — the stream reassembles deltas into exactly that shape, which is decision 2 paying for itself.
-- `go.mod` gains a WebSocket dependency, the module's first. The v1.8.13 pin is load-bearing and must survive dependency updates.
+- Test fixtures moved from HTTP stubs to snapshot seeding. `seedSelfTree`/`seedVesselTrees` install REST-shaped JSON directly as snapshot state, preserving existing fixtures because the stream reassembles deltas into the same shape.
+- `go.mod` gains its first WebSocket dependency. The v1.8.13 pin preserves Go 1.22 compatibility and must survive dependency updates.
 - The browser no longer polls for telemetry. `GET /api/stream` pushes five named event types (`vessel-state`, `electrical-state`, `nearby-vessels`, `solar-state`, `tanks-state`) over one shared, ref-counted `EventSource`, each on its own interval and change-gated. SSE rather than a WebSocket for the browser leg: the traffic is one-way, and it survives an authenticating reverse proxy.
 
   **Correction (2026-08-13):** this ADR originally claimed "`EventSource` reconnects and resumes on its own," and `frontend/src/hooks/use-telemetry-stream.ts` was written with no `error` handler on that assumption. That is only true of a transport-level drop. Per the WHATWG spec, a response carrying a non-200 status or a non-`text/event-stream` content-type is a *permanent* failure: `readyState` goes to `CLOSED` and the browser never retries. That is exactly what the Vite dev proxy, and nginx/the reverse proxy in production, answer with for the several seconds the Go backend takes to restart. The result in production: the stream died silently and stayed dead - one incident measured 57 minutes with zero `/api/stream` connections while REST polling (settings, weather) kept working normally - and every telemetry tile, including the position feed the anchor drag alarm reads (`use-anchor-watch.ts:181`), froze at its last value with nothing on screen to say so.

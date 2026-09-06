@@ -25,11 +25,11 @@ Nothing publishes the vessel figure. It has to be derived.
 
 The derived value is published as `helmcentral.propulsion.fuelEconomy` and rides the existing `gauge-values` event.
 
-This is the cheap decision and the reason it is worth making: **every widget that can bind a path can bind this one with no widget code at all.** A gauge, a cluster slot, a lamp, an alarm rule — all of it works already. A bespoke "vessel economy" tile would have been more code and would have served exactly one number.
+Existing gauges, cluster slots, lamps and alarm rules can bind this path without new widget code. A dedicated vessel-economy tile would require additional code to display the same value.
 
 The `helmcentral.` prefix means a derived path can never shadow one the vessel publishes, and makes it obvious in the picker that the value is computed here rather than received.
 
-Derived paths are listed by `GET /api/signalk/paths` alongside the published ones, with their units, so the picker preselects the quantity the same way it does from SignalK's own `meta.units`. A value nobody can find is a value nobody can bind.
+Derived paths are listed by `GET /api/signalk/paths` alongside the published ones, with their units, so operators can select them and the picker preselects the quantity as it does from SignalK's own `meta.units`.
 
 ### 3. Absent, never zero and never infinite
 
@@ -41,7 +41,7 @@ An engine that is off contributes nothing to the total rather than making the ve
 
 ### 4. `fuel.economy` is dropped from the bundled profile
 
-Not merely omitted — removed, with a note saying why and pointing at the derived path. Leaving it available invited exactly the error this ADR exists to prevent.
+The profile entry is removed, with a note explaining the per-engine limitation and pointing at the derived path.
 
 The `lead` corner emphasis added for the economy sub-line was removed with it. It was three lines of config, backend validation and tests serving one caller, and that caller is gone; re-adding it when a real second case appears is cheaper than carrying it unused.
 

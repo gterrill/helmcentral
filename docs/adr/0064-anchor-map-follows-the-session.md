@@ -23,9 +23,8 @@ left this morning. The phone that was closed at the time is the same. Each clien
 centre it had no way to date, so every device had to be re-centred by hand at every new
 anchorage.
 
-The stored centre was never wrong, it was just untagged. It recorded *where* the operator
-had looked and not *when*, so nothing could tell a pan made ten minutes ago from one made
-in a bay two headlands back.
+The stored centre had no session identifier, so the map could not distinguish a pan in
+the current anchorage from one made in a previous anchorage.
 
 ## Decision
 
@@ -94,11 +93,10 @@ and so do the rode, the sea state and the seabed, which were being wiped on ever
 somebody nudged the marker. Nothing on screen said so. The Rode Planner simply started
 recommending against inputs the operator had not chosen.
 
-The rule is one rule, applied to the whole record: a reposition changes the point and nothing
-else. What still resets is the bow-offset group, `bow_offset_m`, `bow_offset_applied` and
-`heading_at_set_deg`, and that is correct rather than an oversight. Those describe a
-correction applied to a live GPS fix at the drop. A hand-placed point had no correction
-applied to it, and reporting one would be a claim about provenance that is not true.
+A reposition changes the point while preserving the other session fields, except the
+bow-offset group: `bow_offset_m`, `bow_offset_applied` and `heading_at_set_deg` still reset.
+Those describe a correction applied to a live GPS fix at the drop, which does not apply
+to a hand-placed point.
 
 ## Consequences
 

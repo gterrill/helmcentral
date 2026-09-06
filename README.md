@@ -2,36 +2,30 @@
 
 A dashboard and alarm system for [SignalK](https://signalk.org/). It puts anchor
 watch, tides, weather, routes, tanks and electrical monitoring on one screen at
-the helm, and when something goes wrong it tells you on your phone, off the
-boat.
+the helm, and sends alarm notifications to your phone when you are off the boat.
 
-Everything runs on the boat. It is a single binary with the web UI compiled into
-it, so there is no database server to run and nothing phoning home to a service
-that can change its pricing. If you already have a SignalK server, installing it
-is one command.
+Helmcentral runs on the boat as a single binary with the web UI compiled into
+it. It needs no database server or cloud account. If you already have a SignalK
+server, you can install it with one command.
 
 ![The Helmcentral dashboard at anchor](docs/images/dashboard.png)
 
 ## Why this exists
 
 I spent my working life building software. I now live aboard full time, which
-has been a useful education in what "reliable" actually means when you are the
-only person on watch.
+has shaped how I build software for use on a boat.
 
-A boat runs on intermittent power and worse internet, and the person responsible
-for it is frequently asleep. That rules out a lot of otherwise sensible designs.
-An alarm that only exists in a browser tab is not an alarm. A dashboard that
-quietly freezes looks exactly like a calm night. A notification that failed to
-send because the LTE dropped out is not a notification.
+A boat has intermittent power and unreliable internet, and the person
+responsible for it is often asleep. Alarms need to keep running when the browser
+is closed, stale readings need to be visible, and failed notifications need to
+be retried.
 
-So the parts of Helmcentral that look over-engineered for a hobby project are
-the deliberate ones. Anchor watch runs on the server rather than in the browser.
-Alarm rules have mandatory dwell and hysteresis. There is a watchdog on the data
-stream itself. Failed notifications are queued and retried instead of dropped.
-Those are the parts I would not go to sea without.
+Helmcentral runs anchor watch on the server. Alarm rules have mandatory dwell
+and hysteresis, a watchdog monitors the data stream, and failed notifications
+are queued for retry.
 
-The rest is ordinary work done carefully: instruments on a screen you can read
-in daylight, in a layout you can rearrange without editing a config file.
+The dashboard is designed to be readable in daylight, with a layout you can
+rearrange without editing a config file.
 
 ---
 
@@ -42,16 +36,16 @@ in daylight, in a layout you can rearrange without editing a config file.
   engine temperature, wind. Rules name paths from the live delta stream, so
   alarming on something new needs no code change. Five SignalK severities, with
   dwell and hysteresis on every rule.
-- **Two-way on the notification bus.** Helmcentral reads *and* writes SignalK's
+- **SignalK notifications.** Helmcentral reads and writes SignalK's
   `notifications.*` tree. Alarms raised by a Victron GX, an N2K device or
   another plugin turn up in its list with no per-source integration, and its own
   rules reach your MFD by the same route.
-- **Delivery that survives bad internet.** ntfy, SMTP, webhook, web push, or
+- **Notification retries.** ntfy, SMTP, webhook, web push, or
   SignalK itself. A failed send is queued and retried with backoff from 30
   seconds out to 30 minutes for up to 24 hours, with every attempt logged.
-- **A watchdog on the stream.** If the SignalK connection dies, that is itself
-  an alarm. A periodic heartbeat sent off the boat makes its absence one too.
-- **Layouts you arrange yourself.** 17 built-in widgets, custom gauges bound to
+- **Connection monitoring.** Losing the SignalK connection raises an alarm.
+  An external service can also monitor a periodic heartbeat sent off the boat.
+- **Configurable layouts.** 17 built-in widgets, custom gauges bound to
   any path your server publishes, and embed tiles for anything with a URL.
   Named pages you switch between, persisted server-side.
 - **Forecasts with no API key.** Open-Meteo and Open-Meteo Marine are the
@@ -113,9 +107,9 @@ Docker, manual binaries and upgrade instructions:
   Safari 16.4+, which means iPadOS/iOS 16.4+ on a helm tablet. Older devices are
   out of support, since the shipped CSS is not downlevelled past that floor.
 
-That is the whole list. Telemetry history is in-memory by default. InfluxDB buys
-you longer retention if you want it, and is not otherwise needed. Radar is the
-same shape: optional, and off unless the pieces are there.
+Telemetry history is in-memory by default. InfluxDB is optional for longer
+retention. Radar is also optional and remains off unless its dependencies are
+available.
 
 ## Configuration
 
@@ -136,15 +130,14 @@ the API and dashboard respond to anything except `/api/health` and the login
 screen.
 
 Helmcentral has no user database of its own. It forwards submitted credentials
-to your SignalK server and trusts the answer, mapping SignalK's `readonly`,
+to your SignalK server, mapping SignalK's `readonly`,
 `readwrite` and `admin` levels onto matching Helmcentral permissions. An
 unrecognised role fails closed rather than falling back to something permissive.
 
-That means SignalK's own security has to be enabled first. Turn Helmcentral's
-login on from Settings → Security, which refuses to save unless SignalK security
-is already on, so a lockout is prevented at save time rather than discovered at
-the next reboot. Turning it back off is never gated on SignalK being reachable,
-so that way out always works.
+Enable SignalK's security first, then turn on Helmcentral's login from
+Settings → Security. Helmcentral refuses to save this setting unless SignalK
+security is already on, to prevent a lockout after reboot. Disabling login does
+not require SignalK to be reachable.
 
 Every environment variable, state path and startup behaviour:
 [docs/reference/configuration.md](docs/reference/configuration.md).
@@ -155,11 +148,11 @@ Every environment variable, state path and startup behaviour:
 plus gauge widgets that bind to any path your server publishes and embed tiles
 that put any URL in the grid. Arrange them yourself into named pages you switch
 between, persisted server-side. A gauge's coloured band set into an alarm
-severity *is* the alarm rule, not a picture of one.
+severity defines an alarm rule.
 
 **[Anchor watch](docs/features/anchor-watch.md).** Trail sampling and drag
-detection run on the server, so closing the browser cannot silence a drag. A
-lost GNSS fix never raises one. The rode planner does pay-out and swing-radius
+detection run on the server, even when the browser is closed. A
+lost GNSS fix does not raise a drag alarm. The rode planner does pay-out and swing-radius
 planning against tide-corrected depth before the anchor is down, on a map that
 takes shared pins for hazards.
 
@@ -168,19 +161,19 @@ dwell and hysteresis, using SignalK's own severity vocabulary in both
 directions. Five transports, none needing a paid subscription. Failed deliveries
 are queued and retried, not dropped.
 
-Also aboard: route planning that pushes an active route to SignalK for your
+Other features include route planning that pushes an active route to SignalK for your
 autopilot, satellite charts from your own MBTiles, autopilot control on
 SignalK's v2 API, ARPA radar targets, and an embedded weather radar.
 
-What it deliberately does not do: hazard avoidance, weather routing, live
+Out of scope: hazard avoidance, weather routing, live
 navigation, or anything requiring a chart licence.
 
 ## Provider plugins
 
-Tides, weather, waves and forecast warnings are **not built in**. Each is a
-sandboxed WASM plugin loaded from disk, so adding another region's government
-API means dropping a `.wasm` file into a directory. No fork, no Go, no rebuild,
-and the new provider appears in the existing Settings dropdown on restart.
+Tides, weather, waves and forecast warnings come from sandboxed WASM plugins
+loaded from disk. Install a provider's `.wasm` file in its plugin directory,
+then restart Helmcentral to make it available in Settings. There is no need to
+rebuild Helmcentral.
 
 | Category | Bundled reference plugins |
 | --- | --- |
@@ -195,25 +188,24 @@ reaches only the hosts named in its `allowed_hosts.json` sidecar. The host owns
 all derived data, so a plugin only ever returns raw provider numbers. You can
 write one in any language with an Extism PDK.
 
-**Tides are the one thing with no default.** Tide data is tied to physical
-station networks rather than a global model, so there is no keyless worldwide
-API to hardcode and nothing sensible to fall back to. Pick `ui.tide_provider` in
+**Tides have no default provider.** The available providers use regional station
+networks rather than a global model. Pick `ui.tide_provider` in
 Settings to match your region. Until you do, `/api/tide-today` returns an error
-naming what is missing rather than guessing.
+naming the missing configuration.
 
 Contracts, the sandbox model, and how to build a plugin:
 [docs/reference/plugins.md](docs/reference/plugins.md).
 
 ## Documentation
 
-[docs/index.md](docs/index.md) is the map. In short:
+Start with [docs/index.md](docs/index.md).
 
 | | |
 | --- | --- |
 | [docs/features/](docs/features/) | What each part does and where it stops |
 | [docs/how-to/](docs/how-to/) | Install, upgrade, develop |
 | [docs/reference/](docs/reference/) | Configuration, plugin contracts, engine profiles |
-| [docs/adr/](docs/adr/) | Why each non-obvious trade-off went the way it did |
+| [docs/adr/](docs/adr/) | Architecture decisions and their rationale |
 
 ## Development
 
@@ -255,8 +247,8 @@ helmcentral/
   touchscreen.
 - **Ingestion.** One WebSocket subscription to SignalK's delta stream,
   reassembled into a snapshot tree. It is the only ingestion path. There is no
-  REST fallback and no toggle, because a fallback would mask exactly the
-  upstream failures the watchdog exists to catch. REST survives only for probing
+  REST fallback or toggle, because a fallback could mask upstream failures
+  monitored by the watchdog. REST is used only for probing
   during discovery and connection tests.
 - **Storage.** SQLite for secrets, alarm history and tile caches; JSON files for
   routes and dashboard pages. Telemetry history is an in-memory ring buffer by
@@ -266,31 +258,27 @@ helmcentral/
 
 ### Why Helmcentral isn't a SignalK plugin
 
-What SignalK brings is normalization. It translates thirty years of fragmented,
-reverse-engineered NMEA 2000 data into a single tree with documented paths and
-standard SI units. That decoding work is solid and there is no reason to
-reinvent it.
+SignalK normalizes NMEA 2000 data into a single tree with documented paths and
+standard SI units. Helmcentral uses that translation rather than implementing
+its own NMEA 2000 decoder.
 
-The problem is isolation. SignalK runs plugins in-process inside the Node
+SignalK runs plugins in-process inside the Node
 runtime, where any plugin can register arbitrary HTTP routes, inject spoofed
-delta updates, read server configuration or crash the event loop. That trust
-model is fine for a hobbyist setup and too fragile for an anchor alarm.
+delta updates, read server configuration or crash the event loop. Helmcentral
+runs separately to isolate its alarm processing from those plugins.
 
-Authorization at the wire level is missing too. NMEA 2000 has no device
+NMEA 2000 has no device
 authentication, so any node on the CAN bus can claim an address and broadcast
-any PGN. Hardening the layer directly above an unauthenticated stream buys
-limited protection. The boundaries that actually matter are the write path,
-meaning anything able to engage an autopilot or switch a CZone breaker, and the
-network edge between the vessel's bus and the internet.
+any PGN. Application-level security cannot authenticate that source data.
+Commands that can engage an autopilot or switch a CZone breaker need access
+controls. The network boundary between the vessel's bus and the internet also
+needs protection.
 
 Helmcentral therefore treats SignalK strictly as a translation layer and owns
 those boundaries itself: a single read-only delta subscription into an isolated
 state snapshot, role resolution downstream of SignalK that fails closed on an
 unrecognised role, and third-party provider code confined to WASM with linear
 memory isolation, host allowlists and hard execution timeouts.
-
-SignalK belongs at the sensor and data layer, not as the security boundary
-between third-party code and physical relays.
 
 ## Roadmap
 

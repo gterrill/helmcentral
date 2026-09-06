@@ -3,7 +3,7 @@
 ## Status
 Accepted
 
-Applies the AGENTS.md Fallback Policy to two figures that were not fetched at all, but computed in the browser from an unrelated measurement and displayed with the authority of a reading.
+Applies the AGENTS.md Fallback Policy to two figures computed in the browser from an unrelated measurement rather than fetched from a provider.
 
 Changes the `fetch_forecast` guest contract: two new hourly fields, `humidity_pct` and `visibility_m`, carried as nullable on the host so that an omitted field is distinguishable from a real zero. Weather plugin authors must read section 1.
 
@@ -20,7 +20,7 @@ const visibilityNm = precipitationPct === null ? null
 
 A 40% chance of rain rendered as "Humidity 61%" and "Visibility 9.6 nm". Nothing measured or forecast either number. The constants have no source.
 
-Visibility is the one that matters. It is a navigation figure, it is quoted in nautical miles, and it sits two chips away from a wind speed that came off a real model run. A skipper reading "Visibility 9.6 nm" has been told something, and what they were told was a rescaling of the rain chance.
+Visibility is a navigation figure, shown in nautical miles alongside wind speed from a forecast model. Nothing indicated that "Visibility 9.6 nm" was merely a rescaling of precipitation probability.
 
 Two things let this survive review.
 
@@ -45,7 +45,7 @@ WeatherKit is the sharper case: `humidity` and `visibility` are required fields 
 
 `fetch_forecast` hourly entries gain `humidity_pct` (0 to 100) and `visibility_m` (metres). SI on the wire, matching `wind_speed_ms` and `temperature_c`; metres convert to nautical miles host-side the same way m/s converts to knots.
 
-The host structs declare both as `*float64`, and this is the point of the whole change rather than a detail of it. A missing JSON field decodes to Go's zero value. Zero percent humidity is physically near impossible and would be obvious nonsense to anyone reading closely, but 0.0 nm visibility is not nonsense: it means you cannot see the bow. It is the single most consequential reading a helm display can show, and it is exactly what an un-rebuilt plugin would produce by saying nothing at all.
+The host structs declare both as `*float64` to distinguish absence from zero. With a bare `float64`, an omitted JSON field decodes to zero, so an un-rebuilt plugin would appear to report 0% humidity and 0.0 nm visibility. In particular, zero visibility must remain distinguishable from missing data.
 
 So absence is carried in the type. Two distinct absences resolve to the same `-1` sentinel:
 
@@ -66,9 +66,9 @@ So both are reduced from the hourly series in `buildDayData`, which is where `bu
 
 ### 3. Humidity takes the mean, visibility takes the minimum
 
-The reduction follows the split the codebase already uses. `buildWindSummary` takes a range for sustained speed and a maximum for gust. `buildWaveSummary` takes a mean for period and a range for height. Hazard-shaped quantities reduce toward the hazard; characteristic-shaped ones reduce to the middle.
+The reduction follows the codebase's use of different summaries for different quantities: `buildWindSummary` takes a range for sustained speed and a maximum for gust, while `buildWaveSummary` takes a mean for period and a range for height.
 
-Humidity is characteristic-shaped and takes the mean. Visibility is hazard-shaped in the low direction and takes the minimum. The worst visibility of the day is the number a passage plan turns on, and a mean would smooth a two-hour fog bank at 0.5 nm into a comfortable-looking eight.
+Humidity takes the mean to describe typical conditions. Visibility takes the minimum to retain the day's worst conditions for passage planning; a mean could obscure a two-hour fog bank at 0.5 nm within an otherwise clear day.
 
 Both reducers skip negative samples and report absent when no sample qualifies, rather than reporting zero.
 
@@ -76,7 +76,7 @@ Both reducers skip negative samples and report absent when no sample qualifies, 
 
 Retaining the computed values for the case where a provider omits the field would leave the display exactly as untrustworthy as it is now, while making it harder to notice: a real absence and a real reading would render identically, and the only way to tell them apart would be to read the source. That is the defect this ADR closes, reintroduced one layer down.
 
-The chips render `—` when the provider said nothing. That path already existed for precipitation and is correct. It will fire more often now, which is the honest outcome and not a regression.
+The chips render `—` when the provider supplies no value, using the existing precipitation absence display. Missing values are now shown rather than replaced with calculated estimates.
 
 ## Consequences
 
@@ -92,7 +92,7 @@ The chips render `—` when the provider said nothing. That path already existed
 
 The fixture rule applies and was followed. The Open-Meteo parse is pinned to a response captured live from `api.open-meteo.com` over a full 16-day window rather than an assumed shape: 384 hourly samples, with five trailing nulls in both `relative_humidity_2m` and `visibility`. The null tail is in the fixture, so the case that decodes wrong under a bare `[]float64` is exercised by every run rather than reasoned about.
 
-The boundary case that a genuine 0.0 nm visibility survives, rather than being read as absent, is asserted at all three layers it could be lost in: `sentinelVisibilityNm` returning 0 for a real zero metre reading, `reduceVisibilityNm` letting that zero win as the day's minimum, and the drawer rendering it as `0.0 nm` rather than as the em dash. It is the most important assertion in the change and the one most likely to be broken by a later refactor that "simplifies" a nil check into a falsiness check.
+The boundary case that a genuine 0.0 nm visibility survives, rather than being read as absent, is asserted at all three layers it could be lost in: `sentinelVisibilityNm` returning 0 for a real zero metre reading, `reduceVisibilityNm` retaining that zero as the day's minimum, and the drawer rendering it as `0.0 nm` rather than as the em dash. These tests guard against replacing a nil check with a falsiness check that would discard zero.
 
 Not yet done: an end-to-end check against the running install on the boat, including a location whose model omits visibility so the em-dash path is exercised against a live response rather than a fixture. WeatherKit's fixture was built from the documented schema rather than captured, because credentials were not available in this environment; the two fields it adds are required fields on `HourWeatherConditions` and were already arriving on the wire, but that path has not been confirmed against a real response.
 

@@ -1,11 +1,9 @@
 # Provider plugins
 
-Tides, weather, waves, forecast warnings and the upper-air outlook are **not
-built into Helmcentral**.
-Each provider is a sandboxed WASM plugin loaded from disk at startup. Adding
-support for another region's government API requires placing a `.wasm` file into
-a directory, with no code changes, Go compilation, binary rebuilds, or frontend
-modifications.
+Tides, weather, waves, forecast warnings and the upper-air outlook use sandboxed
+WASM provider plugins loaded from disk at startup. Installing a provider for
+another region's government API does not require changes to Helmcentral's code
+or a rebuild of its binary or frontend.
 
 The five registries (`backend/tide_providers.go`,
 `backend/weather_providers.go`, `backend/wave_providers.go`,
@@ -111,7 +109,7 @@ For forecast warnings, it does **none**: it performs no zone matching and no
 filtering between active and cancelled bulletins. Each plugin resolves its own
 zones for a coordinate and returns only bulletins that are currently active.
 
-This design is intentional. BOM's zone taxonomy (named coastal zones derived
+BOM's zone taxonomy (named coastal zones derived
 from state bounding boxes) and NWS's taxonomy (UGC marine zone codes) use
 incompatible namespaces. Determining whether a warning remains active also
 differs: BOM requires parsing free-text sections, whereas NWS provides
@@ -128,10 +126,8 @@ This function is available to all plugin types and is controlled by the same
 `allowed_hosts.json` allowlist used for HTTP. It is the only custom host
 function in the codebase.
 
-This host function exists because BOM distributes warnings exclusively over
-anonymous FTP. The alternative would have been keeping BOM as built-in Go code
-due to its transport requirements. That would have made the Australian source
-an exception to the plugin architecture without a functional justification.
+The host function lets BOM use the same plugin interface as other providers
+despite its FTP requirement, instead of requiring a built-in Go provider.
 
 ## Why tides have no default
 
