@@ -13,15 +13,20 @@ import (
 
 // notificationMessage is one alarm transition, rendered for delivery.
 type notificationMessage struct {
-	Kind    string    `json:"kind"`
-	RuleID  string    `json:"rule_id"`
-	Label   string    `json:"label"`
-	Path    string    `json:"path"`
-	State   string    `json:"state"`
-	Message string    `json:"message"`
-	Value   float64   `json:"value"`
-	Vessel  string    `json:"vessel"`
-	At      time.Time `json:"at"`
+	Kind    string  `json:"kind"`
+	RuleID  string  `json:"rule_id"`
+	Label   string  `json:"label"`
+	Path    string  `json:"path"`
+	State   string  `json:"state"`
+	Message string  `json:"message"`
+	Value   float64 `json:"value"`
+	// Unit is the SI unit of Value, when known -- carried so a transport can
+	// render Value the way an operator reads it (formatAlarmReading,
+	// alarm_units.go) instead of raw SI. Empty for the heartbeat and test
+	// notifications, which have no Value to convert.
+	Unit   string    `json:"unit,omitempty"`
+	Vessel string    `json:"vessel"`
+	At     time.Time `json:"at"`
 }
 
 func (m notificationMessage) title() string {
@@ -187,7 +192,7 @@ func buildAlarmEmail(config smtpConfig, msg notificationMessage) []byte {
 	fmt.Fprintf(&b, "%s\r\n\r\n", msg.Message)
 	fmt.Fprintf(&b, "Path:  %s\r\n", msg.Path)
 	fmt.Fprintf(&b, "State: %s\r\n", msg.State)
-	fmt.Fprintf(&b, "Value: %s\r\n", formatAlarmValue(msg.Value))
+	fmt.Fprintf(&b, "Value: %s\r\n", formatAlarmReading(msg.Value, msg.Unit))
 	fmt.Fprintf(&b, "Time:  %s\r\n", msg.At.UTC().Format(time.RFC3339))
 	return []byte(b.String())
 }
@@ -291,6 +296,7 @@ func notificationFor(event alarmEvent, vessel string, now time.Time) notificatio
 		State:   event.Status.State,
 		Message: event.Status.Message,
 		Value:   event.Status.Value,
+		Unit:    event.Status.Unit,
 		Vessel:  vessel,
 		At:      now,
 	}

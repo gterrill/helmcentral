@@ -380,7 +380,7 @@ func alarmMessageFor(rule alarmRule, sample alarmSample, unit string) string {
 		return fmt.Sprintf("%s: no data for %ds", rule.Label, rule.StaleAfterSeconds)
 	}
 
-	valueText := formatAlarmValueWithUnit(sample.Value, unit)
+	valueText := formatAlarmReading(sample.Value, unit)
 
 	switch rule.Op {
 	case alarmOpBelow, alarmOpAbove:
@@ -390,24 +390,13 @@ func alarmMessageFor(rule alarmRule, sample alarmSample, unit string) string {
 		if rule.Op == alarmOpAbove {
 			direction = "below"
 		}
-		clearText := formatAlarmValueWithUnit(*alarmClearValueFor(rule), unit)
+		clearText := formatAlarmReading(*alarmClearValueFor(rule), unit)
 		return fmt.Sprintf("%s: %s, clears %s %s", rule.Label, valueText, direction, clearText)
 	default: // equal, notEqual
 		// Neither clears at a single crossing point, so there is no clear
 		// clause to add -- just the label and the value that tripped it.
 		return fmt.Sprintf("%s: %s", rule.Label, valueText)
 	}
-}
-
-// formatAlarmValueWithUnit appends a unit when one is known, with no dangling
-// space when it is not -- "-0.03" reads as a bare number, "-0.03 Pa/s" as a
-// measurement, and "-0.03 " would read as neither.
-func formatAlarmValueWithUnit(value float64, unit string) string {
-	formatted := formatAlarmValue(value)
-	if unit == "" {
-		return formatted
-	}
-	return formatted + " " + unit
 }
 
 // formatAlarmValue renders a value the way an operator wants to read it, not

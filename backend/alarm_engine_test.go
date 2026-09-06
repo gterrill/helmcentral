@@ -364,8 +364,11 @@ func TestAlarmStatusOmitsUnsetTimestamps(t *testing.T) {
 }
 
 // alarmMessageFor now carries the live reading and the point at which the
-// alarm lets go, in the path's own unit, because an operator acknowledging an
-// alarm has no other way to learn what "clears" it. Every number still goes
+// alarm lets go, converted into the unit an operator actually reads --
+// mb/hr, degrees C, knots -- rather than raw SI, because an operator
+// acknowledging an alarm has no other way to learn what "clears" it. A unit
+// this engine recognises (alarm_units.go, mirroring the frontend's own
+// table) is converted; an unknown or absent one falls back to a bare number
 // through formatAlarmValue (rounded to two decimal places, no padded ".00").
 func TestAlarmMessageForCarriesLiveValueAndClearPoint(t *testing.T) {
 	cases := []struct {
@@ -376,32 +379,32 @@ func TestAlarmMessageForCarriesLiveValueAndClearPoint(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "below with hysteresis clears above the threshold",
+			name:   "below with hysteresis clears above the threshold, converted to mb/hr",
 			rule:   alarmRule{Label: "Barometer falling", Op: alarmOpBelow, Value: -0.03, Hysteresis: 0.01},
 			sample: alarmSample{Value: -0.05, Present: true},
 			unit:   "Pa/s",
-			want:   "Barometer falling: -0.05 Pa/s, clears above -0.02 Pa/s",
+			want:   "Barometer falling: -1.8 mb/hr, clears above -0.7 mb/hr",
 		},
 		{
-			name:   "above with hysteresis clears below the threshold",
+			name:   "above with hysteresis clears below the threshold, unit not in the table stays a bare number",
 			rule:   alarmRule{Label: "Wind strong", Op: alarmOpAbove, Value: 30, Hysteresis: 2},
 			sample: alarmSample{Value: 35, Present: true},
 			unit:   "kn",
-			want:   "Wind strong: 35 kn, clears below 28 kn",
+			want:   "Wind strong: 35, clears below 28",
 		},
 		{
-			name:   "zero hysteresis clears back at the threshold itself",
+			name:   "zero hysteresis clears back at the threshold itself, converted to mb/hr",
 			rule:   alarmRule{Label: "Barometer falling", Op: alarmOpBelow, Value: -0.03, Hysteresis: 0},
 			sample: alarmSample{Value: -0.05, Present: true},
 			unit:   "Pa/s",
-			want:   "Barometer falling: -0.05 Pa/s, clears above -0.03 Pa/s",
+			want:   "Barometer falling: -1.8 mb/hr, clears above -1.1 mb/hr",
 		},
 		{
-			name:   "the House bank low fixture in its new shape",
+			name:   "the House bank low fixture in its new shape, converted to V",
 			rule:   lowVoltageRule(), // below 11.8, hysteresis 0.3
 			sample: alarmSample{Value: 11.0, Present: true},
 			unit:   "V",
-			want:   "House bank low: 11 V, clears above 12.1 V",
+			want:   "House bank low: 11.0 V, clears above 12.1 V",
 		},
 		{
 			name:   "unknown unit is omitted with no trailing space",
@@ -418,11 +421,11 @@ func TestAlarmMessageForCarriesLiveValueAndClearPoint(t *testing.T) {
 			want:   "Anchor watch: 1",
 		},
 		{
-			name:   "notEqual carries the value and its unit with no clear clause",
+			name:   "notEqual carries the bare value with no clear clause, unit not in the table is dropped",
 			rule:   alarmRule{Label: "Autopilot mode", Op: alarmOpNotEqual, Value: 0},
 			sample: alarmSample{Value: 2, Present: true},
 			unit:   "mode",
-			want:   "Autopilot mode: 2 mode",
+			want:   "Autopilot mode: 2",
 		},
 		{
 			name:   "stale is unchanged by any of this",

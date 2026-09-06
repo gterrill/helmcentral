@@ -167,6 +167,22 @@ func TestBuildAlarmEmailRoundsValueToTwoDecimalPlaces(t *testing.T) {
 	}
 }
 
+// The same Value line converts into the operator's own unit when the message
+// carries one -- a sailor reads mb/hr on their phone, not Pa/s -- matching
+// the dashboard card's own conversion (frontend/src/lib/alarm-display.ts,
+// mirrored here by alarm_units.go's formatAlarmReading).
+func TestBuildAlarmEmailConvertsValueIntoOperatorUnit(t *testing.T) {
+	msg := testMessage()
+	msg.Value = -0.03
+	msg.Unit = "Pa/s"
+
+	body := string(buildAlarmEmail(smtpConfig{From: "boat@example.com"}, msg))
+
+	if !strings.Contains(body, "Value: -1.1 mb/hr\r\n") {
+		t.Fatalf("expected the email body to carry the converted value, got:\n%s", body)
+	}
+}
+
 // SignalK clears a notification by writing null to its path, so a cleared
 // alarm must not leave a stale one latched on the bus.
 func TestSignalKNotifyTransportWritesNullOnClear(t *testing.T) {
