@@ -176,6 +176,38 @@ The dawn figure is built to answer one question: whether to run the generator
 or plug in before dark. It is not a forecast to plan a passage on, and it
 does not attempt to be one.
 
+## Amendment, 2026-09-07: shore power and the generator are excluded by their own signals
+
+The first cut scanned the last seven nights and relied on the net-rise rule
+to drop nights with an external charge source. That week included a marina
+stay. A charger in float holds the state of charge flat rather than raising
+it, so those nights passed the rise check, scored as usable nights with a
+slope near zero, and pulled the median toward zero. Flat is not the same as
+clean.
+
+The model now scans back up to thirty completed nights, most recent first,
+and stops once it has seven usable ones. Before a night's slope is judged it
+is excluded outright if the charger's AC input current
+(`INFLUX_SHORE_MEASUREMENT`, default `electrical.chargers.0.acin.1.current`)
+exceeds 0.5 A at any point in the window, or if the generator state
+(`INFLUX_GENERATOR_MEASUREMENT`, default `electrical.generator.0.stateNumber`)
+is above zero at any point. On this boat the charger's AC input path only
+exists in InfluxDB while shore power is connected, which makes it a clean
+presence signal; the inverter's own AC-in flag did not track the marina stay
+and is not used. The gap rule and the rise rule remain as the backstop for a
+source neither path saw. Each path is read once across the whole lookback and
+sliced per night in Go, so the cost is three range queries, not one per night.
+
+A misnamed shore or generator path yields no points and therefore no
+exclusions, silently. That is why the response and the recompute log carry
+the counts (nights scanned, used, and excluded for shore, generator, gaps and
+rise, plus the oldest night reached): an operator who sees zero shore
+exclusions across a week in a marina knows the path is wrong.
+
+The same reasoning applies to tonight. While the charger reports AC input the
+tile does not project a discharge to dawn at all; the Dawn line reads "on
+shore power" instead of a percentage.
+
 ## Follow-ups
 
 The overnight model treats every usable night the same. Weighting it by

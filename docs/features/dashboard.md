@@ -130,8 +130,9 @@ arithmetic yourself. It reads something like:
 `6:08` is tomorrow's sunrise. `51%` is the projected state of charge at that
 time. `4 nights` means the figure is built from your boat's own recent
 overnight discharge: it takes the typical (median) rate the bank has actually
-drawn down over the last four clean nights it has data for, and applies that
-rate to tonight, after first running the current rate forward to sunset.
+drawn down over the most recent clean nights it can find, up to seven,
+looking back as far as thirty nights, and applies that rate to tonight, after
+first running the current rate forward to sunset.
 
 When there isn't yet enough history for that, the same spot instead reads:
 
@@ -147,10 +148,16 @@ night's rate.
 
 The tile switches from "at current rate" to a night count on its own, with
 nothing for you to configure, once your boat has at least two clean nights of
-state-of-charge history in InfluxDB. A "clean" night is one where the bank
-discharged (no generator or shore power ran) and reported enough samples to
-trust the slope; a generator night or a gappy night is skipped rather than
-averaged in.
+state-of-charge history in InfluxDB. A "clean" night is one with no shore
+power on the charger and no generator run at any point between sunset and
+sunrise, judged from those two signals directly, and with enough samples to
+trust the slope. A night in a marina, a generator night or a gappy night is
+skipped rather than averaged in, and a night where the bank somehow rose is
+skipped too. Hovering the figure shows how many nights were skipped and why.
+
+While the charger is on shore power tonight, the line reads `Dawn 6:08 · on
+shore power` instead of a percentage: the bank is being held, and projecting
+a discharge would be wrong in the same way the skipped marina nights were.
 
 If the boat's position is not known, no sunrise can be computed and the Dawn
 segment is left out altogether. If the feed has gone stale, or the live-rate
