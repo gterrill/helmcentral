@@ -22,6 +22,8 @@ Steps for specific tasks.
 
 - [Installing Helmcentral](how-to/install.md), including Docker and manual binaries.
 - [Upgrading across a breaking release](how-to/upgrading.md)
+- [Reorder dashboard pages](how-to/reorder-dashboard-pages.md)
+- [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
 - [Development](how-to/development.md), running the stack, tests and release builds.
 
 ## Reference

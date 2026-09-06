@@ -94,6 +94,73 @@ A tile showing `—` with no `STALE` marker means something different: that path
 is not being published at all. Check that the source exists in SignalK before
 looking for a dead link.
 
+## Battery & Power
+
+Four cards: State, Net, Solar and Loads, plus a Shore line that only appears
+when the shore charger has something to report.
+
+**State** is the big number: state of charge, with a bar underneath and a
+line to its right reading "To full", "To 20%" or "To empty" depending on
+whether the bank is charging, discharging above a threshold you've set, or
+discharging with no threshold set. The number and the bar turn amber, then
+red, only when the reading crosses a band you have configured as a battery
+alarm rule (see [Set the battery state-of-charge
+bands](../how-to/set-battery-state-of-charge-bands.md)). With no rule
+configured, this number stays plain amber at any state of charge, because
+there is no threshold yet for it to have crossed.
+
+**Net**, **Solar** and the rate under State are teal: energy moving into or
+out of the bank. **Loads** is plain text, because it is what the bank is
+feeding, not a state of the bank itself.
+
+**Shore** shows the charger's mode and AC input current once the charger
+reports anything at all. At anchor with no shore power connected, this line
+is absent rather than showing blank fields. If the charger reports an error,
+that error always shows, in red, even if nothing else about the charger has
+reported yet.
+
+### The Dawn figure
+
+The footer's right side projects the state of charge at sunrise, so you can
+tell at a glance whether the bank will hold until morning without doing the
+arithmetic yourself. It reads something like:
+
+`Dawn 6:08 · 51% · 4 nights`
+
+`6:08` is tomorrow's sunrise. `51%` is the projected state of charge at that
+time. `4 nights` means the figure is built from your boat's own recent
+overnight discharge: it takes the typical (median) rate the bank has actually
+drawn down over the last four clean nights it has data for, and applies that
+rate to tonight, after first running the current rate forward to sunset.
+
+When there isn't yet enough history for that, the same spot instead reads:
+
+`Dawn 6:08 · 61% · at current rate`
+
+This holds the rate the bank is drawing (or charging) right now all the way
+through to sunrise. Read that literally: in the early afternoon, with the
+panels putting power in, "at current rate" can read as high as 100%, because
+it is projecting an afternoon charging rate across hours you will actually
+spend discharging overnight. It becomes an accurate night estimate on its
+own once the sun goes down, because at that point the current rate *is* the
+night's rate.
+
+The tile switches from "at current rate" to a night count on its own, with
+nothing for you to configure, once your boat has at least two clean nights of
+state-of-charge history in InfluxDB. A "clean" night is one where the bank
+discharged (no generator or shore power ran) and reported enough samples to
+trust the slope; a generator night or a gappy night is skipped rather than
+averaged in.
+
+If the boat's position is not known, no sunrise can be computed and the Dawn
+segment is left out altogether. If the feed has gone stale, or the live-rate
+fallback has been switched off and there is not enough history, it reads a
+dash. On a screen with a mouse, hovering the figure shows the reason.
+
+The estimate itself also follows the alarm bands: if the projected percentage
+falls into a band you've set, it takes that band's colour, which is your cue
+to run the generator or plug in before dark rather than finding out at 3 AM.
+
 ## Beyond the grid
 
 ### Anchor watch and the rode planner
