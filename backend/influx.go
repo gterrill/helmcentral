@@ -163,6 +163,63 @@ func queryInfluxPathTrend(path, window string) ([]telemetryPoint, error) {
 	return points, nil
 }
 
+// queryInfluxPathRange reads any SignalK path's history over an explicit
+// [start, stop] range rather than a relative "last N" window, aggregated to
+// every-sized buckets. Modelled on queryInfluxSolarEnergyKWhRange's RFC3339
+// range query, generalised to an arbitrary measurement the way
+// queryInfluxPathTrend generalised queryInfluxDepthTrend.
+//
+// The overnight model (electrical_overnight.go) needs an explicit
+// sunset-to-sunrise range per night, which telemetryHistoryHandler's
+// relative "-1h"/"-24h" style window can't express.
+//
+// every is interpolated into the Flux query unquoted, same as the other
+// aggregateWindow call sites in this file - safe here because every only
+// ever comes from a fixed duration literal chosen by this backend
+// (overnightQueryEvery), never from an HTTP request. If a future caller
+// needs to take every from a request, it needs the same allowlist
+// telemetryHistoryWindows gives window.
+//
+// Like queryInfluxPathTrend, this returns an error rather than nil so the
+// caller can tell "no discharge happened" apart from "couldn't ask".
+func queryInfluxPathRange(path string, start, stop time.Time, every string) ([]telemetryPoint, error) {
+	client, org, bucket, ok := newInfluxClient()
+	if !ok {
+		return nil, fmt.Errorf("influxdb is not configured")
+	}
+	defer client.Close()
+
+	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+
+	flux := fmt.Sprintf(
+		`from(bucket: %q) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> aggregateWindow(every: %s, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucket, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), path, field, every,
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	result, err := client.QueryAPI(org).Query(ctx, flux)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	var points []telemetryPoint
+	for result.Next() {
+		rec := result.Record()
+		v, ok := rec.Value().(float64)
+		if !ok {
+			continue
+		}
+		points = append(points, telemetryPoint{Timestamp: rec.Time(), Value: v})
+	}
+	if result.Err() != nil {
+		return nil, result.Err()
+	}
+	return points, nil
+}
+
 // influxTrendResolution keeps a long window from returning thousands of points
 // for a sparkline a few hundred pixels wide.
 func influxTrendResolution(window string) string {

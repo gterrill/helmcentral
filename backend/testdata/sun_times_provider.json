@@ -1,0 +1,28 @@
+{
+ "captured_at": "2026-09-07",
+ "latitude": -20.109054166666667,
+ "longitude": 148.8943935,
+ "timezone": "Australia/Brisbane",
+ "days": [
+  {
+   "date": "Sep 7",
+   "sunrise_time": "6:08AM",
+   "sunset_time": "5:57PM"
+  },
+  {
+   "date": "Sep 8",
+   "sunrise_time": "6:07AM",
+   "sunset_time": "5:57PM"
+  },
+  {
+   "date": "Sep 9",
+   "sunrise_time": "6:06AM",
+   "sunset_time": "5:57PM"
+  },
+  {
+   "date": "Sep 10",
+   "sunrise_time": "6:05AM",
+   "sunset_time": "5:57PM"
+  }
+ ]
+}

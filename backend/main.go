@@ -382,6 +382,12 @@ func main() {
 	// this is cheap to run unconditionally.
 	go startSessionSweeper(streamCtx, sessions, sessionSweepInterval)
 
+	// Battery & Power tile dawn projection (battery-power-tile-pfd-fixes
+	// plan, Phase 4): names which basis the tile falls back to before the
+	// first request ever asks, per the AGENTS.md exception rule for the
+	// linear (live-rate) fallback.
+	logOvernightStartupMode()
+
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("Starting server on %s", addr)
 	if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
@@ -420,6 +426,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/alarms/log", tierRead, alarmLogHandler},
 		{http.MethodGet, "/api/alarm-rules", tierRead, listAlarmRulesHandler},
 		{http.MethodGet, "/api/electrical-state", tierRead, electricalState},
+		{http.MethodGet, "/api/electrical/overnight", tierRead, electricalOvernightHandler},
 		{http.MethodGet, "/api/solar-state", tierRead, solarState},
 		{http.MethodGet, "/api/tanks-state", tierRead, tanksState},
 		{http.MethodGet, "/api/nearby-vessels", tierRead, nearbyVessels},
