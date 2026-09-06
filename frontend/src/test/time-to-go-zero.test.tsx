@@ -215,10 +215,15 @@ describe('Battery tile time to go', () => {
   it('shows an em dash when time to go computes to zero', () => {
     render(<App />)
 
-    const label = screen.getByText('Time Remaining')
-    const card = label.closest('div')
+    // "Time Remaining" no longer exists as its own labelled sub-card: the
+    // direction and the formatted hours now live in the right-aligned block
+    // of the STATE card, so scope through the tile's heading instead.
+    const heading = screen.getByText('Battery & Power')
+    const card = heading.closest('[data-slot="card"]') as HTMLElement
     expect(card).not.toBeNull()
-    expect(within(card as HTMLDivElement).getByText('—')).toBeInTheDocument()
+    const timeBlock = card.querySelector('.text-right') as HTMLElement
+    expect(timeBlock).not.toBeNull()
+    expect(timeBlock).toHaveTextContent('—')
   })
 
   it('shows rounded weeks for very large remaining time', () => {
@@ -226,9 +231,11 @@ describe('Battery tile time to go', () => {
 
     render(<App />)
 
-    const label = screen.getByText('Time Remaining')
-    const card = label.closest('div')
+    const heading = screen.getByText('Battery & Power')
+    const card = heading.closest('[data-slot="card"]') as HTMLElement
     expect(card).not.toBeNull()
-    expect(within(card as HTMLDivElement).getByText('12w')).toBeInTheDocument()
+    const timeBlock = card.querySelector('.text-right') as HTMLElement
+    expect(timeBlock).not.toBeNull()
+    expect(within(timeBlock).getByText('12w')).toBeInTheDocument()
   })
 })

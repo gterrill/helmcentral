@@ -20,32 +20,136 @@ const baseProps = {
   lastUpdateAgeS: 2,
 }
 
-test('renders Charger card with charger telemetry values', () => {
+test('the state-of-charge numeral is the only text-gauge-primary element on the tile', () => {
+  const { container } = render(<BatteryPowerTile {...baseProps} />)
+
+  const gaugePrimary = container.querySelectorAll('.text-gauge-primary')
+  expect(gaugePrimary).toHaveLength(1)
+  expect(gaugePrimary[0]).toHaveTextContent('82')
+})
+
+test('the Loads total reads as plain consumption, not a gauge colour', () => {
+  render(<BatteryPowerTile {...baseProps} acOutputW={222} dc12vPowerW={380} />)
+
+  expect(screen.getByText('602')).toHaveClass('text-foreground')
+})
+
+test('the % after the SoC numeral is a unit suffix, not the readout', () => {
+  render(<BatteryPowerTile {...baseProps} />)
+
+  const percent = screen.getByText('%')
+  expect(percent).toHaveClass('font-display')
+  expect(percent).toHaveClass('text-muted-foreground')
+})
+
+test('no text-[11px] element is also a shouting uppercase label', () => {
+  // The micro-typography scale reserves text-[11px] for sub-readouts and
+  // text-[10px] for uppercase labels; the two must never mix on one element.
+  const { container } = render(<BatteryPowerTile {...baseProps} />)
+
+  const elevenPx = Array.from(container.querySelectorAll('*')).filter((el) =>
+    el.classList.contains('text-[11px]'),
+  )
+  expect(elevenPx.length).toBeGreaterThan(0)
+  for (const el of elevenPx) {
+    expect(el.classList.contains('uppercase')).toBe(false)
+  }
+})
+
+test('renders four sub-cards at anchor with no charger reporting', () => {
+  const { container } = render(<BatteryPowerTile {...baseProps} />)
+
+  expect(container.querySelectorAll('.rounded-md.border')).toHaveLength(4)
+})
+
+test('renders a fifth sub-card once a charger reports', () => {
+  const { container } = render(
+    <BatteryPowerTile {...baseProps} charger0ChargingMode="bulk" charger0AcIn1CurrentA={10.8} />,
+  )
+
+  expect(container.querySelectorAll('.rounded-md.border')).toHaveLength(5)
+})
+
+test('labels reflect the recomposed layout: Net, Solar and Loads', () => {
+  render(<BatteryPowerTile {...baseProps} />)
+
+  expect(screen.getByText('Net')).toBeInTheDocument()
+  expect(screen.getByText('Solar')).toBeInTheDocument()
+  expect(screen.getByText('Loads')).toBeInTheDocument()
+})
+
+test('the old per-field labels are gone', () => {
   render(
     <BatteryPowerTile
       {...baseProps}
-      charger0CurrentA={23.4}
-      charger0AcIn1CurrentA={10.8}
       charger0ChargingMode="bulk"
-      charger0Error="none"
+      charger0AcIn1CurrentA={10.8}
+      charger0Error="overtemp"
     />,
   )
 
-  expect(screen.getByText('Charger')).toBeInTheDocument()
-  expect(screen.getByText('23.4')).toBeInTheDocument()
-  expect(screen.getByText('10.8')).toBeInTheDocument()
-  expect(screen.getByText('Mode:')).toBeInTheDocument()
-  expect(screen.getByText('bulk')).toBeInTheDocument()
-  expect(screen.getByText('Error:')).toBeInTheDocument()
-  expect(screen.getByText('none')).toBeInTheDocument()
+  for (const gone of ['Battery', 'AC Draw', 'DC Draw', 'Charger', 'Time Remaining', 'Charge Rate', 'Mode:', 'Error:']) {
+    expect(screen.queryByText(gone)).not.toBeInTheDocument()
+  }
 })
 
-test('renders Charger fallbacks when charger fields are unavailable', () => {
+test('a positive rate reads "To full" with the signed hours spelled out', () => {
+  render(<BatteryPowerTile {...baseProps} batteryRatePercentPerHour={1.1} timeToGoHours={6.5} />)
+
+  expect(screen.getByText('To full')).toBeInTheDocument()
+  expect(screen.getByText('6h 30m')).toBeInTheDocument()
+})
+
+test('a negative rate reads "To empty" with the signed hours spelled out', () => {
+  render(<BatteryPowerTile {...baseProps} batteryRatePercentPerHour={-1.4} timeToGoHours={-3.2} />)
+
+  expect(screen.getByText('To empty')).toBeInTheDocument()
+  expect(screen.getByText('3h 12m')).toBeInTheDocument()
+})
+
+test('Loads totals AC and DC draw into one figure', () => {
+  render(<BatteryPowerTile {...baseProps} acOutputW={222} dc12vPowerW={380} />)
+
+  expect(screen.getByText('602')).toBeInTheDocument()
+  expect(screen.getByText('AC 222 · DC 380')).toBeInTheDocument()
+})
+
+test('a missing load component blanks the total rather than showing a partial sum', () => {
+  render(<BatteryPowerTile {...baseProps} acOutputW={222} dc12vPowerW={null} />)
+
+  const dash = screen.getByText('—')
+  expect(dash).toHaveClass('text-foreground')
+  expect(screen.getByText('AC 222 · DC —')).toBeInTheDocument()
+})
+
+test('no Shore line when the charger has reported nothing', () => {
   render(<BatteryPowerTile {...baseProps} />)
 
-  expect(screen.getByText('Charger')).toBeInTheDocument()
-  expect(screen.getByText('Mode:')).toBeInTheDocument()
-  expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  expect(screen.queryByText('Shore')).not.toBeInTheDocument()
+})
+
+test('Shore line reports the mode and AC-in current once a charger reports', () => {
+  render(<BatteryPowerTile {...baseProps} charger0ChargingMode="bulk" charger0AcIn1CurrentA={10.8} />)
+
+  expect(screen.getByText('Shore')).toBeInTheDocument()
+  expect(screen.getByText(/bulk/)).toBeInTheDocument()
+  expect(screen.getByText(/10\.8/)).toBeInTheDocument()
+})
+
+test('a charger error replaces the mode word and renders even with everything else unknown', () => {
+  const { container } = render(
+    <BatteryPowerTile
+      {...baseProps}
+      charger0CurrentA={null}
+      charger0AcIn1CurrentA={null}
+      charger0ChargingMode={null}
+      charger0Error="overtemp"
+    />,
+  )
+
+  const errorEl = container.querySelector('.text-red-600')
+  expect(errorEl).not.toBeNull()
+  expect(errorEl).toHaveTextContent('overtemp')
 })
 
 test('flags a stale feed instead of presenting its last readings as current', () => {

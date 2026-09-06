@@ -1,4 +1,3 @@
-import { BatteryCharging, BatteryFull, BatteryLow, BatteryMedium, BatteryWarning } from 'lucide-react'
 import { memo } from 'react'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
@@ -70,7 +69,7 @@ function formatTimeToGo(hours: number | null) {
  * Every reading blanked. When the feed is stale the values below are
  * historical artefacts, and routing them through this instead of the live
  * props reuses the existing "no value" formatting rather than repeating a
- * stale branch at each of the fifteen labels.
+ * stale branch at each of the readouts.
  */
 const NO_READINGS = {
   batterySocPercent: null,
@@ -105,159 +104,149 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     batteryRatePercentPerHour,
     timeToGoHours,
   } = feedStale ? NO_READINGS : props
+
   const socLabel = batterySocPercent !== null ? Math.round(batterySocPercent).toString() : '—'
   const socBarWidth = `${Math.max(0, Math.min(100, batterySocPercent ?? 0))}%`
+
   const chargingCurrentLabel = chargingCurrentA !== null
     ? `${chargingCurrentA >= 0 ? '+' : '-'}${Math.abs(chargingCurrentA).toFixed(1)}`
     : '—'
   const chargingPowerLabel = chargingPowerW !== null
     ? `${chargingPowerW >= 0 ? '+' : '-'}${Math.abs(Math.round(chargingPowerW))}`
     : '—'
-  const isDischarging = (chargingCurrentA !== null && chargingCurrentA < 0) || (chargingPowerW !== null && chargingPowerW < 0)
   // Discharging at anchor is the ordinary state, not a fault: text-amber-600
   // is the alert palette and belongs to actual alert thresholds (a charger
   // error, an over-temp alternator), not to a battery quietly running the
-  // fridge. Both directions read as the same readout token; the leading
-  // +/- sign already carries which way the current is flowing.
-  const chargingValueClass = 'text-gauge-secondary'
+  // fridge. Net, the rate and time-to-go all read as the same teal readout
+  // token regardless of direction; the sign on the number and the "To
+  // full"/"To empty" label already carry which way the current is flowing.
+  const readoutClass = 'text-gauge-secondary'
+
   const solarOutputLabel = solarOutputW !== null ? Math.round(solarOutputW).toString() : '—'
   const acOutputLabel = acOutputW !== null ? Math.round(acOutputW).toString() : '—'
   const dc12vPowerLabel = dc12vPowerW !== null ? Math.round(dc12vPowerW).toString() : '—'
+  // A missing load component makes the total unknown, not a partial sum:
+  // reporting the AC draw alone as "the total" when the DC channel hasn't
+  // reported would understate what the bank is actually feeding.
+  const loadsTotalLabel = acOutputW !== null && dc12vPowerW !== null
+    ? Math.round(acOutputW + dc12vPowerW).toString()
+    : '—'
+
   const dc24vVoltageLabel = dc24vVoltageV !== null ? dc24vVoltageV.toFixed(2) : '—'
-  const charger0CurrentLabel = typeof charger0CurrentA === 'number' ? charger0CurrentA.toFixed(1) : '—'
-  const charger0AcIn1CurrentLabel = typeof charger0AcIn1CurrentA === 'number' ? charger0AcIn1CurrentA.toFixed(1) : '—'
-  const charger0ChargingModeLabel = typeof charger0ChargingMode === 'string' && charger0ChargingMode.length > 0 ? charger0ChargingMode : '—'
-  const charger0ErrorLabel = typeof charger0Error === 'string' && charger0Error.length > 0 ? charger0Error : '—'
-  const charger0ErrorClass = hasChargerError(charger0Error) ? 'text-red-500' : 'text-muted-foreground'
   const chargeRateLabel = batteryRatePercentPerHour !== null
     ? `${batteryRatePercentPerHour >= 0 ? '+' : ''}${batteryRatePercentPerHour.toFixed(1)}`
     : '—'
-  // Same reasoning as chargingValueClass above: a falling rate or a
-  // counting-down time-to-go is what discharging looks like, not an alert.
-  const chargeRateClass = 'text-gauge-secondary'
-  const timeToGoLabel = formatTimeToGo(timeToGoHours)
-  const timeToGoClass = 'text-gauge-secondary'
 
-  let TimeToGoIcon = BatteryFull
-  if (!isDischarging && batteryRatePercentPerHour !== null && batteryRatePercentPerHour > 0) {
-    TimeToGoIcon = BatteryCharging
-  } else {
-    const soc = batterySocPercent ?? 0
-    if (soc <= 20) TimeToGoIcon = BatteryWarning
-    else if (soc <= 33) TimeToGoIcon = BatteryLow
-    else if (soc <= 66) TimeToGoIcon = BatteryMedium
-    else TimeToGoIcon = BatteryFull
-  }
+  const timeToGoValue = formatTimeToGo(timeToGoHours !== null ? Math.abs(timeToGoHours) : null)
+  // Direction now lives in the label rather than a battery glyph. The rate's
+  // sign decides it; when the rate hasn't reported but a signed time-to-go
+  // has, fall back to that, since use-electrical-state.ts already signs it
+  // the same way (positive hours to full, negative hours to empty). With no
+  // value to show, the label reads "—" too rather than guessing a direction.
+  const timeToGoIsToFull = batteryRatePercentPerHour !== null
+    ? batteryRatePercentPerHour > 0
+    : timeToGoHours !== null && timeToGoHours > 0
+  const timeToGoLabel = timeToGoValue === '—' ? '—' : (timeToGoIsToFull ? 'To full' : 'To empty')
+
+  // The charger becomes one status line rather than four separate fields:
+  // shown when any of them has reported, so an error surfaces even if the
+  // current channel hasn't, and gone entirely at anchor with no shore power.
+  const shoreHasError = hasChargerError(charger0Error)
+  const shoreModeText = shoreHasError
+    ? charger0Error
+    : (typeof charger0ChargingMode === 'string' && charger0ChargingMode.length > 0 ? charger0ChargingMode : null)
+  const shoreAcInText = charger0AcIn1CurrentA !== null ? `${charger0AcIn1CurrentA.toFixed(1)} A` : null
+  const shoreVisible = charger0CurrentA !== null
+    || charger0AcIn1CurrentA !== null
+    || charger0ChargingMode !== null
+    || charger0Error !== null
 
   return (
     <Tile title="Battery & Power" stale={feedStale} staleLabel={formatDataAge(props.lastUpdateAgeS)}>
-      <div className="mt-1 grid grid-cols-2 gap-2">
-        <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
-          <div className="flex items-baseline gap-2">
-            {/* `md` used to mean "more room" and stepped this up. With the narrow
-                dashboard it means the opposite — two columns *and* a fixed sidebar —
-                so the step-up now waits for `lg`, where the RGL grid takes over. */}
-            <span className="font-display text-6xl leading-none tabular-nums text-gauge-primary md:text-5xl lg:text-7xl">{socLabel}</span>
-            <span className="shrink-0 text-2xl leading-none text-foreground md:text-xl lg:text-3xl">%</span>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <div className="h-1.5 flex-1 rounded-full bg-muted/60">
-              <div className="h-full rounded-full bg-gauge-primary" style={{ width: socBarWidth }} />
+      <div className="mt-1 space-y-2">
+        <div className="rounded-md border bg-background/60 px-3 py-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex min-w-0 items-baseline gap-1">
+              <span className="font-display text-6xl leading-none tabular-nums text-gauge-primary md:text-5xl lg:text-7xl">
+                {socLabel}
+              </span>
+              <span className="shrink-0 font-display text-2xl leading-none text-muted-foreground md:text-xl lg:text-2xl">
+                %
+              </span>
             </div>
-            <span className="shrink-0 font-display text-sm tabular-nums leading-none text-gauge-secondary">
-              {dc24vVoltageLabel}<span className="text-xs text-muted-foreground">V</span>
+            <div className="min-w-0 shrink-0 text-right">
+              <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                {timeToGoLabel}
+              </p>
+              <p className={`mt-1 truncate font-display text-2xl leading-none tabular-nums md:text-xl lg:text-3xl ${readoutClass}`}>
+                {timeToGoValue}
+              </p>
+            </div>
+          </div>
+          <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-muted/60">
+            <div className="h-full rounded-full bg-gauge-primary" style={{ width: socBarWidth }} />
+          </div>
+          <div className="mt-2 flex items-center justify-between font-display text-[11px] tabular-nums text-muted-foreground">
+            <span className="truncate">
+              {dc24vVoltageLabel}
+              <span className="font-display text-muted-foreground">V</span>
+              {' · '}
+              <span className={readoutClass}>{chargeRateLabel}</span>
+              <span className="ml-1 font-display text-muted-foreground">%/h</span>
+            </span>
+            <span />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Net</p>
+            <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl lg:text-4xl ${readoutClass}`}>
+              {chargingPowerLabel}
+              <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
+            </p>
+            <p className="mt-1 truncate font-display text-[11px] tabular-nums text-muted-foreground">
+              <span className={readoutClass}>{chargingCurrentLabel}</span>
+              <span className="ml-1 font-display text-muted-foreground">A</span>
+            </p>
+          </div>
+          <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
+            <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl lg:text-4xl ${readoutClass}`}>
+              {solarOutputLabel}
+              <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Loads</p>
+          <p className="mt-1 truncate font-display text-4xl leading-none tabular-nums text-foreground md:text-xl lg:text-4xl">
+            {loadsTotalLabel}
+            <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
+          </p>
+          <p className="mt-1 truncate font-display text-[11px] tabular-nums text-muted-foreground">
+            {`AC ${acOutputLabel} · DC ${dc12vPowerLabel}`}
+          </p>
+        </div>
+
+        {shoreVisible && (
+          <div className="flex items-center justify-between gap-2 rounded-md border bg-background/60 px-3 py-2">
+            <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Shore</span>
+            <span className="min-w-0 truncate font-display text-sm tabular-nums text-foreground">
+              {shoreModeText === null && shoreAcInText === null ? (
+                '—'
+              ) : shoreHasError ? (
+                <>
+                  <span className="text-red-600">{shoreModeText}</span>
+                  {shoreAcInText !== null ? ` · ${shoreAcInText}` : null}
+                </>
+              ) : (
+                [shoreModeText, shoreAcInText].filter((part): part is string => part !== null).join(' · ')
+              )}
             </span>
           </div>
-        </div>
-        <div className="min-w-0 rounded-md border bg-background/60 px-3 py-3">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Battery</p>
-          {/* Steps down between `md` and `lg`. That band is the tightest the tile ever
-              gets: the narrow dashboard is two columns from `sm` up, but from `md` the
-              sidebar is a fixed rail rather than an overlay sheet, so it takes ~256px
-              off the content width — leaving this sub-card ~110px, where a `text-3xl`
-              signed value with its unit suffix spills past the border. */}
-          <p className={`font-display text-3xl leading-none md:text-2xl lg:text-3xl ${chargingValueClass}`}>
-            {chargingCurrentLabel}
-            <span className="ml-1 text-xl text-muted-foreground md:text-base lg:text-xl">A</span>
-          </p>
-          <p className={`mt-1 font-display text-3xl leading-none md:text-2xl lg:text-3xl ${chargingValueClass}`}>
-            {chargingPowerLabel}
-            <span className="ml-1 text-xl text-muted-foreground md:text-base lg:text-xl">W</span>
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-        <div className="rounded-md border bg-background/60 px-3 py-2">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">AC Draw</p>
-          <p className="font-display text-4xl leading-none text-gauge-primary">
-            {acOutputLabel}
-            <span className="ml-1 text-xl text-muted-foreground">W</span>
-          </p>
-        </div>
-        <div className="rounded-md border bg-background/60 px-3 py-2">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">DC Draw</p>
-          <p className="font-display text-4xl leading-none text-gauge-primary">
-            {dc12vPowerLabel}
-            <span className="ml-1 text-xl text-muted-foreground">W</span>
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
-        <p className="font-display text-4xl leading-none text-gauge-secondary">
-          {solarOutputLabel}
-          <span className="ml-1 text-xl text-muted-foreground">W</span>
-        </p>
-      </div>
-
-      <div className="mt-2 rounded-md border bg-background/60 px-3 py-2">
-        <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charger</p>
-        <div className="mt-1 grid grid-cols-2 gap-2">
-          <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">AC In</p>
-            <p className="font-display text-2xl leading-none text-gauge-primary tabular-nums">
-              {charger0AcIn1CurrentLabel}
-              <span className="ml-1 text-base text-muted-foreground">A</span>
-            </p>
-            <p className={`mt-2 truncate text-[10px] uppercase tracking-[0.16em] ${charger0ErrorClass}`}>
-              Error: <span className="text-foreground">{charger0ErrorLabel}</span>
-            </p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Output</p>
-            <p className="font-display text-2xl leading-none text-gauge-secondary tabular-nums">
-              {charger0CurrentLabel}
-              <span className="ml-1 text-base text-muted-foreground">A</span>
-            </p>
-            <p className="mt-2 truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              Mode: <span className="text-foreground">{charger0ChargingModeLabel}</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <div className="rounded-md border bg-background/60 px-3 py-2">
-          <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-            Time Remaining
-            {timeToGoLabel !== '—' && <TimeToGoIcon className="h-3 w-3" />}
-          </p>
-          <p className={`mt-1 font-display text-3xl leading-none ${timeToGoClass}`}>
-            {timeToGoLabel}
-          </p>
-        </div>
-        <div className="rounded-md border bg-background/60 px-3 py-2">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Charge Rate</p>
-          {/* Same md–lg squeeze as the Battery sub-card above. */}
-          <p className={`mt-1 font-display text-3xl leading-none md:text-2xl lg:text-3xl ${chargeRateClass}`}>
-            {chargeRateLabel}
-            {/* Four glyphs rather than one, so this suffix steps down further than the
-                A/W ones to keep the pair inside an ~86px sub-card. */}
-            <span className="ml-1 text-xl text-muted-foreground md:text-xs lg:text-xl">%/hr</span>
-          </p>
-        </div>
+        )}
       </div>
     </Tile>
   )
