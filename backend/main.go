@@ -70,19 +70,19 @@ type vesselStateData struct {
 	// its quality/HDOP/satellite-count figures are published under two
 	// different parents, and either one still updating means the fix is
 	// current. -1 when neither subtree carries a timestamp.
-	PositionLastUpdateAge       float64
-	GNSSQualityIndicator        int
-	GNSSHDOP                    float64
-	GNSSSatellites               int
-	GNSSValidationState         string
-	GNSSValidationReason        string
-	GNSSCriticalAlert           bool
-	HeadingTrue                 float64
-	SpeedOverGroundKts          float64
-	WindSpeedApparentKts        float64
-	WindAngleApparentDeg        float64
-	WindSide                    string
-	WindAngleRelativeDeg        float64
+	PositionLastUpdateAge float64
+	GNSSQualityIndicator  int
+	GNSSHDOP              float64
+	GNSSSatellites        int
+	GNSSValidationState   string
+	GNSSValidationReason  string
+	GNSSCriticalAlert     bool
+	HeadingTrue           float64
+	SpeedOverGroundKts    float64
+	WindSpeedApparentKts  float64
+	WindAngleApparentDeg  float64
+	WindSide              string
+	WindAngleRelativeDeg  float64
 	// WindLastUpdateAge is the freshest last_update_age_s found anywhere
 	// under environment.wind (ADR 0068), scoped to that subtree only —
 	// environment.current is a different sensor with its own health and
