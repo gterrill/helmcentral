@@ -317,7 +317,7 @@ export function App() {
     activate: activateRoute,
     deactivate: deactivateRoute,
   } = useRouteActivation()
-  const { pages, loading: pagesLoading, error: pagesError, createPage, updatePage, deletePage } = useDashboardPages()
+  const { pages, loading: pagesLoading, error: pagesError, createPage, updatePage, deletePage, reorderPages, reordering } = useDashboardPages()
   const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId)
   const activePage = pages.find((p) => p.id === activePageId) ?? null
 
@@ -333,6 +333,7 @@ export function App() {
   // not it actually writes) — see that effect's own comment for why the
   // write path needs to know this.
   const locationInitialisedRef = useRef(false)
+  const previousFirstPageIdRef = useRef<string | null>(null)
 
   // Applies a parsed location to the shell's own state. Separate from
   // requestNavigate's plain `() => setActivePanel(...)` callbacks (every
@@ -371,6 +372,8 @@ export function App() {
     locationInitialisedRef.current = true
 
     const ctx = { firstPageId: pages[0]?.id ?? null, knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
+    const firstPageChanged = previousFirstPageIdRef.current !== ctx.firstPageId
+    previousFirstPageIdRef.current = ctx.firstPageId
     const next = formatAppLocation({ panel: activePanel, pageId: activePageId, section: settingsSection }, ctx)
     const path = window.location.pathname
     if (next === path) return // popstate, or a clean deep link, already put us here
@@ -379,7 +382,7 @@ export function App() {
     // effect didn't itself write — that only ever happens on first load, or
     // when the page list/admin role resolve to something that makes the
     // current bar non-canonical.
-    const replace = first || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
+    const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
   }, [shellVisible, activePanel, activePageId, settingsSection, pages, pagesLoading, canAdmin])
 
@@ -1540,6 +1543,9 @@ export function App() {
               <>
                 <DashboardPageSwitcher
                   pages={pages}
+                  canWrite={canWrite}
+                  onReorder={reorderPages}
+                  reordering={reordering}
                   activePageId={activePageId}
                   onSelect={setActivePageId}
                   onCreate={() => {

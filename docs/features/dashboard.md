@@ -25,6 +25,10 @@ Layouts are named **pages** you switch between, for example "Anchored" and
 restored next session, so a tablet at the helm and a phone in a bunk see the
 same arrangement.
 
+Page order is shared too: the sidebar and page dropdown follow the same saved
+sequence. New pages appear at the end. Moving a page keeps it selected and
+does not change its widgets. See [Reorder dashboard pages](../how-to/reorder-dashboard-pages.md).
+
 The layout adapts to screen size, including phones, with three structurally
 different arrangements.
 
@@ -42,7 +46,7 @@ The address bar tracks the current panel, so you can link directly to it.
 
 | URL | Opens |
 | --- | --- |
-| `/` | The dashboard, first page. |
+| `/` | The dashboard; on initial load, restores this browser's remembered page if available, otherwise the first page. |
 | `/dashboard/<page id>` | The dashboard, that page. |
 | `/forecast` | The forecast drawer. |
 | `/routes` | Route planning. |
@@ -52,6 +56,10 @@ The address bar tracks the current panel, so you can link directly to it.
 | `/alarms` | The alarms panel. |
 | `/settings` | Settings, General section. |
 | `/settings/<section id>` | Settings, that section. |
+
+The first page uses `/` as its canonical address. If reordering changes which
+page is first, the address adjusts without switching the page you are viewing.
+Use `/dashboard/<page id>` to explicitly request a particular page.
 
 Your browser's Back and Forward buttons move between panels the same way they
 move between pages on any other site: open Forecast, then Routes, and Back

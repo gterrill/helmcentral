@@ -1,6 +1,8 @@
-import { useState } from 'react'
-import { ChevronDown, Plus, Pencil, Trash2 } from 'lucide-react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Plus, Pencil, Trash2 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +22,9 @@ interface DashboardPageSwitcherProps {
   onCreate: () => void
   onRename: (id: string, name: string) => void
   onDelete: (id: string) => void
+  onReorder?: (ids: string[]) => Promise<boolean>
+  reordering?: boolean
+  canWrite?: boolean
 }
 
 export function DashboardPageSwitcher({
@@ -29,8 +34,22 @@ export function DashboardPageSwitcher({
   onCreate,
   onRename,
   onDelete,
+  onReorder,
+  reordering = false,
+  canWrite = true,
 }: DashboardPageSwitcherProps) {
   const [open, setOpen] = useState(false)
+  const [reorderMode, setReorderMode] = useState(false)
+  const [orderMessage, setOrderMessage] = useState('')
+  const restoreReorderFocus = useRef(false)
+  const reorderButtonRef = useRef<HTMLButtonElement>(null)
+
+  useLayoutEffect(() => {
+    if (!reorderMode && restoreReorderFocus.current) {
+      restoreReorderFocus.current = false
+      reorderButtonRef.current?.focus()
+    }
+  }, [reorderMode])
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
   // A page holds a whole board of tiles and there is no undo, so the trash
   // icon confirms before it does anything (design critique batch). Named
@@ -94,9 +113,27 @@ export function DashboardPageSwitcher({
     setPendingDelete(null)
   }
 
+  const handleMove = async (index: number, direction: -1 | 1) => {
+    const destination = index + direction
+    if (!canWrite || !onReorder || reordering || destination < 0 || destination >= pages.length) return
+    const ids = pages.map((page) => page.id)
+    ;[ids[index], ids[destination]] = [ids[destination], ids[index]]
+    setOrderMessage('')
+    const saved = await onReorder(ids)
+    setOrderMessage(saved
+      ? `${pages[index].name} moved to position ${destination + 1} of ${pages.length}.`
+      : 'Order not saved. Try again; reload if the page list has changed.')
+  }
+
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={(nextOpen) => {
+        setOpen(nextOpen)
+        if (!nextOpen) {
+          setReorderMode(false)
+          setOrderMessage('')
+        }
+      }}>
         <PopoverTrigger
           className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors border-border bg-background/70 text-muted-foreground hover:border-primary/40 hover:text-primary md:text-[11px]"
           aria-label="Switch dashboard page"
@@ -108,12 +145,47 @@ export function DashboardPageSwitcher({
           <span className="hidden sm:inline">{displayName}</span>
           <ChevronDown className="h-3.5 w-3.5" />
         </PopoverTrigger>
-        <PopoverContent className="w-56 p-1">
+        <PopoverContent className="w-72 max-w-[calc(100vw-1rem)] max-h-[var(--available-height)] overflow-y-auto p-1">
+          {reorderMode && canWrite ? (
+            <div className="flex min-w-0 flex-col gap-1">
+              <div className="flex min-w-0 items-center justify-between gap-2 px-2">
+                <h2 className="truncate text-sm font-semibold">Reorder pages</h2>
+                <Button variant="ghost" size="sm" autoFocus onClick={() => {
+                  restoreReorderFocus.current = true
+                  setReorderMode(false)
+                }}>Done</Button>
+              </div>
+              <p className="px-2 text-xs text-muted-foreground">Changes save automatically for all devices.</p>
+              <ol role="list" aria-label="Dashboard page order" className="flex flex-col">
+                {pages.map((page, index) => (
+                  <li key={page.id} className="flex min-w-0 items-center gap-2 rounded-sm px-2 py-1">
+                    <span className="w-4 shrink-0 text-xs tabular-nums text-muted-foreground" aria-hidden="true">{index + 1}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm">{page.name}</span>
+                    <div className="flex shrink-0 gap-1">
+                      <Button variant="ghost" size="icon" className="data-[disabled]:opacity-50" aria-label={`Move ${page.name} up`}
+                        disabled={reordering || index === 0} focusableWhenDisabled
+                        onClick={() => { void handleMove(index, -1) }}>
+                        <ArrowUp size={16} aria-hidden="true" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="data-[disabled]:opacity-50" aria-label={`Move ${page.name} down`}
+                        disabled={reordering || index === pages.length - 1} focusableWhenDisabled
+                        onClick={() => { void handleMove(index, 1) }}>
+                        <ArrowDown size={16} aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <p role="status" className="min-h-4 px-2 pb-1 text-xs text-muted-foreground">
+                {reordering ? 'Saving order…' : orderMessage}
+              </p>
+            </div>
+          ) : (
           <div className="flex flex-col">
             {pages.map((page) => (
               <div
                 key={page.id}
-                className="flex items-center justify-between rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                className="flex min-w-0 items-center justify-between rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 {editing?.id === page.id ? (
                   <input
@@ -124,22 +196,23 @@ export function DashboardPageSwitcher({
                     onBlur={() => handleEditConfirm(page.id, page.name)}
                     autoFocus
                     onFocus={(e) => e.currentTarget.select()}
-                    className="flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="min-w-0 flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 ) : (
                   <>
                     <button
                       type="button"
                       onClick={() => handleSelectPage(page.id)}
-                      className="flex-1 text-left"
+                      className="min-h-10 min-w-0 flex-1 truncate text-left"
                     >
                       {page.name}
                     </button>
-                    <div className="flex items-center gap-1">
+                    {canWrite && <div className="flex shrink-0 items-center gap-1">
                       <button
                         type="button"
+                        disabled={reordering}
                         onClick={() => handleEditStart(page)}
-                        className="inline-flex items-center rounded p-0.5 hover:bg-accent"
+                        className="inline-flex size-10 items-center justify-center rounded p-0.5 hover:bg-accent"
                         aria-label={`Rename ${page.name}`}
                       >
                         <Pencil className="h-3.5 w-3.5" />
@@ -147,29 +220,43 @@ export function DashboardPageSwitcher({
                       {pages.length > 1 && (
                         <button
                           type="button"
+                          disabled={reordering}
                           onClick={() => setPendingDelete({ id: page.id, name: page.name })}
-                          className="inline-flex items-center rounded p-0.5 hover:bg-accent hover:text-destructive"
+                          className="inline-flex size-10 items-center justify-center rounded p-0.5 hover:bg-accent hover:text-destructive"
                           aria-label={`Delete ${page.name}`}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       )}
-                    </div>
+                    </div>}
                   </>
                 )}
               </div>
             ))}
-            <div className="border-t pt-1 mt-1">
+            {canWrite && <div className="mt-1 flex flex-col gap-1 pt-1">
+              <Separator />
+              {onReorder && pages.length > 1 && (
+                <Button variant="ghost" className="w-full" ref={reorderButtonRef} onClick={() => {
+                  setEditing(null)
+                  setOrderMessage('')
+                  setReorderMode(true)
+                }}>
+                  <ArrowUpDown size={16} data-icon="inline-start" aria-hidden="true" />
+                  Reorder pages
+                </Button>
+              )}
               <button
                 type="button"
                 onClick={handleCreatePage}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-sm px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                disabled={reordering}
+                className="inline-flex min-h-10 w-full items-center justify-center gap-1 rounded-sm px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
               >
                 <Plus className="h-3.5 w-3.5" />
                 New Page
               </button>
-            </div>
+            </div>}
           </div>
+          )}
         </PopoverContent>
       </Popover>
 

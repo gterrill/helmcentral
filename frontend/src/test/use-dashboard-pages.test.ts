@@ -6,6 +6,89 @@ import { useDashboardPages } from '@/hooks/use-dashboard-pages'
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
 describe('useDashboardPages', () => {
+  const orderedPages = ['Anchored', 'Underway', 'Docked'].map((name, index) => ({
+    id: String(index), name, widgets: [], created_at: '', updated_at: '',
+  }))
+
+  it('saves the complete order and uses the server response without refetching', async () => {
+    const reordered = [orderedPages[0], orderedPages[2], orderedPages[1]]
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: orderedPages }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: reordered }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => {
+      expect(await result.current.reorderPages(['0', '2', '1'])).toBe(true)
+    })
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages/order', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page_ids: ['0', '2', '1'] }),
+    })
+    expect(result.current.pages).toEqual(reordered)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.current.reordering).toBe(false)
+  })
+
+  it.each(['server', 'network', 'invalid response'])('retains the saved order and surfaces %s failures without blanking the dashboard', async (failure) => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ pages: orderedPages }) })
+    if (failure === 'network') fetchMock.mockRejectedValueOnce(new Error('Offline'))
+    else if (failure === 'server') fetchMock.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: 'Reload the page list' }) })
+    else fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => {
+      expect(await result.current.reorderPages(['0', '2', '1'])).toBe(false)
+    })
+    expect(result.current.pages).toEqual(orderedPages)
+    expect(result.current.error).toBeNull()
+    expect(result.current.reordering).toBe(false)
+    expect(toast.error).toHaveBeenCalledWith('Could not reorder pages', expect.objectContaining({ description: expect.any(String) }))
+  })
+
+  it('blocks overlapping reorder requests and leaves the list unchanged while saving', async () => {
+    let finish!: (value: unknown) => void
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: orderedPages }) })
+      .mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let pending!: Promise<boolean>
+    act(() => { pending = result.current.reorderPages(['0', '2', '1']) })
+    expect(result.current.reordering).toBe(true)
+    expect(result.current.pages).toEqual(orderedPages)
+    await act(async () => { expect(await result.current.reorderPages(['2', '0', '1'])).toBe(false) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      finish({ ok: true, json: async () => ({ pages: [orderedPages[0], orderedPages[2], orderedPages[1]] }) })
+      await pending
+    })
+    expect(result.current.reordering).toBe(false)
+  })
+
+  it('does not overwrite a newer page edit with a delayed reorder response', async () => {
+    let finish!: (value: unknown) => void
+    const edited = { ...orderedPages[0], name: 'Updated Anchored' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: orderedPages }) })
+      .mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+      .mockResolvedValueOnce({ ok: true, json: async () => edited })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let pending!: Promise<boolean>
+    act(() => { pending = result.current.reorderPages(['0', '2', '1']) })
+    await act(async () => { await result.current.updatePage('0', { name: edited.name }) })
+    await act(async () => {
+      finish({ ok: true, json: async () => ({ pages: [orderedPages[0], orderedPages[2], orderedPages[1]] }) })
+      await pending
+    })
+    expect(result.current.pages[0].name).toBe(edited.name)
+    expect(result.current.pages.map((page) => page.id)).toEqual(['0', '2', '1'])
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })

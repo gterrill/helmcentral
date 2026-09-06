@@ -1,9 +1,80 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 
 describe('DashboardPageSwitcher', () => {
+  const reorderProps = {
+    onSelect: vi.fn(), onCreate: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+    onReorder: vi.fn().mockResolvedValue(true), canWrite: true, reordering: false,
+  }
+
+  it('moves pages without selecting them, disables boundaries, and retains focus after moving', async () => {
+    const onSelect = vi.fn()
+    const onReorder = vi.fn().mockResolvedValue(true)
+    const { rerender } = render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} onReorder={onReorder} onSelect={onSelect} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reorder pages' })) })
+    expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus()
+    expect(screen.getByLabelText('Move Page A up')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByLabelText('Move Page B down')).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(screen.getByLabelText('Move Page A up'))
+    expect(onReorder).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('Rename Page A')).not.toBeInTheDocument()
+    const move = screen.getByLabelText('Move Page B up')
+    await act(async () => { move.focus(); fireEvent.click(move) })
+    expect(onReorder).toHaveBeenCalledWith(['p2', 'p1'])
+    expect(onSelect).not.toHaveBeenCalled()
+    rerender(<DashboardPageSwitcher pages={[mockPages[1], mockPages[0]]} activePageId="p1" {...reorderProps} onReorder={onReorder} onSelect={onSelect} />)
+    expect(within(screen.getByRole('list', { name: 'Dashboard page order' })).getAllByRole('listitem')[0]).toHaveTextContent('Page B')
+    expect(screen.getByLabelText('Switch dashboard page')).toHaveTextContent('Page A')
+    expect(screen.getByLabelText('Move Page B up')).toHaveFocus()
+    await act(async () => { fireEvent.click(screen.getByLabelText('Move Page B down')) })
+    expect(onReorder).toHaveBeenLastCalledWith(['p1', 'p2'])
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Done' })) })
+    expect(screen.getByRole('button', { name: 'Reorder pages' })).toHaveFocus()
+    expect(await screen.findByLabelText('Rename Page A')).toBeInTheDocument()
+  })
+
+  it('disables movement while saving and shows saving status', async () => {
+    const { rerender } = render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Reorder pages' }))
+    rerender(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} reordering />)
+    expect(screen.getByLabelText('Move Page A down')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByLabelText('Move Page B up')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByText('Saving order…')).toBeInTheDocument()
+  })
+
+  it('read-only users can select pages but cannot manage or reorder them', async () => {
+    const onSelect = vi.fn()
+    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} canWrite={false} onSelect={onSelect} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+    expect(await screen.findByRole('button', { name: 'Page B' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reorder pages' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New Page' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Rename Page A')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Delete Page A')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Page B' }))
+    expect(onSelect).toHaveBeenCalledWith('p2')
+  })
+
+  it('keeps reorder mode open and shows a failed save without changing order', async () => {
+    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} onReorder={vi.fn().mockResolvedValue(false)} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Reorder pages' }))
+    fireEvent.click(screen.getByLabelText('Move Page B up'))
+    expect(await screen.findByText(/Order not saved/)).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Dashboard page order' })).getAllByRole('listitem')[0]).toHaveTextContent('Page A')
+  })
+
+  it('does not offer reordering for a single page', async () => {
+    render(<DashboardPageSwitcher pages={[mockPages[0]]} activePageId="p1" {...reorderProps} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+    await screen.findByRole('button', { name: 'New Page' })
+    expect(screen.queryByRole('button', { name: 'Reorder pages' })).not.toBeInTheDocument()
+  })
+
   const mockPages: DashboardPage[] = [
     { id: 'p1', name: 'Page A', widgets: [], created_at: '', updated_at: '' },
     { id: 'p2', name: 'Page B', widgets: [], created_at: '', updated_at: '' },

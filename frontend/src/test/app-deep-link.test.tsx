@@ -342,6 +342,24 @@ describe('App deep links', () => {
     expect(window.location.pathname).toBe('/')
   })
 
+  it('retains the selected page and replaces its canonical URL when ordering changes', () => {
+    const anchored = page('p1', 'Anchored')
+    const docked = page('p2', 'Docked')
+    mockPagesState.pages = [anchored, docked]
+    window.history.replaceState({}, '', '/')
+    const { rerender } = render(<App />)
+    const historyLength = window.history.length
+    mockPagesState.pages = [docked, anchored]
+    rerender(<App />)
+    expect(screen.getByRole('button', { name: 'Anchored' })).toHaveAttribute('data-active', 'true')
+    expect(window.location.pathname).toBe('/dashboard/p1')
+    expect(window.history.length).toBe(historyLength)
+    mockPagesState.pages = [anchored, docked]
+    rerender(<App />)
+    expect(window.location.pathname).toBe('/')
+    expect(window.history.length).toBe(historyLength)
+  })
+
   it('reconciles an unknown page id to the first page and normalises the bar to /', () => {
     mockPagesState.pages = [page('p1', 'Anchored'), page('p2', 'Underway')]
     window.history.replaceState({}, '', '/dashboard/zzz')

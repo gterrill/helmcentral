@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 
 export interface DashboardPage {
   id: string
   name: string
+  position?: number
   widgets: DashboardLayoutItem[]
   /** `instrument` keeps the whole page dark whatever the app theme is (ADR 0060). */
   skin?: 'default' | 'instrument'
@@ -42,6 +43,8 @@ export function useDashboardPages() {
   const [pages, setPages] = useState<DashboardPage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [reordering, setReordering] = useState(false)
+  const reorderPending = useRef(false)
 
   const fetchPages = useCallback(async () => {
     try {
@@ -76,9 +79,7 @@ export function useDashboardPages() {
       return null
     }
     const page = (await res.json()) as DashboardPage
-    // Append rather than refetch: the list is sorted oldest-created-first
-    // server-side, and a newly created page has the newest created_at, so
-    // appending preserves that order without a round trip.
+    // The server appends newly created pages after the saved navigation order.
     setPages((prev) => [...prev, page])
     return page
   }, [])
@@ -118,5 +119,50 @@ export function useDashboardPages() {
     return true
   }, [])
 
-  return { pages, loading, error, refetch: fetchPages, createPage, updatePage, deletePage }
+  const reorderPages = useCallback(async (pageIds: string[]): Promise<boolean> => {
+    // A ref also blocks clicks that arrive before React renders the pending state.
+    if (reorderPending.current) return false
+    reorderPending.current = true
+    setReordering(true)
+    try {
+      const res = await fetch('/api/dashboard-pages/order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_ids: pageIds }),
+      })
+      if (!res.ok) throw new Error(await readErrorMessage(res))
+      const data = (await res.json()) as DashboardPagesListResponse
+      if (!Array.isArray(data.pages) || data.pages.length !== pageIds.length ||
+          data.pages.some((page, index) => page?.id !== pageIds[index])) {
+        throw new Error('Invalid page order response')
+      }
+      const orderedPages = data.pages
+      setPages((current) => {
+        // The response is an ordering snapshot, not a refresh of page content.
+        // A widget PATCH or create/delete can finish while this request is in
+        // flight; don't roll back its content or resurrect a deleted page.
+        const byId = new Map(current.map((page) => [page.id, page]))
+        const orderedIds = new Set(orderedPages.map((page) => page.id))
+        return [
+          ...orderedPages.flatMap((saved) => {
+            const page = byId.get(saved.id)
+            return page ? [{ ...page, position: saved.position }] : []
+          }),
+          ...current.filter((page) => !orderedIds.has(page.id)),
+        ]
+      })
+      return true
+    } catch (err) {
+      // Keep the last confirmed order and leave the dashboard visible.
+      toast.error('Could not reorder pages', {
+        description: err instanceof Error ? err.message : 'Failed to save page order',
+      })
+      return false
+    } finally {
+      reorderPending.current = false
+      setReordering(false)
+    }
+  }, [])
+
+  return { pages, loading, error, refetch: fetchPages, createPage, updatePage, deletePage, reorderPages, reordering }
 }

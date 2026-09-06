@@ -500,6 +500,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/anchor-watch/placemarks", tierWrite, createPlacemarkHandler},
 		{http.MethodDelete, "/api/anchor-watch/placemarks/:id", tierWrite, deletePlacemarkHandler},
 		{http.MethodPost, "/api/dashboard-pages", tierWrite, createDashboardPageHandler},
+		{http.MethodPut, "/api/dashboard-pages/order", tierWrite, reorderDashboardPagesHandler},
 		{http.MethodPatch, "/api/dashboard-pages/:id", tierWrite, patchDashboardPageHandler},
 		{http.MethodDelete, "/api/dashboard-pages/:id", tierWrite, deleteDashboardPageHandler},
 		{http.MethodPost, "/api/routes", tierWrite, createRouteHandler},

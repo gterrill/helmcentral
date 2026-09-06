@@ -286,6 +286,9 @@ var defaultDashboardLayout = []dashboardLayoutItem{
 type dashboardPageData struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Shared navigation order. Older files omit this field (zero); creation
+	// time and ID break ties until load normalizes the positions.
+	Position int `json:"position"`
 	// Selects the token set every widget on this page renders against: the
 	// app theme, or the always-dark instrument skin. Was a per-cluster-widget
 	// setting until ADR 0060 moved it here, since a page is already a mode
@@ -318,15 +321,25 @@ func dashboardPagesFilePath() string {
 	return cacheFilePath("DASHBOARD_PAGES_FILE", "data/dashboard-pages.json")
 }
 
-func saveDashboardPagesLocked() error {
+func orderedDashboardPagesLocked() []*dashboardPageData {
 	list := make([]*dashboardPageData, 0, len(dashboardPagesState))
 	for _, p := range dashboardPagesState {
 		list = append(list, p)
 	}
 	sort.Slice(list, func(i, j int) bool {
+		if list[i].Position != list[j].Position {
+			return list[i].Position < list[j].Position
+		}
+		if list[i].CreatedAt.Equal(list[j].CreatedAt) {
+			return list[i].ID < list[j].ID
+		}
 		return list[i].CreatedAt.Before(list[j].CreatedAt)
 	})
-	return writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{Pages: list})
+	return list
+}
+
+func saveDashboardPagesLocked() error {
+	return writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{Pages: orderedDashboardPagesLocked()})
 }
 
 // validateEmbedWidget guards the one widget whose content is operator-supplied.
@@ -469,9 +482,18 @@ func loadDashboardPages() {
 				}
 				dashboardPagesState[p.ID] = p
 			}
-			if anyStripped {
+			// Normalize legacy creation order and gaps left by page deletion.
+			// Existing explicit positions take precedence over creation time.
+			orderChanged := false
+			for i, p := range orderedDashboardPagesLocked() {
+				if p.Position != i {
+					p.Position = i
+					orderChanged = true
+				}
+			}
+			if anyStripped || orderChanged {
 				if err := saveDashboardPagesLocked(); err != nil {
-					log.Printf("Failed to persist dashboard pages after stripping retired widget ids: %v", err)
+					log.Printf("Failed to persist migrated dashboard pages: %v", err)
 				}
 			}
 			return
@@ -540,15 +562,50 @@ func listDashboardPagesHandler(c echo.Context) error {
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
 
-	list := make([]*dashboardPageData, 0, len(dashboardPagesState))
-	for _, p := range dashboardPagesState {
-		list = append(list, p)
-	}
-	sort.Slice(list, func(i, j int) bool {
-		return list[i].CreatedAt.Before(list[j].CreatedAt)
-	})
+	return c.JSON(http.StatusOK, dashboardPagesFile{Pages: orderedDashboardPagesLocked()})
+}
 
-	return c.JSON(http.StatusOK, map[string]any{"pages": list})
+// PUT /api/dashboard-pages/order replaces the complete shared order. Requiring
+// every current ID rejects stale lists after a concurrent create or delete.
+func reorderDashboardPagesHandler(c echo.Context) error {
+	var body struct {
+		PageIDs []string `json:"page_ids"`
+	}
+	if err := c.Bind(&body); err != nil || body.PageIDs == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "page_ids must be an array of every current page ID"})
+	}
+
+	dashboardPagesMu.Lock()
+	defer dashboardPagesMu.Unlock()
+	if len(body.PageIDs) != len(dashboardPagesState) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "page_ids must include every current page exactly once; reload the page list and try again"})
+	}
+	seen := make(map[string]bool, len(body.PageIDs))
+	list := make([]*dashboardPageData, 0, len(body.PageIDs))
+	now := time.Now().UTC()
+	for i, id := range body.PageIDs {
+		page, ok := dashboardPagesState[id]
+		if !ok || seen[id] {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown or duplicate page ID: " + id + "; reload the page list and try again"})
+		}
+		seen[id] = true
+		updated := *page
+		if updated.Position != i {
+			updated.Position = i
+			updated.UpdatedAt = now
+		}
+		list = append(list, &updated)
+	}
+
+	// Publish only after the entire order is durable. A failed write must not
+	// leave readers seeing an order that will vanish at the next restart.
+	if err := writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{Pages: list}); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist page order"})
+	}
+	for _, page := range list {
+		dashboardPagesState[page.ID] = page
+	}
+	return c.JSON(http.StatusOK, dashboardPagesFile{Pages: list})
 }
 
 // POST /api/dashboard-pages
@@ -596,6 +653,11 @@ func createDashboardPageHandler(c echo.Context) error {
 	}
 
 	dashboardPagesMu.Lock()
+	for _, existing := range dashboardPagesState {
+		if existing.Position >= page.Position {
+			page.Position = existing.Position + 1
+		}
+	}
 	dashboardPagesState[page.ID] = page
 	err := saveDashboardPagesLocked()
 	dashboardPagesMu.Unlock()
@@ -670,6 +732,7 @@ func patchDashboardPageHandler(c echo.Context) error {
 	updated := &dashboardPageData{
 		ID:        current.ID,
 		Name:      current.Name,
+		Position:  current.Position,
 		Skin:      current.Skin,
 		Hero:      current.Hero,
 		Widgets:   current.Widgets,
