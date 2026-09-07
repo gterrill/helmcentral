@@ -1,173 +1,78 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { anchorRequest } from '@/lib/anchor-request'
 
 const AUTO_CLOSE_HYSTERESIS_SECONDS = 5
-const DRAG_BUFFER_METERS = 4.572 // 15 feet
+const DRAG_BUFFER_METERS = 4.572
 
-interface UseAnchorWatchAutoCloseResult {
-  isAutoCloseArmed: boolean
-  motoringSecondsElapsed: number
-}
-
-/**
- * Automatically closes anchor watch when engines start (navigationState becomes 'motoring')
- * AND the vessel drifts outside the anchor circle for 5+ seconds.
- *
- * This prevents users from forgetting to turn off the anchor alarm when underway.
- * Requires both conditions to be true for the hysteresis period before clearing.
- */
+/** Departure depends on engine telemetry, not Auto-state's anchored latch.
+ * The caller withholds distance when GNSS is critical. Still browser-driven:
+ * server-side drag detection remains active when the dashboard is closed. */
 export function useAnchorWatchAutoClose(
-  navigationState: string | null,
+  engine0Rpm: number | null | undefined,
+  engine1Rpm: number | null | undefined,
   distanceMeters: number | null,
   radiusMeters: number,
   anchorWatchActive: boolean,
   isEnabled: boolean,
-): UseAnchorWatchAutoCloseResult {
-  const motoringStartTimeRef = useRef<number | null>(null)
-  const intervalIdRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const autoCloseInProgressRef = useRef(false)
-  const [motoringSecondsElapsed, setMoturingSecondsElapsed] = useState(0)
-  const [isAutoCloseArmed, setIsAutoCloseArmed] = useState(false)
+) {
+  const startRef = useRef<number | null>(null)
+  const inFlightRef = useRef(false)
+  const attemptedRef = useRef(false)
+  const completedRef = useRef(false)
+  const [motoringSecondsElapsed, setElapsed] = useState(0)
+  const [isAutoCloseArmed, setArmed] = useState(false)
+  const enginesRunning = [engine0Rpm, engine1Rpm].some(
+    (rpm) => typeof rpm === 'number' && Number.isFinite(rpm) && rpm > 0,
+  )
+  const eligible = isEnabled && anchorWatchActive && enginesRunning
+    && distanceMeters !== null && Number.isFinite(distanceMeters)
+    && Number.isFinite(radiusMeters) && radiusMeters > 0
+    && distanceMeters > radiusMeters + DRAG_BUFFER_METERS
 
-  /**
-   * Check if vessel is outside the anchor circle (within dragging threshold)
-   */
-  const isOutsideCircle = useCallback((): boolean => {
-    if (distanceMeters === null) return false
-    return distanceMeters > radiusMeters + DRAG_BUFFER_METERS
-  }, [distanceMeters, radiusMeters])
-
-  /**
-   * Check if engines are running (motoring state)
-   */
-  const isMotoring = useCallback((): boolean => {
-    return navigationState === 'motoring'
-  }, [navigationState])
-
-  /**
-   * Perform the auto-close operation
-   */
-  const performAutoClose = useCallback(async () => {
-    if (autoCloseInProgressRef.current) {
-      return
-    }
-
-    autoCloseInProgressRef.current = true
-
-    try {
-      const response = await fetch('/api/anchor-watch', { method: 'DELETE' })
-      if (response.ok) {
-        console.log('[anchor-watch-auto-close] Anchor watch cleared automatically')
-
-        // Dispatch custom event to trigger toast notification
-        window.dispatchEvent(
-          new CustomEvent('anchor-watch-auto-closed', {
-            detail: { reason: 'engines_running' },
-          }),
-        )
-
-        // Reset states
-        motoringStartTimeRef.current = null
-        setMoturingSecondsElapsed(0)
-        setIsAutoCloseArmed(false)
-
-        if (intervalIdRef.current) {
-          clearInterval(intervalIdRef.current)
-          intervalIdRef.current = null
-        }
-
-        autoCloseInProgressRef.current = false
-      } else {
-        console.error('[anchor-watch-auto-close] Failed to clear anchor watch:', response.statusText)
-        autoCloseInProgressRef.current = false
-      }
-    } catch (err) {
-      console.error('[anchor-watch-auto-close] Error clearing anchor watch:', err)
-      autoCloseInProgressRef.current = false
-    }
-  }, [])
-
-  /**
-   * Main effect: monitor conditions and trigger auto-close
-   */
   useEffect(() => {
-    // Feature disabled or anchor watch not active
-    if (!isEnabled || !anchorWatchActive) {
-      motoringStartTimeRef.current = null
-      autoCloseInProgressRef.current = false
-      setMoturingSecondsElapsed(0)
-      setIsAutoCloseArmed(false)
-
-      if (intervalIdRef.current) {
-        clearInterval(intervalIdRef.current)
-        intervalIdRef.current = null
-      }
-
+    if (!anchorWatchActive) completedRef.current = false
+    if (!eligible) {
+      startRef.current = null
+      attemptedRef.current = false
+      setElapsed(0)
+      setArmed(false)
       return
     }
+    if (completedRef.current || attemptedRef.current || inFlightRef.current) return
 
-    const motoring = isMotoring()
-    const outside = isOutsideCircle()
-
-    // Both conditions are true: start/continue countdown
-    if (motoring && outside) {
-      // First time entering this state
-      if (motoringStartTimeRef.current === null) {
-        motoringStartTimeRef.current = Date.now()
-        setIsAutoCloseArmed(true)
-        console.log('[anchor-watch-auto-close] Armed: engines running + outside circle')
-      }
-
-      // Clear any existing interval to avoid duplicates
-      if (intervalIdRef.current) {
-        clearInterval(intervalIdRef.current)
-      }
-
-      // Update elapsed time every 100ms for smooth countdown display
-      intervalIdRef.current = setInterval(() => {
-        if (motoringStartTimeRef.current === null) return
-
-        const elapsedMs = Date.now() - motoringStartTimeRef.current
-        const elapsedSec = Math.floor(elapsedMs / 1000)
-        setMoturingSecondsElapsed(elapsedSec)
-
-        // Fire auto-close when hysteresis period is met
-        if (elapsedSec >= AUTO_CLOSE_HYSTERESIS_SECONDS) {
-          void performAutoClose()
-        }
-      }, 100)
-    } else {
-      // One or both conditions went false: reset countdown
-      if (motoringStartTimeRef.current !== null || isAutoCloseArmed) {
-        motoringStartTimeRef.current = null
-        autoCloseInProgressRef.current = false
-        setMoturingSecondsElapsed(0)
-        setIsAutoCloseArmed(false)
-
-        if (motoring && !outside) {
-          console.log('[anchor-watch-auto-close] Disarmed: engines running but inside circle')
-        } else if (!motoring && outside) {
-          console.log('[anchor-watch-auto-close] Disarmed: engines stopped, outside circle')
-        } else {
-          console.log('[anchor-watch-auto-close] Disarmed: engines stopped and back inside circle')
-        }
-      }
-
-      if (intervalIdRef.current) {
-        clearInterval(intervalIdRef.current)
-        intervalIdRef.current = null
-      }
-    }
-
-    // Cleanup on unmount
+    startRef.current = Date.now()
+    setArmed(true)
+    let disposed = false
+    const interval = setInterval(() => {
+      if (startRef.current === null || inFlightRef.current || attemptedRef.current) return
+      const elapsed = Math.floor((Date.now() - startRef.current) / 1000)
+      setElapsed(elapsed)
+      if (elapsed < AUTO_CLOSE_HYSTERESIS_SECONDS) return
+      clearInterval(interval)
+      attemptedRef.current = true
+      inFlightRef.current = true
+      setArmed(false)
+      void anchorRequest({ method: 'DELETE' }).then(() => {
+        completedRef.current = true
+        window.dispatchEvent(new CustomEvent('anchor-watch-auto-closed', {
+          detail: { reason: 'engines_running' },
+        }))
+      }).catch((error: unknown) => {
+        toast.error('Could not automatically raise anchor', {
+          description: error instanceof Error ? error.message : 'Request failed',
+        })
+      }).finally(() => {
+        inFlightRef.current = false
+        startRef.current = null
+        if (!disposed) setElapsed(0)
+      })
+    }, 100)
     return () => {
-      if (intervalIdRef.current) {
-        clearInterval(intervalIdRef.current)
-      }
+      disposed = true
+      clearInterval(interval)
     }
-  }, [isEnabled, anchorWatchActive, isMotoring, isOutsideCircle, performAutoClose, isAutoCloseArmed])
+  }, [eligible, anchorWatchActive])
 
-  return {
-    isAutoCloseArmed,
-    motoringSecondsElapsed,
-  }
+  return { isAutoCloseArmed, motoringSecondsElapsed }
 }

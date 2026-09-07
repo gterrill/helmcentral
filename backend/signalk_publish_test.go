@@ -83,7 +83,7 @@ func (s *publishStub) applyLocked(frame []byte) {
 	}
 	for _, update := range delta.Updates {
 		for _, value := range update.Values {
-			if value.Value == nil {
+			if value.Value == nil && strings.HasPrefix(value.Path, "notifications.") {
 				// What a real signalk-server does with a null notification: the
 				// key is NOT removed. The notifications API normalises it to
 				// state "normal" with an empty method, which is SignalK's

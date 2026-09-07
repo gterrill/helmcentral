@@ -1,299 +1,132 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
+import { toast } from 'sonner'
 import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
+
+const initialProps = {
+  engine0: 800 as number | null | undefined,
+  engine1: null as number | null | undefined,
+  distance: 30 as number | null,
+  radius: 20,
+  active: true,
+  enabled: true,
+}
+function setup(overrides: Partial<typeof initialProps> = {}) {
+  return renderHook((p) => useAnchorWatchAutoClose(
+    p.engine0, p.engine1, p.distance, p.radius, p.active, p.enabled,
+  ), { initialProps: { ...initialProps, ...overrides } })
+}
+const advance = async (ms: number) => {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+}
 
 describe('useAnchorWatchAutoClose', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
   })
-
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
-  it('should not arm when feature is disabled', () => {
-    const { result } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'motoring', // navigationState
-        30, // distanceMeters (outside circle)
-        20, // radiusMeters
-        true, // anchorWatchActive
-        false, // isEnabled (disabled)
-      ),
-    )
-
+  it.each([[800, null], [null, 800], [-1, 0.1], [800, NaN]])(
+    'arms with one finite positive main engine RPM (%s, %s)', (engine0, engine1) => {
+      expect(setup({ engine0, engine1 }).result.current.isAutoCloseArmed).toBe(true)
+    },
+  )
+  it.each([0, -1, null, undefined, NaN, Infinity, -Infinity])(
+    'does not interpret unavailable/stopped RPM %s as running', async (rpm) => {
+      const { result } = setup({ engine0: rpm, engine1: rpm })
+      await advance(6000)
+      expect(result.current.isAutoCloseArmed).toBe(false)
+      expect(fetch).not.toHaveBeenCalled()
+    },
+  )
+  it.each([
+    { enabled: false }, { active: false }, { distance: null }, { distance: NaN },
+    { distance: Infinity }, { distance: 20 }, { distance: 24.572 },
+    { radius: NaN }, { radius: Infinity }, { radius: -1 },
+  ])('does not arm without valid enabled/outside-watch evidence: %j', async (props) => {
+    const { result } = setup(props)
+    await advance(6000)
     expect(result.current.isAutoCloseArmed).toBe(false)
-    expect(result.current.motoringSecondsElapsed).toBe(0)
+    expect(fetch).not.toHaveBeenCalled()
   })
-
-  it('should not arm when anchor watch is not active', () => {
-    const { result } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'motoring',
-        30,
-        20,
-        false, // anchorWatchActive
-        true, // isEnabled
-      ),
-    )
-
-    expect(result.current.isAutoCloseArmed).toBe(false)
-    expect(result.current.motoringSecondsElapsed).toBe(0)
-  })
-
-  it('should arm when engines are running and vessel is outside circle', () => {
-    const { result } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'motoring', // Engines running
-        30, // distanceMeters > radiusMeters + 4.572
-        20, // radiusMeters
-        true, // anchorWatchActive
-        true, // isEnabled
-      ),
-    )
-
-    expect(result.current.isAutoCloseArmed).toBe(true)
-    expect(result.current.motoringSecondsElapsed).toBe(0)
-  })
-
-  it('should not arm when inside circle even with engines running', () => {
-    const { result } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'motoring', // Engines running
-        15, // distanceMeters < radiusMeters + 4.572
-        20, // radiusMeters
-        true, // anchorWatchActive
-        true, // isEnabled
-      ),
-    )
-
-    expect(result.current.isAutoCloseArmed).toBe(false)
-  })
-
-  it('should not arm when engines are off even if outside circle', () => {
-    const { result } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'anchored', // Engines off
-        30, // distanceMeters (outside circle)
-        20, // radiusMeters
-        true, // anchorWatchActive
-        true, // isEnabled
-      ),
-    )
-
-    expect(result.current.isAutoCloseArmed).toBe(false)
-  })
-
-  it('should count down elapsed seconds while armed', () => {
-    const { result } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'motoring',
-        30,
-        20,
-        true,
-        true,
-      ),
-    )
-
-    expect(result.current.isAutoCloseArmed).toBe(true)
-    expect(result.current.motoringSecondsElapsed).toBe(0)
-
-    // Advance time by 1 second
-    act(() => {
-      vi.advanceTimersByTime(1100)
-    })
-
-    expect(result.current.motoringSecondsElapsed).toBe(1)
-
-    // Advance to 3 seconds
-    act(() => {
-      vi.advanceTimersByTime(2000)
-    })
-
-    expect(result.current.motoringSecondsElapsed).toBe(3)
-  })
-
-  it('should disarm when vessel re-enters circle', () => {
-    const { result, rerender } = renderHook(
-      ({
-        navigationState,
-        distanceMeters,
-      }: {
-        navigationState: string
-        distanceMeters: number
-      }) =>
-        useAnchorWatchAutoClose(
-          navigationState,
-          distanceMeters,
-          20,
-          true,
-          true,
-        ),
-      {
-        initialProps: {
-          navigationState: 'motoring',
-          distanceMeters: 30, // Outside
-        },
-      },
-    )
-
-    expect(result.current.isAutoCloseArmed).toBe(true)
-
-    // Re-enter circle
-    act(() => {
-      rerender({
-        navigationState: 'motoring',
-        distanceMeters: 15, // Inside (less than 20 + 4.572)
-      })
-    })
-
-    expect(result.current.isAutoCloseArmed).toBe(false)
-    expect(result.current.motoringSecondsElapsed).toBe(0)
-  })
-
-  it('should disarm when engines stop', () => {
-    const { result, rerender } = renderHook(
-      ({ navigationState }: { navigationState: string }) =>
-        useAnchorWatchAutoClose(
-          navigationState,
-          30,
-          20,
-          true,
-          true,
-        ),
-      {
-        initialProps: {
-          navigationState: 'motoring',
-        },
-      },
-    )
-
-    expect(result.current.isAutoCloseArmed).toBe(true)
-
-    // Engines stop
-    act(() => {
-      rerender({ navigationState: 'anchored' })
-    })
-
-    expect(result.current.isAutoCloseArmed).toBe(false)
-    expect(result.current.motoringSecondsElapsed).toBe(0)
-  })
-
-  it('should trigger auto-close API call after 5 seconds', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      statusText: 'OK',
-    } as Response)
-
-    const { unmount } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'motoring',
-        30,
-        20,
-        true,
-        true,
-      ),
-    )
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5100)
-    })
-
-    expect(fetchSpy).toHaveBeenCalledWith('/api/anchor-watch', { method: 'DELETE' })
-
-    unmount()
-    fetchSpy.mockRestore()
-  })
-
-  it('should dispatch custom event when auto-closing', async () => {
+  it('requires five continuous seconds and sends exactly one success event/request despite telemetry updates', async () => {
     const eventSpy = vi.spyOn(window, 'dispatchEvent')
-
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      statusText: 'OK',
-    } as Response)
-
-    const { unmount } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'motoring',
-        30,
-        20,
-        true,
-        true,
-      ),
-    )
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5100)
-    })
-
-    const customEventCall = eventSpy.mock.calls.find((call) => {
-      const event = call[0] as CustomEvent
-      return event.type === 'anchor-watch-auto-closed'
-    })
-    expect(customEventCall).toBeDefined()
-
-    unmount()
-    fetchSpy.mockRestore()
-    eventSpy.mockRestore()
-  })
-
-  it('should not trigger auto-close before 5 seconds', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch')
-
-    const { unmount } = renderHook(() =>
-      useAnchorWatchAutoClose(
-        'motoring',
-        30,
-        20,
-        true,
-        true,
-      ),
-    )
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(4900)
-    })
-
-    expect(fetchSpy).not.toHaveBeenCalled()
-
-    unmount()
-    fetchSpy.mockRestore()
-  })
-
-  it('should reset elapsed time when disarmed', () => {
-    const { result, rerender } = renderHook(
-      ({ navigationState }: { navigationState: string }) =>
-        useAnchorWatchAutoClose(
-          navigationState,
-          30,
-          20,
-          true,
-          true,
-        ),
-      {
-        initialProps: {
-          navigationState: 'motoring',
-        },
-      },
-    )
-
-    expect(result.current.isAutoCloseArmed).toBe(true)
-
-    // Advance time
-    act(() => {
-      vi.advanceTimersByTime(2000)
-    })
-
-    expect(result.current.motoringSecondsElapsed).toBe(2)
-
-    // Disarm
-    act(() => {
-      rerender({ navigationState: 'anchored' })
-    })
-
+    const { result, rerender } = setup()
+    await advance(3000)
+    expect(result.current.motoringSecondsElapsed).toBe(3)
+    rerender({ ...initialProps, distance: 31, engine0: 900 })
+    await advance(1900)
+    expect(fetch).not.toHaveBeenCalled()
+    await advance(100)
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/anchor-watch', { method: 'DELETE' })
+    expect(eventSpy.mock.calls.filter(([event]) => event.type === 'anchor-watch-auto-closed')).toHaveLength(1)
     expect(result.current.isAutoCloseArmed).toBe(false)
-    expect(result.current.motoringSecondsElapsed).toBe(0)
+    rerender({ ...initialProps, distance: 32 })
+    await advance(10000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+  it.each([{ engine0: 0 }, { distance: 20 }, { distance: null }, { active: false }, { enabled: false }])(
+    'resets the countdown when evidence is lost: %j', async (props) => {
+      const { result, rerender } = setup()
+      await advance(3000)
+      rerender({ ...initialProps, ...props })
+      expect(result.current.isAutoCloseArmed).toBe(false)
+      expect(result.current.motoringSecondsElapsed).toBe(0)
+      await advance(6000)
+      expect(fetch).not.toHaveBeenCalled()
+      rerender(initialProps)
+      await advance(4900)
+      expect(fetch).not.toHaveBeenCalled()
+      await advance(100)
+      expect(fetch).toHaveBeenCalledTimes(1)
+    },
+  )
+  it.each(['http', 'network'])('surfaces %s failure without success or repeated requests; rearms only after conditions reset', async (failure) => {
+    if (failure === 'http') {
+      vi.mocked(fetch).mockResolvedValue({ ok: false, status: 502, json: async () => ({ error: 'SignalK publish failed' }) } as Response)
+    } else {
+      vi.mocked(fetch).mockRejectedValue(new Error('SignalK publish failed'))
+    }
+    const eventSpy = vi.spyOn(window, 'dispatchEvent')
+    const { result, rerender } = setup()
+    await advance(15000)
+    rerender({ ...initialProps, distance: 35 })
+    await advance(6000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith('Could not automatically raise anchor', { description: 'SignalK publish failed' })
+    expect(eventSpy.mock.calls.filter(([event]) => event.type === 'anchor-watch-auto-closed')).toHaveLength(0)
+    expect(result.current.isAutoCloseArmed).toBe(false)
+    rerender({ ...initialProps, engine0: 0 })
+    rerender(initialProps)
+    await advance(5000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+  it('does not overlap pending requests when conditions toggle', async () => {
+    let resolve!: (response: Response) => void
+    vi.mocked(fetch).mockReturnValue(new Promise((done) => { resolve = done }))
+    const { rerender } = setup()
+    await advance(5000)
+    rerender({ ...initialProps, enabled: false })
+    rerender(initialProps)
+    await advance(6000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await act(async () => { resolve({ ok: true } as Response) })
+    await advance(6000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+  it('cleans up its countdown on unmount', async () => {
+    const { unmount } = setup()
+    await advance(3000)
+    unmount()
+    await advance(10000)
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

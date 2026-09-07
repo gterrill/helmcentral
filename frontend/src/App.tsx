@@ -604,8 +604,12 @@ export function App() {
   // the anchor comes up and is raised again.
   const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tideHeightFt: number | null } | null>(null)
   const { isAutoCloseArmed, motoringSecondsElapsed } = useAnchorWatchAutoClose(
-    navigationState,
-    anchorWatch.distanceMeters,
+    engine0Rpm,
+    engine1Rpm,
+    !gnssCriticalAlert && latitude !== null && longitude !== null
+      && Number.isFinite(latitude) && Number.isFinite(longitude)
+      && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180
+      ? anchorWatch.distanceMeters : null,
     anchorWatch.radiusMeters,
     anchorWatch.anchorState !== 'none',
     autoCloseAnchorWatchEnabled,

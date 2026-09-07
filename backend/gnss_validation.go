@@ -36,12 +36,13 @@ type gnssPositionValidation struct {
 }
 
 type gnssObservedSample struct {
-	Latitude      float64
-	Longitude     float64
-	DepthMeters   float64
-	Navigation    string
-	ObservedAt    time.Time
-	HasObservedAt bool
+	Latitude       float64
+	Longitude      float64
+	DepthMeters    float64
+	Navigation     string
+	EnginesRunning bool
+	ObservedAt     time.Time
+	HasObservedAt  bool
 }
 
 type gnssHeuristicState struct {
@@ -124,7 +125,9 @@ func applyGNSSHeuristics(validation gnssPositionValidation, sample gnssObservedS
 				sample.Longitude,
 			)
 			speedKts := (distance / dt.Seconds()) * metersPerSecondToKnots
-			if isAnchoredOrMooredState(sample.Navigation) {
+			// Departure is plausible with a running main engine even before
+			// Auto-state receives anchor-raised. Quality/age checks still apply.
+			if isAnchoredOrMooredState(sample.Navigation) && !sample.EnginesRunning {
 				if speedKts > gnssCriticalJumpKts {
 					validation = escalateValidation(validation, "critical", fmt.Sprintf("position jump implies %.1f kts at anchor", speedKts))
 				} else if speedKts > gnssDegradedJumpKts {

@@ -56,6 +56,14 @@ func buildSignalKPublishURL(address string, port int) string {
 // That is exactly how the previous REST implementation went unnoticed: it had
 // never once reached the bus.
 func publishSignalKNotification(path string, value any) error {
+	return publishSignalKValue(path, value, func(ctx context.Context, base, token string) error {
+		return confirmSignalKNotification(ctx, base, token, path, value != nil)
+	})
+}
+
+// publishSignalKValue shares the authenticated delta transport, but leaves
+// read-back semantics to the producer (notifications normalize null).
+func publishSignalKValue(path string, value any, confirm func(context.Context, string, string) error) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	address, port, err := loadSignalKSettings(settingsPath)
 	if err != nil {
@@ -76,7 +84,7 @@ func publishSignalKNotification(path string, value any) error {
 		return fmt.Errorf("could not publish %s to SignalK: %w", path, err)
 	}
 
-	return confirmSignalKNotification(ctx, httpBaseURL, token, path, value != nil)
+	return confirm(ctx, httpBaseURL, token)
 }
 
 // sendSignalKDelta opens a publish connection, writes one delta, and closes it.

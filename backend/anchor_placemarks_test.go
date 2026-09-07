@@ -204,6 +204,7 @@ func TestDeletePlacemark_UnknownIDIs404(t *testing.T) {
 // Ending the anchor session drops every placemark with it — that is what
 // "session bound" means — and takes the state file with it.
 func TestDeleteAnchorWatch_ClearsPlacemarks(t *testing.T) {
+	anchorTestEnv(t, 0)
 	placemarkTestEnv(t)
 	activateAnchorWatch(t)
 	createPlacemark(t, -21.1120, 149.2280, "a")

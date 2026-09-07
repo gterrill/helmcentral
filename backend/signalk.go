@@ -690,14 +690,17 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 		rawLongitude = lookupNumber(payload, "navigation", "position", "longitude")
 	}
 
+	state.Engine0RPM = readEngineRPM(payload, []string{"0", "port", "main", "engine0", "engine-0"})
+	state.Engine1RPM = readEngineRPM(payload, []string{"1", "starboard", "secondary", "engine1", "engine-1"})
 	validation := parseGNSSPositionValidation(payload)
 	validation = applyGNSSHeuristics(validation, gnssObservedSample{
-		Latitude:      rawLatitude,
-		Longitude:     rawLongitude,
-		DepthMeters:   state.Depth,
-		Navigation:    state.Status,
-		ObservedAt:    state.Datetime,
-		HasObservedAt: hasGNSSDatetime,
+		Latitude:       rawLatitude,
+		Longitude:      rawLongitude,
+		DepthMeters:    state.Depth,
+		Navigation:     state.Status,
+		EnginesRunning: (state.Engine0RPM > 0 && !math.IsInf(state.Engine0RPM, 0)) || (state.Engine1RPM > 0 && !math.IsInf(state.Engine1RPM, 0)),
+		ObservedAt:     state.Datetime,
+		HasObservedAt:  hasGNSSDatetime,
 	}, time.Now().UTC())
 	state.GNSSQualityIndicator = validation.QualityIndicator
 	state.GNSSHDOP = validation.HDOP
@@ -816,9 +819,6 @@ func fetchSignalKVesselState() (vesselStateData, error) {
 	if genRuntime >= 0 {
 		state.GeneratorRuntime = genRuntime
 	}
-
-	state.Engine0RPM = readEngineRPM(payload, []string{"0", "port", "main", "engine0", "engine-0"})
-	state.Engine1RPM = readEngineRPM(payload, []string{"1", "starboard", "secondary", "engine1", "engine-1"})
 
 	return state, nil
 }

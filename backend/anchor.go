@@ -15,6 +15,10 @@ import (
 const defaultAnchorWatchRadiusMeters = 20.0
 const maxTrailPoints = 1000
 
+// Serialize operator lifecycle writes, including their upstream confirmation.
+// Never hold anchorWatchMu over network I/O: telemetry must keep flowing.
+var anchorLifecycleMu sync.Mutex
+
 type anchorWatchData struct {
 	Lat              float64   `json:"lat"`
 	Lon              float64   `json:"lon"`
@@ -213,6 +217,8 @@ func getAnchorWatch(c echo.Context) error {
 
 // POST /api/anchor-watch
 func setAnchorWatch(c echo.Context) error {
+	anchorLifecycleMu.Lock()
+	defer anchorLifecycleMu.Unlock()
 	var body struct {
 		Lat                  float64  `json:"lat"`
 		Lon                  float64  `json:"lon"`
@@ -362,6 +368,13 @@ func setAnchorWatch(c echo.Context) error {
 	selfTrail = newVesselTrail()
 	trailMu.Unlock()
 
+	// Keep the local safety watch if the upstream publish fails, but do not
+	// report a successful drop/reposition. The operator can retry explicitly.
+	if err := publishSignalKAnchorPosition(aw); err != nil {
+		c.Logger().Errorf("anchor position publish failed: %v", err)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "Anchor watch saved locally, but SignalK did not confirm the anchor position. Retry Drop or reposition to synchronize."})
+	}
+
 	// Resolve the anchorage's place name once, in the background, so the
 	// response above isn't held up by an Overpass round trip. A failure
 	// logs explicitly (inside resolveAndCachePlaceName) and leaves
@@ -408,6 +421,8 @@ func setAnchorWatch(c echo.Context) error {
 // the lock across the save call below is not re-entrant and cannot
 // deadlock. Do not narrow this back to RLock+Lock.
 func patchAnchorWatch(c echo.Context) error {
+	anchorLifecycleMu.Lock()
+	defer anchorLifecycleMu.Unlock()
 	anchorWatchMu.Lock()
 	defer anchorWatchMu.Unlock()
 
@@ -553,6 +568,17 @@ func patchAnchorWatch(c echo.Context) error {
 
 // DELETE /api/anchor-watch
 func deleteAnchorWatch(c echo.Context) error {
+	anchorLifecycleMu.Lock()
+	defer anchorLifecycleMu.Unlock()
+	// Also publish when already inactive: retrying Raise must repair an
+	// upstream latch, not silently skip the explicit null event.
+	if err := publishSignalKAnchorPosition(nil); err != nil {
+		c.Logger().Errorf("anchor raise publish failed: %v", err)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "SignalK did not confirm anchor raised. Local watch retained; retry Raise."})
+	}
+	if err := os.Remove(anchorWatchFilePath()); err != nil && !os.IsNotExist(err) {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK anchor raised, but local watch could not be removed. Retry Raise."})
+	}
 	anchorWatchMu.Lock()
 	anchorWatchState = nil
 	anchorWatchMu.Unlock()
@@ -563,8 +589,6 @@ func deleteAnchorWatch(c echo.Context) error {
 
 	// Placemarks are bound to the anchoring session, so they end with it.
 	clearPlacemarks()
-
-	_ = os.Remove(anchorWatchFilePath())
 
 	return c.JSON(http.StatusOK, map[string]any{"active": false})
 }

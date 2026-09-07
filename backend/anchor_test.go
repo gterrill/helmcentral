@@ -22,6 +22,8 @@ import (
 func anchorTestEnv(t *testing.T, gpsFromBowM float64) string {
 	t.Helper()
 	dir := t.TempDir()
+	stub := newPublishStub(t)
+	withServiceAccount(t, stub)
 
 	// setAnchorWatch's apply_bow_offset path calls fetchSignalKVesselState,
 	// which runs GNSS position validation backed by package-level "last
@@ -34,7 +36,7 @@ func anchorTestEnv(t *testing.T, gpsFromBowM float64) string {
 	t.Setenv("ANCHOR_WATCH_FILE", filepath.Join(dir, "anchor_watch.json"))
 
 	settingsPath := filepath.Join(dir, "settings.yaml")
-	body := fmt.Sprintf("anchor:\n  gps_from_bow_m: %g\n", gpsFromBowM)
+	body := fmt.Sprintf("signalk:\n  address: %s\nanchor:\n  gps_from_bow_m: %g\n", stub.server.URL, gpsFromBowM)
 	if err := os.WriteFile(settingsPath, []byte(body), 0o644); err != nil {
 		t.Fatalf("write settings: %v", err)
 	}

@@ -1,6 +1,59 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
+import { toast } from 'sonner'
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
+
+describe('useAnchorWatch mutation failures', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: true, lat: -21.1, lon: 149.2, radius_meters: 20 }),
+    }))
+  })
+
+  it.each([
+    ['Drop', 'Could not drop anchor'],
+    ['reposition', 'Could not reposition anchor'],
+    ['Raise', 'Could not raise anchor'],
+  ])('%s surfaces publish and network failures without changing watch state', async (operation, title) => {
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
+    await act(async () => { await Promise.resolve() })
+    const before = result.current
+    for (const failure of ['http', 'network', 'non-json']) {
+      if (failure === 'network') vi.mocked(fetch).mockRejectedValueOnce(new Error('Connection lost'))
+      else vi.mocked(fetch).mockResolvedValueOnce({
+        ok: false, status: 502,
+        json: async () => {
+          if (failure === 'non-json') throw new Error('Not JSON')
+          return { error: 'SignalK publish failed' }
+        },
+      } as Response)
+      await act(async () => {
+        if (operation === 'Drop') await result.current.setAnchorHere(-22, 150, { planningDepthM: null, planningTideHeightFt: null })
+        else if (operation === 'reposition') await result.current.updatePosition(-22, 150)
+        else await result.current.clearAnchor()
+      })
+      expect(toast.error).toHaveBeenLastCalledWith(title, {
+        description: failure === 'http' ? 'SignalK publish failed' : failure === 'network' ? 'Connection lost' : 'HTTP 502',
+      })
+      expect(result.current.anchorState).toBe(before.anchorState)
+      expect(result.current.anchorLat).toBe(before.anchorLat)
+      expect(result.current.anchorLon).toBe(before.anchorLon)
+    }
+    expect(toast.error).toHaveBeenCalledTimes(3)
+  })
+
+  it('only clears local state after a successful Raise', async () => {
+    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2, 3600))
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await result.current.clearAnchor() })
+    expect(result.current.anchorState).toBe('none')
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+})
 
 // setAnchorHere is fed the live GPS fix (App.tsx / anchor-watch-tile.tsx), so
 // it must ask the backend to apply the bow-offset correction. updatePosition

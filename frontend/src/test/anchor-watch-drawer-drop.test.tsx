@@ -31,10 +31,20 @@ vi.mock('@/hooks/use-auth', () => ({
 const setAnchorHereMock = vi.fn()
 const clearAnchorMock = vi.fn()
 let anchorStateMock: 'none' | 'set' = 'none'
+let positionMock: { latitude: number | null; longitude: number | null; gnssCriticalAlert: boolean } = {
+  latitude: -36.8485, longitude: 174.7633, gnssCriticalAlert: false,
+}
+const autoCloseMock = vi.fn<(...args: unknown[]) => { isAutoCloseArmed: boolean; motoringSecondsElapsed: number }>(
+  () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
+)
+vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
+  useAnchorWatchAutoClose: (...args: unknown[]) => autoCloseMock(...args),
+}))
 
 beforeEach(() => {
   vi.clearAllMocks()
   anchorStateMock = 'none'
+  positionMock = { latitude: -36.8485, longitude: 174.7633, gnssCriticalAlert: false }
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: false,
     json: async () => ({}),
@@ -47,14 +57,11 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     currentDriftKts: null,
     currentSetDeg: null,
     navigationState: null,
-    latitude: -36.8485,
-    longitude: 174.7633,
     gnssQualityIndicator: null,
     gnssHdop: null,
     gnssSatellites: null,
     gnssValidationState: null,
     gnssValidationReason: null,
-    gnssCriticalAlert: false,
     headingTrue: null,
     speedOverGroundKts: null,
     windSpeedApparentKts: null,
@@ -67,6 +74,9 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     generatorManualStartTimer: 0,
     generatorRunningByCondition: null,
     generatorRuntime: null,
+    engine0Rpm: -1,
+    engine1Rpm: 850,
+    ...positionMock,
   }),
 }))
 
@@ -119,7 +129,7 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     rodeDeployedM: 0,
     seaState: 'calm',
     seabedType: 'sand',
-    distanceMeters: null,
+    distanceMeters: 30,
     bearingDeg: null,
     setAt: null,
     planningDepthM: null,
@@ -191,6 +201,21 @@ vi.mock('@/hooks/use-app-config', () => ({
 }))
 
 describe('Anchor watch drawer drop button', () => {
+  it('feeds main engine RPM, not the navigation label, to auto-close', () => {
+    anchorStateMock = 'set'
+    render(<App />)
+    expect(autoCloseMock).toHaveBeenLastCalledWith(-1, 850, 30, 20, true, true)
+  })
+
+  it.each([
+    { gnssCriticalAlert: true }, { latitude: null }, { longitude: null },
+    { latitude: NaN }, { longitude: Infinity }, { latitude: 91 }, { longitude: -181 },
+  ])('withholds auto-close distance for an invalid/critical fix: %j', (position) => {
+    anchorStateMock = 'set'
+    positionMock = { ...positionMock, ...position }
+    render(<App />)
+    expect(autoCloseMock).toHaveBeenLastCalledWith(-1, 850, null, 20, true, true)
+  })
   // useVesselState mock above has depth: null, so this is the "no sounder at
   // drop" case (ADR 0063) — setAnchorHere still gets called, now with a
   // third capture argument carrying explicit nulls rather than silently

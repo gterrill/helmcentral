@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
+import { toast } from 'sonner'
+import { anchorRequest } from '@/lib/anchor-request'
 
 export type AnchorWatchState = 'none' | 'set' | 'dragging'
 
@@ -127,14 +129,15 @@ export function useAnchorWatch(
       payload.radius_meters = capture.radiusMeters
     }
 
-    const res = await fetch('/api/anchor-watch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    if (res.ok) {
-      const data = (await res.json()) as AnchorWatchServerState
-      setServerState(data)
+    try {
+      const res = await anchorRequest({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      setServerState(await res.json() as AnchorWatchServerState)
+    } catch (error) {
+      toast.error('Could not drop anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }
   }, [])
 
@@ -194,21 +197,24 @@ export function useAnchorWatch(
       payload.radius_meters = serverState.radius_meters
     }
 
-    const res = await fetch('/api/anchor-watch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    if (res.ok) {
-      const data = (await res.json()) as AnchorWatchServerState
-      setServerState(data)
+    try {
+      const res = await anchorRequest({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      setServerState(await res.json() as AnchorWatchServerState)
+    } catch (error) {
+      toast.error('Could not reposition anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }
   }, [serverState.radius_meters])
 
   const clearAnchor = useCallback(async () => {
-    const res = await fetch('/api/anchor-watch', { method: 'DELETE' })
-    if (res.ok) {
+    try {
+      await anchorRequest({ method: 'DELETE' })
       setServerState({ active: false })
+    } catch (error) {
+      toast.error('Could not raise anchor', { description: error instanceof Error ? error.message : 'Request failed' })
     }
   }, [])
 
