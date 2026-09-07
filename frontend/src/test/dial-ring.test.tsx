@@ -63,6 +63,41 @@ describe('DialRing', () => {
   })
 
   /**
+   * A zone rim is a marking, not a light: a permanently full-width redline is
+   * exactly the "red needle on every gauge" habituation problem the N2KView
+   * evaluation found (ADR 0080). It stays a hairline until the reading is
+   * actually inside that zone, then widens to carry the state.
+   */
+  test('is a hairline when the value sits outside the zone', () => {
+    const { container } = render(
+      <DialRing value={20} min={0} max={100} majorStep={50}
+        zones={[{ from: 80, to: 100, state: 'alarm' }]} />,
+    )
+    const segment = container.querySelector('[data-zone="alarm"]')!
+    expect(segment.getAttribute('stroke-width')).toBe('2.5')
+    expect(segment.getAttribute('data-zone-active')).toBeNull()
+  })
+
+  test('widens to full width and marks itself active when the value is inside the zone', () => {
+    const { container } = render(
+      <DialRing value={90} min={0} max={100} majorStep={50}
+        zones={[{ from: 80, to: 100, state: 'alarm' }]} />,
+    )
+    const segment = container.querySelector('[data-zone="alarm"]')!
+    expect(segment.getAttribute('stroke-width')).toBe('7')
+    expect(segment.getAttribute('data-zone-active')).toBe('true')
+  })
+
+  test('a null value never activates a zone rim', () => {
+    const { container } = render(
+      <DialRing value={null} min={0} max={100} majorStep={50}
+        zones={[{ from: 80, to: 100, state: 'alarm' }]} />,
+    )
+    const segment = container.querySelector('[data-zone="alarm"]')!
+    expect(segment.getAttribute('stroke-width')).toBe('2.5')
+  })
+
+  /**
    * On the same rule as the ticks. A green arc down the whole normal band is
    * 250 degrees of rim saying nothing, and it buried the value arc, the redline
    * and the pointer under itself.

@@ -272,13 +272,17 @@ function RadialGauge({ value, zone, config, text, unitLabel, density }: {
 
         <path d={arcPath(0, 1)} fill="none" stroke="hsl(var(--muted))" strokeWidth="8" strokeLinecap="round" />
 
+        {/* Same rule as DialRing's zone rim (ADR 0080): thin at rest, full
+            width only while the reading is actually in that zone, so a
+            healthy gauge does not carry a permanent amber or red band. */}
         {(config.zones ?? []).map((z, index) => {
           const from = clampFraction(z.from, min, max) ?? 0
           const to = clampFraction(z.to, min, max) ?? 0
           if (to <= from) return null
+          const active = zone === z.state
           return (
             <path key={index} d={arcPath(from, to)} fill="none" stroke={severityFill(z.state)}
-              strokeWidth="8" strokeLinecap="butt" opacity="0.4" />
+              strokeWidth={active ? 8 : 3} strokeLinecap="butt" opacity="0.4" />
           )
         })}
 

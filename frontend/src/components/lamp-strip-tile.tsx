@@ -19,10 +19,17 @@ function lampState(lamp: LampConfig, value: number | null | undefined): LampStat
   return (lamp.invert ? !lit : lit) ? 'on' : 'off'
 }
 
+/**
+ * "on" is the healthy green, not Signal Blue (ADR 0080). Signal Blue is
+ * interactive chrome (DESIGN.md) — buttons, toggles, the active state of a
+ * control — and a lamp is not a control; it is a reading with two states.
+ * severityFill('normal') is the same green a gauge zone in its normal band
+ * draws, so "everything is fine" reads the same way across the dashboard.
+ */
 function lampFill(state: LampState): string {
   switch (state) {
     case 'on':
-      return 'hsl(var(--primary))'
+      return severityFill('normal')
     case 'off':
       return 'hsl(var(--muted-foreground))'
     default:

@@ -177,7 +177,11 @@ controls and alarms.
 - **Deep Amber** (`hsl(39 100% 39%)`): the primary instrument readout token
   (`--gauge-primary`). Depth, battery state of charge, wind, AC and DC draw:
   the main numeral in a tile usually uses this token. Darkened for text contrast
-  on a white card.
+  on a white card. The dial's pointer no longer draws in it: a pointer is
+  chrome, not a reading, and Deep Amber shares a hue with the amber warning
+  band closely enough that every gauge read as carrying a standing warning.
+  The pointer draws in the foreground ink instead, and Deep Amber stays a
+  readout-only token.
 - **Muted Teal** (`hsl(175 42% 32%)`): the secondary readout token
   (`--gauge-secondary`). The second-rank numbers in a tile, and the tide and
   depth figures that pair against amber.
@@ -421,10 +425,18 @@ under it. Both truncate. The banner must stand out from ordinary tile content.
 An SVG dial in a 280 viewBox, fully token-driven so a skin repaints it without
 touching the component (ADR 0054). Flat: a 3px track at r130, an 8px band at the
 same radius, three gradient stops in Signal Blue at 0.55 / 0.775 / 1, muted tick
-marks, a 14px label, and a pointer bar spanning r88–r122 in Deep Amber. Skinned:
-the band moves in to r96 and widens to 40px so the scale numbers sit inside it
-and the ticks along its outer edge, the bezel and hub light up, ticks go near
-white at 4px, labels to 17px/600, and the pointer whitens and gains its glow.
+marks, a 14px label, and a pointer bar spanning r88–r122 in the foreground ink.
+Skinned: the band moves in to r96 and widens to 40px so the scale numbers sit
+inside it and the ticks along its outer edge, the bezel and hub light up, ticks
+go near white at 4px, labels to 17px/600, and the pointer whitens and gains its
+glow.
+
+A zone's rim sits at r135: a 2.5-unit hairline at rest, marking where the band
+is without lighting it, and it widens to its full 7 units only while the
+reading is actually inside that zone (ADR 0080). Zone-coloured ticks and scale
+numbers are unaffected; they stay lit whenever the reading has ever crossed
+into that band's range, which is what lets a helm crew see where the redline
+is even when the needle is nowhere near it.
 
 ### Fuel Rail (Signature)
 

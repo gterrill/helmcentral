@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { GaugeTile, majorStepFor } from '@/components/gauge-tile'
 import type { GaugeDisplay, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
+import { severityFill } from '@/lib/severity'
 
 function config(overrides: Partial<GaugeWidgetConfig> = {}): GaugeWidgetConfig {
   return {
@@ -154,6 +155,40 @@ describe('healthy zones (ADR 0053)', () => {
     expect(readout.className).toContain('text-gauge-primary')
     expect(readout.className).not.toContain('red')
     expect(readout.className).not.toContain('amber')
+  })
+})
+
+/**
+ * The plain radial's zone wash follows the same rule as DialRing's rim
+ * (ADR 0080): thin at rest, full width only while the reading sits in that
+ * zone, so a healthy gauge does not carry a permanent amber or red band.
+ */
+describe('zone wash width (ADR 0080)', () => {
+  const zoned = config({
+    display: 'radial', min: 0, max: 100,
+    zones: [{ from: 0, to: 20, state: 'alarm' }],
+  })
+
+  test('is a thin wash when the reading is outside the zone', () => {
+    // 68947 Pa converts to 10.0 psi, inside the 0-20 alarm zone here — use a
+    // reading well clear of it instead.
+    const { container } = render(
+      <GaugeTile config={zoned} value={689470} editing={false} onConfigure={vi.fn()} />,
+    )
+    const wash = [...container.querySelectorAll('path')]
+      .find((p) => p.getAttribute('stroke') === severityFill('alarm'))!
+    expect(wash.getAttribute('stroke-width')).toBe('3')
+    expect(wash.getAttribute('opacity')).toBe('0.4')
+  })
+
+  test('widens to full width when the reading is inside the zone', () => {
+    const { container } = render(
+      <GaugeTile config={zoned} value={68947} editing={false} onConfigure={vi.fn()} />,
+    )
+    const wash = [...container.querySelectorAll('path')]
+      .find((p) => p.getAttribute('stroke') === severityFill('alarm'))!
+    expect(wash.getAttribute('stroke-width')).toBe('8')
+    expect(wash.getAttribute('opacity')).toBe('0.4')
   })
 })
 

@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest'
 
 import { LampStripTile } from '@/components/lamp-strip-tile'
 import type { LampStripWidgetConfig } from '@/lib/dashboard-widgets'
+import { severityFill } from '@/lib/severity'
 
 const ribbon: LampStripWidgetConfig = {
   title: 'Status',
@@ -53,6 +54,17 @@ describe('LampStripTile', () => {
   test('an absent path reads as no data, not as off', () => {
     renderStrip()
     expect(screen.getByLabelText('INV: no data')).toBeInTheDocument()
+  })
+
+  /**
+   * An indicator is not a control (ADR 0080): "on" is the healthy green,
+   * not Signal Blue, which DESIGN.md reserves for interactive chrome.
+   */
+  test('lights an "on" lamp in the healthy green, not Signal Blue', () => {
+    renderStrip()
+    const lamp = screen.getByLabelText('GEN: on')
+    const circle = lamp.querySelector('circle')!
+    expect(circle.getAttribute('fill')).toBe(severityFill('normal'))
   })
 
   test('invert lights a lamp whose healthy state is off', () => {

@@ -101,7 +101,14 @@
     --dial-label: var(--muted-foreground);
     --dial-label-size: 14px;
     --dial-label-weight: 400;
-    --dial-needle: var(--gauge-primary);
+    /* A pointer is chrome, not a reading (ADR 0080): it says where the value
+       is, and colouring it Deep Amber put an instrument's own readout token
+       on a part of the dial that carries no measurement, sharing a hue with
+       the amber warning band closely enough that a healthy gauge and a
+       gauge in warn read the same at a glance (PFD Learning #16, a near-miss
+       colour pair). The flat pointer draws in the foreground ink instead.
+       The instrument skin keeps its own white pointer below, unchanged. */
+    --dial-needle: var(--foreground);
     --dial-needle-glow: 0 0 0 transparent;
     /* Where the pointer bar starts and stops, as a radius and a radial width.
        88-122 here, which is the span the blade it replaced swept. */

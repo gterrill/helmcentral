@@ -246,14 +246,25 @@ export function DialRing({
             readable at a glance, which is most of what the reference gets right.
             Markings only, on the same rule as the ticks: a green arc down the
             whole normal band buried the value arc, the redline and the pointer
-            under the one thing on the dial that carries no information. */}
+            under the one thing on the dial that carries no information.
+
+            A permanently full-width rim reproduces the N2KView evaluation's
+            own failure in miniature: about 60 red or yellow marks lit on a
+            healthy boat, which teaches the eye to stop reading them (ADR
+            0080). So the rim is a hairline at rest and widens to its full 7
+            units only while the converted reading actually sits inside that
+            zone - a marking the rest of the time, an alarm only when true. */}
         {(zones ?? []).map((zone, index) => {
           if (zone.state === 'normal') return null
           const from = Math.max(min, Math.min(zone.from, zone.to))
           const to = Math.min(max, Math.max(zone.from, zone.to))
           if (to <= from) return null
-          return <path key={index} data-zone={zone.state} d={arc(from, to, R_OUTER + 5)}
-            fill="none" stroke={zoneColor(zone.state)} strokeWidth="7" />
+          const active = value !== null
+            && value >= Math.min(zone.from, zone.to)
+            && value <= Math.max(zone.from, zone.to)
+          return <path key={index} data-zone={zone.state} data-zone-active={active ? 'true' : undefined}
+            d={arc(from, to, R_OUTER + 5)}
+            fill="none" stroke={zoneColor(zone.state)} strokeWidth={active ? 7 : 2.5} />
         })}
 
         {majors.map((v, index) => {
