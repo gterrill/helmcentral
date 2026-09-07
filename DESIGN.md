@@ -430,6 +430,17 @@ Full-width, `rounded-lg`, alarm red border over a 10% red wash, red text, with
 an uppercase tracked `text-sm font-semibold` headline and a `text-xs` message
 under it. Both truncate. The banner must stand out from ordinary tile content.
 
+### Indicator Ribbon
+
+A `Tile` like any other, not a banner: full width, above the grid, inside the
+page's own skin rather than among the app-theme banners (ADR 0082). A lamp is
+green (`severityFill('normal')`) when on and healthy, the muted grey token when
+off, and a border-tinted dot at low opacity when no data has ever reported:
+three states, never a color for "off" that could be mistaken for "unknown." The
+CHK lamp at the end colours from the same alarm ladder every other severity
+indicator on the board reads from, and opens the alarms drawer on click. The
+row is `overflow-x-auto`: it scrolls rather than widening the tile or the page.
+
 ### Dial (Signature)
 
 An SVG dial in a 280 viewBox, fully token-driven so a skin repaints it without

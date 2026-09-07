@@ -2,13 +2,38 @@ import { TriangleAlert } from 'lucide-react'
 import { memo } from 'react'
 
 import { Button } from '@/components/ui/button'
-import type { ActiveAlarm } from '@/hooks/use-alarms'
+import { ALARM_STATES, type ActiveAlarm, type AlarmState } from '@/hooks/use-alarms'
 import { alarmConditionSentence } from '@/lib/alarm-display'
 import { cn } from '@/lib/utils'
 
 interface AlarmBannerProps {
   alarms: ActiveAlarm[]
   onOpen: () => void
+}
+
+/**
+ * Worst-first, stable within a severity (ADR 0082 decision 8: the ribbon
+ * never reorders, so triage is this banner's job instead). ALARM_STATES is
+ * ordered worst-last, so a descending index sort ranks worst-first; the
+ * original array index breaks ties so alarms sharing a severity keep the
+ * order they arrived in rather than reshuffling on every render.
+ */
+function worstFirst(alarms: ActiveAlarm[]): ActiveAlarm[] {
+  return alarms
+    .map((alarm, index) => ({ alarm, index }))
+    .sort((a, b) => ALARM_STATES.indexOf(b.alarm.state) - ALARM_STATES.indexOf(a.alarm.state) || a.index - b.index)
+    .map(({ alarm }) => alarm)
+}
+
+/** One entry per state actually present among `sorted`, worst first. */
+function countsByState(sorted: ActiveAlarm[]): { state: AlarmState; count: number }[] {
+  const counts: { state: AlarmState; count: number }[] = []
+  for (const alarm of sorted) {
+    const last = counts[counts.length - 1]
+    if (last && last.state === alarm.state) last.count += 1
+    else counts.push({ state: alarm.state, count: 1 })
+  }
+  return counts
 }
 
 /**
@@ -33,10 +58,14 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen }: AlarmBa
 
   const unacknowledged = alarms.filter((alarm) => alarm.phase !== 'acknowledged')
   const loud = unacknowledged.length > 0
-  const shown = loud ? unacknowledged : alarms
+  const shown = worstFirst(loud ? unacknowledged : alarms)
 
   const [first] = shown
-  const others = shown.length - 1
+  const counts = countsByState(shown)
+  // e.g. "1 ALARM · 2 WARN" — worst state first, matching the order `shown`
+  // and its labels below are already sorted into.
+  const headline = counts.map(({ state, count }) => `${count} ${state}`).join(' · ')
+  const labels = shown.map((alarm) => alarm.label).join(', ')
 
   return (
     <div
@@ -50,13 +79,15 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen }: AlarmBa
     >
       <TriangleAlert className="size-5 shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        {/* The severity word keeps the tracked uppercase idiom; the label does
-            not. An alarm's label is a SignalK path (`radar.fur6424a.guardzone.1`),
+        {/* The counts keep the tracked uppercase idiom; the labels do not. An
+            alarm's label is a SignalK path (`radar.fur6424a.guardzone.1`),
             and 44 characters of shouted dotted identifier is slower to read at
-            arm's length than the same string in its own case. */}
+            arm's length than the same string in its own case. Any overflow is
+            the plain `truncate` clip below, same as a single-alarm headline
+            always had — there is no separate "and N more" count anymore now
+            that every shown alarm's label is already listed. */}
         <p className="truncate text-sm font-semibold">
-          <span className="uppercase tracking-[0.08em]">{first.state}</span> — {first.label}
-          {others > 0 && <span className="ml-2 font-normal">and {others} more</span>}
+          <span className="uppercase tracking-[0.08em]">{headline}</span> — {labels}
           {!loud && <span className="ml-2 font-normal">· all acknowledged, still live</span>}
         </p>
         <p className="truncate text-xs">{alarmConditionSentence(first)}</p>

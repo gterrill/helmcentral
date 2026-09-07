@@ -2,6 +2,7 @@ import {
   Anchor,
   BellRing,
   CloudSun,
+  LampCeiling,
   LayoutDashboard,
   Map,
   Plus,
@@ -58,6 +59,7 @@ import { useRoutes } from '@/hooks/use-routes'
 import { useSatCharts } from '@/hooks/use-sat-charts'
 import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
 import { useDashboardPages } from '@/hooks/use-dashboard-pages'
+import { useDashboardRibbon } from '@/hooks/use-dashboard-ribbon'
 import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
@@ -325,6 +327,11 @@ export function App() {
   const { pages, loading: pagesLoading, error: pagesError, createPage, updatePage, deletePage, reorderPages, reordering } = useDashboardPages()
   const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId)
   const activePage = pages.find((p) => p.id === activePageId) ?? null
+  // The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip, not
+  // tied to any page, so it lives beside the page hooks rather than inside
+  // effectiveWidgets below.
+  const { ribbon, saveRibbon } = useDashboardRibbon()
+  const [ribbonDialogOpen, setRibbonDialogOpen] = useState(false)
 
   // Gates the two URL-writing effects below on the shell actually being
   // shown (mirrors the render gate further down): while auth is still
@@ -822,6 +829,19 @@ export function App() {
     setLampStripDraft(null)
   }, [activePage, effectiveWidgets, lampStripDraft, updatePage])
 
+  // The ribbon (ADR 0082) reuses LampStripConfigDialog under a synthetic
+  // { id: 'ribbon' } rather than a real page widget — there is no draft state
+  // to hold, since it is vessel-level and already lives in `ribbon` itself.
+  const handleSaveRibbon = useCallback((lamps: LampStripWidgetConfig) => {
+    void saveRibbon(lamps)
+    setRibbonDialogOpen(false)
+  }, [saveRibbon])
+
+  const handleRemoveRibbon = useCallback(() => {
+    void saveRibbon(null)
+    setRibbonDialogOpen(false)
+  }, [saveRibbon])
+
   /**
    * Copies a tile and opens the copy's config straight away — the copy exists
    * to be retargeted, so making that the immediate next step is the point.
@@ -1140,6 +1160,24 @@ export function App() {
         </div>
       )}
 
+      {/* The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip
+          above the grid on every dashboard page and every width, inside the
+          page's own skin rather than among the app-theme banners — the same
+          slot ADR 0072 gave the hero row. Not part of effectiveWidgets, so it
+          never enters react-grid-layout's managed array. */}
+      {ribbon && (
+        <div data-testid="dashboard-ribbon" className="w-full min-w-0">
+          <LampStripTile
+            config={ribbon}
+            values={gaugeValues}
+            worstAlarmState={worstAlarmState}
+            editing={layoutEditing}
+            onConfigure={() => setRibbonDialogOpen(true)}
+            onOpenAlarms={() => requestNavigate('alarms', () => setActivePanel('alarms'))}
+          />
+        </div>
+      )}
+
       <DashboardBentoGrid
         widgets={effectiveWidgets}
         editing={layoutEditing}
@@ -1162,6 +1200,14 @@ export function App() {
           page={activePage ?? null}
           onSetHero={(id, hero) => { void updatePage(id, { hero }) }}
         />
+        <button
+          type="button"
+          onClick={() => setRibbonDialogOpen(true)}
+          className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary"
+        >
+          <LampCeiling className="h-3.5 w-3.5" aria-hidden="true" />
+          Ribbon
+        </button>
         <Popover>
           <PopoverTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">
             <Plus className="h-3.5 w-3.5" />
@@ -1256,6 +1302,13 @@ export function App() {
         widget={lampStripDraft}
         onCancel={() => setLampStripDraft(null)}
         onSave={handleSaveLampStrip}
+      />
+
+      <LampStripConfigDialog
+        widget={ribbonDialogOpen ? { id: 'ribbon', lamps: ribbon ?? undefined } : null}
+        onCancel={() => setRibbonDialogOpen(false)}
+        onSave={handleSaveRibbon}
+        onRemove={handleRemoveRibbon}
       />
 
       <EmbedConfigDialog

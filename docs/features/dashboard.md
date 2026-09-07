@@ -35,6 +35,28 @@ Two additional widget types are configurable:
 - **Embed tiles** put any URL in the grid: a Grafana panel, a camera feed, a
   windrose.
 
+## The indicator ribbon
+
+One strip of status lamps and a CHK rollup, pinned above the grid on every
+dashboard page, inside whatever skin that page uses. It is vessel-level: the
+same strip, the same order, wherever you look, so a glance always means the
+same thing. It does not appear on the Forecast, Routes, Charts, Radar, Anchor
+Watch or Settings panels; those rely on the alarm banner instead.
+
+Its order never changes on its own. A lamp that trips does not jump to the
+front and a lamp that clears does not disappear, because the whole point of a
+ribbon is that its layout is something you can memorize. Triage is the alarm
+banner's job instead: it lists a count for each severity currently active,
+worst first, then names the alarms in that same worst-first order.
+
+The ribbon is one strip for the whole vessel. If a page needs its own
+additional status lamps alongside it, add a separate lamp strip widget to
+that page in layout mode. It configures the same way and does not affect the
+pinned ribbon.
+
+To add, edit or remove the ribbon, see [Pin an indicator
+ribbon](../how-to/pin-an-indicator-ribbon.md).
+
 ## Arranging it
 
 Toggle layout mode in the header, then drag, resize or remove widgets and add

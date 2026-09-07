@@ -21,23 +21,45 @@ import {
   type LampStripWidgetConfig,
 } from '@/lib/dashboard-widgets'
 
-function defaultStripConfig(): LampStripWidgetConfig {
-  return { title: 'Status', lamps: [{ path: '', label: '' }], showCheck: true }
+/**
+ * A `Pick` of `DashboardLayoutItem` rather than the full type, so this dialog
+ * also serves the vessel-level ribbon (ADR 0082), which has no page, no
+ * geometry and no real widget id — App.tsx passes it a synthetic
+ * `{ id: 'ribbon', lamps: ribbon ?? undefined }` — while an ordinary
+ * `DashboardLayoutItem` for a per-page `lamps:` widget still satisfies this
+ * shape unchanged.
+ */
+export interface LampStripDialogWidget extends Pick<DashboardLayoutItem, 'lamps'> {
+  id: string
+}
+
+// The ribbon's synthetic id, distinguishing it from a real lamps: widget id
+// for the one thing that differs between them: a fresh draft's default title.
+const RIBBON_DIALOG_ID = 'ribbon'
+
+function defaultStripConfig(id: string): LampStripWidgetConfig {
+  return {
+    title: id === RIBBON_DIALOG_ID ? 'Indicators' : 'Status',
+    lamps: [{ path: '', label: '' }],
+    showCheck: true,
+  }
 }
 
 interface LampStripConfigDialogProps {
-  widget: DashboardLayoutItem | null
+  widget: LampStripDialogWidget | null
   onCancel: () => void
   onSave: (config: LampStripWidgetConfig) => void
+  /** Present only for the ribbon: offers removing it entirely rather than just editing its contents. */
+  onRemove?: () => void
 }
 
-export function LampStripConfigDialog({ widget, onCancel, onSave }: LampStripConfigDialogProps) {
+export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: LampStripConfigDialogProps) {
   const { paths } = useSignalKPaths(widget !== null)
-  const [config, setConfig] = useState<LampStripWidgetConfig>(defaultStripConfig)
+  const [config, setConfig] = useState<LampStripWidgetConfig>(() => defaultStripConfig(widget?.id ?? ''))
 
   // Re-seed per instance, so editing one strip never shows another's settings.
   useEffect(() => {
-    setConfig(widget?.lamps ? structuredClone(widget.lamps) : defaultStripConfig())
+    setConfig(widget?.lamps ? structuredClone(widget.lamps) : defaultStripConfig(widget?.id ?? ''))
   }, [widget?.id, widget?.lamps])
 
   const setLamp = (index: number, patch: Partial<LampStripWidgetConfig['lamps'][number]>) =>
@@ -159,6 +181,9 @@ export function LampStripConfigDialog({ widget, onCancel, onSave }: LampStripCon
         </div>
 
         <DialogFooter>
+          {onRemove && (
+            <Button variant="outline" onClick={onRemove}>Remove ribbon</Button>
+          )}
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           <Button disabled={!canSave} onClick={() => onSave(config)}>Save</Button>
         </DialogFooter>

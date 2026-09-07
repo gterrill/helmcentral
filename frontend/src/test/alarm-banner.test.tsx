@@ -106,6 +106,73 @@ describe('AlarmBanner', () => {
   })
 })
 
+// ADR 0082: the ribbon never reorders, so triage moves to the banner instead —
+// it ranks every shown alarm worst first (ALARM_STATES order) and rolls the
+// headline up into a count per state present rather than naming only one.
+describe('AlarmBanner triage', () => {
+  it('ranks the worst alarm first regardless of input order, for both the headline and the condition line', () => {
+    render(
+      <AlarmBanner
+        alarms={[
+          makeAlarm({ rule_id: 'warn-1', label: 'High bilge', state: 'warn', message: 'High bilge running.' }),
+          makeAlarm({ rule_id: 'alarm-1', label: 'Anchor dragging', state: 'alarm' }),
+          makeAlarm({ rule_id: 'warn-2', label: 'Battery low', state: 'warn', message: 'Battery low.' }),
+        ]}
+        onOpen={vi.fn()}
+      />,
+    )
+
+    const banner = screen.getByRole('alert')
+    // Labels appear worst-first: the alarm-severity alarm before either warn.
+    expect(banner).toHaveTextContent('Anchor dragging, High bilge, Battery low')
+    // The second line is the worst alarm's own condition ("Anchor dragging"
+    // from makeAlarm's default message), not the first one that happened to
+    // be first in the input array ("High bilge running.").
+    expect(banner).toHaveTextContent('Anchor dragging: 62m from where it was set')
+    expect(banner).not.toHaveTextContent('High bilge running.')
+  })
+
+  it('rolls the headline up into one count per state present, worst first', () => {
+    render(
+      <AlarmBanner
+        alarms={[
+          makeAlarm({ rule_id: 'warn-1', label: 'High bilge', state: 'warn' }),
+          makeAlarm({ rule_id: 'alarm-1', label: 'Anchor dragging', state: 'alarm' }),
+          makeAlarm({ rule_id: 'warn-2', label: 'Battery low', state: 'warn' }),
+        ]}
+        onOpen={vi.fn()}
+      />,
+    )
+
+    // The state words are the tracked *uppercase idiom* visually (a CSS class,
+    // as jsdom does not apply text-transform to textContent), so the raw DOM
+    // text is the lowercase AlarmState string, same as ALARM_STATES itself.
+    expect(screen.getByRole('alert')).toHaveTextContent('1 alarm · 2 warn')
+  })
+
+  it('keeps same-severity alarms in their original relative order', () => {
+    render(
+      <AlarmBanner
+        alarms={[
+          makeAlarm({ rule_id: 'warn-1', label: 'First warn', state: 'warn' }),
+          makeAlarm({ rule_id: 'warn-2', label: 'Second warn', state: 'warn' }),
+        ]}
+        onOpen={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('First warn, Second warn')
+  })
+
+  it('shows a single-state count for one alarm, unchanged from a one-alarm headline', () => {
+    render(<AlarmBanner alarms={[makeAlarm({ state: 'emergency', label: 'Fire' })]} onOpen={vi.fn()} />)
+
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent('1 emergency')
+    expect(banner).toHaveTextContent('Fire')
+  })
+})
+
 describe('AlarmBanner identifier legibility', () => {
   // The severity word is a short status token and stays in the tracked
   // uppercase idiom. The alarm's own label is a SignalK path
