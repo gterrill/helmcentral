@@ -68,6 +68,7 @@ import { useRadarTargets } from '@/hooks/use-radar-targets'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
 import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
+import { ConnectionBanner } from '@/components/connection-banner'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
@@ -1617,6 +1618,7 @@ export function App() {
         </header>
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
+            <ConnectionBanner />
             <AlarmBanner alarms={alarms} onOpen={() => requestNavigate('alarms', () => setActivePanel('alarms'))} />
             <ForecastWarningsBanner warnings={activeForecastWarning} />
 

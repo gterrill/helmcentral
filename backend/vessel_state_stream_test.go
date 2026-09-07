@@ -161,6 +161,23 @@ func TestTelemetryEmittersIncludeRadarTargets(t *testing.T) {
 	t.Fatal("telemetryEmitters() does not include a radar-targets emitter")
 }
 
+func TestTelemetryHeartbeatIsObservableAndPeriodic(t *testing.T) {
+	for _, emitter := range telemetryEmitters() {
+		if emitter.event != "heartbeat" {
+			continue
+		}
+		if emitter.interval != 15*time.Second {
+			t.Fatalf("heartbeat cadence: %v", emitter.interval)
+		}
+		first := emitter.build()["timestamp"]
+		if first == nil || emitter.build()["timestamp"] == first {
+			t.Fatal("heartbeat must carry fresh data so change gating cannot suppress it")
+		}
+		return
+	}
+	t.Fatal("missing observable heartbeat (SSE comments cannot drive the browser watchdog)")
+}
+
 // ── buildAutopilotPayload ───────────────────────────────────────────────────
 
 func autopilotDelta(context string, now time.Time, values map[string]any) signalKDelta {

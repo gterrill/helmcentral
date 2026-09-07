@@ -31,17 +31,19 @@ export type TelemetryStatus = 'connected' | 'reconnecting' | 'disconnected'
 const MIN_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 30_000
 const STABLE_DURATION_MS = 10_000
+// Three missed 15s server heartbeats. Also bounds a connection attempt that
+// never opens/errors (common with limited-connectivity Wi-Fi).
+const RECEIVE_TIMEOUT_MS = 45_000
+let lastReceivedAt = 0
+let watchdogTimer: ReturnType<typeof setInterval> | null = null
 
 let source: EventSource | null = null
 let subscriberCount = 0
 let backoff = MIN_BACKOFF_MS
 let connectedAt: number | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-// Optimistic default: mirrors the null-means-"assume fine until proven
-// otherwise" convention useVesselIdentity's signalkConnected already uses,
-// so a fresh page load doesn't flash a warning before the first connection
-// attempt has even had a chance to succeed or fail.
-let status: TelemetryStatus = 'connected'
+// Opening TCP is not proof of live telemetry. Require an actual event.
+let status: TelemetryStatus = 'reconnecting'
 
 // Listener registry keyed by event name, independent of any EventSource
 // instance. Subscribers register here rather than on the EventSource
@@ -61,6 +63,8 @@ function dispatcherFor(event: string): (e: Event) => void {
   let dispatcher = dispatchers.get(event)
   if (!dispatcher) {
     dispatcher = (e: Event) => {
+      if (e.currentTarget && e.currentTarget !== source) return
+      received()
       const raw = (e as MessageEvent<string>).data
       for (const listener of listeners.get(event) ?? []) {
         listener(raw)
@@ -84,15 +88,56 @@ function clearReconnectTimer(): void {
   }
 }
 
+function received(): void {
+  lastReceivedAt = Date.now()
+  if (connectedAt === null) connectedAt = lastReceivedAt
+  setStatus('connected')
+}
+
+function checkSilence(): void {
+  if (source && Date.now() - lastReceivedAt >= RECEIVE_TIMEOUT_MS) {
+    scheduleReconnect(source)
+  }
+}
+
+function onResume(): void {
+  if (document.visibilityState !== 'hidden') checkSilence()
+}
+
+function onOffline(): void {
+  if (source) scheduleReconnect(source)
+}
+
+function startWatchdog(): void {
+  watchdogTimer = setInterval(checkSilence, 1_000)
+  window.addEventListener('online', onResume)
+  window.addEventListener('offline', onOffline)
+  window.addEventListener('pageshow', onResume)
+  document.addEventListener('visibilitychange', onResume)
+}
+
+function stopWatchdog(): void {
+  if (watchdogTimer !== null) clearInterval(watchdogTimer)
+  watchdogTimer = null
+  window.removeEventListener('online', onResume)
+  window.removeEventListener('offline', onOffline)
+  window.removeEventListener('pageshow', onResume)
+  document.removeEventListener('visibilitychange', onResume)
+}
+
 function attachSource(): void {
   const es = new EventSource('/api/stream')
   source = es
   connectedAt = null
+  lastReceivedAt = Date.now()
+  setStatus('reconnecting')
 
   es.addEventListener('open', () => {
     if (source !== es) return // superseded by a later reconnect; ignore
-    connectedAt = Date.now()
-    setStatus('connected')
+    // Do not clear a stale-data warning until data actually arrives.
+  })
+  es.addEventListener('heartbeat', () => {
+    if (source === es) received()
   })
 
   for (const event of listeners.keys()) {
@@ -107,8 +152,8 @@ function attachSource(): void {
       // instance per spec; reconnecting by hand too would just race it. The
       // status still has to move: for however long that retry takes, every
       // tile is frozen, and a badge reading "Live" over stale telemetry is
-      // the failure this whole module exists to stop. The 'open' handler
-      // above puts it back once the browser's own retry lands.
+      // the failure this whole module exists to stop. Receiving data puts
+      // it back; the watchdog bounds a browser retry that never completes.
       setStatus('reconnecting')
       return
     }
@@ -121,6 +166,11 @@ function attachSource(): void {
 }
 
 function scheduleReconnect(deadSource: EventSource): void {
+  if (source !== deadSource) return
+  clearReconnectTimer()
+  for (const [event, dispatcher] of dispatchers) {
+    deadSource.removeEventListener(event, dispatcher)
+  }
   deadSource.close()
   source = null
 
@@ -145,6 +195,7 @@ function scheduleReconnect(deadSource: EventSource): void {
 
 function acquire(): void {
   subscriberCount += 1
+  if (subscriberCount === 1) startWatchdog()
   if (!source && reconnectTimer === null) {
     backoff = MIN_BACKOFF_MS
     attachSource()
@@ -154,7 +205,11 @@ function acquire(): void {
 function release(): void {
   subscriberCount = Math.max(0, subscriberCount - 1)
   if (subscriberCount === 0) {
+    stopWatchdog()
     clearReconnectTimer()
+    for (const [event, dispatcher] of dispatchers) {
+      source?.removeEventListener(event, dispatcher)
+    }
     source?.close()
     source = null
     backoff = MIN_BACKOFF_MS

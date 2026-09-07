@@ -63,10 +63,22 @@ class FakeEventSource {
 }
 
 let instances: FakeEventSource[] = []
+let cleanups: Array<() => void> = []
 
 async function loadModule() {
   vi.resetModules()
-  return import('@/hooks/use-telemetry-stream')
+  const module = await import('@/hooks/use-telemetry-stream')
+  return {
+    ...module,
+    subscribeTelemetry: (...args: Parameters<typeof module.subscribeTelemetry>) => {
+      const cleanup = module.subscribeTelemetry(...args)
+      cleanups.push(cleanup)
+      return () => {
+        cleanups = cleanups.filter((fn) => fn !== cleanup)
+        cleanup()
+      }
+    },
+  }
 }
 
 beforeEach(() => {
@@ -76,6 +88,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanups.forEach((cleanup) => cleanup())
+  cleanups = []
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -116,7 +130,7 @@ describe('use-telemetry-stream reconnection', () => {
     const es = instances[0]
 
     act(() => { es.emitError(FakeEventSource.CONNECTING) })
-    act(() => { vi.advanceTimersByTime(60_000) })
+    act(() => { vi.advanceTimersByTime(10_000) })
 
     expect(instances).toHaveLength(1)
   })
@@ -127,7 +141,7 @@ describe('use-telemetry-stream reconnection', () => {
     subscribeTelemetry('vessel-state', vi.fn())
     const { result } = renderHook(() => useTelemetryStatus())
 
-    act(() => { instances[0].emitOpen() })
+    act(() => { instances[0].emitOpen(); instances[0].emitMessage('vessel-state', '{}') })
     expect(result.current).toBe('connected')
 
     // A transport-level drop: the browser retries this instance on its own, so
@@ -136,7 +150,7 @@ describe('use-telemetry-stream reconnection', () => {
     act(() => { instances[0].emitError(FakeEventSource.CONNECTING) })
     expect(result.current).toBe('reconnecting')
 
-    act(() => { instances[0].emitOpen() })
+    act(() => { instances[0].emitOpen(); instances[0].emitMessage('vessel-state', '{}') })
     expect(result.current).toBe('connected')
   })
 
@@ -186,7 +200,7 @@ describe('use-telemetry-stream reconnection', () => {
     const { result } = renderHook(() => useTelemetryStatus())
 
     expect(instances).toHaveLength(1)
-    act(() => { instances[0].emitOpen() })
+    act(() => { instances[0].emitOpen(); instances[0].emitMessage('vessel-state', '{}') })
     expect(result.current).toBe('connected')
 
     act(() => { instances[0].emitError(FakeEventSource.CLOSED) })
@@ -195,7 +209,72 @@ describe('use-telemetry-stream reconnection', () => {
     act(() => { vi.advanceTimersByTime(1_000) })
     expect(instances).toHaveLength(2)
 
-    act(() => { instances[1].emitOpen() })
+    act(() => { instances[1].emitOpen(); instances[1].emitMessage('vessel-state', '{}') })
     expect(result.current).toBe('connected')
+  })
+
+  it('does not claim live data until an event arrives, even after open', async () => {
+    const { subscribeTelemetry, useTelemetryStatus } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn())
+    const { result } = renderHook(() => useTelemetryStatus())
+    expect(result.current).toBe('reconnecting')
+    act(() => { instances[0].emitOpen() })
+    expect(result.current).toBe('reconnecting')
+    act(() => { instances[0].emitMessage('heartbeat', '{}') })
+    expect(result.current).toBe('connected')
+  })
+
+  it.each([FakeEventSource.OPEN, FakeEventSource.CONNECTING])('replaces a silently stalled stream in readyState %s', async (state) => {
+    const { subscribeTelemetry, useTelemetryStatus } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn())
+    const { result } = renderHook(() => useTelemetryStatus())
+    const old = instances[0]
+    if (state === FakeEventSource.OPEN) {
+      act(() => { old.emitOpen(); old.emitMessage('vessel-state', '{}') })
+    }
+    act(() => { vi.advanceTimersByTime(45_000) })
+    expect(result.current).toBe('reconnecting')
+    expect(old.readyState).toBe(FakeEventSource.CLOSED)
+    act(() => { vi.advanceTimersByTime(1_000) })
+    expect(instances).toHaveLength(2)
+    act(() => { old.emitMessage('vessel-state', '{}') })
+    expect(result.current).toBe('reconnecting')
+    act(() => { instances[1].emitMessage('vessel-state', '{}') })
+    expect(result.current).toBe('connected')
+  })
+
+  it('heartbeats keep a quiet stream alive', async () => {
+    const { subscribeTelemetry, useTelemetryStatus } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn())
+    const { result } = renderHook(() => useTelemetryStatus())
+    for (let i = 0; i < 6; i++) {
+      act(() => { vi.advanceTimersByTime(15_000); instances[0].emitMessage('heartbeat', '{}') })
+    }
+    expect(instances).toHaveLength(1)
+    expect(result.current).toBe('connected')
+  })
+
+  it('checks wall-clock silence on resume and never treats online as proof of recovery', async () => {
+    const { subscribeTelemetry, useTelemetryStatus } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn())
+    const { result } = renderHook(() => useTelemetryStatus())
+    act(() => { instances[0].emitMessage('vessel-state', '{}') })
+    act(() => { vi.setSystemTime(Date.now() + 120_000); window.dispatchEvent(new Event('pageshow')) })
+    expect(result.current).toBe('reconnecting')
+    expect(instances[0].readyState).toBe(FakeEventSource.CLOSED)
+    act(() => { window.dispatchEvent(new Event('online')) })
+    expect(result.current).toBe('reconnecting')
+  })
+
+  it('marks offline immediately and cleans up watchdog and browser listeners', async () => {
+    const { subscribeTelemetry, useTelemetryStatus } = await loadModule()
+    const unsubscribe = subscribeTelemetry('vessel-state', vi.fn())
+    const { result } = renderHook(() => useTelemetryStatus())
+    act(() => { instances[0].emitMessage('vessel-state', '{}'); window.dispatchEvent(new Event('offline')) })
+    expect(result.current).toBe('reconnecting')
+    act(() => { unsubscribe() })
+    expect(vi.getTimerCount()).toBe(0)
+    act(() => { window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('pageshow')); vi.advanceTimersByTime(60_000) })
+    expect(instances).toHaveLength(1)
   })
 })

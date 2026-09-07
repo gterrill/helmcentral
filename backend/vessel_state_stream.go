@@ -49,6 +49,11 @@ func telemetryEmitters() []*streamEmitter {
 		{event: "radar-targets", interval: 2 * time.Second, build: buildRadarTargetsPayload},
 		{event: "solar-state", interval: 10 * time.Second, build: buildSolarStatePayload},
 		{event: "tanks-state", interval: 10 * time.Second, build: buildTanksStatePayload},
+		// Unlike SSE comment keepalives, this is observable in EventSource
+		// JavaScript. Always changes so a quiet boat still proves liveness.
+		{event: "heartbeat", interval: telemetryStreamKeepalive, build: func() map[string]any {
+			return map[string]any{"timestamp": time.Now().UTC().Format(time.RFC3339Nano)}
+		}},
 	}
 }
 

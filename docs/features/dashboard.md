@@ -1,5 +1,25 @@
 # The dashboard
 
+## Connection loss
+
+If the dashboard loses its connection to Helmcentral, a non-dismissible
+**Server connection unavailable** banner appears above the page content,
+including on phones. Retained telemetry, anchor-watch state and alarm status
+may be out of date; they are not confirmation of the vessel's current state.
+
+The dashboard reconnects automatically. Explicit connection errors and the
+browser's offline signal show the warning immediately. A connection that
+silently stops receiving events is detected after 45 seconds. Returning to
+the page checks elapsed time again, so suspended phone timers do not hide a
+stale connection. The warning clears only when an event arrives from the
+server, not merely when Wi-Fi reconnects or a connection opens.
+
+This warning describes the browser-to-Helmcentral connection. SignalK source
+outages are separate. Server-side alarms can continue while a phone cannot
+reach the dashboard, but that phone cannot confirm their current status.
+
+## Widgets
+
 Seventeen built-in widgets: Vessel, Apparent Wind, Depth & Tide, Position,
 Today & Now, Anchor Watch, Tanks, Route, Nearby Vessels, Radar Targets,
 Battery & Power, Solar, Alternator, Generator, Switches, Hot Water and
