@@ -130,7 +130,7 @@ import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import { EngineProfileDialog } from '@/components/engine-profile-dialog'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
 import { LampStripTile } from '@/components/lamp-strip-tile'
-import { useGaugeValues } from '@/hooks/use-gauge-values'
+import { useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
 import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -239,6 +239,9 @@ export function App() {
   const [engineProfileOpen, setEngineProfileOpen] = useState(false)
   const [clusterDraft, setClusterDraft] = useState<DashboardLayoutItem | null>(null)
   const gaugeValues = useGaugeValues()
+  // Age behind each bound path (ADR 0083), riding the same gauge-values event
+  // rather than a stream of its own -- see hooks/use-gauge-values.ts.
+  const gaugeAges = useGaugeAges()
   const [settingsDirty, setSettingsDirty] = useState(false)
   const settingsPageRef = useRef<SettingsPageHandle>(null)
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
@@ -893,6 +896,7 @@ export function App() {
         <EngineClusterTile
           config={widget.cluster}
           values={gaugeValues}
+          ages={gaugeAges}
           editing={layoutEditing}
           onConfigure={() => setClusterDraft(widget)}
         />
@@ -905,6 +909,7 @@ export function App() {
         <LampStripTile
           config={widget.lamps}
           values={gaugeValues}
+          ages={gaugeAges}
           worstAlarmState={worstAlarmState}
           editing={layoutEditing}
           onConfigure={() => setLampStripDraft(widget)}
@@ -919,6 +924,7 @@ export function App() {
         <GaugeGroupTile
           config={widget.gaugeGroup}
           values={gaugeValues}
+          ages={gaugeAges}
           editing={layoutEditing}
           onConfigure={() => setGaugeGroupDraft(widget)}
         />
@@ -931,6 +937,7 @@ export function App() {
         <GaugeTile
           config={widget.gauge}
           value={gaugeValues[widget.gauge.path] ?? null}
+          ages={gaugeAges}
           editing={layoutEditing}
           onConfigure={() => setGaugeDraft(widget)}
         />
@@ -1170,6 +1177,7 @@ export function App() {
           <LampStripTile
             config={ribbon}
             values={gaugeValues}
+            ages={gaugeAges}
             worstAlarmState={worstAlarmState}
             editing={layoutEditing}
             onConfigure={() => setRibbonDialogOpen(true)}

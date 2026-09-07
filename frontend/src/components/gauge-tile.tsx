@@ -8,6 +8,7 @@ import { useTelemetryHistory, type TelemetryHistoryPoint } from '@/hooks/use-tel
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { formatQuantity, convertFromSI, unitOption } from '@/lib/quantities'
 import { severityFill, severityTextClass } from '@/lib/severity'
+import { formatDataAge, isStale } from '@/lib/staleness'
 
 /** The zone a converted reading falls in, or null when it is in no zone. */
 function activeZone(value: number | null, zones: GaugeZone[] | undefined): GaugeZone['state'] | null {
@@ -68,21 +69,31 @@ interface GaugeTileProps {
   config: GaugeWidgetConfig
   /** Raw SI value from SignalK, or null when the path is absent. */
   value: number | null
+  /** Age in seconds behind this gauge's bound path (ADR 0083); absent is unknown. */
+  ages?: Record<string, number | null>
   editing: boolean
   onConfigure: () => void
 }
 
-export const GaugeTile = memo(function GaugeTile({ config, value, editing, onConfigure }: GaugeTileProps) {
+export const GaugeTile = memo(function GaugeTile({ config, value, ages, editing, onConfigure }: GaugeTileProps) {
   const title = config.label.trim() || config.path
+  const age = ages?.[config.path] ?? null
+  const stale = isStale(age)
+  // A frozen source is blanked to the same absence a never-reported path
+  // gets (ADR 0068/0083): the frozen value is exactly the one most likely to
+  // be read as fact, and GaugeBody already renders the structural dash.
+  const displayValue = stale ? null : value
   // The same conversion GaugeBody does internally, so the tile edge can carry
   // the reading's own zone (ADR 0081) without GaugeBody reaching back out.
-  const converted = value === null ? null : convertFromSI(value, config.quantity, config.unit)
+  const converted = displayValue === null ? null : convertFromSI(displayValue, config.quantity, config.unit)
   const zone = activeZone(converted, config.zones)
 
   return (
     <Tile
       title={title}
       state={zone}
+      stale={stale}
+      staleLabel={formatDataAge(age)}
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (
@@ -92,7 +103,7 @@ export const GaugeTile = memo(function GaugeTile({ config, value, editing, onCon
         ) : undefined
       }
     >
-      <GaugeBody config={config} value={value} />
+      <GaugeBody config={config} value={displayValue} />
     </Tile>
   )
 })

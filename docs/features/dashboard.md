@@ -128,6 +128,24 @@ The Solar tile does this per controller as well as for the array as a whole. One
 MPPT dropping off marks that row and leaves the rest of the tile reporting
 normally, using readings from the controllers that are still live.
 
+Every configurable gauge, gauge group, engine cluster, indicator lamp strip and
+the pinned ribbon watches the same way. A standalone gauge dims and blanks
+exactly like Solar or Battery & Power. A lamp goes dark with the same age
+marker rather than staying lit on an old reading: a generator that shut down
+twenty minutes ago must not still show green because the last report it sent
+happened to say "running". A gauge group or an engine cluster marks only the
+one reading that actually stopped, with a small badge next to its label, and
+keeps reporting everything else normally; the tile as a whole only goes stale
+once every reading on it has stopped updating, so one dead sensor among
+several does not blank a cluster that is otherwise still telling the truth.
+
+A number the dashboard computes from other readings, such as the boat's fuel
+economy, is only as current as whichever input it used is oldest. If one
+engine's fuel-rate feed stops while the boat is still moving, the economy
+figure built from it is being computed from a number that is no longer
+arriving, and it goes stale along with that feed rather than continuing to
+read as a live measurement.
+
 Ages are measured against the vessel clock at the moment the reading was taken,
 so a tablet with a wrong clock or one waking from sleep will not cause false
 staleness.

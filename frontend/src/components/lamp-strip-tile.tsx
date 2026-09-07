@@ -5,15 +5,18 @@ import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import type { LampConfig, LampStripWidgetConfig } from '@/lib/dashboard-widgets'
 import { severityFill } from '@/lib/severity'
+import { formatDataAge, isStale } from '@/lib/staleness'
 
 /**
- * Three states, not two. An absent path is not a zero — a lamp lit or darkened
- * because nothing has reported is the same failure the gauges' structural dash
- * exists to prevent.
+ * Four states. An absent path is not a zero — a lamp lit or darkened because
+ * nothing has reported is the same failure the gauges' structural dash
+ * exists to prevent. `stale` (ADR 0083) is a fifth reason a lamp goes dark:
+ * a source that stopped reporting must never be left showing its last "on".
  */
-type LampState = 'on' | 'off' | 'no data'
+type LampState = 'on' | 'off' | 'no data' | 'stale'
 
-function lampState(lamp: LampConfig, value: number | null | undefined): LampState {
+function lampState(lamp: LampConfig, value: number | null | undefined, stale: boolean): LampState {
+  if (stale) return 'stale'
   if (value === null || value === undefined) return 'no data'
   const lit = value !== 0
   return (lamp.invert ? !lit : lit) ? 'on' : 'off'
@@ -25,6 +28,9 @@ function lampState(lamp: LampConfig, value: number | null | undefined): LampStat
  * control — and a lamp is not a control; it is a reading with two states.
  * severityFill('normal') is the same green a gauge zone in its normal band
  * draws, so "everything is fine" reads the same way across the dashboard.
+ *
+ * "no data" and "stale" share the same unlit border colour: a frozen source
+ * reads exactly like one that has never reported at all.
  */
 function lampFill(state: LampState): string {
   switch (state) {
@@ -70,6 +76,8 @@ function Lamp({ label, state, fill, opacity, onClick, ariaLabel }: {
 interface LampStripTileProps {
   config: LampStripWidgetConfig
   values: Record<string, number | null>
+  /** Age in seconds behind each lamp's bound path (ADR 0083); absent is unknown. */
+  ages?: Record<string, number | null>
   /** The worst currently-active alarm severity, driving the CHK rollup. */
   worstAlarmState: string
   editing: boolean
@@ -82,7 +90,7 @@ interface LampStripTileProps {
  * attention, and the CHK lamp says whether to go looking.
  */
 export const LampStripTile = memo(function LampStripTile({
-  config, values, worstAlarmState, editing, onConfigure, onOpenAlarms,
+  config, values, ages, worstAlarmState, editing, onConfigure, onOpenAlarms,
 }: LampStripTileProps) {
   const title = config.title.trim() || 'Indicators'
 
@@ -102,15 +110,18 @@ export const LampStripTile = memo(function LampStripTile({
           tile and break the grid. */}
       <div data-testid="lamp-strip-row" className="flex items-start gap-3 overflow-x-auto pb-1">
         {config.lamps.map((lamp, index) => {
-          const state = lampState(lamp, values[lamp.path])
+          const age = ages?.[lamp.path] ?? null
+          const stale = isStale(age)
+          const state = lampState(lamp, values[lamp.path], stale)
+          const label = lamp.label.trim() || lamp.path.split('.').slice(-1)[0]
           return (
             <Lamp
               key={index}
-              label={lamp.label.trim() || lamp.path.split('.').slice(-1)[0]}
+              label={label}
               state={state}
               fill={lampFill(state)}
               opacity={state === 'on' ? 1 : 0.3}
-              ariaLabel={`${lamp.label.trim() || lamp.path}: ${state}`}
+              ariaLabel={stale ? `${label}: stale ${formatDataAge(age)}` : `${label}: ${state}`}
             />
           )
         })}

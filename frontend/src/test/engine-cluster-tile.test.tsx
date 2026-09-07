@@ -572,3 +572,70 @@ describe('tile state (ADR 0081)', () => {
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
   })
 })
+
+/**
+ * Ages ride the same gauge-values stream (ADR 0083). A stale slot renders the
+ * dash -- the ring blanks, a corner row carries its own badge -- without
+ * staling the whole tile until every slot whose age is actually known has
+ * frozen, the exact shape a dead engine feed (still reading 698 RPM an hour
+ * after the engine stopped) needs.
+ */
+describe('staleness (ADR 0083)', () => {
+  // Every path the default `port` config binds, all fresh, so a test can
+  // stale exactly one of them without the rest going along for the ride.
+  const freshAges: Record<string, number> = {
+    'propulsion.port.revolutions': 3,
+    'propulsion.port.runTime': 3,
+    'propulsion.port.oilPressure': 3,
+    'propulsion.port.boostPressure': 3,
+    'propulsion.port.temperature': 3,
+    'propulsion.port.transmission.oilTemperature': 3,
+    'propulsion.port.fuel.rate': 3,
+  }
+
+  test('a frozen corner row shows the dash and its own badge, without staling the whole tile', () => {
+    const { container } = render(
+      <EngineClusterTile
+        config={port} values={values}
+        ages={{ ...freshAges, 'propulsion.port.oilPressure': 300 }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    const oil = screen.getByTestId('cluster-corner-0')
+    expect(within(oil).getByText('--')).toBeInTheDocument()
+    expect(within(oil).getByText(/Stale/)).toBeInTheDocument()
+    expect(within(oil).queryByText('22.0')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-stale')
+  })
+
+  test('blanks the ring when its own path is stale', () => {
+    render(
+      <EngineClusterTile
+        config={port} values={values}
+        ages={{ ...freshAges, 'propulsion.port.revolutions': 300 }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('--')
+    expect(screen.queryByText('698')).not.toBeInTheDocument()
+  })
+
+  test('goes stale as a whole only once every slot with a known age has frozen', () => {
+    const staleAges = Object.fromEntries(Object.keys(freshAges).map((path) => [path, 300]))
+    const { container } = render(
+      <EngineClusterTile config={port} values={values} ages={staleAges} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
+    expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
+    expect(screen.queryByText('698')).not.toBeInTheDocument()
+    expect(screen.queryByText('22.0')).not.toBeInTheDocument()
+  })
+
+  test('an unknown age never counts as stale', () => {
+    const { container } = render(
+      <EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-stale')
+    expect(screen.getByText('698')).toBeInTheDocument()
+  })
+})

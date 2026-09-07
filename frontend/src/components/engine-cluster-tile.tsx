@@ -13,6 +13,7 @@ import { FuelRail } from '@/components/ui/fuel-rail'
 import type { ClusterCorner, EngineClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { majorStepFor } from '@/components/gauge-tile'
 import { severityTextClass, worstZoneState, type ZoneState } from '@/lib/severity'
+import { formatDataAge } from '@/lib/staleness'
 
 /**
  * An engine cluster (ADR 0054).
@@ -77,9 +78,10 @@ function SlotIcon({ name, slot, className }: {
   return <Icon className={className} aria-hidden="true" />
 }
 
-function CornerCard({ corner, values, style, index }: {
+function CornerCard({ corner, values, ages, style, index }: {
   corner: ClusterCorner
   values: Record<string, number | null>
+  ages?: Record<string, number | null>
   style: CSSProperties
   index: number
 }) {
@@ -99,7 +101,7 @@ function CornerCard({ corner, values, style, index }: {
       style={style}
     >
       {corner.rows.map((row, rowIndex) => {
-        const { text, unit, converted, zone } = reading(row, values)
+        const { text, unit, converted, zone, stale, age } = reading(row, values, ages)
         const label = row.label.trim() || row.path.split('.').slice(-1)[0]
         return (
           <div key={rowIndex} className={`flex min-w-0 max-w-full flex-col gap-0.5 ${align}`}>
@@ -112,6 +114,14 @@ function CornerCard({ corner, values, style, index }: {
                 <SlotIcon name={corner.icon} slot={row} className="size-3 shrink-0 text-gauge-secondary" />
               )}
               <span className="truncate">{label}</span>
+              {/* A frozen row carries its own badge (ADR 0083) rather than
+                  staling the whole card: one dead sensor among several must
+                  not blank readings that are still live. */}
+              {stale && (
+                <span className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
+                  Stale {formatDataAge(age)}
+                </span>
+              )}
             </span>
             <span className={`font-display leading-none tabular-nums ${zoneTextClass(zone)} ${stacked ? 'text-base' : 'text-2xl'}`}>
               {text ?? '--'}
@@ -182,11 +192,18 @@ function telltaleZoneState(state: ReturnType<typeof zoneFor>, value: number | nu
  * wedge the 250-degree sweep leaves at the bottom, so it costs the composition
  * nothing and puts the lights where the eye already is.
  */
-function Telltales({ slots, values }: { slots: GaugeWidgetConfig[]; values: Record<string, number | null> }) {
+function Telltales({ slots, values, ages }: {
+  slots: GaugeWidgetConfig[]
+  values: Record<string, number | null>
+  ages?: Record<string, number | null>
+}) {
   return (
     <div data-testid="cluster-telltales" className="mt-1.5 flex items-center justify-center gap-3">
       {slots.map((slot, index) => {
-        const { text, converted, zone } = reading(slot, values)
+        // A stale telltale reads exactly as a never-reported one (grey,
+        // ADR 0083): reading() already blanks converted/zone when stale, and
+        // telltaleClass already renders a null value grey.
+        const { text, converted, zone } = reading(slot, values, ages)
         const { kind, Icon } = telltaleIcon(slot.path)
         return (
           <span key={index} data-telltale={kind}
@@ -203,12 +220,14 @@ function Telltales({ slots, values }: { slots: GaugeWidgetConfig[]; values: Reco
 interface EngineClusterTileProps {
   config: EngineClusterConfig
   values: Record<string, number | null>
+  /** Age in seconds behind each bound path (ADR 0083); absent is unknown. */
+  ages?: Record<string, number | null>
   editing: boolean
   onConfigure: () => void
 }
 
 export const EngineClusterTile = memo(function EngineClusterTile({
-  config, values, editing, onConfigure,
+  config, values, ages, editing, onConfigure,
 }: EngineClusterTileProps) {
   // The rail widens only the design the canvas is scaled against. The body
   // keeps its own 520-wide coordinate space, which is what every corner mask
@@ -221,8 +240,8 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   const [ref, scale] = useFitScale(designWidth)
   const title = config.title.trim() || 'Engine'
 
-  const ring = reading(config.ring, values)
-  const centre = reading(config.centre, values)
+  const ring = reading(config.ring, values, ages)
+  const centre = reading(config.centre, values, ages)
   const ringMin = config.ring.min ?? 0
   const ringMax = config.ring.max ?? 100
 
@@ -233,18 +252,29 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   // of boxes again and the disc still spans it.
   const canvasH = height
 
+  const cornerReadings = config.corners.flatMap((corner) => corner.rows.map((row) => reading(row, values, ages)))
+  const telltaleReadings = telltales.map((slot) => reading(slot, values, ages))
+
   // The tile edge carries the worst of everything the cluster reads (ADR
   // 0081): the ring, the centre, every corner row, and the telltales in
-  // their own vocabulary via telltaleZoneState above.
+  // their own vocabulary via telltaleZoneState above. reading() already
+  // blanks a stale slot's zone to null (ADR 0083), so a frozen reading drops
+  // out of this worst-of the same way an absent one always has.
   const state = worstZoneState([
     ring.zone,
     centre.zone,
-    ...config.corners.flatMap((corner) => corner.rows.map((row) => reading(row, values).zone)),
-    ...telltales.map((slot) => {
-      const t = reading(slot, values)
-      return telltaleZoneState(t.zone, t.converted)
-    }),
+    ...cornerReadings.map((r) => r.zone),
+    ...telltaleReadings.map((r) => telltaleZoneState(r.zone, r.converted)),
   ])
+
+  // The tile itself only goes stale once every slot whose age is actually
+  // known has frozen (ADR 0083) -- the shape a dead engine feed takes, where
+  // the ring, the corners and the telltales all stop together. A cluster
+  // with no known ages at all is neither fresh nor stale.
+  const allReadings = [ring, centre, ...cornerReadings, ...telltaleReadings]
+  const knownAges = allReadings.filter((r) => r.age !== null)
+  const tileStale = knownAges.length > 0 && knownAges.every((r) => r.stale)
+  const staleLabel = tileStale ? formatDataAge(Math.max(...knownAges.map((r) => r.age as number))) : undefined
   const cardStyles: CSSProperties[] = [
     { left: 0, top: 0, width: topCardW, height: topCardH, ...CLUSTER_MASKS.tl },
     { left: width - topCardW, top: 0, width: topCardW, height: topCardH, ...CLUSTER_MASKS.tr },
@@ -256,6 +286,8 @@ export const EngineClusterTile = memo(function EngineClusterTile({
     <Tile
       title={title}
       state={state}
+      stale={tileStale}
+      staleLabel={staleLabel}
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (
@@ -358,13 +390,13 @@ export const EngineClusterTile = memo(function EngineClusterTile({
                   {centre.unit && <span className="text-[9px] text-muted-foreground">{centre.unit}</span>}
                 </span>
 
-                {telltales.length > 0 && <Telltales slots={telltales} values={values} />}
+                {telltales.length > 0 && <Telltales slots={telltales} values={values} ages={ages} />}
               </div>
             </DialRing>
           </div>
 
           {config.corners.slice(0, CORNER_LAYOUT.length).map((corner, index) => (
-            <CornerCard key={index} index={index} corner={corner} values={values} style={cardStyles[index]} />
+            <CornerCard key={index} index={index} corner={corner} values={values} ages={ages} style={cardStyles[index]} />
           ))}
           </div>
         </div>

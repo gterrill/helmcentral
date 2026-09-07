@@ -124,3 +124,50 @@ describe('tile state (ADR 0081)', () => {
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
   })
 })
+
+/**
+ * Ages ride the same gauge-values stream (ADR 0083). A stale member reads as
+ * absent -- the dash plus its own badge -- without staling the whole tile
+ * until every member whose age is actually known has frozen.
+ */
+describe('staleness (ADR 0083)', () => {
+  test('marks a stale member with the dash and its own badge, without staling the whole tile', () => {
+    const { container } = render(
+      <GaugeGroupTile
+        config={portEngine}
+        values={values}
+        ages={{ 'propulsion.port.revolutions': 4, 'propulsion.port.oilPressure': 300 }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    // The frozen oil-pressure reading blanks rather than showing a stale number.
+    expect(screen.queryByText('35.0')).not.toBeInTheDocument()
+    expect(screen.getByText('Oil Press').parentElement).toHaveTextContent(/Stale/)
+    // The fresh RPM member is unaffected.
+    expect(screen.getByText('1800')).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-stale')
+    expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
+  })
+
+  test('goes stale as a whole only once every member with a known age has frozen', () => {
+    const { container } = render(
+      <GaugeGroupTile
+        config={portEngine}
+        values={values}
+        ages={{ 'propulsion.port.revolutions': 300, 'propulsion.port.oilPressure': 300 }}
+        editing={false} onConfigure={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
+    expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
+    expect(screen.queryByText('1800')).not.toBeInTheDocument()
+  })
+
+  test('an unknown age never counts as stale', () => {
+    const { container } = render(
+      <GaugeGroupTile config={portEngine} values={values} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-stale')
+    expect(screen.getByText('1800')).toBeInTheDocument()
+  })
+})

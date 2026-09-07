@@ -21,11 +21,12 @@ const values = {
   // inverter absent: nothing has reported it.
 }
 
-function renderStrip(config = ribbon, worstAlarmState = 'normal', onOpenAlarms = vi.fn()) {
+function renderStrip(config = ribbon, worstAlarmState = 'normal', onOpenAlarms = vi.fn(), ages?: Record<string, number | null>) {
   render(
     <LampStripTile
       config={config}
       values={values}
+      ages={ages}
       worstAlarmState={worstAlarmState}
       editing={false}
       onConfigure={vi.fn()}
@@ -102,6 +103,40 @@ describe('LampStripTile', () => {
   test('scrolls rather than stretching the tile', () => {
     renderStrip()
     expect(screen.getByTestId('lamp-strip-row').className).toContain('overflow-x-auto')
+  })
+
+  /**
+   * ADR 0083: a frozen source must never leave a lamp lit. GEN's value (1)
+   * would normally read "on"; a stale age overrides that to the no-data
+   * treatment instead.
+   */
+  describe('staleness (ADR 0083)', () => {
+    test('a frozen path goes unlit with the stale marker, never on', () => {
+      renderStrip(ribbon, 'normal', vi.fn(), { 'electrical.generator.state': 300 })
+      expect(screen.queryByLabelText('GEN: on')).not.toBeInTheDocument()
+      const lamp = screen.getByLabelText('GEN: stale 5m')
+      expect(lamp).toHaveAttribute('data-state', 'stale')
+      const circle = lamp.querySelector('circle')!
+      // The same unlit border colour "no data" gets, not the healthy green.
+      expect(circle.getAttribute('fill')).not.toBe(severityFill('normal'))
+    })
+
+    test('a fresh age leaves an on lamp lit', () => {
+      renderStrip(ribbon, 'normal', vi.fn(), { 'electrical.generator.state': 4 })
+      expect(screen.getByLabelText('GEN: on')).toBeInTheDocument()
+    })
+
+    test('an unknown age never counts as stale', () => {
+      renderStrip()
+      expect(screen.getByLabelText('GEN: on')).toBeInTheDocument()
+    })
+
+    // The CHK lamp reads the alarm rollup, not a bound path, so ages never
+    // touch it.
+    test('leaves the CHK lamp alone', () => {
+      renderStrip(ribbon, 'warn', vi.fn(), { 'electrical.generator.state': 300 })
+      expect(screen.getByLabelText('CHK: warn')).toBeInTheDocument()
+    })
   })
 
   test('offers the config button only in layout mode', () => {

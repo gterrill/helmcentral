@@ -1,6 +1,7 @@
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { convertFromSI, formatQuantity, unitOption } from '@/lib/quantities'
 import { severityTextClass } from '@/lib/severity'
+import { isStale } from '@/lib/staleness'
 
 /**
  * Turning a bound path into something an instrument can draw (ADR 0054).
@@ -10,15 +11,32 @@ import { severityTextClass } from '@/lib/severity'
  * Lifted unchanged.
  */
 
-/** One reading, converted and formatted, or the structural dash when absent. */
-export function reading(slot: GaugeWidgetConfig, values: Record<string, number | null>) {
-  const raw = values[slot.path] ?? null
+/**
+ * One reading, converted and formatted, or the structural dash when absent.
+ *
+ * `ages` is optional so every existing caller that has none keeps working
+ * unchanged (an omitted age is unknown, never stale). When a path's age is
+ * stale (ADR 0083), the raw value is blanked to `null` before conversion, so
+ * `text`, `converted` and `zone` all read exactly as they do for a path that
+ * has never reported — the frozen number is exactly the one most likely to
+ * be read as fact, and every caller already knows how to render an absence.
+ */
+export function reading(
+  slot: GaugeWidgetConfig,
+  values: Record<string, number | null>,
+  ages?: Record<string, number | null>,
+) {
+  const age = ages?.[slot.path] ?? null
+  const stale = isStale(age)
+  const raw = stale ? null : (values[slot.path] ?? null)
   const converted = raw === null ? null : convertFromSI(raw, slot.quantity, slot.unit)
   return {
     text: formatQuantity(raw, slot.quantity, slot.unit, slot.decimals),
     unit: unitOption(slot.quantity, slot.unit).label,
     converted,
     zone: zoneFor(converted, slot.zones),
+    stale,
+    age,
   }
 }
 

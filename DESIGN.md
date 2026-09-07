@@ -383,7 +383,10 @@ with `py-4`, `px-3` (`px-4` at `sm`), header and body flush.
   outlined badge appears beside the title with the age of the last update.
   This distinguishes stale values from live measurements. Do not also reduce
   opacity: faded values are harder to read in sunlight and may look like a dim
-  screen rather than a stale feed.
+  screen rather than a stale feed. Inside a gauge group or engine cluster, a
+  single stale reading carries its own small badge and grayscale rather than
+  taking the whole tile down with it; the tile itself only goes stale, and
+  drops its state dot, once every reading on it has stopped updating.
 - **State:** the border takes the colour of the worst *named* severity any of
   the tile's readings currently sits in (sky for alert, amber for warn, red
   for alarm, a deeper red wash for emergency), with a small dot of the same

@@ -190,6 +190,42 @@ describe('tile state (ADR 0081)', () => {
 })
 
 /**
+ * Ages ride the same gauge-values stream (ADR 0083): a frozen source marks
+ * the tile stale and blanks the reading, the same treatment ADR 0068 gave
+ * Solar and Battery & Power, extended to every configurable gauge.
+ */
+describe('staleness (ADR 0083)', () => {
+  const zoned = config({
+    display: 'numeric', min: 0, max: 100,
+    zones: [{ from: 0, to: 20, state: 'alarm' }],
+  })
+
+  test('a frozen source blanks the reading and marks the tile stale, without a zone', () => {
+    const { container } = render(
+      <GaugeTile config={zoned} value={68947} ages={{ [zoned.path]: 300 }} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
+    expect(screen.getByText('--')).toBeInTheDocument()
+    expect(screen.queryByText('10.0')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+  })
+
+  test('a fresh age leaves the reading and state untouched', () => {
+    render(
+      <GaugeTile config={config()} value={241325} ages={{ 'propulsion.port.oilPressure': 5 }} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
+    expect(screen.getByText('35.0')).toBeInTheDocument()
+  })
+
+  test('an unknown age is never stale', () => {
+    render(<GaugeTile config={config()} value={241325} editing={false} onConfigure={vi.fn()} />)
+    expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
+    expect(screen.getByText('35.0')).toBeInTheDocument()
+  })
+})
+
+/**
  * The plain radial's zone wash follows the same rule as DialRing's rim
  * (ADR 0080): thin at rest, full width only while the reading sits in that
  * zone, so a healthy gauge does not carry a permanent amber or red band.
