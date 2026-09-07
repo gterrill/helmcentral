@@ -56,6 +56,26 @@ func alarmSampleStale(rule alarmRule, sample alarmSample, now time.Time) bool {
 	return now.Sub(sample.LastSeen) > time.Duration(rule.StaleAfterSeconds)*time.Second
 }
 
+// alarmSampleAge reports how long before now a sample was last seen, in
+// seconds, rounded to one decimal place. -1 when it was never seen: an
+// unknown age must never be presented as freshly measured.
+//
+// Ages riding the gauge-values stream (ADR 0083) are computed from this same
+// LastSeen fact alarmSampleStale above already uses, so the stream and the
+// alarm engine can never disagree about what counts as frozen.
+func alarmSampleAge(sample alarmSample, now time.Time) float64 {
+	if sample.LastSeen.IsZero() {
+		return -1
+	}
+	age := now.Sub(sample.LastSeen).Seconds()
+	if age < 0 {
+		// A concurrent update landed between the payload's now and this
+		// sample's LastSeen; it is current, not negative.
+		return 0
+	}
+	return roundTo1(age)
+}
+
 type alarmReader func(path string) alarmSample
 
 type alarmStatus struct {

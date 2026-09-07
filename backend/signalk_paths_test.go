@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -192,5 +195,122 @@ func TestSignalKPathsHandlerListsDerivedPaths(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected %q among the listed paths", vesselFuelEconomyPath)
+	}
+}
+
+/*
+Ages ride the same gauge-values stream as the values themselves (ADR 0083):
+every bound path carries how long ago its last update arrived, so a widget
+can tell a frozen reading from a live one without a source-specific age of
+its own.
+*/
+
+// setPagesWithGaugePaths installs one page carrying one gauge widget per
+// path, so buildGaugeValuesPayload has something bound to walk.
+func setPagesWithGaugePaths(t *testing.T, paths ...string) {
+	t.Helper()
+	widgets := make([]dashboardLayoutItem, 0, len(paths))
+	for i, path := range paths {
+		widgets = append(widgets, gaugeWidget(fmt.Sprintf("gauge:age%04d", i+1), &dashboardGaugeConfig{
+			Path: path, Display: "numeric", Quantity: "raw", Unit: "raw",
+		}))
+	}
+
+	dashboardPagesMu.Lock()
+	previous := dashboardPagesState
+	dashboardPagesState = map[string]*dashboardPageData{"a": {ID: "a", Widgets: widgets}}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previous
+		dashboardPagesMu.Unlock()
+	})
+}
+
+func TestGaugeValuesPayloadCarriesAges(t *testing.T) {
+	seedSelfTree(t, `{"propulsion": {"port": {"oilPressure": {"value": 241325.0}}}}`)
+	setPagesWithGaugePaths(t, "propulsion.port.oilPressure")
+
+	payload := buildGaugeValuesPayload()
+	ages, ok := payload["ages"].(map[string]float64)
+	if !ok {
+		t.Fatalf("expected an ages map alongside values, got %+v", payload)
+	}
+	if _, present := ages["propulsion.port.oilPressure"]; !present {
+		t.Fatalf("expected an age for the bound path, got %v", ages)
+	}
+}
+
+// A path seen a known amount of time ago reports that age, computed from the
+// alarm engine's own arrival-time record (pathSeen) rather than a client-side
+// clock.
+func TestGaugeValuesPayloadAgeFromPathSeen(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	seenAt := time.Now().UTC().Add(-300 * time.Second)
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "propulsion.port.oilPressure", Value: 241325.0}}}},
+	}, seenAt)
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+	setPagesWithGaugePaths(t, "propulsion.port.oilPressure")
+
+	ages := buildGaugeValuesPayload()["ages"].(map[string]float64)
+	age := ages["propulsion.port.oilPressure"]
+	if math.Abs(age-300) > 5 {
+		t.Fatalf("expected an age of about 300s, got %v", age)
+	}
+}
+
+// A bound path that has never reported, and carries no node timestamp
+// either, is unknown -- never a guessed zero.
+func TestGaugeValuesPayloadAgeUnknownForNeverSeenPath(t *testing.T) {
+	seedSelfTree(t, `{}`)
+	setPagesWithGaugePaths(t, "propulsion.port.oilPressure")
+
+	ages := buildGaugeValuesPayload()["ages"].(map[string]float64)
+	if age := ages["propulsion.port.oilPressure"]; age != -1 {
+		t.Fatalf("expected -1 for a path with no data at all, got %v", age)
+	}
+}
+
+// A node seeded with only a SignalK timestamp -- no pathSeen entry, the
+// shape a REST-seeded tree would have if this backend ever built one -- still
+// reports an age, from that timestamp rather than the alarm engine's own
+// record.
+func TestGaugeValuesPayloadAgeFromNodeTimestampWithoutPathSeen(t *testing.T) {
+	old := time.Now().UTC().Add(-90 * time.Second).Format(time.RFC3339)
+	seedSelfTree(t, fmt.Sprintf(`{"propulsion": {"port": {"oilPressure": {"value": 241325.0, "timestamp": %q}}}}`, old))
+	setPagesWithGaugePaths(t, "propulsion.port.oilPressure")
+
+	ages := buildGaugeValuesPayload()["ages"].(map[string]float64)
+	age := ages["propulsion.port.oilPressure"]
+	if age < 0 || math.Abs(age-90) > 5 {
+		t.Fatalf("expected an age of about 90s from the node's own timestamp, got %v", age)
+	}
+}
+
+// A derived value carries the oldest age among the inputs that actually
+// contributed to it: SOG was current but the burn rate was twenty hours old,
+// so the economy figure it produced is exactly as stale as that engine is.
+func TestGaugeValuesPayloadDerivedFuelEconomyAgeIsOldestInput(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	now := time.Now().UTC()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
+	}, now)
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}}}},
+	}, now.Add(-20*time.Hour))
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+	setPagesWithGaugePaths(t, vesselFuelEconomyPath)
+
+	ages := buildGaugeValuesPayload()["ages"].(map[string]float64)
+	age := ages[vesselFuelEconomyPath]
+	if math.Abs(age-20*3600) > 5 {
+		t.Fatalf("expected the fuel-rate input's ~20h age, got %v", age)
 	}
 }

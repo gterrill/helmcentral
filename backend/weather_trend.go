@@ -83,6 +83,31 @@ func linearSlopePerSecond(points []telemetryPoint) (float64, bool) {
 	return (n*sumXY - sumX*sumY) / denominator, true
 }
 
+// newestSampleAge is freshestTimestampAge's ring-buffer counterpart: how long
+// before now the most recent point in a window was recorded, rounded to one
+// decimal place, -1 for an empty window.
+//
+// A trend's slope covers the whole window, but it is only as fresh as the
+// newest point feeding it. A buffer that stopped receiving samples makes the
+// slope stale even though every point behind it still carries a real
+// timestamp from inside the window.
+func newestSampleAge(points []telemetryPoint, now time.Time) float64 {
+	if len(points) == 0 {
+		return -1
+	}
+	newest := points[0].Timestamp
+	for _, p := range points[1:] {
+		if p.Timestamp.After(newest) {
+			newest = p.Timestamp
+		}
+	}
+	age := now.Sub(newest).Seconds()
+	if age < 0 {
+		return 0
+	}
+	return roundTo1(age)
+}
+
 // changeOverWindow is last minus first, the plain tendency.
 func changeOverWindow(points []telemetryPoint) (float64, bool) {
 	if len(points) < 2 {

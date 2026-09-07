@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -113,11 +114,20 @@ func signalKPathsHandler(c echo.Context) error {
 // buildGaugeValuesPayload pushes the current value of every path a gauge is
 // bound to. The backend owns the page config, so it can work out what to send
 // without the browser subscribing to anything.
+//
+// It also carries "ages" (ADR 0083): seconds since each path's last update,
+// computed against the vessel clock once per build so nothing here depends
+// on the browser's clock. Every widget bound through gauge-values -- a
+// standalone gauge, a group, a cluster, a lamp, the ribbon -- reads the same
+// map, rather than each source growing its own bespoke age the way Solar and
+// Battery & Power did before this (ADR 0068).
 func buildGaugeValuesPayload() map[string]any {
 	paths := gaugeBoundPaths()
 	values := make(map[string]any, len(paths))
+	ages := make(map[string]float64, len(paths))
 
-	derived := derivedPathValues()
+	now := time.Now().UTC()
+	derivedValues, derivedAges := computeDerivedPaths(now)
 
 	if len(paths) > 0 {
 		read := snapshotAlarmReader(globalSignalKSnapshot)
@@ -125,11 +135,12 @@ func buildGaugeValuesPayload() map[string]any {
 			// A derived path is computed rather than looked up, but rides the
 			// same event so every widget binds it the same way.
 			if isDerivedPath(path) {
-				if value := derived[path]; value != nil {
+				if value := derivedValues[path]; value != nil {
 					values[path] = *value
 				} else {
 					values[path] = nil
 				}
+				ages[path] = derivedAges[path]
 				continue
 			}
 
@@ -138,11 +149,20 @@ func buildGaugeValuesPayload() map[string]any {
 				// Absent stays absent: a gauge must render the structural dash
 				// rather than a zero it would be read as a real measurement.
 				values[path] = nil
-				continue
+			} else {
+				values[path] = sample.Value
 			}
-			values[path] = sample.Value
+
+			// The newer (fresher) of the alarm engine's own arrival-time
+			// record and the newest SignalK timestamp anywhere on the node,
+			// so ages can never disagree with what the alarm engine already
+			// treats as frozen. -1 when neither exists or the path is absent.
+			ages[path] = freshestAge(
+				alarmSampleAge(sample, now),
+				freshestTimestampAge(globalSignalKSnapshot.nodeAt(path), now),
+			)
 		}
 	}
 
-	return map[string]any{"values": values}
+	return map[string]any{"values": values, "ages": ages}
 }

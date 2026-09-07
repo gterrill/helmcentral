@@ -249,3 +249,131 @@ func TestPressureRateDerivedPathReportsFallingBarometer(t *testing.T) {
 		t.Fatalf("expected about -300 Pa of three-hour change, got %v", change)
 	}
 }
+
+/*
+Ages for the derived paths (ADR 0083). A figure computed from a frozen input
+must carry that input's age, or a dead source reads as a live one exactly
+where staleness matters most: a derived number nobody wired an age for.
+*/
+
+// The 20-hour-old fuel rate that produced a 0.02 nm/L Economy reading while
+// SOG was current: the derived value's age must be the frozen input's, not
+// the fresh one's.
+func TestVesselFuelEconomyWithAgeReportsOldestContributingInput(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	now := time.Now().UTC()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
+	}, now)
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}}}},
+	}, now.Add(-20*time.Hour))
+	snapshot.setSelfContext("vessels.self")
+
+	read := snapshotAlarmReader(snapshot)
+	_, age, ok := vesselFuelEconomyWithAge(read, []string{"propulsion.port.fuel.rate"}, now)
+	if !ok {
+		t.Fatal("expected an economy figure")
+	}
+	if math.Abs(age-20*3600) > 1 {
+		t.Fatalf("expected ~20h (the frozen fuel-rate input's age), got %v", age)
+	}
+}
+
+// The reverse case: SOG itself is the stale input, a fresh engine notwithstanding.
+func TestVesselFuelEconomyWithAgeCountsSOGAsAnInputToo(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	now := time.Now().UTC()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
+	}, now.Add(-1*time.Hour))
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}}}},
+	}, now)
+	snapshot.setSelfContext("vessels.self")
+
+	read := snapshotAlarmReader(snapshot)
+	_, age, ok := vesselFuelEconomyWithAge(read, []string{"propulsion.port.fuel.rate"}, now)
+	if !ok {
+		t.Fatal("expected an economy figure")
+	}
+	if math.Abs(age-3600) > 1 {
+		t.Fatalf("expected ~1h (SOG's own age), got %v", age)
+	}
+}
+
+func TestVesselFuelEconomyWithAgeIsUnknownWhenAbsent(t *testing.T) {
+	read := fakeReader(map[string]float64{"navigation.speedOverGround": 0})
+	if _, age, ok := vesselFuelEconomyWithAge(read, []string{"propulsion.port.fuel.rate"}, time.Now().UTC()); ok || age != -1 {
+		t.Fatalf("expected no figure and -1 age, got age=%v ok=%v", age, ok)
+	}
+}
+
+func TestDerivedPathAgesUnknownWithoutBarometerHistory(t *testing.T) {
+	origBarometer := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(8)
+	t.Cleanup(func() { barometerHistory = origBarometer })
+
+	ages := derivedPathAges(time.Now().UTC())
+	if ages[pressureRatePath] != -1 {
+		t.Fatalf("expected -1 with no barometer history, got %v", ages[pressureRatePath])
+	}
+}
+
+// A rate computed over the full three-hour window is only as fresh as the
+// newest sample in the buffer: a buffer that stopped receiving new points 30
+// minutes ago makes the slope 30 minutes stale, even though every point
+// behind it still carries a real timestamp from inside the window.
+func TestDerivedPathAgesReportsNewestBarometerSample(t *testing.T) {
+	origBarometer := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(4096)
+	t.Cleanup(func() { barometerHistory = origBarometer })
+
+	now := time.Now().UTC()
+	for i := 0; i <= 120; i++ {
+		barometerHistory.record(101500, now.Add(-150*time.Minute+time.Duration(i)*time.Minute))
+	}
+
+	ages := derivedPathAges(now)
+	age := ages[pressureRatePath]
+	if math.Abs(age-1800) > 5 {
+		t.Fatalf("expected about 1800s (30 minutes since the buffer's last sample), got %v", age)
+	}
+}
+
+// squashZoneIndex depends on three ring buffers; its age is the oldest of
+// the three, not just the barometer's.
+func TestDerivedPathAgesSquashZoneReportsOldestOfItsThreeInputs(t *testing.T) {
+	origBarometer := barometerHistory
+	origWindSpeed := trueWindSpeedHistory
+	origWindDirection := trueWindDirectionHistory
+	barometerHistory = newTelemetryRingBuffer(4096)
+	trueWindSpeedHistory = newTelemetryRingBuffer(4096)
+	trueWindDirectionHistory = newTelemetryRingBuffer(4096)
+	t.Cleanup(func() {
+		barometerHistory = origBarometer
+		trueWindSpeedHistory = origWindSpeed
+		trueWindDirectionHistory = origWindDirection
+	})
+
+	now := time.Now().UTC()
+	for i := 0; i <= 120; i++ {
+		ts := now.Add(-120*time.Minute + time.Duration(i)*time.Minute)
+		barometerHistory.record(101500, ts)
+		trueWindSpeedHistory.record(12, ts)
+	}
+	// Direction stopped reporting 40 minutes ago, though its last two points
+	// are still inside the three-hour window.
+	trueWindDirectionHistory.record(180, now.Add(-100*time.Minute))
+	trueWindDirectionHistory.record(185, now.Add(-40*time.Minute))
+
+	ages := derivedPathAges(now)
+	age := ages[squashZoneIndexPath]
+	if math.Abs(age-2400) > 5 {
+		t.Fatalf("expected ~2400s (wind direction's stalled 40 minutes), got %v", age)
+	}
+}
