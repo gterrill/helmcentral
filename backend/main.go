@@ -470,6 +470,9 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/anchor-watch/trails/ais", tierRead, getAllAISTrailsHandler},
 		{http.MethodGet, "/api/dashboard-pages", tierRead, listDashboardPagesHandler},
 		{http.MethodGet, "/api/dashboard-pages/:id", tierRead, getDashboardPageHandler},
+		// The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip,
+		// promoted out of the per-page widget above.
+		{http.MethodGet, "/api/dashboard-ribbon", tierRead, getDashboardRibbonHandler},
 		{http.MethodGet, "/api/routes", tierRead, listRoutesHandler},
 		{http.MethodGet, "/api/routes/:id", tierRead, getRouteHandler},
 		{http.MethodGet, "/api/routes/active", tierRead, getActiveRouteHandler},
@@ -510,6 +513,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPut, "/api/dashboard-pages/order", tierWrite, reorderDashboardPagesHandler},
 		{http.MethodPatch, "/api/dashboard-pages/:id", tierWrite, patchDashboardPageHandler},
 		{http.MethodDelete, "/api/dashboard-pages/:id", tierWrite, deleteDashboardPageHandler},
+		{http.MethodPut, "/api/dashboard-ribbon", tierWrite, putDashboardRibbonHandler},
 		{http.MethodPost, "/api/routes", tierWrite, createRouteHandler},
 		{http.MethodPatch, "/api/routes/:id", tierWrite, patchRouteHandler},
 		{http.MethodDelete, "/api/routes/:id", tierWrite, deleteRouteHandler},

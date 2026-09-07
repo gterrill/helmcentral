@@ -310,11 +310,22 @@ type dashboardPageData struct {
 
 type dashboardPagesFile struct {
 	Pages []*dashboardPageData `json:"pages"`
+	// Ribbon is the one vessel-level indicator ribbon (ADR 0082): a lamp
+	// strip promoted out of the per-page widget so it renders identically on
+	// every page instead of being copied by hand onto each one. Nil when the
+	// operator has not pinned one. omitempty keeps a file with no ribbon
+	// byte-identical to one written before this field existed.
+	Ribbon *dashboardLampStripConfig `json:"ribbon,omitempty"`
 }
 
 var (
 	dashboardPagesMu    sync.RWMutex
 	dashboardPagesState map[string]*dashboardPageData
+	// dashboardRibbonState is guarded by dashboardPagesMu, the same lock that
+	// guards dashboardPagesState — it lives in the same file and every writer
+	// of that file must carry it forward (see saveDashboardPagesLocked and
+	// reorderDashboardPagesHandler, the two places that actually touch disk).
+	dashboardRibbonState *dashboardLampStripConfig
 )
 
 func dashboardPagesFilePath() string {
@@ -339,7 +350,10 @@ func orderedDashboardPagesLocked() []*dashboardPageData {
 }
 
 func saveDashboardPagesLocked() error {
-	return writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{Pages: orderedDashboardPagesLocked()})
+	return writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{
+		Pages:  orderedDashboardPagesLocked(),
+		Ribbon: dashboardRibbonState,
+	})
 }
 
 // validateEmbedWidget guards the one widget whose content is operator-supplied.
@@ -467,6 +481,7 @@ func loadDashboardPages() {
 	defer dashboardPagesMu.Unlock()
 
 	dashboardPagesState = make(map[string]*dashboardPageData)
+	dashboardRibbonState = nil
 
 	// Try loading new format first
 	data, err := os.ReadFile(dashboardPagesFilePath())
@@ -474,6 +489,7 @@ func loadDashboardPages() {
 		// New file exists, try to parse it
 		var loaded dashboardPagesFile
 		if err := json.Unmarshal(data, &loaded); err == nil {
+			dashboardRibbonState = loaded.Ribbon
 			anyStripped := false
 			for _, p := range loaded.Pages {
 				if kept, changed := stripRetiredWidgets(p.Widgets); changed {
@@ -599,7 +615,11 @@ func reorderDashboardPagesHandler(c echo.Context) error {
 
 	// Publish only after the entire order is durable. A failed write must not
 	// leave readers seeing an order that will vanish at the next restart.
-	if err := writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{Pages: list}); err != nil {
+	// Ribbon rides along explicitly: this handler writes the pages file
+	// directly rather than through saveDashboardPagesLocked, so it is exactly
+	// the "other code path" that has to remember to carry the ribbon forward
+	// or silently drop it from disk on the next restart.
+	if err := writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{Pages: list, Ribbon: dashboardRibbonState}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist page order"})
 	}
 	for _, page := range list {
@@ -794,6 +814,46 @@ func deleteDashboardPageHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// GET /api/dashboard-ribbon
+func getDashboardRibbonHandler(c echo.Context) error {
+	dashboardPagesMu.RLock()
+	defer dashboardPagesMu.RUnlock()
+	return c.JSON(http.StatusOK, map[string]*dashboardLampStripConfig{"ribbon": dashboardRibbonState})
+}
+
+// PUT /api/dashboard-ribbon sets or clears the one vessel-level indicator
+// ribbon (ADR 0082). A null ribbon clears it; anything else is validated with
+// the same rules a per-page lamps: widget uses.
+func putDashboardRibbonHandler(c echo.Context) error {
+	var body struct {
+		Ribbon *dashboardLampStripConfig `json:"ribbon"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
+	}
+	if body.Ribbon != nil {
+		if msg := validateLampStripConfig(body.Ribbon, "ribbon"); msg != "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
+		}
+	}
+
+	dashboardPagesMu.Lock()
+	defer dashboardPagesMu.Unlock()
+
+	// Publish only after the write is durable, the same stance
+	// reorderDashboardPagesHandler takes on the page order: a failed write
+	// must not leave memory holding a ribbon that will vanish at the next
+	// restart.
+	if err := writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{
+		Pages:  orderedDashboardPagesLocked(),
+		Ribbon: body.Ribbon,
+	}); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist"})
+	}
+	dashboardRibbonState = body.Ribbon
+	return c.JSON(http.StatusOK, map[string]*dashboardLampStripConfig{"ribbon": dashboardRibbonState})
+}
+
 // validateGaugeWidget guards the second operator-configured widget. It mirrors
 // validateEmbedWidget's reject-rather-than-drop stance: config the renderer
 // would never read means the caller has misunderstood the model.
@@ -973,9 +1033,11 @@ func validateClusterFuelRail(rail *dashboardClusterFuelRail, id string) string {
 
 // validateLampStripWidget guards the fourth operator-configured widget.
 //
-// A strip with no lamps but ShowCheck set is fine — the rollup alone is a
-// useful thing to pin to a page — but a strip with neither renders nothing at
-// all, which is a mistake rather than a choice.
+// The per-config rules live in validateLampStripConfig, shared with the
+// vessel-level ribbon (ADR 0082) so a strip can never accept, on one side or
+// the other, something the other would have rejected. This function keeps
+// only what is specific to a *widget*: its id and which sibling configs are
+// disallowed on it.
 func validateLampStripWidget(w dashboardLayoutItem) string {
 	token := strings.TrimPrefix(w.ID, lampStripWidgetIDPrefix)
 	if !embedWidgetTokenPattern.MatchString(token) {
@@ -987,25 +1049,39 @@ func validateLampStripWidget(w dashboardLayoutItem) string {
 	if w.Lamps == nil {
 		return "lamp strip widget requires lamps config: " + w.ID
 	}
-	if len(w.Lamps.Title) > gaugeGroupTitleMaxLen {
-		return "lamp strip title too long: " + w.ID
+	return validateLampStripConfig(w.Lamps, w.ID)
+}
+
+// validateLampStripConfig holds the rules for a lamp strip's contents,
+// whether it is a per-page `lamps:` widget or the one vessel-level ribbon.
+// where names the offending config in a rejection message.
+//
+// A strip with no lamps but ShowCheck set is fine — the rollup alone is a
+// useful thing to pin to a page — but a strip with neither renders nothing at
+// all, which is a mistake rather than a choice.
+func validateLampStripConfig(cfg *dashboardLampStripConfig, where string) string {
+	if cfg == nil {
+		return "lamp strip requires config: " + where
 	}
-	if len(w.Lamps.Lamps) == 0 && !w.Lamps.ShowCheck {
-		return "lamp strip needs at least one lamp or the check indicator: " + w.ID
+	if len(cfg.Title) > gaugeGroupTitleMaxLen {
+		return "lamp strip title too long: " + where
 	}
-	if len(w.Lamps.Lamps) > lampStripMaxLamps {
-		return "lamp strip has too many lamps: " + w.ID
+	if len(cfg.Lamps) == 0 && !cfg.ShowCheck {
+		return "lamp strip needs at least one lamp or the check indicator: " + where
 	}
-	for _, lamp := range w.Lamps.Lamps {
+	if len(cfg.Lamps) > lampStripMaxLamps {
+		return "lamp strip has too many lamps: " + where
+	}
+	for _, lamp := range cfg.Lamps {
 		path := strings.TrimSpace(lamp.Path)
 		if path == "" {
-			return "lamp requires a SignalK path: " + w.ID
+			return "lamp requires a SignalK path: " + where
 		}
 		if len(path) > gaugePathMaxLen {
-			return "lamp path too long: " + w.ID
+			return "lamp path too long: " + where
 		}
 		if len(lamp.Label) > lampStripLabelMaxLen {
-			return "lamp label too long: " + w.ID
+			return "lamp label too long: " + where
 		}
 	}
 	return ""
@@ -1121,6 +1197,17 @@ func gaugeBoundPaths() []string {
 			}
 		}
 	}
+
+	// The ribbon (ADR 0082) is vessel-level rather than per-page, but its
+	// lamps are bound paths exactly like a page lamp strip's: miss it here
+	// and every ribbon lamp renders permanently blank with nothing in any
+	// log to say why, the same failure mode this walker exists to prevent.
+	if dashboardRibbonState != nil {
+		for _, lamp := range dashboardRibbonState.Lamps {
+			add(lamp.Path)
+		}
+	}
+
 	sort.Strings(paths)
 	return paths
 }

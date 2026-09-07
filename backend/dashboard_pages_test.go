@@ -29,6 +29,19 @@ func setupDashboardPagesTest(t *testing.T) {
 	dashboardPagesMu.Lock()
 	dashboardPagesState = make(map[string]*dashboardPageData)
 	dashboardPagesMu.Unlock()
+
+	// dashboardRibbonState is package-level state guarded by the same mutex
+	// (ADR 0082), and a test that PUTs a ribbon through the real handler has
+	// no per-test file to isolate it the way DASHBOARD_PAGES_FILE isolates
+	// pages. Without this, a ribbon set by one test leaks into whichever test
+	// runs next and does not call this helper — in particular the
+	// gaugeBoundPaths tests, which manipulate dashboardPagesState directly
+	// and would otherwise pick up a stray ribbon's paths.
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardRibbonState = nil
+		dashboardPagesMu.Unlock()
+	})
 }
 
 func newDashboardPagesRequest(t *testing.T, method, path string, body any) (echo.Context, *httptest.ResponseRecorder) {
@@ -1686,6 +1699,235 @@ func TestDashboardLayoutItem_OmitsLampsKeyWhenAbsent(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "lamps") {
 		t.Fatalf("expected no lamps key on a widget without one, got %s", encoded)
+	}
+}
+
+// ── vessel-level indicator ribbon (ADR 0082) ─────────────────────────────────
+//
+// The ribbon is the promoted lamp strip: one vessel-level config, not tied to
+// any page, sharing validateLampStripConfig with the per-page lamps: widget
+// so it can never accept something the widget would have rejected, or the
+// reverse. It rides in the same pages file as a sibling of Pages, kept in
+// memory under the same mutex — which means every code path that persists
+// dashboard state has to remember to carry it forward, the same trap ADR
+// 0060 §7 documents for Skin.
+
+func putDashboardRibbon(t *testing.T, ribbon any) (*httptest.ResponseRecorder, string) {
+	t.Helper()
+	c, rec := newDashboardPagesRequest(t, http.MethodPut, "/api/dashboard-ribbon", map[string]any{"ribbon": ribbon})
+	if err := putDashboardRibbonHandler(c); err != nil {
+		t.Fatalf("putDashboardRibbonHandler returned error: %v", err)
+	}
+	return rec, rec.Body.String()
+}
+
+func getDashboardRibbon(t *testing.T) (*httptest.ResponseRecorder, *dashboardLampStripConfig) {
+	t.Helper()
+	c, rec := newDashboardPagesRequest(t, http.MethodGet, "/api/dashboard-ribbon", nil)
+	if err := getDashboardRibbonHandler(c); err != nil {
+		t.Fatalf("getDashboardRibbonHandler returned error: %v", err)
+	}
+	var payload struct {
+		Ribbon *dashboardLampStripConfig `json:"ribbon"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to parse ribbon response: %v", err)
+	}
+	return rec, payload.Ribbon
+}
+
+func TestDashboardRibbon_NilInitially(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	rec, ribbon := getDashboardRibbon(t)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if ribbon != nil {
+		t.Fatalf("expected no ribbon initially, got %+v", ribbon)
+	}
+}
+
+func TestDashboardRibbon_RoundTripsThroughPutAndGet(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	rec, body := putDashboardRibbon(t, validLampStripConfig())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, body)
+	}
+
+	getRec, ribbon := getDashboardRibbon(t)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, getRec.Code, getRec.Body.String())
+	}
+	if ribbon == nil || ribbon.Title != "Status" || len(ribbon.Lamps) != 2 {
+		t.Fatalf("expected the saved ribbon to round-trip, got %+v", ribbon)
+	}
+
+	dashboardPagesMu.RLock()
+	stored := dashboardRibbonState
+	dashboardPagesMu.RUnlock()
+	if stored == nil || stored.Title != "Status" {
+		t.Fatalf("expected the ribbon to be held in memory after PUT, got %+v", stored)
+	}
+}
+
+func TestDashboardRibbon_PutNullClears(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	if rec, body := putDashboardRibbon(t, validLampStripConfig()); rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, body)
+	}
+
+	rec, body := putDashboardRibbon(t, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, body)
+	}
+
+	dashboardPagesMu.RLock()
+	stored := dashboardRibbonState
+	dashboardPagesMu.RUnlock()
+	if stored != nil {
+		t.Fatalf("expected a null PUT to clear the ribbon, got %+v", stored)
+	}
+
+	_, ribbon := getDashboardRibbon(t)
+	if ribbon != nil {
+		t.Fatalf("expected GET to report the cleared ribbon as null, got %+v", ribbon)
+	}
+}
+
+func TestDashboardRibbon_RejectsAnEmptyStrip(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	empty := &dashboardLampStripConfig{Title: "Status"}
+	rec, body := putDashboardRibbon(t, empty)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, body)
+	}
+}
+
+func TestDashboardRibbon_RejectsSeventeenLamps(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	tooMany := validLampStripConfig()
+	tooMany.Lamps = make([]dashboardLamp, lampStripMaxLamps+1)
+	for i := range tooMany.Lamps {
+		tooMany.Lamps[i] = dashboardLamp{Path: "a.b", Label: "X"}
+	}
+
+	rec, body := putDashboardRibbon(t, tooMany)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, body)
+	}
+}
+
+// TestDashboardRibbon_SurvivesPatchingAPageWidgets is the ribbon's version of
+// TestPatchDashboardPageHandler_PreservesSkinOnWidgetsOnlyPatch: set a
+// ribbon, patch an unrelated page's widgets only (exactly what a layout drag
+// sends), reload from disk as if the process had restarted, and confirm the
+// ribbon is still there.
+func TestDashboardRibbon_SurvivesPatchingAPageWidgets(t *testing.T) {
+	setupDashboardPagesTest(t)
+	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	if rec, body := putDashboardRibbon(t, validLampStripConfig()); rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, body)
+	}
+
+	newWidgets := []dashboardLayoutItem{{ID: "route", X: 0, Y: 0, W: 8, H: 8}}
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"widgets": newWidgets,
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	ribbon := dashboardRibbonState
+	dashboardPagesMu.RUnlock()
+	if ribbon == nil || ribbon.Title != "Status" {
+		t.Fatalf("expected the ribbon to survive a page widgets-only patch and a reload, got %+v", ribbon)
+	}
+}
+
+// TestDashboardRibbon_SurvivesReorderingPages guards the same file-rewrite
+// trap against reorderDashboardPagesHandler specifically: unlike the other
+// page handlers it writes the pages file directly rather than going through
+// saveDashboardPagesLocked, so it is exactly the "other code path" that has
+// to remember to carry the ribbon forward or silently drop it from disk.
+func TestDashboardRibbon_SurvivesReorderingPages(t *testing.T) {
+	setupDashboardPagesTest(t)
+	first := createTestDashboardPage(t, "First", sampleDashboardWidgets())
+	second := createTestDashboardPage(t, "Second", sampleDashboardWidgets())
+
+	if rec, body := putDashboardRibbon(t, validLampStripConfig()); rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, body)
+	}
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPut, "/api/dashboard-pages/order", map[string]any{
+		"page_ids": []string{second.ID, first.ID},
+	})
+	if err := reorderDashboardPagesHandler(c); err != nil {
+		t.Fatalf("reorderDashboardPagesHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	ribbon := dashboardRibbonState
+	dashboardPagesMu.RUnlock()
+	if ribbon == nil || ribbon.Title != "Status" {
+		t.Fatalf("expected the ribbon to survive reordering pages and a reload, got %+v", ribbon)
+	}
+}
+
+// The walker's fourth widget kind to learn (ADR 0052, 0049, and twice for
+// clusters), and the first that is not itself a widget: the ribbon is
+// vessel-level, so it has no widget id and no page, but its lamps are bound
+// paths exactly the same way.
+func TestGaugeBoundPathsIncludesRibbonLampsDeduplicatedAgainstAPageLamp(t *testing.T) {
+	dashboardPagesMu.Lock()
+	previousPages := dashboardPagesState
+	previousRibbon := dashboardRibbonState
+	dashboardPagesState = map[string]*dashboardPageData{
+		"a": {ID: "a", Widgets: []dashboardLayoutItem{
+			lampStripWidget("lamps:aaaa1111", &dashboardLampStripConfig{
+				Title: "Status",
+				Lamps: []dashboardLamp{{Path: "electrical.generator.state", Label: "GEN"}},
+			}),
+		}},
+	}
+	dashboardRibbonState = &dashboardLampStripConfig{
+		Title: "Ribbon",
+		Lamps: []dashboardLamp{
+			// Shared with the page lamp above: one subscription, not two.
+			{Path: "electrical.generator.state", Label: "GEN"},
+			{Path: "tanks.fuel.2.currentLevel", Label: "FUEL"},
+		},
+	}
+	dashboardPagesMu.Unlock()
+	t.Cleanup(func() {
+		dashboardPagesMu.Lock()
+		dashboardPagesState = previousPages
+		dashboardRibbonState = previousRibbon
+		dashboardPagesMu.Unlock()
+	})
+
+	paths := gaugeBoundPaths()
+	want := []string{"electrical.generator.state", "tanks.fuel.2.currentLevel"}
+	if len(paths) != len(want) || paths[0] != want[0] || paths[1] != want[1] {
+		t.Fatalf("expected %v, got %v", want, paths)
 	}
 }
 
