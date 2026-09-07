@@ -116,13 +116,18 @@ looking for a dead link.
 
 ## Tile state
 
-A tile's edge takes the colour of the worst band any of its readings
-currently sits in: sky for alert, amber for warn, red for alarm, a deeper red
-wash for emergency. A small dot beside the title carries the same colour,
-since a border alone is easy to miss along the edge of a screen. A tile with
-every reading in its normal band draws no attention at all, on the same
-principle as the rest of the board: colour is spent only when something
-needs it.
+A tile's edge takes the colour of the worst configured alert level any of its
+readings currently sits in: sky for alert, amber for warn, red for alarm, a
+deeper red wash for emergency. A small dot beside the title carries the same
+colour, since a border alone is easy to miss along the edge of a screen.
+
+A tile with every reading in its normal band draws no attention at all, on
+the same principle as the rest of the board: colour is spent only when
+something needs it. The same is true of a reading that has simply drifted
+outside a healthy band with no warn or alarm threshold set for it. Add the
+threshold in Settings if you want that reading to raise the edge; until then
+it stays quiet rather than turning a normal engine idling with no configured
+limits into a permanent amber warning.
 
 A stale tile shows its usual amber staleness treatment instead, whatever band
 its last reading was in. A value the tile can no longer vouch for should not

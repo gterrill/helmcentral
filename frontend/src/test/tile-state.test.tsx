@@ -8,7 +8,9 @@ import { severityBorderClass, type ZoneState } from '@/lib/severity'
  * The tile edge carries the worst zone state of its readings (ADR 0081).
  */
 describe('Tile state', () => {
-  test.each<ZoneState>(['alert', 'warn', 'outside', 'alarm', 'emergency'])(
+  // 'outside' is excluded here: a named severity the operator actually
+  // configured (alert/warn/alarm/emergency), not an unconfigured band.
+  test.each<ZoneState>(['alert', 'warn', 'alarm', 'emergency'])(
     'carries the %s state as a border class, data-state and a header dot',
     (state) => {
       const { container } = render(
@@ -23,6 +25,28 @@ describe('Tile state', () => {
       expect(screen.getByTestId('tile-state-dot')).toHaveAttribute('aria-label', `State: ${state}`)
     },
   )
+
+  /**
+   * A bundled engine profile with no warn/alarm thresholds filled in (ADR
+   * 0054 §5a) puts every reading above its normal band on `outside` all day,
+   * every day. Lighting the tile edge for that reproduces the exact noise
+   * floor ADR 0080 removed from the dial: an amber edge with nothing wrong.
+   * `outside` stays in the ladder (worstZoneState still returns it, and
+   * severityBorderClass still has a mapping for it) but the tile itself
+   * ignores it: only a named severity the operator configured lights the
+   * edge.
+   */
+  test('outside renders no border class, no data-state and no dot', () => {
+    const { container } = render(
+      <Tile title="Engine" state="outside">
+        <p>content</p>
+      </Tile>,
+    )
+    const card = container.querySelector('[data-slot="card"]')!
+    expect(card).not.toHaveAttribute('data-state')
+    expect(card.className).not.toContain('border-amber')
+    expect(screen.queryByTestId('tile-state-dot')).not.toBeInTheDocument()
+  })
 
   test('normal renders no border class, no data-state and no dot', () => {
     const { container } = render(

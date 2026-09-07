@@ -25,7 +25,9 @@ interface TileProps {
    * colour is spent only once a tile actually has something to say. Ignored
    * while `stale`: a value the tile can no longer vouch for should not also
    * claim a state, which is the same call ADR 0068 already made for the
-   * readings themselves.
+   * readings themselves. `outside` is also ignored here (see `showState`
+   * below): only a named severity the operator actually configured lights
+   * the edge.
    */
   state?: ZoneState | null
   children: React.ReactNode
@@ -42,7 +44,14 @@ export function Tile({
   state = null,
   children,
 }: TileProps) {
-  const showState = !stale && state !== null && state !== 'normal'
+  // `outside` stays out of this: a bundled engine profile with no warn/alarm
+  // thresholds filled in (ADR 0054 §5a) puts every reading above its normal
+  // band on `outside` all day on a healthy engine, and lighting the edge for
+  // that reproduces the exact noise floor ADR 0080 removed from the dial.
+  // worstZoneState still returns it and severityBorderClass still maps it,
+  // for callers that want it; the tile itself only lights for a severity the
+  // operator actually configured.
+  const showState = !stale && state !== null && state !== 'normal' && state !== 'outside'
 
   return (
     <Card
@@ -82,15 +91,23 @@ export function Tile({
             </span>
           )}
         </CardTitle>
-        <div className="h-px flex-1 bg-border/70" />
-        {showState && (
-          <span
-            data-testid="tile-state-dot"
-            aria-label={`State: ${state}`}
-            className="h-2 w-2 shrink-0 rounded-full"
-            style={{ background: severityFill(state === 'outside' ? 'warn' : state) }}
-          />
-        )}
+        {/* One grid child, not two: CardHeader is a grid with no explicit
+            column track for an auto-placed item, so a bare sibling span
+            wrapped its own row under the title instead of sitting at the
+            rule's end. Wrapping the rule and the dot in a single flex row
+            keeps the grid child count exactly what it was before the dot
+            existed, and lets the dot sit flush with the rule inside it. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="h-px flex-1 bg-border/70" />
+          {showState && (
+            <span
+              data-testid="tile-state-dot"
+              aria-label={`State: ${state}`}
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: severityFill(state) }}
+            />
+          )}
+        </div>
         {titleExtra && <CardAction className="static shrink-0">{titleExtra}</CardAction>}
       </CardHeader>
 

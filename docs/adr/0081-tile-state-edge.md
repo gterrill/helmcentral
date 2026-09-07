@@ -27,12 +27,19 @@ a helm screen is read at.
 
 ### 1. `Tile` gets a `state` prop
 
-`state?: ZoneState | null`. When it is set, not `'normal'`, and the tile is
-not `stale`, three things happen: `severityBorderClass(state)` joins the
-card's class list, `data-state={state}` is set on the card, and a small dot
-(`severityFill`, `outside` mapped to `warn`'s colour) renders after the
-header's hairline rule, inside `CardHeader` rather than beside it so the
-existing flex layout does not need a new slot.
+`state?: ZoneState | null`. When it is a named severity the operator actually
+configured (`alert`, `warn`, `alarm` or `emergency`) and the tile is not
+`stale`, three things happen: `severityBorderClass(state)` joins the card's
+class list, `data-state={state}` is set on the card, and a small dot
+(`severityFill(state)`) renders inside the same flex row as the header's
+hairline rule, at its right end, before `titleExtra`. The rule and the dot
+share one grid child in `CardHeader` rather than the dot being a sibling of
+its own: `CardHeader` is a grid with no explicit column track for an
+auto-placed item, and an early version of this change added the dot as a
+bare sibling span, which put it on its own row under the title at the far
+left instead of at the end of the rule. Wrapping the rule and the dot in one
+`<div className="flex min-w-0 flex-1 items-center gap-2">` keeps the grid
+child count exactly what it was before the dot existed.
 
 `stale` wins outright: no border class, no dot, no `data-state`. This is the
 same call ADR 0068 already made about the readings themselves. A value the
@@ -40,9 +47,23 @@ tile cannot currently vouch for should not also assert a state, alarm or
 otherwise. `stale` and `state` can be passed together (a caller does not have
 to gate one on the other); the suppression happens once, inside `Tile`.
 
+`outside` is excluded the same way `normal` and `null` are, and for a
+related reason: it is not a severity the operator configured, only a
+reading past whatever band they did configure. A screenshot of the live
+dashboard's two engine clusters, both idling, both bundled with the stock
+Cummins profile that leaves warn and alarm thresholds null (ADR 0054 §5a),
+showed a permanent amber edge and dot on a perfectly healthy pair of
+engines: every reading above its normal band reads `outside`, all day,
+because nobody has entered the manual's actual thresholds. An edge that is
+amber all day on a healthy engine is precisely the noise floor ADR 0080 spent
+its whole effort removing from the dial; `Tile` cannot reproduce it one layer
+up. `worstZoneState` still returns `outside` and `severityBorderClass` still
+has a mapping for it, for a caller that wants either; `Tile` itself simply
+does not act on it.
+
 Colour is spent the same way the rest of the board already spends it:
-`normal` and `null` draw nothing. A healthy tile looks exactly as it did
-before this ADR.
+`normal`, `outside` and `null` all draw nothing. A healthy tile, and an
+unconfigured one, both look exactly as they did before this ADR.
 
 ### 2. The ladder and its ranking live in `lib/severity.ts`
 
@@ -92,7 +113,12 @@ which is what surfaced the coupling.
   literal `warn`/`alert` zone maps to `warn`, no band or inside the normal
   one maps to `normal`, and no reading at all maps to `null`. The two
   functions read the same inputs so a telltale's colour and its contribution
-  to the tile's edge can never disagree about which tier it is in.
+  to the tile's edge can never disagree about which tier it is in. This is
+  the widget that actually surfaced Decision 1's `outside` exclusion: the
+  stock Cummins profile's engine reads `outside` on its oil pressure and its
+  temperature telltales at idle, every idle, because ADR 0054 §5a shipped it
+  with no warn or alarm thresholds. Before the exclusion, both clusters on a
+  healthy running boat carried a standing amber edge for exactly that reason.
 - **Battery & Power.** `socSeverity(batterySocPercent, socBands)` already
   returns `'alarm' | 'warn' | null`; `null` (in band, or no rule configured)
   maps to `'normal'` for the tile, which is inert either way since `Tile`
@@ -123,14 +149,31 @@ anywhere on it renders exactly as it did before this ADR, because
   Decision 2 exists specifically so that import does not force every module
   that touches `Tile` to also load a working `use-alarms` at the moment
   `severity.ts` does.
+- A gauge, group, cluster or other tile whose only band configured is a
+  `normal` one (an advisory healthy range with no warn or alarm threshold,
+  ADR 0053's healthy-zone case) never lights its own edge, no matter how far
+  out of that band the reading sits, until an operator fills in an actual
+  warn or alarm threshold. This is deliberate, not a gap: it is the same
+  choice the telltales already made (ADR 0054 §5a) about not asserting an
+  alarm a configuration has no threshold to detect, now made once at the
+  `Tile` level instead of per widget.
 
 ## Verification
 
 `npx vitest run`, `npx tsc --noEmit` and `npm run lint` in `frontend/`, all
-clean. New coverage: `severity.test.ts` (`worstZoneState` ranking, the
+clean. Coverage: `severity.test.ts` (`worstZoneState` ranking, the
 warn/outside tie, null/empty handling, `severityBorderClass` per state),
-`tile-state.test.tsx` (border class, `data-state` and the dot per state;
-`normal` and no state render neither; a stale tile suppresses all three even
-with an alarm state passed in), and a state-specific test added to each of
-`gauge-tile.test.tsx`, `gauge-group-tile.test.tsx`, `engine-cluster-tile.test.tsx`,
-`battery-power-tile.test.tsx` and `tanks-tile.test.tsx`.
+`tile-state.test.tsx` (border class, `data-state` and the dot per named
+severity; `normal`, `outside` and no state all render neither; a stale tile
+suppresses all three even with an alarm state passed in), and a
+state-specific test added to each of `gauge-tile.test.tsx`,
+`gauge-group-tile.test.tsx`, `engine-cluster-tile.test.tsx`,
+`battery-power-tile.test.tsx` and `tanks-tile.test.tsx`, including the
+engine cluster's own out-of-band case.
+
+Also checked against the live dev dashboard (screenshot only, no writes) on
+the Cluster preview page, which carries the two idling engines this ADR's
+`outside` exclusion was written for: the header dot sits at the end of the
+hairline rule rather than wrapped onto its own row, and both engine clusters
+show a plain, unlit edge instead of the standing amber border the first
+version of this change produced.

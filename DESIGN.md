@@ -384,12 +384,16 @@ with `py-4`, `px-3` (`px-4` at `sm`), header and body flush.
   This distinguishes stale values from live measurements. Do not also reduce
   opacity: faded values are harder to read in sunlight and may look like a dim
   screen rather than a stale feed.
-- **State:** the border takes the colour of the worst zone any of the tile's
-  readings currently sits in (sky for alert, amber for warn, red for alarm, a
-  deeper red wash for emergency), with a small dot of the same colour after
-  the header hairline. `normal` and no state draw neither. Stale wins: a
-  stale tile keeps its amber staleness border and shows no state dot, because
-  a reading it cannot vouch for should not also claim a state.
+- **State:** the border takes the colour of the worst *named* severity any of
+  the tile's readings currently sits in (sky for alert, amber for warn, red
+  for alarm, a deeper red wash for emergency), with a small dot of the same
+  colour at the end of the header hairline. `normal`, no state, and a
+  reading that is merely out of its normal band with no warn or alarm
+  threshold configured (`outside`) all draw neither: an unconfigured band is
+  not a severity the operator set, and lighting the edge for it reproduces
+  the standing-alarm noise floor ADR 0080 removed from the dial. Stale wins:
+  a stale tile keeps its amber staleness border and shows no state dot,
+  because a reading it cannot vouch for should not also claim a state.
 - **Do not** invent a shared `MetricTile` or `StatCard`. Each widget composes its
   own KPI stack inside `Tile`. That is the established pattern.
 

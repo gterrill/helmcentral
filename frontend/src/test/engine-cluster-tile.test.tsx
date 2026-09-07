@@ -544,9 +544,15 @@ describe('tile state (ADR 0081)', () => {
     expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
   })
 
-  // 22.0 psi (this vessel's live oil pressure) sits below the healthy band's
-  // floor of 40, so it reads `outside`, which ranks alongside `warn`.
-  test('carries a corner reading outside its band up to the tile edge', () => {
+  /**
+   * 22.0 psi (this vessel's live oil pressure) sits below the healthy band's
+   * floor of 40, so it reads `outside`. This is exactly the bundled engine
+   * profile's own case (ADR 0054 §5a: warn/alarm thresholds left null), and
+   * it must not light the tile: an engine idling all day with no thresholds
+   * filled in would otherwise carry a permanent amber edge on a healthy
+   * boat, the noise floor ADR 0080 removed from the dial in the first place.
+   */
+  test('does not carry an out-of-band reading to the tile edge', () => {
     const zoned = {
       ...port,
       corners: port.corners.map((c, i) => (i === 0
@@ -556,7 +562,7 @@ describe('tile state (ADR 0081)', () => {
     const { container } = render(
       <EngineClusterTile config={zoned} values={values} editing={false} onConfigure={vi.fn()} />,
     )
-    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'outside')
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
   })
 
   test('carries no state when nothing on the cluster has a band configured', () => {
