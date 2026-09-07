@@ -521,3 +521,48 @@ describe('stacked cards', () => {
     expect(screen.getByText('1.5').className).toContain('text-2xl')
   })
 })
+
+/**
+ * The tile edge carries the worst of the ring, centre, every corner row and
+ * the telltales (ADR 0081) — the same worst-of that already governs the
+ * telltale row's own colour, extended up to the tile.
+ */
+describe('tile state (ADR 0081)', () => {
+  test('carries a telltale past its alarm band up to the tile edge', () => {
+    const withTelltales = {
+      ...port,
+      telltales: [
+        { path: 'propulsion.port.temperature', label: 'Coolant', display: 'numeric' as const, quantity: 'temperature', unit: 'C',
+          min: 0, max: 120, zones: [{ from: 0, to: 95, state: 'normal' as const }, { from: 95, to: 120, state: 'alarm' as const }] },
+      ],
+    }
+    const { container } = render(
+      <EngineClusterTile config={withTelltales}
+        values={{ ...values, 'propulsion.port.temperature': 380.15 }}
+        editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
+  })
+
+  // 22.0 psi (this vessel's live oil pressure) sits below the healthy band's
+  // floor of 40, so it reads `outside`, which ranks alongside `warn`.
+  test('carries a corner reading outside its band up to the tile edge', () => {
+    const zoned = {
+      ...port,
+      corners: port.corners.map((c, i) => (i === 0
+        ? { ...c, rows: [{ ...c.rows[0], min: 0, max: 100, zones: [{ from: 40, to: 100, state: 'normal' as const }] }] }
+        : c)),
+    }
+    const { container } = render(
+      <EngineClusterTile config={zoned} values={values} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'outside')
+  })
+
+  test('carries no state when nothing on the cluster has a band configured', () => {
+    const { container } = render(
+      <EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+  })
+})

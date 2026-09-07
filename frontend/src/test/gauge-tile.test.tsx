@@ -159,6 +159,37 @@ describe('healthy zones (ADR 0053)', () => {
 })
 
 /**
+ * The tile edge carries the gauge's own zone (ADR 0081).
+ */
+describe('tile state (ADR 0081)', () => {
+  const zoned = config({
+    display: 'numeric', min: 0, max: 100,
+    zones: [{ from: 0, to: 20, state: 'alarm' }],
+  })
+
+  test('carries the active zone up to the tile edge', () => {
+    const { container } = render(
+      <GaugeTile config={zoned} value={68947} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
+  })
+
+  test('carries no state when the reading is in no zone', () => {
+    const { container } = render(
+      <GaugeTile config={zoned} value={689470} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+  })
+
+  test('carries no state when the value is absent', () => {
+    const { container } = render(
+      <GaugeTile config={zoned} value={null} editing={false} onConfigure={vi.fn()} />,
+    )
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+  })
+})
+
+/**
  * The plain radial's zone wash follows the same rule as DialRing's rim
  * (ADR 0080): thin at rest, full width only while the reading sits in that
  * zone, so a healthy gauge does not carry a permanent amber or red band.

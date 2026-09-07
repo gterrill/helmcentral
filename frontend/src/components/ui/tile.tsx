@@ -1,6 +1,7 @@
 import * as React from 'react'
 
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { severityBorderClass, severityFill, type ZoneState } from '@/lib/severity'
 import { cn } from '@/lib/utils'
 
 interface TileProps {
@@ -18,6 +19,15 @@ interface TileProps {
   stale?: boolean
   /** Age of the last update, already formatted (`1h 39m`). */
   staleLabel?: string
+  /**
+   * The worst zone state among this tile's readings (ADR 0081), from
+   * `worstZoneState` in lib/severity.ts. `null` or `normal` draw nothing —
+   * colour is spent only once a tile actually has something to say. Ignored
+   * while `stale`: a value the tile can no longer vouch for should not also
+   * claim a state, which is the same call ADR 0068 already made for the
+   * readings themselves.
+   */
+  state?: ZoneState | null
   children: React.ReactNode
 }
 
@@ -29,12 +39,21 @@ export function Tile({
   titleExtra,
   stale = false,
   staleLabel,
+  state = null,
   children,
 }: TileProps) {
+  const showState = !stale && state !== null && state !== 'normal'
+
   return (
     <Card
-      className={cn('h-full gap-0 py-4', stale && 'border-amber-500 dark:border-amber-400', className)}
+      className={cn(
+        'h-full gap-0 py-4',
+        stale && 'border-amber-500 dark:border-amber-400',
+        showState && severityBorderClass(state),
+        className,
+      )}
       data-stale={stale ? 'true' : undefined}
+      data-state={showState ? state : undefined}
     >
       {/* Padding and letter-spacing tighten before anything else at phone width. The
           0.22em tracking costs more width than the horizontal padding does, so it is
@@ -64,6 +83,14 @@ export function Tile({
           )}
         </CardTitle>
         <div className="h-px flex-1 bg-border/70" />
+        {showState && (
+          <span
+            data-testid="tile-state-dot"
+            aria-label={`State: ${state}`}
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ background: severityFill(state === 'outside' ? 'warn' : state) }}
+          />
+        )}
         {titleExtra && <CardAction className="static shrink-0">{titleExtra}</CardAction>}
       </CardHeader>
 

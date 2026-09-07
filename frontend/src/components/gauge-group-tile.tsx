@@ -4,7 +4,9 @@ import { memo } from 'react'
 import { Button } from '@/components/ui/button'
 import { GaugeBody } from '@/components/gauge-tile'
 import { Tile } from '@/components/ui/tile'
+import { reading } from '@/lib/cluster-readings'
 import { GAUGE_GROUP_MAX_COLUMNS, type GaugeGroupWidgetConfig } from '@/lib/dashboard-widgets'
+import { worstZoneState } from '@/lib/severity'
 
 /**
  * Columns when the operator has not chosen. One gauge alone gets the full
@@ -31,10 +33,15 @@ interface GaugeGroupTileProps {
  */
 export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, editing, onConfigure }: GaugeGroupTileProps) {
   const title = config.title.trim() || 'Gauges'
+  // reading() does the same conversion GaugeBody does per member; reused
+  // here rather than recomputed so the tile edge and each member's readout
+  // agree on which zone it is in (ADR 0081).
+  const state = worstZoneState(config.gauges.map((gauge) => reading(gauge, values).zone))
 
   return (
     <Tile
       title={title}
+      state={state}
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (

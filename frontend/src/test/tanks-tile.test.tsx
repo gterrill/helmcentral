@@ -104,4 +104,38 @@ describe('TanksTile', () => {
 
     expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
   })
+
+  // The tile edge carries the worst tank tone (ADR 0081).
+  describe('tile state (ADR 0081)', () => {
+    it('carries a critical tank as the alarm state', () => {
+      const { container } = render(
+        <TanksTile
+          tanks={[tank({ id: 't1', kind: 'fuel', level_percent: 60 }), tank({ id: 't2', kind: 'fuel', level_percent: 5 })]}
+          loading={false} lastUpdateAgeS={null}
+        />,
+      )
+      expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
+    })
+
+    it('carries a warn tank as the warn state when nothing is worse', () => {
+      const { container } = render(
+        <TanksTile tanks={[tank({ kind: 'fuel', level_percent: 20 })]} loading={false} lastUpdateAgeS={null} />,
+      )
+      expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'warn')
+    })
+
+    it('carries no state when every tank is healthy', () => {
+      const { container } = render(
+        <TanksTile tanks={[tank({ kind: 'fuel', level_percent: 60 })]} loading={false} lastUpdateAgeS={null} />,
+      )
+      expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+    })
+
+    it('suppresses the state on a stale feed', () => {
+      const { container } = render(
+        <TanksTile tanks={[tank({ kind: 'fuel', level_percent: 5 })]} loading={false} lastUpdateAgeS={999} />,
+      )
+      expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+    })
+  })
 })

@@ -74,10 +74,15 @@ interface GaugeTileProps {
 
 export const GaugeTile = memo(function GaugeTile({ config, value, editing, onConfigure }: GaugeTileProps) {
   const title = config.label.trim() || config.path
+  // The same conversion GaugeBody does internally, so the tile edge can carry
+  // the reading's own zone (ADR 0081) without GaugeBody reaching back out.
+  const converted = value === null ? null : convertFromSI(value, config.quantity, config.unit)
+  const zone = activeZone(converted, config.zones)
 
   return (
     <Tile
       title={title}
+      state={zone}
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (

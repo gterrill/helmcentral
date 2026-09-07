@@ -516,6 +516,25 @@ test('a charger current of zero (plugged in but not drawing) leaves the normal d
   expect(estimate).toHaveTextContent(`${Math.round(expected!.socPercent)}%`)
 })
 
+// The tile edge carries the SoC band (ADR 0081).
+test('carries the alarm SoC band up to the tile edge', () => {
+  const { container } = render(<BatteryPowerTile {...baseProps} batterySocPercent={8} socBands={bands} />)
+  expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
+})
+
+test('carries the warn SoC band up to the tile edge', () => {
+  const { container } = render(<BatteryPowerTile {...baseProps} batterySocPercent={18} socBands={bands} />)
+  expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'warn')
+})
+
+test('carries no state when the SoC is in band or no bands are configured', () => {
+  const { container: inBand } = render(<BatteryPowerTile {...baseProps} batterySocPercent={63} socBands={bands} />)
+  expect(inBand.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+
+  const { container: noRule } = render(<BatteryPowerTile {...baseProps} batterySocPercent={8} />)
+  expect(noRule.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+})
+
 test('a stale feed still blanks the dawn estimate even with the charger drawing shore power', () => {
   vi.useFakeTimers()
   vi.setSystemTime(DAYTIME_NOW)

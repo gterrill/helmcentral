@@ -114,6 +114,20 @@ A tile showing `—` with no `STALE` marker means something different: that path
 is not being published at all. Check that the source exists in SignalK before
 looking for a dead link.
 
+## Tile state
+
+A tile's edge takes the colour of the worst band any of its readings
+currently sits in: sky for alert, amber for warn, red for alarm, a deeper red
+wash for emergency. A small dot beside the title carries the same colour,
+since a border alone is easy to miss along the edge of a screen. A tile with
+every reading in its normal band draws no attention at all, on the same
+principle as the rest of the board: colour is spent only when something
+needs it.
+
+A stale tile shows its usual amber staleness treatment instead, whatever band
+its last reading was in. A value the tile can no longer vouch for should not
+also claim a state.
+
 ## Battery & Power
 
 Four cards: State, Net, Solar and Loads, plus a Shore line that only appears

@@ -12,7 +12,7 @@ import { CLUSTER_CANVAS, CLUSTER_RAIL, clusterDesignWidth, computeCornerMasks, u
 import { FuelRail } from '@/components/ui/fuel-rail'
 import type { ClusterCorner, EngineClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { majorStepFor } from '@/components/gauge-tile'
-import { severityTextClass } from '@/lib/severity'
+import { severityTextClass, worstZoneState, type ZoneState } from '@/lib/severity'
 
 /**
  * An engine cluster (ADR 0054).
@@ -164,6 +164,20 @@ function telltaleClass(state: ReturnType<typeof zoneFor>, value: number | null):
 }
 
 /**
+ * The same telltale reading, translated to the tile-edge vocabulary (ADR
+ * 0081) instead of a text class. A telltale's own colour logic above already
+ * decides "past alarm", "in between" and "normal" - this reuses that same
+ * `state`/`value` pair rather than asking the zones a second question, so the
+ * two can never disagree about which tier a telltale is in.
+ */
+function telltaleZoneState(state: ReturnType<typeof zoneFor>, value: number | null): ZoneState | null {
+  if (value === null) return null
+  if (state === 'alarm' || state === 'emergency') return 'alarm'
+  if (state === null || state === 'normal') return 'normal'
+  return 'warn' // 'outside', 'warn' and 'alert' all read as the telltale's amber tier.
+}
+
+/**
  * The telltale row, under the hours notch at the dial's foot. It sits in the
  * wedge the 250-degree sweep leaves at the bottom, so it costs the composition
  * nothing and puts the lights where the eye already is.
@@ -218,6 +232,19 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   // The telltales live inside the dial now, so the canvas is exactly the block
   // of boxes again and the disc still spans it.
   const canvasH = height
+
+  // The tile edge carries the worst of everything the cluster reads (ADR
+  // 0081): the ring, the centre, every corner row, and the telltales in
+  // their own vocabulary via telltaleZoneState above.
+  const state = worstZoneState([
+    ring.zone,
+    centre.zone,
+    ...config.corners.flatMap((corner) => corner.rows.map((row) => reading(row, values).zone)),
+    ...telltales.map((slot) => {
+      const t = reading(slot, values)
+      return telltaleZoneState(t.zone, t.converted)
+    }),
+  ])
   const cardStyles: CSSProperties[] = [
     { left: 0, top: 0, width: topCardW, height: topCardH, ...CLUSTER_MASKS.tl },
     { left: width - topCardW, top: 0, width: topCardW, height: topCardH, ...CLUSTER_MASKS.tr },
@@ -228,6 +255,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   return (
     <Tile
       title={title}
+      state={state}
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         editing ? (

@@ -11,7 +11,7 @@
  * engine-cluster, cluster-readings) that used to each keep their own copy of
  * this switch, with the same near-miss colours.
  */
-import type { AlarmState } from '@/hooks/use-alarms'
+import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 
 export function severityClass(state: AlarmState | string): string {
   switch (state) {
@@ -83,5 +83,66 @@ export function severityTextClass(state: AlarmState | string | null, fallback: s
       return 'text-amber-600'
     default:
       return fallback
+  }
+}
+
+/**
+ * A tile's own vocabulary (ADR 0081): every AlarmState, plus `outside` —
+ * cluster-readings.ts's "past every configured band" case, which a tile has
+ * to be able to carry up to its edge exactly like an alarm state can.
+ */
+export type ZoneState = AlarmState | 'outside'
+
+/**
+ * `outside` shares warn's rung: an out-of-range reading is warning-grade, not
+ * a confirmed alarm, the same call severityTextClass already makes.
+ *
+ * Ranked with `indexOf` at call time rather than a rank table built at module
+ * load: severity.ts is a leaf utility that most of the dashboard imports
+ * (directly or through Tile), and a table built eagerly from ALARM_STATES
+ * would make every one of those importers depend on `@/hooks/use-alarms`
+ * being fully present the moment severity.ts loads, including in a test that
+ * mocks that hook down to only what it calls.
+ */
+function rankOf(state: ZoneState): number {
+  return ALARM_STATES.indexOf(state === 'outside' ? 'warn' : state)
+}
+
+/**
+ * The worst of a tile's readings, for the border colour on its edge.
+ * `null`/`undefined` entries are readings with nothing to report and are
+ * ignored rather than counted as normal; the result is `null` only when
+ * every entry is like that. When the worst rung is the warn/outside tie,
+ * a literal `warn` wins it — `outside` surfaces only when nothing on the
+ * tile has actually crossed into a named band above it.
+ */
+export function worstZoneState(states: Array<ZoneState | null | undefined>): ZoneState | null {
+  const present = states.filter((state): state is ZoneState => state !== null && state !== undefined)
+  if (present.length === 0) return null
+
+  const maxRank = Math.max(...present.map(rankOf))
+  if (maxRank === rankOf('warn') && present.includes('warn')) return 'warn'
+
+  return present.find((state) => rankOf(state) === maxRank)!
+}
+
+/**
+ * The tile-edge border ladder (ADR 0081). Null and `normal` draw no border,
+ * on the same rationed-colour principle as the rest of the board: colour is
+ * spent only once a tile actually has something to say.
+ */
+export function severityBorderClass(state: ZoneState | null): string {
+  switch (state) {
+    case 'alert':
+      return 'border-sky-500'
+    case 'warn':
+    case 'outside':
+      return 'border-amber-500 dark:border-amber-400'
+    case 'alarm':
+      return 'border-red-500 dark:border-red-400'
+    case 'emergency':
+      return 'border-red-700 bg-red-500/10 dark:border-red-500'
+    default:
+      return ''
   }
 }

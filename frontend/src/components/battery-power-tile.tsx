@@ -253,7 +253,15 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
   const onShorePower = charger0AcIn1CurrentA !== null && charger0AcIn1CurrentA > 0.5
 
   return (
-    <Tile title="Battery & Power" stale={feedStale} staleLabel={formatDataAge(props.lastUpdateAgeS)}>
+    <Tile
+      title="Battery & Power"
+      // The tile edge carries the same SoC band the numeral and bar already
+      // colour (ADR 0081): warn and alarm map straight across; in band or
+      // with no rule configured, the tile carries no state.
+      state={socSeverityState ?? 'normal'}
+      stale={feedStale}
+      staleLabel={formatDataAge(props.lastUpdateAgeS)}
+    >
       <div className="mt-1 space-y-2">
         <div className="rounded-md border bg-background/60 px-3 py-3">
           <div className="flex items-start justify-between gap-2">

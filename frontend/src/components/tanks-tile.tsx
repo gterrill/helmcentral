@@ -4,6 +4,7 @@ import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import type { TankLevel } from '@/hooks/use-tanks-state'
+import { worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
 
@@ -71,6 +72,9 @@ function tankTone(kind: TankLevel['kind'], percent: number): TankTone {
   return 'normal'
 }
 
+/** TankTone in the tile-edge vocabulary (ADR 0081). */
+const TONE_STATE: Record<TankTone, ZoneState> = { critical: 'alarm', warn: 'warn', normal: 'normal' }
+
 /**
  * The non-colour channel a red/green-colour-deficient operator (or anyone
  * reading a washed-out screen in direct sun) gets instead of the tone colour
@@ -123,10 +127,20 @@ function tankKindIcon(kind: TankLevel['kind']) {
 export const TanksTile = memo(function TanksTile({ tanks, loading, lastUpdateAgeS }: TanksTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
   const visibleTanks = tanks.slice(0, 8)
+  // Worst tone across the visible tanks, in the tile-edge vocabulary. A stale
+  // feed's tanks all read null here (mirroring the JSX below), which is moot
+  // anyway: Tile suppresses the state whenever `stale` is set.
+  const state = worstZoneState(
+    visibleTanks.map((tank) => {
+      if (feedStale) return null
+      return TONE_STATE[tankTone(tank.kind, clampPercent(tank.level_percent))]
+    }),
+  )
 
   return (
     <Tile
       title="Tanks"
+      state={state}
       icon={<Droplets className="h-3.5 w-3.5 text-gauge-secondary" />}
       stale={feedStale}
       staleLabel={formatDataAge(lastUpdateAgeS)}
