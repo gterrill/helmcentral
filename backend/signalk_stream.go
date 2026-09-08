@@ -30,15 +30,26 @@ const signalKStreamPath = "/signalk/v1/stream?subscribe=none"
 //     that feature everything and save almost nothing.
 //   - path "*" keeps every path, including any the operator has mapped to a
 //     widget in settings.yaml. Only the rate is capped, never the coverage.
-//   - policy instant with minPeriod still delivers a change as soon as it
-//     happens, just no more than once per second per path. policy fixed was
-//     measured slower to no benefit (210 frames/s against instant's 159).
-const streamSubscribeMinPeriodMS = 1000
+//   - policy fixed with period buffers each window and delivers the latest
+//     value per (context, $source, path) when it closes (signalk-server's
+//     subscriptionmanager.ts: bufferWithTime(period)). This used to be policy
+//     instant with minPeriod, which sounds equivalent, "no more than once a
+//     second" either way, but the server implements instant+minPeriod as
+//     Bacon's debounceImmediate(minPeriod): the first value in the window
+//     passes and every later one inside it is dropped, not deferred. A path
+//     that raises and clears inside one window loses the clear outright and
+//     looks live until it next changes, one of the ways a bus notification
+//     goes stale in this snapshot (ADR 0086). fixed+period cannot lose the
+//     final value: the window is buffered and the last value per path is
+//     the one delivered, which is all a consumer this slow ever wanted.
+//     Measured against the boat, fixed costs more frames than instant did
+//     (210/s against 159/s); that cost is accepted for the correctness.
+const streamSubscribePeriodMS = 1000
 
 type signalKSubscribeEntry struct {
-	Path      string `json:"path"`
-	Policy    string `json:"policy"`
-	MinPeriod int    `json:"minPeriod"`
+	Path   string `json:"path"`
+	Policy string `json:"policy"`
+	Period int    `json:"period"`
 }
 
 type signalKSubscribeMessage struct {
@@ -50,9 +61,9 @@ func streamSubscription() signalKSubscribeMessage {
 	return signalKSubscribeMessage{
 		Context: "vessels.*",
 		Subscribe: []signalKSubscribeEntry{{
-			Path:      "*",
-			Policy:    "instant",
-			MinPeriod: streamSubscribeMinPeriodMS,
+			Path:   "*",
+			Policy: "fixed",
+			Period: streamSubscribePeriodMS,
 		}},
 	}
 }

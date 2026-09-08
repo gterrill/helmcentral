@@ -325,6 +325,16 @@ func TestStreamDeltaReachesVesselStateFetcher(t *testing.T) {
 //
 // So the client subscribes explicitly and rate-limits to 1Hz per path, rather
 // than taking the firehose and throwing most of it away.
+//
+// fixed+period, not instant+minPeriod (ADR 0086): signalk-server implements
+// instant+minPeriod with Bacon's debounceImmediate(minPeriod), which lets the
+// first value in a window through and drops every later one -- not defers,
+// drops. A path that raises and clears inside one window loses the clear, and
+// that is what dropped a CPA alarm's clear on the boat (ADR 0086). fixed+period
+// instead buffers the window and delivers the latest value per (context,
+// $source, path), so the final state in any window is never lost. Measured
+// against the boat, fixed cost more frames than instant (210/s vs 159/s), and
+// that cost is accepted for the correctness fixed buys.
 func TestStreamClientSubscribesWithRateLimit(t *testing.T) {
 	received := make(chan string, 1)
 	stub := newStreamStub(func(ctx context.Context, c *websocket.Conn, _ int) {
@@ -355,9 +365,9 @@ func TestStreamClientSubscribesWithRateLimit(t *testing.T) {
 	var msg struct {
 		Context   string `json:"context"`
 		Subscribe []struct {
-			Path      string `json:"path"`
-			Policy    string `json:"policy"`
-			MinPeriod int    `json:"minPeriod"`
+			Path   string `json:"path"`
+			Policy string `json:"policy"`
+			Period int    `json:"period"`
 		} `json:"subscribe"`
 	}
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
@@ -379,11 +389,14 @@ func TestStreamClientSubscribesWithRateLimit(t *testing.T) {
 	if entry.Path != "*" {
 		t.Fatalf("path = %q, want * so no configured path is dropped", entry.Path)
 	}
-	if entry.Policy != "instant" {
-		t.Fatalf("policy = %q, want instant so changes still arrive promptly", entry.Policy)
+	if entry.Policy != "fixed" {
+		t.Fatalf("policy = %q, want fixed so the last value in each window is never dropped", entry.Policy)
 	}
-	if entry.MinPeriod != 1000 {
-		t.Fatalf("minPeriod = %d, want 1000 to match the 1s consumption rate", entry.MinPeriod)
+	if entry.Period != 1000 {
+		t.Fatalf("period = %d, want 1000 to match the 1s consumption rate", entry.Period)
+	}
+	if strings.Contains(raw, "minPeriod") {
+		t.Fatalf("fixed+period must not also send minPeriod, which is instant's own parameter: %q", raw)
 	}
 }
 
