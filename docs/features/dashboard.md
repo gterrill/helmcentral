@@ -54,6 +54,11 @@ additional status lamps alongside it, add a separate lamp strip widget to
 that page in layout mode. It configures the same way and does not affect the
 pinned ribbon.
 
+Opening the ribbon dialog for the first time fills it with lamps resolved
+against the paths your own vessel is currently publishing, such as each
+engine's revolutions and the generator's state. Nothing is saved until you
+choose Save.
+
 To add, edit or remove the ribbon, see [Pin an indicator
 ribbon](../how-to/pin-an-indicator-ribbon.md).
 

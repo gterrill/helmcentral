@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import {
   type DashboardLayoutItem,
   type LampStripWidgetConfig,
 } from '@/lib/dashboard-widgets'
+import { suggestRibbonLamps } from '@/lib/ribbon-defaults'
 
 /**
  * A `Pick` of `DashboardLayoutItem` rather than the full type, so this dialog
@@ -62,6 +63,17 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
     setConfig(widget?.lamps ? structuredClone(widget.lamps) : defaultStripConfig(widget?.id ?? ''))
   }, [widget?.id, widget?.lamps])
 
+  // A fresh ribbon (ADR 0085): once the vessel's published paths have loaded,
+  // replace the single blank lamp with a suggested set resolved against them.
+  // Never runs for an existing ribbon config or a per-page widget, and never
+  // overwrites lamps the operator has already started editing.
+  useEffect(() => {
+    if (widget?.id !== RIBBON_DIALOG_ID || widget?.lamps || paths.length === 0) return
+    const suggested = suggestRibbonLamps(paths)
+    if (suggested.length === 0) return
+    setConfig((current) => ({ ...current, lamps: suggested }))
+  }, [widget?.id, widget?.lamps, paths])
+
   const setLamp = (index: number, patch: Partial<LampStripWidgetConfig['lamps'][number]>) =>
     setConfig((current) => ({
       ...current,
@@ -76,6 +88,13 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
       ;[lamps[index], lamps[target]] = [lamps[target], lamps[index]]
       return { ...current, lamps }
     })
+
+  // Every suggested lamp not already on the strip by path, for the "Suggest
+  // lamps" button — offered only for the ribbon; empty (and so disabled)
+  // until paths have loaded, since suggestRibbonLamps([]) is always [].
+  const missingSuggestions = suggestRibbonLamps(paths).filter(
+    (suggested) => !config.lamps.some((lamp) => lamp.path === suggested.path),
+  )
 
   // A strip with neither lamps nor the rollup renders nothing at all, which the
   // backend rejects — so the dialog will not offer to save one.
@@ -169,15 +188,28 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
             </div>
           ))}
 
-          <Button
-            variant="ghost"
-            className="w-fit"
-            disabled={config.lamps.length >= LAMP_STRIP_MAX_LAMPS}
-            onClick={() => setConfig((current) => ({ ...current, lamps: [...current.lamps, { path: '', label: '' }] }))}
-          >
-            <Plus className="size-3.5" />
-            Add lamp
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="ghost"
+              className="w-fit"
+              disabled={config.lamps.length >= LAMP_STRIP_MAX_LAMPS}
+              onClick={() => setConfig((current) => ({ ...current, lamps: [...current.lamps, { path: '', label: '' }] }))}
+            >
+              <Plus className="size-3.5" />
+              Add lamp
+            </Button>
+            {widget?.id === RIBBON_DIALOG_ID && (
+              <Button
+                variant="outline"
+                className="w-fit"
+                disabled={missingSuggestions.length === 0}
+                onClick={() => setConfig((current) => ({ ...current, lamps: [...current.lamps, ...missingSuggestions] }))}
+              >
+                <Sparkles className="size-3.5" />
+                Suggest lamps
+              </Button>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
