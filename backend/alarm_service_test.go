@@ -123,6 +123,84 @@ func TestAcknowledgeAlarmHandlerRefusesABusSourcedEmergency(t *testing.T) {
 	}
 }
 
+// ── a failed bus action forces an immediate resync (ADR 0086) ──────────────
+//
+// actOnSignalKNotification failing upstream (a 502, not one of the three 409
+// refusals) means Helmcentral's copy and the server may already disagree --
+// exactly the shape of the "Alarm not found!" case, where the server has
+// forgotten a notification Helmcentral still shows as live. Waiting out the
+// rest of the 30s sync interval would leave the stale card up for no reason;
+// invalidating forces the very next tick to re-read the server instead.
+
+func TestAlarmActionHandlerInvalidatesTheNotificationSyncOnAnUpstreamFailure(t *testing.T) {
+	invalidateSignalKToken()
+	t.Cleanup(invalidateSignalKToken)
+
+	t.Setenv("SIGNALK_USERNAME", "helmcentral-service")
+	t.Setenv("SIGNALK_PASSWORD", "service-secret")
+
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+	rs.on(http.MethodPost, "/signalk/v1/auth/login", http.StatusOK, `{"token":"service-jwt","timeToLive":86400}`)
+	rs.on(http.MethodPost, signalKNotificationsAPIPath+"/"+liveNotificationID+"/acknowledge", http.StatusInternalServerError, `{"error":"boom"}`)
+	t.Setenv("SETTINGS_FILE", settingsFileForServer(t, srv.URL))
+
+	withGlobalSnapshot(t, snapshotWithNotification("notifications.arrivalCircleEntered",
+		notificationWithStatus("alarm", liveNotificationStatus())))
+
+	originalSyncer := globalNotificationSyncer
+	globalNotificationSyncer = newNotificationSyncer(globalSignalKSnapshot)
+	globalNotificationSyncer.lastRun = alarmNow // pretend a sync just ran
+	t.Cleanup(func() { globalNotificationSyncer = originalSyncer })
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/alarms/x/acknowledge", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("notifications:arrivalCircleEntered")
+
+	if err := acknowledgeAlarmHandler(c); err != nil {
+		t.Fatalf("acknowledgeAlarmHandler: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status: got %d, want 502 (body %s)", rec.Code, rec.Body.String())
+	}
+
+	if !globalNotificationSyncer.lastRun.IsZero() {
+		t.Fatalf("expected an upstream failure to invalidate the notification sync so the next tick re-reads the server")
+	}
+}
+
+// A refusal is Helmcentral correctly declining a request the server was never
+// asked to carry out -- nothing about what the server holds is in question,
+// so there is nothing to resync early for.
+func TestAlarmActionHandlerDoesNotInvalidateTheNotificationSyncOnARefusal(t *testing.T) {
+	withGlobalSnapshot(t, snapshotWithNotification("notifications.mob",
+		notificationWithStatus("emergency", liveNotificationStatus())))
+
+	originalSyncer := globalNotificationSyncer
+	globalNotificationSyncer = newNotificationSyncer(globalSignalKSnapshot)
+	globalNotificationSyncer.lastRun = alarmNow
+	t.Cleanup(func() { globalNotificationSyncer = originalSyncer })
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/alarms/x/acknowledge", nil), rec)
+	c.SetParamNames("id")
+	c.SetParamValues("notifications:mob")
+
+	if err := acknowledgeAlarmHandler(c); err != nil {
+		t.Fatalf("acknowledgeAlarmHandler: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status: got %d, want 409 (body %s)", rec.Code, rec.Body.String())
+	}
+	if globalNotificationSyncer.lastRun.IsZero() {
+		t.Fatalf("a refusal (409) must not trigger a resync -- nothing about the server's own state is in question")
+	}
+}
+
 // Routing-level regression: bus-sourced ids are the first alarm ids to contain
 // a character the frontend percent-encodes (the "notifications:" namespace
 // colon), and Echo hands path params to the handler still escaped — it prefers

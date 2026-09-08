@@ -25,6 +25,15 @@ fall eases to 0.7 mb/hr." An
 alarm raised by something else on the bus, which has no rule behind it, says
 so and clears when its source clears it.
 
+An alarm raised elsewhere on the bus can also go stale the other way: the
+source clears it, or forgets it, without Helmcentral noticing, since the
+stream only reports what changes. Helmcentral re-reads the server's
+notifications every 30 seconds to catch that, so an alarm the server has
+forgotten leaves the list within half a minute. Acknowledging or silencing
+one inside that window can answer with the server's own "Alarm not found"
+message rather than success, and the card then disappears on its own rather
+than staying stuck.
+
 **Missing paths do not satisfy thresholds.** This prevents a freshly booted
 boat from firing every rule at once while the bus comes up. The
 same rule applies in reverse: a live alarm does not clear when its path goes
@@ -69,6 +78,15 @@ rule here is holding, left behind by a restart or by another Helmcentral
 install pointed at the same SignalK, is cleared from the bus automatically.
 For that reason a development copy of Helmcentral should keep the SignalK
 transport switched off if it talks to the boat's server.
+
+A SignalK server restarting is the sharpest way a bus alarm goes stale: its
+notifications live in memory and none of them survive a restart, so
+everything it was holding for another producer is simply gone the moment it
+comes back, whatever the underlying condition is actually doing. The stream
+carries no signal that this happened, since nothing on the path in question
+changed from its point of view. The 30-second re-read described above is
+what catches it, rather than leaving that alarm on your board until the same
+path happens to change again.
 
 ## The rules list
 

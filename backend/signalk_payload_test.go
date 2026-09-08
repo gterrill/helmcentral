@@ -6,12 +6,41 @@ import (
 	"time"
 )
 
-// withGlobalSnapshot swaps the package-level snapshot for the duration of a test.
+// withGlobalSnapshot swaps the package-level snapshot for the duration of a
+// test, and points globalNotificationSyncer's fetch at a no-network stub for
+// the same duration.
+//
+// evaluateAlarmsOnce re-points globalNotificationSyncer.snapshot to
+// globalSignalKSnapshot every tick, so any test that drives evaluateAlarmsOnce
+// through this helper would otherwise reach the real fetchSignalKNotificationsTree
+// and its live HTTP call. A stub that answered found=true with an empty tree
+// would be worse than the network call it replaces: reconcileNotifications
+// would read that as "the server has nothing" and wipe every notification the
+// test just seeded. Echoing the snapshot's own current subtree back is a
+// no-op reconcile instead, safe for every other test in this package that
+// never intended to exercise the sync at all.
 func withGlobalSnapshot(t *testing.T, snapshot *signalKSnapshot) {
 	t.Helper()
 	original := globalSignalKSnapshot
 	globalSignalKSnapshot = snapshot
 	t.Cleanup(func() { globalSignalKSnapshot = original })
+
+	originalFetch := globalNotificationSyncer.fetch
+	globalNotificationSyncer.fetch = func(vesselID string) (map[string]any, bool, error) {
+		ctx := vesselContextPrefix + vesselID
+		if vesselID == "self" {
+			ctx = globalSignalKSnapshot.selfContext()
+			if ctx == "" {
+				return nil, false, nil
+			}
+		}
+		notifications, ok := globalSignalKSnapshot.treeFor(ctx)[notificationsRoot].(map[string]any)
+		if !ok {
+			return nil, false, nil
+		}
+		return notifications, true, nil
+	}
+	t.Cleanup(func() { globalNotificationSyncer.fetch = originalFetch })
 }
 
 // seedSelfTree installs a SignalK REST-shaped JSON body as the self vessel's

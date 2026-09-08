@@ -320,3 +320,150 @@ func (s *signalKSnapshot) lastSeen(context, path string) time.Time {
 	defer s.mu.RUnlock()
 	return s.pathSeen[context+"|"+path]
 }
+
+// reconcileNotifications replaces the notifications subtree held for context
+// with the server's REST copy, keeping any leaf a delta updated at or after
+// readStartedAt (ADR 0086).
+//
+// Nothing else ever re-reads the server: the snapshot is fed only by the
+// delta stream (signalk_stream.go), so a notification the server has
+// forgotten -- a restart that emptied its NotificationManager, a clear the
+// instant+minPeriod stream dropped inside one debounce window, or its
+// 60-120s clean() sweep -- stays live here until that exact path happens to
+// change again. This is the periodic correction against the REST tree that
+// closes that gap. server == nil means the server holds no notifications for
+// that context at all (a 404).
+//
+// Returns the dotted notification paths (relative to "notifications") whose
+// leaf was removed or whose liveness (notificationValueIsLive) changed,
+// sorted, so the caller can log exactly what it corrected.
+func (s *signalKSnapshot) reconcileNotifications(context string, server map[string]any, readStartedAt time.Time) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tree, ok := s.contexts[context]
+	if !ok {
+		// The syncer only ever asks about contexts it already holds; this must
+		// never manufacture one.
+		return nil
+	}
+
+	ours := map[string]map[string]any{}
+	if root, ok := tree[notificationsRoot].(map[string]any); ok {
+		flattenNotificationLeaves(root, nil, ours)
+	}
+	serverLeaves := map[string]map[string]any{}
+	flattenNotificationLeaves(server, nil, serverLeaves)
+
+	paths := make(map[string]bool, len(ours)+len(serverLeaves))
+	for path := range ours {
+		paths[path] = true
+	}
+	for path := range serverLeaves {
+		paths[path] = true
+	}
+
+	kept := map[string]map[string]any{}
+	var changed []string
+
+	for path := range paths {
+		key := context + "|" + notificationsRoot + "." + path
+		seen := s.pathSeen[key]
+		ourLeaf, weHold := ours[path]
+		serverLeaf, serverHas := serverLeaves[path]
+
+		// A delta that arrived after the read began is newer than anything the
+		// read can say, so our copy wins regardless of what the server answered.
+		if !seen.IsZero() && !seen.Before(readStartedAt) {
+			if weHold {
+				kept[path] = ourLeaf
+			}
+			continue
+		}
+
+		if serverHas {
+			newLeaf := deepCopyMap(serverLeaf)
+			kept[path] = newLeaf
+			s.pathSeen[key] = readStartedAt
+
+			oldLive := weHold && leafNotificationIsLive(ourLeaf)
+			if oldLive != leafNotificationIsLive(newLeaf) {
+				changed = append(changed, path)
+			}
+			continue
+		}
+
+		// The server no longer has this leaf at all: it is gone, whether or not
+		// it was live. paths only ever contains this branch when weHold is true
+		// (otherwise neither side carries the leaf and it was never unioned in).
+		delete(s.pathSeen, key)
+		changed = append(changed, path)
+	}
+
+	if len(kept) == 0 {
+		delete(tree, notificationsRoot)
+	} else {
+		root := map[string]any{}
+		for path, leaf := range kept {
+			setNotificationLeaf(root, strings.Split(path, "."), leaf)
+		}
+		tree[notificationsRoot] = root
+	}
+
+	sort.Strings(changed)
+	return changed
+}
+
+// flattenNotificationLeaves walks a notifications subtree, collecting every
+// leaf -- a map node carrying a "value" key, any value including nil -- keyed
+// by its dotted path relative to the walk's root. A branch node's own child
+// that is a map without a "value" key (typically a schema "meta" block
+// describing the branch) is descended into like any other child and
+// contributes no leaf, which is exactly what dropping it means.
+func flattenNotificationLeaves(node map[string]any, prefix []string, out map[string]map[string]any) {
+	if node == nil {
+		return
+	}
+	if _, ok := node["value"]; ok {
+		out[strings.Join(prefix, ".")] = node
+		return
+	}
+	for key, child := range node {
+		asMap, ok := child.(map[string]any)
+		if !ok {
+			continue
+		}
+		flattenNotificationLeaves(asMap, append(append([]string{}, prefix...), key), out)
+	}
+}
+
+// setNotificationLeaf writes leaf at a dotted path within root, creating
+// branch maps as it goes -- the same walk applyDelta uses to reassemble a
+// flat delta path into the nested REST shape.
+func setNotificationLeaf(root map[string]any, segments []string, leaf map[string]any) {
+	current := root
+	for i, segment := range segments {
+		if i == len(segments)-1 {
+			current[segment] = leaf
+			return
+		}
+		child, ok := current[segment].(map[string]any)
+		if !ok {
+			child = make(map[string]any)
+			current[segment] = child
+		}
+		current = child
+	}
+}
+
+// leafNotificationIsLive reports whether a flattened notification leaf (the
+// map carrying "value" plus timestamp/$source/meta) is currently live,
+// tolerating a leaf whose "value" is nil or not a map -- notificationValueIsLive
+// requires a map to read "state" off.
+func leafNotificationIsLive(leaf map[string]any) bool {
+	value, ok := leaf["value"].(map[string]any)
+	if !ok {
+		return false
+	}
+	return notificationValueIsLive(value)
+}

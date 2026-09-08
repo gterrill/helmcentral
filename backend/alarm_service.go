@@ -30,6 +30,13 @@ var globalBusEchoReconciler = newBusEchoReconciler(globalSignalKSnapshot)
 // than on every tick.
 var globalCollisionProfileSyncer = newCollisionProfileSyncer(globalSignalKSnapshot)
 
+// globalNotificationSyncer re-reads each held vessel context's notifications
+// against the server's REST tree every 30s, so a notification the server has
+// forgotten (a restart, a debounced clear the stream dropped, its clean()
+// sweep) leaves Helmcentral's copy too instead of staying live forever
+// (ADR 0086).
+var globalNotificationSyncer = newNotificationSyncer(globalSignalKSnapshot)
+
 // startAlarmEvaluator runs the rule engine against the delta-stream snapshot
 // until ctx is cancelled, persisting every transition to the alarm log.
 func startAlarmEvaluator(ctx context.Context, interval time.Duration) {
@@ -69,6 +76,14 @@ func evaluateAlarmsOnce(now time.Time) {
 	for _, event := range events {
 		recordAlarmEvent(event, now)
 	}
+
+	// Runs after evaluate and before globalBusNotificationWatcher.check so a
+	// correction the sync makes to the snapshot is visible to the watcher on
+	// this very tick -- a notification the server has forgotten leaves the
+	// bus alarm list within one tick of the correction, rather than sitting
+	// stale for the rest of the sync interval (ADR 0086).
+	globalNotificationSyncer.snapshot = globalSignalKSnapshot
+	globalNotificationSyncer.check(now)
 
 	// Re-read each tick, the same reason startStreamWatchdog re-reads its
 	// silence threshold: production never reassigns globalSignalKSnapshot, so
@@ -338,6 +353,14 @@ func alarmActionHandler(c echo.Context, action string) error {
 			code := http.StatusBadGateway
 			if errors.Is(err, errNotificationNotLive) || errors.Is(err, errNotificationEmergency) || errors.Is(err, errNotificationNotAllowed) {
 				code = http.StatusConflict
+			} else {
+				// An upstream fault (not a refusal) means Helmcentral's copy and
+				// the server may already disagree -- the "Alarm not found!"
+				// shape ADR 0086 documents. Forcing the next tick to re-read the
+				// server means the stale card leaves the list within a second
+				// rather than sitting for up to the rest of the sync interval.
+				// The error below is still returned unchanged; this never masks it.
+				globalNotificationSyncer.invalidate()
 			}
 			return c.JSON(code, map[string]string{"error": err.Error()})
 		}

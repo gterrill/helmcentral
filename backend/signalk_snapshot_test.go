@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -791,5 +794,255 @@ func TestVesselsTreeExcludesNonVesselContexts(t *testing.T) {
 	}
 	if _, present := vessels["urn:mrn:signalk:uuid:buoy"]; present {
 		t.Fatalf("vesselsTree must not include an aton context")
+	}
+}
+
+// ── reconcileNotifications ──────────────────────────────────────────────────
+//
+// Nothing ever re-reads the SignalK server once a notification is in the
+// snapshot (ADR 0086): a notification the server has forgotten -- a restart
+// that wiped its in-memory NotificationManager, a clear the instant+minPeriod
+// stream dropped, or its 60-120s clean() sweep -- stays live in Helmcentral
+// forever. reconcileNotifications is the periodic REST correction for that.
+
+// loadNotificationFixture reads a captured `GET .../notifications` body --
+// the raw notifications subtree, not wrapped in another "notifications" key.
+func loadNotificationFixture(t *testing.T, name string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "signalk_notifications", name))
+	if err != nil {
+		t.Fatalf("reading fixture %s: %v", name, err)
+	}
+	var tree map[string]any
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		t.Fatalf("decoding fixture %s: %v", name, err)
+	}
+	return tree
+}
+
+// The exact bug the boat hit: a live notification we hold goes stale, and the
+// server's own copy -- fetched here from the real self.json capture -- now
+// says normal.
+func TestReconcileNotificationsReplacesALiveLeafTheServerNowSaysIsNormal(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	ctx := "vessels.self"
+	snapshot.setSelfContext(ctx)
+
+	seenAt := time.Date(2026, 9, 8, 4, 0, 0, 0, time.UTC)
+	snapshot.applyDelta(signalKDelta{
+		Context: ctx,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path: "notifications.arrivalCircleEntered",
+			Value: map[string]any{
+				"state":   "warn",
+				"message": "WP arrival circle entered!",
+				"id":      "9925e7ce-363e-4e76-8889-ec20197d72d8",
+				"status": map[string]any{
+					"silenced": false, "acknowledged": false,
+					"canSilence": true, "canAcknowledge": true,
+				},
+			},
+		}}}},
+	}, seenAt)
+
+	readStartedAt := seenAt.Add(1 * time.Hour)
+	server := loadNotificationFixture(t, "self.json") // arrivalCircleEntered is "normal" there
+
+	changed := snapshot.reconcileNotifications(ctx, server, readStartedAt)
+	if !slices.Contains(changed, "arrivalCircleEntered") {
+		t.Fatalf("expected arrivalCircleEntered among the corrected paths, got %v", changed)
+	}
+
+	for _, status := range signalKNotifications(snapshot, ownsNothing) {
+		if status.Label == "arrivalCircleEntered" {
+			t.Fatalf("the server's normal copy must not surface as live: %+v", status)
+		}
+	}
+
+	value := lookupAnyMap(snapshot.treeFor(ctx), "notifications", "arrivalCircleEntered", "value")
+	if state, _ := value["state"].(string); state != "normal" {
+		t.Fatalf("state: got %q, want normal (the server's copy)", state)
+	}
+}
+
+// A leaf we hold that the server no longer has at all must be dropped, along
+// with the now-empty branches leading to it and its pathSeen entry -- this is
+// what a signalk-server restart does to every notification (ADR 0086 §1).
+func TestReconcileNotificationsDropsALeafTheServerNoLongerHas(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	ctx := "vessels.self"
+	snapshot.setSelfContext(ctx)
+
+	seenAt := time.Date(2026, 9, 8, 4, 0, 0, 0, time.UTC)
+	snapshot.applyDelta(signalKDelta{
+		Context: ctx,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "notifications.electrical.batteries.house.voltage",
+			Value: map[string]any{"state": "alarm", "message": "House bank critically low"},
+		}}}},
+	}, seenAt)
+
+	readStartedAt := seenAt.Add(1 * time.Minute)
+	changed := snapshot.reconcileNotifications(ctx, map[string]any{}, readStartedAt)
+
+	if !slices.Contains(changed, "electrical.batteries.house.voltage") {
+		t.Fatalf("expected the dropped leaf reported, got %v", changed)
+	}
+
+	tree := snapshot.treeFor(ctx)
+	if _, present := tree["notifications"]; present {
+		t.Fatalf("the notifications subtree must be gone once its only leaf is dropped, got %v", tree["notifications"])
+	}
+	if _, present := snapshot.pathSeen[ctx+"|notifications.electrical.batteries.house.voltage"]; present {
+		t.Fatalf("pathSeen must be cleared for a dropped leaf")
+	}
+}
+
+// A delta that arrived after the read began is newer than anything the read
+// can say, so it must survive even when the server disagrees.
+func TestReconcileNotificationsKeepsALeafSeenAtOrAfterReadStarted(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	ctx := "vessels.self"
+	snapshot.setSelfContext(ctx)
+
+	readStartedAt := time.Date(2026, 9, 8, 5, 0, 0, 0, time.UTC)
+	seenAt := readStartedAt.Add(1 * time.Second) // arrived after the read started
+	snapshot.applyDelta(signalKDelta{
+		Context: ctx,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "notifications.mob",
+			Value: map[string]any{"state": "emergency", "message": "Man overboard"},
+		}}}},
+	}, seenAt)
+
+	server := map[string]any{"mob": map[string]any{"value": map[string]any{"state": "normal", "message": "cleared"}}}
+	changed := snapshot.reconcileNotifications(ctx, server, readStartedAt)
+
+	if slices.Contains(changed, "mob") {
+		t.Fatalf("a leaf newer than the read must not be reported as corrected, got %v", changed)
+	}
+	value := lookupAnyMap(snapshot.treeFor(ctx), "notifications", "mob", "value")
+	if state, _ := value["state"].(string); state != "emergency" {
+		t.Fatalf("expected our own newer leaf kept untouched, got state %q", state)
+	}
+}
+
+// A leaf live on the server that we never held at all -- the other half of
+// what a restart does: signalk-server's fresh notification is invisible to
+// Helmcentral until the path changes again, unless the sync adds it.
+func TestReconcileNotificationsAddsALiveLeafWeDidNotHold(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	ctx := "vessels.self"
+	// The context must already be held -- the syncer only ever asks about
+	// contexts it has seen a hello or a delta for -- but this vessel has never
+	// carried a notification before, so its notifications subtree starts empty.
+	snapshot.contexts[ctx] = map[string]any{}
+	snapshot.setSelfContext(ctx)
+
+	readStartedAt := time.Date(2026, 9, 8, 5, 0, 0, 0, time.UTC)
+	server := map[string]any{
+		"navigation": map[string]any{"arrivalCircleEntered": map[string]any{
+			"value": map[string]any{"state": "alarm", "message": "WP arrival circle entered!"},
+		}},
+	}
+
+	changed := snapshot.reconcileNotifications(ctx, server, readStartedAt)
+	if !slices.Contains(changed, "navigation.arrivalCircleEntered") {
+		t.Fatalf("expected the newly-discovered live leaf reported, got %v", changed)
+	}
+
+	statuses := signalKNotifications(snapshot, ownsNothing)
+	if len(statuses) != 1 || statuses[0].Label != "navigation.arrivalCircleEntered" {
+		t.Fatalf("expected the leaf added and listed, got %+v", statuses)
+	}
+}
+
+// server == nil is the 404 case: the context has no notifications at all any
+// more (or never did). Every notification for that context is removed, but
+// nothing else about it, and no other context, is touched.
+func TestReconcileNotificationsWithNilServerRemovesEveryNotificationForThatContext(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	ctx := "vessels.self"
+	snapshot.contexts[ctx] = map[string]any{
+		"notifications": loadNotificationFixture(t, "self.json"),
+		"navigation":    map[string]any{"position": map[string]any{"value": map[string]any{"latitude": 1.0}}},
+	}
+	snapshot.pathSeen[ctx+"|notifications.arrivalCircleEntered"] = time.Date(2026, 9, 8, 4, 0, 0, 0, time.UTC)
+	snapshot.setSelfContext(ctx)
+
+	otherCtx := "vessels.urn:mrn:imo:mmsi:503135940"
+	snapshot.contexts[otherCtx] = map[string]any{
+		"notifications": map[string]any{"navigation": map[string]any{"closestApproach": map[string]any{
+			"value": map[string]any{"state": "warn", "message": "Closing"},
+		}}},
+	}
+
+	readStartedAt := time.Date(2026, 9, 8, 5, 20, 0, 0, time.UTC)
+	changed := snapshot.reconcileNotifications(ctx, nil, readStartedAt)
+	if len(changed) == 0 {
+		t.Fatalf("expected the removed leaves to be reported")
+	}
+
+	tree := snapshot.treeFor(ctx)
+	if _, present := tree["notifications"]; present {
+		t.Fatalf("expected notifications gone entirely for a 404 context, got %v", tree["notifications"])
+	}
+	if got := lookupNumber(tree, "navigation", "position", "value", "latitude"); got != 1.0 {
+		t.Fatalf("an unrelated subtree must survive the reconcile untouched, got %v", got)
+	}
+	if _, present := snapshot.pathSeen[ctx+"|notifications.arrivalCircleEntered"]; present {
+		t.Fatalf("pathSeen for a removed leaf must be cleared")
+	}
+
+	other := snapshot.treeFor(otherCtx)
+	if lookupAnyMap(other, "notifications", "navigation", "closestApproach", "value") == nil {
+		t.Fatalf("a different context must not be touched by reconciling this one")
+	}
+}
+
+// The syncer only ever asks about contexts it already knows about; an unknown
+// one must not spring into existence just because it was asked about.
+func TestReconcileNotificationsOnUnknownContextIsANoOp(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+
+	changed := snapshot.reconcileNotifications("vessels.nobody-home", map[string]any{}, time.Now())
+	if changed != nil {
+		t.Fatalf("expected nil for an unknown context, got %v", changed)
+	}
+	if _, ok := snapshot.contexts["vessels.nobody-home"]; ok {
+		t.Fatalf("reconcileNotifications must never create a context")
+	}
+}
+
+// A replacement that leaves liveness unchanged (still live, different
+// message) is applied -- the server is still the record -- but is not one of
+// the corrections logged, since nothing about what the operator sees changed.
+func TestReconcileNotificationsAppliesALivenessPreservingReplacementSilently(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	ctx := "vessels.self"
+	snapshot.setSelfContext(ctx)
+
+	seenAt := time.Date(2026, 9, 8, 4, 0, 0, 0, time.UTC)
+	snapshot.applyDelta(signalKDelta{
+		Context: ctx,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "notifications.electrical.batteries.house.voltage",
+			Value: map[string]any{"state": "warn", "message": "Elevated cell voltage"},
+		}}}},
+	}, seenAt)
+
+	readStartedAt := seenAt.Add(1 * time.Minute)
+	server := map[string]any{"electrical": map[string]any{"batteries": map[string]any{"house": map[string]any{"voltage": map[string]any{
+		"value": map[string]any{"state": "warn", "message": "High cell voltage"},
+	}}}}}
+
+	changed := snapshot.reconcileNotifications(ctx, server, readStartedAt)
+	if slices.Contains(changed, "electrical.batteries.house.voltage") {
+		t.Fatalf("a same-liveness replacement must not be reported as a correction, got %v", changed)
+	}
+
+	value := lookupAnyMap(snapshot.treeFor(ctx), "notifications", "electrical", "batteries", "house", "voltage", "value")
+	if message, _ := value["message"].(string); message != "High cell voltage" {
+		t.Fatalf("expected the server's copy applied even though it was not logged, got message %q", message)
 	}
 }
