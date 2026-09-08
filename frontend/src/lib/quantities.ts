@@ -132,6 +132,9 @@ export const QUANTITIES: Quantity[] = [
     units: [
       { id: 'm', label: 'm', fromSI: identity, decimals: 1 },
       { id: 'ft', label: 'ft', fromSI: (v) => v * 3.28084, decimals: 1 },
+      // A range figure is planned in nautical miles, not the bare metres
+      // SignalK publishes -- the Tanks footer's "range at current burn".
+      { id: 'nm', label: 'nm', fromSI: (v) => v / 1852, decimals: 1 },
     ],
   },
   {

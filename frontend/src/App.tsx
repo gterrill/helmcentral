@@ -525,7 +525,16 @@ export function App() {
   const { settings: currentSettings, loading: currentSettingsLoading } = useSettingsForm()
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading, lastUpdateAgeS: nearbyVesselsAgeS } = useNearbyVessels()
   const { targets: radarTargets, radars: radarInfos, source: radarSource, loading: radarTargetsLoading } = useRadarTargets()
-  const { tanks, loading: tanksLoading, lastUpdateAgeS: tanksAgeS } = useTanksState()
+  const {
+    tanks,
+    loading: tanksLoading,
+    lastUpdateAgeS: tanksAgeS,
+    fuelVolumeM3,
+    fuelVolumeAgeS,
+    fuelTimeToEmptyS,
+    fuelRangeM,
+    fuelDerivedAgeS,
+  } = useTanksState()
   const {
     lastUpdateAgeS: electricalLastUpdateAgeS,
     batterySocPercent,
@@ -1049,7 +1058,18 @@ export function App() {
           />
         )
       case 'tanks':
-        return <TanksTile tanks={tanks} loading={tanksLoading} lastUpdateAgeS={tanksAgeS} />
+        return (
+          <TanksTile
+            tanks={tanks}
+            loading={tanksLoading}
+            lastUpdateAgeS={tanksAgeS}
+            fuelVolumeM3={fuelVolumeM3}
+            fuelVolumeAgeS={fuelVolumeAgeS}
+            fuelTimeToEmptyS={fuelTimeToEmptyS}
+            fuelRangeM={fuelRangeM}
+            fuelDerivedAgeS={fuelDerivedAgeS}
+          />
+        )
       case 'route':
         return (
           <RouteTile

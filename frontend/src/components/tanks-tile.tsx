@@ -4,6 +4,7 @@ import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import type { TankLevel } from '@/hooks/use-tanks-state'
+import { formatQuantity } from '@/lib/quantities'
 import { worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
@@ -20,6 +21,17 @@ type TanksTileProps = {
    * evidence for.
    */
   lastUpdateAgeS: number | null
+  /**
+   * The three derived fuel figures the footer reads (ADR 0084), plus each
+   * figure's own age. Optional and defaulted to null so a caller exercising
+   * the tank rows in isolation (most of this file's existing tests) does not
+   * have to know the footer exists.
+   */
+  fuelVolumeM3?: number | null
+  fuelVolumeAgeS?: number | null
+  fuelTimeToEmptyS?: number | null
+  fuelRangeM?: number | null
+  fuelDerivedAgeS?: number | null
 }
 
 const NO_VALUE = '—'
@@ -124,7 +136,53 @@ function tankKindIcon(kind: TankLevel['kind']) {
   return <Icon iconNode={faucet} className="h-4 w-4 text-emerald-700" aria-hidden="true" />
 }
 
-export const TanksTile = memo(function TanksTile({ tanks, loading, lastUpdateAgeS }: TanksTileProps) {
+type FuelFooterStatProps = {
+  label: string
+  value: string
+  unit: string
+  stale: boolean
+  staleAgeLabel: string
+}
+
+/**
+ * One footer KPI stack: a muted uppercase label (with a small amber stale
+ * badge beside it, the same `Tile`-badge look, when this stat's own age has
+ * gone stale) over a mono readout and its unit suffix, in the same idiom
+ * `AlternatorColumn` and `GaugeGroupTile`'s per-member rows already use.
+ * Scoped to this file — not a shared primitive, used three times below.
+ */
+function FuelFooterStat({ label, value, unit, stale, staleAgeLabel }: FuelFooterStatProps) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <span className="flex min-w-0 items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span className="truncate">{label}</span>
+        {stale && (
+          <span
+            data-testid="fuel-footer-stale-badge"
+            className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400"
+          >
+            Stale {staleAgeLabel}
+          </span>
+        )}
+      </span>
+      <div className="flex min-w-0 items-baseline gap-1">
+        <span className="truncate font-display text-lg tabular-nums leading-none text-gauge-secondary">{value}</span>
+        <span className="shrink-0 text-[11px] leading-none text-muted-foreground">{unit}</span>
+      </div>
+    </div>
+  )
+}
+
+export const TanksTile = memo(function TanksTile({
+  tanks,
+  loading,
+  lastUpdateAgeS,
+  fuelVolumeM3 = null,
+  fuelVolumeAgeS = null,
+  fuelTimeToEmptyS = null,
+  fuelRangeM = null,
+  fuelDerivedAgeS = null,
+}: TanksTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
   const visibleTanks = tanks.slice(0, 8)
   // Worst tone across the visible tanks, in the tile-edge vocabulary. A stale
@@ -136,6 +194,25 @@ export const TanksTile = memo(function TanksTile({ tanks, loading, lastUpdateAge
       return TONE_STATE[tankTone(tank.kind, clampPercent(tank.level_percent))]
     }),
   )
+
+  // The footer only makes sense once there is a fuel tank to be aboard for —
+  // a boat with none configured has nothing for "fuel aboard" to mean.
+  const hasFuelTank = tanks.some((tank) => tank.kind === 'fuel')
+
+  // Fuel aboard goes stale on its own age; range and time both go stale on
+  // fuel_derived_age_s, the oldest input behind whichever of burn or speed
+  // they need (ADR 0084) — independent of each other and of the tank feed's
+  // own staleness above, so an engine's dead fuel-rate sensor blanks range
+  // and time without also blanking a live tank reading.
+  const volumeStale = isStale(fuelVolumeAgeS)
+  const derivedStale = isStale(fuelDerivedAgeS)
+
+  const volumeLabel = formatQuantity(volumeStale ? null : fuelVolumeM3, 'volume', 'L') ?? NO_VALUE
+  const rangeLabel = formatQuantity(derivedStale ? null : fuelRangeM, 'length', 'nm') ?? NO_VALUE
+  // One decimal for time to empty specifically: the shared duration/h unit
+  // rounds to whole hours for gauges like engine hours, but a boat rarely
+  // has anywhere near an hour of margin worth truncating away here.
+  const timeToEmptyLabel = formatQuantity(derivedStale ? null : fuelTimeToEmptyS, 'duration', 'h', 1) ?? NO_VALUE
 
   return (
     <Tile
@@ -179,6 +256,32 @@ export const TanksTile = memo(function TanksTile({ tanks, loading, lastUpdateAge
           <div className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-muted-foreground">Loading tank levels...</div>
         ) : null}
       </div>
+
+      {hasFuelTank && (
+        <div className="mt-3 grid grid-cols-2 gap-3 border-t pt-3 sm:grid-cols-3">
+          <FuelFooterStat
+            label="Fuel aboard"
+            value={volumeLabel}
+            unit="L"
+            stale={volumeStale}
+            staleAgeLabel={formatDataAge(fuelVolumeAgeS)}
+          />
+          <FuelFooterStat
+            label="Range at current burn"
+            value={rangeLabel}
+            unit="nm"
+            stale={derivedStale}
+            staleAgeLabel={formatDataAge(fuelDerivedAgeS)}
+          />
+          <FuelFooterStat
+            label="Time to empty"
+            value={timeToEmptyLabel}
+            unit="h"
+            stale={derivedStale}
+            staleAgeLabel={formatDataAge(fuelDerivedAgeS)}
+          />
+        </div>
+      )}
     </Tile>
   )
 })

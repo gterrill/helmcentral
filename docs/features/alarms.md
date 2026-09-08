@@ -105,6 +105,9 @@ zero when there is not enough history to answer.
 | `helmcentral.environment.pressureChange3h` | Pa | The plain three-hour tendency, the figure marine forecasts quote. |
 | `helmcentral.environment.squashZoneIndex` | none | 1 when the wind has climbed 10 knots in three hours while the barometer stayed within 1 mb and the direction held. Bind it with "above 0.5". |
 | `helmcentral.propulsion.fuelEconomy` | m/m³ | The whole boat's distance per unit fuel, rather than one engine's. |
+| `helmcentral.fuel.volume` | m3 | Fuel aboard, summed across every tank that reports both a level and a capacity. Empty when no tank reports both. |
+| `helmcentral.fuel.timeToEmpty` | s | Fuel aboard divided by the current total burn. Empty while stopped, with the engines off, or with no fuel volume to divide. |
+| `helmcentral.fuel.rangeAtCurrentBurn` | m | Fuel aboard times the boat's current distance per unit fuel. Empty under the same conditions as fuel economy or fuel volume, whichever is absent. |
 
 These need the boat to be publishing `environment.outside.pressure` and, for
 the squash-zone index, true wind speed and direction. If these inputs are
@@ -113,6 +116,14 @@ missing, the value stays absent and does not satisfy a rule.
 The barometer paths need half an hour of history before they report anything,
 and clear when Helmcentral restarts. This avoids deriving a weather trend from
 too few readings.
+
+The fuel-economy and fuel paths go absent for a second reason as well: if any
+reading they are built from (a fuel tank's level or capacity, an engine's fuel
+rate, or speed over ground) has stopped updating for more than two minutes,
+the derived path reports nothing rather than a number computed from a source
+that is no longer telling the truth. A rule bound to one of these paths never
+fires on stale arithmetic; it simply sees no value, the same as if the path
+had never been published at all.
 
 ### Why a squash zone gets its own path
 

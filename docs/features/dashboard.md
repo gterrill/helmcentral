@@ -247,6 +247,30 @@ The estimate itself also follows the alarm bands: if the projected percentage
 falls into a band you've set, it takes that band's colour, which is your cue
 to run the generator or plug in before dark rather than finding out at 3 AM.
 
+## Tanks
+
+Below the tank bars, a footer with three fuel figures appears once at least
+one fuel tank is configured: **Fuel aboard**, **Range at current burn** and
+**Time to empty**.
+
+Fuel aboard sums the level and capacity of every fuel tank that reports both,
+in litres. Range at current burn and time to empty both read "at current
+burn" on purpose: they are built from the boat's speed and its engines' fuel
+burn as they stand this moment, with no averaging over time. Slow down or
+speed up and the figures move immediately to match. Read them as what the
+boat could do if nothing changed from here, not as a trip plan.
+
+Range and time to empty need the boat to actually be burning fuel, so both
+sit blank while stopped or with the engines off. Fuel aboard keeps reporting
+regardless, since a tank's level does not depend on an engine running.
+
+If an engine's fuel-rate reading stops updating, range and time to empty
+blank out with a small stale marker next to the label rather than continuing
+to show a number built from a burn rate that stopped being true hours ago.
+Fuel aboard carries the same treatment against its own tank readings: a tank
+sensor that has gone quiet blanks that figure too, rather than showing a
+level from before it stopped reporting.
+
 ## Beyond the grid
 
 ### Anchor watch and the rode planner

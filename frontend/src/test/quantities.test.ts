@@ -133,6 +133,18 @@ describe('pressure in millibars', () => {
   })
 })
 
+describe('length', () => {
+  // The Tanks footer's range reads in nm, the unit a range figure is
+  // actually planned in, not the bare metres SignalK publishes.
+  it('converts metres to nautical miles', () => {
+    expect(formatQuantity(225700, 'length', 'nm')).toBe('121.9')
+  })
+
+  it('still converts metres to feet unchanged', () => {
+    expect(formatQuantity(10, 'length', 'ft')).toBe('32.8')
+  })
+})
+
 describe('fuel economy', () => {
   // 792950.7 m/m³ is what the vessel published at 10.21 kn burning 23.9 L/h on
   // that engine, which works out to 0.427 nm/L the long way round.
