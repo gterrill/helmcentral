@@ -31,6 +31,51 @@ const derivedPathPrefix = "helmcentral."
 const vesselFuelEconomyPath = derivedPathPrefix + "propulsion.fuelEconomy"
 
 /*
+Fuel volume, time to empty and range at current burn (ADR 0084).
+
+N2KView's main screen showed five tank quantities and a burn rate and left
+range to the operator to work out in their head. These three paths do that
+arithmetic host-side, the same way ADR 0055 derives fuel economy.
+
+fuelVolumePath sums currentLevel × capacity over every tanks.fuel.<id> node
+that publishes both; a tank with only a level (no known capacity) contributes
+nothing, because multiplying a ratio by an unknown capacity is not a volume.
+fuelTimeToEmptyPath and fuelRangeAtCurrentBurnPath both need volume and the
+same total burn vesselFuelEconomy already sums, so they are absent under
+exactly the same conditions that already make economy or volume absent:
+stopped, not burning, or no tank contributing.
+*/
+const (
+	fuelVolumePath             = derivedPathPrefix + "fuel.volume"
+	fuelTimeToEmptyPath        = derivedPathPrefix + "fuel.timeToEmpty"
+	fuelRangeAtCurrentBurnPath = derivedPathPrefix + "fuel.rangeAtCurrentBurn"
+)
+
+// derivedInputMaxAge is how old a derived fuel figure's oldest contributing
+// input can be before the figure itself is reported as absent rather than
+// merely aged (the frozen-burn-rate addendum to ADR 0084's plan). This is a
+// stronger guarantee than the gauge-values staleness treatment (ADR 0083),
+// which still shows the number with a badge: an alarm rule bound to one of
+// these paths reads a derived value's Present field directly
+// (derivedAwareAlarmReader), never seeing the UI's stale marker, so the value
+// itself has to go absent or a rule could fire on arithmetic done against a
+// source that stopped reporting a day ago. Must agree with the frontend's
+// STALE_AFTER_SECONDS in lib/staleness.ts -- both exist to say "a SignalK
+// source publishing every few seconds has been silent long enough that its
+// last value is not a measurement of the present."
+const derivedInputMaxAge = 120 * time.Second
+
+// freshEnoughToPublish decides whether a derived figure's oldest
+// contributing input is recent enough to publish a value at all. -1
+// (unknown) counts as fresh: a source that has never carried a timestamp
+// gives no evidence of staleness (ADR 0068), and treating "no evidence" as
+// "too old" would blank a figure forever the first time it met an input with
+// no timestamp of its own.
+func freshEnoughToPublish(age float64) bool {
+	return age < 0 || age <= derivedInputMaxAge.Seconds()
+}
+
+/*
 Heavy-weather trends (ADR 0070).
 
 These exist because Surviving the Storm's advice is almost entirely about
@@ -62,6 +107,9 @@ var derivedPathIDs = []string{
 	pressureRatePath,
 	pressureChange3hPath,
 	squashZoneIndexPath,
+	fuelVolumePath,
+	fuelTimeToEmptyPath,
+	fuelRangeAtCurrentBurnPath,
 }
 
 // Units each derived path reports in, so the path picker can preselect a
@@ -70,10 +118,13 @@ var derivedPathIDs = []string{
 // squashZoneIndex is unitless: it is 1 or 0, and a rule binds it with
 // "above 0.5". An empty unit is the honest answer rather than inventing one.
 var derivedPathUnits = map[string]string{
-	vesselFuelEconomyPath: "m/m3",
-	pressureRatePath:      "Pa/s",
-	pressureChange3hPath:  "Pa",
-	squashZoneIndexPath:   "",
+	vesselFuelEconomyPath:      "m/m3",
+	pressureRatePath:           "Pa/s",
+	pressureChange3hPath:       "Pa",
+	squashZoneIndexPath:        "",
+	fuelVolumePath:             "m3",
+	fuelTimeToEmptyPath:        "s",
+	fuelRangeAtCurrentBurnPath: "m",
 }
 
 func isDerivedPath(path string) bool {
@@ -131,25 +182,36 @@ func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, rateP
 		return 0, -1, false
 	}
 
-	total := 0.0
-	burning := false
-	ages := []float64{pathAge(snapshot, speed, speedOverGroundPath, now)}
-	for _, path := range ratePaths {
-		rate := read(path)
-		if !rate.Present || rate.Value <= 0 {
-			// An engine that is off contributes nothing; it does not make the
-			// vessel's economy unknowable.
-			continue
-		}
-		total += rate.Value
-		burning = true
-		ages = append(ages, pathAge(snapshot, rate, path, now))
-	}
-	if !burning || total <= 0 {
+	total, burnAge, burning := totalFuelBurnWithAge(snapshot, read, ratePaths, now)
+	if !burning {
 		return 0, -1, false
 	}
 
-	return speed.Value / total, derivedInputAge(ages...), true
+	speedAge := pathAge(snapshot, speed, speedOverGroundPath, now)
+	return speed.Value / total, derivedInputAge(speedAge, burnAge), true
+}
+
+// totalFuelBurnWithAge sums every rate path that is currently reporting a
+// burn above zero, and reports the oldest age among only the engines that
+// actually contributed. Shared between vesselFuelEconomyWithAge and the fuel
+// time-to-empty and range paths (ADR 0084), all three of which need "the
+// boat's total current burn" as an input. An engine that is off contributes
+// nothing to the total; it does not make the total unknowable.
+func totalFuelBurnWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, now time.Time) (total float64, age float64, ok bool) {
+	var ages []float64
+	for _, path := range ratePaths {
+		rate := read(path)
+		if !rate.Present || rate.Value <= 0 {
+			continue
+		}
+		total += rate.Value
+		ok = true
+		ages = append(ages, pathAge(snapshot, rate, path, now))
+	}
+	if !ok || total <= 0 {
+		return 0, -1, false
+	}
+	return total, derivedInputAge(ages...), true
 }
 
 // derivedInputAge reduces several ages (each -1 for unknown) down to the
@@ -187,6 +249,106 @@ func fuelRatePaths(tree map[string]any) []string {
 	return paths
 }
 
+// fuelTankVolumePathPair is the currentLevel and capacity path for one fuel
+// tank, the two inputs fuelVolumeWithAge needs to turn that tank's ratio into
+// a volume.
+type fuelTankVolumePathPair struct {
+	currentLevelPath string
+	capacityPath     string
+}
+
+// fuelTankVolumePaths finds every tanks.fuel.<id> node that publishes both
+// currentLevel and capacity, so a tank carrying only a level -- tanks.fuel.0
+// and .1 on the reference vessel, which report a ratio with no known size --
+// is excluded rather than silently treated as a zero-sized tank.
+func fuelTankVolumePaths(tree map[string]any) []fuelTankVolumePathPair {
+	if tree == nil {
+		return nil
+	}
+
+	levels := map[string]bool{}
+	capacities := map[string]bool{}
+	const prefix = "tanks.fuel."
+	for _, entry := range collectSignalKPaths(tree) {
+		if !strings.HasPrefix(entry.Path, prefix) {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(entry.Path, ".currentLevel"):
+			levels[strings.TrimSuffix(strings.TrimPrefix(entry.Path, prefix), ".currentLevel")] = true
+		case strings.HasSuffix(entry.Path, ".capacity"):
+			capacities[strings.TrimSuffix(strings.TrimPrefix(entry.Path, prefix), ".capacity")] = true
+		}
+	}
+
+	var ids []string
+	for id := range levels {
+		if capacities[id] {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+
+	pairs := make([]fuelTankVolumePathPair, 0, len(ids))
+	for _, id := range ids {
+		pairs = append(pairs, fuelTankVolumePathPair{
+			currentLevelPath: prefix + id + ".currentLevel",
+			capacityPath:     prefix + id + ".capacity",
+		})
+	}
+	return pairs
+}
+
+/*
+fuelVolumeWithAge sums currentLevel × capacity over every tank pair that is
+currently reporting both, so it survives a tank the snapshot has never seen a
+level for as cleanly as it does one this boat never fitted. A tank at 0% with
+a known capacity is a real "no fuel in this tank" reading and still
+contributes -- 0 volume -- because that is what a tank with a known size
+reports, not an absence.
+
+Absent, not zero, whenever no tank contributes at all, per the same reasoning
+ADR 0055 already applies to fuel economy.
+*/
+func fuelVolumeWithAge(snapshot *signalKSnapshot, read alarmReader, tankPaths []fuelTankVolumePathPair, now time.Time) (volume float64, age float64, ok bool) {
+	var ages []float64
+	for _, pair := range tankPaths {
+		level := read(pair.currentLevelPath)
+		capacity := read(pair.capacityPath)
+		if !level.Present || !capacity.Present {
+			continue
+		}
+		volume += level.Value * capacity.Value
+		ok = true
+		ages = append(ages, pathAge(snapshot, level, pair.currentLevelPath, now), pathAge(snapshot, capacity, pair.capacityPath, now))
+	}
+	if !ok {
+		return 0, -1, false
+	}
+	return volume, derivedInputAge(ages...), true
+}
+
+// fuelTimeToEmptyWithAge is the volume aboard over the boat's total current
+// burn. Absent whenever either input is: no tank contributing a volume, or
+// nothing burning.
+func fuelTimeToEmptyWithAge(volume, volumeAge float64, volumeOK bool, burn, burnAge float64, burnOK bool) (float64, float64, bool) {
+	if !volumeOK || !burnOK || burn <= 0 {
+		return 0, -1, false
+	}
+	return volume / burn, derivedInputAge(volumeAge, burnAge), true
+}
+
+// fuelRangeAtCurrentBurnWithAge is the volume aboard times the vessel's fuel
+// economy (distance per unit volume), so it is absent under exactly the
+// conditions that already make economy absent: stopped, not burning, or no
+// volume to plan a range from.
+func fuelRangeAtCurrentBurnWithAge(volume, volumeAge float64, volumeOK bool, economy, economyAge float64, economyOK bool) (float64, float64, bool) {
+	if !volumeOK || !economyOK {
+		return 0, -1, false
+	}
+	return volume * economy, derivedInputAge(volumeAge, economyAge), true
+}
+
 // derivedPathValues computes every derived path, absent ones included, so the
 // stream can carry a null rather than dropping the key.
 func derivedPathValues() map[string]*float64 {
@@ -210,16 +372,22 @@ func derivedPathAges(now time.Time) map[string]float64 {
 // buffers and the snapshot twice for the same numbers.
 func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64) {
 	values := map[string]*float64{
-		vesselFuelEconomyPath: nil,
-		pressureRatePath:      nil,
-		pressureChange3hPath:  nil,
-		squashZoneIndexPath:   nil,
+		vesselFuelEconomyPath:      nil,
+		pressureRatePath:           nil,
+		pressureChange3hPath:       nil,
+		squashZoneIndexPath:        nil,
+		fuelVolumePath:             nil,
+		fuelTimeToEmptyPath:        nil,
+		fuelRangeAtCurrentBurnPath: nil,
 	}
 	ages := map[string]float64{
-		vesselFuelEconomyPath: -1,
-		pressureRatePath:      -1,
-		pressureChange3hPath:  -1,
-		squashZoneIndexPath:   -1,
+		vesselFuelEconomyPath:      -1,
+		pressureRatePath:           -1,
+		pressureChange3hPath:       -1,
+		squashZoneIndexPath:        -1,
+		fuelVolumePath:             -1,
+		fuelTimeToEmptyPath:        -1,
+		fuelRangeAtCurrentBurnPath: -1,
 	}
 
 	// The weather trends come from ring buffers rather than the snapshot, so
@@ -232,10 +400,47 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 	}
 
 	read := snapshotAlarmReader(globalSignalKSnapshot)
-	if economy, age, ok := vesselFuelEconomyWithAge(globalSignalKSnapshot, read, fuelRatePaths(tree), now); ok {
-		values[vesselFuelEconomyPath] = &economy
-		ages[vesselFuelEconomyPath] = age
+	ratePaths := fuelRatePaths(tree)
+
+	// Every fuel figure below reports its true age in ages[] regardless of
+	// freshness -- "the age still reports the oldest input so the reason is
+	// visible" -- and is only promoted into values[] (published as a real
+	// number) when that age clears derivedInputMaxAge. Below the guard the
+	// figure stays absent rather than a rule silently evaluating arithmetic
+	// done against a source that stopped reporting hours or days ago.
+	economy, economyAge, economyOK := vesselFuelEconomyWithAge(globalSignalKSnapshot, read, ratePaths, now)
+	if economyOK {
+		ages[vesselFuelEconomyPath] = economyAge
+		if freshEnoughToPublish(economyAge) {
+			values[vesselFuelEconomyPath] = &economy
+		}
 	}
+
+	tankPaths := fuelTankVolumePaths(tree)
+	volume, volumeAge, volumeOK := fuelVolumeWithAge(globalSignalKSnapshot, read, tankPaths, now)
+	if volumeOK {
+		ages[fuelVolumePath] = volumeAge
+		if freshEnoughToPublish(volumeAge) {
+			values[fuelVolumePath] = &volume
+		}
+	}
+
+	burn, burnAge, burnOK := totalFuelBurnWithAge(globalSignalKSnapshot, read, ratePaths, now)
+
+	if timeToEmpty, ttAge, ttOK := fuelTimeToEmptyWithAge(volume, volumeAge, volumeOK, burn, burnAge, burnOK); ttOK {
+		ages[fuelTimeToEmptyPath] = ttAge
+		if freshEnoughToPublish(ttAge) {
+			values[fuelTimeToEmptyPath] = &timeToEmpty
+		}
+	}
+
+	if rangeM, rangeAge, rangeOK := fuelRangeAtCurrentBurnWithAge(volume, volumeAge, volumeOK, economy, economyAge, economyOK); rangeOK {
+		ages[fuelRangeAtCurrentBurnPath] = rangeAge
+		if freshEnoughToPublish(rangeAge) {
+			values[fuelRangeAtCurrentBurnPath] = &rangeM
+		}
+	}
+
 	return values, ages
 }
 

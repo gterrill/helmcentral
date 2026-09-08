@@ -1004,13 +1004,31 @@ func buildTanksStatePayload() map[string]any {
 		}
 	}
 
+	// The three derived fuel figures (ADR 0084), from the same
+	// computeDerivedPaths pass a gauge bound to the same helmcentral.fuel.*
+	// path reads, so the built-in Tanks tile and a configured gauge can never
+	// disagree. Computed against the actual current instant rather than
+	// `now` above, which tracks the (possibly REST-reported) tank datetime,
+	// not the vessel clock the derivation's own node timestamps are read
+	// against.
+	derivedValues, derivedAges := computeDerivedPaths(time.Now().UTC())
+
 	return map[string]any{
 		"datetime": now.Format(time.RFC3339),
 		"source":   source,
 		"tanks":    tanks,
 		// The freshest of the per-tank ages above: what the Tanks tile
 		// itself goes stale on (ADR 0068).
-		"last_update_age_s": tanksFeedAge(tanks),
+		"last_update_age_s":    tanksFeedAge(tanks),
+		"fuel_volume_m3":       derivedValues[fuelVolumePath],
+		"fuel_volume_age_s":    derivedAges[fuelVolumePath],
+		"fuel_time_to_empty_s": derivedValues[fuelTimeToEmptyPath],
+		"fuel_range_m":         derivedValues[fuelRangeAtCurrentBurnPath],
+		// Oldest input age of the range and time figures specifically, not
+		// volume's -- an operator watching the footer's range/time readouts
+		// go stale wants to know how old the reason for the dash is, and
+		// volume has its own age already exposed on fuel_volume_age_s.
+		"fuel_derived_age_s": derivedInputAge(derivedAges[fuelTimeToEmptyPath], derivedAges[fuelRangeAtCurrentBurnPath]),
 	}
 }
 func tanksState(c echo.Context) error {

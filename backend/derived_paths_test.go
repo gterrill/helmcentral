@@ -1,13 +1,24 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 // snapshotWithSelfValues builds a snapshot carrying several self paths at
 // once, for the cases that need a whole derivation's inputs present.
+//
+// Received "just now" (time.Now(), not the fixed historical alarmNow other
+// alarm-engine tests use) rather than a value with no timestamp of its own:
+// callers exercise derivedAwareAlarmReader, which resolves a derived path
+// through computeDerivedPaths(time.Now().UTC()) (ADR 0084's staleness
+// guard), so a pathSeen record set to a fixed date in the past would read as
+// stale by however far real "now" has drifted from it and the derived value
+// would go absent for a reason this helper's callers are not testing.
 func snapshotWithSelfValues(values map[string]any) *signalKSnapshot {
 	snapshot := newSignalKSnapshot()
 	entries := make([]signalKValue, 0, len(values))
@@ -17,7 +28,7 @@ func snapshotWithSelfValues(values map[string]any) *signalKSnapshot {
 	snapshot.applyDelta(signalKDelta{
 		Context: "vessels.self",
 		Updates: []signalKUpdate{{Values: entries}},
-	}, alarmNow)
+	}, time.Now().UTC())
 	snapshot.setSelfContext("vessels.self")
 	return snapshot
 }
@@ -388,5 +399,274 @@ func TestDerivedPathAgesSquashZoneReportsOldestOfItsThreeInputs(t *testing.T) {
 	age := ages[squashZoneIndexPath]
 	if math.Abs(age-2400) > 5 {
 		t.Fatalf("expected ~2400s (wind direction's stalled 40 minutes), got %v", age)
+	}
+}
+
+/*
+Fuel volume, time to empty and range at current burn (ADR 0084).
+
+Fixtures captured from the live vessel 2026-09-08 (backend/testdata/fuel/),
+not assumed: tanks.fuel.{2,4,5,7} carry both currentLevel and capacity --
+0.69556×1.2, 0.56092×1.3, 0.7416×1.2, 0.49612×1.3, summing to about 3.0987m3
+-- tanks.fuel.{0,1} carry only currentLevel, and at capture time
+propulsion.{port,starboard}.fuel.rate (4.1667e-7 m3/s each) were already
+about 20 hours stale from 2026-09-07T00:59:20Z while the tank levels and SOG
+(0.0607 m/s) were current at 2026-09-07T21:25Z. That is the frozen-input case
+derivedInputMaxAge exists for.
+*/
+
+// loadFuelFixtureMap reads a captured SignalK REST-shaped fragment.
+func loadFuelFixtureMap(t *testing.T, name string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "fuel", name))
+	if err != nil {
+		t.Fatalf("reading fixture %s: %v", name, err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("parsing fixture %s: %v", name, err)
+	}
+	return m
+}
+
+// restampFixtureTimestamps deep-copies a fixture fragment and overwrites
+// every "timestamp" key found anywhere in it, so a test can hold the
+// fixture's own values while controlling exactly how old they read against a
+// given now, rather than the fixture's captured dates ageing out from under
+// the test the further today gets from 2026-09-08.
+func restampFixtureTimestamps(node map[string]any, ts string) map[string]any {
+	copied := deepCopyMap(node)
+	var walk func(any)
+	walk = func(v any) {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return
+		}
+		if _, has := m["timestamp"]; has {
+			m["timestamp"] = ts
+		}
+		for _, child := range m {
+			walk(child)
+		}
+	}
+	walk(copied)
+	return copied
+}
+
+// fuelFixtureSnapshot builds a self tree from the three captured fixtures, at
+// their own captured timestamps.
+func fuelFixtureSnapshot(t *testing.T) *signalKSnapshot {
+	t.Helper()
+	snapshot := newSignalKSnapshot()
+	snapshot.contexts["vessels.self"] = map[string]any{
+		"tanks":      map[string]any{"fuel": loadFuelFixtureMap(t, "tanks_fuel.json")},
+		"propulsion": loadFuelFixtureMap(t, "propulsion.json"),
+		"navigation": map[string]any{"speedOverGround": loadFuelFixtureMap(t, "sog.json")},
+	}
+	snapshot.setSelfContext("vessels.self")
+	return snapshot
+}
+
+// restampFuelRate mutates a fixture snapshot's two engine rate timestamps in
+// place, so a test can move only the burn input into or out of the
+// freshness window while leaving the tank and SOG timestamps alone.
+func restampFuelRate(t *testing.T, snapshot *signalKSnapshot, ts string) {
+	t.Helper()
+	propulsion, ok := snapshot.contexts["vessels.self"]["propulsion"].(map[string]any)
+	if !ok {
+		t.Fatal("fixture snapshot has no propulsion tree")
+	}
+	for _, engine := range []string{"port", "starboard"} {
+		rate, ok := propulsion[engine].(map[string]any)["fuel"].(map[string]any)["rate"].(map[string]any)
+		if !ok {
+			t.Fatalf("fixture snapshot has no %s fuel rate node", engine)
+		}
+		rate["timestamp"] = ts
+	}
+}
+
+// Volume only depends on the tank inputs, which are current at the fixture's
+// own now; time to empty and range both depend on the burn rate, which is
+// about 20 hours stale at that same instant, so both go absent even though a
+// naive computation from vesselFuelEconomy's old behaviour would still
+// produce a number.
+func TestFuelVolumePresentButBurnDerivedFiguresAbsentWhenBurnIsStale(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	withGlobalSnapshot(t, snapshot)
+
+	now, err := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	if err != nil {
+		t.Fatalf("parsing now: %v", err)
+	}
+
+	values, ages := computeDerivedPaths(now)
+
+	volume := values[fuelVolumePath]
+	if volume == nil {
+		t.Fatal("expected a fuel volume figure")
+	}
+	if math.Abs(*volume-3.0987) > 0.001 {
+		t.Fatalf("expected about 3.0987 m3 (tanks 2, 4, 5, 7 only), got %v", *volume)
+	}
+	if age := ages[fuelVolumePath]; age < 0 || age > 60 {
+		t.Fatalf("expected the volume's age to be a handful of seconds (fresh tank timestamps), got %v", age)
+	}
+
+	if values[fuelTimeToEmptyPath] != nil {
+		t.Fatalf("expected time to empty absent with the burn rate ~20h stale, got %v", *values[fuelTimeToEmptyPath])
+	}
+	if values[fuelRangeAtCurrentBurnPath] != nil {
+		t.Fatalf("expected range absent with the burn rate ~20h stale, got %v", *values[fuelRangeAtCurrentBurnPath])
+	}
+
+	// The age still reports the reason, even though the value itself is absent.
+	for _, path := range []string{fuelTimeToEmptyPath, fuelRangeAtCurrentBurnPath} {
+		if age := ages[path]; math.Abs(age-73570) > 30 {
+			t.Fatalf("%s: expected an age of about 73570s (the frozen burn rate), got %v", path, age)
+		}
+	}
+}
+
+// Move the burn rate's timestamps to within the freshness window and both
+// figures that depend on it become computable.
+func TestFuelTimeToEmptyAndRangeComputedWhenBurnIsFresh(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	withGlobalSnapshot(t, snapshot)
+
+	now, err := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	if err != nil {
+		t.Fatalf("parsing now: %v", err)
+	}
+	restampFuelRate(t, snapshot, now.Add(-10*time.Second).Format(time.RFC3339))
+
+	values, _ := computeDerivedPaths(now)
+
+	// Volume ~3.0987 m3 over a combined burn of 2×4.1667e-7 m3/s.
+	timeToEmpty := values[fuelTimeToEmptyPath]
+	if timeToEmpty == nil {
+		t.Fatal("expected a time-to-empty figure with the burn rate fresh")
+	}
+	if math.Abs(*timeToEmpty-3.7185e6) > 5000 {
+		t.Fatalf("expected about 3.7185e6 s, got %v", *timeToEmpty)
+	}
+
+	// Range = volume × (SOG / total burn).
+	rangeM := values[fuelRangeAtCurrentBurnPath]
+	if rangeM == nil {
+		t.Fatal("expected a range figure with the burn rate fresh")
+	}
+	if math.Abs(*rangeM-2.257e5) > 2000 {
+		t.Fatalf("expected about 2.257e5 m, got %v", *rangeM)
+	}
+}
+
+// Range needs speed as well as burn; time to empty does not. Stopped with
+// the engines idling in gear (a real liveaboard case at the dock) must blank
+// range without blanking time to empty for a reason that has nothing to do
+// with it.
+func TestFuelRangeAbsentWhenStoppedEvenWithFreshBurnAndVolume(t *testing.T) {
+	snapshot := fuelFixtureSnapshot(t)
+	withGlobalSnapshot(t, snapshot)
+
+	now, err := time.Parse(time.RFC3339, "2026-09-07T21:25:30Z")
+	if err != nil {
+		t.Fatalf("parsing now: %v", err)
+	}
+	fresh := now.Add(-10 * time.Second).Format(time.RFC3339)
+	restampFuelRate(t, snapshot, fresh)
+
+	sog, ok := snapshot.contexts["vessels.self"]["navigation"].(map[string]any)["speedOverGround"].(map[string]any)
+	if !ok {
+		t.Fatal("fixture snapshot has no speedOverGround node")
+	}
+	sog["value"] = 0.0
+	sog["timestamp"] = fresh
+
+	values, _ := computeDerivedPaths(now)
+
+	if values[fuelTimeToEmptyPath] == nil {
+		t.Fatal("expected time to empty to stay computable stopped: it does not depend on speed")
+	}
+	if values[fuelRangeAtCurrentBurnPath] != nil {
+		t.Fatalf("expected range absent when stopped, got %v", *values[fuelRangeAtCurrentBurnPath])
+	}
+}
+
+// tanks.fuel.0 and .1 on the reference vessel carry a level with no known
+// capacity. With only those two present, nothing can be converted to a
+// volume, so volume, time to empty and range are all absent.
+func TestFuelVolumeAbsentWhenNoTankPublishesCapacity(t *testing.T) {
+	now := time.Now().UTC()
+	snapshot := newSignalKSnapshot()
+	snapshot.contexts["vessels.self"] = map[string]any{
+		"tanks": map[string]any{
+			"fuel": map[string]any{
+				"0": map[string]any{"currentLevel": map[string]any{"value": 0.0, "timestamp": now.Format(time.RFC3339)}},
+				"1": map[string]any{"currentLevel": map[string]any{"value": 0.0, "timestamp": now.Format(time.RFC3339)}},
+			},
+		},
+	}
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	values, ages := computeDerivedPaths(now)
+	if values[fuelVolumePath] != nil {
+		t.Fatalf("expected no volume with no tank publishing a capacity, got %v", *values[fuelVolumePath])
+	}
+	if age := ages[fuelVolumePath]; age != -1 {
+		t.Fatalf("expected -1 age with no contributing tank, got %v", age)
+	}
+	if values[fuelTimeToEmptyPath] != nil || values[fuelRangeAtCurrentBurnPath] != nil {
+		t.Fatal("time to empty and range both need a volume; expected both absent")
+	}
+}
+
+// buildTanksStatePayload has to expose the same computeDerivedPaths pass
+// under the field names the Tanks tile footer reads, alongside the
+// REST-fetched per-tank list, which stays independent of this (it fails over
+// to backend-fallback in this test environment since SETTINGS_FILE points at
+// nothing reachable).
+func TestTanksStatePayloadCarriesFuelDerivedFields(t *testing.T) {
+	t.Setenv("SETTINGS_FILE", filepath.Join(t.TempDir(), "settings.yaml"))
+
+	now := time.Now().UTC()
+	fresh := now.Add(-5 * time.Second).Format(time.RFC3339)
+
+	snapshot := newSignalKSnapshot()
+	snapshot.contexts["vessels.self"] = map[string]any{
+		"tanks":      map[string]any{"fuel": restampFixtureTimestamps(loadFuelFixtureMap(t, "tanks_fuel.json"), fresh)},
+		"propulsion": restampFixtureTimestamps(loadFuelFixtureMap(t, "propulsion.json"), fresh),
+		"navigation": map[string]any{"speedOverGround": restampFixtureTimestamps(loadFuelFixtureMap(t, "sog.json"), fresh)},
+	}
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	payload := buildTanksStatePayload()
+
+	volume, ok := payload["fuel_volume_m3"].(*float64)
+	if !ok || volume == nil {
+		t.Fatalf("expected fuel_volume_m3 to carry a number, got %#v", payload["fuel_volume_m3"])
+	}
+	if math.Abs(*volume-3.0987) > 0.001 {
+		t.Fatalf("expected about 3.0987 m3, got %v", *volume)
+	}
+
+	if _, ok := payload["fuel_volume_age_s"].(float64); !ok {
+		t.Fatalf("expected fuel_volume_age_s to be a number, got %#v", payload["fuel_volume_age_s"])
+	}
+
+	timeToEmpty, ok := payload["fuel_time_to_empty_s"].(*float64)
+	if !ok || timeToEmpty == nil {
+		t.Fatalf("expected fuel_time_to_empty_s to carry a number, got %#v", payload["fuel_time_to_empty_s"])
+	}
+
+	rangeM, ok := payload["fuel_range_m"].(*float64)
+	if !ok || rangeM == nil {
+		t.Fatalf("expected fuel_range_m to carry a number, got %#v", payload["fuel_range_m"])
+	}
+
+	derivedAge, ok := payload["fuel_derived_age_s"].(float64)
+	if !ok || derivedAge < 0 || derivedAge > 60 {
+		t.Fatalf("expected fuel_derived_age_s to be a small known age, got %#v", payload["fuel_derived_age_s"])
 	}
 }
