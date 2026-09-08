@@ -257,8 +257,9 @@ where staleness matters most: a derived number nobody wired an age for.
 */
 
 // The 20-hour-old fuel rate that produced a 0.02 nm/L Economy reading while
-// SOG was current: the derived value's age must be the frozen input's, not
-// the fresh one's.
+// SOG was current: the derived value's age must be the frozen input's own
+// SignalK timestamp, not the fresher pathSeen record a resubscribe replay
+// (a restart or an ordinary reconnect) would otherwise reset to now.
 func TestVesselFuelEconomyWithAgeReportsOldestContributingInput(t *testing.T) {
 	snapshot := newSignalKSnapshot()
 	now := time.Now().UTC()
@@ -266,49 +267,61 @@ func TestVesselFuelEconomyWithAgeReportsOldestContributingInput(t *testing.T) {
 		Context: "vessels.self",
 		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
 	}, now)
+	oldTimestamp := now.Add(-20 * time.Hour).Format(time.RFC3339)
 	snapshot.applyDelta(signalKDelta{
 		Context: "vessels.self",
-		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}}}},
-	}, now.Add(-20*time.Hour))
+		Updates: []signalKUpdate{{
+			Timestamp: oldTimestamp,
+			Values:    []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}},
+		}},
+	}, now) // arrival is "now": a replay, not a fresh reading from the source
 	snapshot.setSelfContext("vessels.self")
 
 	read := snapshotAlarmReader(snapshot)
-	_, age, ok := vesselFuelEconomyWithAge(read, []string{"propulsion.port.fuel.rate"}, now)
+	_, age, ok := vesselFuelEconomyWithAge(snapshot, read, []string{"propulsion.port.fuel.rate"}, now)
 	if !ok {
 		t.Fatal("expected an economy figure")
 	}
-	if math.Abs(age-20*3600) > 1 {
-		t.Fatalf("expected ~20h (the frozen fuel-rate input's age), got %v", age)
+	if math.Abs(age-20*3600) > 2 {
+		t.Fatalf("expected ~20h (the frozen fuel-rate input's own timestamp), got %v", age)
 	}
 }
 
-// The reverse case: SOG itself is the stale input, a fresh engine notwithstanding.
+// The reverse case: SOG's own timestamp is the stale one, a freshly
+// timestamped engine notwithstanding.
 func TestVesselFuelEconomyWithAgeCountsSOGAsAnInputToo(t *testing.T) {
 	snapshot := newSignalKSnapshot()
 	now := time.Now().UTC()
+	oldTimestamp := now.Add(-1 * time.Hour).Format(time.RFC3339)
 	snapshot.applyDelta(signalKDelta{
 		Context: "vessels.self",
-		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
-	}, now.Add(-1*time.Hour))
+		Updates: []signalKUpdate{{
+			Timestamp: oldTimestamp,
+			Values:    []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}},
+		}},
+	}, now)
 	snapshot.applyDelta(signalKDelta{
 		Context: "vessels.self",
-		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}}}},
+		Updates: []signalKUpdate{{
+			Timestamp: now.Format(time.RFC3339),
+			Values:    []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}},
+		}},
 	}, now)
 	snapshot.setSelfContext("vessels.self")
 
 	read := snapshotAlarmReader(snapshot)
-	_, age, ok := vesselFuelEconomyWithAge(read, []string{"propulsion.port.fuel.rate"}, now)
+	_, age, ok := vesselFuelEconomyWithAge(snapshot, read, []string{"propulsion.port.fuel.rate"}, now)
 	if !ok {
 		t.Fatal("expected an economy figure")
 	}
-	if math.Abs(age-3600) > 1 {
-		t.Fatalf("expected ~1h (SOG's own age), got %v", age)
+	if math.Abs(age-3600) > 2 {
+		t.Fatalf("expected ~1h (SOG's own timestamp), got %v", age)
 	}
 }
 
 func TestVesselFuelEconomyWithAgeIsUnknownWhenAbsent(t *testing.T) {
 	read := fakeReader(map[string]float64{"navigation.speedOverGround": 0})
-	if _, age, ok := vesselFuelEconomyWithAge(read, []string{"propulsion.port.fuel.rate"}, time.Now().UTC()); ok || age != -1 {
+	if _, age, ok := vesselFuelEconomyWithAge(newSignalKSnapshot(), read, []string{"propulsion.port.fuel.rate"}, time.Now().UTC()); ok || age != -1 {
 		t.Fatalf("expected no figure and -1 age, got age=%v ok=%v", age, ok)
 	}
 }

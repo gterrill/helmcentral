@@ -241,10 +241,10 @@ func TestGaugeValuesPayloadCarriesAges(t *testing.T) {
 	}
 }
 
-// A path seen a known amount of time ago reports that age, computed from the
-// alarm engine's own arrival-time record (pathSeen) rather than a client-side
-// clock.
-func TestGaugeValuesPayloadAgeFromPathSeen(t *testing.T) {
+// A node that never carried a SignalK timestamp (this delta's update sets
+// none) falls back to the alarm engine's own arrival-time record (pathSeen)
+// rather than a client-side clock: arrival time is all the evidence there is.
+func TestGaugeValuesPayloadAgeFromPathSeenWhenNodeHasNoTimestamp(t *testing.T) {
 	snapshot := newSignalKSnapshot()
 	seenAt := time.Now().UTC().Add(-300 * time.Second)
 	snapshot.applyDelta(signalKDelta{
@@ -259,6 +259,34 @@ func TestGaugeValuesPayloadAgeFromPathSeen(t *testing.T) {
 	age := ages["propulsion.port.oilPressure"]
 	if math.Abs(age-300) > 5 {
 		t.Fatalf("expected an age of about 300s, got %v", age)
+	}
+}
+
+// The case that actually produced "Stale 16m" against a source silent for a
+// day: a resubscribe (a backend restart or an ordinary reconnect) replays
+// every retained delta, which resets pathSeen to the arrival time -- now --
+// even though the replayed delta still carries the source's original
+// declared timestamp. The node's own timestamp must win, or a resubscribe
+// makes every long-dead path look freshly arrived for two minutes.
+func TestGaugeValuesPayloadAgePrefersNodeTimestampOverReplayedPathSeen(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	now := time.Now().UTC()
+	oldTimestamp := now.Add(-20 * time.Hour).Format(time.RFC3339)
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: oldTimestamp,
+			Values:    []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 4.1666666e-7}},
+		}},
+	}, now) // arrival is "now": a replay, not a fresh reading from the source
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+	setPagesWithGaugePaths(t, "propulsion.port.fuel.rate")
+
+	ages := buildGaugeValuesPayload()["ages"].(map[string]float64)
+	age := ages["propulsion.port.fuel.rate"]
+	if math.Abs(age-20*3600) > 5 {
+		t.Fatalf("expected about 72000s (20h, the node's own timestamp), got %v", age)
 	}
 }
 
@@ -291,8 +319,10 @@ func TestGaugeValuesPayloadAgeFromNodeTimestampWithoutPathSeen(t *testing.T) {
 }
 
 // A derived value carries the oldest age among the inputs that actually
-// contributed to it: SOG was current but the burn rate was twenty hours old,
-// so the economy figure it produced is exactly as stale as that engine is.
+// contributed to it: SOG was current but the burn rate's own SignalK
+// timestamp was twenty hours old, so the economy figure it produced is
+// exactly as stale as that engine is -- even though both deltas arrive in
+// this same tick, the shape a resubscribe replay takes.
 func TestGaugeValuesPayloadDerivedFuelEconomyAgeIsOldestInput(t *testing.T) {
 	snapshot := newSignalKSnapshot()
 	now := time.Now().UTC()
@@ -300,10 +330,14 @@ func TestGaugeValuesPayloadDerivedFuelEconomyAgeIsOldestInput(t *testing.T) {
 		Context: "vessels.self",
 		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 5.0}}}},
 	}, now)
+	oldTimestamp := now.Add(-20 * time.Hour).Format(time.RFC3339)
 	snapshot.applyDelta(signalKDelta{
 		Context: "vessels.self",
-		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}}}},
-	}, now.Add(-20*time.Hour))
+		Updates: []signalKUpdate{{
+			Timestamp: oldTimestamp,
+			Values:    []signalKValue{{Path: "propulsion.port.fuel.rate", Value: 1e-05}},
+		}},
+	}, now)
 	snapshot.setSelfContext("vessels.self")
 	withGlobalSnapshot(t, snapshot)
 	setPagesWithGaugePaths(t, vesselFuelEconomyPath)
@@ -311,6 +345,6 @@ func TestGaugeValuesPayloadDerivedFuelEconomyAgeIsOldestInput(t *testing.T) {
 	ages := buildGaugeValuesPayload()["ages"].(map[string]float64)
 	age := ages[vesselFuelEconomyPath]
 	if math.Abs(age-20*3600) > 5 {
-		t.Fatalf("expected the fuel-rate input's ~20h age, got %v", age)
+		t.Fatalf("expected the fuel-rate input's ~20h age from its own timestamp, got %v", age)
 	}
 }

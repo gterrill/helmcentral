@@ -104,27 +104,36 @@ covers no distance per litre", which is a measurement rather than the absence
 of one, and an infinity would render as a plausible-looking enormous range.
 */
 func vesselFuelEconomy(read alarmReader, ratePaths []string) (float64, bool) {
-	value, _, ok := vesselFuelEconomyWithAge(read, ratePaths, time.Now().UTC())
+	value, _, ok := vesselFuelEconomyWithAge(globalSignalKSnapshot, read, ratePaths, time.Now().UTC())
 	return value, ok
 }
 
 // vesselFuelEconomyWithAge is vesselFuelEconomy plus the oldest age among the
 // inputs that actually contributed: the SOG sample and every burning
-// engine's rate path (ADR 0083). A figure computed from a frozen engine must
-// carry that engine's age, however current SOG happens to be -- the case a
-// 20-hour-old fuel rate produced a 0.02 nm/L Economy reading exists for.
+// engine's rate path (ADR 0083), each read through the same pathAge
+// function buildGaugeValuesPayload uses, so this figure and a widget bound
+// straight to one of its inputs can never disagree about that input's age. A
+// figure computed from a frozen engine must carry that engine's age, however
+// current SOG happens to be -- the case a 20-hour-old fuel rate produced a
+// 0.02 nm/L Economy reading exists for.
+//
+// snapshot is taken explicitly, the same snapshot read builds its samples
+// from, rather than assumed to be globalSignalKSnapshot: a test exercising
+// this against a local snapshot must have pathAge resolve node timestamps
+// from that same snapshot.
 //
 // Only computed alongside a real figure: an age for an undefined economy
 // would say nothing an operator could act on.
-func vesselFuelEconomyWithAge(read alarmReader, ratePaths []string, now time.Time) (value float64, age float64, ok bool) {
-	speed := read("navigation.speedOverGround")
+func vesselFuelEconomyWithAge(snapshot *signalKSnapshot, read alarmReader, ratePaths []string, now time.Time) (value float64, age float64, ok bool) {
+	const speedOverGroundPath = "navigation.speedOverGround"
+	speed := read(speedOverGroundPath)
 	if !speed.Present || speed.Value <= 0 {
 		return 0, -1, false
 	}
 
 	total := 0.0
 	burning := false
-	ages := []float64{alarmSampleAge(speed, now)}
+	ages := []float64{pathAge(snapshot, speed, speedOverGroundPath, now)}
 	for _, path := range ratePaths {
 		rate := read(path)
 		if !rate.Present || rate.Value <= 0 {
@@ -134,7 +143,7 @@ func vesselFuelEconomyWithAge(read alarmReader, ratePaths []string, now time.Tim
 		}
 		total += rate.Value
 		burning = true
-		ages = append(ages, alarmSampleAge(rate, now))
+		ages = append(ages, pathAge(snapshot, rate, path, now))
 	}
 	if !burning || total <= 0 {
 		return 0, -1, false
@@ -223,7 +232,7 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 	}
 
 	read := snapshotAlarmReader(globalSignalKSnapshot)
-	if economy, age, ok := vesselFuelEconomyWithAge(read, fuelRatePaths(tree), now); ok {
+	if economy, age, ok := vesselFuelEconomyWithAge(globalSignalKSnapshot, read, fuelRatePaths(tree), now); ok {
 		values[vesselFuelEconomyPath] = &economy
 		ages[vesselFuelEconomyPath] = age
 	}

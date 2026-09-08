@@ -38,51 +38,53 @@ the same `gauge-values` event `useGaugeValues()` already reads. No new
 stream, no new subscription protocol. The same reasoning ADR 0052 gave
 `gaugeBoundPaths()` for lamps applies again here.
 
-### 2. The newer of two clocks, and what a restart does to them
+### 2. The node's own timestamp, preferred over pathSeen
 
-For a snapshot path, the age is the fresher of two readings: the alarm
-engine's own arrival-time record (`pathSeen`, the host clock's timestamp when
-the delta landed) and the newest SignalK `timestamp` string anywhere on that
-path's node, both already available (`alarmSample.LastSeen` and
-`freshestTimestampAge`). Taking the fresher of the two matters because they
-are different clocks. The host's arrival time and the source's own declared
-time can disagree by a little even on a healthy feed, and a path is only as
-stale as its most current evidence says.
+For a snapshot path, the age is the node's own SignalK `timestamp`
+(`freshestTimestampAge(snapshot.nodeAt(path), now)`) whenever it carries one.
+The alarm engine's arrival-time record (`pathSeen`, `alarmSample.LastSeen`) is
+used only as a fallback, for a path whose node carries no timestamp at all.
+Both the payload and every derived path read this through one function,
+`pathAge`, so a widget bound straight to a path and a derived figure computed
+from that same path can never disagree about its age.
 
-The plan behind this change assumed the node timestamp would also be what
-"survives a backend restart" if a frozen source never sent again. That is not
-true of this codebase as it stands. `globalSignalKSnapshot` is populated
-exclusively by `applyDelta`, called only from the live WebSocket stream
-(`signalk_stream.go`), and `applyDelta` sets a path's tree node and its
-`pathSeen` entry in the same call, from the same delta. There is no REST-tree
-seeding anywhere; nothing calls `GET /signalk/v1/api/vessels/self` to prime
-the snapshot at startup. A restart empties both records together, and a path
-whose source never sends again after that reads `-1` from both sources
-identically, forever.
+An earlier version of this decision took the fresher of the two readings, on
+the assumption that pathSeen is the alarm engine's own definition of a frozen
+path and the two ought to agree. That missed what a resubscribe does to
+`pathSeen`. `applyDelta` (`signalk_snapshot.go`) sets a path's `pathSeen`
+entry to the arrival time on every delta it processes, replayed ones
+included, and `signalk_stream.go`'s own comment already notes that the server
+replays its whole retained model on every subscribe. That happens on an
+ordinary network reconnect as much as a full backend restart, and this
+backend's stream reconnects routinely (every ten to thirty minutes against
+this vessel's link, going by its own logs) rather than only on rare
+failures. A replayed delta still carries the source's original declared
+timestamp into the node, though. Only the node timestamp survives a replay
+telling the truth, so taking the fresher of the two picked `pathSeen`'s
+freshly reset arrival time over the node's honest, day-old timestamp every
+time a resubscribe happened. A live check against the dev stack caught this
+directly: the Cluster preview page read "Stale 16m" against a fuel-rate feed
+that had in fact been silent for about a day, sixteen minutes being how long
+it had been since the backend's last resubscribe, not since the feed had
+said anything real.
 
-There is a second, more operationally relevant wrinkle the live check turned
-up. `signalk_stream.go`'s own comment already notes that "SignalK replays its
-whole model as the initial state dump on every subscribe." That dump refreshes
-`pathSeen` for every already-known path the moment the connection
-(re)subscribes, whether that is a full backend restart or an ordinary network
-drop, and this backend's stream reconnects routinely (every ten to thirty
-minutes against this vessel's link, going by its own logs) rather than only
-on rare failures. A path whose source genuinely stopped days ago gets its
-`pathSeen` reset to "now" on every one of those reconnects, and reads as fresh
-for the two minutes it takes the threshold to re-elapse. The screenshot below
-caught this directly: an `air` rebuild mid-development restarted the backend
-and forced a resubscribe, and the Cluster preview page briefly reported
-"Stale 16m" against a fuel-rate feed that had in fact been silent for about a
-day, because sixteen minutes was how long it had been since that restart's
-resubscribe, not since the feed last said anything real. The marker still
-correctly read stale at sixteen minutes past the two-minute threshold; a
-narrower window right after a reconnect is where it would not have.
+The corrected rule reads the node's own timestamp first, because it is the
+only one of the two a resubscribe cannot reset. `pathSeen` remains the
+fallback for the narrower case a source has never carried a `timestamp` at
+all, where arrival time really is the only evidence there is, the same case
+ADR 0068 already accepted for the Solar and Battery & Power tiles it fed
+directly from REST.
 
-The dual-source computation still earns its keep for the ordinary clock-skew
-case above. It is not the restart-survival mechanism the plan expected, and a
-resubscribe (restart or reconnect alike) buys a dead path a brief, bounded
-window of looking fresher than it is. This ADR says so rather than leaving
-either assumption uncorrected.
+Two caveats remain, not addressed here. A source whose own clock runs behind
+the vessel's will always read a little older than it actually is; that is
+the source misreporting its own time, not something this backend can correct
+from outside. And the alarm engine's own staleness rule
+(`alarmSampleStale`) still checks `pathSeen` alone, unchanged by this
+correction, so an alarm rule with a staleness threshold on a path whose
+source has gone silent can still read as satisfied for up to that
+threshold's length after a resubscribe, the exact failure just removed from
+the gauge-values stream. Moving `alarmSampleStale` onto the node-timestamp
+rule is a follow-up, out of scope here.
 
 ### 3. A derived path carries its oldest input's age
 
@@ -152,15 +154,20 @@ a path that was simply never going to have an age at all.
 - Every widget bound through `gauge-values`, not just Solar and Battery &
   Power, now tells a frozen reading from a live one, using the mechanism ADR
   0068 built and never had to be redesigned to reach the rest of the board.
-- The dual-clock age computation (pathSeen vs. node timestamp) buys less than
-  the plan assumed. It does not survive a backend restart in this codebase,
-  because nothing seeds the snapshot from the REST tree, and a resubscribe of
-  any kind (restart or a plain network reconnect, which this backend does
-  every ten to thirty minutes in ordinary operation) briefly refreshes
-  `pathSeen` for every path, dead ones included, until the two-minute
-  threshold re-elapses. It remains useful for ordinary clock skew between the
-  host's arrival time and a source's declared timestamp, which is a real if
-  smaller thing to guard against.
+- A resubscribe (a backend restart or an ordinary network reconnect, which
+  this backend does every ten to thirty minutes in ordinary operation) no
+  longer masks a long-dead path as fresh. The node's own SignalK timestamp
+  survives the replay and is what gauge-values now reports; `pathSeen` is a
+  fallback only, for a source that has never carried a timestamp of its own.
+  A source whose own clock runs behind the vessel's still reads a little
+  older than it actually is, which is that source's own misreporting rather
+  than something this backend can correct.
+- The alarm engine's own staleness rule still reads `pathSeen` alone and so
+  still carries the resubscribe-masking behaviour this correction removed
+  from the gauge-values stream: an alarm rule with a staleness threshold can
+  still read as satisfied for up to that threshold's length right after a
+  resubscribe. Moving it onto the same node-timestamp-first rule is a
+  follow-up.
 - `computeDerivedPaths` is now the one place that computes a derived value and
   its age together. `derivedPathValues()` and `derivedPathAges()` are thin
   wrappers around it, kept so existing tests and callers that only want one
@@ -173,17 +180,20 @@ a path that was simply never going to have an age at all.
 ## Verification
 
 Backend: `go test -short ./...`, covering the payload carrying `ages`
-alongside `values`; a path seen a known number of seconds ago reporting
-approximately that age from `pathSeen`; a bound path never seen and with no
-node timestamp reporting `-1`; a node carrying only a SignalK timestamp with
-no `pathSeen` entry (the shape a REST-seeded tree would have, built with the
-same `seedSelfTree` fixture idiom `signalk_payload_test.go` already uses)
-reporting the age from that timestamp; a derived fuel-economy path reporting
-its oldest contributing input's age in both directions (a stale engine
-against a fresh SOG, and the reverse); the barometric trends reporting the
-newest sample in their ring-buffer window rather than `-1` once there is
-history, and `-1` with none; squashZoneIndex reporting the oldest of its
-three inputs. 1129 to 1140 tests passing.
+alongside `values`; a path seen a known number of seconds ago (its node
+carrying no timestamp) reporting approximately that age from `pathSeen`; a
+bound path never seen and with no node timestamp reporting `-1`; a node
+carrying only a SignalK timestamp with no `pathSeen` entry (the shape a
+REST-seeded tree would have, built with the same `seedSelfTree` fixture
+idiom `signalk_payload_test.go` already uses) reporting the age from that
+timestamp; a replayed delta that arrives now but carries a node timestamp 20
+hours old reporting about 72000s from that timestamp rather than about 0 from
+the freshly reset `pathSeen`; a derived fuel-economy path reporting its
+oldest contributing input's age from that input's own timestamp in both
+directions (a stale engine against a fresh SOG, and the reverse); the
+barometric trends reporting the newest sample in their ring-buffer window
+rather than `-1` once there is history, and `-1` with none; squashZoneIndex
+reporting the oldest of its three inputs. 1129 to 1141 tests passing.
 
 Frontend: `npx vitest run`, `npx tsc --noEmit`, `npm run lint`, covering
 `useGaugeAges` against a mocked `subscribeTelemetry` (including the `-1` to
@@ -198,12 +208,16 @@ the CHK lamp is untouched. 1812 to 1831 tests passing, no new lint warnings.
 
 Checked against the dev stack (`docker compose -f docker-compose.dev.yml`,
 read-only, no writes): the Cluster preview page at 1600x1000, before and
-after. Before, both engine clusters read 698 RPM and the Economy tile read
-0.01 to 0.02 nm/L, matching the frozen `propulsion.{port,starboard}.fuel.rate`
-confirmed live against SignalK (`GET
+after, both times. Before this ADR's change, both engine clusters read 698
+RPM and the Economy tile read 0.01 to 0.02 nm/L, matching the frozen
+`propulsion.{port,starboard}.fuel.rate` confirmed live against SignalK (`GET
 /signalk/v1/api/vessels/self/propulsion/port/fuel/rate`, timestamp
-2026-09-07T00:59Z, about a day old). After, both clusters and the Economy
-tile went stale, each showing the dash and an amber "Stale 16m" badge in
-place of the frozen numbers, the sixteen minutes tracing back to the
-`air` rebuild's own restart-driven resubscribe rather than the feed's real
-age, exactly the boundary case section 2 above describes.
+2026-09-07T00:59Z, about a day old). Immediately after the fresher-of rule
+shipped, both clusters and the Economy tile went stale but under-reported the
+age: an amber "Stale 16m" badge in place of the frozen numbers, sixteen
+minutes tracing back to an `air` rebuild's own restart-driven resubscribe
+rather than the feed's real age. After this correction, with the backend
+rebuilt again and no further resubscribe in between, the same page reads
+"Stale 23h 9m" against the same frozen paths, matching the SignalK timestamp
+(2026-09-07T00:59:20Z to the screenshot's 2026-09-08T00:08 UTC) almost to the
+minute.

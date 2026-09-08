@@ -111,6 +111,33 @@ func signalKPathsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"paths": paths})
 }
 
+// pathAge is the single computation of how stale a snapshot path is, shared
+// between buildGaugeValuesPayload and every derived path that reads through
+// the same alarmReader (ADR 0083), so a widget bound directly to a path and
+// a derived figure computed from that same path can never disagree about
+// its age. Takes the snapshot explicitly, the same way alarmReader itself
+// does, rather than reaching for the global: a derived-path computation
+// tested against a local snapshot must resolve the node from that same
+// snapshot, not whatever globalSignalKSnapshot happens to hold.
+//
+// The node's own SignalK timestamp is preferred over the alarm engine's
+// pathSeen record. signalk_stream.go's own comment already notes that the
+// server replays its whole retained model on every subscribe, and that
+// happens on an ordinary reconnect as much as a backend restart: applyDelta
+// resets pathSeen to the arrival time for every path a replay touches, dead
+// ones included, but the replayed delta still carries the source's original
+// declared timestamp into the node. Only the node timestamp survives that
+// replay telling the truth, so it wins whenever the path has one. pathSeen
+// is used only when the node carries no timestamp at all -- the same
+// "arrival time is all the evidence there is" case ADR 0068 already accepted
+// for the Solar and Battery & Power tiles it fed directly from REST.
+func pathAge(snapshot *signalKSnapshot, sample alarmSample, path string, now time.Time) float64 {
+	if nodeAge := freshestTimestampAge(snapshot.nodeAt(path), now); nodeAge >= 0 {
+		return nodeAge
+	}
+	return alarmSampleAge(sample, now)
+}
+
 // buildGaugeValuesPayload pushes the current value of every path a gauge is
 // bound to. The backend owns the page config, so it can work out what to send
 // without the browser subscribing to anything.
@@ -153,14 +180,9 @@ func buildGaugeValuesPayload() map[string]any {
 				values[path] = sample.Value
 			}
 
-			// The newer (fresher) of the alarm engine's own arrival-time
-			// record and the newest SignalK timestamp anywhere on the node,
-			// so ages can never disagree with what the alarm engine already
-			// treats as frozen. -1 when neither exists or the path is absent.
-			ages[path] = freshestAge(
-				alarmSampleAge(sample, now),
-				freshestTimestampAge(globalSignalKSnapshot.nodeAt(path), now),
-			)
+			// -1 when neither the node nor pathSeen has anything, or the
+			// path is absent.
+			ages[path] = pathAge(globalSignalKSnapshot, sample, path, now)
 		}
 	}
 
