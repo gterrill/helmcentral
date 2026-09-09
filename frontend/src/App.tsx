@@ -76,7 +76,7 @@ import { useTideToday } from '@/hooks/use-tide-today'
 import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
-import { useAlarms } from '@/hooks/use-alarms'
+import { collisionAlarmStatesByVessel, useAlarms } from '@/hooks/use-alarms'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
 import { useSocBands } from '@/hooks/use-soc-bands'
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
@@ -506,6 +506,10 @@ export function App() {
   } = useVesselState()
 
   const { alarms, worst: worstAlarmState, acknowledge: acknowledgeAlarm, silence: silenceAlarm } = useAlarms()
+  // Vessel id -> worst live collision state, for the anchor-watch map's AIS
+  // markers (ADR 0088). Memoized so the map doesn't see a new Map identity
+  // on every render that changes nothing about the alarm list.
+  const aisCollisionAlarms = useMemo(() => collisionAlarmStatesByVessel(alarms), [alarms])
   // Lifted out of AlarmsDrawer so a rule saved there reaches the battery
   // tile's SoC bands (useSocBands below) without a reload.
   const {
@@ -1035,6 +1039,7 @@ export function App() {
             vesselTrail={getSelfTrail}
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
+            aisCollisionAlarms={aisCollisionAlarms}
             radarTargets={radarTargets}
             radars={radarInfos}
             radarSource={radarSource}
@@ -1471,6 +1476,7 @@ export function App() {
             vesselTrail={getSelfTrail}
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
+            aisCollisionAlarms={aisCollisionAlarms}
             radarTargets={radarTargets}
             radars={radarInfos}
             radarSource={radarSource}

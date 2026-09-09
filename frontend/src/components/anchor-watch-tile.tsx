@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
-import { findAnchorDragAlarm, useAlarms } from '@/hooks/use-alarms'
+import { findAnchorDragAlarm, useAlarms, type AlarmState } from '@/hooks/use-alarms'
 import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
@@ -54,6 +54,10 @@ interface AnchorWatchTileProps {
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
+  // Optional, mirroring AnchorWatchMapProps — passed straight through to the
+  // map, which colours an AIS marker red while a collision alarm is in force
+  // for that vessel id (ADR 0088).
+  aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
   // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
   // integration wired up simply omits it.
   radarTargets?: RadarTarget[]
@@ -112,6 +116,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   vesselTrail,
   aisVessels,
   aisTrails,
+  aisCollisionAlarms,
   radarTargets,
   radars,
   radarSource,
@@ -328,6 +333,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
             vesselTrail={vesselTrail}
             aisVessels={aisVessels}
             aisTrails={aisTrails}
+            aisCollisionAlarms={aisCollisionAlarms}
             radarTargets={radarTargets}
             radars={radars}
             radarSource={radarSource}

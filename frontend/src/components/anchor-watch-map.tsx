@@ -7,6 +7,7 @@ import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Plus, Radar, Satelli
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
+import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
@@ -311,6 +312,11 @@ export interface AnchorWatchMapProps {
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
+  // Vessel id -> worst live collision-alarm state (ADR 0088), keyed the same
+  // way collisionAlarmStatesByVessel keys it. Optional and left undefined by
+  // every existing caller/test with no alarm feed wired up — the AIS marker
+  // block below reads it with optional chaining and stays amber throughout.
+  aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
   // Optional, and defaulted below, so every existing caller and test that
   // mounts this map without a mayara integration keeps compiling untouched
   // — the same treatment `placemarks` already gets.
@@ -361,6 +367,7 @@ export function AnchorWatchMap({
   vesselTrail,
   aisVessels,
   aisTrails,
+  aisCollisionAlarms,
   radarTargets = [],
   radars = [],
   radarSource = 'disabled',
@@ -1268,7 +1275,16 @@ export function AnchorWatchMap({
           <Layer id="openseamap-layer" type="raster" beforeId="alarm-circle-fill" paint={{ 'raster-opacity': 0.85 }} />
         </Source>
 
-        {/* AIS vessel markers */}
+        {/* AIS vessel markers (ADR 0088 colours them). Shape carries
+            identity, colour carries state, the same split the radar block
+            below uses: a circle with the Ship glyph is always an AIS
+            contact, never a triangle. Red is the one shared danger colour
+            with radar's dangerous triangle below, added once a collision
+            alarm is in force for this target; a ring marks alarm severity
+            and above. Amber is AIS's own identity colour, so a warn tier
+            can't borrow it and an intermediate orange next to amber isn't
+            legible at chart scale — hence one red for every live state,
+            with the state itself spelled out in the accessible label. */}
         {aisVessels.map((vessel) => {
           if (vessel.lat === undefined || vessel.lon === undefined) return null
           const isSelected = selectedVesselId === vessel.id
@@ -1277,17 +1293,29 @@ export function AnchorWatchMap({
           // ignores our own movement between polls.
           const distanceM = Math.round(haversineMeters(vesselLat, vesselLon, vessel.lat, vessel.lon))
           const bearing = Math.round(bearingDeg(vesselLat, vesselLon, vessel.lat, vessel.lon))
+          // A live collision alarm for this target (ADR 0088). Read off the
+          // alarm list rather than the plugin's raw collision_alarm_state so
+          // the marker agrees with the alarm card: same freshness gate, same
+          // self-context skip.
+          const collisionState = aisCollisionAlarms?.get(vessel.id)
+          const inCollisionAlarm = collisionState !== undefined
+          const collisionAlarmTier = collisionState !== undefined
+            && ALARM_STATES.indexOf(collisionState) >= ALARM_STATES.indexOf('alarm')
           return (
             <Marker
               key={vessel.id}
               latitude={vessel.lat}
               longitude={vessel.lon}
-              style={{ zIndex: isSelected ? 30 : 10 }}
+              style={{ zIndex: isSelected ? 30 : inCollisionAlarm ? 25 : 10 }}
             >
               <button
                 className="flex flex-col items-center"
                 style={{ minWidth: 40, minHeight: 40 }}
-                aria-label={`AIS vessel: ${vessel.name}`}
+                aria-label={
+                  inCollisionAlarm
+                    ? `AIS vessel: ${vessel.name}, collision ${collisionState === 'warn' ? 'warning' : collisionState}`
+                    : `AIS vessel: ${vessel.name}`
+                }
                 onClick={(e) => handleAisClick(e, vessel)}
               >
                 <div
@@ -1299,8 +1327,11 @@ export function AnchorWatchMap({
                 >
                   <div
                     className={cn(
-                      'flex items-center justify-center rounded-full bg-amber-500/90 shadow-lg',
-                      isSelected ? 'h-11 w-11 ring-2 ring-white/70' : 'h-9 w-9',
+                      'flex items-center justify-center rounded-full shadow-lg',
+                      inCollisionAlarm ? 'bg-red-600' : 'bg-amber-500/90',
+                      isSelected
+                        ? 'h-11 w-11 ring-2 ring-white/70'
+                        : cn('h-9 w-9', collisionAlarmTier && 'ring-2 ring-red-600/50'),
                     )}
                   >
                     <Ship className={cn('text-white', isSelected ? 'h-6 w-6' : 'h-5 w-5')} />

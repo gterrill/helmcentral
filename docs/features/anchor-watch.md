@@ -13,6 +13,17 @@ during an outage rather than wandering, and the stream watchdog reports the
 outage separately, as its own alarm. A drag alert and a lost GPS fix require
 different responses.
 
+## AIS targets on the map
+
+Nearby AIS targets draw on the anchor-watch map as amber circles carrying the
+vessel's name, range and bearing. When a collision alarm is in force for one
+of them, its marker turns red, gaining a ring once the alarm reaches alarm
+severity, and it stays red for as long as that alarm is active, including
+after you have acknowledged it. Radar contacts draw as triangles on the same
+map and turn red on their own closing figures, independently of AIS, so a
+boat your radar and your AIS both see can show two red markers at once with
+two different numbers.
+
 ## Drop, Raise, and SignalK
 
 **Drop** saves the watch and publishes its anchor coordinates to SignalK's

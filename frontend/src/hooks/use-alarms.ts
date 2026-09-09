@@ -91,3 +91,25 @@ export const ANCHOR_DRAG_RULE_ID = 'helmcentral:anchor-drag'
 export function findAnchorDragAlarm(alarms: ActiveAlarm[]): ActiveAlarm | null {
   return alarms.find((alarm) => alarm.rule_id === ANCHOR_DRAG_RULE_ID) ?? null
 }
+
+/**
+ * Rule id prefix of an AIS collision alarm (ADR 0057). The SignalK vessel id
+ * follows the '@', and it is the same string the nearby-vessels payload uses
+ * as NearbyVessel.id, so the map can match the two by plain equality.
+ */
+export const COLLISION_ALARM_RULE_PREFIX = 'notifications:navigation.closestApproach@'
+
+/** Vessel id -> worst live collision state, for the map's AIS markers. Empty when none is in force. */
+export function collisionAlarmStatesByVessel(alarms: ActiveAlarm[]): Map<string, AlarmState> {
+  const result = new Map<string, AlarmState>()
+  for (const alarm of alarms) {
+    if (!alarm.rule_id.startsWith(COLLISION_ALARM_RULE_PREFIX)) continue
+    const vesselId = alarm.rule_id.slice(COLLISION_ALARM_RULE_PREFIX.length)
+    if (vesselId === '') continue
+    const existing = result.get(vesselId)
+    if (existing === undefined || ALARM_STATES.indexOf(alarm.state) > ALARM_STATES.indexOf(existing)) {
+      result.set(vesselId, alarm.state)
+    }
+  }
+  return result
+}

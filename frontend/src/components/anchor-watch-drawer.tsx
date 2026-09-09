@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { AnchorConfig } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
+import type { AlarmState } from '@/hooks/use-alarms'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
@@ -49,6 +50,10 @@ interface AnchorWatchDrawerProps {
   vesselTrail: () => TrailPoint[]
   aisVessels: NearbyVessel[]
   aisTrails: () => Map<string, TrailPoint[]>
+  // Optional, mirroring AnchorWatchMapProps — passed straight through to the
+  // map, which colours an AIS marker red while a collision alarm is in force
+  // for that vessel id (ADR 0088).
+  aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
   // Optional, mirroring AnchorWatchMapProps — a caller with no mayara
   // integration wired up simply omits it.
   radarTargets?: RadarTarget[]
@@ -116,6 +121,7 @@ export function AnchorWatchDrawer({
   vesselTrail,
   aisVessels,
   aisTrails,
+  aisCollisionAlarms,
   radarTargets,
   radars,
   radarSource,
@@ -256,6 +262,7 @@ export function AnchorWatchDrawer({
                 vesselTrail={vesselTrail}
                 aisVessels={aisVessels}
                 aisTrails={aisTrails}
+                aisCollisionAlarms={aisCollisionAlarms}
                 radarTargets={radarTargets}
                 radars={radars}
                 radarSource={radarSource}

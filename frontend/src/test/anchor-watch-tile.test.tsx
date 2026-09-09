@@ -16,8 +16,12 @@ vi.mock('@/components/anchor-watch-map', () => ({
     vesselLat: number
     vesselLon: number
     scopeRecommendation: RodeMethodResult | null
+    aisCollisionAlarms?: ReadonlyMap<string, string>
   }) => (
-    <div data-testid="anchor-watch-map">
+    <div
+      data-testid="anchor-watch-map"
+      data-collision-vessels={[...(props.aisCollisionAlarms?.keys() ?? [])].join(',')}
+    >
       {`${props.vesselLat},${props.vesselLon}`}
       <div
         data-testid="scope-recommendation"
@@ -145,6 +149,19 @@ describe('AnchorWatchTile', () => {
     render(<AnchorWatchTile {...baseProps()} />)
 
     expect(screen.getByTestId('anchor-watch-map')).toBeInTheDocument()
+  })
+
+  it('passes aisCollisionAlarms straight through to the map', () => {
+    render(
+      <AnchorWatchTile
+        {...baseProps({ aisCollisionAlarms: new Map([['urn:mrn:imo:mmsi:100000001', 'warn']]) })}
+      />,
+    )
+
+    expect(screen.getByTestId('anchor-watch-map')).toHaveAttribute(
+      'data-collision-vessels',
+      'urn:mrn:imo:mmsi:100000001',
+    )
   })
 
   it('shows a No GPS fix placeholder — never a map — when position and anchor are both unavailable', () => {
