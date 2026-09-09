@@ -250,7 +250,12 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 	signalkSelfName := strings.ToUpper(strings.TrimSpace(fetchSignalKSelfName()))
 
 	result := make(map[string][]trackPoint, len(payload))
-	now := time.Now().UTC()
+	// Truncated to millisecond precision for the same reason as
+	// vesselTrail.addPoint (anchor.go): the client feeds the max AIS
+	// timestamp it has seen back into `since` as a millisecond-precision
+	// JS Date string, and a nanosecond-precision synthesized timestamp
+	// here would never match it exactly.
+	now := time.Now().UTC().Truncate(time.Millisecond)
 	for vesselID, snapshot := range payload {
 		var multiCoords [][][]float64
 		if snapshot.Geometry != nil && len(snapshot.Geometry.Coordinates) > 0 {

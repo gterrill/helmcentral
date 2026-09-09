@@ -208,6 +208,59 @@ func TestMotoringTrail_StartsEmptyAndFillsOnlyViaRecordMotoringPoint(t *testing.
 	}
 }
 
+// TestAddPoint_StoresMillisecondPrecision guards the wire round-trip: the
+// client parses timestamps through JS Date (millisecond precision) and sends
+// `since` back via toISOString(), which is also millisecond precision. If
+// addPoint stores the full nanosecond-precision time.Now(), that round-trip
+// truncates on the way out and back in, so the stored timestamp is always
+// microscopically later than what the client can ever send as `since` - and
+// pointsSince (which uses After, not equal-or-after) re-sends the newest
+// point on every single poll.
+func TestAddPoint_StoresMillisecondPrecision(t *testing.T) {
+	vt := newVesselTrail()
+	vt.addPoint(-25.29, 152.91)
+
+	pts := vt.pointsSince(time.Time{})
+	if len(pts) != 1 {
+		t.Fatalf("expected 1 point, got %d", len(pts))
+	}
+	ts := pts[0].Timestamp
+	if ts.Nanosecond()%int(time.Millisecond) != 0 {
+		t.Fatalf("expected addPoint to store millisecond precision, got nanosecond remainder %d (timestamp %s)", ts.Nanosecond()%int(time.Millisecond), ts)
+	}
+}
+
+// TestPointsSince_MillisecondPrecisionSinceDoesNotResendNewestPoint is the
+// end-to-end regression guard for the same defect, exercised the way the
+// real client hits it: record a point through the real addPoint, format its
+// timestamp the way JS Date.toISOString() would, parse that back as `since`,
+// and confirm the just-recorded point is not handed back again. Before the
+// fix this is red whenever time.Now() lands off a millisecond boundary,
+// which on a real clock is effectively always.
+func TestPointsSince_MillisecondPrecisionSinceDoesNotResendNewestPoint(t *testing.T) {
+	vt := newVesselTrail()
+	vt.addPoint(-25.29, 152.91)
+	stored := vt.pointsSince(time.Time{})[0].Timestamp
+
+	sinceStr := stored.Format("2006-01-02T15:04:05.000Z07:00")
+	since, err := time.Parse(time.RFC3339, sinceStr)
+	if err != nil {
+		t.Fatalf("could not parse since timestamp %q: %v", sinceStr, err)
+	}
+
+	pts := vt.pointsSince(since)
+	if len(pts) != 0 {
+		t.Fatalf("expected the just-recorded point not to be re-sent when since matches its millisecond, got %d points", len(pts))
+	}
+
+	// A point at a strictly later millisecond must still come through.
+	vt.addPointWithTimestamp(-25.30, 152.92, stored.Add(time.Millisecond))
+	pts = vt.pointsSince(since)
+	if len(pts) != 1 {
+		t.Fatalf("expected the later point to be returned, got %d points", len(pts))
+	}
+}
+
 // TestSampleTracks_RecordsWindAndDepthHistoryEvenWithoutValidPosition is a
 // regression guard for the in-memory telemetry history buffers: wind gust
 // and depth are not position-dependent, so sampleTracks must record them

@@ -75,7 +75,13 @@ func newVesselTrail() *vesselTrail {
 }
 
 func (vt *vesselTrail) addPoint(lat, lon float64) {
-	vt.addPointWithTimestamp(lat, lon, time.Now().UTC())
+	// Truncated to millisecond precision: the client parses timestamps
+	// through JS Date (millisecond precision) and sends `since` back via
+	// toISOString(), which is also millisecond precision. Storing the raw
+	// nanosecond-precision time.Now() means the client can never send a
+	// `since` that matches the stored value exactly, so pointsSince's
+	// After comparison re-sends the newest point on every poll.
+	vt.addPointWithTimestamp(lat, lon, time.Now().UTC().Truncate(time.Millisecond))
 }
 
 func (vt *vesselTrail) addPointWithTimestamp(lat, lon float64, ts time.Time) {
