@@ -670,3 +670,127 @@ func TestTanksStatePayloadCarriesFuelDerivedFields(t *testing.T) {
 		t.Fatalf("expected fuel_derived_age_s to be a small known age, got %#v", payload["fuel_derived_age_s"])
 	}
 }
+
+/*
+Forecast wind and surf warning derived paths (plan: fold the forecast
+warning into the alarm system; ADR 0087). These read globalForecastWarningsSlot
+(forecast_warnings_fetcher.go), the background fetcher's own state, rather
+than the SignalK snapshot - so every test here manages the slot directly and
+clears it afterwards.
+*/
+
+func withCleanForecastWarningsSlot(t *testing.T) {
+	t.Helper()
+	globalForecastWarningsSlot.clear()
+	t.Cleanup(func() { globalForecastWarningsSlot.clear() })
+}
+
+func TestForecastWarningPathsAbsentWhenNeverFetched(t *testing.T) {
+	withCleanForecastWarningsSlot(t)
+
+	values, ages := computeDerivedPaths(time.Now().UTC())
+	if values[forecastWindWarningLevelPath] != nil {
+		t.Fatalf("expected no wind-warning value before any fetch, got %v", *values[forecastWindWarningLevelPath])
+	}
+	if values[forecastSurfWarningPath] != nil {
+		t.Fatalf("expected no surf-warning value before any fetch, got %v", *values[forecastSurfWarningPath])
+	}
+	if ages[forecastWindWarningLevelPath] != -1 || ages[forecastSurfWarningPath] != -1 {
+		t.Fatalf("expected -1 age before any fetch, got wind=%v surf=%v", ages[forecastWindWarningLevelPath], ages[forecastSurfWarningPath])
+	}
+}
+
+func TestForecastWarningPathsPublishAFiveMinuteOldReading(t *testing.T) {
+	withCleanForecastWarningsSlot(t)
+
+	now := time.Now().UTC()
+	globalForecastWarningsSlot.set(forecastWarningsReading{WindLevel: 2, Surf: true, FetchedAt: now.Add(-5 * time.Minute)})
+
+	values, ages := computeDerivedPaths(now)
+	if values[forecastWindWarningLevelPath] == nil || *values[forecastWindWarningLevelPath] != 2 {
+		t.Fatalf("expected wind level 2, got %v", values[forecastWindWarningLevelPath])
+	}
+	if values[forecastSurfWarningPath] == nil || *values[forecastSurfWarningPath] != 1 {
+		t.Fatalf("expected surf 1, got %v", values[forecastSurfWarningPath])
+	}
+	if age := ages[forecastWindWarningLevelPath]; math.Abs(age-300) > 2 {
+		t.Fatalf("expected a wind-warning age of about 300s, got %v", age)
+	}
+	if age := ages[forecastSurfWarningPath]; math.Abs(age-300) > 2 {
+		t.Fatalf("expected a surf-warning age of about 300s, got %v", age)
+	}
+}
+
+// Past forecastWarningsMaxAge (30 minutes, three missed fetch intervals) the
+// values go absent, but the age is still reported - the same
+// freshEnoughToPublish shape the fuel paths use - so a staleness rule has
+// something concrete to watch climb rather than the path vanishing with no
+// trace of why.
+func TestForecastWarningPathsAbsentPastMaxAgeButAgeStillReported(t *testing.T) {
+	withCleanForecastWarningsSlot(t)
+
+	now := time.Now().UTC()
+	globalForecastWarningsSlot.set(forecastWarningsReading{WindLevel: 2, Surf: true, FetchedAt: now.Add(-40 * time.Minute)})
+
+	values, ages := computeDerivedPaths(now)
+	if values[forecastWindWarningLevelPath] != nil {
+		t.Fatalf("expected the wind-warning value absent past max age, got %v", *values[forecastWindWarningLevelPath])
+	}
+	if values[forecastSurfWarningPath] != nil {
+		t.Fatalf("expected the surf-warning value absent past max age, got %v", *values[forecastSurfWarningPath])
+	}
+	if age := ages[forecastWindWarningLevelPath]; math.Abs(age-2400) > 2 {
+		t.Fatalf("expected the age still reported (~2400s), got %v", age)
+	}
+	if age := ages[forecastSurfWarningPath]; math.Abs(age-2400) > 2 {
+		t.Fatalf("expected the age still reported (~2400s), got %v", age)
+	}
+}
+
+func TestForecastWarningPathsListedWithUnits(t *testing.T) {
+	for _, path := range []string{forecastWindWarningLevelPath, forecastSurfWarningPath} {
+		found := false
+		for _, id := range derivedPathIDs {
+			if id == path {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s is not listed in derivedPathIDs", path)
+		}
+		if unit, ok := derivedPathUnits[path]; !ok || unit != "" {
+			t.Fatalf("%s should declare an explicit empty unit, got %q ok=%v", path, unit, ok)
+		}
+	}
+}
+
+// A staleness rule bound to a derived path has to measure that path's own
+// input going quiet, not the unrelated fact that the SignalK stream itself
+// is still talking (this is what changed in derivedAwareAlarmReader). A
+// five-minute-old slot must read as stale against a 240s threshold and fresh
+// against a 600s one.
+func TestDerivedAwareAlarmReader_LastSeenIsThePathsOwnAge(t *testing.T) {
+	withCleanForecastWarningsSlot(t)
+
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	now := time.Now().UTC()
+	globalForecastWarningsSlot.set(forecastWarningsReading{WindLevel: 2, FetchedAt: now.Add(-5 * time.Minute)})
+
+	sample := derivedAwareAlarmReader(snapshot)(forecastWindWarningLevelPath)
+	if !sample.Present {
+		t.Fatal("expected the wind-warning path to be present")
+	}
+
+	shortRule := alarmRule{Op: alarmOpStale, StaleAfterSeconds: 240}
+	if !alarmSampleStale(shortRule, sample, now) {
+		t.Fatalf("expected a 5-minute-old sample to be stale against a 240s threshold, LastSeen=%v now=%v", sample.LastSeen, now)
+	}
+
+	longRule := alarmRule{Op: alarmOpStale, StaleAfterSeconds: 600}
+	if alarmSampleStale(longRule, sample, now) {
+		t.Fatalf("expected a 5-minute-old sample to read fresh against a 600s threshold, LastSeen=%v now=%v", sample.LastSeen, now)
+	}
+}

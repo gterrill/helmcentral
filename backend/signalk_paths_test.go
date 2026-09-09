@@ -184,17 +184,19 @@ func TestSignalKPathsHandlerListsDerivedPaths(t *testing.T) {
 		t.Fatalf("failed to decode: %v", err)
 	}
 
-	found := false
+	listed := make(map[string]signalKPath, len(body.Paths))
 	for _, p := range body.Paths {
-		if p.Path == vesselFuelEconomyPath {
-			found = true
-			if p.Units != "m/m3" {
-				t.Errorf("expected the derived path to declare its units, got %q", p.Units)
-			}
-		}
+		listed[p.Path] = p
 	}
-	if !found {
-		t.Fatalf("expected %q among the listed paths", vesselFuelEconomyPath)
+
+	for _, path := range derivedPathIDs {
+		p, ok := listed[path]
+		if !ok {
+			t.Fatalf("expected %q among the listed paths", path)
+		}
+		if p.Units != derivedPathUnits[path] {
+			t.Errorf("%s: expected units %q, got %q", path, derivedPathUnits[path], p.Units)
+		}
 	}
 }
 

@@ -335,3 +335,123 @@ func TestSeedHeavyWeatherRules_ThresholdsAreInSIUnits(t *testing.T) {
 		t.Fatalf("squash-zone rule should be 'above 0.5', got %q %v", squash.Op, squash.Value)
 	}
 }
+
+// --- forecast-warnings seed set (plan: fold the forecast warning into the
+// alarm system; ADR 0087) ---
+
+func TestSeedForecastWarningsRules_CreatesFourEnabledRules(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedForecastWarningsRules(); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	rules := listAlarmRules()
+	if len(rules) != 4 {
+		t.Fatalf("expected 4 forecast-warnings rules, got %d", len(rules))
+	}
+
+	byLabel := map[string]alarmRule{}
+	for _, rule := range rules {
+		byLabel[rule.Label] = rule
+		// The source is the official warning itself, not an uncalibrated
+		// heuristic (contrast the heavy-weather set above), so these ship live.
+		if !rule.Enabled {
+			t.Fatalf("seeded rule %q must ship enabled", rule.Label)
+		}
+		if rule.Hysteresis != 0 {
+			t.Fatalf("%s: expected zero hysteresis, got %v", rule.Label, rule.Hysteresis)
+		}
+	}
+
+	wind, ok := byLabel["Forecast wind warning"]
+	if !ok {
+		t.Fatal("expected a 'Forecast wind warning' rule")
+	}
+	if wind.Path != forecastWindWarningLevelPath || wind.Op != alarmOpAbove || wind.Value != 0.5 || wind.DwellSeconds != 0 || wind.State != alarmStateWarn {
+		t.Fatalf("unexpected wind rule: %+v", wind)
+	}
+
+	gale, ok := byLabel["Forecast gale or storm warning"]
+	if !ok {
+		t.Fatal("expected a 'Forecast gale or storm warning' rule")
+	}
+	if gale.Path != forecastWindWarningLevelPath || gale.Op != alarmOpAbove || gale.Value != 1.5 || gale.DwellSeconds != 0 || gale.State != alarmStateAlarm {
+		t.Fatalf("unexpected gale rule: %+v", gale)
+	}
+
+	surf, ok := byLabel["Forecast surf warning"]
+	if !ok {
+		t.Fatal("expected a 'Forecast surf warning' rule")
+	}
+	if surf.Path != forecastSurfWarningPath || surf.Op != alarmOpAbove || surf.Value != 0.5 || surf.DwellSeconds != 0 || surf.State != alarmStateAlert {
+		t.Fatalf("unexpected surf rule: %+v", surf)
+	}
+
+	unavailable, ok := byLabel["Forecast warnings unavailable"]
+	if !ok {
+		t.Fatal("expected a 'Forecast warnings unavailable' rule")
+	}
+	if unavailable.Path != forecastWindWarningLevelPath || unavailable.Op != alarmOpStale || unavailable.StaleAfterSeconds != 1800 || unavailable.DwellSeconds != 120 || unavailable.State != alarmStateAlert {
+		t.Fatalf("unexpected unavailable rule: %+v", unavailable)
+	}
+}
+
+// Mirrors TestSeedHeavyWeatherRules_RunsOnceAndDoesNotResurrectDeleted:
+// seeding is keyed on a marker in the file, not on the file being empty, so
+// a rule the operator deletes on purpose never comes back.
+func TestSeedForecastWarningsRules_RunsOnceAndDoesNotResurrectDeleted(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedForecastWarningsRules(); err != nil {
+		t.Fatalf("first seed failed: %v", err)
+	}
+	first := listAlarmRules()
+	if len(first) != 4 {
+		t.Fatalf("expected 4 seeded rules, got %d", len(first))
+	}
+
+	if err := deleteAlarmRule(first[0].ID); err != nil {
+		t.Fatalf("deleting a seeded rule failed: %v", err)
+	}
+	remaining := len(listAlarmRules())
+
+	if err := seedForecastWarningsRules(); err != nil {
+		t.Fatalf("second seed failed: %v", err)
+	}
+	if got := len(listAlarmRules()); got != remaining {
+		t.Fatalf("re-seeding changed the rule count from %d to %d", remaining, got)
+	}
+
+	// And the marker survives a reload from disk.
+	if err := loadAlarmRules(); err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	if err := seedForecastWarningsRules(); err != nil {
+		t.Fatalf("third seed failed: %v", err)
+	}
+	if got := len(listAlarmRules()); got != remaining {
+		t.Fatalf("seeding after a reload changed the rule count to %d, want %d", got, remaining)
+	}
+}
+
+// The two seed sets are keyed on independent markers: an installation that
+// already has the heavy-weather marker but not the forecast-warnings one
+// must still get the forecast-warnings set on its next boot.
+func TestSeedForecastWarningsRules_SeedsIndependentlyOfHeavyWeatherMarker(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedHeavyWeatherRules(); err != nil {
+		t.Fatalf("seeding heavy weather failed: %v", err)
+	}
+	afterHeavyWeather := len(listAlarmRules())
+
+	if err := seedForecastWarningsRules(); err != nil {
+		t.Fatalf("seeding forecast warnings failed: %v", err)
+	}
+
+	rules := listAlarmRules()
+	if len(rules) != afterHeavyWeather+4 {
+		t.Fatalf("expected the forecast-warnings set to add 4 rules on top of the heavy-weather set, got %d total (was %d)", len(rules), afterHeavyWeather)
+	}
+}

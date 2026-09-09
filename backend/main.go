@@ -328,6 +328,14 @@ func main() {
 	if err := seedHeavyWeatherRules(); err != nil {
 		log.Printf("could not seed the heavy-weather alarm rules: %v", err)
 	}
+	// Offers the forecast-warnings set once per installation, enabled by
+	// default (ADR 0087): unlike the heavy-weather set above, these four
+	// rules bind to the official met-service warning itself, not an
+	// uncalibrated heuristic. A failure here is not fatal for the same
+	// reason as above: it leaves the alarm centre exactly as it was.
+	if err := seedForecastWarningsRules(); err != nil {
+		log.Printf("could not seed the forecast-warnings alarm rules: %v", err)
+	}
 	if err := loadAlarmTransports(); err != nil {
 		log.Fatalf("failed to load alarm transports: %v", err)
 	}
@@ -373,6 +381,7 @@ func main() {
 	go startStreamWatchdog(streamCtx, watchdogCheckInterval)
 	go startHeartbeat(streamCtx, heartbeatCheckInterval)
 	go startAnchorDragWatcher(streamCtx, anchorDragCheckInterval)
+	go startForecastWarningsFetcher(streamCtx, forecastWarningsFetchInterval)
 
 	go startTrackPoller(5 * time.Second)
 	go startTideAutoUpdater(30 * time.Minute)

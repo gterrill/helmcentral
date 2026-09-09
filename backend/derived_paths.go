@@ -102,6 +102,33 @@ const (
 	windDirectionTruePath = "environment.wind.directionTrue"
 )
 
+/*
+Forecast wind and surf warning level (plan: fold the forecast warning into
+the alarm system; ADR 0087).
+
+The forecast-warnings WASM plugin (ADR 0019) already tells the host which
+official met-service bulletins are active for the vessel's own zone; nothing
+publishes that onto a path an alarm rule can bind, which is the same gap ADR
+0055 and ADR 0070 exist to close for fuel economy and the barometer. These
+two paths are that: a ranked wind level (0 none, 1 strong wind / small
+craft / watch, 2 gale, 3 storm / hurricane) and a surf flag, fed by a
+background fetcher (forecast_warnings_fetcher.go) that polls independently of
+the SignalK stream, on its own ten-minute cadence, since a marine warning
+bulletin changes far slower than the boat's live data.
+
+Never 0/false by default, the same way squashZoneIndex above is absent
+rather than 0 with no barometer history: these two are absent (nil) until a
+fetch has actually landed, and absent again once the last one is older than
+forecastWarningsMaxAge, even though the age itself is still reported past
+that point so a staleness rule has something to watch climb. 0 (no warning
+currently in force) is a real fetched result and reads as present, exactly
+like squashZoneIndex's own 0.
+*/
+const (
+	forecastWindWarningLevelPath = derivedPathPrefix + "environment.forecastWindWarningLevel"
+	forecastSurfWarningPath      = derivedPathPrefix + "environment.forecastSurfWarning"
+)
+
 var derivedPathIDs = []string{
 	vesselFuelEconomyPath,
 	pressureRatePath,
@@ -110,6 +137,8 @@ var derivedPathIDs = []string{
 	fuelVolumePath,
 	fuelTimeToEmptyPath,
 	fuelRangeAtCurrentBurnPath,
+	forecastWindWarningLevelPath,
+	forecastSurfWarningPath,
 }
 
 // Units each derived path reports in, so the path picker can preselect a
@@ -118,13 +147,15 @@ var derivedPathIDs = []string{
 // squashZoneIndex is unitless: it is 1 or 0, and a rule binds it with
 // "above 0.5". An empty unit is the honest answer rather than inventing one.
 var derivedPathUnits = map[string]string{
-	vesselFuelEconomyPath:      "m/m3",
-	pressureRatePath:           "Pa/s",
-	pressureChange3hPath:       "Pa",
-	squashZoneIndexPath:        "",
-	fuelVolumePath:             "m3",
-	fuelTimeToEmptyPath:        "s",
-	fuelRangeAtCurrentBurnPath: "m",
+	vesselFuelEconomyPath:        "m/m3",
+	pressureRatePath:             "Pa/s",
+	pressureChange3hPath:         "Pa",
+	squashZoneIndexPath:          "",
+	fuelVolumePath:               "m3",
+	fuelTimeToEmptyPath:          "s",
+	fuelRangeAtCurrentBurnPath:   "m",
+	forecastWindWarningLevelPath: "",
+	forecastSurfWarningPath:      "",
 }
 
 func isDerivedPath(path string) bool {
@@ -372,27 +403,37 @@ func derivedPathAges(now time.Time) map[string]float64 {
 // buffers and the snapshot twice for the same numbers.
 func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64) {
 	values := map[string]*float64{
-		vesselFuelEconomyPath:      nil,
-		pressureRatePath:           nil,
-		pressureChange3hPath:       nil,
-		squashZoneIndexPath:        nil,
-		fuelVolumePath:             nil,
-		fuelTimeToEmptyPath:        nil,
-		fuelRangeAtCurrentBurnPath: nil,
+		vesselFuelEconomyPath:        nil,
+		pressureRatePath:             nil,
+		pressureChange3hPath:         nil,
+		squashZoneIndexPath:          nil,
+		fuelVolumePath:               nil,
+		fuelTimeToEmptyPath:          nil,
+		fuelRangeAtCurrentBurnPath:   nil,
+		forecastWindWarningLevelPath: nil,
+		forecastSurfWarningPath:      nil,
 	}
 	ages := map[string]float64{
-		vesselFuelEconomyPath:      -1,
-		pressureRatePath:           -1,
-		pressureChange3hPath:       -1,
-		squashZoneIndexPath:        -1,
-		fuelVolumePath:             -1,
-		fuelTimeToEmptyPath:        -1,
-		fuelRangeAtCurrentBurnPath: -1,
+		vesselFuelEconomyPath:        -1,
+		pressureRatePath:             -1,
+		pressureChange3hPath:         -1,
+		squashZoneIndexPath:          -1,
+		fuelVolumePath:               -1,
+		fuelTimeToEmptyPath:          -1,
+		fuelRangeAtCurrentBurnPath:   -1,
+		forecastWindWarningLevelPath: -1,
+		forecastSurfWarningPath:      -1,
 	}
 
 	// The weather trends come from ring buffers rather than the snapshot, so
 	// they are computed whether or not the vessel tree has arrived yet.
 	addWeatherTrendValues(values, ages, now)
+
+	// Forecast warnings come from the background fetcher's own slot
+	// (forecast_warnings_fetcher.go), not the SignalK tree either -- same
+	// reasoning as the weather trends above, so it runs before the tree==nil
+	// guard below.
+	addForecastWarningValues(values, ages, now)
 
 	tree := globalSignalKSnapshot.selfTree()
 	if tree == nil {
@@ -484,6 +525,43 @@ func addWeatherTrendValues(values map[string]*float64, ages map[string]float64, 
 	ages[squashZoneIndexPath] = derivedInputAge(pressureAge, newestSampleAge(windSpeed, now), newestSampleAge(windDirection, now))
 }
 
+// addForecastWarningValues fills in the forecast-warnings derived paths from
+// globalForecastWarningsSlot (forecast_warnings_fetcher.go), the background
+// fetcher's own cross-goroutine state. It needs no SignalK tree at all -- the
+// provider is polled independently of the delta stream -- so, like
+// addWeatherTrendValues above, it runs unconditionally rather than waiting
+// on the vessel tree to exist.
+//
+// Age is reported the moment a fetch has ever landed, and stays reported
+// past forecastWarningsMaxAge even once the value itself goes absent: the
+// same freshEnoughToPublish shape the fuel paths use. That is what gives the
+// "Forecast warnings unavailable" rule (alarm_seed_forecast_warnings.go)
+// something concrete to watch climb, rather than the path just vanishing
+// with no trace of why it went quiet.
+func addForecastWarningValues(values map[string]*float64, ages map[string]float64, now time.Time) {
+	reading, ok := globalForecastWarningsSlot.get()
+	if !ok {
+		return
+	}
+
+	age := now.Sub(reading.FetchedAt).Seconds()
+	ages[forecastWindWarningLevelPath] = age
+	ages[forecastSurfWarningPath] = age
+
+	if age > forecastWarningsMaxAge.Seconds() {
+		return
+	}
+
+	windLevel := float64(reading.WindLevel)
+	values[forecastWindWarningLevelPath] = &windLevel
+
+	surf := 0.0
+	if reading.Surf {
+		surf = 1.0
+	}
+	values[forecastSurfWarningPath] = &surf
+}
+
 /*
 derivedAwareAlarmReader reads derived paths as well as published ones.
 
@@ -497,6 +575,22 @@ the operator believes something is watching.
 Derived values keep their absence: a path that is computed but undefined right
 now reports not-present, exactly as a missing SignalK path does, so a "below"
 rule cannot fire on a number that does not exist.
+
+LastSeen used to be the SignalK stream's own last-message time for every
+derived path, regardless of what the path was actually derived from. That
+was close enough for the barometer paths, which genuinely do depend on data
+riding that same stream, but it stopped being true the moment a path could be
+computed from something else entirely: forecastWindWarningLevel is fed by a
+background fetcher on its own ten-minute cadence
+(forecast_warnings_fetcher.go), completely independent of whether SignalK
+itself is talking. Stamping it with the stream's arrival time would let a
+"Forecast warnings unavailable" rule read as fresh for as long as the boat's
+other instruments kept reporting -- exactly the failure that rule exists to
+catch. LastSeen is now each path's own reported age (ages[path] from
+computeDerivedPaths, the same figure ADR 0083's gauge-values stream already
+carries): the stream's last-message time is only a fallback for a path whose
+age is genuinely unknown (-1), the same "no evidence of staleness" case
+freshEnoughToPublish already treats as fresh.
 */
 func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 	published := snapshotAlarmReader(snapshot)
@@ -506,16 +600,18 @@ func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 			return published(path)
 		}
 
-		value, ok := derivedPathValues()[path]
+		now := time.Now().UTC()
+		values, ages := computeDerivedPaths(now)
+		value, ok := values[path]
 		if !ok || value == nil {
 			return alarmSample{}
 		}
 
-		// Derived values are recomputed every tick from the current snapshot,
-		// so they are exactly as fresh as the stream itself. Reporting the
-		// snapshot's last message time lets a staleness rule on a derived path
-		// mean what it does on a published one.
-		_, lastMessage := snapshot.status()
-		return alarmSample{Value: *value, Present: true, LastSeen: lastMessage}
+		_, lastSeen := snapshot.status()
+		if age := ages[path]; age >= 0 {
+			lastSeen = now.Add(-time.Duration(age * float64(time.Second)))
+		}
+
+		return alarmSample{Value: *value, Present: true, LastSeen: lastSeen}
 	}
 }
