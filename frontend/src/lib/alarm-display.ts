@@ -14,6 +14,13 @@ import { formatQuantity, quantityForSIUnit, unitOption } from '@/lib/quantities'
 // own first unit is what an alarm should show (pressure's first unit is
 // kPa, an alarm shows mb), so this table is deliberately separate from
 // quantityForSIUnit's own unit ordering.
+// The two forecast-warning derived paths (ADR 0087). Both carry unit '',
+// so a rule on either can't be told apart from the SI unit the way the
+// falling-barometer special case below is - the card sentence has to key
+// on the path itself.
+export const FORECAST_WIND_WARNING_PATH = 'helmcentral.environment.forecastWindWarningLevel'
+export const FORECAST_SURF_WARNING_PATH = 'helmcentral.environment.forecastSurfWarning'
+
 const ALARM_UNIT_OVERRIDES: Record<string, string> = {
   'Pa/s': 'mbph',
   Pa: 'mb',
@@ -61,6 +68,30 @@ export function formatAlarmReading(value: number, siUnit?: string): string {
 }
 
 /**
+ * The card sentence for the two forecast-warning derived paths, or null for
+ * every other path. Both paths carry a small ranked integer (wind 0-3, surf
+ * 0-1) that is meaningless to a sailor as a bare number - "now 2" says
+ * nothing about what is happening - so the sentence is fixed warning
+ * language keyed on which path raised, not the generic "now X, clears above
+ * Y" phrasing every other above/below rule gets. Math.round guards against
+ * an off-integer reading (the rule evaluates in SI, so it can land between
+ * whole numbers even though the backend only ever publishes 0-3) landing
+ * between two words instead of on one of them.
+ */
+function forecastWarningSentence(alarm: ActiveAlarm): string | null {
+  if (alarm.path === FORECAST_SURF_WARNING_PATH) {
+    return 'Surf warning in force. Details on the Forecast page.'
+  }
+  if (alarm.path === FORECAST_WIND_WARNING_PATH) {
+    const level = Math.round(alarm.value)
+    if (level >= 3) return 'Storm warning in force. Details on the Forecast page.'
+    if (level === 2) return 'Gale warning in force. Details on the Forecast page.'
+    return 'Strong wind warning in force. Details on the Forecast page.'
+  }
+  return null
+}
+
+/**
  * The operator-facing sentence for an alarm card: what it is doing now, and
  * what will clear it. A rule alarm renders its own sentence from the
  * structured fields; a bus notification (no rule behind it, so no op) has
@@ -83,6 +114,14 @@ export function alarmConditionSentence(alarm: ActiveAlarm): string {
     const extra = trimmedMessage && trimmedMessage !== 'No data.' ? ` ${trimmedMessage}` : ''
     return `No data.${extra}`
   }
+
+  // Forecast wind warnings on 'stale' fall through the branch above (a
+  // dead provider still reads "No data."); a live reading on either
+  // forecast path gets its own sentence here, ahead of every other
+  // op-based branch below, none of which know what a bare 0-3 or 0-1
+  // integer is supposed to mean.
+  const forecastSentence = forecastWarningSentence(alarm)
+  if (forecastSentence !== null) return forecastSentence
 
   if (op === 'equal' || op === 'notEqual') {
     return `Now ${formatAlarmReading(value, unit)}.`

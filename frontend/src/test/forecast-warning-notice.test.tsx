@@ -1,22 +1,26 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { WindWarningNotice } from '@/components/wind-warning-notice'
+import { ForecastWarningNotice } from '@/components/forecast-warning-notice'
 import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
 
-describe('WindWarningNotice', () => {
+describe('ForecastWarningNotice', () => {
   it('renders nothing when there is no active warning', () => {
-    const { container } = render(<WindWarningNotice warnings={null} />)
+    const { container } = render(<ForecastWarningNotice warnings={null} />)
     expect(container).toBeEmptyDOMElement()
   })
 
   it('renders nothing when warnings has no bulletins', () => {
     const warnings: ForecastWarnings = { provider: 'bom', region: 'Capricornia Coast', bulletins: [] }
-    const { container } = render(<WindWarningNotice warnings={warnings} />)
+    const { container } = render(<ForecastWarningNotice warnings={warnings} />)
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders nothing when only a surf warning is active', () => {
+  // Wind and surf are independent ladders (ADR 0087, forecastWindWarningLevel
+  // and forecastSurfWarning are separate derived paths), so a surf-only
+  // warning has to render its own line rather than being swallowed by a
+  // component that only ever looked for wind.
+  it('renders only the surf line when only a surf warning is active', () => {
     const warnings: ForecastWarnings = {
       provider: 'bom',
       region: 'Capricornia Coast',
@@ -31,8 +35,11 @@ describe('WindWarningNotice', () => {
         },
       ],
     }
-    const { container } = render(<WindWarningNotice warnings={warnings} />)
-    expect(container).toBeEmptyDOMElement()
+    render(<ForecastWarningNotice warnings={warnings} />)
+
+    const notice = screen.getByTestId('forecast-surf-warning')
+    expect(notice).toHaveTextContent(/surf warning/i)
+    expect(screen.queryByTestId('forecast-wind-warning')).not.toBeInTheDocument()
   })
 
   it('renders the notice with a working link when a wind warning is active', () => {
@@ -50,7 +57,7 @@ describe('WindWarningNotice', () => {
         },
       ],
     }
-    render(<WindWarningNotice warnings={warnings} />)
+    render(<ForecastWarningNotice warnings={warnings} />)
 
     expect(screen.getByText(/Wind warning in effect/)).toBeInTheDocument()
     const link = screen.getByRole('link', { name: /view details/i })
@@ -60,7 +67,10 @@ describe('WindWarningNotice', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'))
   })
 
-  it('renders the notice even when only a surf warning has no sections but a wind warning does', () => {
+  // A wind-only warning must still render only the wind line - the surf
+  // paragraph is conditional on its own bulletin, not on the wind one being
+  // present.
+  it('renders only the wind line when only a wind warning is active', () => {
     const warnings: ForecastWarnings = {
       provider: 'bom',
       region: 'Capricornia Coast',
@@ -75,9 +85,40 @@ describe('WindWarningNotice', () => {
         },
       ],
     }
-    render(<WindWarningNotice warnings={warnings} />)
-    expect(screen.getByText(/Wind warning in effect/)).toBeInTheDocument()
+    render(<ForecastWarningNotice warnings={warnings} />)
+    expect(screen.getByTestId('forecast-wind-warning')).toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-surf-warning')).not.toBeInTheDocument()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  // Both ladders can be active at once (a gale and hazardous surf from the
+  // same system), so both lines have to be able to render together.
+  it('renders both lines when a wind warning and a surf warning are both active', () => {
+    const warnings: ForecastWarnings = {
+      provider: 'bom',
+      region: 'Capricornia Coast',
+      bulletins: [
+        {
+          id: 'IDQ20085',
+          title: 'Marine Wind Warning Summary for Queensland',
+          issuedAt: '2026-07-05T01:51:00Z',
+          detailsUrl: '',
+          category: 'wind',
+          sections: [{ day: 'Sunday 5 July', warningType: 'Strong Wind Warning' }],
+        },
+        {
+          id: 'IDQ21285',
+          title: 'Hazardous Surf Warning Summary for Queensland',
+          issuedAt: '2026-07-05T01:51:00Z',
+          detailsUrl: '',
+          category: 'surf',
+          sections: [{ day: 'Sunday 5 July', warningType: 'Hazardous Surf Warning' }],
+        },
+      ],
+    }
+    render(<ForecastWarningNotice warnings={warnings} />)
+    expect(screen.getByTestId('forecast-wind-warning')).toBeInTheDocument()
+    expect(screen.getByTestId('forecast-surf-warning')).toBeInTheDocument()
   })
 
   // It used to return a bare fragment so it could sit inline inside the
@@ -99,7 +140,7 @@ describe('WindWarningNotice', () => {
         },
       ],
     }
-    const { container } = render(<WindWarningNotice warnings={warnings} />)
+    const { container } = render(<ForecastWarningNotice warnings={warnings} />)
 
     expect(container.childNodes).toHaveLength(1)
     const notice = container.firstChild as HTMLElement

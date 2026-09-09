@@ -20,11 +20,22 @@ export interface ForecastWarnings {
   bulletins: ForecastWarningBulletin[]
 }
 
-// Shared by WindWarningNotice and the Forecast tab indicator so both agree
-// on what counts as an active wind warning without duplicating the check.
+// Shared by ForecastWarningNotice and the Forecast tab indicator so both
+// agree on what counts as an active wind warning without duplicating the
+// check.
 export function findActiveWindBulletin(warnings: ForecastWarnings | null): ForecastWarningBulletin | undefined {
   if (!warnings) return undefined
   return warnings.bulletins.find((bulletin) => bulletin.category === 'wind' && bulletin.sections.length > 0)
+}
+
+// The surf counterpart to findActiveWindBulletin (ADR 0087 adds the surf
+// warning path alongside the existing wind one). Kept as a separate
+// function rather than a category parameter because the two are called
+// from different, unrelated call sites and a shared "kind" argument would
+// buy nothing but an extra string to get wrong at each call site.
+export function findActiveSurfBulletin(warnings: ForecastWarnings | null): ForecastWarningBulletin | undefined {
+  if (!warnings) return undefined
+  return warnings.bulletins.find((bulletin) => bulletin.category === 'surf' && bulletin.sections.length > 0)
 }
 
 interface ForecastWarningsSectionApi {

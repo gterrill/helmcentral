@@ -198,8 +198,9 @@ get zeros, because the grid cell is land.
 None of the indicators here are predictions of severe weather. They are the
 warning signs a seamanship text says to watch for, evaluated automatically so
 you do not have to read every hour of a ten-day forecast yourself. Official
-warnings for your area still come from your meteorological service and appear
-in their own banner.
+warnings for your area still come from your meteorological service. When one
+is in force for your zone it raises an alarm (see [Alarms](alarms.md)) and is
+named under the summary on this page, with a link to the bulletin.
 
 The book notes that a low probability of severe weather may not justify an
 official warning. The absence of a warning therefore does not rule out risk

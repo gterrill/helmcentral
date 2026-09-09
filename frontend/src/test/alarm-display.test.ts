@@ -6,6 +6,8 @@ import {
   alarmDisplayUnitId,
   formatAlarmReading,
   formatAlarmTime,
+  FORECAST_SURF_WARNING_PATH,
+  FORECAST_WIND_WARNING_PATH,
 } from '@/lib/alarm-display'
 
 function makeAlarm(overrides: Partial<ActiveAlarm> = {}): ActiveAlarm {
@@ -124,6 +126,73 @@ describe('alarmConditionSentence', () => {
 
   it('reports no data for a stale rule', () => {
     const alarm = makeAlarm({ op: 'stale', value: 0, message: 'Bilge pump: no data for 45s', unit: undefined })
+    expect(alarmConditionSentence(alarm)).toContain('No data.')
+  })
+
+  // The two forecast-warning derived paths (ADR 0087) carry a small ranked
+  // integer that means nothing to a sailor as "now 2" - the meaning lives
+  // entirely in which path raised and how far up its own ladder the value
+  // sits, not in the number itself, so these get their own fixed sentences
+  // rather than the generic "now X, clears above Y" phrasing every other
+  // above/below rule falls through to. Unit is '' for both paths, which is
+  // exactly why the branch keys on alarm.path instead.
+  it('renders the wind ladder as plain warning language, keyed on the wind path', () => {
+    expect(alarmConditionSentence(makeAlarm({
+      path: FORECAST_WIND_WARNING_PATH,
+      op: 'above',
+      unit: '',
+      value: 1,
+    }))).toBe('Strong wind warning in force. Details on the Forecast page.')
+
+    expect(alarmConditionSentence(makeAlarm({
+      path: FORECAST_WIND_WARNING_PATH,
+      op: 'above',
+      unit: '',
+      value: 2,
+    }))).toBe('Gale warning in force. Details on the Forecast page.')
+
+    expect(alarmConditionSentence(makeAlarm({
+      path: FORECAST_WIND_WARNING_PATH,
+      op: 'above',
+      unit: '',
+      value: 3,
+    }))).toBe('Storm warning in force. Details on the Forecast page.')
+  })
+
+  // The rule evaluates in SI, so a reading can arrive off-integer even
+  // though the backend only ever publishes 0-3; the sentence still has to
+  // land on one of the four words, hence Math.round rather than a strict
+  // equality ladder.
+  it('rounds the wind level before choosing a word', () => {
+    expect(alarmConditionSentence(makeAlarm({ path: FORECAST_WIND_WARNING_PATH, op: 'above', unit: '', value: 2.4 })))
+      .toBe('Gale warning in force. Details on the Forecast page.')
+    expect(alarmConditionSentence(makeAlarm({ path: FORECAST_WIND_WARNING_PATH, op: 'above', unit: '', value: 2.6 })))
+      .toBe('Storm warning in force. Details on the Forecast page.')
+    expect(alarmConditionSentence(makeAlarm({ path: FORECAST_WIND_WARNING_PATH, op: 'above', unit: '', value: 4 })))
+      .toBe('Storm warning in force. Details on the Forecast page.')
+  })
+
+  it('renders the surf warning in plain language, keyed on the surf path', () => {
+    expect(alarmConditionSentence(makeAlarm({
+      path: FORECAST_SURF_WARNING_PATH,
+      op: 'above',
+      unit: '',
+      value: 1,
+    }))).toBe('Surf warning in force. Details on the Forecast page.')
+  })
+
+  // "Forecast warnings unavailable" is a stale rule on the wind path, not a
+  // third path, so it has to stay caught by the op === 'stale' branch above
+  // rather than falling into the path-keyed forecast branch, which would
+  // print a warning-level word for a reading that isn't there.
+  it('still reports no data for a stale rule on the forecast wind path', () => {
+    const alarm = makeAlarm({
+      path: FORECAST_WIND_WARNING_PATH,
+      op: 'stale',
+      unit: '',
+      value: 0,
+      message: 'Forecast warnings unavailable: no data for 32m',
+    })
     expect(alarmConditionSentence(alarm)).toContain('No data.')
   })
 

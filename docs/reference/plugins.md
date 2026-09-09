@@ -116,6 +116,16 @@ differs: BOM requires parsing free-text sections, whereas NWS provides
 structured CAP alert status fields. Because these models share no common
 structure, this logic cannot be generalised into the host.
 
+The host performs one derivation after the plugin has done that work: it
+ranks each active wind section's `warning_type` onto a severity ladder for the
+alarm paths (`helmcentral.environment.forecastWindWarningLevel`, ADR 0087). The
+ladder is a case-insensitive first-match table: `watch` ranks lowest before
+anything else is tested, `hurricane` and `storm` rank highest, `gale` next,
+and `strong wind`, `small craft`, `wind advisory` and `brisk wind` lowest. A
+wind type the ladder does not recognise ranks lowest and is logged by name, so
+the vocabulary can be extended. It is never dropped: the plugin has already
+said the warning is in force.
+
 ### The FTP host function
 
 BOM warnings are only reliably available over anonymous FTP (`ftp.bom.gov.au`),

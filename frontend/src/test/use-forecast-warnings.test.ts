@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
-import { useForecastWarnings } from '@/hooks/use-forecast-warnings'
+import { findActiveSurfBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
+import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
 
 describe('useForecastWarnings', () => {
   beforeEach(() => {
@@ -172,5 +173,56 @@ describe('useForecastWarnings', () => {
 
     expect(result.current.error).toBe('boom')
     expect(result.current.activeWarning).toBeNull()
+  })
+})
+
+// Mirrors findActiveWindBulletin's own contract (ADR 0087 adds the surf
+// path alongside the wind one): the first surf bulletin that actually has
+// sections, since a bulletin with none is the plugin listing a category
+// with nothing currently active in it.
+describe('findActiveSurfBulletin', () => {
+  const windBulletin = {
+    id: 'IDQ20085',
+    title: 'Marine Wind Warning Summary for Queensland',
+    issuedAt: null,
+    detailsUrl: '',
+    category: 'wind',
+    sections: [{ day: 'Sunday 5 July', warningType: 'Strong Wind Warning' }],
+  }
+
+  it('returns the first surf bulletin with sections', () => {
+    const surfBulletin = {
+      id: 'IDQ21285',
+      title: 'Hazardous Surf Warning Summary for Queensland',
+      issuedAt: null,
+      detailsUrl: 'http://www.bom.gov.au/qld/',
+      category: 'surf',
+      sections: [{ day: 'Sunday 5 July', warningType: 'Hazardous Surf Warning' }],
+    }
+    const warnings: ForecastWarnings = {
+      provider: 'bom',
+      region: 'Capricornia Coast',
+      bulletins: [windBulletin, surfBulletin],
+    }
+
+    expect(findActiveSurfBulletin(warnings)).toBe(surfBulletin)
+  })
+
+  it('returns undefined when there is no surf bulletin', () => {
+    const warnings: ForecastWarnings = { provider: 'bom', region: 'Capricornia Coast', bulletins: [windBulletin] }
+    expect(findActiveSurfBulletin(warnings)).toBeUndefined()
+  })
+
+  it('returns undefined when the only surf bulletin has no sections', () => {
+    const warnings: ForecastWarnings = {
+      provider: 'bom',
+      region: 'Capricornia Coast',
+      bulletins: [{ id: 'IDQ21285', title: 'Hazardous Surf Warning Summary for Queensland', issuedAt: null, detailsUrl: '', category: 'surf', sections: [] }],
+    }
+    expect(findActiveSurfBulletin(warnings)).toBeUndefined()
+  })
+
+  it('returns undefined for null warnings', () => {
+    expect(findActiveSurfBulletin(null)).toBeUndefined()
   })
 })

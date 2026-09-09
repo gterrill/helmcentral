@@ -126,6 +126,8 @@ zero when there is not enough history to answer.
 | `helmcentral.fuel.volume` | m3 | Fuel aboard, summed across every tank that reports both a level and a capacity. Empty when no tank reports both. |
 | `helmcentral.fuel.timeToEmpty` | s | Fuel aboard divided by the current total burn. Empty while stopped, with the engines off, or with no fuel volume to divide. |
 | `helmcentral.fuel.rangeAtCurrentBurn` | m | Fuel aboard times the boat's current distance per unit fuel. Empty under the same conditions as fuel economy or fuel volume, whichever is absent. |
+| `helmcentral.environment.forecastWindWarningLevel` | none | The official wind warning in force for the vessel's zone, ranked: 0 none, 1 strong wind or small craft, 2 gale, 3 storm. Absent until the first fetch lands, and again after thirty minutes without one. |
+| `helmcentral.environment.forecastSurfWarning` | none | 1 when a hazardous surf warning is in force for the zone, 0 otherwise. Absent under the same conditions as the wind level. |
 
 These need the boat to be publishing `environment.outside.pressure` and, for
 the squash-zone index, true wind speed and direction. If these inputs are
@@ -189,3 +191,32 @@ system moving at 15 knots closes 190 miles a day on a boat running with it and
 At anchor this does not apply. Underway, account for your course relative to
 the weather system when interpreting an alarm; the thresholds do not adjust
 for it.
+
+## The forecast warning rules
+
+The forecast-warnings plugin (see [Forecast](forecast.md)) already knows which
+official marine warnings are in force for the vessel's own zone. Helmcentral
+polls it every ten minutes in the background, ranks the result onto the two
+paths above, and ships four rules bound to them, created once on first run:
+
+| Rule | Fires when | Severity |
+| --- | --- | --- |
+| Forecast wind warning | Any wind warning is in force | warn |
+| Forecast gale or storm warning | The warning is a gale or worse | alarm |
+| Forecast surf warning | A hazardous surf warning is in force | alert |
+| Forecast warnings unavailable | No successful fetch for thirty minutes | alert |
+
+**These arrive switched on.** Unlike the heavy-weather set there is nothing to
+calibrate: the source is the met service's own call for your zone, not a
+threshold read from a book. A gale warning issued while you are ashore reaches
+every transport you have enabled, and shows in the alarm banner on every
+screen until it is acknowledged there.
+
+"Unavailable" means what it says. It raises when there is no forecast-warnings
+plugin installed, when the boat has had no position fix, or when the provider
+has been down for half an hour. It exists so a dead provider looks like a dead
+provider rather than a quiet sea. If your boat has no plugin and you do not
+want the standing alert, disable that rule like any other.
+
+The alarm card says which warning is in force. The region, the days it covers
+and the link to the bulletin are on the Forecast page.

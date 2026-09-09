@@ -2857,6 +2857,56 @@ describe('ForecastDrawer wind warning prominence', () => {
     // Its own block, not a run of text inside the summary paragraph.
     expect(notice.tagName).toBe('P')
     expect(notice.textContent).not.toContain("Today's hourly forecast")
+    // A wind-only warning must not also render a surf line - the two
+    // ladders (ADR 0087) are independent, each gated on its own bulletin.
+    expect(screen.queryByTestId('forecast-surf-warning')).not.toBeInTheDocument()
+  })
+
+  // The surf path (forecastSurfWarning) is a separate ladder from wind
+  // (forecastWindWarningLevel), so a surf-only bulletin has to render its
+  // own line rather than being invisible because the drawer only ever
+  // looked for a wind bulletin.
+  it('renders the surf warning and no wind line for a surf-only warning', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        hourlyToday={[
+          {
+            label: 'Now',
+            kind: 'forecast',
+            isDaylight: true,
+            temperatureF: 70,
+            condition: 'Clear',
+            windSpeedKts: 10,
+            windGustKts: 14,
+            windDirection: 'NE',
+            windDirectionDeg: 45,
+          },
+        ]}
+        activeForecastWarning={{
+          provider: 'bom',
+          region: 'Capricornia Coast',
+          bulletins: [
+            {
+              id: 'IDQ21285',
+              title: 'Hazardous Surf Warning Summary for Queensland',
+              issuedAt: '2026-07-05T01:51:00Z',
+              detailsUrl: 'http://www.bom.gov.au/qld/',
+              category: 'surf',
+              sections: [{ day: 'Sunday 5 July', warningType: 'Hazardous Surf Warning' }],
+            },
+          ],
+        }}
+        summary="Today's hourly forecast"
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const notice = screen.getByTestId('forecast-surf-warning')
+    expect(notice).toHaveTextContent(/surf warning/i)
+    expect(screen.queryByTestId('forecast-wind-warning')).not.toBeInTheDocument()
   })
 })
 

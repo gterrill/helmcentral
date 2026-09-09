@@ -23,7 +23,6 @@ import { TodayNowTile } from '@/components/today-now-tile'
 import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
-import { ForecastWarningsBanner } from '@/components/forecast-warnings-banner'
 import { AlarmBanner } from '@/components/alarm-banner'
 import { AlarmsDrawer } from '@/components/alarms-drawer'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
@@ -1701,7 +1700,6 @@ export function App() {
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
             <ConnectionBanner />
             <AlarmBanner alarms={alarms} onOpen={() => requestNavigate('alarms', () => setActivePanel('alarms'))} />
-            <ForecastWarningsBanner warnings={activeForecastWarning} />
 
             <div className="min-h-0 flex-1">
               {activePanel === null ? (

@@ -8,7 +8,7 @@ import { Cloud, CloudRain, Moon, Sun, Sunrise, Sunset, Wind, Waves } from 'lucid
 import { Button } from '@/components/ui/button'
 import { ChartTooltipBubble, ChartTooltipMarker, ChartUnavailableMessage } from '@/components/chart-tooltip'
 import { ForecastTideSection } from '@/components/forecast-tide-section'
-import { WindWarningNotice } from '@/components/wind-warning-notice'
+import { ForecastWarningNotice } from '@/components/forecast-warning-notice'
 import type { ChartConfig } from '@/components/ui/chart'
 import { useChartTooltip } from '@/hooks/use-chart-tooltip'
 import type { WeatherHourlyCloudPoint, WeatherHourlyEntry, WeatherHourlyPrecipPoint, WeatherHourlyUVPoint, WeatherHourlyWindPoint } from '@/hooks/use-weather-forecast'
@@ -1427,7 +1427,7 @@ export function ForecastDrawer({
           intro={
             <div className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
               <p>{summary ?? "Today's hourly forecast"}</p>
-              <WindWarningNotice warnings={activeForecastWarning} />
+              <ForecastWarningNotice warnings={activeForecastWarning} />
             </div>
           }
         >
