@@ -42,15 +42,22 @@ export function useServerTrails(pollIntervalMs = 5000): ServerTrailsResult {
   const selfRef = useRef<TrailPoint[]>([])
   const aisRef = useRef<Map<string, TrailPoint[]>>(new Map())
   const sinceRef = useRef<string>('')
+  const inFlightRef = useRef(false)
 
-  const poll = useCallback(async () => {
+  const poll = useCallback(async (signal: AbortSignal) => {
+    if (inFlightRef.current) return
+    inFlightRef.current = true
     try {
       const url = sinceRef.current
         ? `/api/tracks?since=${encodeURIComponent(sinceRef.current)}`
         : '/api/tracks'
-      const res = await fetch(url)
+      const res = await fetch(url, { signal })
       if (!res.ok) return
       const data = (await res.json()) as ServerTracksResponse
+      // The effect cleanup aborts the controller on unmount/StrictMode
+      // remount; a response that lands after that point belongs to a poll
+      // this hook instance no longer owns, so it must not touch the refs.
+      if (signal.aborted) return
 
       let latestMs = sinceRef.current ? new Date(sinceRef.current).getTime() : 0
 
@@ -82,14 +89,26 @@ export function useServerTrails(pollIntervalMs = 5000): ServerTrailsResult {
         sinceRef.current = new Date(latestMs).toISOString()
       }
     } catch {
-      // Network error — keep existing data, retry next interval
+      // Network error or abort: keep existing data, retry next interval
+    } finally {
+      // If the signal is already aborted, cleanup already cleared this flag
+      // synchronously for the next effect run (StrictMode remount). Doing
+      // it again here would clobber that run's own in-flight poll.
+      if (!signal.aborted) {
+        inFlightRef.current = false
+      }
     }
   }, [])
 
   useEffect(() => {
-    void poll()
-    const id = setInterval(() => void poll(), pollIntervalMs)
-    return () => clearInterval(id)
+    const controller = new AbortController()
+    void poll(controller.signal)
+    const id = setInterval(() => void poll(controller.signal), pollIntervalMs)
+    return () => {
+      controller.abort()
+      clearInterval(id)
+      inFlightRef.current = false
+    }
   }, [poll, pollIntervalMs])
 
   return {
