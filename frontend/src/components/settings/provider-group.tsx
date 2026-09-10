@@ -14,16 +14,18 @@ import { useSettingsFormContext } from '@/components/settings/settings-form-cont
 const DEFAULT_ACTIVE_PROVIDER: Partial<Record<ProviderDomain, string>> = {
   weather: 'open-meteo',
   wave: 'open-meteo-marine',
+  poi: 'osm-overpass',
   'forecast-warnings': 'bom',
 }
 
 const SETTINGS_KEY_BY_DOMAIN: Record<
   ProviderDomain,
-  'tide_provider' | 'weather_provider' | 'wave_provider' | 'forecast_warnings_provider'
+  'tide_provider' | 'weather_provider' | 'wave_provider' | 'poi_provider' | 'forecast_warnings_provider'
 > = {
   tide: 'tide_provider',
   weather: 'weather_provider',
   wave: 'wave_provider',
+  poi: 'poi_provider',
   'forecast-warnings': 'forecast_warnings_provider',
 }
 

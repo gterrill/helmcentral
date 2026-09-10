@@ -213,7 +213,8 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
 /**
  * Builds the settings patch for the pinned "Save Settings" button. Note
  * this deliberately does NOT include `ui.tide_provider` /
- * `ui.weather_provider` / `ui.wave_provider` / `ui.forecast_warnings_provider`
+ * `ui.weather_provider` / `ui.wave_provider` / `ui.poi_provider` /
+ * `ui.forecast_warnings_provider`
  * — those are owned exclusively by the Widgets provider cards' own
  * immediate `save()` calls, and omitting them here means the settings
  * form's one-level-per-subobject merge (see `deepMergeSettings`) leaves

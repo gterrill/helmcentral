@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { SecretFieldGroup, type SecretFieldSpec } from '@/components/settings/secret-field-group'
 import { useSecretsStatusContext } from '@/components/settings/secrets-status-context'
 
-export type ProviderDomain = 'tide' | 'weather' | 'wave' | 'forecast-warnings'
+export type ProviderDomain = 'tide' | 'weather' | 'wave' | 'poi' | 'forecast-warnings'
 
 interface PluginInfoResponse {
   type: string
@@ -39,6 +39,9 @@ const PROVIDER_SECRET_FIELDS: Partial<Record<ProviderDomain, Record<string, Secr
       { key: 'WEATHERKIT_SERVICE_ID', label: 'WeatherKit Service ID' },
       { key: 'WEATHERKIT_PRIVATE_KEY', label: 'WeatherKit Private Key', multiline: true },
     ],
+  },
+  poi: {
+    'google-places': [{ key: 'GOOGLE_PLACES_API_KEY', label: 'Google Places API key' }],
   },
 }
 

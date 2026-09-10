@@ -71,4 +71,32 @@ describe('ProviderGroup tide provider default', () => {
     const openMeteoSwitch = screen.getByRole('switch', { name: /activate open-meteo/i })
     expect(openMeteoSwitch).toHaveAttribute('aria-disabled', 'true')
   })
+
+  it('defaults poi to osm-overpass active when unconfigured', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ ui: {} }) })),
+    )
+
+    render(
+      <SettingsFormProvider>
+        <SecretsStatusProvider>
+          <ProviderGroup
+            type="poi"
+            providers={[
+              { id: 'osm-overpass', name: 'OpenStreetMap (Overpass)', description: 'Free, keyless POI data from OpenStreetMap' },
+              { id: 'google-places', name: 'Google Places', description: "Google's Places API (New)" },
+            ]}
+          />
+        </SecretsStatusProvider>
+      </SettingsFormProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Active')).toBeTruthy()
+    })
+
+    const osmSwitch = screen.getByRole('switch', { name: /activate openstreetmap/i })
+    expect(osmSwitch).toHaveAttribute('aria-disabled', 'true')
+  })
 })

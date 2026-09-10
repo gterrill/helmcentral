@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProviderGroup } from '@/components/settings/provider-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useForecastWarningsProviders } from '@/hooks/use-forecast-warnings-providers'
+import { usePOIProviders } from '@/hooks/use-poi-providers'
 import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useWaveProviders } from '@/hooks/use-wave-providers'
 import { useWeatherProviders } from '@/hooks/use-weather-providers'
@@ -18,6 +19,7 @@ export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
   const { providers: tideProviders } = useTideProviders()
   const { providers: weatherProviders } = useWeatherProviders()
   const { providers: waveProviders } = useWaveProviders()
+  const { providers: poiProviders } = usePOIProviders()
   const { providers: forecastWarningsProviders } = useForecastWarningsProviders()
 
   return (
@@ -30,6 +32,7 @@ export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
             <TabsTrigger value="tide">Tide</TabsTrigger>
             <TabsTrigger value="weather">Weather</TabsTrigger>
             <TabsTrigger value="wave">Wave</TabsTrigger>
+            <TabsTrigger value="poi">Nearby</TabsTrigger>
             <TabsTrigger value="forecast-warnings">Forecast Warnings</TabsTrigger>
           </TabsList>
 
@@ -73,6 +76,10 @@ export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
 
           <TabsContent value="wave">
             <ProviderGroup type="wave" providers={waveProviders} />
+          </TabsContent>
+
+          <TabsContent value="poi">
+            <ProviderGroup type="poi" providers={poiProviders} />
           </TabsContent>
 
           <TabsContent value="forecast-warnings">

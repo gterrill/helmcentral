@@ -22,6 +22,7 @@ export type SettingsPayload = {
     tide_auto_station?: boolean
     weather_provider?: string
     wave_provider?: string
+    poi_provider?: string
     forecast_warnings_provider?: string
   }
   anchor?: {

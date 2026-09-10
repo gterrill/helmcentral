@@ -9,6 +9,7 @@ export type SecretKey =
   | 'WEATHERKIT_TEAM_ID'
   | 'WEATHERKIT_SERVICE_ID'
   | 'WEATHERKIT_PRIVATE_KEY'
+  | 'GOOGLE_PLACES_API_KEY'
 
 export const SECRET_KEYS: SecretKey[] = [
   'SIGNALK_USERNAME',
@@ -18,6 +19,7 @@ export const SECRET_KEYS: SecretKey[] = [
   'WEATHERKIT_TEAM_ID',
   'WEATHERKIT_SERVICE_ID',
   'WEATHERKIT_PRIVATE_KEY',
+  'GOOGLE_PLACES_API_KEY',
 ]
 
 const emptyValues = (): Record<SecretKey, string> =>

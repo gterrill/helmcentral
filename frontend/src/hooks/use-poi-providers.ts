@@ -1,0 +1,34 @@
+import { useEffect, useState } from 'react'
+
+export interface POIProviderInfo {
+  id: string
+  name: string
+  description: string
+}
+
+export function usePOIProviders() {
+  const [providers, setProviders] = useState<POIProviderInfo[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const response = await fetch('/api/poi-providers')
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
+        const data = await response.json()
+        setProviders(Array.isArray(data) ? data : [])
+      } catch (error) {
+        console.error('Error fetching POI providers:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    void fetchProviders()
+  }, [])
+
+  return { providers, loading }
+}
