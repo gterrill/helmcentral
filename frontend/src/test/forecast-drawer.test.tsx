@@ -134,54 +134,68 @@ function buildWaveDay(overrides: Record<string, unknown> = {}) {
 // which theme is active. This is a guard against regressions, not a one-time
 // cleanup: it reads the component source directly off disk so any literal
 // that creeps back in fails the suite immediately.
+// Any file extracted from forecast-drawer.tsx (lib/moon-phase.ts,
+// components/forecast/*) keeps the same token-only coverage the drawer
+// itself has always had - a move out of the drawer must not also be a way
+// to smuggle a raw colour literal or an arbitrary font-size utility past
+// these guards.
+const TOKEN_GUARD_RELATIVE_PATHS = [
+  '../components/forecast-drawer.tsx',
+  '../lib/moon-phase.ts',
+  '../components/forecast/weather-condition-icon.tsx',
+  '../components/forecast/direction-glyphs.tsx',
+]
+
+function readTokenGuardSources() {
+  const testDir = dirname(fileURLToPath(import.meta.url))
+  return TOKEN_GUARD_RELATIVE_PATHS.map((relativePath) => ({
+    label: relativePath.replace(/^\.\.\//, ''),
+    lines: readFileSync(resolve(testDir, relativePath), 'utf8').split('\n'),
+  }))
+}
+
 describe('ForecastDrawer design tokens', () => {
   it('contains no raw colour literals - only hsl(var(--...)) tokens', () => {
-    const testDir = dirname(fileURLToPath(import.meta.url))
-    const sourcePath = resolve(testDir, '../components/forecast-drawer.tsx')
-    const source = readFileSync(sourcePath, 'utf8')
-    const lines = source.split('\n')
-
     // hsl(var(--...)) is explicitly allowed and never matched by this pattern.
     const colorLiteralPattern = /rgb\(|rgba\(|#[0-9a-fA-F]{3,8}\b/g
 
     const offenders: string[] = []
-    lines.forEach((line, idx) => {
-      const matches = line.match(colorLiteralPattern)
-      if (matches) {
-        offenders.push(`  line ${idx + 1} (${matches.length}x): ${line.trim()}`)
-      }
-    })
+    for (const { label, lines } of readTokenGuardSources()) {
+      lines.forEach((line, idx) => {
+        const matches = line.match(colorLiteralPattern)
+        if (matches) {
+          offenders.push(`  ${label}:${idx + 1} (${matches.length}x): ${line.trim()}`)
+        }
+      })
+    }
 
     expect(
       offenders,
-      `Found raw colour literal(s) in forecast-drawer.tsx - replace with hsl(var(--token)):\n${offenders.join('\n')}`,
+      `Found raw colour literal(s) in the forecast drawer or its extracted files - replace with hsl(var(--token)):\n${offenders.join('\n')}`,
     ).toEqual([])
   })
 
   // Type-scale sweep guard: the component should only ever reach for named
   // Tailwind font-size steps (text-2xs, text-xs, text-sm, ...), not one-off
   // text-[Npx] bracket values that drift a pixel or two off a scale step
-  // that already exists. Reads the component source directly off disk so any
+  // that already exists. Reads the source directly off disk so any
   // arbitrary font-size utility that creeps back in fails the suite immediately.
   it('contains no arbitrary font-size utilities - only named text- scale steps', () => {
-    const testDir = dirname(fileURLToPath(import.meta.url))
-    const sourcePath = resolve(testDir, '../components/forecast-drawer.tsx')
-    const source = readFileSync(sourcePath, 'utf8')
-    const lines = source.split('\n')
-
     const arbitraryFontSizePattern = /text-\[[^\]]*\]/g
 
     const offenders: string[] = []
-    lines.forEach((line, idx) => {
-      const matches = line.match(arbitraryFontSizePattern)
-      if (matches) {
-        offenders.push(`  line ${idx + 1} (${matches.length}x): ${line.trim()}`)
-      }
-    })
+    for (const { label, lines } of readTokenGuardSources()) {
+      lines.forEach((line, idx) => {
+        const matches = line.match(arbitraryFontSizePattern)
+        if (matches) {
+          offenders.push(`  ${label}:${idx + 1} (${matches.length}x): ${line.trim()}`)
+        }
+      })
+    }
 
     expect(
       offenders,
-      `Found arbitrary text-[...] font-size utilit(y/ies) in forecast-drawer.tsx - replace with a named scale step (text-2xs/text-xs/text-sm/...):\n${offenders.join('\n')}`,
+      `Found arbitrary text-[...] font-size utilit(y/ies) in the forecast drawer or its extracted files - replace with a named scale step (text-2xs/text-xs/text-sm/...):\n${offenders.join('\n')}`,
     ).toEqual([])
   })
 

@@ -3,6 +3,7 @@ import { memo } from 'react'
 import type { WeatherToday } from '@/hooks/use-weather-today'
 import type { DistanceUnits } from '@/config/app-config'
 import { Tile } from '@/components/ui/tile'
+import { fahrenheitToCelsius } from '@/lib/units'
 
 export interface TodayNowTileProps {
   weather: WeatherToday
@@ -11,10 +12,6 @@ export interface TodayNowTileProps {
   seaTemperatureF: number | null
   distanceUnits: DistanceUnits
   onOpen?: () => void
-}
-
-function fahrenheitToCelsius(temp: number) {
-  return (temp - 32) * (5 / 9)
 }
 
 export const TodayNowTile = memo(function TodayNowTile({ weather, highTempF, lowTempF, seaTemperatureF, distanceUnits, onOpen }: TodayNowTileProps) {
