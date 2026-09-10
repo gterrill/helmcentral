@@ -1,0 +1,27 @@
+{
+  "_comment": "Hand-written fixture, NOT a live capture. This plugin has no Google Places API key available in the environment it was built in, so this fixture was written by hand against the documented Places API (New) Nearby Search response shape (developers.google.com/maps/documentation/places/web-service/nearby-search#nearby-search-post-body) rather than a real API response. Treat any field here as a best-effort guess at the real shape, not a verified value.",
+  "places": [
+    {
+      "id": "ChIJ_example_marina_0001",
+      "displayName": { "text": "Coral Sea Marina", "languageCode": "en" },
+      "location": { "latitude": -20.4467, "longitude": 149.0353 },
+      "types": ["marina", "point_of_interest", "establishment"],
+      "googleMapsUri": "https://maps.google.com/?cid=1234567890123456789"
+    },
+    {
+      "id": "ChIJ_example_landmark_0002",
+      "displayName": { "text": "Old Lighthouse Ruins", "languageCode": "en" },
+      "location": { "latitude": -20.451, "longitude": 149.041 },
+      "types": ["historical_landmark", "tourist_attraction", "point_of_interest"],
+      "editorialSummary": { "text": "Ruins of a 19th-century lighthouse overlooking the passage.", "languageCode": "en" },
+      "googleMapsUri": "https://maps.google.com/?cid=2234567890123456789"
+    },
+    {
+      "id": "ChIJ_example_trail_0003",
+      "displayName": { "text": "Whitsunday Ridge Track", "languageCode": "en" },
+      "location": { "latitude": -20.44, "longitude": 149.03 },
+      "types": ["hiking_area", "park", "point_of_interest"],
+      "googleMapsUri": "https://maps.google.com/?cid=3234567890123456789"
+    }
+  ]
+}

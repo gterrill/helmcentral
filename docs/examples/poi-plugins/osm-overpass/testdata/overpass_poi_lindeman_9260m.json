@@ -1,0 +1,305 @@
+{
+  "_comment": "Live Overpass capture, assembled from three sequential requests (anchorage+bay+island+marina, fuel+ramp+mooring+historic, viewpoint+dive+trail) issued 20-30s apart against overpass.kumi.systems, a public mirror, rather than one combined request against the plugin's real target overpass-api.de, because (1) the sandbox this plugin was developed in could not route to overpass-api.de and (2) the mirror could not complete this plan's full 11-category query in one request within any patient timeout at this radius. Every element below is genuine live OSM data; only the number of HTTP round trips used to assemble this one fixture file differs from what the shipped plugin issues (exactly one request per fetch_poi call - see osm-overpass.go). See docs/examples/poi-plugins/osm-overpass/README.md.",
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-06-01T08:52:28Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 2982535013,
+      "lat": -20.4717209,
+      "lon": 149.0528895,
+      "tags": {
+        "name": "Kennedy Sound",
+        "natural": "bay"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8375803920,
+      "lat": -20.4527241,
+      "lon": 149.0549393,
+      "tags": {
+        "name": "Plantation Bay",
+        "natural": "bay"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8375803923,
+      "lat": -20.434973,
+      "lon": 149.0508566,
+      "tags": {
+        "name": "Turtle Bay",
+        "natural": "bay"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2982518201,
+      "lat": -20.5063013,
+      "lon": 149.0904833,
+      "tags": {
+        "name": "Pine Island",
+        "place": "island"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2982518203,
+      "lat": -20.4383551,
+      "lon": 149.0805441,
+      "tags": {
+        "name": "Gaibirra Island",
+        "place": "island"
+      }
+    },
+    {
+      "type": "way",
+      "id": 16323472,
+      "center": {
+        "lat": -20.4855283,
+        "lon": 149.0548533
+      },
+      "tags": {
+        "name": "Brush Island",
+        "natural": "coastline",
+        "place": "island",
+        "source": "PGS",
+        "wikidata": "Q21914786"
+      }
+    },
+    {
+      "type": "way",
+      "id": 16323493,
+      "center": {
+        "lat": -20.46333,
+        "lon": 149.1077499
+      },
+      "tags": {
+        "name": "Comston Island",
+        "natural": "coastline",
+        "place": "islet",
+        "source": "PGS"
+      }
+    },
+    {
+      "type": "way",
+      "id": 16323600,
+      "center": {
+        "lat": -20.425585,
+        "lon": 149.0876849
+      },
+      "tags": {
+        "name": "Maher Island",
+        "natural": "coastline",
+        "place": "island",
+        "source": "PGS"
+      }
+    },
+    {
+      "type": "way",
+      "id": 16323670,
+      "center": {
+        "lat": -20.48121,
+        "lon": 149.07128
+      },
+      "tags": {
+        "name": "Shaw Island",
+        "natural": "coastline",
+        "place": "island",
+        "source": "PGS",
+        "wikidata": "Q21902583"
+      }
+    },
+    {
+      "type": "way",
+      "id": 16323700,
+      "center": {
+        "lat": -20.521285,
+        "lon": 149.08546
+      },
+      "tags": {
+        "name": "Kyser Island",
+        "natural": "coastline",
+        "place": "island",
+        "source": "PGS"
+      }
+    },
+    {
+      "type": "way",
+      "id": 16323704,
+      "center": {
+        "lat": -20.4350701,
+        "lon": 149.102745
+      },
+      "tags": {
+        "name": "Baynham Island",
+        "natural": "coastline",
+        "place": "islet",
+        "source": "PGS"
+      }
+    },
+    {
+      "type": "way",
+      "id": 16323756,
+      "center": {
+        "lat": -20.489455,
+        "lon": 149.11241
+      },
+      "tags": {
+        "name": "Triangle Island",
+        "natural": "coastline",
+        "place": "islet",
+        "source": "PGS"
+      }
+    },
+    {
+      "type": "way",
+      "id": 16323759,
+      "center": {
+        "lat": -20.473235,
+        "lon": 149.127705
+      },
+      "tags": {
+        "name": "Mansell Island",
+        "natural": "coastline",
+        "place": "island",
+        "source": "PGS"
+      }
+    },
+    {
+      "type": "way",
+      "id": 104628500,
+      "center": {
+        "lat": -20.3983244,
+        "lon": 149.0302966
+      },
+      "tags": {
+        "name": "Pentecost Island",
+        "natural": "coastline",
+        "place": "island"
+      }
+    },
+    {
+      "type": "way",
+      "id": 104628514,
+      "center": {
+        "lat": -20.4239831,
+        "lon": 149.0323103
+      },
+      "tags": {
+        "name": "Little Lindeman Island",
+        "natural": "coastline",
+        "place": "islet"
+      }
+    },
+    {
+      "type": "way",
+      "id": 158020262,
+      "center": {
+        "lat": -20.4447447,
+        "lon": 149.0452591
+      },
+      "tags": {
+        "name": "Lindeman Island",
+        "natural": "coastline",
+        "place": "island",
+        "source": "Protected Areas of Queensland - Boundaries Dated: 30-09-2010",
+        "wikidata": "Q6552223"
+      }
+    },
+    {
+      "type": "way",
+      "id": 158020263,
+      "center": {
+        "lat": -20.4247019,
+        "lon": 149.0070447
+      },
+      "tags": {
+        "name": "Cole Island",
+        "natural": "coastline",
+        "place": "islet",
+        "source": "Bing"
+      }
+    },
+    {
+      "type": "way",
+      "id": 158020266,
+      "center": {
+        "lat": -20.4200379,
+        "lon": 149.016685
+      },
+      "tags": {
+        "name": "Ann Island",
+        "natural": "coastline",
+        "place": "islet",
+        "source": "Bing"
+      }
+    },
+    {
+      "type": "way",
+      "id": 904097976,
+      "center": {
+        "lat": -20.4494119,
+        "lon": 149.009421
+      },
+      "tags": {
+        "name": "Sidney Island",
+        "place": "islet"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1011566612,
+      "center": {
+        "lat": -20.4764262,
+        "lon": 149.0285003
+      },
+      "tags": {
+        "name": "Spitfire Rock",
+        "natural": "reef",
+        "reef": "rock"
+      }
+    },
+    {
+      "type": "way",
+      "id": 901651034,
+      "center": {
+        "lat": -20.4678403,
+        "lon": 149.0373629
+      },
+      "tags": {
+        "highway": "path",
+        "name": "Seaforth Track"
+      }
+    },
+    {
+      "type": "way",
+      "id": 901651035,
+      "center": {
+        "lat": -20.4675996,
+        "lon": 149.0373278
+      },
+      "tags": {
+        "highway": "path",
+        "name": "Seaforth Track"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1236194026,
+      "center": {
+        "lat": -20.4415308,
+        "lon": 149.0396202
+      },
+      "tags": {
+        "highway": "footway",
+        "name": "Gap beach walk"
+      }
+    }
+  ]
+}

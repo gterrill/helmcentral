@@ -1,0 +1,3 @@
+{
+  "api_key": "${GOOGLE_PLACES_API_KEY}"
+}
