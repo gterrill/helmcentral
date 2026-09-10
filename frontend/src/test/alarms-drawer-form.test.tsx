@@ -53,6 +53,7 @@ function renderDrawer(rules: AlarmRule[], paths: SignalKPath[] = []) {
       createRule={vi.fn()}
       updateRule={vi.fn()}
       deleteRule={vi.fn()}
+      collisionTuningUrl={null}
     />,
   )
 }

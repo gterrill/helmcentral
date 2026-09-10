@@ -88,6 +88,26 @@ changed from its point of view. The 30-second re-read described above is
 what catches it, rather than leaving that alarm on your board until the same
 path happens to change again.
 
+## AIS collision alarms
+
+Collision warnings for AIS targets come from the AIS Target Prioritizer plugin
+on the SignalK server, not from a Helmcentral rule. The plugin works out CPA
+and TCPA for every target from the AIS data already on the bus and raises a
+notification per target when one crosses the thresholds of the profile in
+force. It keeps four profiles, anchored, harbor, coastal and offshore, each
+with its own warning and alarm tiers. Helmcentral selects the profile from the
+vessel's navigation state (anchored, moored, under way) and never edits the
+numbers in it.
+
+Those numbers are yours, and the shipped harbor profile needs attention before
+a marina. It warns on any target closer than half a mile with a reported speed
+over half a knot. Alongside a pontoon every neighbour is inside half a mile,
+and GPS jitter puts a tied-up boat over half a knot every few minutes, so the
+warning fires on boats doing nothing. Each collision alarm card carries a link
+to the plugin's own page, which is where the thresholds live. Raising the
+warning tier's speed floor to a couple of knots quietens a marina without
+losing a boat actually moving down the fairway.
+
 ## The rules list
 
 Rules are grouped by what they watch, using the first part of the SignalK path:

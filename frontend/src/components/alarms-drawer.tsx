@@ -17,7 +17,7 @@ import {
   type AlarmRule,
   type AlarmRuleDraft,
 } from '@/hooks/use-alarm-rules'
-import type { ActiveAlarm } from '@/hooks/use-alarms'
+import { COLLISION_ALARM_RULE_PREFIX, type ActiveAlarm } from '@/hooks/use-alarms'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 
 function formatTime(value?: string): string {
@@ -49,6 +49,9 @@ interface AlarmsDrawerProps {
   createRule: (draft: AlarmRuleDraft) => Promise<void>
   updateRule: (id: string, draft: AlarmRuleDraft) => Promise<void>
   deleteRule: (id: string) => Promise<void>
+  // Computed in App from the configured SignalK address (ADR 0090); null
+  // when unconfigured, in which case no tuning link renders.
+  collisionTuningUrl: string | null
 }
 
 export const AlarmsDrawer = memo(function AlarmsDrawer({
@@ -61,6 +64,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
   createRule,
   updateRule,
   deleteRule,
+  collisionTuningUrl,
 }: AlarmsDrawerProps) {
   const { entries, refresh: refreshLog } = useAlarmLog(true)
   const { paths: signalKPaths } = useSignalKPaths(true)
@@ -194,6 +198,24 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                           {timeParts.length > 0 && showPath && ' · '}
                           {showPath && <span className="font-display">{displayPath}</span>}
                         </p>
+                      )}
+                      {/*
+                        A collision alarm's CPA/TCPA thresholds live in the
+                        AIS Target Prioritizer plugin, not in a Helmcentral
+                        rule, so the card points at the one place they can
+                        actually be changed (ADR 0090). No other bus
+                        producer has a tuning page to send anyone to, so
+                        only collision alarms get this link.
+                      */}
+                      {alarm.rule_id.startsWith(COLLISION_ALARM_RULE_PREFIX) && collisionTuningUrl && (
+                        <a
+                          href={collisionTuningUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1.5 inline-block rounded border px-2 py-1 text-[11px] hover:bg-muted"
+                        >
+                          Adjust thresholds in AIS Target Prioritizer
+                        </a>
                       )}
                     </div>
                     {/*

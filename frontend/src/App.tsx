@@ -88,6 +88,7 @@ import { useSocBands } from '@/hooks/use-soc-bands'
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
 import { DEFAULT_SOC_PATH } from '@/lib/soc-bands'
 import { useSettingsForm } from '@/hooks/use-settings-form'
+import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
@@ -549,6 +550,14 @@ export function App() {
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
   const { settings: currentSettings, loading: currentSettingsLoading } = useSettingsForm()
+  // The AIS Target Prioritizer plugin's webapp lives on the SignalK server
+  // itself, so the collision alarm card's tuning link is only as good as
+  // the configured address (ADR 0090); null when unconfigured, which
+  // means no link renders.
+  const collisionTuningHref = useMemo(
+    () => buildCollisionTuningUrl(currentSettings.signalk?.address, currentSettings.signalk?.port),
+    [currentSettings.signalk?.address, currentSettings.signalk?.port],
+  )
   const { vessels: nearbyVessels, loading: nearbyVesselsLoading, lastUpdateAgeS: nearbyVesselsAgeS } = useNearbyVessels()
   const { targets: radarTargets, radars: radarInfos, source: radarSource, loading: radarTargetsLoading } = useRadarTargets()
   const {
@@ -1450,6 +1459,7 @@ export function App() {
             createRule={createAlarmRule}
             updateRule={updateAlarmRule}
             deleteRule={deleteAlarmRule}
+            collisionTuningUrl={collisionTuningHref}
           />
         )
       case 'routes':

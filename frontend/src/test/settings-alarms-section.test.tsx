@@ -240,6 +240,7 @@ describe('AlarmsDrawer', () => {
         createRule={vi.fn()}
         updateRule={vi.fn()}
         deleteRule={vi.fn()}
+        collisionTuningUrl={null}
       />,
     )
 
