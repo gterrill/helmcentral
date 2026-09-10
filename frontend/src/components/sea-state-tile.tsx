@@ -18,9 +18,16 @@ export interface SeaStateTileProps {
 
 // Fallback box for the one frame before ResizeObserver reports a real size
 // (or in an environment, such as jsdom, that never fires it at all) - large
-// enough that the chart is legible rather than collapsed to nothing.
+// enough that the chart is legible rather than collapsed to nothing, and no
+// taller than gridPixelHeight(WIDGET_CONSTRAINTS['sea-state'].minH) (224px:
+// 5 rows at GRID_ROW_HEIGHT=32, GRID_MARGIN=16 - dashboard-bento-grid.tsx),
+// so a test or a browser that never fires the observer doesn't render a
+// chart taller than this tile is ever allowed to be. Not imported directly
+// from dashboard-bento-grid.tsx to avoid pulling react-grid-layout into a
+// presentational tile just for one constant; keep the two numbers in sync
+// by hand if that constraint ever changes.
 const FALLBACK_WIDTH = 800
-const FALLBACK_HEIGHT = 260
+const FALLBACK_HEIGHT = 220
 
 /**
  * Measures its own content box with a ref + ResizeObserver, the same
