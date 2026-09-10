@@ -1277,6 +1277,64 @@ func TestDashboardLayoutItem_OmitsEmbedKeyWhenAbsent(t *testing.T) {
 	}
 }
 
+// Frameless mode (a wall-display feature: no title bar, no padding) is
+// per-instance like the rest of the embed config, so it must ride the same
+// reload path.
+func TestDashboardPages_EmbedFramelessSurvivesReload(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	const panelURL = "http://boat.local:3000/d-solo/abc/camera?panelId=2&kiosk"
+	page := createTestDashboardPage(t, "Wall Display", []dashboardLayoutItem{
+		{
+			ID: embedWidgetIDPrefix + "m1x8abcd", X: 0, Y: 0, W: 12, H: 7,
+			Embed: &dashboardEmbedConfig{Title: "Camera", URL: panelURL, Frameless: true},
+		},
+	})
+
+	// Simulate a process restart: reload state from disk.
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	defer dashboardPagesMu.RUnlock()
+	reloaded, ok := dashboardPagesState[page.ID]
+	if !ok {
+		t.Fatal("expected page to survive reload")
+	}
+	if len(reloaded.Widgets) != 1 {
+		t.Fatalf("expected 1 widget after reload, got %d", len(reloaded.Widgets))
+	}
+	got := reloaded.Widgets[0]
+	if got.Embed == nil {
+		t.Fatal("expected embed config to survive reload")
+	}
+	if got.Embed.Frameless != true {
+		t.Fatalf("expected frameless to survive reload as true, got %v", got.Embed.Frameless)
+	}
+}
+
+// omitempty keeps existing dashboard-pages.json files byte-identical: an embed
+// saved before this field existed (or one left in its default framed mode)
+// must not gain a "frameless": false key.
+func TestDashboardLayoutItem_OmitsFramelessKeyWhenFalse(t *testing.T) {
+	encoded, err := json.Marshal(dashboardEmbedConfig{Title: "X", URL: "http://x"})
+	if err != nil {
+		t.Fatalf("failed to marshal embed config: %v", err)
+	}
+	if strings.Contains(string(encoded), "frameless") {
+		t.Fatalf("expected no frameless key when false, got %s", encoded)
+	}
+}
+
+func TestDashboardLayoutItem_IncludesFramelessKeyWhenTrue(t *testing.T) {
+	encoded, err := json.Marshal(dashboardEmbedConfig{Title: "X", URL: "http://x", Frameless: true})
+	if err != nil {
+		t.Fatalf("failed to marshal embed config: %v", err)
+	}
+	if !strings.Contains(string(encoded), "frameless") {
+		t.Fatalf("expected frameless key when true, got %s", encoded)
+	}
+}
+
 func gaugeWidget(id string, config *dashboardGaugeConfig) dashboardLayoutItem {
 	return dashboardLayoutItem{ID: id, X: 0, Y: 0, W: 4, H: 4, Gauge: config}
 }

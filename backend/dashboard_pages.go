@@ -295,6 +295,12 @@ type gaugeZone struct {
 type dashboardEmbedConfig struct {
 	Title string `json:"title"`
 	URL   string `json:"url"`
+	// Frameless drops the Tile title bar and padding so the embed fills the
+	// widget, for wall-display strips where chrome is wasted space. It is
+	// ignored by the frontend while the dashboard is in layout-editing mode,
+	// since editing still needs the gear icon and title reachable.
+	// omitempty keeps existing dashboard-pages.json files byte-identical.
+	Frameless bool `json:"frameless,omitempty"`
 }
 
 // defaultDashboardLayout recreates the pre-bento 3-column arrangement, used to
