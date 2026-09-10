@@ -16,6 +16,15 @@ export interface DashboardPage {
    * is ever removed, so a stale reference can't persist here.
    */
   hero?: string
+  /**
+   * Kiosk fields (ADR 0089): `kiosk` marks this page as part of the wall
+   * display rotation at /kiosk; `kiosk_seconds` is how long it shows before
+   * the rotation advances; `kiosk_when` restricts it to a condition
+   * ("anchored"), or shows it always when absent.
+   */
+  kiosk?: boolean
+  kiosk_seconds?: number
+  kiosk_when?: 'always' | 'anchored'
   created_at: string
   updated_at: string
 }
@@ -86,7 +95,7 @@ export function useDashboardPages() {
 
   const updatePage = useCallback(async (
     id: string,
-    patch: Partial<Pick<DashboardPage, 'name' | 'widgets' | 'skin' | 'hero'>>,
+    patch: Partial<Pick<DashboardPage, 'name' | 'widgets' | 'skin' | 'hero' | 'kiosk' | 'kiosk_seconds' | 'kiosk_when'>>,
   ): Promise<DashboardPage | null> => {
     const res = await fetch(`/api/dashboard-pages/${id}`, {
       method: 'PATCH',

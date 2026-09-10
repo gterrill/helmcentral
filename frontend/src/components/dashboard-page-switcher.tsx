@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Anchor, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, MonitorPlay, Plus, Pencil, Trash2 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -14,6 +14,27 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
+
+/**
+ * A page flagged for the wall display (ADR 0089) stays in this same list -
+ * there is no separate kiosk page list - so it needs a glyph rather than a
+ * different location. MonitorPlay plus its duration; an Anchor glyph on top
+ * for a page that only shows while anchored, since "conditional" is the one
+ * fact a bare duration can't convey.
+ */
+export function KioskPageGlyph({ page }: { page: DashboardPage }) {
+  if (!page.kiosk || !page.kiosk_seconds) return null
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
+      title={`On the wall display, ${page.kiosk_seconds}s${page.kiosk_when === 'anchored' ? ', while anchored' : ''}`}
+    >
+      <MonitorPlay className="h-3 w-3" aria-hidden="true" />
+      {page.kiosk_seconds}s
+      {page.kiosk_when === 'anchored' && <Anchor className="h-3 w-3" aria-hidden="true" />}
+    </span>
+  )
+}
 
 interface DashboardPageSwitcherProps {
   pages: DashboardPage[]
@@ -203,9 +224,10 @@ export function DashboardPageSwitcher({
                     <button
                       type="button"
                       onClick={() => handleSelectPage(page.id)}
-                      className="min-h-10 min-w-0 flex-1 truncate text-left"
+                      className="flex min-h-10 min-w-0 flex-1 items-center gap-1.5 text-left"
                     >
-                      {page.name}
+                      <span className="min-w-0 flex-1 truncate">{page.name}</span>
+                      <KioskPageGlyph page={page} />
                     </button>
                     {canWrite && <div className="flex shrink-0 items-center gap-1">
                       <button

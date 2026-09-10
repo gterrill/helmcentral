@@ -5,6 +5,7 @@ import {
   LampCeiling,
   LayoutDashboard,
   Map,
+  MonitorPlay,
   Plus,
   Radar as RadarIcon,
   Route,
@@ -60,7 +61,12 @@ import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
 import { useDashboardPages } from '@/hooks/use-dashboard-pages'
 import { useDashboardRibbon } from '@/hooks/use-dashboard-ribbon'
 import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
-import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
+import { useKioskRotation } from '@/hooks/use-kiosk-rotation'
+import { parseKioskOptions, KIOSK_FOLD_PX } from '@/lib/kiosk'
+import { KioskShell } from '@/components/kiosk-shell'
+import { KioskFoldGuide } from '@/components/kiosk-fold-guide'
+import { PageKioskSelect } from '@/components/page-kiosk-select'
+import { DashboardPageSwitcher, KioskPageGlyph } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useSolarState } from '@/hooks/use-solar-state'
@@ -326,9 +332,16 @@ export function App() {
     activate: activateRoute,
     deactivate: deactivateRoute,
   } = useRouteActivation()
-  const { pages, loading: pagesLoading, error: pagesError, createPage, updatePage, deletePage, reorderPages, reordering } = useDashboardPages()
+  const { pages, loading: pagesLoading, error: pagesError, refetch: refetchPages, createPage, updatePage, deletePage, reorderPages, reordering } = useDashboardPages()
   const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId)
   const activePage = pages.find((p) => p.id === activePageId) ?? null
+  // ADR 0089: the wall display at /kiosk. Its query string is its own
+  // (rotate, a pinned page for authoring/screenshots) rather than app state,
+  // so it's parsed once here the same way initialLocation is, and never
+  // written back to the URL — see the early returns in the sync effect and
+  // the popstate handler below.
+  const [kioskOptions] = useState(() => parseKioskOptions(globalThis.location?.search ?? ''))
+  const isKiosk = activePanel === 'kiosk'
   // The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip, not
   // tied to any page, so it lives beside the page hooks rather than inside
   // effectiveWidgets below.
@@ -373,6 +386,11 @@ export function App() {
   // changes too (e.g. the active page disappearing out from under a user).
   useEffect(() => {
     if (!shellVisible) return
+    // /kiosk owns its own query string (rotate, a pinned page) rather than
+    // app state, and never navigates anywhere else - writing to history here
+    // would fight the device's fixed URL for no benefit to anyone looking at
+    // a screen with no back button.
+    if (isKiosk) return
     // Page structure not yet known: leave whatever deep link brought us
     // here alone rather than guessing at a page id that might still turn
     // out valid once the list loads.
@@ -398,7 +416,7 @@ export function App() {
     // current bar non-canonical.
     const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
-  }, [shellVisible, activePanel, activePageId, settingsSection, pages, pagesLoading, canAdmin])
+  }, [shellVisible, isKiosk, activePanel, activePageId, settingsSection, pages, pagesLoading, canAdmin])
 
   // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
   // page still gets to veto the navigation exactly as a sidebar click
@@ -409,6 +427,11 @@ export function App() {
   useEffect(() => {
     const handlePopState = () => {
       if (!shellVisible) return
+      // /kiosk never pushes or replaces history (see the sync effect above),
+      // so there is nothing here for it to react to; a bare `return` also
+      // means the device's own back/forward gestures, if it has any, don't
+      // fight the fixed URL it was launched with.
+      if (isKiosk) return
       const path = window.location.pathname
       const ctx = { firstPageId: pages[0]?.id ?? null, knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
       const parsed = parseAppLocation(path)
@@ -426,7 +449,7 @@ export function App() {
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [shellVisible, requestNavigate, applyAppLocation, settingsSection, pages, pagesLoading, canAdmin])
+  }, [shellVisible, isKiosk, requestNavigate, applyAppLocation, settingsSection, pages, pagesLoading, canAdmin])
 
   // If admin access ends (or was never established) while Settings happens
   // to be open, drop back to the dashboard. The sync effect above then sees
@@ -655,6 +678,20 @@ export function App() {
 
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
+
+  // Drives activePageId exactly the way a sidebar click or a deep link
+  // does (ADR 0089), so activePage/effectiveWidgets/dashboardGrid/renderWidget
+  // all keep working unchanged whether the page came from a click or from
+  // the rotation timer. Called unconditionally (rules of hooks); `enabled`
+  // is what actually turns it off outside kiosk mode.
+  const { feedEmpty: kioskFeedEmpty } = useKioskRotation({
+    enabled: isKiosk,
+    pages,
+    anchored: hasActiveAnchorWatch,
+    pinnedPageId: kioskOptions.pageId,
+    refetch: refetchPages,
+    onShow: setActivePageId,
+  })
 
   // See sessionPlanningDepth's own comment above for why this has to be
   // cleared on every transition rather than left to go stale.
@@ -1191,34 +1228,46 @@ export function App() {
         </div>
       )}
 
-      {/* The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip
-          above the grid on every dashboard page and every width, inside the
-          page's own skin rather than among the app-theme banners — the same
-          slot ADR 0072 gave the hero row. Not part of effectiveWidgets, so it
-          never enters react-grid-layout's managed array. */}
-      {ribbon && (
-        <div data-testid="dashboard-ribbon" className="w-full min-w-0">
-          <LampStripTile
-            config={ribbon}
-            values={gaugeValues}
-            ages={gaugeAges}
-            worstAlarmState={worstAlarmState}
-            editing={layoutEditing}
-            onConfigure={() => setRibbonDialogOpen(true)}
-            onOpenAlarms={() => requestNavigate('alarms', () => setActivePanel('alarms'))}
-          />
-        </div>
-      )}
+      {/* relative so KioskFoldGuide (ADR 0089) can position itself against
+          exactly the content a kiosk page would show — the ribbon and hero
+          row count against the 344px fold budget just like every widget
+          does, so the guide has to sit above both, not just the grid. */}
+      <div className="relative">
+        {/* The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip
+            above the grid on every dashboard page and every width, inside the
+            page's own skin rather than among the app-theme banners — the same
+            slot ADR 0072 gave the hero row. Not part of effectiveWidgets, so it
+            never enters react-grid-layout's managed array. */}
+        {ribbon && (
+          <div data-testid="dashboard-ribbon" className="w-full min-w-0">
+            <LampStripTile
+              config={ribbon}
+              values={gaugeValues}
+              ages={gaugeAges}
+              worstAlarmState={worstAlarmState}
+              editing={layoutEditing}
+              onConfigure={() => setRibbonDialogOpen(true)}
+              onOpenAlarms={() => requestNavigate('alarms', () => setActivePanel('alarms'))}
+            />
+          </div>
+        )}
 
-      <DashboardBentoGrid
-        widgets={effectiveWidgets}
-        editing={layoutEditing}
-        heroId={activePage?.hero}
-        renderWidget={renderWidget}
-        onRemoveWidget={handleRemoveWidget}
-        onDuplicateWidget={handleDuplicateWidget}
-        onLayoutSettle={handleLayoutSettle}
-      />
+        <DashboardBentoGrid
+          widgets={effectiveWidgets}
+          editing={layoutEditing}
+          heroId={activePage?.hero}
+          renderWidget={renderWidget}
+          onRemoveWidget={handleRemoveWidget}
+          onDuplicateWidget={handleDuplicateWidget}
+          onLayoutSettle={handleLayoutSettle}
+        />
+
+        {/* Authoring aid, not a kiosk feature: only shown while editing a
+            page that is itself flagged for the wall display, so laying it
+            out on the ordinary desktop dashboard shows exactly where the
+            360px strip cuts off before saving. */}
+        {layoutEditing && activePage?.kiosk && <KioskFoldGuide topPx={KIOSK_FOLD_PX} />}
+      </div>
 
       {/* Always available in layout mode: Embed is never "placed", so unlike the
           builtin widgets it can be added any number of times. */}
@@ -1231,6 +1280,10 @@ export function App() {
         <PageHeroSelect
           page={activePage ?? null}
           onSetHero={(id, hero) => { void updatePage(id, { hero }) }}
+        />
+        <PageKioskSelect
+          page={activePage ?? null}
+          onPatch={(id, patch) => { void updatePage(id, patch) }}
         />
         <button
           type="button"
@@ -1557,6 +1610,28 @@ export function App() {
     return <LoginScreen onLogin={auth.login} error={auth.error} />
   }
 
+  // The wall display (ADR 0089) reuses dashboardGrid directly rather than
+  // the ordinary shell: no sidebar, no header, no SidebarProvider. toastRef
+  // already null-checks everywhere it's read and no tile calls useSidebar,
+  // so nothing downstream depends on SidebarProvider being mounted.
+  if (isKiosk) {
+    return (
+      <KioskShell rotate={kioskOptions.rotate} alarms={alarms}>
+        {pagesError ? (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            Could not load dashboard pages. Retrying…
+          </div>
+        ) : kioskFeedEmpty && !kioskOptions.pageId ? (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            No pages are flagged for the wall display yet.
+          </div>
+        ) : (
+          dashboardGrid
+        )}
+      </KioskShell>
+    )
+  }
+
   return (
     <SidebarProvider>
       <div
@@ -1592,7 +1667,8 @@ export function App() {
                         setActivePageId(page.id)
                       })}
                     >
-                      <span>{page.name}</span>
+                      <span className="min-w-0 flex-1 truncate">{page.name}</span>
+                      <KioskPageGlyph page={page} />
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
                 ))}
@@ -1615,6 +1691,20 @@ export function App() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
+            {/* Opens in its own tab (ADR 0089): the wall display is a
+                separate, unattended screen, not a place this operator's own
+                session navigates to and back from. A plain top-level item,
+                not a sub-item of Dashboard, so it survives collapsing the
+                sidebar to its icon rail. */}
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={<a href="/kiosk" target="_blank" rel="noopener noreferrer" />}
+                tooltip="Wall display"
+              >
+                <MonitorPlay />
+                <span>Wall display</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter>

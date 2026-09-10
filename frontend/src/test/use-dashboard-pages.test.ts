@@ -158,6 +158,28 @@ describe('useDashboardPages', () => {
     expect(result.current.pages[0].name).toBe('Renamed')
   })
 
+  it('updatePage sends and applies the kiosk fields (ADR 0089)', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '1', name: 'Page A', widgets: [], created_at: '', updated_at: '' }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '1', name: 'Page A', widgets: [], kiosk: true, kiosk_seconds: 30, kiosk_when: 'anchored', created_at: '', updated_at: '' }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.updatePage('1', { kiosk: true, kiosk_seconds: 30, kiosk_when: 'anchored' })
+    })
+
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages/1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ kiosk: true, kiosk_seconds: 30, kiosk_when: 'anchored' }),
+    }))
+    expect(result.current.pages[0].kiosk).toBe(true)
+    expect(result.current.pages[0].kiosk_seconds).toBe(30)
+    expect(result.current.pages[0].kiosk_when).toBe('anchored')
+  })
+
   it('deletePage issues a DELETE request and removes the page locally', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '1', name: 'Page A', widgets: [], created_at: '', updated_at: '' }] }) })

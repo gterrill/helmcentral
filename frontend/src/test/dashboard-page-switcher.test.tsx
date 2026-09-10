@@ -413,4 +413,37 @@ describe('DashboardPageSwitcher', () => {
     await screen.findByText(/New Page/)
     expect(screen.queryByLabelText(/skin/i)).not.toBeInTheDocument()
   })
+
+  // ADR 0089: a page flagged for the wall display stays in this same list -
+  // there is no separate kiosk page list - so it gets a small glyph instead.
+  // The trigger button also renders the active page's own name (hidden below
+  // `sm`, but present in the DOM), so the active page in each of these is a
+  // third, differently-named page - otherwise getByText would match both the
+  // trigger and the row it's meant to isolate.
+  it('marks a kiosk-flagged row with its duration, and an unflagged row with no glyph', () => {
+    const flagged: DashboardPage[] = [
+      { id: 'p1', name: 'Kiosk Page', widgets: [], created_at: '', updated_at: '', kiosk: true, kiosk_seconds: 30 },
+      { id: 'p2', name: 'Plain Page', widgets: [], created_at: '', updated_at: '' },
+      { id: 'p3', name: 'Active Page', widgets: [], created_at: '', updated_at: '' },
+    ]
+    render(<DashboardPageSwitcher pages={flagged} activePageId="p3" {...mockFns()} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+
+    const rowA = screen.getByText('Kiosk Page').closest('button') as HTMLElement
+    const rowB = screen.getByText('Plain Page').closest('button') as HTMLElement
+    expect(within(rowA).getByText('30s')).toBeInTheDocument()
+    expect(within(rowB).queryByText(/\ds$/)).not.toBeInTheDocument()
+  })
+
+  it('adds an anchor glyph for a page whose kiosk condition is "anchored"', () => {
+    const pages: DashboardPage[] = [
+      { id: 'p1', name: 'Wall: Anchor', widgets: [], created_at: '', updated_at: '', kiosk: true, kiosk_seconds: 30, kiosk_when: 'anchored' },
+      { id: 'p2', name: 'Active Page', widgets: [], created_at: '', updated_at: '' },
+    ]
+    render(<DashboardPageSwitcher pages={pages} activePageId="p2" {...mockFns()} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+
+    const row = screen.getByText('Wall: Anchor').closest('button') as HTMLElement
+    expect(within(row).getByTitle(/while anchored/)).toBeInTheDocument()
+  })
 })
