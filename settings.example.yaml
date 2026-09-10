@@ -54,11 +54,16 @@ ui:
   vessel_state_refresh_seconds: 10
   # Provider names must match a plugin installed under <state dir>/plugins/.
   # The released plugin bundle ships: tides bom/noaa, weather
-  # open-meteo/weatherkit, waves open-meteo-marine, warnings bom/nws.
+  # open-meteo/weatherkit, waves open-meteo-marine, poi osm-overpass/
+  # google-places, warnings bom/nws.
   tide_provider: noaa
   tide_auto_station: true
   weather_provider: open-meteo
   wave_provider: open-meteo-marine
+  # Points of interest (anchorages, marinas, fuel, moorings, etc.) for the
+  # Nearby widget. osm-overpass needs no API key; google-places needs
+  # GOOGLE_PLACES_API_KEY set via the secrets store.
+  poi_provider: osm-overpass
   forecast_warnings_provider: nws
   # Optional. Unlike the others this one may be left out entirely: with no
   # upper-air plugin installed the forecast page simply shows no 500mb

@@ -89,6 +89,37 @@ func TestBuildSettingsPayload_SurfacesUnregisteredTideProviderFromDisk(t *testin
 	}
 }
 
+// TestNormalizeSettingsPayload_PersistsUnregisteredPOIProviderAsSubmitted
+// mirrors the tide-provider round-trip test above for poi_provider - added
+// alongside the poi plugin kind (docs/adr/0090).
+func TestNormalizeSettingsPayload_PersistsUnregisteredPOIProviderAsSubmitted(t *testing.T) {
+	req := settingsPayload{}
+	req.UI.POIProvider = "not-a-real-provider"
+
+	normalized := normalizeSettingsPayload(req)
+
+	if normalized.UI.POIProvider != "not-a-real-provider" {
+		t.Fatalf("expected poi_provider to be persisted as submitted, got %q", normalized.UI.POIProvider)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesUnregisteredPOIProviderFromDisk is the
+// read-side counterpart, mirroring
+// TestBuildSettingsPayload_SurfacesUnregisteredTideProviderFromDisk.
+func TestBuildSettingsPayload_SurfacesUnregisteredPOIProviderFromDisk(t *testing.T) {
+	settings := map[string]any{
+		"ui": map[string]any{
+			"poi_provider": "not-a-real-provider",
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+
+	if payload.UI.POIProvider != "not-a-real-provider" {
+		t.Fatalf("expected poi_provider to surface the stored value, got %q", payload.UI.POIProvider)
+	}
+}
+
 // TestNormalizeSettingsPayload_RoundTripsInfluxdbSection mirrors the
 // tide-provider round-trip test above: the influxdb section (enabled/url/
 // org/bucket) must be persisted as submitted, trimmed of whitespace, with no

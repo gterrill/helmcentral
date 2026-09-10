@@ -12,7 +12,8 @@
 //	  tinygo build -o /src/backend/testdata/wasm_plugins/es256sign.wasm -target wasip1 -buildmode c-shared ./es256sign &&
 //	  tinygo build -o /src/backend/testdata/wasm_plugins/configecho.wasm -target wasip1 -buildmode c-shared ./configecho &&
 //	  tinygo build -o /src/backend/testdata/wasm_plugins/describedvalid.wasm -target wasip1 -buildmode c-shared ./describedvalid &&
-//	  tinygo build -o /src/backend/testdata/wasm_plugins/describederror.wasm -target wasip1 -buildmode c-shared ./describederror
+//	  tinygo build -o /src/backend/testdata/wasm_plugins/describederror.wasm -target wasip1 -buildmode c-shared ./describederror &&
+//	  tinygo build -o /src/backend/testdata/wasm_plugins/poivalid.wasm -target wasip1 -buildmode c-shared ./poivalid
 //	"
 //
 // describedvalid and describederror back the description()-export tests in

@@ -313,9 +313,11 @@ func TestGetPluginInfoHandler_UnknownIDForEachValidType(t *testing.T) {
 	withCleanTideProviderRegistry(t)
 	withCleanWeatherProviderRegistry(t)
 	withCleanWaveProviderRegistry(t)
+	withCleanPOIProviderRegistry(t)
+	withCleanUpperAirProviderRegistry(t)
 	withCleanForecastWarningsProviderRegistry(t)
 
-	for _, providerType := range []string{"tide", "weather", "wave", "forecast-warnings"} {
+	for _, providerType := range []string{"tide", "weather", "wave", "poi", "upper-air", "forecast-warnings"} {
 		c, rec := newPluginTestEchoContext(http.MethodGet, "/api/plugins/"+providerType+"/missing", "", providerType, "missing")
 		if err := getPluginInfoHandler(c); err != nil {
 			t.Fatalf("[%s] handler returned error: %v", providerType, err)

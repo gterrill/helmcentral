@@ -8,11 +8,12 @@ import (
 )
 
 // namedProvider is the subset of tideProvider/weatherProvider/waveProvider/
-// forecastWarningsProvider's methods these handlers need generically. Every
-// concrete provider type across all four domains already implements
-// ID()/Name()/Description() (see wasm_plugin.go and each *_providers.go
-// interface), so no per-type switch is needed to read those three fields -
-// only providerByTypeAndID's registry dispatch is type-specific.
+// poiProvider/upperAirProvider/forecastWarningsProvider's methods these
+// handlers need generically. Every concrete provider type across all six
+// domains already implements ID()/Name()/Description() (see wasm_plugin.go
+// and each *_providers.go interface), so no per-type switch is needed to
+// read those three fields - only providerByTypeAndID's registry dispatch is
+// type-specific.
 type namedProvider interface {
 	ID() string
 	Name() string
@@ -21,14 +22,14 @@ type namedProvider interface {
 
 // pluginPathProvider is implemented by every WASM-backed provider -
 // wasmPluginBase's Path() accessor (Part 1), inherited by every
-// wasmTideProvider/wasmWeatherProvider/wasmWaveProvider/
-// wasmForecastWarningsProvider via embedding. Every provider registered in
-// every domain's registry (tide/weather/wave/forecast-warnings) is
-// WASM-backed, so this assertion holding is an invariant, not a runtime
-// possibility to branch on: a provider that fails it is a programming error
-// (something registered a non-WASM provider), and the call sites below
-// treat that as an internal error rather than a supported "native provider"
-// configuration.
+// wasmTideProvider/wasmWeatherProvider/wasmWaveProvider/wasmPOIProvider/
+// wasmUpperAirProvider/wasmForecastWarningsProvider via embedding. Every
+// provider registered in every domain's registry (tide/weather/wave/poi/
+// upper-air/forecast-warnings) is WASM-backed, so this assertion holding is
+// an invariant, not a runtime possibility to branch on: a provider that
+// fails it is a programming error (something registered a non-WASM
+// provider), and the call sites below treat that as an internal error
+// rather than a supported "native provider" configuration.
 type pluginPathProvider interface{ Path() string }
 
 // pluginInfoResponse is the exact, fixed HTTP contract for
@@ -50,6 +51,12 @@ type pluginInfoResponse struct {
 // looks up id. validType=false means providerType itself isn't one of
 // tide/weather/wave/forecast-warnings; found=false (with validType=true)
 // means the type is valid but no such id is registered under it.
+// The "upper-air" case was missing from this switch until this change even
+// though upper_air_providers.go, main.go's route table and the Settings
+// provider machinery all treat it as a real domain - GET/POST/DELETE
+// /api/plugins/upper-air/:id simply 400'd as an unknown type. Added here
+// alongside "poi" rather than as a separate change since both are the same
+// one-line fix to the same switch.
 func providerByTypeAndID(providerType, id string) (provider namedProvider, validType, found bool) {
 	switch providerType {
 	case "tide":
@@ -66,6 +73,18 @@ func providerByTypeAndID(providerType, id string) (provider namedProvider, valid
 		return p, true, true
 	case "wave":
 		p, ok := getWaveProvider(id)
+		if !ok {
+			return nil, true, false
+		}
+		return p, true, true
+	case "poi":
+		p, ok := getPOIProvider(id)
+		if !ok {
+			return nil, true, false
+		}
+		return p, true, true
+	case "upper-air":
+		p, ok := getUpperAirProvider(id)
 		if !ok {
 			return nil, true, false
 		}

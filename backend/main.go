@@ -256,6 +256,11 @@ func main() {
 	// until plugins/waves/*.wasm exists.
 	loadWasmWaveProviders(pluginsWavesDir())
 
+	// POI (points of interest) providers - WASM-plugin-only (no native
+	// built-in), same reasoning as wave above; registry stays empty
+	// (poiNearby correctly 502s) until plugins/poi/*.wasm exists.
+	loadWasmPOIProviders(pluginsPOIDir())
+
 	// Upper air is its own category rather than part of the weather provider,
 	// so a boat can run WeatherKit for surface weather (which has no pressure
 	// levels) and still get a 500mb outlook (ADR 0071).
@@ -462,6 +467,8 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/weather-providers", tierRead, weatherProvidersHandler},
 		{http.MethodGet, "/api/wave-forecast", tierRead, waveForecast},
 		{http.MethodGet, "/api/wave-providers", tierRead, waveProvidersHandler},
+		{http.MethodGet, "/api/poi", tierRead, poiNearby},
+		{http.MethodGet, "/api/poi-providers", tierRead, poiProvidersHandler},
 		{http.MethodGet, "/api/upper-air", tierRead, upperAirForecast},
 		{http.MethodGet, "/api/upper-air-providers", tierRead, upperAirProvidersHandler},
 		{http.MethodGet, "/api/forecast-warnings", tierRead, forecastWarningsHandler},

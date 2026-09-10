@@ -91,6 +91,7 @@ type settingsPayload struct {
 		TideAutoStation           bool              `json:"tide_auto_station"`
 		WeatherProvider           string            `json:"weather_provider"`
 		WaveProvider              string            `json:"wave_provider"`
+		POIProvider               string            `json:"poi_provider"`
 		ForecastWarningsProvider  string            `json:"forecast_warnings_provider"`
 	} `json:"ui"`
 	Anchor struct {
@@ -180,6 +181,7 @@ func updateSettingsHandler(c echo.Context) error {
 	uiMap["tide_auto_station"] = normalized.UI.TideAutoStation
 	uiMap["weather_provider"] = normalized.UI.WeatherProvider
 	uiMap["wave_provider"] = normalized.UI.WaveProvider
+	uiMap["poi_provider"] = normalized.UI.POIProvider
 	uiMap["forecast_warnings_provider"] = normalized.UI.ForecastWarningsProvider
 	settings["ui"] = uiMap
 
@@ -339,6 +341,7 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		}
 		payload.UI.WeatherProvider = strings.TrimSpace(coerceString(uiMap["weather_provider"]))
 		payload.UI.WaveProvider = strings.TrimSpace(coerceString(uiMap["wave_provider"]))
+		payload.UI.POIProvider = strings.TrimSpace(coerceString(uiMap["poi_provider"]))
 		payload.UI.ForecastWarningsProvider = strings.TrimSpace(coerceString(uiMap["forecast_warnings_provider"]))
 	}
 
@@ -447,6 +450,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.UI.TideAutoStation = req.UI.TideAutoStation
 	normalized.UI.WeatherProvider = strings.TrimSpace(req.UI.WeatherProvider)
 	normalized.UI.WaveProvider = strings.TrimSpace(req.UI.WaveProvider)
+	normalized.UI.POIProvider = strings.TrimSpace(req.UI.POIProvider)
 	normalized.UI.ForecastWarningsProvider = strings.TrimSpace(req.UI.ForecastWarningsProvider)
 
 	normalized.Anchor.BowRollerHeightM = req.Anchor.BowRollerHeightM
