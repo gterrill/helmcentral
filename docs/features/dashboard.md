@@ -87,6 +87,40 @@ back to "No hero", never rearranges anything else. Use it to emphasise the
 main reading for a page, such as anchor distance on an anchorage page or
 apparent wind on a passage page.
 
+## The kiosk feed
+
+Any page can also join the wall display's rotation. In layout mode, tick
+**Kiosk** next to the page's skin and hero controls, set how many seconds it
+shows (5 to 3600), and choose a condition: **Always**, or **While anchored**
+to only show the page when the anchor watch is active. Unticking the box
+keeps the duration and condition it had, so re-ticking it later remembers
+both.
+
+A flagged page keeps its place in the ordinary page list; it is not moved
+anywhere, and nothing about how it renders changes outside the wall display
+itself. It gains a small monitor glyph next to its name, showing its
+duration, in both the sidebar and the page switcher; a page whose condition
+is "While anchored" also carries an anchor glyph.
+
+Opening **Wall display** in the sidebar loads `/kiosk` in a new tab: a
+fullscreen, chromeless view that cycles through every flagged page in page
+order, in the exact widget arrangement it already has. A page whose
+condition is "While anchored" drops out of the rotation the moment the
+anchor comes up, and rejoins once it goes down again, mid-lap rather than
+only on the next reload. An empty rotation (nothing flagged, or nothing whose
+condition currently holds) checks again every 15 seconds rather than sitting
+on a blank screen.
+
+The wall display shows a compact status pill for a lost connection or an
+active alarm, in place of the full banners the ordinary dashboard uses;
+those are absent whenever the feed is connected and quiet. This is meant for
+an unattended screen with no interaction of its own; there is no way to
+click into a page from `/kiosk`, and it is not part of the app's normal
+back/forward navigation.
+
+See [Set up a wall display](../how-to/set-up-a-wall-display.md) for
+mounting and orientation.
+
 ## Linking to a page
 
 The address bar tracks the current panel, so you can link directly to it.
@@ -103,6 +137,8 @@ The address bar tracks the current panel, so you can link directly to it.
 | `/alarms` | The alarms panel. |
 | `/settings` | Settings, General section. |
 | `/settings/<section id>` | Settings, that section. |
+| `/kiosk` | The wall display: fullscreen, no sidebar, cycling through every kiosk-flagged page. |
+| `/kiosk?rotate=180` | The wall display, rotated 180 degrees for a screen mounted upside down. |
 
 The first page uses `/` as its canonical address. If reordering changes which
 page is first, the address adjusts without switching the page you are viewing.
