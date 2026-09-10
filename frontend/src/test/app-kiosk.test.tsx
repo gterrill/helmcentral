@@ -12,6 +12,21 @@ import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
+import type { LampStripWidgetConfig } from '@/lib/dashboard-widgets'
+
+// A configured ribbon (ADR 0082), so "does it render" tests below are
+// actually exercising something: the ribbon is normally null in this test
+// file's default fetch stub, which would make its absence at /kiosk trivially
+// true rather than a real assertion.
+const RIBBON: LampStripWidgetConfig = {
+  title: 'Status',
+  lamps: [{ path: 'electrical.generator.state', label: 'GEN' }],
+  showCheck: false,
+}
+
+vi.mock('@/hooks/use-dashboard-ribbon', () => ({
+  useDashboardRibbon: () => ({ ribbon: RIBBON, loading: false, error: null, saveRibbon: vi.fn() }),
+}))
 
 vi.mock('@/hooks/use-auth', () => ({
   refreshAuthState: vi.fn().mockResolvedValue({ mode: 'none', user: null }),
@@ -344,6 +359,13 @@ describe('App at /kiosk', () => {
 
     expect(screen.getByTestId('kiosk-alarm-pill')).toHaveTextContent('1 alarm')
   })
+
+  it('does not render the pinned indicator ribbon, even when one is configured', () => {
+    window.history.replaceState({}, '', '/kiosk')
+    render(<App />)
+
+    expect(screen.queryByTestId('dashboard-ribbon')).not.toBeInTheDocument()
+  })
 })
 
 describe('App at / (kiosk authoring)', () => {
@@ -379,5 +401,12 @@ describe('App at / (kiosk authoring)', () => {
     // Switch to the unflagged page via the sidebar sub-list.
     fireEvent.click(screen.getByRole('button', { name: 'Other page' }))
     expect(screen.queryByTestId('kiosk-fold')).not.toBeInTheDocument()
+  })
+
+  it('renders the pinned indicator ribbon outside the kiosk route', () => {
+    window.history.replaceState({}, '', '/')
+    render(<App />)
+
+    expect(screen.getByTestId('dashboard-ribbon')).toBeInTheDocument()
   })
 })

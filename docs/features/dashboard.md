@@ -41,7 +41,11 @@ One strip of status lamps and a CHK rollup, pinned above the grid on every
 dashboard page, inside whatever skin that page uses. It is vessel-level: the
 same strip, the same order, wherever you look, so a glance always means the
 same thing. It does not appear on the Forecast, Routes, Charts, Radar, Anchor
-Watch or Settings panels; those rely on the alarm banner instead.
+Watch or Settings panels; those rely on the alarm banner instead. It also
+does not appear on the wall display (`/kiosk`): on a 360px-tall strip it
+costs about a third of the height for the least page-specific information on
+screen. A wall page that wants status lamps of its own adds a lamp-strip
+widget directly to that page instead of relying on the pinned ribbon.
 
 Its order never changes on its own. A lamp that trips does not jump to the
 front and a lamp that clears does not disappear, because the whole point of a
@@ -117,6 +121,12 @@ those are absent whenever the feed is connected and quiet. This is meant for
 an unattended screen with no interaction of its own; there is no way to
 click into a page from `/kiosk`, and it is not part of the app's normal
 back/forward navigation.
+
+`/kiosk` never renders the pinned indicator ribbon, whether or not one is
+configured, even on a page that shows it everywhere else it's viewed. See
+[The indicator ribbon](#the-indicator-ribbon) above. If a wall page needs
+lamps, add a lamp-strip widget to that page's own layout; it counts against
+the page's row budget and shows up on the fold guide like everything else.
 
 See [Set up a wall display](../how-to/set-up-a-wall-display.md) for
 mounting and orientation.

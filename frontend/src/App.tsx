@@ -1237,30 +1237,38 @@ export function App() {
         </div>
       )}
 
-      {/* relative so KioskFoldGuide (ADR 0089) can position itself against
-          exactly the content a kiosk page would show — the ribbon and hero
-          row count against the 344px fold budget just like every widget
-          does, so the guide has to sit above both, not just the grid. */}
-      <div className="relative">
-        {/* The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip
-            above the grid on every dashboard page and every width, inside the
-            page's own skin rather than among the app-theme banners — the same
-            slot ADR 0072 gave the hero row. Not part of effectiveWidgets, so it
-            never enters react-grid-layout's managed array. */}
-        {ribbon && (
-          <div data-testid="dashboard-ribbon" className="w-full min-w-0">
-            <LampStripTile
-              config={ribbon}
-              values={gaugeValues}
-              ages={gaugeAges}
-              worstAlarmState={worstAlarmState}
-              editing={layoutEditing}
-              onConfigure={() => setRibbonDialogOpen(true)}
-              onOpenAlarms={() => requestNavigate('alarms', () => setActivePanel('alarms'))}
-            />
-          </div>
-        )}
+      {/* The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip
+          above the grid on every dashboard page and every width, inside the
+          page's own skin rather than among the app-theme banners — the same
+          slot ADR 0072 gave the hero row. Not part of effectiveWidgets, so it
+          never enters react-grid-layout's managed array.
 
+          Never rendered at /kiosk (ADR 0089): on a 1920x360 strip it ran
+          about a third of the height and pushed a seven-row page below the
+          fold. The wall display gets nothing here for free; a page that
+          wants lamps on the wall adds its own lamp-strip widget, sized and
+          placed like any other tile, same as it would for any other
+          page-specific status row. */}
+      {!isKiosk && ribbon && (
+        <div data-testid="dashboard-ribbon" className="w-full min-w-0">
+          <LampStripTile
+            config={ribbon}
+            values={gaugeValues}
+            ages={gaugeAges}
+            worstAlarmState={worstAlarmState}
+            editing={layoutEditing}
+            onConfigure={() => setRibbonDialogOpen(true)}
+            onOpenAlarms={() => requestNavigate('alarms', () => setActivePanel('alarms'))}
+          />
+        </div>
+      )}
+
+      {/* relative so KioskFoldGuide (ADR 0089) can position itself against
+          exactly the content the kiosk route shows: the grid alone. The
+          ribbon sits outside this container (above) precisely because it no
+          longer counts against the fold budget — it never reaches the wall
+          at all. */}
+      <div className="relative">
         <DashboardBentoGrid
           widgets={effectiveWidgets}
           editing={layoutEditing}

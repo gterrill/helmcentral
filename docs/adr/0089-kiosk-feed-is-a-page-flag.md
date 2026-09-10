@@ -212,7 +212,35 @@ anything showing is unacknowledged, muted once everything has been but is
 still live, the same distinction `AlarmBanner` already draws. Both pills are
 absent entirely while the feed is connected and quiet.
 
-### 9. Phase 0 findings
+### 9. The pinned ribbon does not render at `/kiosk`
+
+A 1920x360 screenshot of the wall display showed the pinned indicator ribbon
+(ADR 0082) eating about a third of the strip's height on its own, pushing a
+seven-row page below the fold before a single tile had a chance to render.
+The ribbon buys its keep on a phone or a tablet screen, where 320-368px of
+grid still leaves plenty of vertical room underneath it; on a 344px budget it
+is by far the most expensive thing on the page for the least specific
+information, since it is deliberately the same vessel-wide strip everywhere.
+
+`isKiosk` now gates the ribbon block directly in `dashboardGrid`, alongside
+the ribbon's own null check, so it renders nothing at `/kiosk` regardless of
+whether one is configured. A page that wants status lamps on the wall adds
+its own lamp-strip widget in layout mode instead — the same widget type the
+ribbon itself wraps, sized and placed like any other tile on that one page,
+rather than the one vessel-wide strip every page shares. This does not
+change the ribbon anywhere else: it still pins above the grid on the
+ordinary dashboard, unmodified, for every page an operator navigates to by
+hand.
+
+`KioskFoldGuide` moved with it. It used to sit inside the same `relative`
+container as the ribbon, so its `topPx` measured 344px down from the
+ribbon's own top edge — correct while the ribbon counted against the
+budget, wrong now that it doesn't reach the wall at all. The guide's
+`relative` container now wraps only `DashboardBentoGrid`, so the dashed line
+an operator sees while authoring a kiosk page measures the fold from the top
+of the grid, matching what `/kiosk` will actually show.
+
+### 10. Phase 0 findings
 
 Before any of the above was worth building, a static probe page
 (`frontend/public/kiosk-probe.html`) checked whether the ODROID's WPE-webkit
@@ -242,6 +270,12 @@ it can change with a firmware update in a way this ADR's reasoning does not.
   ordinary dashboard page an operator navigates to by hand; the two uses do
   not interfere, because the flag changes nothing about how the page renders
   outside of `/kiosk`.
+- The pinned ribbon is the one exception to that last point: it renders on
+  every ordinary dashboard page and never renders on `/kiosk`, regardless of
+  whether that page is flagged. A page authored with the ribbon showing above
+  it will show one row fewer of grid once it reaches the wall; the fold guide
+  reflects that by measuring from the grid, not the ribbon. A wall-specific
+  status row is a lamp-strip widget placed on that one page, not the ribbon.
 - The frameless embed, the points-of-interest map and the purpose-built
   wall-display tiles (clock, current conditions, forecast days, sea state)
   remain open work, tracked separately from this decision.
