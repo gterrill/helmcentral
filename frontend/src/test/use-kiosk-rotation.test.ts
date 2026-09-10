@@ -113,7 +113,11 @@ describe('useKioskRotation', () => {
     expect(onShow).toHaveBeenLastCalledWith('x') // re-admitted
   })
 
-  it('polls every 15s while the feed is empty and starts once a page appears', async () => {
+  it('recovers immediately once pages become available, without waiting for the poll', async () => {
+    // Regression: on a real mount, useDashboardPages' own fetch is still in
+    // flight when this hook first runs, so `pages` starts as `[]`. Without
+    // reacting to that arriving, a kiosk that loads with an already-flagged
+    // page would show "nothing flagged" for up to 15s on every reload.
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     let pages: KioskEligiblePage[] = []
@@ -127,11 +131,29 @@ describe('useKioskRotation', () => {
 
     pages = [page('a')]
     rerender({ pages })
-    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
 
-    expect(refetch).toHaveBeenCalledTimes(1)
+    // No fake-timer advance at all: the page appears on the very next
+    // render, not on the next scheduled poll tick.
     expect(onShow).toHaveBeenCalledWith('a')
     expect(result.current.feedEmpty).toBe(false)
+    expect(refetch).not.toHaveBeenCalled()
+  })
+
+  it('polls with refetch every 15s while the feed stays empty with no local pages change', async () => {
+    // Covers the complementary case: a page gets flagged from another
+    // device, so nothing about this kiosk's own `pages` prop changes on its
+    // own. The interval has to actively ask the server itself.
+    const onShow = vi.fn()
+    const refetch = vi.fn().mockResolvedValue(undefined)
+    const pages: KioskEligiblePage[] = []
+    renderHook(() => useKioskRotation({ enabled: true, pages, anchored: false, pinnedPageId: null, refetch, onShow }))
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+    expect(refetch).toHaveBeenCalledTimes(1)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+    expect(refetch).toHaveBeenCalledTimes(2)
+    expect(onShow).not.toHaveBeenCalled()
   })
 
   it('pins one page and never advances', async () => {

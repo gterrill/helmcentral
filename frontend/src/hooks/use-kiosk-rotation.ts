@@ -64,6 +64,9 @@ export function useKioskRotation({
   // state updates are batched/async and advance() needs the id it last
   // scheduled against synchronously, on the very next tick.
   const currentIdRef = useRef<string | null>(null)
+  // Lets the "pages changed while empty" effect below trigger an immediate
+  // re-check without being a dependency of the main effect itself.
+  const advanceNowRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (!enabled) return
@@ -149,13 +152,32 @@ export function useKioskRotation({
       showPage(feed[nextIndex])
     }
 
+    advanceNowRef.current = () => { void advance() }
     void advance()
 
     return () => {
       cancelled = true
       clearScheduled()
+      advanceNowRef.current = null
     }
   }, [enabled, pinnedPageId])
+
+  // Closes the startup race: on mount, `pages` is still `[]` while
+  // useDashboardPages' own fetch is in flight, so the very first advance()
+  // above almost always finds an empty feed and commits to the 15s poll
+  // cadence in pollWhileEmpty(). Without this, a kiosk that loads with an
+  // already-flagged page would still show "nothing flagged" for up to 15
+  // seconds on every reload. This only ever fires while feedEmpty is
+  // already true, so it never disrupts a lap already in progress - the
+  // main effect's own deliberately narrow dependency array still governs
+  // that case.
+  useEffect(() => {
+    if (!enabled || pinnedPageId || !feedEmpty) return
+    advanceNowRef.current?.()
+    // pages is compared by reference (useDashboardPages hands back a new
+    // array on every fetch), so this only re-fires on an actual data
+    // change, not on every render.
+  }, [pages, feedEmpty, enabled, pinnedPageId])
 
   return { currentPageId, feedEmpty }
 }
