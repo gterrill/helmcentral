@@ -1,0 +1,131 @@
+import { render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+
+import { ClockTile } from '@/components/clock-tile'
+import { formatClock } from '@/hooks/use-vessel-identity'
+
+// formatClock renders in whatever timezone the test runner's Node process is
+// in (Intl.DateTimeFormat with no explicit timeZone), which fake-timing
+// Date.now() does not change - so every expectation below is derived from
+// formatClock itself rather than a hand-computed wall-clock string, and the
+// suite is timezone-independent by construction.
+function hhmmFor(date: Date) {
+  const [hh = '--', mm = '--'] = formatClock(date).timePart.split(':')
+  return `${hh}:${mm}`
+}
+
+const NOW = new Date('2026-06-14T14:32:07Z')
+
+// use-vessel-identity ticks a local clock every second and fetches
+// /api/vessel-state and /api/settings on mount - stub both so the tile
+// renders a deterministic time with no network noise.
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(NOW)
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }))
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+describe('ClockTile', () => {
+  test('renders the current time and date from the vessel clock', () => {
+    render(
+      <ClockTile
+        sunriseTime="6:02AM"
+        sunsetTime="7:41PM"
+        moonPhase="waxingGibbous"
+        placeName="Airlie Beach"
+        nextWaypoint={null}
+      />,
+    )
+
+    // formatClock is 12-hour with seconds; the tile drops the seconds for
+    // its hero readout, so only hh:mm and the meridiem are asserted.
+    expect(screen.getByText(hhmmFor(NOW))).toBeInTheDocument()
+    expect(screen.getByText(formatClock(NOW).meridiem)).toBeInTheDocument()
+  })
+
+  test('shows sunrise, sunset and moon phase when present', () => {
+    render(
+      <ClockTile
+        sunriseTime="6:02AM"
+        sunsetTime="7:41PM"
+        moonPhase="waxingGibbous"
+        placeName="Airlie Beach"
+        nextWaypoint={null}
+      />,
+    )
+
+    expect(screen.getByText('6:02AM')).toBeInTheDocument()
+    expect(screen.getByText('7:41PM')).toBeInTheDocument()
+    expect(screen.getByText(/Waxing Gibbous/)).toBeInTheDocument()
+  })
+
+  test('shows structural dashes for sunrise, sunset and moon when absent', () => {
+    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName={null} nextWaypoint={null} />)
+
+    // One dash for sunrise, one for sunset, one for moon, one for place, one for ETA.
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(5)
+  })
+
+  test('shows the place name in a chip', () => {
+    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName="Airlie Beach" nextWaypoint={null} />)
+    expect(screen.getByText('Airlie Beach')).toBeInTheDocument()
+  })
+
+  test('shows an ETA line with the waypoint label and time when a route is active', () => {
+    const etaAt = new Date('2026-06-14T18:05:00Z')
+    render(
+      <ClockTile
+        sunriseTime={null}
+        sunsetTime={null}
+        moonPhase={null}
+        placeName={null}
+        nextWaypoint={{ label: 'WP 3', etaAt, basis: 'sog' }}
+      />,
+    )
+
+    const eta = screen.getByTestId('clock-eta')
+    expect(eta).toHaveTextContent('ETA')
+    expect(eta).toHaveTextContent('WP 3')
+    expect(eta).toHaveTextContent(hhmmFor(etaAt))
+    expect(eta).not.toHaveTextContent(/plan/i)
+  })
+
+  test('marks a planning-speed ETA with a plan suffix', () => {
+    render(
+      <ClockTile
+        sunriseTime={null}
+        sunsetTime={null}
+        moonPhase={null}
+        placeName={null}
+        nextWaypoint={{ label: 'Mooloolaba', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' }}
+      />,
+    )
+
+    expect(screen.getByTestId('clock-eta')).toHaveTextContent(/plan/i)
+  })
+
+  test('shows the waypoint label with a dash for the time when no honest ETA exists', () => {
+    render(
+      <ClockTile
+        sunriseTime={null}
+        sunsetTime={null}
+        moonPhase={null}
+        placeName={null}
+        nextWaypoint={{ label: 'WP 1', etaAt: null, basis: 'plan' }}
+      />,
+    )
+
+    expect(screen.getByText(/WP 1/)).toBeInTheDocument()
+    expect(screen.getByTestId('clock-eta')).toHaveTextContent('—')
+  })
+
+  test('shows a structural dash for the ETA line when no route is active', () => {
+    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName={null} nextWaypoint={null} />)
+    expect(screen.getByTestId('clock-eta')).toHaveTextContent('—')
+  })
+})
