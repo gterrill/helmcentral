@@ -91,7 +91,7 @@ func TestBuildSettingsPayload_SurfacesUnregisteredTideProviderFromDisk(t *testin
 
 // TestNormalizeSettingsPayload_PersistsUnregisteredPOIProviderAsSubmitted
 // mirrors the tide-provider round-trip test above for poi_provider - added
-// alongside the poi plugin kind (docs/adr/0090).
+// alongside the poi plugin kind (docs/adr/0091).
 func TestNormalizeSettingsPayload_PersistsUnregisteredPOIProviderAsSubmitted(t *testing.T) {
 	req := settingsPayload{}
 	req.UI.POIProvider = "not-a-real-provider"

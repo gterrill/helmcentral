@@ -49,8 +49,9 @@ type pluginInfoResponse struct {
 
 // providerByTypeAndID dispatches providerType to the matching registry and
 // looks up id. validType=false means providerType itself isn't one of
-// tide/weather/wave/forecast-warnings; found=false (with validType=true)
-// means the type is valid but no such id is registered under it.
+// tide/weather/wave/poi/upper-air/forecast-warnings; found=false (with
+// validType=true) means the type is valid but no such id is registered
+// under it.
 // The "upper-air" case was missing from this switch until this change even
 // though upper_air_providers.go, main.go's route table and the Settings
 // provider machinery all treat it as a real domain - GET/POST/DELETE

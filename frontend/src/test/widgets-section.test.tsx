@@ -24,7 +24,7 @@ const mockedUsePOIProviders = vi.mocked(usePOIProviders)
 const mockedUseForecastWarningsProviders = vi.mocked(useForecastWarningsProviders)
 
 // The Nearby tab (ui.poi_provider) added alongside the poi plugin kind
-// (docs/adr/0090) - this guards the tab existing and rendering the
+// (docs/adr/0091) - this guards the tab existing and rendering the
 // registered POI providers, mirroring the existing tide/weather/wave/
 // forecast-warnings tabs' wiring in this same section.
 describe('WidgetsSection Nearby tab', () => {
