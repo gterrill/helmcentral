@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, test } from 'vitest'
 
 import {
@@ -277,5 +281,30 @@ describe('rewriteGaugePaths', () => {
   test('does not mutate the input', () => {
     rewriteGaugePaths(gauges, 'port', 'starboard')
     expect(gauges[0].path).toBe('propulsion.port.revolutions')
+  })
+})
+
+/**
+ * Go's JSON decoder drops any field/id it doesn't recognise, silently: a
+ * widget id present in the frontend's picker but missing from the backend's
+ * validDashboardWidgetIDs map is a 400 an operator only discovers by trying
+ * to save the page. Reads the backend source directly off disk (the same
+ * technique forecast-drawer.test.tsx's colour-token guards use) so the two
+ * lists can never drift apart without failing the suite immediately.
+ */
+describe('DASHBOARD_WIDGET_IDS backend parity', () => {
+  test('matches backend/dashboard_pages.go validDashboardWidgetIDs exactly', () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const source = readFileSync(resolve(testDir, '../../../backend/dashboard_pages.go'), 'utf8')
+
+    const start = source.indexOf('var validDashboardWidgetIDs = map[string]bool{')
+    expect(start, 'validDashboardWidgetIDs map not found in backend/dashboard_pages.go').toBeGreaterThan(-1)
+    const end = source.indexOf('}', start)
+    const block = source.slice(start, end)
+
+    const backendIds = [...block.matchAll(/"([a-z0-9-]+)":\s*true/g)].map((m) => m[1])
+
+    expect(backendIds.length, 'no widget ids parsed out of validDashboardWidgetIDs - regex or map shape changed').toBeGreaterThan(0)
+    expect(new Set(backendIds)).toEqual(new Set(DASHBOARD_WIDGET_IDS))
   })
 })

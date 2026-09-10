@@ -21,6 +21,10 @@ import { HotWaterTile } from '@/components/hot-water-tile'
 import { DepthTideTile } from '@/components/depth-tide-tile'
 import { PositionTile } from '@/components/position-tile'
 import { TodayNowTile } from '@/components/today-now-tile'
+import { ClockTile } from '@/components/clock-tile'
+import { CurrentConditionsTile } from '@/components/current-conditions-tile'
+import { ForecastDaysTile } from '@/components/forecast-days-tile'
+import { SeaStateTile } from '@/components/sea-state-tile'
 import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
@@ -63,6 +67,7 @@ import { useDashboardRibbon } from '@/hooks/use-dashboard-ribbon'
 import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
 import { useKioskRotation } from '@/hooks/use-kiosk-rotation'
 import { parseKioskOptions, KIOSK_FOLD_PX } from '@/lib/kiosk'
+import { nextWaypoint, etaToWaypoint } from '@/lib/next-waypoint'
 import { KioskShell } from '@/components/kiosk-shell'
 import { KioskFoldGuide } from '@/components/kiosk-fold-guide'
 import { PageKioskSelect } from '@/components/page-kiosk-select'
@@ -671,6 +676,19 @@ export function App() {
   )
   const { getSelfTrail, getAisTrails } = useServerTrails(5000)
   const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
+  // The clock wall-display tile's next-waypoint line (ADR 0092): the same
+  // pieces any other consumer of routeActivationStatus already has in scope,
+  // just combined once here rather than inside the tile itself, which has no
+  // reason to know about routes or route activation at all.
+  const clockNextWaypoint = useMemo(() => {
+    if (!routeActivationStatus || routeActivationStatus.state !== 'active' || routeActivationStatus.routeId === null) return null
+    const route = routes.find((r) => r.id === routeActivationStatus.routeId)
+    if (!route) return null
+    const waypoint = nextWaypoint(route, routeActivationStatus)
+    if (!waypoint || latitude === null || longitude === null) return null
+    const eta = etaToWaypoint(latitude, longitude, waypoint.waypoint, speedOverGroundKts, route.planning_speed_kts, new Date())
+    return { label: waypoint.label, etaAt: eta.etaAt, basis: eta.basis }
+  }, [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts])
   const depthTrend = useDepthTrend('3h', 60)
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
   const autopilot = useAutopilot()
@@ -1067,6 +1085,40 @@ export function App() {
             seaTemperatureF={waveSeaTemperatureF ?? null}
             distanceUnits={uiConfig.distanceUnits}
             onOpen={layoutEditing ? undefined : () => setActivePanel('forecast')}
+          />
+        )
+      case 'clock':
+        return (
+          <ClockTile
+            sunriseTime={forecast[0]?.sunriseTime ?? null}
+            sunsetTime={forecast[0]?.sunsetTime ?? null}
+            moonPhase={forecast[0]?.moonPhase ?? null}
+            placeName={placeName}
+            nextWaypoint={clockNextWaypoint}
+          />
+        )
+      case 'current-conditions':
+        return (
+          <CurrentConditionsTile
+            depth={depth}
+            depthLastUpdateAgeS={depthLastUpdateAgeS}
+            windSpeedApparentKts={windSpeedApparentKts}
+            maxGustKts={maxGustKts}
+            weather={weather}
+            forecast={forecast}
+            distanceUnits={uiConfig.distanceUnits}
+          />
+        )
+      case 'forecast-days':
+        return <ForecastDaysTile days={forecast} units={uiConfig.distanceUnits} />
+      case 'sea-state':
+        return (
+          <SeaStateTile
+            forecast={forecast}
+            waveForecastDays={waveForecastDays}
+            waveLoading={waveForecastLoading}
+            waveError={waveForecastError}
+            units={uiConfig.distanceUnits}
           />
         )
       case 'anchor-watch':

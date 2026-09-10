@@ -5,8 +5,10 @@ import {
   CLUSTER_WIDGET_CONSTRAINTS,
   GRID_MARGIN,
   GRID_ROW_HEIGHT,
+  WIDGET_CONSTRAINTS,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
+import { KIOSK_FOLD_PX } from '@/lib/kiosk'
 
 /**
  * A widget's minimum row count is the only thing standing between an operator
@@ -57,4 +59,29 @@ describe('the fuel rail', () => {
   test('needs a wider column than a bare cluster', () => {
     expect(CLUSTER_FUEL_MIN_W).toBeGreaterThan(CLUSTER_WIDGET_CONSTRAINTS.minW)
   })
+})
+
+/**
+ * The four wall-display tiles (ADR 0092). Each minH is small enough to fit
+ * inside the kiosk's seven-row, 344px fold budget on its own - a tile sized
+ * past that could never appear on the wall at all, only ever on the ordinary
+ * dashboard, which would defeat the point of building it for the wall.
+ */
+describe('the wall-display tiles', () => {
+  test.each([
+    ['clock', { minW: 2, minH: 6 }],
+    ['current-conditions', { minW: 3, minH: 6 }],
+    ['forecast-days', { minW: 3, minH: 4 }],
+    ['sea-state', { minW: 4, minH: 5 }],
+  ] as const)('%s has the constraint the wall-display layout was authored against', (id, expected) => {
+    expect(WIDGET_CONSTRAINTS[id]).toEqual(expected)
+  })
+
+  test.each(['clock', 'current-conditions', 'forecast-days', 'sea-state'] as const)(
+    '%s fits inside the kiosk fold on its own',
+    (id) => {
+      const minH = WIDGET_CONSTRAINTS[id]!.minH!
+      expect(gridPixelHeight(minH)).toBeLessThanOrEqual(KIOSK_FOLD_PX)
+    },
+  )
 })

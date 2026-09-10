@@ -73,7 +73,7 @@ const CLUSTER_WIDGET_CONSTRAINTS = {
  */
 export const CLUSTER_FUEL_MIN_W = 5
 
-export { CLUSTER_WIDGET_CONSTRAINTS }
+export { CLUSTER_WIDGET_CONSTRAINTS, WIDGET_CONSTRAINTS }
 
 const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?: number }>> = {
   'vessel': { minW: 4, minH: 2 },
@@ -93,6 +93,13 @@ const WIDGET_CONSTRAINTS: Partial<Record<BuiltinWidgetId, { minW?: number; minH?
   'czone-switches': { minW: 2, minH: 3 },
   // The control pad needs finger-sized hold-to-confirm targets (ADR 0041).
   'autopilot': { minW: 4, minH: 6 },
+  // Wall-display tiles (ADR 0092). Sizes come from what each tile's content
+  // actually needs at the 1920x360 kiosk strip's 7-row budget, not from the
+  // general density scale the rest of this table follows.
+  'clock': { minW: 2, minH: 6 },
+  'current-conditions': { minW: 3, minH: 6 },
+  'forecast-days': { minW: 3, minH: 4 },
+  'sea-state': { minW: 4, minH: 5 },
 }
 
 // The hero's uniform enlargement (ADR 0072). Applied as a CSS transform rather

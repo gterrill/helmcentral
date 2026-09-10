@@ -16,6 +16,10 @@ export const DASHBOARD_WIDGET_IDS = [
   'czone-switches',
   'hot-water',
   'autopilot',
+  'clock',
+  'current-conditions',
+  'forecast-days',
+  'sea-state',
 ] as const
 
 /** A widget baked into the app, with a fixed id and at most one instance per page. */
@@ -69,6 +73,10 @@ export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'czone-switches': 'Switches',
   'hot-water': 'Hot Water',
   'autopilot': 'Autopilot',
+  'clock': 'Clock',
+  'current-conditions': 'Current Conditions',
+  'forecast-days': 'Forecast',
+  'sea-state': 'Sea State',
 }
 
 export interface EmbedWidgetConfig {
