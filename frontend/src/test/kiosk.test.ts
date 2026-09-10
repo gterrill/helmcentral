@@ -1,0 +1,109 @@
+import { describe, it, expect } from 'vitest'
+import {
+  KIOSK_FOLD_PX,
+  kioskRowsThatFit,
+  parseKioskOptions,
+  kioskFeed,
+  nextKioskIndex,
+  type KioskEligiblePage,
+} from '@/lib/kiosk'
+import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
+
+const WIDGET: DashboardLayoutItem = { id: 'depth-tide', x: 0, y: 0, w: 4, h: 7 }
+
+function page(id: string, overrides: Partial<KioskEligiblePage> = {}): KioskEligiblePage {
+  return { id, widgets: [WIDGET], ...overrides }
+}
+
+describe('kioskRowsThatFit', () => {
+  it('fits 7 rows into the 344px fold budget', () => {
+    expect(KIOSK_FOLD_PX).toBe(344)
+    expect(kioskRowsThatFit(KIOSK_FOLD_PX)).toBe(7)
+  })
+
+  it('fits exactly 7 rows at 320px and not yet 8 at 344px', () => {
+    expect(kioskRowsThatFit(320)).toBe(7)
+    expect(kioskRowsThatFit(344)).toBe(7)
+  })
+
+  it('fits 8 rows once the budget reaches 368px', () => {
+    expect(kioskRowsThatFit(368)).toBe(8)
+  })
+})
+
+describe('parseKioskOptions', () => {
+  it('defaults to no rotation and no pinned page', () => {
+    expect(parseKioskOptions('')).toEqual({ rotate: 0, pageId: null })
+  })
+
+  it('rotates only on the literal value 180', () => {
+    expect(parseKioskOptions('?rotate=180')).toEqual({ rotate: 180, pageId: null })
+    expect(parseKioskOptions('?rotate=90')).toEqual({ rotate: 0, pageId: null })
+    expect(parseKioskOptions('?rotate=-180')).toEqual({ rotate: 0, pageId: null })
+  })
+
+  it('pins a page from ?page=', () => {
+    expect(parseKioskOptions('?page=abc-123')).toEqual({ rotate: 0, pageId: 'abc-123' })
+  })
+
+  it('reads both together', () => {
+    expect(parseKioskOptions('?rotate=180&page=abc-123')).toEqual({ rotate: 180, pageId: 'abc-123' })
+  })
+})
+
+describe('kioskFeed', () => {
+  it('keeps only pages flagged kiosk with a positive duration and at least one widget', () => {
+    const pages = [
+      page('a', { kiosk: true, kiosk_seconds: 30 }),
+      page('b', { kiosk: false, kiosk_seconds: 30 }),
+      page('c', { kiosk: true, kiosk_seconds: 0 }),
+      page('d', { kiosk: true, kiosk_seconds: 30, widgets: [] }),
+    ]
+    expect(kioskFeed(pages, { anchored: false }).map((p) => p.id)).toEqual(['a'])
+  })
+
+  it('preserves the given (server) order', () => {
+    const pages = [
+      page('z', { kiosk: true, kiosk_seconds: 10 }),
+      page('a', { kiosk: true, kiosk_seconds: 10 }),
+    ]
+    expect(kioskFeed(pages, { anchored: false }).map((p) => p.id)).toEqual(['z', 'a'])
+  })
+
+  it('excludes an anchored-only page when the anchor is not down', () => {
+    const pages = [page('a', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'anchored' })]
+    expect(kioskFeed(pages, { anchored: false })).toEqual([])
+    expect(kioskFeed(pages, { anchored: true }).map((p) => p.id)).toEqual(['a'])
+  })
+
+  it('includes an "always" or unset condition regardless of anchor state', () => {
+    const pages = [
+      page('a', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'always' }),
+      page('b', { kiosk: true, kiosk_seconds: 10 }),
+    ]
+    expect(kioskFeed(pages, { anchored: false }).map((p) => p.id)).toEqual(['a', 'b'])
+    expect(kioskFeed(pages, { anchored: true }).map((p) => p.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('nextKioskIndex', () => {
+  const feed = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+
+  it('advances to the next index', () => {
+    expect(nextKioskIndex(feed, 'a')).toBe(1)
+    expect(nextKioskIndex(feed, 'b')).toBe(2)
+  })
+
+  it('wraps around at the end', () => {
+    expect(nextKioskIndex(feed, 'c')).toBe(0)
+  })
+
+  it('restarts at 0 when the current id has vanished from the feed', () => {
+    expect(nextKioskIndex(feed, 'zzz')).toBe(0)
+    expect(nextKioskIndex(feed, null)).toBe(0)
+  })
+
+  it('returns -1 for an empty feed', () => {
+    expect(nextKioskIndex([], 'a')).toBe(-1)
+  })
+})

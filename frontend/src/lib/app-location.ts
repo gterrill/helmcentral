@@ -7,7 +7,7 @@ import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings
 // Pure and React-free so it can be unit tested without mounting anything,
 // and so PANEL_IDS can be validated here without importing App.tsx (which
 // would create a cycle: App needs the parser, the parser must not need App).
-export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'settings'] as const
+export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'settings', 'kiosk'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface AppLocation {
