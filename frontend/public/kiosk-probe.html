@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kiosk device probe</title>
+<style>
+  /* Deliberately plain: this page exists to tell us what the device's
+     browser actually supports before any app code runs on it, so it must
+     not depend on anything the probe itself is checking for (no :has(),
+     no structuredClone, nothing from the build). */
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0b0b0b;
+    color: #f5f5f5;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  body.rotate-180 {
+    transform: rotate(180deg);
+    transform-origin: center center;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #9aa0a6;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  td {
+    padding: 8px 16px;
+    border-top: 1px solid #333;
+    vertical-align: middle;
+  }
+  td.label {
+    font-size: 16px;
+    color: #d0d0d0;
+  }
+  td.detail {
+    font-size: 12px;
+    color: #888;
+  }
+  td.result {
+    font-size: 48px;
+    font-weight: 700;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .pass { color: #2ecc71; }
+  .fail { color: #e74c3c; }
+  .info { color: #f1c40f; }
+  #ua {
+    margin: 16px;
+    font-size: 12px;
+    color: #888;
+    word-break: break-all;
+  }
+  #helmcam-wrap {
+    margin: 16px;
+  }
+  #helmcam-wrap iframe {
+    width: 480px;
+    height: 270px;
+    border: 1px solid #333;
+    background: #000;
+  }
+</style>
+</head>
+<body>
+<h1>Kiosk device probe</h1>
+<table id="results"></table>
+<div id="ua"></div>
+<div id="helmcam-wrap"></div>
+<script>
+(function () {
+  // Checks 1-6 of Phase 0 (plan: delightful-drifting-anchor). Check 7 (an
+  // actual /routes render on the device, panned by hand for 60s to judge
+  // frame rate) is manual and not attempted here.
+  var params = new URLSearchParams(location.search);
+  var rotated = params.get('rotate') === '180';
+  if (rotated) document.body.classList.add('rotate-180');
+
+  var rows = document.getElementById('results');
+
+  function addRow(label, status, detail) {
+    // status: 'pass' | 'fail' | 'info'
+    var tr = document.createElement('tr');
+    var tdLabel = document.createElement('td');
+    tdLabel.className = 'label';
+    tdLabel.textContent = label;
+    var tdDetail = document.createElement('td');
+    tdDetail.className = 'detail';
+    tdDetail.textContent = detail || '';
+    var tdResult = document.createElement('td');
+    tdResult.className = 'result ' + status;
+    tdResult.textContent = status === 'pass' ? 'PASS' : status === 'fail' ? 'FAIL' : 'INFO';
+    tr.appendChild(tdLabel);
+    tr.appendChild(tdDetail);
+    tr.appendChild(tdResult);
+    rows.appendChild(tr);
+  }
+
+  // 1. WebGL2 + renderer string. A software renderer (SwiftShader, llvmpipe)
+  // counts as a fail for the map pages even though the context itself opens.
+  (function checkWebGL2() {
+    var canvas = document.createElement('canvas');
+    var gl = null;
+    try {
+      gl = canvas.getContext('webgl2');
+    } catch (e) {
+      gl = null;
+    }
+    if (!gl) {
+      addRow('WebGL2 context', 'fail', 'no webgl2 context available');
+      return;
+    }
+    var renderer = 'unknown';
+    var ext = gl.getExtension('WEBGL_debug_renderer_info');
+    if (ext) {
+      renderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+    } else {
+      renderer = gl.getParameter(gl.RENDERER);
+    }
+    var isSoftware = /swiftshader|llvmpipe|software/i.test(String(renderer));
+    addRow('WebGL2 context', isSoftware ? 'fail' : 'pass', 'renderer: ' + renderer + (isSoftware ? ' (software - fails the map pages)' : ''));
+  })();
+
+  // 2. :has() selector support.
+  (function checkHas() {
+    var ok = false;
+    try {
+      ok = CSS.supports('selector(:has(*))');
+    } catch (e) {
+      ok = false;
+    }
+    addRow(':has() selector', ok ? 'pass' : 'fail', "CSS.supports('selector(:has(*))')");
+  })();
+
+  // 3. 100svh support. Informational only: the kiosk root uses fixed
+  // inset-0, not svh, so this does not gate the decision either way.
+  (function checkSvh() {
+    var ok = false;
+    try {
+      ok = CSS.supports('height: 100svh');
+    } catch (e) {
+      ok = false;
+    }
+    addRow('100svh unit', 'info', "informational only, kiosk root uses fixed inset-0 (supported: " + ok + ")");
+  })();
+
+  // 4. structuredClone.
+  (function checkStructuredClone() {
+    var ok = typeof structuredClone === 'function';
+    addRow('structuredClone', ok ? 'pass' : 'fail', "typeof structuredClone === 'function'");
+  })();
+
+  // 5. EventSource, ResizeObserver, matchMedia, Intl timezone.
+  (function checkMisc() {
+    var hasEventSource = typeof EventSource === 'function';
+    addRow('EventSource', hasEventSource ? 'pass' : 'fail', 'used by the telemetry stream (ADR 0037)');
+
+    var hasResizeObserver = typeof ResizeObserver === 'function';
+    addRow('ResizeObserver', hasResizeObserver ? 'pass' : 'fail', 'used for responsive tile scaling');
+
+    var hasMatchMedia = typeof matchMedia === 'function';
+    addRow('matchMedia', hasMatchMedia ? 'pass' : 'fail', 'used for breakpoint and theme detection');
+
+    var tz = null;
+    var hasTz = false;
+    try {
+      tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      hasTz = typeof tz === 'string' && tz.length > 0;
+    } catch (e) {
+      hasTz = false;
+    }
+    addRow('Intl timezone', hasTz ? 'pass' : 'fail', 'resolved: ' + tz);
+  })();
+
+  // 6. Rotation + helmcam embed, only when ?rotate=180 is present. The
+  // manual part (stop helmcam for 60s, confirm frames resume without a
+  // reload) is done by eye against this iframe; this page only sets up the
+  // rotated embed to look at.
+  if (rotated) {
+    var wrap = document.getElementById('helmcam-wrap');
+    var note = document.createElement('p');
+    note.className = 'detail';
+    note.textContent = 'rotate=180 active. helmcam embed below - stop the feed for 60s, restore it, and confirm the frame resumes without reloading this page.';
+    wrap.appendChild(note);
+    var iframe = document.createElement('iframe');
+    iframe.src = 'http://192.168.50.170:8080/main?kiosk=1';
+    iframe.title = 'helmcam';
+    wrap.appendChild(iframe);
+  }
+
+  document.getElementById('ua').textContent = navigator.userAgent;
+})();
+</script>
+</body>
+</html>
