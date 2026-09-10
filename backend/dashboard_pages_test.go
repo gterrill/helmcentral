@@ -1358,6 +1358,20 @@ func TestValidateDashboardWidgets_AcceptsAutopilotBuiltin(t *testing.T) {
 	}
 }
 
+// radar-targets has been a real frontend widget (frontend/src/lib/dashboard-widgets.ts,
+// rendered by App.tsx's renderWidget and constrained in dashboard-bento-grid.tsx)
+// since before this test existed, but was never added to this map - a latent
+// 400 on save for any page that placed it. The four wall-display tiles are new
+// in the same change that fixes that gap.
+func TestValidateDashboardWidgets_AcceptsWallDisplayAndRadarTargetsBuiltins(t *testing.T) {
+	for _, id := range []string{"radar-targets", "clock", "current-conditions", "forecast-days", "sea-state"} {
+		widgets := []dashboardLayoutItem{{ID: id, X: 0, Y: 0, W: 4, H: 6}}
+		if msg := validateDashboardWidgets(widgets); msg != "" {
+			t.Errorf("expected builtin id %q to be accepted, got %q", id, msg)
+		}
+	}
+}
+
 func TestValidateDashboardWidgets_RejectsEmbedConfigOnAutopilotWidget(t *testing.T) {
 	widgets := []dashboardLayoutItem{
 		{ID: "autopilot", X: 0, Y: 0, W: 4, H: 6, Embed: &dashboardEmbedConfig{URL: "https://grafana.local/a"}},
