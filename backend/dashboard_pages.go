@@ -125,6 +125,43 @@ var validClusterFuelSides = map[string]bool{"left": true, "right": true}
 
 var validPageSkins = map[string]bool{"": true, "default": true, "instrument": true}
 
+// Kiosk fields (ADR 0089) turn an ordinary page into one that can appear in
+// the wall-display rotation at /kiosk: a bool flag, how long it shows, and
+// an optional condition. kioskSecondsMin/Max bound the duration to something
+// a human will actually notice cycle; 5s is fast but visible, 3600s (an
+// hour) is long enough that "kiosk" without a duration would just mean
+// "forever" by another name, which is what the zero value already means.
+const (
+	kioskSecondsMin = 5
+	kioskSecondsMax = 3600
+)
+
+// Empty means "always" - an unset page needs no value, matching skin and
+// hero's own empty-string-means-default convention.
+var validKioskWhen = map[string]bool{"": true, "always": true, "anchored": true}
+
+// validateKioskFields holds the rules for the three kiosk fields together,
+// shared by create (an all-at-once body) and patch (a field-by-field
+// rebuild, see patchDashboardPageHandler) so both fail closed the same way.
+//
+// seconds is validated whenever it is non-zero, independent of the kiosk
+// flag: a stored duration that survives an untick (see patch's carry-forward
+// comment) must already have been a valid one, and a caller setting seconds
+// without also setting kiosk in the same request should not be able to smuggle
+// in a value that would be rejected the moment kiosk actually flips on.
+func validateKioskFields(kiosk bool, seconds int, when string) string {
+	if !validKioskWhen[when] {
+		return "unknown kiosk condition: " + when
+	}
+	if seconds != 0 && (seconds < kioskSecondsMin || seconds > kioskSecondsMax) {
+		return fmt.Sprintf("kiosk_seconds must be between %d and %d", kioskSecondsMin, kioskSecondsMax)
+	}
+	if kiosk && seconds == 0 {
+		return "kiosk requires kiosk_seconds"
+	}
+	return ""
+}
+
 // heroWidgetExists reports whether hero is unset, or names a widget actually
 // present in widgets. Shared by create and patch so both fail closed the same
 // way (ADR 0072, following the precedent ADR 0060 set for skin).
@@ -302,10 +339,20 @@ type dashboardPageData struct {
 	// a widgets-only patch that removes the hero's own widget clears it
 	// automatically rather than failing an otherwise-ordinary widget removal
 	// (see patchDashboardPageHandler).
-	Hero      string                `json:"hero,omitempty"`
-	Widgets   []dashboardLayoutItem `json:"widgets"`
-	CreatedAt time.Time             `json:"created_at"`
-	UpdatedAt time.Time             `json:"updated_at"`
+	Hero string `json:"hero,omitempty"`
+	// Kiosk fields (ADR 0089): Kiosk marks this page as part of the wall
+	// display rotation at /kiosk; KioskSeconds is how long it shows before
+	// the rotation advances; KioskWhen is an optional condition ("anchored"
+	// restricts the page to while the anchor watch is active, empty means
+	// always). omitempty on all three keeps existing files byte-identical -
+	// an unflagged page never gains any of these keys just because the
+	// struct grew them.
+	Kiosk        bool                  `json:"kiosk,omitempty"`
+	KioskSeconds int                   `json:"kiosk_seconds,omitempty"`
+	KioskWhen    string                `json:"kiosk_when,omitempty"`
+	Widgets      []dashboardLayoutItem `json:"widgets"`
+	CreatedAt    time.Time             `json:"created_at"`
+	UpdatedAt    time.Time             `json:"updated_at"`
 }
 
 type dashboardPagesFile struct {
@@ -631,10 +678,13 @@ func reorderDashboardPagesHandler(c echo.Context) error {
 // POST /api/dashboard-pages
 func createDashboardPageHandler(c echo.Context) error {
 	var body struct {
-		Name    string                `json:"name"`
-		Skin    string                `json:"skin"`
-		Hero    string                `json:"hero"`
-		Widgets []dashboardLayoutItem `json:"widgets"`
+		Name         string                `json:"name"`
+		Skin         string                `json:"skin"`
+		Hero         string                `json:"hero"`
+		Kiosk        bool                  `json:"kiosk"`
+		KioskSeconds int                   `json:"kiosk_seconds"`
+		KioskWhen    string                `json:"kiosk_when"`
+		Widgets      []dashboardLayoutItem `json:"widgets"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -646,6 +696,9 @@ func createDashboardPageHandler(c echo.Context) error {
 	}
 	if !validPageSkins[body.Skin] {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown page skin: " + body.Skin})
+	}
+	if msg := validateKioskFields(body.Kiosk, body.KioskSeconds, body.KioskWhen); msg != "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 
 	// Handle nil slice: ensure it's an empty slice for consistency
@@ -663,13 +716,16 @@ func createDashboardPageHandler(c echo.Context) error {
 
 	now := time.Now().UTC()
 	page := &dashboardPageData{
-		ID:        uuid.NewString(),
-		Name:      name,
-		Skin:      body.Skin,
-		Hero:      body.Hero,
-		Widgets:   body.Widgets,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:           uuid.NewString(),
+		Name:         name,
+		Skin:         body.Skin,
+		Hero:         body.Hero,
+		Kiosk:        body.Kiosk,
+		KioskSeconds: body.KioskSeconds,
+		KioskWhen:    body.KioskWhen,
+		Widgets:      body.Widgets,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	dashboardPagesMu.Lock()
@@ -708,15 +764,19 @@ func patchDashboardPageHandler(c echo.Context) error {
 	id := c.Param("id")
 
 	var body struct {
-		Name    *string                `json:"name"`
-		Skin    *string                `json:"skin"`
-		Hero    *string                `json:"hero"`
-		Widgets *[]dashboardLayoutItem `json:"widgets"`
+		Name         *string                `json:"name"`
+		Skin         *string                `json:"skin"`
+		Hero         *string                `json:"hero"`
+		Kiosk        *bool                  `json:"kiosk"`
+		KioskSeconds *int                   `json:"kiosk_seconds"`
+		KioskWhen    *string                `json:"kiosk_when"`
+		Widgets      *[]dashboardLayoutItem `json:"widgets"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if body.Name == nil && body.Skin == nil && body.Hero == nil && body.Widgets == nil {
+	if body.Name == nil && body.Skin == nil && body.Hero == nil && body.Widgets == nil &&
+		body.Kiosk == nil && body.KioskSeconds == nil && body.KioskWhen == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
@@ -750,14 +810,17 @@ func patchDashboardPageHandler(c echo.Context) error {
 	}
 
 	updated := &dashboardPageData{
-		ID:        current.ID,
-		Name:      current.Name,
-		Position:  current.Position,
-		Skin:      current.Skin,
-		Hero:      current.Hero,
-		Widgets:   current.Widgets,
-		CreatedAt: current.CreatedAt,
-		UpdatedAt: time.Now().UTC(),
+		ID:           current.ID,
+		Name:         current.Name,
+		Position:     current.Position,
+		Skin:         current.Skin,
+		Hero:         current.Hero,
+		Kiosk:        current.Kiosk,
+		KioskSeconds: current.KioskSeconds,
+		KioskWhen:    current.KioskWhen,
+		Widgets:      current.Widgets,
+		CreatedAt:    current.CreatedAt,
+		UpdatedAt:    time.Now().UTC(),
 	}
 	if body.Name != nil {
 		updated.Name = strings.TrimSpace(*body.Name)
@@ -768,8 +831,26 @@ func patchDashboardPageHandler(c echo.Context) error {
 	if body.Hero != nil {
 		updated.Hero = *body.Hero
 	}
+	if body.Kiosk != nil {
+		updated.Kiosk = *body.Kiosk
+	}
+	if body.KioskSeconds != nil {
+		updated.KioskSeconds = *body.KioskSeconds
+	}
+	if body.KioskWhen != nil {
+		updated.KioskWhen = *body.KioskWhen
+	}
 	if body.Widgets != nil {
 		updated.Widgets = *body.Widgets
+	}
+	// Validated on the merged triple, not the raw patch fields: {"kiosk":true}
+	// alone must succeed when seconds are already on record from an earlier
+	// save, and {"kiosk":false} alone must leave seconds and condition alone
+	// so re-ticking the box remembers them (see the carry-forward above) -
+	// neither of those is visible from body.Kiosk/body.KioskSeconds/body.KioskWhen
+	// in isolation.
+	if msg := validateKioskFields(updated.Kiosk, updated.KioskSeconds, updated.KioskWhen); msg != "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 	// A hero not named explicitly in this patch can still be orphaned by it,
 	// e.g. a widgets-only patch that drops the widget that was the hero (this

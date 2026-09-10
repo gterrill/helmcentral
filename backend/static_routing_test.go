@@ -95,3 +95,35 @@ func TestStaticHandler_APIRoutesStillWin(t *testing.T) {
 		t.Errorf("GET /api/health = %d, want 200", rec.Code)
 	}
 }
+
+// TestStaticHandler_ShellIsNoCache guards a kiosk that runs for days and
+// reloads: a cached shell would keep naming /assets/* files a later deploy
+// has already deleted, a blank screen with nothing in any log to say why.
+func TestStaticHandler_ShellIsNoCache(t *testing.T) {
+	e := echo.New()
+	registerStaticHandlerFS(e, testDistFS())
+
+	for _, path := range []string{"/", "/anchor"} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+			t.Errorf("GET %s Cache-Control = %q, want %q", path, cc, "no-cache")
+		}
+	}
+}
+
+// TestStaticHandler_HashedAssetsAreNotNoCache guards the other half: a real
+// asset must keep whatever caching http.FileServer already gives it, not the
+// shell's no-cache header.
+func TestStaticHandler_HashedAssetsAreNotNoCache(t *testing.T) {
+	e := echo.New()
+	registerStaticHandlerFS(e, testDistFS())
+
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-abc.js", nil))
+
+	if cc := rec.Header().Get("Cache-Control"); cc == "no-cache" {
+		t.Errorf("GET /assets/index-abc.js Cache-Control = %q, want anything but no-cache", cc)
+	}
+}

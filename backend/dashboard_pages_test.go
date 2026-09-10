@@ -2401,3 +2401,269 @@ func TestClusterFuelRailRoundTripsEveryRenderedField(t *testing.T) {
 		t.Errorf("level zones did not survive: %v", got.Bars[0].Level.Zones)
 	}
 }
+
+// ── kiosk fields (ADR 0089) ──────────────────────────────────────────────
+//
+// Kiosk fields turn an ordinary page into one that can appear in the wall
+// display rotation at /kiosk: a bool flag, a duration and an optional
+// condition. They follow the same validate-fail-closed pattern ADR 0060
+// established for skin and ADR 0072 established for hero, with the added
+// wrinkle that the three fields are validated together (see
+// validateKioskFields and its call sites).
+
+func TestDashboardPages_KioskRoundTripsThroughPostAndGet(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Wall: Engines",
+		"widgets":       sampleDashboardWidgets(),
+		"kiosk":         true,
+		"kiosk_seconds": 30,
+		"kiosk_when":    "anchored",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+	if !page.Kiosk || page.KioskSeconds != 30 || page.KioskWhen != "anchored" {
+		t.Fatalf("expected kiosk fields to round-trip on create, got kiosk=%v seconds=%d when=%q", page.Kiosk, page.KioskSeconds, page.KioskWhen)
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodGet, "/api/dashboard-pages/"+page.ID, nil)
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := getDashboardPageHandler(c2); err != nil {
+		t.Fatalf("getDashboardPageHandler returned error: %v", err)
+	}
+	var fetched dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("failed to parse get response: %v", err)
+	}
+	if !fetched.Kiosk || fetched.KioskSeconds != 30 || fetched.KioskWhen != "anchored" {
+		t.Fatalf("expected kiosk fields to round-trip through GET, got kiosk=%v seconds=%d when=%q", fetched.Kiosk, fetched.KioskSeconds, fetched.KioskWhen)
+	}
+}
+
+func TestCreateDashboardPageHandler_RejectsKioskWithoutSeconds(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":    "No Duration",
+		"widgets": sampleDashboardWidgets(),
+		"kiosk":   true,
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateDashboardPageHandler_RejectsKioskSecondsOutOfRange(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	for _, seconds := range []int{4, 3601} {
+		c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+			"name":          "Bad Duration",
+			"widgets":       sampleDashboardWidgets(),
+			"kiosk":         true,
+			"kiosk_seconds": seconds,
+		})
+		if err := createDashboardPageHandler(c); err != nil {
+			t.Fatalf("createDashboardPageHandler returned error: %v", err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("kiosk_seconds=%d: expected status %d, got %d: %s", seconds, http.StatusBadRequest, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestCreateDashboardPageHandler_RejectsUnknownKioskWhen(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Bad Condition",
+		"widgets":       sampleDashboardWidgets(),
+		"kiosk":         true,
+		"kiosk_seconds": 30,
+		"kiosk_when":    "underway",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestPatchDashboardPageHandler_KioskOnlyPatchSucceedsAndReusesStoredSeconds(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Cluster preview",
+		"widgets":       sampleDashboardWidgets(),
+		"kiosk":         true,
+		"kiosk_seconds": 45,
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+
+	// Untick, then re-tick with no seconds in the body at all - a kiosk-only
+	// patch has neither name, skin, hero nor widgets, so it must not trip the
+	// "no patch fields provided" guard, and it must reuse the 45s already on
+	// record rather than requiring the caller to resend it.
+	c1, rec1 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"kiosk": false,
+	})
+	c1.SetParamNames("id")
+	c1.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c1); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec1.Code, rec1.Body.String())
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"kiosk": true,
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
+	}
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if !updated.Kiosk || updated.KioskSeconds != 45 {
+		t.Fatalf("expected kiosk to reuse the stored 45s duration, got kiosk=%v seconds=%d", updated.Kiosk, updated.KioskSeconds)
+	}
+}
+
+func TestPatchDashboardPageHandler_RejectsKioskTrueWithNoStoredSeconds(t *testing.T) {
+	setupDashboardPagesTest(t)
+	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"kiosk": true,
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestPatchDashboardPageHandler_WidgetsOnlyPatchPreservesKioskFields(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Cluster preview",
+		"widgets":       sampleDashboardWidgets(),
+		"kiosk":         true,
+		"kiosk_seconds": 30,
+		"kiosk_when":    "anchored",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"widgets": sampleDashboardWidgets(),
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
+	}
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if !updated.Kiosk || updated.KioskSeconds != 30 || updated.KioskWhen != "anchored" {
+		t.Fatalf("expected kiosk fields to survive a widgets-only patch, got kiosk=%v seconds=%d when=%q", updated.Kiosk, updated.KioskSeconds, updated.KioskWhen)
+	}
+}
+
+func TestPatchDashboardPageHandler_UntickKeepsSecondsAndCondition(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Cluster preview",
+		"widgets":       sampleDashboardWidgets(),
+		"kiosk":         true,
+		"kiosk_seconds": 60,
+		"kiosk_when":    "anchored",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"kiosk": false,
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
+	}
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.Kiosk {
+		t.Fatal("expected kiosk to be false after untick")
+	}
+	if updated.KioskSeconds != 60 || updated.KioskWhen != "anchored" {
+		t.Fatalf("expected untick to remember seconds and condition, got seconds=%d when=%q", updated.KioskSeconds, updated.KioskWhen)
+	}
+}
+
+// omitempty keeps existing dashboard-pages.json files byte-identical: an
+// unflagged page must not gain "kiosk"/"kiosk_seconds"/"kiosk_when" keys
+// just because the struct grew them, mirroring
+// TestDashboardLayoutItem_OmitsEmbedKeyWhenAbsent.
+func TestDashboardPageData_OmitsKioskKeysWhenUnset(t *testing.T) {
+	encoded, err := json.Marshal(dashboardPageData{ID: "p1", Name: "Anchored", Widgets: []dashboardLayoutItem{}})
+	if err != nil {
+		t.Fatalf("failed to marshal page: %v", err)
+	}
+	for _, key := range []string{"kiosk", "kiosk_seconds", "kiosk_when"} {
+		if strings.Contains(string(encoded), `"`+key+`"`) {
+			t.Fatalf("expected no %q key for an unflagged page, got %s", key, encoded)
+		}
+	}
+}

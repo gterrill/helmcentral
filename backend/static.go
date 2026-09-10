@@ -47,6 +47,7 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 
 	serve := func(c echo.Context) error {
 		reqPath := strings.TrimPrefix(c.Request().URL.Path, "/")
+		isShell := true
 		if reqPath != "" {
 			f, openErr := distFS.Open(reqPath)
 			if openErr != nil {
@@ -58,9 +59,21 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 				c.Request().URL.Path = "/"
 			} else {
 				f.Close()
+				isShell = false
 			}
 		}
 
+		// The shell (index.html, served at "/" and at every unmatched deep
+		// link) references hashed /assets/* files by name. A kiosk left
+		// running for days reloads its tab far more often than a phone
+		// bookmark does, and a cached shell from before the last deploy
+		// names assets that no longer exist on disk - a blank kiosk screen
+		// with nothing in any log to say why. Hashed assets are unaffected:
+		// their filename already changes on every build, so the browser's
+		// default caching for them is correct and is left alone here.
+		if isShell {
+			c.Response().Header().Set("Cache-Control", "no-cache")
+		}
 		fileServer.ServeHTTP(c.Response().Writer, c.Request())
 		return nil
 	}
