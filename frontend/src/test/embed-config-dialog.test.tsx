@@ -30,6 +30,7 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof EmbedConfig
 
 const urlField = () => screen.getByLabelText(/url/i)
 const titleField = () => screen.getByLabelText(/title/i)
+const framelessSwitch = () => screen.getByRole('switch', { name: /frameless/i })
 const saveButton = () => screen.getByRole('button', { name: /save/i })
 
 describe('EmbedConfigDialog', () => {
@@ -54,6 +55,7 @@ describe('EmbedConfigDialog', () => {
     expect(onSave).toHaveBeenCalledWith(widget.id, {
       title: 'Polars',
       url: 'https://grafana.local/d-solo/x?panelId=7',
+      frameless: false,
     })
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
@@ -87,7 +89,11 @@ describe('EmbedConfigDialog', () => {
     expect(saveButton()).toBeEnabled()
 
     fireEvent.click(saveButton())
-    expect(onSave).toHaveBeenCalledWith(widget.id, { title: 'Windrose', url: 'https://grafana.local/d-solo/x' })
+    expect(onSave).toHaveBeenCalledWith(widget.id, {
+      title: 'Windrose',
+      url: 'https://grafana.local/d-solo/x',
+      frameless: false,
+    })
   })
 
   test('warns that an http embed is blocked when the app itself is served over https', () => {
@@ -104,11 +110,52 @@ describe('EmbedConfigDialog', () => {
     const other: DashboardLayoutItem = {
       ...widget,
       id: 'embed:m1x8efgh',
-      embed: { title: 'Battery History', url: 'https://grafana.local/d-solo/b' },
+      embed: { title: 'Battery History', url: 'https://grafana.local/d-solo/b', frameless: true },
     }
     rerender(<EmbedConfigDialog widget={other} open onOpenChange={vi.fn()} onSave={vi.fn()} />)
 
     expect(urlField()).toHaveValue('https://grafana.local/d-solo/b')
     expect(titleField()).toHaveValue('Battery History')
+    expect(framelessSwitch()).toBeChecked()
+  })
+
+  test('seeds the frameless switch off when the embed has no frameless set', () => {
+    renderDialog()
+    expect(framelessSwitch()).not.toBeChecked()
+  })
+
+  test('seeds the frameless switch off when the embed explicitly has frameless: false', () => {
+    renderDialog({ widget: { ...widget, embed: { ...widget.embed!, frameless: false } } })
+    expect(framelessSwitch()).not.toBeChecked()
+  })
+
+  test('seeds the frameless switch on when the embed has frameless: true', () => {
+    renderDialog({ widget: { ...widget, embed: { ...widget.embed!, frameless: true } } })
+    expect(framelessSwitch()).toBeChecked()
+  })
+
+  test('toggling frameless on and saving passes frameless: true to onSave', () => {
+    const { onSave } = renderDialog()
+
+    fireEvent.click(framelessSwitch())
+    fireEvent.click(saveButton())
+
+    expect(onSave).toHaveBeenCalledWith(widget.id, {
+      title: 'Windrose',
+      url: 'http://boat.local:3000/d-solo/abc?panelId=2',
+      frameless: true,
+    })
+  })
+
+  test('saving with frameless left off passes frameless: false explicitly', () => {
+    const { onSave } = renderDialog()
+
+    fireEvent.click(saveButton())
+
+    expect(onSave).toHaveBeenCalledWith(widget.id, {
+      title: 'Windrose',
+      url: 'http://boat.local:3000/d-solo/abc?panelId=2',
+      frameless: false,
+    })
   })
 })

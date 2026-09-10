@@ -74,6 +74,13 @@ export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
 export interface EmbedWidgetConfig {
   title: string
   url: string
+  /**
+   * Drops the Tile title bar and padding so the embed fills the widget, for
+   * wall-display strips where chrome is wasted space. Ignored while the
+   * dashboard is in layout-editing mode, since editing still needs the gear
+   * icon and title reachable.
+   */
+  frameless?: boolean
 }
 
 export type GaugeDisplay = 'numeric' | 'radial' | 'bar' | 'lamp' | 'trend'

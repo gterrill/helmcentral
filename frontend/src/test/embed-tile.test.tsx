@@ -78,6 +78,67 @@ describe('EmbedTile', () => {
   })
 })
 
+describe('EmbedTile frameless mode', () => {
+  test('renders just the iframe, with no tile chrome, when frameless and not editing', () => {
+    render(<EmbedTile config={{ ...config, frameless: true }} editing={false} />)
+
+    expect(screen.queryByText('Windrose')).not.toBeInTheDocument()
+
+    const frame = getIframe()
+    expect(frame).toHaveAttribute('src', config.url)
+    expect(frame).toHaveAttribute('title', 'Windrose')
+    const sandbox = frame.getAttribute('sandbox') ?? ''
+    expect(sandbox).toContain('allow-scripts')
+    expect(sandbox).toContain('allow-same-origin')
+    expect(sandbox).not.toContain('allow-top-navigation')
+  })
+
+  test('falls back to the framed tile while editing, even when frameless is set', () => {
+    const onConfigure = vi.fn()
+    render(
+      <EmbedTile config={{ ...config, frameless: true }} editing onConfigure={onConfigure} />,
+    )
+
+    expect(screen.getByText('Windrose')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /configure embed/i }))
+    expect(onConfigure).toHaveBeenCalledOnce()
+  })
+
+  test('renders the framed tile as before when frameless is false', () => {
+    render(<EmbedTile config={{ ...config, frameless: false }} editing={false} />)
+    expect(screen.getByText('Windrose')).toBeInTheDocument()
+  })
+
+  test('renders the framed tile as before when frameless is unset', () => {
+    render(<EmbedTile config={config} editing={false} />)
+    expect(screen.getByText('Windrose')).toBeInTheDocument()
+  })
+
+  test('still shows the "No URL configured" zero state when frameless but no URL is set', () => {
+    render(<EmbedTile config={{ title: 'Windrose', url: '', frameless: true }} editing={false} />)
+
+    expect(document.querySelector('iframe')).toBeNull()
+    expect(screen.getByText(/no url configured/i)).toBeInTheDocument()
+  })
+
+  // A frameless empty tile with no reachable gear or Configure button would be
+  // a dead end, so the zero state (and its Configure action) still needs to
+  // fall through in edit mode even though the widget is set frameless.
+  test('still offers the Configure action from the zero state when frameless and editing', () => {
+    const onConfigure = vi.fn()
+    render(
+      <EmbedTile
+        config={{ title: 'Windrose', url: '', frameless: true }}
+        editing
+        onConfigure={onConfigure}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }))
+    expect(onConfigure).toHaveBeenCalledOnce()
+  })
+})
+
 describe('EmbedTile theme sync', () => {
   const grafanaUrl =
     'http://192.168.50.240:3030/d-solo/ad6vblf/weather?orgId=1&panelId=panel-1&kiosk&theme=light'

@@ -51,6 +51,29 @@ export const EmbedTile = memo(function EmbedTile({
     [config?.url, isDarkTheme],
   )
 
+  // Frameless drops the Tile title bar and padding so the embed fills the
+  // widget (a wall-display strip has no use for either). Editing overrides
+  // it: the gear icon and title need to stay reachable to reconfigure the
+  // widget, and an empty URL has no chrome of its own to drop, so both fall
+  // through to the regular Tile-wrapped rendering below.
+  if (hasUsableUrl && config?.frameless && !editing) {
+    return (
+      <div className="h-full w-full overflow-hidden rounded-md border border-border bg-background">
+        <iframe
+          src={src}
+          title={title}
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+          // allow-same-origin is needed for the embedded app's own session
+          // (Grafana will not render without it). It only defeats the sandbox
+          // for a same-origin frame, which an operator-supplied embed is not.
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+          className="h-full w-full border-0"
+        />
+      </div>
+    )
+  }
+
   return (
     <Tile
       title={title}

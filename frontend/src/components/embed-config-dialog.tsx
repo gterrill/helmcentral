@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import {
   EMBED_TITLE_MAX_LENGTH,
   EMBED_URL_MAX_LENGTH,
@@ -30,13 +31,15 @@ interface EmbedConfigDialogProps {
 export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedConfigDialogProps) {
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
+  const [frameless, setFrameless] = useState(false)
 
   // Re-seed whenever a different widget is opened, so editing one embed never
   // shows another's URL.
   useEffect(() => {
     setUrl(widget?.embed?.url ?? '')
     setTitle(widget?.embed?.title ?? '')
-  }, [widget?.id, widget?.embed?.url, widget?.embed?.title])
+    setFrameless(widget?.embed?.frameless ?? false)
+  }, [widget?.id, widget?.embed?.url, widget?.embed?.title, widget?.embed?.frameless])
 
   if (!widget) return null
 
@@ -47,7 +50,7 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
 
   const handleSave = () => {
     if (!canSave) return
-    onSave(widget.id, { title: title.trim(), url: url.trim() })
+    onSave(widget.id, { title: title.trim(), url: url.trim(), frameless })
     onOpenChange(false)
   }
 
@@ -93,6 +96,14 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
             />
             <FieldDescription>Shown in the widget header. Optional.</FieldDescription>
           </Field>
+
+          <Field orientation="horizontal">
+            <Switch id="embed-frameless" checked={frameless} onCheckedChange={setFrameless} />
+            <FieldLabel htmlFor="embed-frameless">Frameless</FieldLabel>
+          </Field>
+          <FieldDescription>
+            No title bar or padding — fills the tile. Only applies outside layout editing.
+          </FieldDescription>
         </div>
 
         <DialogFooter>
