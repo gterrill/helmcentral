@@ -1,30 +1,34 @@
 # Provider plugins
 
-Tides, weather, waves, forecast warnings and the upper-air outlook use sandboxed
-WASM provider plugins loaded from disk at startup. Installing a provider for
-another region's government API does not require changes to Helmcentral's code
-or a rebuild of its binary or frontend.
+Tides, weather, waves, points of interest, forecast warnings and the
+upper-air outlook use sandboxed WASM provider plugins loaded from disk at
+startup. Installing a provider for another region's government API does not
+require changes to Helmcentral's code or a rebuild of its binary or frontend.
 
-The five registries (`backend/tide_providers.go`,
+The six registries (`backend/tide_providers.go`,
 `backend/weather_providers.go`, `backend/wave_providers.go`,
-`backend/forecast_warnings_providers.go`, and `backend/upper_air_providers.go`)
-share a single WASM host layer in `backend/wasm_plugin.go`.
+`backend/poi_providers.go`, `backend/forecast_warnings_providers.go`, and
+`backend/upper_air_providers.go`) share a single WASM host layer in
+`backend/wasm_plugin.go`.
 
 | Category | Directory | Override | Bundled reference plugins |
 | --- | --- | --- | --- |
 | Tides | `plugins/tides/` | `PLUGINS_TIDES_DIR` | `bom` (Australia), `noaa` (US) |
 | Weather | `plugins/weather/` | `PLUGINS_WEATHER_DIR` | `open-meteo` (worldwide, keyless, **default**), `weatherkit` (Apple, needs keys) |
 | Waves | `plugins/waves/` | `PLUGINS_WAVES_DIR` | `open-meteo-marine` (**default**) |
+| Points of interest | `plugins/poi/` | `PLUGINS_POI_DIR` | `osm-overpass` (worldwide, keyless, **default**), `google-places` (needs a key, partial category coverage) |
 | Forecast warnings | `plugins/forecast-warnings/` | `PLUGINS_FORECAST_WARNINGS_DIR` | `bom` (Australia, **default**), `nws` (US) |
 | Upper air | `plugins/upper-air/` | `PLUGINS_UPPER_AIR_DIR` | `open-meteo-upper` (worldwide, keyless) |
 
-You select the active provider for each category in Settings. All eight
+You select the active provider for each category in Settings. All ten
 reference plugins are built and installed automatically by the `plugins-builder`
 Compose service during each `make dev` run and deployment.
 
-Upper air is the one optional category: leave the plugin out and the forecast
-page simply shows no 500mb section. The rest have a widget that goes empty
-without a provider.
+Upper air is optional: leave the plugin out and the forecast page simply
+shows no 500mb section. Points of interest is optional in the same way: with
+no `poi` plugin installed, `GET /api/poi` 502s with an actionable message
+rather than any part of the dashboard failing to load. The rest have a
+widget that goes empty without a provider.
 
 ## The sandbox
 
@@ -41,7 +45,8 @@ using the backend environment at load time.
 
 **The host owns all derived data.** Unit conversion, interpolation, caching,
 day-bucketing into the vessel's local timezone, spring/neap classification,
-summary sentences, and moon phase calculations are all executed host-side. The
+summary sentences, moon phase calculations, and (for points of interest)
+distance, bearing, dedupe, sort and limit are all executed host-side. The
 plugin only returns raw, provider-native numbers.
 
 Plugins can be written in any language that provides an Extism PDK, such as
@@ -57,6 +62,7 @@ function for its category:
 | Tides | `search_stations`, `fetch_tide_chart` | Raw station and tide-extreme data |
 | Weather | `fetch_forecast` | Current + multi-day + hourly, all SI units |
 | Waves | `fetch_waves` | Hourly wave/swell series with per-component direction and period, optional sea-surface temperature |
+| Points of interest | `fetch_poi(lat, lon, radius_m, categories, limit)` | Raw features per category (id, name, position, optional detail/source URL), plus which categories were truncated or unsupported |
 | Forecast warnings | `fetch_warnings(lat, lon)` | Current, relevant bulletins only |
 | Upper air | `fetch_upper_air` | Hourly 500mb and 1000mb geopotential height, 500mb wind and temperature |
 
@@ -96,6 +102,13 @@ or secrets are granted.
 ["WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY"]
 ```
 
+```jsonc
+// google-places.config.json
+{
+  "api_key": "${GOOGLE_PLACES_API_KEY}"
+}
+```
+
 Both allowlists are enforced by the host rather than the WASM sandbox. They
 prevent a plugin from receiving unapproved secrets or contacting unlisted hosts.
 If a plugin receives approval for both a secret and an external host, it can
@@ -125,6 +138,24 @@ and `strong wind`, `small craft`, `wind advisory` and `brisk wind` lowest. A
 wind type the ladder does not recognise ranks lowest and is logged by name, so
 the vocabulary can be extended. It is never dropped: the plugin has already
 said the warning is in force.
+
+### Why points of interest rank host-side
+
+A `poi` plugin returns raw features only - no distance, no bearing, no
+ranking. `backend/poi_providers.go` computes distance and bearing from the
+vessel's live position (never a client-supplied one), drops anything outside
+the requested radius, dedupes near-identical features (a name plus position
+match within 5 decimal places), sorts by distance, and applies the limit.
+
+This is the same "host owns derived data" principle as tides/weather/waves,
+applied to a case where every provider needs the exact same ranking logic:
+`osm-overpass` and `google-places` would otherwise each have to get
+haversine distance and initial bearing right independently, and a future
+third provider would have to match whichever of the two it copied from. See
+`docs/reference/poi-categories.md` for the category list and
+`docs/adr/0091-points-of-interest-as-a-plugin-kind.md` for the full
+reasoning, including why POI's cache cell (0.02 degrees, about 2km) is much
+tighter than weather's.
 
 ### The FTP host function
 
@@ -197,6 +228,7 @@ Available example directories:
 - `docs/examples/tide-plugins/bom`, `docs/examples/tide-plugins/noaa`
 - `docs/examples/weather-plugins/open-meteo`, `docs/examples/weather-plugins/weatherkit`
 - `docs/examples/wave-plugins/open-meteo-marine`
+- `docs/examples/poi-plugins/osm-overpass`, `docs/examples/poi-plugins/google-places`
 - `docs/examples/forecast-warnings-plugins/bom`, `docs/examples/forecast-warnings-plugins/nws`
 - `docs/examples/upper-air-plugins/open-meteo-upper`
 

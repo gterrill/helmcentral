@@ -38,6 +38,8 @@ Lookup material: fields, formats, environment variables and file paths.
   its fields.
 - [Provider plugins](reference/plugins.md), the WASM sandbox and the per-category
   contracts.
+- [POI categories](reference/poi-categories.md), the eleven points-of-interest
+  categories and each provider's coverage.
 
 ## Architecture decision records
 
