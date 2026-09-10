@@ -149,6 +149,20 @@ uses for Lindeman Island (`-20.4467, 149.0353`, 5nm/9260m) and at Airlie
 Beach (`-20.2675, 148.7176`, 3nm/5556m). `testdata/wikipedia_summary_lindeman_island.json`
 is a live capture of the English Wikipedia REST summary for Lindeman Island.
 
+The Lindeman fixture covers all eleven categories. The Airlie fixture is
+**partial**: bay, island, mooring, historic, viewpoint and dive were
+captured live; anchorage, marina, fuel, ramp and trail could not be, because
+the mirror used to capture it (see below) rate-limited or timed out on
+those specific category queries across several retries in the same session,
+while the same categories succeeded moments apart for the Lindeman capture.
+The fixture's own `_comment` and `_missing_categories` fields record exactly
+which categories are absent and why - every element present is still
+genuine live data, never backfilled or invented. Recapturing the missing
+categories against a healthier Overpass endpoint (ideally the real
+`overpass-api.de`) would improve this fixture's coverage; it is not required
+for the test suite to pass, since `TestLiveFixture_AirlieBeachReturnsFeatures`
+only asserts that live capture produced at least one real feature.
+
 These were captured against `overpass.kumi.systems`, a public Overpass
 mirror serving the same OpenStreetMap database, rather than
 `overpass-api.de` directly - the sandbox this plugin was developed in could

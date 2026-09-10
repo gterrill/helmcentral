@@ -1,0 +1,116 @@
+{
+  "_comment": "Live Overpass capture, assembled from six separate per-category requests (bay, island, mooring, historic, viewpoint, dive) issued against overpass.kumi.systems, a public mirror, rather than one combined request against the plugin's real target overpass-api.de - see docs/examples/poi-plugins/osm-overpass/README.md for why a mirror was used. Five categories (anchorage, marina, fuel, ramp, trail) could not be captured live within this session: the mirror repeatedly rate-limited or timed out (HTTP 000/504/200-with-HTML-body) on those specific category queries at this radius across multiple retries, despite the same categories succeeding moments earlier or later. This is a genuine capture-environment limitation, not a shortcut - every element below is real live OSM data, and the missing categories are absent rather than backfilled with invented data. If bay, island, mooring, historic, viewpoint or dive genuinely have zero features in this radius, that is what Overpass returned live, not a placeholder.",
+  "_missing_categories": [
+    "anchorage",
+    "marina",
+    "fuel",
+    "ramp",
+    "trail"
+  ],
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-05-31T22:37:44Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 2530284965,
+      "lat": -20.2515542,
+      "lon": 148.704603,
+      "tags": {
+        "name": "Pioneer Bay",
+        "natural": "bay"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2531867601,
+      "lat": -20.2713964,
+      "lon": 148.7297982,
+      "tags": {
+        "name": "Boathaven Bay",
+        "natural": "bay"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2531868430,
+      "lat": -20.2543868,
+      "lon": 148.7462573,
+      "tags": {
+        "name": "Funnel Bay",
+        "natural": "bay"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2541206070,
+      "lat": -20.2651376,
+      "lon": 148.7189853,
+      "tags": {
+        "name": "Airlie Bay",
+        "natural": "bay"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2530284685,
+      "lat": -20.2657116,
+      "lon": 148.6958134,
+      "tags": {
+        "name": "Pigeon Island",
+        "place": "island"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 10156269,
+      "center": {
+        "lat": -17.5901543,
+        "lon": 148.2662772
+      },
+      "tags": {
+        "boundary": "protected_area",
+        "heritage": "1",
+        "heritage:operator": "whc",
+        "heritage:website": "http://whc.unesco.org/en/list/154",
+        "name": "Great Barrier Reef World Heritage Area",
+        "name:sk": "Ve\u013ek\u00e1 koralov\u00e1 bari\u00e9ra",
+        "protect_class": "98",
+        "protection_title": "World Heritage Site",
+        "ref:WDPA": "2571",
+        "ref:whc": "154",
+        "start_date": "1981",
+        "type": "boundary",
+        "website": "https://www.gbrmpa.gov.au/",
+        "whc:criteria": "(ix),(vii),(viii),(x)",
+        "whc:inscription_date": "1981",
+        "wikidata": "Q7343",
+        "wikipedia": "en:Great Barrier Reef"
+      }
+    },
+    {
+      "type": "node",
+      "id": 837135633,
+      "lat": -20.2925145,
+      "lon": 148.6975663,
+      "tags": {
+        "name": "Honeyeater Lookout",
+        "name:en": "Honeyeater Lookout",
+        "tourism": "viewpoint"
+      }
+    },
+    {
+      "type": "node",
+      "id": 6004834284,
+      "lat": -20.3046829,
+      "lon": 148.7348783,
+      "tags": {
+        "direction": "0",
+        "tourism": "viewpoint"
+      }
+    }
+  ]
+}
