@@ -223,4 +223,61 @@ describe('useAssistantChat', () => {
     const firstSignal = fetchMock.mock.calls[0][1]?.signal as AbortSignal
     expect(firstSignal.aborted).toBe(true)
   })
+
+  // ADR 0093 voice phase: `spoken` and `screen` ride along in the POST body
+  // only when the caller actually passes them - an ordinary panel send (no
+  // options) must not grow a `spoken: false` or `screen: undefined` key the
+  // backend was never asked for.
+  it('includes spoken and screen in the request body when given', async () => {
+    const body = sseStream([`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`])
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantChat())
+
+    await act(async () => {
+      await result.current.send('c1', 'How does tomorrow look?', {
+        spoken: true,
+        screen: { panel: 'forecast' },
+      })
+    })
+
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string)
+    expect(sentBody).toEqual({ content: 'How does tomorrow look?', spoken: true, screen: { panel: 'forecast' } })
+  })
+
+  it('omits spoken and screen from the request body when no options are given', async () => {
+    const body = sseStream([`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`])
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantChat())
+
+    await act(async () => {
+      await result.current.send('c1', 'hello')
+    })
+
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string)
+    expect(sentBody).toEqual({ content: 'hello' })
+  })
+
+  it('still calls onConversation via options once the message frame resolves', async () => {
+    const body = sseStream([`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`])
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const onConversation = vi.fn()
+    const { result } = renderHook(() => useAssistantChat())
+
+    await act(async () => {
+      await result.current.send('c1', 'hello', { onConversation })
+    })
+
+    expect(onConversation).toHaveBeenCalledWith({
+      id: 'c1',
+      title: 'Hook Reef anchorages',
+      createdAt: '2026-09-11T00:00:00Z',
+      updatedAt: '2026-09-11T00:00:01Z',
+    })
+  })
 })

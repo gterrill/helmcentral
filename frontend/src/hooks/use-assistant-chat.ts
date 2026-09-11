@@ -44,6 +44,26 @@ function mapConversation(api: ConversationApi): AssistantConversation {
   return { id: api.id, title: api.title, createdAt: api.created_at, updatedAt: api.updated_at }
 }
 
+// ADR 0093 voice phase: the screen the operator is looking at when they ask
+// Mate a question, passed through untouched to the backend so a reply can
+// open with "The operator is looking at the Forecast panel" instead of the
+// model guessing. `lib/mate-screen.ts` is what builds one of these from the
+// shell's own state; this hook only needs the shape.
+export interface AssistantScreenContext {
+  panel?: string
+  section?: string
+  page?: string
+}
+
+export interface AssistantSendOptions {
+  /** Voice phase: true when the question came in by speech, so the reply's
+   * markdown ends with a `## Spoken summary` section the frontend can read
+   * aloud. Omitted (not just false) when the send didn't come from voice. */
+  spoken?: boolean
+  screen?: AssistantScreenContext
+  onConversation?: (conversation: AssistantConversation) => void
+}
+
 // A non-2xx response carries a JSON `{error}` body per the API contract, but
 // a 503 from a proxy in front of the backend (or any other layer that never
 // reaches the handler) won't - read it defensively rather than letting a
@@ -86,7 +106,7 @@ export function useAssistantChat() {
   const send = useCallback(async (
     conversationId: string,
     content: string,
-    onConversation?: (conversation: AssistantConversation) => void,
+    options?: AssistantSendOptions,
   ): Promise<AssistantMessage | null> => {
     // A send already in flight loses: its events are ignored below and its
     // request is cancelled, so only this call's outcome updates state.
@@ -100,12 +120,20 @@ export function useAssistantChat() {
     setStatusText(null)
 
     try {
+      // `spoken`/`screen` are included only when the caller actually passed
+      // them - an ordinary panel send (no options at all) posts the same
+      // `{ content }` body it always has, so the backend only sees a voice
+      // question or a screen context when one genuinely applies.
+      const body: { content: string; spoken?: boolean; screen?: AssistantScreenContext } = { content }
+      if (options?.spoken !== undefined) body.spoken = options.spoken
+      if (options?.screen !== undefined) body.screen = options.screen
+
       const response = await fetch(
         `${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(conversationId)}/messages`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify(body),
           signal: controller.signal,
         },
       )
@@ -131,7 +159,7 @@ export function useAssistantChat() {
         } else if (event.event === 'message') {
           const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
           resolved = mapMessage(data.message)
-          onConversation?.(mapConversation(data.conversation))
+          options?.onConversation?.(mapConversation(data.conversation))
         } else if (event.event === 'error') {
           const data = JSON.parse(event.data) as { error?: string }
           setError(typeof data.error === 'string' && data.error !== '' ? data.error : 'assistant error')
