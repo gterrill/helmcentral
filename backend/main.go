@@ -453,6 +453,12 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/auth/logout", tierPublic, logoutHandler(sessions)},
 		{http.MethodGet, "/api/auth/me", tierPublic, meHandler(sessions)},
 		{http.MethodGet, "/api/auth/mode", tierPublic, authModeHandler},
+		// The wall-display kiosk browser's capability probe
+		// (frontend/public/kiosk-probe.html) reports into the backend log
+		// rather than rendering on a 1920x360 screen with no keyboard or
+		// mouse. Public tier: the kiosk may never sign in, and the only
+		// effect is a log line.
+		{http.MethodPost, "/api/kiosk-probe", tierPublic, kioskProbeHandler},
 
 		// ── read: readonly and above ────────────────────────────────────
 		{http.MethodGet, "/api/vessel-state", tierRead, vesselState},
