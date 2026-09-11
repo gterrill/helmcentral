@@ -20,10 +20,18 @@ reach the dashboard, but that phone cannot confirm their current status.
 
 ## Widgets
 
-Seventeen built-in widgets: Vessel, Apparent Wind, Depth & Tide, Position,
+Twenty-one built-in widgets: Vessel, Apparent Wind, Depth & Tide, Position,
 Today & Now, Anchor Watch, Tanks, Route, Nearby Vessels, Radar Targets,
-Battery & Power, Solar, Alternator, Generator, Switches, Hot Water and
-Autopilot.
+Battery & Power, Solar, Alternator, Generator, Switches, Hot Water,
+Autopilot, Clock, Current Conditions, Forecast and Sea State.
+
+The last four are built for the wall display: a clock with sunrise, sunset,
+moon phase and a route's ETA to its next waypoint; depth, apparent wind and
+outside temperature each read against today's forecast range; five days of
+condition, high and low; and a five-day wind-and-wave chart. Nothing stops
+you placing them on an ordinary phone or tablet page too, but they were
+sized for the kiosk's seven-row fold first. See [Set up a wall
+display](../how-to/set-up-a-wall-display.md).
 
 Two additional widget types are configurable:
 
@@ -33,7 +41,12 @@ Two additional widget types are configurable:
   Dragging engine temperature into the red raises an alarm. Readings such as
   oil pressure or engine hours can use gauges without a dedicated widget.
 - **Embed tiles** put any URL in the grid: a Grafana panel, a camera feed, a
-  windrose.
+  windrose. Tick **Frameless** in the embed's settings to drop its title bar
+  and padding so the embedded page fills the whole tile, meant for a wall
+  display page with no other chrome around it, such as a camera feed; on the
+  ordinary dashboard leave it framed so the gear icon and title stay
+  reachable. Layout mode always shows the frame regardless of this setting,
+  so an embed is never unreachable to reconfigure.
 
 ## The indicator ribbon
 

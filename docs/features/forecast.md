@@ -189,6 +189,21 @@ climbs while the barometer sits still.
 A set of rules using the book's thresholds ships with Helmcentral, disabled.
 See [Alarms](alarms.md).
 
+## On the dashboard and the wall display
+
+The forecast panel is the full picture; the dashboard carries condensed
+versions of the same data as ordinary widgets. **Current Conditions** shows
+apparent wind and outside temperature against today's forecast range.
+**Forecast** lists five days ahead with condition, high and low. **Sea
+State** draws the same wind, gust and wave-height series this page does,
+steepness-coloured the same way, across five days at once. **Clock** shows
+sunrise, sunset and moon phase alongside the time. None of the four
+replace this page: none show the warning signs, the largest-wave figure or
+the upper-air outlook. They exist for a glance that doesn't want the
+detail, particularly on a [wall
+display](../how-to/set-up-a-wall-display.md), which has no room for this
+whole page at once. See [The dashboard](dashboard.md#widgets).
+
 ## Where it stops
 
 The forecast is only as good as the models behind it, and the wave model in

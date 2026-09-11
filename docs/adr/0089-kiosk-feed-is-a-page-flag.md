@@ -225,7 +225,7 @@ information, since it is deliberately the same vessel-wide strip everywhere.
 `isKiosk` now gates the ribbon block directly in `dashboardGrid`, alongside
 the ribbon's own null check, so it renders nothing at `/kiosk` regardless of
 whether one is configured. A page that wants status lamps on the wall adds
-its own lamp-strip widget in layout mode instead — the same widget type the
+its own lamp-strip widget in layout mode instead, the same widget type the
 ribbon itself wraps, sized and placed like any other tile on that one page,
 rather than the one vessel-wide strip every page shares. This does not
 change the ribbon anywhere else: it still pins above the grid on the
@@ -234,7 +234,7 @@ hand.
 
 `KioskFoldGuide` moved with it. It used to sit inside the same `relative`
 container as the ribbon, so its `topPx` measured 344px down from the
-ribbon's own top edge — correct while the ribbon counted against the
+ribbon's own top edge: correct while the ribbon counted against the
 budget, wrong now that it doesn't reach the wall at all. The guide's
 `relative` container now wraps only `DashboardBentoGrid`, so the dashed line
 an operator sees while authoring a kiosk page measures the fold from the top
