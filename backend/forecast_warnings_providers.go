@@ -251,7 +251,7 @@ func forecastWarningsHandler(c echo.Context) error {
 	bundle, fetchErr := provider.FetchWarnings(vesselState.Latitude, vesselState.Longitude)
 	if fetchErr != nil {
 		log.Printf("forecast warnings provider %q error: %v", configuredProvider, fetchErr)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("forecast warnings provider %q unavailable: %v", configuredProvider, fetchErr)})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("forecast warnings provider %q unavailable: %s", configuredProvider, firstErrorLine(fetchErr))})
 	}
 
 	bulletins := make([]forecastWarningBulletinResponse, 0, len(bundle.Bulletins))

@@ -666,7 +666,7 @@ func waveForecast(c echo.Context) error {
 	bundle, fetchErr := provider.FetchWaves(vesselState.Latitude, vesselState.Longitude, 10)
 	if fetchErr != nil {
 		log.Printf("wave provider %q error: %v", configuredProvider, fetchErr)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("wave provider %q unavailable: %v", configuredProvider, fetchErr)})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("wave provider %q unavailable: %s", configuredProvider, firstErrorLine(fetchErr))})
 	}
 	if len(bundle.Hourly) == 0 {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "wave forecast response was empty"})

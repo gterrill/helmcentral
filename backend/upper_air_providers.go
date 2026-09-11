@@ -181,7 +181,7 @@ func upperAirForecast(c echo.Context) error {
 	bundle, fetchErr := provider.FetchUpperAir(vesselState.Latitude, vesselState.Longitude, upperAirForecastDays)
 	if fetchErr != nil {
 		log.Printf("upper-air provider %q error: %v", configured, fetchErr)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("upper-air provider %q unavailable: %v", configured, fetchErr)})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("upper-air provider %q unavailable: %s", configured, firstErrorLine(fetchErr))})
 	}
 
 	localLocation := vesselLocalLocation(vesselState.Longitude)

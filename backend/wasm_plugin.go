@@ -137,6 +137,26 @@ func (b *wasmPluginBase) call(name string, input []byte) (out []byte, err error)
 	return out, nil
 }
 
+// firstErrorLine returns only the first line of err's message. A
+// wazero-recovered plugin panic (see call above) can put a multi-kilobyte
+// wasm stack trace into the error text - observed live: a 6 KB JSON error
+// body for a refused TCP connection. Every provider handler
+// (poi_providers.go, wave_providers.go, upper_air_providers.go,
+// forecast_warnings_providers.go) logs the full, untrimmed error via
+// log.Printf and uses this helper only for the text it puts in a JSON
+// response, so an operator gets one actionable line instead of a stack
+// trace dump while the full detail stays in the server log.
+func firstErrorLine(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
+		msg = msg[:idx]
+	}
+	return strings.TrimRight(msg, "\r")
+}
+
 // wasmPluginTimeoutMS resolves the manifest timeout (ms) from
 // WASM_PLUGIN_TIMEOUT_MS, falling back to defaultWasmPluginTimeoutMS on an
 // unset or invalid value (logged loudly rather than failing plugin discovery

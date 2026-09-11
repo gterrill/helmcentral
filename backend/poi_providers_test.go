@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -289,6 +291,51 @@ func TestPOINearby_ReturnsBadGatewayWhenProviderFetchFails(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502 on provider fetch error, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// A wazero-recovered plugin panic can put a multi-kilobyte wasm stack trace
+// into the provider's error text (observed live: a 6 KB JSON error body for
+// a refused TCP connection). Only the first line belongs in the JSON
+// response; the full error still goes to the server log.
+func TestPOINearby_TrimsMultilineProviderErrorToFirstLine(t *testing.T) {
+	withCleanPOIProviderRegistry(t)
+	stackTrace := "dial tcp 203.0.113.5:443: connect: connection refused\n" +
+		"goroutine 1 [running]:\n" +
+		"runtime.gopanic(...)\n" +
+		"\t/usr/local/go/src/runtime/panic.go:914 +0x21f\n" +
+		"wasm_call_stack_frame_2\n" +
+		"wasm_call_stack_frame_3"
+	registerPOIProvider(&stubPOIProvider{id: "osm-overpass", name: "OSM", ttl: 21600, err: errors.New(stackTrace)})
+	server := trustedSignalKPayloadServer(t, -27.4, 153.0)
+	defer server.Close()
+	t.Setenv("SETTINGS_FILE", writePOISettings(t, "osm-overpass", server.URL))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/poi?radius_nm=5&categories=anchorage", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := poiNearby(c); err != nil {
+		t.Fatalf("poiNearby returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 on provider fetch error, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	errMsg := body["error"]
+	if strings.Contains(errMsg, "\n") {
+		t.Fatalf("expected no newline in the JSON error field, got %q", errMsg)
+	}
+	if !strings.Contains(errMsg, "connect: connection refused") {
+		t.Fatalf("expected the first line of the error, got %q", errMsg)
+	}
+	if strings.Contains(errMsg, "goroutine") {
+		t.Fatalf("expected the wasm stack trace to be trimmed, got %q", errMsg)
 	}
 }
 

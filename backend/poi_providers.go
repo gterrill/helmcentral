@@ -327,7 +327,7 @@ func poiNearby(c echo.Context) error {
 	result, fetchErr := provider.FetchPOI(vesselState.Latitude, vesselState.Longitude, radiusM, categories, limit)
 	if fetchErr != nil {
 		log.Printf("POI provider %q error: %v", configuredProvider, fetchErr)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("POI provider %q unavailable: %v", configuredProvider, fetchErr)})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("POI provider %q unavailable: %s", configuredProvider, firstErrorLine(fetchErr))})
 	}
 
 	features := decorateAndRankPOIFeatures(result.Features, vesselState.Latitude, vesselState.Longitude, float64(radiusM), limit)
