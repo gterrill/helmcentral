@@ -101,7 +101,7 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 | `PLUGINS_WEATHER_DIR` | `plugins/weather` |
 | `PLUGINS_WAVES_DIR` | `plugins/waves` |
 | `PLUGINS_FORECAST_WARNINGS_DIR` | `plugins/forecast-warnings` |
-| `WASM_PLUGIN_TIMEOUT_MS` | `5000` |
+| `WASM_PLUGIN_TIMEOUT_MS` | `15000` |
 
 ## Secrets
 
