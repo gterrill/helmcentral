@@ -5,6 +5,8 @@ import {
   CLUSTER_WIDGET_CONSTRAINTS,
   GRID_MARGIN,
   GRID_ROW_HEIGHT,
+  POI_MAP_SPLIT_MIN_W,
+  POI_MAP_WIDGET_CONSTRAINTS,
   WIDGET_CONSTRAINTS,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
@@ -84,4 +86,19 @@ describe('the wall-display tiles', () => {
       expect(gridPixelHeight(minH)).toBeLessThanOrEqual(KIOSK_FOLD_PX)
     },
   )
+})
+
+/**
+ * The Nearby widget (ADR 0091 phase 3b). Split layout adds a ranked list
+ * beside the map, so it needs a wider floor than the bare map-only layout —
+ * the same reasoning the cluster fuel rail's own wider floor follows.
+ */
+describe('the poi-map widget', () => {
+  test('has a floor small enough for map-only, small AIS/POI markers still readable', () => {
+    expect(POI_MAP_WIDGET_CONSTRAINTS).toEqual({ minW: 4, minH: 6 })
+  })
+
+  test('the split-layout floor is wider than the bare map floor', () => {
+    expect(POI_MAP_SPLIT_MIN_W).toBeGreaterThan(POI_MAP_WIDGET_CONSTRAINTS.minW)
+  })
 })

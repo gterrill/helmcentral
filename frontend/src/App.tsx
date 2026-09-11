@@ -117,11 +117,13 @@ import {
   isGaugeWidgetId,
   isClusterWidgetId,
   isLampStripWidgetId,
+  isPoiMapWidgetId,
   newEmbedWidgetId,
   newGaugeGroupWidgetId,
   newGaugeWidgetId,
   newClusterWidgetId,
   newLampStripWidgetId,
+  newPoiMapWidgetId,
   type DashboardLayoutItem,
   type DashboardWidgetId,
   type EmbedWidgetConfig,
@@ -129,9 +131,13 @@ import {
   type EngineClusterConfig,
   type LampStripWidgetConfig,
   type GaugeWidgetConfig,
+  type PoiMapWidgetConfig,
 } from '@/lib/dashboard-widgets'
+import { POI_CATEGORY_IDS } from '@/lib/poi'
 import { EmbedTile } from '@/components/embed-tile'
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
+import { PoiMapTile } from '@/components/poi-map-tile'
+import { PoiMapConfigDialog } from '@/components/poi-map-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
 import { GaugeTile } from '@/components/gauge-tile'
 import { GaugeGroupConfigDialog } from '@/components/gauge-group-config-dialog'
@@ -249,6 +255,9 @@ export function App() {
   const [lampStripDraft, setLampStripDraft] = useState<DashboardLayoutItem | null>(null)
   const [engineProfileOpen, setEngineProfileOpen] = useState(false)
   const [clusterDraft, setClusterDraft] = useState<DashboardLayoutItem | null>(null)
+  // Same pattern as embedDraft: a freshly added Nearby map (ADR 0091 phase
+  // 3b) exists only here until it holds a valid config.
+  const [poiMapDraft, setPoiMapDraft] = useState<DashboardLayoutItem | null>(null)
   const gaugeValues = useGaugeValues()
   // Age behind each bound path (ADR 0083), riding the same gauge-values event
   // rather than a stream of its own -- see hooks/use-gauge-values.ts.
@@ -942,6 +951,7 @@ export function App() {
     else if (isGaugeGroupWidgetId(placed.id)) setGaugeGroupDraft(placed)
     else if (isGaugeWidgetId(placed.id)) setGaugeDraft(placed)
     else if (isEmbedWidgetId(placed.id)) setEmbedDraft(placed)
+    else if (isPoiMapWidgetId(placed.id)) setPoiMapDraft(placed)
   }, [activePage, effectiveWidgets, updatePage])
 
   const handleSaveEmbed = useCallback((id: DashboardWidgetId, embed: EmbedWidgetConfig) => {
@@ -956,6 +966,30 @@ export function App() {
       void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...embedDraft, embed }] })
     }
   }, [activePage, effectiveWidgets, embedDraft, updatePage])
+
+  // Wide by default (w:12, h:7): the split layout needs the room, and a
+  // narrower map-only tile is a resize away rather than the starting point.
+  const handleAddPoiMap = useCallback(() => {
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    setPoiMapDraft({
+      id: newPoiMapWidgetId(effectiveWidgets),
+      x: 0, y: maxY, w: 12, h: 7,
+      poiMap: { title: '', rangeNm: 5, categories: [...POI_CATEGORY_IDS], layout: 'split', showAis: true, showTrail: false },
+    })
+  }, [effectiveWidgets])
+
+  const handleSavePoiMap = useCallback((id: DashboardWidgetId, poiMap: PoiMapWidgetConfig) => {
+    if (!activePage) return
+    if (effectiveWidgets.some((w) => w.id === id)) {
+      void updatePage(activePage.id, {
+        widgets: effectiveWidgets.map((w) => (w.id === id ? { ...w, poiMap } : w)),
+      })
+      return
+    }
+    if (poiMapDraft?.id === id) {
+      void updatePage(activePage.id, { widgets: [...effectiveWidgets, { ...poiMapDraft, poiMap }] })
+    }
+  }, [activePage, effectiveWidgets, poiMapDraft, updatePage])
 
   // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
   // (essentially the entire polled-data surface of the component — vessel,
@@ -1027,6 +1061,28 @@ export function App() {
           editing={layoutEditing}
           onConfigure={() => setEmbedDraft(widget)}
           isDarkTheme={isDarkTheme}
+        />
+      )
+    }
+
+    if (isPoiMapWidgetId(id)) {
+      if (!widget.poiMap) return null
+      return (
+        <PoiMapTile
+          config={widget.poiMap}
+          editing={layoutEditing}
+          onConfigure={() => setPoiMapDraft(widget)}
+          latitude={latitude}
+          longitude={longitude}
+          headingTrue={headingTrue}
+          gnssCriticalAlert={gnssCriticalAlert}
+          positionLastUpdateAgeS={positionLastUpdateAgeS}
+          nearbyVessels={nearbyVessels}
+          aisCollisionAlarms={aisCollisionAlarms}
+          getSelfTrail={getSelfTrail}
+          isDarkTheme={isDarkTheme}
+          forceDark={activePage?.skin === 'instrument'}
+          distanceUnits={uiConfig.distanceUnits}
         />
       )
     }
@@ -1422,6 +1478,13 @@ export function App() {
               >
                 Embed…
               </button>
+              <button
+                type="button"
+                onClick={handleAddPoiMap}
+                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                Nearby map…
+              </button>
             </div>
           </PopoverContent>
         </Popover>
@@ -1470,6 +1533,13 @@ export function App() {
         open={embedDraft !== null}
         onOpenChange={(open) => { if (!open) setEmbedDraft(null) }}
         onSave={handleSaveEmbed}
+      />
+
+      <PoiMapConfigDialog
+        widget={poiMapDraft}
+        open={poiMapDraft !== null}
+        onOpenChange={(open) => { if (!open) setPoiMapDraft(null) }}
+        onSave={handleSavePoiMap}
       />
     </div>
   )

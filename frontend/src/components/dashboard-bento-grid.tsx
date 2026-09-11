@@ -7,7 +7,7 @@ import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
-import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, isPoiMapWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
@@ -42,6 +42,12 @@ const GAUGE_GROUP_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
 
 // A ribbon is wide and short by nature.
 const LAMP_STRIP_WIDGET_CONSTRAINTS = { minW: 3, minH: 2 }
+
+// The Nearby widget (ADR 0091 phase 3b). "map" layout is happy at a modest
+// width; "split" adds a ranked list beside the map, which needs the wider
+// floor below or the list column collapses to nothing useful.
+export const POI_MAP_WIDGET_CONSTRAINTS = { minW: 4, minH: 6 }
+export const POI_MAP_SPLIT_MIN_W = 8
 
 // Tile header, its top padding, and the card's bottom padding: everything the
 // cluster canvas sits inside. Measured rather than derived, since it comes out
@@ -167,7 +173,9 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
           ? GAUGE_GROUP_WIDGET_CONSTRAINTS
           : isGaugeWidgetId(w.id)
             ? GAUGE_WIDGET_CONSTRAINTS
-            : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
+            : isPoiMapWidgetId(w.id)
+              ? { ...POI_MAP_WIDGET_CONSTRAINTS, ...(w.poiMap?.layout === 'split' ? { minW: POI_MAP_SPLIT_MIN_W } : {}) }
+              : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
     })),
     [widgets, heroId],
   )
