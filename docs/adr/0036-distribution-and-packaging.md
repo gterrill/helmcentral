@@ -75,7 +75,9 @@ The `plugins-builder` Compose service needs Docker, TinyGo *and* a checkout —
 none of which a binary installer has. WASM output is architecture-independent,
 so CI builds the seven reference plugins once per release
 (`packaging/build-plugins.sh`, still pinned to `tinygo/tinygo:0.41.1`) and
-attaches `helmcentral-plugins-<version>.tar.gz` to the release. The installer
+attaches `helmcentral-plugins-<version>.tar.gz` to the release, plus an
+unversioned `helmcentral-plugins.tar.gz` copy so the `releases/latest/download`
+URL in the docs survives new releases. The installer
 unpacks it into `<state dir>/plugins`.
 
 They are deliberately not embedded in the binary and not baked into the image.

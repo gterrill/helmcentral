@@ -37,8 +37,16 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist-plugins
           # Contents are the category dirs themselves (tides/, weather/, ...)
-          # so the bundle untars straight into <state dir>/plugins.
-          tar -czf "dist-plugins/helmcentral-plugins-${version}.tar.gz" -C plugins .
+          # so the bundle untars straight into <state dir>/plugins. Name them
+          # via the glob rather than `.` so the archive carries no entry for
+          # the target directory itself: GNU tar tries to restore that entry's
+          # mtime on extract and exits non-zero when the extracting user does
+          # not own the directory (issue #7).
+          (cd plugins && tar -czf "../dist-plugins/helmcentral-plugins-${version}.tar.gz" -- *)
+          # Unversioned copy so the releases/latest/download URL in the docs
+          # stays valid across releases. The installer still fetches the
+          # versioned name from the tag it resolved.
+          cp "dist-plugins/helmcentral-plugins-${version}.tar.gz" dist-plugins/helmcentral-plugins.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:

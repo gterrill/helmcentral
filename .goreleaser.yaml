@@ -98,7 +98,7 @@ release:
   # once with TinyGo and attaches the bundle here rather than baking them into
   # each archive. Keeps ADR 0017's "drop a plugin in without a rebuild" model.
   extra_files:
-    - glob: ./dist-plugins/helmcentral-plugins-*.tar.gz
+    - glob: ./dist-plugins/helmcentral-plugins*.tar.gz
   header: |
     ## Install
 

@@ -149,7 +149,7 @@ binaries.
 To install or update the bundle manually:
 
 ```sh
-curl -fsSL https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \
+curl -fsSL https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins.tar.gz \
   | sudo tar -xz -C /var/lib/helmcentral/plugins
 sudo systemctl restart helmcentral
 ```

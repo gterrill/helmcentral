@@ -20,9 +20,12 @@ services:
       # Reference tide/weather/wave/warning/upper-air providers. Download
       # the plugin bundle from the releases page and unpack it here:
       #
-      #   mkdir -p plugins && curl -fsSL \
-      #     https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \
-      #     | tar -xz -C plugins
+      #   sudo mkdir -p plugins && curl -fsSL \
+      #     https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins.tar.gz \
+      #     | sudo tar -xz -C plugins
+      #
+      # sudo on both halves: with it on mkdir alone, tar runs unprivileged
+      # against the root-owned directory it just created (issue #7).
       #
       # Kept outside the image on purpose (ADR 0017) so a plugin can be added
       # or updated without rebuilding or repulling.

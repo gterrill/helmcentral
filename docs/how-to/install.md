@@ -72,10 +72,12 @@ containing it:
 # 1. Add the reference plugins first. Compose bind-mounts ./plugins, and without
 #    them there are no tide, weather, wave or warning providers. They are
 #    deliberately not baked into the image, so you can add or update one without
-#    repulling.
-mkdir -p plugins && curl -fsSL \
-  https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins-<version>.tar.gz \
-  | tar -xz -C plugins
+#    repulling. Both commands run under sudo: the directory holding
+#    docker-compose.yml is often root-owned (/opt, /srv), and sudo on mkdir
+#    alone leaves tar unprivileged against the directory it just created.
+sudo mkdir -p plugins && curl -fsSL \
+  https://github.com/gterrill/helmcentral/releases/latest/download/helmcentral-plugins.tar.gz \
+  | sudo tar -xz -C plugins
 
 # 2. Start it.
 docker compose pull
