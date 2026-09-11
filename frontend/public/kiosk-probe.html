@@ -8,100 +8,149 @@
   /* Deliberately plain: this page exists to tell us what the device's
      browser actually supports before any app code runs on it, so it must
      not depend on anything the probe itself is checking for (no :has(),
-     no structuredClone, nothing from the build). */
+     no structuredClone, nothing from the build).
+
+     Laid out as a fixed 5x2 grid so the whole report fits inside a
+     1920x360 wall strip with no scrolling - the device has no keyboard or
+     mouse to scroll with. The full detail of each check still goes to the
+     backend log (POST /api/kiosk-probe); the on-screen grid only needs to
+     be glanceable, not exhaustive. */
   html, body {
     margin: 0;
     padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
     background: #0b0b0b;
     color: #f5f5f5;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    box-sizing: border-box;
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  body {
+    display: flex;
+    flex-direction: column;
   }
   body.rotate-180 {
     transform: rotate(180deg);
     transform-origin: center center;
   }
-  h1 {
-    font-size: 20px;
-    margin: 16px;
+  #header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 34px;
+    padding: 0 12px;
+    border-bottom: 1px solid #333;
+  }
+  #title {
+    font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #9aa0a6;
+    white-space: nowrap;
   }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  td {
-    padding: 8px 16px;
-    border-top: 1px solid #333;
-    vertical-align: middle;
-  }
-  td.label {
-    font-size: 16px;
-    color: #d0d0d0;
-  }
-  td.detail {
+  #ua {
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 12px;
     color: #888;
-  }
-  td.result {
-    font-size: 48px;
-    font-weight: 700;
-    text-align: right;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #report-status {
+    flex: 0 0 auto;
+    font-size: 12px;
+    color: #f1c40f;
+    white-space: nowrap;
+  }
+  #grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 4px;
+    padding: 4px;
+  }
+  .cell {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 12px;
+    border: 1px solid #333;
+    border-radius: 4px;
+  }
+  .cell .name {
+    font-size: 18px;
+    color: #d0d0d0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cell .badge {
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+  .cell .detail {
+    font-size: 14px;
+    color: #888;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .pass { color: #2ecc71; }
   .fail { color: #e74c3c; }
   .info { color: #f1c40f; }
-  #ua {
-    margin: 16px;
-    font-size: 12px;
-    color: #888;
-    word-break: break-all;
+  .cell.helmcam {
+    padding: 0;
   }
-  #helmcam-wrap {
-    margin: 16px;
-  }
-  #helmcam-wrap iframe {
-    width: 480px;
-    height: 270px;
-    border: 1px solid #333;
+  .cell.helmcam iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
     background: #000;
   }
 </style>
 </head>
 <body>
-<h1>Kiosk device probe</h1>
-<table id="results"></table>
-<div id="ua"></div>
-<div id="helmcam-wrap"></div>
+<div id="header">
+  <span id="title">Kiosk probe</span>
+  <span id="ua"></span>
+  <span id="report-status">not reported yet</span>
+</div>
+<div id="grid"></div>
 <script>
 (function () {
-  // Checks 1-6 of Phase 0 (plan: delightful-drifting-anchor). Check 7 (an
-  // actual /routes render on the device, panned by hand for 60s to judge
-  // frame rate) is manual and not attempted here.
+  // Checks 1-8 are Phase 0's device checks (plan: delightful-drifting-
+  // anchor); check 9 ("Report POST") is new - it reflects whether the most
+  // recent POST to /api/kiosk-probe itself succeeded, since the operator
+  // now reads results from the backend log rather than this screen. Check
+  // 9's status necessarily lags one report cycle behind: its own outcome
+  // isn't known until after it has been sent, so each report includes the
+  // previous attempt's result and updates it once the current attempt
+  // resolves.
   var params = new URLSearchParams(location.search);
   var rotated = params.get('rotate') === '180';
   if (rotated) document.body.classList.add('rotate-180');
 
-  var rows = document.getElementById('results');
+  var grid = document.getElementById('grid');
+  var checks = [];
 
-  function addRow(label, status, detail) {
-    // status: 'pass' | 'fail' | 'info'
-    var tr = document.createElement('tr');
-    var tdLabel = document.createElement('td');
-    tdLabel.className = 'label';
-    tdLabel.textContent = label;
-    var tdDetail = document.createElement('td');
-    tdDetail.className = 'detail';
-    tdDetail.textContent = detail || '';
-    var tdResult = document.createElement('td');
-    tdResult.className = 'result ' + status;
-    tdResult.textContent = status === 'pass' ? 'PASS' : status === 'fail' ? 'FAIL' : 'INFO';
-    tr.appendChild(tdLabel);
-    tr.appendChild(tdDetail);
-    tr.appendChild(tdResult);
-    rows.appendChild(tr);
+  // display is the on-screen badge style ('pass' | 'fail' | 'info'),
+  // independent of the boolean `pass` sent to the backend - used for the
+  // 100svh check below, which is informational and must never fail the
+  // grid even though CSS.supports can return false for it.
+  function addCheck(name, pass, detail, display) {
+    checks.push({ name: name, pass: pass, detail: detail || '', display: display || (pass ? 'pass' : 'fail') });
   }
 
   // 1. WebGL2 + renderer string. A software renderer (SwiftShader, llvmpipe)
@@ -115,7 +164,7 @@
       gl = null;
     }
     if (!gl) {
-      addRow('WebGL2 context', 'fail', 'no webgl2 context available');
+      addCheck('WebGL2 context', false, 'no webgl2 context');
       return;
     }
     var renderer = 'unknown';
@@ -126,7 +175,7 @@
       renderer = gl.getParameter(gl.RENDERER);
     }
     var isSoftware = /swiftshader|llvmpipe|software/i.test(String(renderer));
-    addRow('WebGL2 context', isSoftware ? 'fail' : 'pass', 'renderer: ' + renderer + (isSoftware ? ' (software - fails the map pages)' : ''));
+    addCheck('WebGL2 context', !isSoftware, (isSoftware ? 'software: ' : 'hw: ') + renderer);
   })();
 
   // 2. :has() selector support.
@@ -137,11 +186,13 @@
     } catch (e) {
       ok = false;
     }
-    addRow(':has() selector', ok ? 'pass' : 'fail', "CSS.supports('selector(:has(*))')");
+    addCheck(':has() selector', ok, 'CSS.supports(:has())');
   })();
 
   // 3. 100svh support. Informational only: the kiosk root uses fixed
-  // inset-0, not svh, so this does not gate the decision either way.
+  // inset-0, not svh, so this does not gate the decision either way -
+  // always reported pass:true to the backend, with the real support state
+  // in the detail; shown on screen with the distinct amber "info" badge.
   (function checkSvh() {
     var ok = false;
     try {
@@ -149,25 +200,20 @@
     } catch (e) {
       ok = false;
     }
-    addRow('100svh unit', 'info', "informational only, kiosk root uses fixed inset-0 (supported: " + ok + ")");
+    addCheck('100svh unit', true, 'not used, fixed inset-0 (supported: ' + ok + ')', 'info');
   })();
 
   // 4. structuredClone.
   (function checkStructuredClone() {
     var ok = typeof structuredClone === 'function';
-    addRow('structuredClone', ok ? 'pass' : 'fail', "typeof structuredClone === 'function'");
+    addCheck('structuredClone', ok, "typeof === 'function'");
   })();
 
   // 5. EventSource, ResizeObserver, matchMedia, Intl timezone.
   (function checkMisc() {
-    var hasEventSource = typeof EventSource === 'function';
-    addRow('EventSource', hasEventSource ? 'pass' : 'fail', 'used by the telemetry stream (ADR 0037)');
-
-    var hasResizeObserver = typeof ResizeObserver === 'function';
-    addRow('ResizeObserver', hasResizeObserver ? 'pass' : 'fail', 'used for responsive tile scaling');
-
-    var hasMatchMedia = typeof matchMedia === 'function';
-    addRow('matchMedia', hasMatchMedia ? 'pass' : 'fail', 'used for breakpoint and theme detection');
+    addCheck('EventSource', typeof EventSource === 'function', 'telemetry stream (ADR 0037)');
+    addCheck('ResizeObserver', typeof ResizeObserver === 'function', 'tile scaling');
+    addCheck('matchMedia', typeof matchMedia === 'function', 'breakpoint/theme detection');
 
     var tz = null;
     var hasTz = false;
@@ -177,26 +223,108 @@
     } catch (e) {
       hasTz = false;
     }
-    addRow('Intl timezone', hasTz ? 'pass' : 'fail', 'resolved: ' + tz);
+    addCheck('Intl timezone', hasTz, hasTz ? tz : 'resolution failed');
   })();
 
-  // 6. Rotation + helmcam embed, only when ?rotate=180 is present. The
-  // manual part (stop helmcam for 60s, confirm frames resume without a
-  // reload) is done by eye against this iframe; this page only sets up the
-  // rotated embed to look at.
-  if (rotated) {
-    var wrap = document.getElementById('helmcam-wrap');
-    var note = document.createElement('p');
-    note.className = 'detail';
-    note.textContent = 'rotate=180 active. helmcam embed below - stop the feed for 60s, restore it, and confirm the frame resumes without reloading this page.';
-    wrap.appendChild(note);
-    var iframe = document.createElement('iframe');
-    iframe.src = 'http://192.168.50.170:8090/';
-    iframe.title = 'helmcam';
-    wrap.appendChild(iframe);
+  // 9. Whether the last report POST succeeded. Seeded as pending until the
+  // first report() call resolves.
+  var reportCheck = { name: 'Report POST', pass: false, detail: 'pending', display: 'info' };
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function nowHHMMSS() {
+    var d = new Date();
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+  }
+  function truncate(str, max) {
+    str = String(str == null ? '' : str);
+    return str.length > max ? str.slice(0, max - 1) + '…' : str;
+  }
+
+  function setReportStatus(text) {
+    document.getElementById('report-status').textContent = text;
+  }
+
+  function renderGrid() {
+    grid.innerHTML = '';
+    checks.concat([reportCheck]).forEach(function (chk) {
+      var cell = document.createElement('div');
+      cell.className = 'cell';
+
+      var name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = chk.name;
+
+      var badge = document.createElement('div');
+      badge.className = 'badge ' + chk.display;
+      badge.textContent = chk.display === 'pass' ? 'PASS' : chk.display === 'fail' ? 'FAIL' : 'INFO';
+
+      var detail = document.createElement('div');
+      detail.className = 'detail';
+      detail.textContent = chk.detail;
+
+      cell.appendChild(name);
+      cell.appendChild(badge);
+      cell.appendChild(detail);
+      grid.appendChild(cell);
+    });
+
+    // 6. Rotation + helmcam embed, only when ?rotate=180 is present - sized
+    // as one grid cell (not full width) so every check stays visible
+    // alongside it. The manual part (stop helmcam for 60s, confirm frames
+    // resume without a reload) is done by eye against this iframe.
+    if (rotated) {
+      var camCell = document.createElement('div');
+      camCell.className = 'cell helmcam';
+      var iframe = document.createElement('iframe');
+      iframe.src = 'http://192.168.50.170:8090/';
+      iframe.title = 'helmcam';
+      camCell.appendChild(iframe);
+      grid.appendChild(camCell);
+    }
+  }
+
+  function report() {
+    var payload = {
+      user_agent: navigator.userAgent,
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      rotate: rotated ? 180 : 0,
+      checks: checks.concat([reportCheck]).map(function (c) {
+        return { name: c.name, pass: c.pass, detail: c.detail };
+      })
+    };
+
+    fetch('/api/kiosk-probe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (resp) {
+      if (resp.ok) {
+        reportCheck.pass = true;
+        reportCheck.display = 'pass';
+        reportCheck.detail = 'HTTP ' + resp.status;
+        setReportStatus('reported ' + nowHHMMSS());
+        return;
+      }
+      return resp.text().then(function (text) {
+        reportCheck.pass = false;
+        reportCheck.display = 'fail';
+        reportCheck.detail = 'HTTP ' + resp.status;
+        setReportStatus('HTTP ' + resp.status + (text ? ': ' + truncate(text, 60) : ''));
+      });
+    }).catch(function (err) {
+      reportCheck.pass = false;
+      reportCheck.display = 'fail';
+      reportCheck.detail = 'network error';
+      setReportStatus('network error: ' + truncate(err && err.message ? err.message : err, 60));
+    }).then(function () {
+      renderGrid();
+    });
   }
 
   document.getElementById('ua').textContent = navigator.userAgent;
+  renderGrid();
+  report();
+  setInterval(report, 60000);
 })();
 </script>
 </body>

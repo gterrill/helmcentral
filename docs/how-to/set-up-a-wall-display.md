@@ -8,11 +8,23 @@ does not do.
 ## 1. Check the device first
 
 Before wiring anything up, load `/kiosk-probe.html` on the actual browser and
-device you plan to run the wall display on, not on a desktop. It prints
-PASS or FAIL for the things the kiosk needs: a hardware WebGL2 context (a
-software renderer, such as SwiftShader or llvmpipe, is reported as a
-failure), `:has()` selector support, `structuredClone`, and
-`EventSource`/`ResizeObserver`/`matchMedia`/timezone resolution.
+device you plan to run the wall display on, not on a desktop. The screen is
+only 360px tall, so the page itself just shows a compact PASS/FAIL grid at a
+glance; read the actual results from the backend log instead, on the boat
+box:
+
+```
+docker compose logs backend | grep 'kiosk probe'
+```
+
+That prints a header line (user agent, viewport, rotation), one line per
+check, and a footer with the pass count. The checks are: a hardware WebGL2
+context (a software renderer, such as SwiftShader or llvmpipe, is reported
+as a failure), `:has()` selector support, `structuredClone`,
+`EventSource`/`ResizeObserver`/`matchMedia`/timezone resolution, and a final
+`Report POST` check confirming the page's own report reached the backend.
+The page POSTs this report as soon as the checks finish and again every 60
+seconds, so leaving it open keeps a fresh record in the log.
 
 If everything passes, proceed. If only the informational `100svh` check
 fails, proceed anyway; the kiosk root doesn't use that unit. If WebGL2,
@@ -21,9 +33,9 @@ dashboard's baseline (Baseline 2024); a Chromium-based kiosk browser is the
 usual fix on a small ARM board that ships an older WebKit by default.
 
 Add `?rotate=180` to the probe URL to also check a physically inverted
-screen: it rotates the page and embeds a camera feed if you have one
-configured, so you can confirm the feed keeps updating through an
-interruption without a page reload.
+screen: it rotates the page and embeds a camera feed, sized as one cell of
+the grid, if you have one configured, so you can confirm the feed keeps
+updating through an interruption without a page reload.
 
 ## 2. Flag the pages you want on the wall
 
