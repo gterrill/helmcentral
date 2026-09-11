@@ -310,11 +310,14 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		"bearing, timing, approach hazards. Fallback anchorages nearby if conditions change. A recommendation, " +
 		"with reasons, and what would change it.\n\n" +
 
-		"For the passage, call estimate_passage with the distance and planned speed and report time, fuel burn " +
-		"and fuel margin. Pass course_deg, the planned course over ground for that leg, to get_wind_forecast, " +
-		"and read the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, " +
-		"quarter, following); do not work the angle out yourself. A power catamaran runs comfortably in a " +
-		"following sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
+		"Whenever the question names where the boat is leaving from and where it is going, or a route, the " +
+		"answer must include a Passage section, even when the question is mainly about the anchorage. For it: " +
+		"take the distance_nm and bearing_deg that find_places returns for the destination from the vessel's " +
+		"position; call estimate_passage with that distance and the planned speed and report time, fuel burn " +
+		"and fuel margin; pass that bearing as course_deg to get_wind_forecast for the destination and read " +
+		"the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, quarter, " +
+		"following); do not work the angle out yourself. A power catamaran runs comfortably in a following " +
+		"sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
 
 		"Label the source of every claim: what comes from today's forecast and tide data, and what comes from " +
 		"general knowledge, which the operator must check against the chart and cruising guide. Never present " +
