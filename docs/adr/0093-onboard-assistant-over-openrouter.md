@@ -153,20 +153,36 @@ reads plain English; standing notes let the operator state exactly what
 they know once, in their own words, rather than encoding it into a form the
 model has to be taught to query in the first place.
 
-### 8. `find_places` sources waypoints, then Overpass, host does the geometry
+### 8. `find_places` sources waypoints, then a two-rung Overpass ladder, host does the geometry
 
 `find_places` (`assistant_tools.go`) searches saved route waypoints by name
-first, then searches OpenStreetMap via Overpass for the same query, over a
-fixed tag set (`natural`, `place`, `seamark:type`, `leisure=marina`) within
-100 nautical miles of the vessel (or of an explicit centre the model
-supplies). Distance and bearing for every candidate, waypoint or OSM
-feature alike, are computed by the host, never returned by a source: this
-is ADR 0091's rule (a provider hands back raw features; the host alone
-computes derived distance, bearing, ranking) applied here to two sources
-instead of one. When a waypoint and an OSM result name the same feature
-within 500m, the waypoint wins on dedupe, since it was added to the
-candidate list first and an operator's own named waypoint is a more
-deliberate answer than Overpass's guess at the same spot.
+first. It then searches OpenStreetMap via Overpass in up to two rungs,
+bbox-based rather than `around:`-based, instead of the single tagged name
+regex the tool started with. Rung 1 is an exact, untagged name match
+(`nwr["name"="<variant>"]`, no tag filter) over the vessel's full 100
+nautical mile search radius, tried against a small set of capitalisation
+variants of the query. Rung 2, the original four-clause tag-filtered name
+regex, runs only when rung 1 comes back empty and no waypoint already
+matched, and only over a tight 20 nautical mile box. The two rungs exist
+because they were measured, live, against `overpass.openstreetmap.fr` (the
+mirror this boat actually reaches; the main `overpass-api.de` refuses this
+network) on 2026-09-11: an untagged exact-name match answers in about 1
+second even at 100 nautical miles, because Overpass can use its name index
+directly, while the tagged name regex costs a full unindexed scan of every
+element in the box, answering in 2 to 5 seconds at 20 nautical miles and
+timing out server-side well before 100. Adding this project's tag filter to
+an exact-name query erased the win too, turning the same 1 second answer
+into 20, so kind (`seamark:type`, `natural`, `place`, `leisure`, in that
+priority order, or `feature` when none of the four is present) is derived
+host-side instead, and nothing named is discarded for want of a recognised
+tag. Distance and bearing for every candidate, waypoint or OSM feature
+alike, are computed by the host, never returned by a source: this is ADR
+0091's rule (a provider hands back raw features; the host alone computes
+derived distance, bearing, ranking) applied here to two sources instead of
+one. When a waypoint and an OSM result name the same feature within 500m,
+the waypoint wins on dedupe, since it was added to the candidate list first
+and an operator's own named waypoint is a more deliberate answer than
+Overpass's guess at the same spot.
 
 ### 9. `time/tzdata` embedded for the static binary
 
