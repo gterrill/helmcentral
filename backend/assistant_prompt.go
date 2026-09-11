@@ -1,0 +1,279 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// This file builds the onboard assistant's system prompt (ADR 0093) from
+// live vessel context, so the model always reasons from the boat's actual
+// position, heading, warnings and configured providers rather than from
+// nothing at all. collectAssistantPromptContext gathers that context once
+// per turn; buildAssistantSystemPrompt is a pure function of it, kept
+// separate so prompt wording can be tested without SignalK, settings, or
+// the forecast warnings fetcher.
+
+// assistantPromptContext is every fact the system prompt is built from.
+// Live vessel fields (Latitude/Longitude/HeadingTrue/SpeedOverGroundKts/
+// WindSpeedApparentKts/WindAngleApparentDeg) carry vesselStateData's own -1
+// "unknown" sentinel (signalk.go's fetchSignalKVesselState) rather than a
+// fabricated reading when a fetch fails - buildAssistantSystemPrompt prints
+// "unknown" for exactly that sentinel and never lets the literal "-1"
+// appear in the rendered prompt.
+type assistantPromptContext struct {
+	Now time.Time
+
+	VesselName string
+	BoatModel  string
+	// LOAM is anchor.loa_m from settings, 0 when not entered (settings.go's
+	// own convention for this field - not a -1 sentinel).
+	LOAM float64
+
+	Latitude  float64
+	Longitude float64
+	// PlaceName is the anchor-watch pinned name when a watch is active and
+	// has resolved one (it wins over the roaming tick's cache - see
+	// collectAssistantPromptContext), otherwise the roaming
+	// getCurrentPlaceName() value. Empty when neither is known.
+	PlaceName string
+
+	HeadingTrue          float64
+	SpeedOverGroundKts   float64
+	WindSpeedApparentKts float64
+	WindAngleApparentDeg float64
+	WindSide             string
+
+	// WarningOK is false when the forecast warnings fetcher
+	// (forecast_warnings_fetcher.go) has never landed a reading at all -
+	// distinct from WarningLevel==0, which is a genuine "no warning in
+	// force" result.
+	WarningOK        bool
+	WarningLevel     int
+	WarningSurf      bool
+	WarningFetchedAt time.Time
+
+	WeatherProvider string
+	WaveProvider    string
+	TideProvider    string
+	TideStationName string
+
+	// Notes are the operator's standing notes (settings.yaml's
+	// assistant.notes), injected into every system prompt verbatim - this is
+	// where anchorage exposure knowledge and rules like "queenfish bite best
+	// on a rising tide" live (ADR 0093).
+	Notes string
+}
+
+// collectAssistantPromptContext reads settings once via readSettings +
+// buildSettingsPayload, the live vessel state, the anchor watch's pinned
+// place name (winning over the roaming one), and the forecast warnings
+// slot. It is deliberately thin: every rendering decision (sentinel ->
+// "unknown", provider id -> "not configured", etc.) lives in
+// buildAssistantSystemPrompt so that function can be tested by constructing
+// this struct directly, with no SignalK connection or settings file
+// required.
+//
+// A failed settings read or vessel state fetch is never masked with a
+// plausible-looking value (AGENTS.md's fallback policy): the affected
+// fields simply stay at their zero value / sentinel default, which
+// buildAssistantSystemPrompt already renders as absent.
+func collectAssistantPromptContext(settingsPath string, now time.Time) assistantPromptContext {
+	pc := assistantPromptContext{
+		Now:                  now,
+		Latitude:             -1,
+		Longitude:            -1,
+		HeadingTrue:          -1,
+		SpeedOverGroundKts:   -1,
+		WindSpeedApparentKts: -1,
+		WindAngleApparentDeg: -1,
+	}
+
+	if settings, err := readSettings(settingsPath); err == nil {
+		payload := buildSettingsPayload(settings)
+		pc.BoatModel = payload.Boat.Model
+		pc.LOAM = payload.Anchor.LOAM
+		pc.WeatherProvider = payload.UI.WeatherProvider
+		pc.WaveProvider = payload.UI.WaveProvider
+		pc.TideProvider = payload.UI.TideProvider
+		pc.TideStationName = payload.UI.TideStationName
+		pc.Notes = payload.Assistant.Notes
+	}
+
+	if state, err := fetchSignalKVesselState(); err == nil {
+		pc.VesselName = state.Name
+		pc.Latitude = state.Latitude
+		pc.Longitude = state.Longitude
+		pc.HeadingTrue = state.HeadingTrue
+		pc.SpeedOverGroundKts = state.SpeedOverGroundKts
+		pc.WindSpeedApparentKts = state.WindSpeedApparentKts
+		pc.WindAngleApparentDeg = state.WindAngleApparentDeg
+		pc.WindSide = state.WindSide
+	}
+
+	// The pinned anchor-watch name wins over the roaming tick's cache while
+	// a watch is active and has resolved one - matching placeName's own
+	// precedence (place_name.go's placeName handler and updateTickPlaceName).
+	anchorWatchMu.RLock()
+	aw := anchorWatchState
+	anchorWatchMu.RUnlock()
+	if aw != nil && aw.PlaceName != "" {
+		pc.PlaceName = aw.PlaceName
+	} else {
+		pc.PlaceName = getCurrentPlaceName()
+	}
+
+	if reading, ok := globalForecastWarningsSlot.get(); ok {
+		pc.WarningOK = true
+		pc.WarningLevel = reading.WindLevel
+		pc.WarningSurf = reading.Surf
+		pc.WarningFetchedAt = reading.FetchedAt
+	}
+
+	return pc
+}
+
+// assistantTimeZoneLabel names pc.Longitude's derived fixed-offset zone the
+// way an operator would say it ("UTC+10"), rather than the IANA-style id
+// vesselLocalTimezoneName (weather_tide.go) hands to a weather plugin. A
+// zero offset - including the one a -1 sentinel longitude rounds to -
+// collapses to plain "UTC" rather than the technically-accurate but
+// misleading "UTC+0".
+func assistantTimeZoneLabel(longitude float64) string {
+	label := vesselLocalLocation(longitude).String()
+	if label == "UTC+0" {
+		return "UTC"
+	}
+	return label
+}
+
+// assistantWarningLevelLabel names a wind-ladder level (see
+// forecastWindWarningLevelFor, forecast_warnings_fetcher.go) for the prompt.
+func assistantWarningLevelLabel(level int) string {
+	switch level {
+	case 1:
+		return "a wind advisory/watch"
+	case 2:
+		return "a gale warning"
+	case 3:
+		return "a storm/hurricane warning"
+	default:
+		return "an unrecognised wind warning"
+	}
+}
+
+// providerLabelOrNotConfigured names a configured provider id, or says so
+// plainly when settings carries none - never a guessed default, since the
+// model needs to know when it's working with nothing rather than a real
+// provider.
+func providerLabelOrNotConfigured(id string) string {
+	if id = strings.TrimSpace(id); id == "" {
+		return "not configured"
+	}
+	return id
+}
+
+// buildAssistantSystemPrompt renders pc into the assistant's system prompt,
+// in a fixed section order (ADR 0093): identity, local time, position,
+// live heading/speed/wind, marine warnings, configured providers, tool-use
+// guidance, and the operator's standing notes. Every live field that might
+// carry vesselStateData's -1 "unknown" sentinel is guarded before
+// formatting, so the literal string "-1" can never appear in the output -
+// a model reasoning over "-1 kts" or "-1 degrees" as if it were a real
+// reading would be worse than no prompt at all.
+func buildAssistantSystemPrompt(pc assistantPromptContext) string {
+	var b strings.Builder
+
+	// 1. Identity.
+	vesselLabel := strings.TrimSpace(pc.VesselName)
+	if vesselLabel == "" {
+		vesselLabel = "the vessel"
+	}
+	boatModel := strings.TrimSpace(pc.BoatModel)
+	if boatModel == "" {
+		boatModel = "unknown model"
+	}
+	loaLabel := "unknown"
+	if pc.LOAM > 0 {
+		loaLabel = fmt.Sprintf("%.1fm", pc.LOAM)
+	}
+	fmt.Fprintf(&b, "You are the onboard passage-planning assistant aboard %s, a %s (LOA %s).\n\n", vesselLabel, boatModel, loaLabel)
+
+	// 2. Local time.
+	loc := vesselLocalLocation(pc.Longitude)
+	fmt.Fprintf(&b, "Local time: %s (%s, derived from the vessel's longitude). Give every time in this zone unless a tool result states a different zone.\n\n",
+		pc.Now.In(loc).Format("Monday 2 January 2006 15:04"), assistantTimeZoneLabel(pc.Longitude))
+
+	// 3. Position + place name.
+	if hasUsableVesselPosition(pc.Latitude, pc.Longitude) {
+		if place := strings.TrimSpace(pc.PlaceName); place != "" {
+			fmt.Fprintf(&b, "Position: %.4f, %.4f (near %s).\n\n", pc.Latitude, pc.Longitude, place)
+		} else {
+			fmt.Fprintf(&b, "Position: %.4f, %.4f.\n\n", pc.Latitude, pc.Longitude)
+		}
+	} else {
+		b.WriteString("Position unknown: ask the operator for the vessel's position or a place name to plan around.\n\n")
+	}
+
+	// 4. Live heading / speed / apparent wind.
+	headingLabel := "unknown"
+	if pc.HeadingTrue >= 0 {
+		headingLabel = fmt.Sprintf("%.0f° true", pc.HeadingTrue)
+	}
+	sogLabel := "unknown"
+	if pc.SpeedOverGroundKts >= 0 {
+		sogLabel = fmt.Sprintf("%.1f kts", pc.SpeedOverGroundKts)
+	}
+	windLabel := "unknown"
+	if pc.WindSpeedApparentKts >= 0 && pc.WindAngleApparentDeg >= 0 {
+		if side := strings.TrimSpace(pc.WindSide); side != "" {
+			windLabel = fmt.Sprintf("%.0f kts at %.0f° (%s)", pc.WindSpeedApparentKts, pc.WindAngleApparentDeg, side)
+		} else {
+			windLabel = fmt.Sprintf("%.0f kts at %.0f°", pc.WindSpeedApparentKts, pc.WindAngleApparentDeg)
+		}
+	}
+	fmt.Fprintf(&b, "Heading: %s. Speed over ground: %s. Apparent wind: %s.\n\n", headingLabel, sogLabel, windLabel)
+
+	// 5. Marine warnings.
+	switch {
+	case !pc.WarningOK:
+		b.WriteString("Marine warnings: the forecast warnings feed has not reported yet.\n\n")
+	case pc.WarningLevel <= 0:
+		fmt.Fprintf(&b, "Marine warnings: no official marine warning as of %s.\n\n", pc.WarningFetchedAt.In(loc).Format("15:04"))
+	default:
+		line := fmt.Sprintf("Marine warnings: %s in force (wind level %d).", assistantWarningLevelLabel(pc.WarningLevel), pc.WarningLevel)
+		if pc.WarningSurf {
+			line += " A surf advisory is also in force."
+		}
+		b.WriteString(line)
+		b.WriteString("\n\n")
+	}
+
+	// 6. Configured providers and tide station.
+	tideStation := strings.TrimSpace(pc.TideStationName)
+	if tideStation == "" {
+		tideStation = "none configured"
+	}
+	fmt.Fprintf(&b, "Weather provider: %s. Wave provider: %s. Tide provider: %s. Configured tide station: %s.\n\n",
+		providerLabelOrNotConfigured(pc.WeatherProvider), providerLabelOrNotConfigured(pc.WaveProvider),
+		providerLabelOrNotConfigured(pc.TideProvider), tideStation)
+
+	// 7. Tool-use guidance.
+	b.WriteString("When the operator names a place, call find_places first to resolve it to coordinates before " +
+		"calling get_wind_forecast or get_tides. For each candidate anchorage under discussion, fetch both wind " +
+		"and tides, not just one. State any exposure or shelter assumptions explicitly, for example \"I am " +
+		"assuming Blue Pearl Bay is open to the north-west; correct me if not.\" Prefer the operator's standing " +
+		"notes below over general knowledge about a place. If a tool call returns an error, say so plainly and " +
+		"do not guess or fabricate a plausible-looking answer. Use knots for wind speed, nautical miles for " +
+		"distance, and metres for wave height and depth. Be concise: use markdown headings, and a short table " +
+		"when comparing two or more options.\n\n")
+
+	// 8. Operator standing notes, verbatim.
+	notes := strings.TrimSpace(pc.Notes)
+	if notes == "" {
+		notes = "(none)"
+	}
+	fmt.Fprintf(&b, "Operator standing notes:\n%s", notes)
+
+	return b.String()
+}
