@@ -284,4 +284,32 @@ describe('PoiMapTile', () => {
     expect(screen.getAllByText('Stale Anchorage').length).toBeGreaterThan(0)
     expect(screen.getByText('POI provider unavailable (502)')).toBeInTheDocument()
   })
+
+  it('shows "POI feed unavailable" rather than "No points of interest in range" when the feed has never succeeded', () => {
+    usePoiMock.mockReturnValue(poiResult({
+      features: [],
+      loading: false,
+      error: 'POI provider unavailable (502)',
+      fetchedAt: null,
+    }))
+
+    renderTile()
+
+    expect(screen.getByText('POI feed unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('No points of interest in range')).toBeNull()
+    expect(screen.getByText('POI provider unavailable (502)')).toBeInTheDocument()
+  })
+
+  it('shows "No points of interest in range" only once the fetch has actually succeeded with zero features', () => {
+    usePoiMock.mockReturnValue(poiResult({
+      features: [],
+      loading: false,
+      error: null,
+      fetchedAt: '2026-09-11T00:00:00Z',
+    }))
+
+    renderTile()
+
+    expect(screen.getByText('No points of interest in range')).toBeInTheDocument()
+  })
 })

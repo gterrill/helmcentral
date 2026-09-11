@@ -325,7 +325,11 @@ export function PoiMapTile({
           <div className="flex h-full min-h-0 flex-col gap-1 overflow-y-auto pr-1">
             {rankedList.length === 0 ? (
               <div className="flex h-full items-center justify-center text-center text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                {poi.loading ? 'Loading…' : 'No points of interest in range'}
+                {poi.error && poi.fetchedAt === null
+                  ? 'POI feed unavailable'
+                  : poi.loading
+                    ? 'Loading…'
+                    : 'No points of interest in range'}
               </div>
             ) : (
               rankedList.map((feature, index) => (
