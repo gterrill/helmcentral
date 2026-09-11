@@ -72,16 +72,35 @@ export function SeaStateTile({ forecast, waveForecastDays, waveLoading, waveErro
 
   return (
     <Tile title="Sea State">
-      <div ref={ref} className="mt-2 h-full min-h-[160px] w-full">
-        {waveError ? (
-          <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
-        ) : (
-          <SeaStateChart series={series} width={width} height={height} waveUnit={waveUnit} />
+      {/* Tile's CardContent isn't itself a flex column (tile.tsx), so this
+          wrapper gives the measured box below a flex parent to take flex-1
+          from - the same technique anchor-watch-tile.tsx uses for its map. */}
+      <div className="flex h-full min-h-0 flex-col">
+        {/* relative + lg:flex-1/lg:min-h-0: at lg+ the dashboard grid hands
+            this tile a fixed height (RGL wraps widgets in h-full), so this
+            box takes its height from that flex parent. Below lg the grid
+            only gives a floor (dashboard-bento-grid.tsx), so min-h-[160px]
+            is the height there instead. Either way the box's height comes
+            from the grid, never from its own content - the chart is rendered
+            in an absolutely-positioned child below, so the SVG's rendered
+            size has no box left to grow. Without this, in a real browser
+            (which, unlike jsdom, actually applies layout) the div's height
+            would be its content height, i.e. the chart's height, which is
+            set from the measured height: every render grows the box and the
+            observer fires again. */}
+        <div ref={ref} className="relative mt-2 min-h-[160px] w-full lg:min-h-0 lg:flex-1">
+          {waveError ? (
+            <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
+          ) : (
+            <div className="absolute inset-0">
+              <SeaStateChart series={series} width={width} height={height} waveUnit={waveUnit} />
+            </div>
+          )}
+        </div>
+        {waveLoading && waveForecastDays.length === 0 && !waveError && (
+          <p className="mt-1 text-[11px] text-muted-foreground">Loading wave data…</p>
         )}
       </div>
-      {waveLoading && waveForecastDays.length === 0 && !waveError && (
-        <p className="mt-1 text-[11px] text-muted-foreground">Loading wave data…</p>
-      )}
     </Tile>
   )
 }
