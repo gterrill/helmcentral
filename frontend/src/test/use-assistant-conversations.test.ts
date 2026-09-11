@@ -30,10 +30,18 @@ describe('useAssistantConversations', () => {
     vi.unstubAllGlobals()
   })
 
-  it('lists conversations on mount, newest updated first as the server returns them', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ conversations: [conversationApi({ id: 'c1', title: 'Hook Reef' })] }),
+  it('lists conversations on mount and opens the newest thread', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1', title: 'Hook Reef' })] }) }
+      }
+      if (url === '/api/assistant/conversations/c1') {
+        return {
+          ok: true,
+          json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [messageApi({ content: 'hello' })] }),
+        }
+      }
+      throw new Error(`unexpected fetch ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -44,6 +52,19 @@ describe('useAssistantConversations', () => {
     expect(result.current.conversations).toEqual([
       { id: 'c1', title: 'Hook Reef', createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' },
     ])
+    await waitFor(() => expect(result.current.activeId).toBe('c1'))
+    await waitFor(() => expect(result.current.messages.map((m) => m.content)).toEqual(['hello']))
+  })
+
+  it('leaves nothing selected when there are no conversations', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ conversations: [] }) }),
+    )
+
+    const { result } = renderHook(() => useAssistantConversations())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.activeId).toBeNull()
     expect(result.current.messages).toEqual([])
   })
@@ -75,25 +96,29 @@ describe('useAssistantConversations', () => {
 
   it('select loads the conversation thread', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ conversations: [conversationApi()] }) })
+      // initial list: c1 first, which the mount opens on its own
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' }), conversationApi({ id: 'c2' })] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [] }) })
+      // the operator picks c2
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ conversation: conversationApi(), messages: [messageApi({ content: 'hi there' })] }),
+        json: async () => ({ conversation: conversationApi({ id: 'c2' }), messages: [messageApi({ conversation_id: 'c2', content: 'hi there' })] }),
       })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useAssistantConversations())
     await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.activeId).toBe('c1')
 
     await act(async () => {
-      await result.current.select('c1')
+      await result.current.select('c2')
     })
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/assistant/conversations/c1')
-    expect(result.current.activeId).toBe('c1')
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/assistant/conversations/c2')
+    expect(result.current.activeId).toBe('c2')
     expect(result.current.messages).toEqual([{
       id: 'm1',
-      conversationId: 'c1',
+      conversationId: 'c2',
       seq: 1,
       role: 'user',
       content: 'hi there',
@@ -108,9 +133,9 @@ describe('useAssistantConversations', () => {
 
   it('remove deletes the active conversation and selects the next one', async () => {
     const fetchMock = vi.fn()
-      // initial list: two conversations, c1 first (active later)
+      // initial list: two conversations, c1 first (opened by the mount)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' }), conversationApi({ id: 'c2' })] }) })
-      // select c1
+      // the mount opens c1
       .mockResolvedValueOnce({ ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [messageApi()] }) })
       // DELETE c1
       .mockResolvedValueOnce({ ok: true, status: 204 })
@@ -122,10 +147,6 @@ describe('useAssistantConversations', () => {
 
     const { result } = renderHook(() => useAssistantConversations())
     await waitFor(() => expect(result.current.loading).toBe(false))
-
-    await act(async () => {
-      await result.current.select('c1')
-    })
     expect(result.current.activeId).toBe('c1')
 
     await act(async () => {
@@ -148,7 +169,7 @@ describe('useAssistantConversations', () => {
     const { result } = renderHook(() => useAssistantConversations())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    await act(async () => { await result.current.select('c1') })
+    expect(result.current.activeId).toBe('c1')
     await act(async () => { await result.current.remove('c1') })
 
     expect(result.current.activeId).toBeNull()

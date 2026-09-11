@@ -111,17 +111,17 @@ export function AssistantDrawer({ canWrite, onOpenSettings }: AssistantDrawerPro
     }
 
     return (
-      <div className="flex h-full min-h-0 w-full gap-4">
-        <div className="flex min-w-0 shrink-0 flex-col gap-2 md:w-56">
+      <div className="flex h-full min-h-0 w-full flex-col gap-4 lg:flex-row">
+        <div className="flex min-w-0 shrink-0 gap-2 lg:w-56 lg:flex-col">
           <Button variant="outline" onClick={() => void conversations.create()}>
             New conversation
           </Button>
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+          <div className="flex min-h-0 min-w-0 flex-1 gap-1 overflow-x-auto lg:flex-col lg:overflow-x-visible lg:overflow-y-auto">
             {conversations.conversations.map((conversation) => (
               <div
                 key={conversation.id}
                 className={cn(
-                  'group flex min-w-0 items-center gap-1 rounded-md px-2 py-1.5',
+                  'group flex w-56 shrink-0 items-center gap-1 rounded-md px-2 py-1.5 lg:w-auto',
                   conversations.activeId === conversation.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
                 )}
               >
@@ -146,21 +146,21 @@ export function AssistantDrawer({ canWrite, onOpenSettings }: AssistantDrawerPro
           </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-1">
+        <div className="mx-auto flex min-h-0 w-full max-w-3xl min-w-0 flex-1 flex-col gap-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1 py-2">
             {conversations.messages.length === 0 ? (
               <p className="text-sm text-muted-foreground">Try: &ldquo;{EXAMPLE_QUESTION}&rdquo;</p>
             ) : (
               conversations.messages.map((message) => (
                 <div key={message.id} className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                   {message.role === 'user' ? (
-                    <div className="max-w-[85%] min-w-0 whitespace-pre-wrap rounded-lg bg-muted/60 p-3 text-sm">
+                    <div className="max-w-[85%] min-w-0 whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-foreground">
                       {message.content}
                     </div>
                   ) : (
-                    <div className="max-w-[85%] min-w-0 rounded-lg border bg-card p-3">
+                    <div className="w-full min-w-0">
                       <AssistantMarkdown content={message.content} />
-                      <p className="mt-2 text-[11px] tabular-nums text-muted-foreground">
+                      <p className="mt-4 border-t border-border pt-2 text-[11px] tabular-nums text-muted-foreground">
                         {formatMessageFooter(message)}
                       </p>
                     </div>

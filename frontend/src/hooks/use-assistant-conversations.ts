@@ -94,8 +94,6 @@ export function useAssistantConversations() {
     }
   }, [fetchConversations])
 
-  useEffect(() => { void refresh() }, [refresh])
-
   const select = useCallback(async (id: string) => {
     setActiveId(id)
     try {
@@ -109,6 +107,30 @@ export function useAssistantConversations() {
       setMessages([])
     }
   }, [])
+
+  // Initial load opens the most recently updated thread rather than an empty
+  // pane: the panel is usually reopened to reread a plan, and the list is
+  // already sorted newest first by the server. A later refresh never changes
+  // the selection; only the operator (or create/remove) does that.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const list = await fetchConversations()
+        if (cancelled) return
+        setConversations(list)
+        setError(null)
+        if (list.length > 0) await select(list[0].id)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fetchConversations, select])
 
   const create = useCallback(async (): Promise<string | null> => {
     try {

@@ -7,45 +7,67 @@ import remarkGfm from 'remark-gfm'
 // dropped explicitly too below, so a reply can never make the browser fetch
 // an attacker-controlled URL as a side effect of rendering it.
 //
+// A reply is read like a briefing, not scanned like a tile, so the block
+// elements carry their own vertical rhythm: more space above a heading than
+// below it, a paragraph's worth between blocks, and a wider gap around a
+// rule, which is how the model separates sections. Tailwind's preflight
+// zeroes every margin, so without these the sections run together.
+//
 // Every override below reaches for a semantic token, not a literal colour,
 // so a reply repaints correctly across the light/dark/instrument themes
 // the same as every other surface in the app.
 const components: Components = {
-  h1: ({ children }) => <h3 className="text-sm font-semibold text-foreground">{children}</h3>,
-  h2: ({ children }) => <h3 className="text-sm font-semibold text-foreground">{children}</h3>,
-  h3: ({ children }) => <h3 className="text-sm font-semibold text-foreground">{children}</h3>,
-  h4: ({ children }) => <h3 className="text-sm font-semibold text-foreground">{children}</h3>,
-  h5: ({ children }) => <h3 className="text-sm font-semibold text-foreground">{children}</h3>,
-  h6: ({ children }) => <h3 className="text-sm font-semibold text-foreground">{children}</h3>,
-  p: ({ children }) => <p className="text-sm text-foreground">{children}</p>,
-  ul: ({ children }) => <ul className="list-disc space-y-0.5 pl-5 text-sm text-foreground">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal space-y-0.5 pl-5 text-sm text-foreground">{children}</ol>,
-  li: ({ children }) => <li className="text-sm text-foreground">{children}</li>,
+  h1: ({ children }) => (
+    <h3 className="mb-2 mt-6 text-base font-semibold leading-snug text-foreground first:mt-0">{children}</h3>
+  ),
+  h2: ({ children }) => (
+    <h3 className="mb-2 mt-6 text-base font-semibold leading-snug text-foreground first:mt-0">{children}</h3>
+  ),
+  h3: ({ children }) => (
+    <h4 className="mb-1.5 mt-5 text-sm font-semibold leading-snug text-foreground first:mt-0">{children}</h4>
+  ),
+  h4: ({ children }) => (
+    <h4 className="mb-1.5 mt-5 text-sm font-semibold leading-snug text-foreground first:mt-0">{children}</h4>
+  ),
+  h5: ({ children }) => (
+    <h4 className="mb-1.5 mt-5 text-sm font-semibold leading-snug text-foreground first:mt-0">{children}</h4>
+  ),
+  h6: ({ children }) => (
+    <h4 className="mb-1.5 mt-5 text-sm font-semibold leading-snug text-foreground first:mt-0">{children}</h4>
+  ),
+  p: ({ children }) => <p className="mb-3 text-foreground last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-3 list-disc space-y-1 pl-5 text-foreground last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1 pl-5 text-foreground last:mb-0">{children}</ol>,
+  li: ({ children }) => <li className="pl-1 text-foreground">{children}</li>,
   a: ({ children, href }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="text-primary underline">
+    <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
       {children}
     </a>
   ),
-  code: ({ children }) => <code className="rounded bg-muted px-1 text-xs text-foreground">{children}</code>,
+  code: ({ children }) => (
+    <code className="rounded-sm bg-muted px-1 py-0.5 font-display text-xs text-foreground">{children}</code>
+  ),
   pre: ({ children }) => (
-    <pre className="overflow-x-auto rounded-md border border-border bg-muted p-2 text-xs text-foreground">
+    <pre className="mb-3 overflow-x-auto rounded-md border border-border bg-muted p-3 font-display text-xs leading-relaxed text-foreground last:mb-0">
       {children}
     </pre>
   ),
   table: ({ children }) => (
-    <div className="min-w-0 overflow-x-auto">
-      <table className="w-full text-xs text-foreground">{children}</table>
+    <div className="mb-4 min-w-0 overflow-x-auto last:mb-0">
+      <table className="w-full border-collapse text-xs text-foreground">{children}</table>
     </div>
   ),
-  thead: ({ children }) => <thead>{children}</thead>,
+  thead: ({ children }) => <thead className="text-muted-foreground">{children}</thead>,
   tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
-  th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-semibold">{children}</th>,
-  td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+  th: ({ children }) => (
+    <th className="px-2 py-1.5 text-left align-bottom font-medium uppercase tracking-[0.08em]">{children}</th>
+  ),
+  td: ({ children }) => <td className="px-2 py-1.5 align-top tabular-nums">{children}</td>,
   strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
   blockquote: ({ children }) => (
-    <blockquote className="border-l-2 border-border pl-3 text-sm text-muted-foreground">{children}</blockquote>
+    <blockquote className="mb-3 border-l border-border pl-3 text-muted-foreground last:mb-0">{children}</blockquote>
   ),
-  hr: () => <hr className="border-border" />,
+  hr: () => <hr className="my-5 border-border" />,
 }
 
 interface AssistantMarkdownProps {
@@ -54,8 +76,10 @@ interface AssistantMarkdownProps {
 
 export function AssistantMarkdown({ content }: AssistantMarkdownProps) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} components={components}>
-      {content}
-    </ReactMarkdown>
+    <div className="min-w-0 text-sm leading-relaxed text-foreground">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} components={components}>
+        {content}
+      </ReactMarkdown>
+    </div>
   )
 }
