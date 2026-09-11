@@ -240,7 +240,26 @@ budget, wrong now that it doesn't reach the wall at all. The guide's
 an operator sees while authoring a kiosk page measures the fold from the top
 of the grid, matching what `/kiosk` will actually show.
 
-### 10. Phase 0 findings
+### 10. The wall display always renders dark
+
+The operator's decision for the wall display is that it always runs in the
+dark theme, regardless of what any given browser profile has stored; a
+freshly provisioned kiosk browser defaults to light, and a live screenshot at
+1920x360 on the "Cluster preview" page showed exactly the mismatch that
+produces: a light basemap inside the instrument skin's dark tokens, because
+`AnchorWatchMap` picks its style off the same `isDarkTheme` value the skin
+ignores. `App()` derives `isDarkTheme` as `isKiosk || storedIsDarkTheme`
+immediately next to the `useDarkMode()` call, ahead of every consumer that
+reads it, and a small effect there keeps `document.documentElement`'s `dark`
+class in sync with that same derived value. Every tile, map and the toaster
+already took `isDarkTheme` from this one variable (ADR 0060's skin work put
+it there first), so the override needed no per-tile special-casing: it is
+one boolean, computed once, at the same place it was always read from.
+`toggleDarkMode` itself is untouched and keeps reading and writing the real
+stored preference; the override never calls it and never persists anything,
+so leaving `/kiosk` resumes exactly what this browser had chosen before.
+
+### 11. Phase 0 findings
 
 Before any of the above was worth building, a static probe page
 (`frontend/public/kiosk-probe.html`) checked whether the ODROID's WPE-webkit

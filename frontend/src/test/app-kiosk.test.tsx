@@ -281,14 +281,33 @@ vi.mock('@/hooks/use-server-trails', () => ({
   useServerTrails: () => ({ getSelfTrail: vi.fn(), getAisTrails: vi.fn() }),
 }))
 
+// Stored preference is always light in this suite. Hoisted so the dark-theme
+// override tests below can assert the real underlying preference is never
+// touched by the kiosk override — a plain inline vi.fn() couldn't be
+// inspected after the fact.
+const { mockToggleDarkMode } = vi.hoisted(() => ({ mockToggleDarkMode: vi.fn() }))
+
 vi.mock('@/hooks/use-dark-mode', () => ({
-  useDarkMode: () => [false, vi.fn()],
+  useDarkMode: () => [false, mockToggleDarkMode],
+}))
+
+// A minimal stand-in for the map-bearing tile the dark-theme override has to
+// reach (ADR 0089 phase 2): the real AnchorWatchTile pulls in the map's own
+// STYLE_DARK/STYLE_LIGHT switch, which is exactly the consumer a light
+// basemap bug would show up in. Mocked down to just the one prop this suite
+// cares about, the same pattern anchor-imagery-toggle.test.tsx uses for
+// AnchorWatchMap.
+vi.mock('@/components/anchor-watch-tile', () => ({
+  AnchorWatchTile: (props: { isDarkTheme?: boolean }) => (
+    <div data-testid="kiosk-anchor-watch-isdark">{String(props.isDarkTheme)}</div>
+  ),
 }))
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
 const DEPTH_TIDE_WIDGET: DashboardLayoutItem = { id: 'depth-tide', x: 0, y: 0, w: 4, h: 7 }
 const WIND_WIDGET: DashboardLayoutItem = { id: 'wind', x: 0, y: 0, w: 4, h: 8 }
+const ANCHOR_WATCH_WIDGET: DashboardLayoutItem = { id: 'anchor-watch', x: 0, y: 0, w: 4, h: 7 }
 
 function page(id: string, name: string, widgets: DashboardLayoutItem[], overrides: Partial<DashboardPage> = {}): DashboardPage {
   return { id, name, widgets, created_at: '', updated_at: '', ...overrides }
@@ -366,6 +385,19 @@ describe('App at /kiosk', () => {
 
     expect(screen.queryByTestId('dashboard-ribbon')).not.toBeInTheDocument()
   })
+
+  it('forces the dark theme regardless of the stored (light) preference, without persisting it', () => {
+    mockPagesState.pages = [
+      page('p1', 'Cluster preview', [DEPTH_TIDE_WIDGET, ANCHOR_WATCH_WIDGET], { kiosk: true, kiosk_seconds: 30 }),
+    ]
+    window.history.replaceState({}, '', '/kiosk')
+    render(<App />)
+
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(screen.getByTestId('kiosk-anchor-watch-isdark')).toHaveTextContent('true')
+    expect(mockToggleDarkMode).not.toHaveBeenCalled()
+    expect(globalThis.localStorage?.getItem('ui.darkMode')).toBeNull()
+  })
 })
 
 describe('App at / (kiosk authoring)', () => {
@@ -401,6 +433,17 @@ describe('App at / (kiosk authoring)', () => {
     // Switch to the unflagged page via the sidebar sub-list.
     fireEvent.click(screen.getByRole('button', { name: 'Other page' }))
     expect(screen.queryByTestId('kiosk-fold')).not.toBeInTheDocument()
+  })
+
+  it('stays on the stored (light) preference outside the kiosk route', () => {
+    mockPagesState.pages = [
+      page('p1', 'Cluster preview', [DEPTH_TIDE_WIDGET, ANCHOR_WATCH_WIDGET], { kiosk: true, kiosk_seconds: 30 }),
+    ]
+    window.history.replaceState({}, '', '/')
+    render(<App />)
+
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    expect(screen.getByTestId('kiosk-anchor-watch-isdark')).toHaveTextContent('false')
   })
 
   it('renders the pinned indicator ribbon outside the kiosk route', () => {

@@ -139,6 +139,10 @@ an unattended screen with no interaction of its own; there is no way to
 click into a page from `/kiosk`, and it is not part of the app's normal
 back/forward navigation.
 
+`/kiosk` always renders in the dark theme, regardless of what this browser
+has stored for the ordinary dashboard, and leaving it never changes that
+stored preference.
+
 `/kiosk` never renders the pinned indicator ribbon, whether or not one is
 configured, even on a page that shows it everywhere else it's viewed. See
 [The indicator ribbon](#the-indicator-ribbon) above. If a wall page needs

@@ -332,7 +332,27 @@ export function App() {
     globalThis.localStorage?.setItem(AUTO_CLOSE_ANCHOR_WATCH_KEY, String(autoCloseAnchorWatchEnabled))
   }, [autoCloseAnchorWatchEnabled])
 
-  const [isDarkTheme, toggleDarkMode] = useDarkMode()
+  // Hoisted ahead of useDarkMode (rather than left beside kioskOptions below,
+  // where it used to live) so the kiosk dark-theme override just below has
+  // it in scope. isKiosk depends only on activePanel, which is already set
+  // by this point, so nothing about moving it changes what it means.
+  const isKiosk = activePanel === 'kiosk'
+  const [storedIsDarkTheme, toggleDarkMode] = useDarkMode()
+  // The wall display always renders dark (operator decision, ADR 0089
+  // phase 2), regardless of what this browser has stored — a fresh kiosk
+  // profile otherwise defaults to light, which is how a light basemap ended
+  // up inside dark instrument-skin tiles on the 1920x360 strip. The override
+  // lives here, at the one place isDarkTheme is established, so every
+  // consumer (the root `dark` class effect right below, and every tile/map
+  // isDarkTheme prop threaded from this same variable) agrees without
+  // special-casing any one of them. toggleDarkMode is left untouched: it
+  // still reads and writes the real stored preference, so leaving /kiosk
+  // resumes whatever the operator last chose on this browser rather than
+  // whatever the wall display happened to force.
+  const isDarkTheme = isKiosk || storedIsDarkTheme
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDarkTheme)
+  }, [isDarkTheme])
   const { routes, loading: routesLoading, error: routesError, createRoute, updateRoute, deleteRoute } = useRoutes()
   const {
     charts: satCharts,
@@ -357,9 +377,9 @@ export function App() {
   // (rotate, a pinned page for authoring/screenshots) rather than app state,
   // so it's parsed once here the same way initialLocation is, and never
   // written back to the URL — see the early returns in the sync effect and
-  // the popstate handler below.
+  // the popstate handler below. isKiosk itself is declared earlier, beside
+  // useDarkMode, so the kiosk dark-theme override there can read it.
   const [kioskOptions] = useState(() => parseKioskOptions(globalThis.location?.search ?? ''))
-  const isKiosk = activePanel === 'kiosk'
   // The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip, not
   // tied to any page, so it lives beside the page hooks rather than inside
   // effectiveWidgets below.
