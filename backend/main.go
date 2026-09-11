@@ -298,6 +298,14 @@ func main() {
 	}
 	globalAlarmLogStore = als
 
+	// Onboard assistant conversation history (ADR 0093). Fail fast on open
+	// error, same reasoning as the stores above.
+	as, err := newAssistantStore(assistantDBPath())
+	if err != nil {
+		log.Fatalf("failed to open assistant store: %v", err)
+	}
+	globalAssistantStore = as
+
 	// Registered web push devices. Its own file rather than the alarm log's:
 	// these are durable device registrations whose loss cannot be recovered
 	// without physically revisiting every phone, unlike the log's prunable
@@ -512,6 +520,12 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/basemap/tiles/:z/:x/:y", tierRead, basemapVectorTileHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/basemap/fonts/:fontstack/:range", tierRead, basemapFontsHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/basemap/sprite/:name", tierRead, basemapSpriteHandler(globalTileCache, tileFetchClient)},
+		// Onboard OpenRouter-backed assistant (ADR 0093). Status and reading
+		// a conversation's history are read-only, same tier as everything
+		// else above.
+		{http.MethodGet, "/api/assistant/status", tierRead, assistantStatusHandler},
+		{http.MethodGet, "/api/assistant/conversations", tierRead, listAssistantConversationsHandler},
+		{http.MethodGet, "/api/assistant/conversations/:id", tierRead, getAssistantConversationHandler},
 
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
@@ -552,6 +566,13 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodDelete, "/api/world-imagery/cache", tierWrite, deleteWorldImageryCacheHandler(globalTileCache)},
 		{http.MethodPost, "/api/sat-charts", tierWrite, uploadSatChartHandler},
 		{http.MethodDelete, "/api/sat-charts/:id", tierWrite, deleteSatChartHandler},
+		{http.MethodPost, "/api/assistant/conversations", tierWrite, createAssistantConversationHandler},
+		{http.MethodDelete, "/api/assistant/conversations/:id", tierWrite, deleteAssistantConversationHandler},
+		// Every tool the assistant can call is read-only, but this is write
+		// tier anyway: it spends the operator's OpenRouter credit and stores
+		// state (a new message row), which a readonly session must not
+		// trigger (ADR 0093).
+		{http.MethodPost, "/api/assistant/conversations/:id/messages", tierWrite, postAssistantMessageHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
