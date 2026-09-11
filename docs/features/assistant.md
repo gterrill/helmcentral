@@ -34,6 +34,16 @@ Place search queries the same Overpass server as the place name shown on
 the position tile. The configuration reference explains how to point that
 at a mirror if your boat's connection can't reach the default one.
 
+When InfluxDB is configured, it can also estimate how long a passage will
+take and how much fuel it will burn, from your own boat's logged speed over
+ground and fuel-rate history, not a manufacturer's polar or fuel curve.
+Give it a distance and a planned speed and it reads a burn rate and rpm off
+what this vessel has actually done at that speed over the last few months,
+telling you plainly that this is observed data across whatever conditions
+occurred, not a guarantee: a head sea will add time and fuel beyond what
+the log shows. Without InfluxDB configured, it skips this and reasons about
+the passage in general terms instead.
+
 ## What leaves the boat
 
 Every question sends your position, the question text itself, and whatever

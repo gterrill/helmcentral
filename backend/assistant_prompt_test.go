@@ -39,6 +39,54 @@ func TestBuildAssistantSystemPrompt_TimeLabelAtLon149(t *testing.T) {
 	}
 }
 
+// ── hull type ───────────────────────────────────────────────────────────
+
+func TestAssistantHullTypePhrase(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"power_cat", "power catamaran"},
+		{"sail_cat", "sailing catamaran"},
+		{"power_mono", "power monohull"},
+		{"sail_mono", "sailing monohull"},
+		{"", ""},
+		{"hovercraft", ""},
+	}
+	for _, tc := range cases {
+		if got := assistantHullTypePhrase(tc.in); got != tc.want {
+			t.Errorf("assistantHullTypePhrase(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestBuildAssistantSystemPrompt_IdentityLineIncludesHullPhrase(t *testing.T) {
+	pc := basePromptContext()
+	pc.BoatModel = "2025 Granocean W-60"
+	pc.HullType = "power_cat"
+
+	prompt := buildAssistantSystemPrompt(pc)
+	want := "a 2025 Granocean W-60 power catamaran (LOA unknown)"
+	if !strings.Contains(prompt, want) {
+		t.Fatalf("expected the identity line to include the hull phrase %q, got:\n%s", want, prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_IdentityLineOmitsHullPhraseWhenBlank(t *testing.T) {
+	pc := basePromptContext()
+	pc.BoatModel = "2025 Granocean W-60"
+	pc.HullType = ""
+
+	prompt := buildAssistantSystemPrompt(pc)
+	// The identity line itself must read exactly as it did before this hull
+	// phrase existed - no trailing space, no stray phrase. Section 7's tool
+	// guidance separately mentions "power catamaran" as a fixed illustrative
+	// example regardless of this vessel's own hull type, so the assertion
+	// is scoped to the identity sentence rather than the whole prompt.
+	identityLine := strings.SplitN(prompt, "\n", 2)[0]
+	want := "You are the onboard passage-planning assistant aboard the vessel, a 2025 Granocean W-60 (LOA unknown)."
+	if identityLine != want {
+		t.Fatalf("expected the identity line unchanged when hull type is blank, got:\n%s", identityLine)
+	}
+}
+
 func TestBuildAssistantSystemPrompt_PositionAndPlaceName(t *testing.T) {
 	pc := basePromptContext()
 	pc.Latitude, pc.Longitude = -20.123, 149.456
@@ -140,6 +188,9 @@ func TestBuildAssistantSystemPrompt_ToolGuidancePresent(t *testing.T) {
 		"fetch both get_wind_forecast and get_tides",
 		"do not guess or fabricate",
 		"knots for wind speed, nautical miles for distance, and metres",
+		"estimate_passage",
+		"following sea",
+		"relative to the course",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("expected the tool guidance to mention %q, got:\n%s", want, prompt)
@@ -183,6 +234,7 @@ func writeAssistantPromptSettings(t *testing.T) string {
 		"  model: Test Cat\n" +
 		"anchor:\n" +
 		"  loa_m: 12.5\n" +
+		"  hull_type: power_cat\n" +
 		"ui:\n" +
 		"  weather_provider: open-meteo\n" +
 		"  wave_provider: open-meteo-marine\n" +
@@ -206,6 +258,9 @@ func TestCollectAssistantPromptContext_ReadsSettingsOnce(t *testing.T) {
 	}
 	if pc.LOAM != 12.5 {
 		t.Errorf("expected LOA 12.5, got %v", pc.LOAM)
+	}
+	if pc.HullType != "power_cat" {
+		t.Errorf("expected hull type %q, got %q", "power_cat", pc.HullType)
 	}
 	if pc.WeatherProvider != "open-meteo" || pc.WaveProvider != "open-meteo-marine" || pc.TideProvider != "bom" {
 		t.Errorf("expected provider ids from settings, got weather=%q wave=%q tide=%q", pc.WeatherProvider, pc.WaveProvider, pc.TideProvider)

@@ -29,6 +29,12 @@ type assistantPromptContext struct {
 	// LOAM is anchor.loa_m from settings, 0 when not entered (settings.go's
 	// own convention for this field - not a -1 sentinel).
 	LOAM float64
+	// HullType is anchor.hull_type from settings (signalk.go's
+	// isSupportedHullType), rendered into the identity line by
+	// assistantHullTypePhrase. Blank when settings carries no recognised
+	// value, in which case the identity line omits the hull phrase entirely
+	// rather than guess.
+	HullType string
 
 	Latitude  float64
 	Longitude float64
@@ -93,6 +99,7 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 		payload := buildSettingsPayload(settings)
 		pc.BoatModel = payload.Boat.Model
 		pc.LOAM = payload.Anchor.LOAM
+		pc.HullType = payload.Anchor.HullType
 		pc.WeatherProvider = payload.UI.WeatherProvider
 		pc.WaveProvider = payload.UI.WaveProvider
 		pc.TideProvider = payload.UI.TideProvider
@@ -162,6 +169,27 @@ func assistantWarningLevelLabel(level int) string {
 	}
 }
 
+// assistantHullTypePhrase names anchor.hull_type for the identity line,
+// covering every value isSupportedHullType (signalk.go) accepts: "power
+// catamaran", "sailing catamaran", "power monohull", "sailing monohull". A
+// blank or unrecognised value (an empty settings field, or a settings.yaml
+// this binary predates) returns "" so buildAssistantSystemPrompt can omit
+// the phrase entirely rather than print a guess about the vessel's hull.
+func assistantHullTypePhrase(hullType string) string {
+	switch strings.TrimSpace(hullType) {
+	case "power_cat":
+		return "power catamaran"
+	case "sail_cat":
+		return "sailing catamaran"
+	case "power_mono":
+		return "power monohull"
+	case "sail_mono":
+		return "sailing monohull"
+	default:
+		return ""
+	}
+}
+
 // providerLabelOrNotConfigured names a configured provider id, or says so
 // plainly when settings carries none - never a guessed default, since the
 // model needs to know when it's working with nothing rather than a real
@@ -197,7 +225,11 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 	if pc.LOAM > 0 {
 		loaLabel = fmt.Sprintf("%.1fm", pc.LOAM)
 	}
-	fmt.Fprintf(&b, "You are the onboard passage-planning assistant aboard %s, a %s (LOA %s).\n\n", vesselLabel, boatModel, loaLabel)
+	if hullPhrase := assistantHullTypePhrase(pc.HullType); hullPhrase != "" {
+		fmt.Fprintf(&b, "You are the onboard passage-planning assistant aboard %s, a %s %s (LOA %s).\n\n", vesselLabel, boatModel, hullPhrase, loaLabel)
+	} else {
+		fmt.Fprintf(&b, "You are the onboard passage-planning assistant aboard %s, a %s (LOA %s).\n\n", vesselLabel, boatModel, loaLabel)
+	}
 
 	// 2. Local time.
 	loc := vesselLocalLocation(pc.Longitude)
@@ -275,6 +307,11 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		"you know them, and where the standing notes make tide state decisive. For a passage: distance and " +
 		"bearing, timing, approach hazards. Fallback anchorages nearby if conditions change. A recommendation, " +
 		"with reasons, and what would change it.\n\n" +
+
+		"For the passage, call estimate_passage with the distance and planned speed and report time, fuel burn " +
+		"and fuel margin. State the wind and sea angle relative to the course (head, beam, quartering, following) " +
+		"and what that means for comfort and speed on this hull; a power catamaran runs comfortably in a " +
+		"following sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
 
 		"Label the source of every claim: what comes from today's forecast and tide data, and what comes from " +
 		"general knowledge, which the operator must check against the chart and cruising guide. Never present " +

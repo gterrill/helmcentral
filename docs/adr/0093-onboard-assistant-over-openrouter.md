@@ -156,7 +156,10 @@ which is itself conditional on the season and what the crew wants that day)
 and would need one for every anchorage a boat ever visits. A model already
 reads plain English; standing notes let the operator state exactly what
 they know once, in their own words, rather than encoding it into a form the
-model has to be taught to query in the first place.
+model has to be taught to query in the first place. The identity line also
+names the hull type (`anchor.hull_type`, e.g. "power catamaran") when
+settings carries one it recognises, so the model reasons about comfort and
+speed on the vessel it is actually aboard rather than a generic hull.
 
 ### 8. `find_places` sources waypoints, then a two-rung Overpass ladder, host does the geometry
 
@@ -225,6 +228,52 @@ that same text rather than attempting a call. There is no default key, no
 demo mode, and no silent fallback to a different model when the configured
 one is blank or unreachable; a model id typo surfaces as a real error from
 OpenRouter, not a quiet substitution.
+
+### 12. `estimate_passage` from logged performance, not a polar
+
+There is no polar diagram and no fuel curve anywhere in this repository, and
+none is coming: hand-entering one, and keeping it current as the boat is
+re-propped or re-engined, is exactly the kind of upkeep this project avoids
+wherever the boat's own instruments already carry the answer. InfluxDB
+(already configured for the depth and solar trend widgets) holds per-path
+history for `navigation.speedOverGround`, every `propulsion.<id>.fuel.rate`
+and `propulsion.<id>.revolutions`, all from SignalK. `estimate_passage`
+(`assistant_tools.go`, pure maths in `assistant_performance.go`) joins the
+last N days (7 to 365, default 90) of these at a 10-minute mean, converts
+speed to knots and fuel rate to litres per hour summed across every
+propulsion instance, buckets the result into whole-knot bands, and reads a
+burn rate and rpm off the two bands nearest the requested speed by linear
+interpolation, clamping past either end of what the boat has actually done.
+
+A band needs at least 3 joined 10-minute samples before it is reported at
+all; fewer than that is one or two short legs' worth of data pretending to
+be a pattern. A timestamp only joins when every series has a point at it -
+sog, every fuel-rate instance, and the reference rpm series - because a
+quiet instrument at that instant makes the total burn unknown, not equal to
+whatever the other instruments happened to report.
+
+This is observed data, not a polar: it says what this boat actually did
+across whatever wind, sea and load conditions occurred in the joined
+window, not what it would do in any one named condition. A head-sea passage
+and a following-sea passage both feed the same table today, and the tool's
+note says so plainly rather than implying a controlled measurement. Splitting
+the table by wind angle relative to the course is a real improvement and a
+deliberate follow-up, once enough underway hours exist in more than one
+angle to make separate bands meaningful rather than thinner ones.
+
+Propulsion instance names ("port", "starboard") are discovered from the
+SignalK snapshot the same way `fuelRatePaths` already does for the derived
+fuel-economy figures (`derived_paths.go`), never hardcoded; a snapshot with
+no propulsion tree yet (a dev backend with no SignalK) falls back to naming
+this vessel's own two engines directly, and the tool result says so via
+`instances_assumed` so the model and operator both know it is an assumption
+rather than a discovery.
+
+The fuel margin (`fuel_aboard_l`, `fuel_after_l`) comes from
+`helmcentral.fuel.volume` (ADR 0084), the same derived path the Tanks tile
+already reads its fuel-aboard figure from; both fields are left out of the
+result entirely, rather than reported as zero, whenever that figure is not
+currently defined.
 
 ### Rejected
 
