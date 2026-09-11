@@ -135,13 +135,18 @@ func looksLikeOverpassRateLimit(contentType string, body []byte) bool {
 	return bytes.Contains(body, []byte("rate_limited"))
 }
 
-// fetchOverpassRing performs one POST to the Overpass API for a single
-// widening ring. A transport error, non-200 status, or unparseable body are
-// all reported as an error - the rate-limited case gets its own explicit
-// log line so it's never confused with a legitimate empty ring or a generic
-// parse failure.
-func fetchOverpassRing(fetcher overpassFetcher, radiusMeters int, lat, lon float64) ([]overpassElement, error) {
-	query := buildOverpassQuery(radiusMeters, lat, lon)
+// postOverpassQuery performs one POST to the Overpass API for an
+// already-built query string. A transport error, non-200 status, or
+// unparseable body are all reported as an error - the rate-limited case
+// gets its own explicit log line so it's never confused with a legitimate
+// empty result set or a generic parse failure.
+//
+// Split out of fetchOverpassRing (ADR 0056) so the assistant's find_places
+// tool (ADR 0093, assistant_tools.go) can post its own name-search query
+// through the same request-building, header and rate-limit handling without
+// duplicating it - fetchOverpassRing's ring-widening ladder is specific to
+// place-name resolution and has no bearing on a name search.
+func postOverpassQuery(fetcher overpassFetcher, query string) ([]overpassElement, error) {
 	form := url.Values{"data": {query}}
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, overpassAPIURL, strings.NewReader(form.Encode()))
@@ -169,13 +174,24 @@ func fetchOverpassRing(fetcher overpassFetcher, radiusMeters int, lat, lon float
 	var parsed overpassResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		if looksLikeOverpassRateLimit(resp.Header.Get("Content-Type"), body) {
-			log.Printf("place name: overpass rate-limited (HTTP 200 with a non-JSON body) at radius=%dm", radiusMeters)
+			// The radius that made fetchOverpassRing's version of this log
+			// line meaningful doesn't exist here - a name search has no
+			// ring - so the query's length stands in as the short label
+			// distinguishing one rate-limited call from another in the log.
+			log.Printf("place name: overpass rate-limited (HTTP 200 with a non-JSON body), query length %d bytes", len(query))
 			return nil, fmt.Errorf("overpass rate limited")
 		}
 		return nil, fmt.Errorf("parse overpass response: %w", err)
 	}
 
 	return parsed.Elements, nil
+}
+
+// fetchOverpassRing performs one POST to the Overpass API for a single
+// widening ring, delegating the request/response handling to
+// postOverpassQuery (ADR 0056).
+func fetchOverpassRing(fetcher overpassFetcher, radiusMeters int, lat, lon float64) ([]overpassElement, error) {
+	return postOverpassQuery(fetcher, buildOverpassQuery(radiusMeters, lat, lon))
 }
 
 // bestNamedFeature ranks the named, tag-matched elements in a ring and

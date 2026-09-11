@@ -5,6 +5,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -343,5 +345,50 @@ func TestTideChartHandler_IncludesTidalPhaseAndDoubleTideFields(t *testing.T) {
 	}
 	if payload.DoubleLowToday {
 		t.Errorf("expected double_low_today=false, got true")
+	}
+}
+
+// ── resolveTideProvider (ADR 0093: the assistant's get_tides tool needs a
+// resolver of its own; tideToday used to inline this same lookup) ─────────
+
+func writeResolveTideProviderSettings(t *testing.T, tideProviderYAML string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "settings.yaml")
+	content := "ui:\n  tide_provider: " + tideProviderYAML + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write test settings file: %v", err)
+	}
+	return path
+}
+
+func TestResolveTideProvider_BlankIDIsErrorNamingSettings(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	settingsPath := writeResolveTideProviderSettings(t, `""`)
+
+	_, id, err := resolveTideProvider(settingsPath)
+	if err == nil {
+		t.Fatalf("expected an error for a blank ui.tide_provider")
+	}
+	if id != "" {
+		t.Fatalf("expected an empty configured id, got %q", id)
+	}
+	if !strings.Contains(err.Error(), "Settings") {
+		t.Fatalf("expected the error to name Settings, got %q", err.Error())
+	}
+}
+
+func TestResolveTideProvider_UnknownIDIsErrorNamingPluginsTides(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	settingsPath := writeResolveTideProviderSettings(t, "not-a-real-provider")
+
+	_, id, err := resolveTideProvider(settingsPath)
+	if err == nil {
+		t.Fatalf("expected an error for an unregistered tide provider")
+	}
+	if id != "not-a-real-provider" {
+		t.Fatalf("expected the configured id to be returned, got %q", id)
+	}
+	if !strings.Contains(err.Error(), "plugins/tides") {
+		t.Fatalf("expected the error to name plugins/tides, got %q", err.Error())
 	}
 }

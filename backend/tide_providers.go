@@ -108,12 +108,45 @@ func nearestStation(p tideProvider, lat, lon float64) (tideStation, bool) {
 	return best, true
 }
 
+// resolveTideProvider reads ui.tide_provider from settingsPath and resolves
+// it against the registry, mirroring resolveWeatherProvider's idiom
+// (weather_providers.go) - added for the assistant's get_tides tool (ADR
+// 0093), which needs this resolution outside an HTTP handler; tideToday
+// (weather_tide.go) used to inline the same lookup and is left untouched.
+//
+// Unlike resolveWeatherProvider there is no default id: a keyless global
+// weather provider is a reasonable default for a fresh install anywhere in
+// the world, but tide stations are national catalogs (BOM, NOAA, ...) with
+// no sane global default, so a blank id is an error naming Settings, in the
+// exact wording tideToday already uses for the unconfigured case. An
+// unknown id is an error naming plugins/tides, matching
+// resolveWeatherProvider's wording for its own unregistered-provider case.
+func resolveTideProvider(settingsPath string) (tideProvider, string, error) {
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read settings: %w", err)
+	}
+
+	uiMap, _ := settings["ui"].(map[string]any)
+	configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
+	if configuredProvider == "" {
+		return nil, "", fmt.Errorf("no tide provider configured, set ui.tide_provider in Settings (e.g. \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)")
+	}
+
+	provider, ok := getTideProvider(configuredProvider)
+	if !ok {
+		return nil, configuredProvider, fmt.Errorf("unknown tide provider configured: %q (is the plugin installed in plugins/tides?)", configuredProvider)
+	}
+
+	return provider, configuredProvider, nil
+}
+
 // interpolateTideNow cosine-interpolates the current tide height and
 // direction between the extremes that bracket `now`. It is shared by all
 // tide providers.
 func interpolateTideNow(extremes []tideExtremePoint, now time.Time) (heightM float64, direction string) {
 	if len(extremes) == 0 {
-		return 0, "—"
+		return 0, ","
 	}
 
 	sorted := make([]tideExtremePoint, len(extremes))
