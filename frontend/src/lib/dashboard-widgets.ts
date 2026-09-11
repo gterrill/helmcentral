@@ -1,3 +1,5 @@
+import { POI_CATEGORY_IDS } from '@/lib/poi'
+
 export const DASHBOARD_WIDGET_IDS = [
   'vessel',
   'wind',
@@ -41,11 +43,14 @@ export const GAUGE_GROUP_WIDGET_ID_PREFIX = 'gauge-group:'
 export const LAMP_STRIP_WIDGET_ID_PREFIX = 'lamps:'
 /** Engine clusters (ADR 0054) — a ticked ring with mask-cut corner cards. */
 export const CLUSTER_WIDGET_ID_PREFIX = 'cluster:'
+/** The poi-map widget (ADR 0091 phase 3b) — a moving map of nearby points of interest. */
+export const POI_MAP_WIDGET_ID_PREFIX = 'poi-map:'
 export type EmbedWidgetId = `${typeof EMBED_WIDGET_ID_PREFIX}${string}`
 export type GaugeWidgetId = `${typeof GAUGE_WIDGET_ID_PREFIX}${string}`
 export type GaugeGroupWidgetId = `${typeof GAUGE_GROUP_WIDGET_ID_PREFIX}${string}`
 export type LampStripWidgetId = `${typeof LAMP_STRIP_WIDGET_ID_PREFIX}${string}`
 export type ClusterWidgetId = `${typeof CLUSTER_WIDGET_ID_PREFIX}${string}`
+export type PoiMapWidgetId = `${typeof POI_MAP_WIDGET_ID_PREFIX}${string}`
 
 export type DashboardWidgetId =
   | BuiltinWidgetId
@@ -54,6 +59,7 @@ export type DashboardWidgetId =
   | GaugeGroupWidgetId
   | LampStripWidgetId
   | ClusterWidgetId
+  | PoiMapWidgetId
 
 export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'vessel': 'Vessel',
@@ -226,6 +232,25 @@ export interface EngineClusterConfig {
   fuel?: ClusterFuelRail
 }
 
+/**
+ * A moving map of nearby points of interest (ADR 0091 phase 3b): a range, a
+ * category subset, a layout, and two rendering toggles. Per-instance and
+ * per-page, like every other multi-instance widget config.
+ */
+export interface PoiMapWidgetConfig {
+  title: string
+  rangeNm: number
+  categories: string[]
+  /** "map" fills the tile with just the map; "split" adds the ranked list. */
+  layout: 'map' | 'split'
+  showAis?: boolean
+  showTrail?: boolean
+}
+
+/** Mirrors poiRadiusNmMin/Max in backend/poi_providers.go — the same bounds GET /api/poi enforces. */
+export const POI_MAP_RANGE_NM_MIN = 0.5
+export const POI_MAP_RANGE_NM_MAX = 25
+
 export const CLUSTER_MAX_CORNERS = 4
 export const CLUSTER_MAX_CORNER_ROWS = 4
 export const CLUSTER_MAX_TELLTALES = 6
@@ -260,6 +285,8 @@ export interface DashboardLayoutItem {
   lamps?: LampStripWidgetConfig
   /** Present only on `cluster:` widgets; the backend rejects it elsewhere. */
   cluster?: EngineClusterConfig
+  /** Present only on `poi-map:` widgets; the backend rejects it elsewhere. */
+  poiMap?: PoiMapWidgetConfig
 }
 
 /** Length caps mirroring embedURLMaxLen / embedTitleMaxLen in backend/dashboard_pages.go. */
@@ -291,6 +318,23 @@ export function isValidEmbedUrl(url: string): boolean {
     return false
   }
   return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.host !== ''
+}
+
+/**
+ * Mirrors validatePoiMapWidget in backend/dashboard_pages.go: title length via
+ * the gauge-group cap, range within GET /api/poi's own bounds, categories a
+ * non-empty subset of the known catalog, layout in the closed set. Duplicated
+ * rather than shared for the same reason isValidEmbedUrl is: the config
+ * dialog needs synchronous feedback while the server must not trust the
+ * client.
+ */
+export function isValidPoiMapConfig(config: PoiMapWidgetConfig): boolean {
+  if (config.title.length > GAUGE_GROUP_TITLE_MAX_LENGTH) return false
+  if (config.rangeNm < POI_MAP_RANGE_NM_MIN || config.rangeNm > POI_MAP_RANGE_NM_MAX) return false
+  if (config.categories.length === 0) return false
+  if (!config.categories.every((id) => POI_CATEGORY_IDS.includes(id))) return false
+  if (config.layout !== 'map' && config.layout !== 'split') return false
+  return true
 }
 
 /**
@@ -364,10 +408,23 @@ export function newLampStripWidgetId(existing: readonly DashboardLayoutItem[]): 
   }
 }
 
+export function isPoiMapWidgetId(id: string): id is PoiMapWidgetId {
+  return id.startsWith(POI_MAP_WIDGET_ID_PREFIX)
+}
+
+/** Mints a poi map id. Same reasoning as newEmbedWidgetId, including why not crypto.randomUUID. */
+export function newPoiMapWidgetId(existing: readonly DashboardLayoutItem[]): PoiMapWidgetId {
+  for (;;) {
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10).padEnd(8, '0')}`
+    const id: PoiMapWidgetId = `${POI_MAP_WIDGET_ID_PREFIX}${token}`
+    if (!existing.some((w) => w.id === id)) return id
+  }
+}
+
 /** True for the widget kinds whose ids carry a per-instance token. */
 export function isMultiInstanceWidgetId(id: string): boolean {
   return isEmbedWidgetId(id) || isGaugeWidgetId(id) || isGaugeGroupWidgetId(id)
-    || isLampStripWidgetId(id) || isClusterWidgetId(id)
+    || isLampStripWidgetId(id) || isClusterWidgetId(id) || isPoiMapWidgetId(id)
 }
 
 /**
@@ -381,6 +438,13 @@ export function duplicateWidget(
   widget: DashboardLayoutItem,
   existing: readonly DashboardLayoutItem[],
 ): DashboardLayoutItem | null {
+  if (isPoiMapWidgetId(widget.id)) {
+    return {
+      ...widget,
+      id: newPoiMapWidgetId(existing),
+      poiMap: widget.poiMap ? { ...widget.poiMap, categories: [...widget.poiMap.categories] } : undefined,
+    }
+  }
   if (isClusterWidgetId(widget.id)) {
     return {
       ...widget,
@@ -470,6 +534,9 @@ export function mergeLayoutGeometry(
 export function widgetDisplayName(widget: DashboardLayoutItem): string {
   if (isEmbedWidgetId(widget.id)) {
     return widget.embed?.title.trim() || 'Embed'
+  }
+  if (isPoiMapWidgetId(widget.id)) {
+    return widget.poiMap?.title.trim() || 'Nearby'
   }
   if (isClusterWidgetId(widget.id)) {
     return widget.cluster?.title.trim() || 'Engine'

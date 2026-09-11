@@ -8,17 +8,25 @@ import {
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_WIDGET_LABELS,
   EMBED_WIDGET_ID_PREFIX,
+  POI_MAP_RANGE_NM_MAX,
+  POI_MAP_RANGE_NM_MIN,
+  POI_MAP_WIDGET_ID_PREFIX,
   duplicateWidget,
   isEmbedWidgetId,
   isGaugeGroupWidgetId,
   isGaugeWidgetId,
+  isMultiInstanceWidgetId,
+  isPoiMapWidgetId,
   isValidEmbedUrl,
+  isValidPoiMapConfig,
   mergeLayoutGeometry,
   newEmbedWidgetId,
   newGaugeGroupWidgetId,
+  newPoiMapWidgetId,
   rewriteGaugePaths,
   widgetDisplayName,
   type DashboardLayoutItem,
+  type PoiMapWidgetConfig,
 } from '@/lib/dashboard-widgets'
 
 describe('isEmbedWidgetId', () => {
@@ -106,6 +114,17 @@ describe('widgetDisplayName', () => {
       id: 'embed:m1x8abcd', x: 0, y: 0, w: 6, h: 8,
       embed: { title: '   ', url: 'https://grafana.local/a' },
     })).toBe('Embed')
+  })
+
+  test('uses the configured title for a poi map, falling back to "Nearby"', () => {
+    expect(widgetDisplayName({
+      id: 'poi-map:m1x8abcd', x: 0, y: 0, w: 12, h: 7,
+      poiMap: { title: 'Anchorages', rangeNm: 5, categories: ['anchorage'], layout: 'map' },
+    })).toBe('Anchorages')
+    expect(widgetDisplayName({
+      id: 'poi-map:m1x8abcd', x: 0, y: 0, w: 12, h: 7,
+      poiMap: { title: '  ', rangeNm: 5, categories: ['anchorage'], layout: 'map' },
+    })).toBe('Nearby')
   })
 })
 
@@ -248,6 +267,21 @@ describe('duplicateWidget', () => {
     expect(duplicateWidget(embed, [embed])?.embed?.url).toBe('https://grafana.local/a')
   })
 
+  test('duplicates a poi map, deep-copying its categories array', () => {
+    const poiMap: DashboardLayoutItem = {
+      id: 'poi-map:m1x8abcd', x: 0, y: 0, w: 12, h: 7,
+      poiMap: { title: 'Nearby', rangeNm: 5, categories: ['anchorage', 'fuel'], layout: 'split' },
+    }
+    const copy = duplicateWidget(poiMap, [poiMap])
+    expect(copy).not.toBeNull()
+    expect(isPoiMapWidgetId(copy!.id)).toBe(true)
+    expect(copy!.id).not.toBe(poiMap.id)
+    expect(copy!.poiMap?.categories).toEqual(['anchorage', 'fuel'])
+
+    copy!.poiMap!.categories.push('marina')
+    expect(poiMap.poiMap!.categories).toEqual(['anchorage', 'fuel'])
+  })
+
   test('refuses a builtin, which is one-per-page', () => {
     expect(duplicateWidget({ id: 'wind', x: 0, y: 0, w: 4, h: 8 }, [])).toBeNull()
   })
@@ -306,5 +340,73 @@ describe('DASHBOARD_WIDGET_IDS backend parity', () => {
 
     expect(backendIds.length, 'no widget ids parsed out of validDashboardWidgetIDs - regex or map shape changed').toBeGreaterThan(0)
     expect(new Set(backendIds)).toEqual(new Set(DASHBOARD_WIDGET_IDS))
+  })
+})
+
+describe('poi map ids (ADR 0091 phase 3b)', () => {
+  test('recognises poi map instance ids', () => {
+    expect(isPoiMapWidgetId('poi-map:m1x8abcd')).toBe(true)
+  })
+
+  test('rejects every builtin widget id', () => {
+    for (const id of DASHBOARD_WIDGET_IDS) {
+      expect(isPoiMapWidgetId(id)).toBe(false)
+    }
+  })
+
+  test('is not mistaken for any other multi-instance kind', () => {
+    expect(isPoiMapWidgetId('gauge:m1x8abcd')).toBe(false)
+    expect(isPoiMapWidgetId('embed:m1x8abcd')).toBe(false)
+    expect(isGaugeWidgetId('poi-map:m1x8abcd')).toBe(false)
+  })
+
+  test('mints an id the backend token pattern accepts and is unique within the page', () => {
+    const existing: DashboardLayoutItem[] = []
+    const seen = new Set<string>()
+    for (let i = 0; i < 50; i += 1) {
+      const id = newPoiMapWidgetId(existing)
+      expect(id.startsWith(POI_MAP_WIDGET_ID_PREFIX)).toBe(true)
+      expect(id.slice(POI_MAP_WIDGET_ID_PREFIX.length)).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
+      expect(seen.has(id)).toBe(false)
+      seen.add(id)
+      existing.push({ id, x: 0, y: 0, w: 12, h: 7 })
+    }
+  })
+
+  test('counts as a multi-instance widget', () => {
+    expect(isMultiInstanceWidgetId('poi-map:m1x8abcd')).toBe(true)
+    expect(isMultiInstanceWidgetId('wind')).toBe(false)
+  })
+})
+
+function validPoiMapConfig(): PoiMapWidgetConfig {
+  return { title: 'Nearby', rangeNm: 5, categories: ['anchorage', 'marina', 'fuel'], layout: 'split' }
+}
+
+/**
+ * Mirrors validatePoiMapWidget in backend/dashboard_pages.go, the same
+ * relationship isValidEmbedUrl has to validateEmbedWidget: duplicated rather
+ * than shared because the config dialog needs synchronous feedback while the
+ * server must not trust the client.
+ */
+describe('isValidPoiMapConfig', () => {
+  test('accepts a well-formed config', () => {
+    expect(isValidPoiMapConfig(validPoiMapConfig())).toBe(true)
+  })
+
+  test.each([
+    ['title too long', { ...validPoiMapConfig(), title: 't'.repeat(49) }],
+    ['no categories', { ...validPoiMapConfig(), categories: [] }],
+    ['unknown category', { ...validPoiMapConfig(), categories: ['anchorage', 'moon-base'] }],
+    ['range below minimum', { ...validPoiMapConfig(), rangeNm: POI_MAP_RANGE_NM_MIN - 0.1 }],
+    ['range above maximum', { ...validPoiMapConfig(), rangeNm: POI_MAP_RANGE_NM_MAX + 0.1 }],
+    ['unknown layout', { ...validPoiMapConfig(), layout: 'carousel' as PoiMapWidgetConfig['layout'] }],
+  ])('rejects %s', (_label, config) => {
+    expect(isValidPoiMapConfig(config)).toBe(false)
+  })
+
+  test('accepts the range bounds themselves', () => {
+    expect(isValidPoiMapConfig({ ...validPoiMapConfig(), rangeNm: POI_MAP_RANGE_NM_MIN })).toBe(true)
+    expect(isValidPoiMapConfig({ ...validPoiMapConfig(), rangeNm: POI_MAP_RANGE_NM_MAX })).toBe(true)
   })
 })
