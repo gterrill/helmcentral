@@ -73,4 +73,29 @@ describe('SeaStateChart', () => {
     // direction or speed, so the count drops by exactly one.
     expect(screen.getAllByTestId('forecast-wind-barb')).toHaveLength(39)
   })
+
+  test('widens the glyph step as the chart narrows, so glyphs never pack closer than ~22px apart', () => {
+    // 120 points (lastIndex 119) at width 582: plot width is 502px after
+    // margins, so 3-hourly spacing (12px apart) would overlap into a solid
+    // band. The step must widen to the next multiple of 3 hours - 6 - giving
+    // half as many glyphs.
+    render(<SeaStateChart series={buildSeries()} width={582} height={280} waveUnit="m" />)
+
+    expect(screen.getAllByTestId('forecast-wind-barb')).toHaveLength(20)
+    expect(screen.getAllByTestId('forecast-wave-arrow')).toHaveLength(20)
+  })
+
+  test('folds the axis unit into the top tick only, leaving the rest of the ticks bare', () => {
+    const series = buildSeries().map((p) => ({ ...p, windKts: 20, gustKts: 46, waveM: 2 }))
+    render(<SeaStateChart series={series} width={1200} height={280} waveUnit="m" />)
+
+    // windMax rounds up to 50 (niceMax), waveMax to 5 - the top tick on each
+    // axis carries the unit, folded in rather than a separate axis label.
+    expect(screen.getByText('50 kn')).toBeInTheDocument()
+    expect(screen.getByText('5 m')).toBeInTheDocument()
+    // The old standalone 'kn'/'m' corner label is gone - no bare unit text
+    // floating apart from a tick value.
+    expect(screen.queryByText('kn')).not.toBeInTheDocument()
+    expect(screen.queryByText('m')).not.toBeInTheDocument()
+  })
 })

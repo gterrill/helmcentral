@@ -14,7 +14,9 @@ export interface SeaStateChartProps {
 }
 
 const HOURS_PER_DAY = 24
-const GLYPH_STEP_HOURS = 3
+// Glyphs closer together than this read as a solid smear rather than
+// individual barbs/arrows once the tile narrows below its widest columns.
+const MIN_GLYPH_SPACING_PX = 22
 const AXIS_LABEL_FONT_SIZE = 10
 const AXIS_LABEL_COLOR = 'hsl(var(--muted-foreground))'
 
@@ -61,7 +63,11 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
   const waveGradientId = useId()
   const waveSteepnessGradientId = useId()
 
-  const margin = { top: 24, right: 40, bottom: 30, left: 40 }
+  // top raised from 24 so the barb row (barbY, half of margin.top) sits
+  // clear of the top y-axis tick text now that the tick carries the unit
+  // ("50 kn") rather than a separate corner label; bottom raised to match so
+  // the wave-arrow row keeps its own clearance from the day-name ticks below.
+  const margin = { top: 40, right: 40, bottom: 34, left: 40 }
   const plotLeft = margin.left
   const plotRight = width - margin.right
   const plotWidth = Math.max(1, plotRight - plotLeft)
@@ -69,6 +75,12 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
   const xForIndex = (i: number) => plotLeft + (i / lastIndex) * plotWidth
   const barbY = margin.top / 2
   const arrowY = height - margin.bottom / 2 - 4
+
+  // Glyph step in hours: always a multiple of 3 (the finest resolution the
+  // data supports), widened just enough that adjacent glyphs stay at least
+  // MIN_GLYPH_SPACING_PX apart once the tile is narrower than its widest
+  // grid span.
+  const glyphStepHours = 3 * Math.ceil((MIN_GLYPH_SPACING_PX * lastIndex) / plotWidth / 3)
 
   const dayCount = Math.max(1, Math.round(series.length / HOURS_PER_DAY))
   const middayTicks = Array.from({ length: dayCount }, (_, d) => d * HOURS_PER_DAY + HOURS_PER_DAY / 2)
@@ -113,7 +125,7 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
   }, [series, lastIndex])
 
   const glyphIndices: number[] = []
-  for (let i = 0; i < series.length; i += GLYPH_STEP_HOURS) glyphIndices.push(i)
+  for (let i = 0; i < series.length; i += glyphStepHours) glyphIndices.push(i)
 
   return (
     <ComposedChart width={width} height={height} data={chartData} margin={margin}>
@@ -135,7 +147,10 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
         axisLine={false}
         tickLine={false}
         width={margin.left}
-        label={{ value: 'kn', position: 'insideTopLeft', fontSize: AXIS_LABEL_FONT_SIZE, fill: AXIS_LABEL_COLOR }}
+        // Unit folded into the top tick's own text (e.g. "50 kn") rather
+        // than a separate corner label, which used to collide with the
+        // barb row above the plot.
+        tickFormatter={(value: number) => (value === windMax ? `${value} kn` : `${value}`)}
       />
       <YAxis
         yAxisId="wave"
@@ -145,7 +160,7 @@ export function SeaStateChart({ series, width, height, waveUnit }: SeaStateChart
         axisLine={false}
         tickLine={false}
         width={margin.right}
-        label={{ value: waveUnit, position: 'insideTopRight', fontSize: AXIS_LABEL_FONT_SIZE, fill: AXIS_LABEL_COLOR }}
+        tickFormatter={(value: number) => (value === waveMax ? `${value} ${waveUnit}` : `${value}`)}
       />
 
       <defs>
