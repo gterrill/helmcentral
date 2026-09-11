@@ -128,6 +128,17 @@ const (
 // on the left; the tanks' side is carried by their paths and the tile's title.
 var validClusterFuelSides = map[string]bool{"left": true, "right": true}
 
+// POI map widgets (ADR 0091 phase 3b) are the sixth multi-instance widget: a
+// moving map of points of interest near the vessel, following the same
+// <kind>:<token> id scheme every other multi-instance widget uses.
+const poiMapWidgetIDPrefix = "poi-map:"
+
+// Range and category bounds are not redeclared here: they are poiRadiusNmMin,
+// poiRadiusNmMax and poiCategoryIDs/isValidPOICategory in poi_providers.go,
+// the same package, so a widget config that validates here can never be
+// rejected by the GET /api/poi request it goes on to drive.
+var validPoiMapLayouts = map[string]bool{"map": true, "split": true}
+
 var validPageSkins = map[string]bool{"": true, "default": true, "instrument": true}
 
 // Kiosk fields (ADR 0089) turn an ordinary page into one that can appear in
@@ -259,6 +270,8 @@ type dashboardLayoutItem struct {
 	Lamps *dashboardLampStripConfig `json:"lamps,omitempty"`
 	// Present only on `cluster:` widgets; rejected on any other id.
 	Cluster *dashboardClusterConfig `json:"cluster,omitempty"`
+	// Present only on `poi-map:` widgets; rejected on any other id.
+	PoiMap *dashboardPoiMapConfig `json:"poiMap,omitempty"`
 }
 
 // dashboardGaugeConfig binds one widget to one SignalK path. Like the embed
@@ -306,6 +319,24 @@ type dashboardEmbedConfig struct {
 	// since editing still needs the gear icon and title reachable.
 	// omitempty keeps existing dashboard-pages.json files byte-identical.
 	Frameless bool `json:"frameless,omitempty"`
+}
+
+// dashboardPoiMapConfig is per-instance and per-page, so it rides on the
+// layout item rather than living in settings.yaml, matching every other
+// multi-instance widget config. RangeNm, Categories and Layout mirror the
+// fields a poi-map-tile.tsx render needs to call GET /api/poi and lay out its
+// split view; ShowAis/ShowTrail are local rendering toggles the endpoint
+// itself never sees.
+type dashboardPoiMapConfig struct {
+	Title      string   `json:"title"`
+	RangeNm    float64  `json:"rangeNm"`
+	Categories []string `json:"categories"`
+	// "map" fills the tile with just the map; "split" adds the ranked list.
+	Layout string `json:"layout"`
+	// omitempty on both: an unconfigured widget or one saved before these
+	// existed keeps the byte-identical file the other ADR 0031 configs do.
+	ShowAis   bool `json:"showAis,omitempty"`
+	ShowTrail bool `json:"showTrail,omitempty"`
 }
 
 // defaultDashboardLayout recreates the pre-bento 3-column arrangement, used to
@@ -431,6 +462,9 @@ func validateEmbedWidget(w dashboardLayoutItem) string {
 	if w.Cluster != nil {
 		return "cluster config not allowed on embed widget: " + w.ID
 	}
+	if w.PoiMap != nil {
+		return "poi map config not allowed on embed widget: " + w.ID
+	}
 	if w.Embed == nil {
 		return "embed widget requires embed config: " + w.ID
 	}
@@ -471,6 +505,10 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 			if msg := validateGaugeWidget(w); msg != "" {
 				return msg
 			}
+		} else if strings.HasPrefix(w.ID, poiMapWidgetIDPrefix) {
+			if msg := validatePoiMapWidget(w); msg != "" {
+				return msg
+			}
 		} else {
 			if !validDashboardWidgetIDs[w.ID] {
 				return "unknown widget id: " + w.ID
@@ -491,6 +529,9 @@ func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
 			}
 			if w.Cluster != nil {
 				return "cluster config not allowed on widget id: " + w.ID
+			}
+			if w.PoiMap != nil {
+				return "poi map config not allowed on widget id: " + w.ID
 			}
 		}
 		// Embed tokens are unique per instance, so the duplicate check below
@@ -966,6 +1007,9 @@ func validateGaugeWidget(w dashboardLayoutItem) string {
 	if w.Cluster != nil {
 		return "cluster config not allowed on gauge widget: " + w.ID
 	}
+	if w.PoiMap != nil {
+		return "poi map config not allowed on gauge widget: " + w.ID
+	}
 	if w.Gauge == nil {
 		return "gauge widget requires gauge config: " + w.ID
 	}
@@ -1026,7 +1070,7 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 	if !embedWidgetTokenPattern.MatchString(token) {
 		return "invalid cluster widget id: " + w.ID
 	}
-	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil || w.Lamps != nil {
+	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil || w.Lamps != nil || w.PoiMap != nil {
 		return "only cluster config is allowed on a cluster widget: " + w.ID
 	}
 	if w.Cluster == nil {
@@ -1135,7 +1179,7 @@ func validateLampStripWidget(w dashboardLayoutItem) string {
 	if !embedWidgetTokenPattern.MatchString(token) {
 		return "invalid lamp strip widget id: " + w.ID
 	}
-	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil || w.Cluster != nil {
+	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil || w.Cluster != nil || w.PoiMap != nil {
 		return "only lamp config is allowed on a lamp strip widget: " + w.ID
 	}
 	if w.Lamps == nil {
@@ -1202,6 +1246,9 @@ func validateGaugeGroupWidget(w dashboardLayoutItem) string {
 	if w.Cluster != nil {
 		return "cluster config not allowed on gauge group widget: " + w.ID
 	}
+	if w.PoiMap != nil {
+		return "poi map config not allowed on gauge group widget: " + w.ID
+	}
 	if w.GaugeGroup == nil {
 		return "gauge group widget requires gaugeGroup config: " + w.ID
 	}
@@ -1221,6 +1268,42 @@ func validateGaugeGroupWidget(w dashboardLayoutItem) string {
 		if msg := validateGaugeConfig(g, w.ID); msg != "" {
 			return msg
 		}
+	}
+	return ""
+}
+
+// validatePoiMapWidget guards the sixth operator-configured widget: a moving
+// map of nearby points of interest (ADR 0091). Range and categories reuse
+// GET /api/poi's own bounds (poiRadiusNmMin/Max, isValidPOICategory) exactly,
+// so a config that validates here can never be rejected by the endpoint it
+// goes on to call.
+func validatePoiMapWidget(w dashboardLayoutItem) string {
+	token := strings.TrimPrefix(w.ID, poiMapWidgetIDPrefix)
+	if !embedWidgetTokenPattern.MatchString(token) {
+		return "invalid poi map widget id: " + w.ID
+	}
+	if w.Embed != nil || w.Gauge != nil || w.GaugeGroup != nil || w.Lamps != nil || w.Cluster != nil {
+		return "only poi map config is allowed on a poi map widget: " + w.ID
+	}
+	if w.PoiMap == nil {
+		return "poi map widget requires poiMap config: " + w.ID
+	}
+	if len(w.PoiMap.Title) > gaugeGroupTitleMaxLen {
+		return "poi map title too long: " + w.ID
+	}
+	if w.PoiMap.RangeNm < poiRadiusNmMin || w.PoiMap.RangeNm > poiRadiusNmMax {
+		return fmt.Sprintf("poi map range must be between %g and %g: %s", poiRadiusNmMin, poiRadiusNmMax, w.ID)
+	}
+	if len(w.PoiMap.Categories) == 0 {
+		return "poi map requires at least one category: " + w.ID
+	}
+	for _, category := range w.PoiMap.Categories {
+		if !isValidPOICategory(category) {
+			return "unknown poi map category: " + category
+		}
+	}
+	if !validPoiMapLayouts[w.PoiMap.Layout] {
+		return "unknown poi map layout: " + w.PoiMap.Layout
 	}
 	return ""
 }

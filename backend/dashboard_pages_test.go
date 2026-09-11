@@ -1646,6 +1646,157 @@ func TestDashboardLayoutItem_OmitsGaugeGroupKeyWhenAbsent(t *testing.T) {
 	}
 }
 
+// ── poi map widget (ADR 0091 phase 3b) ───────────────────────────────────────
+
+func poiMapWidget(id string, config *dashboardPoiMapConfig) dashboardLayoutItem {
+	return dashboardLayoutItem{ID: id, X: 0, Y: 0, W: 12, H: 7, PoiMap: config}
+}
+
+func validPoiMapConfig() *dashboardPoiMapConfig {
+	return &dashboardPoiMapConfig{
+		Title:      "Nearby",
+		RangeNm:    5,
+		Categories: []string{"anchorage", "marina", "fuel"},
+		Layout:     "split",
+	}
+}
+
+func TestValidateDashboardWidgets_AcceptsPoiMapInstance(t *testing.T) {
+	widget := poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig())
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg != "" {
+		t.Fatalf("expected a valid poi map widget to be accepted, got %q", msg)
+	}
+}
+
+func TestValidateDashboardWidgets_AcceptsMultiplePoiMapInstances(t *testing.T) {
+	widgets := []dashboardLayoutItem{
+		poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig()),
+		poiMapWidget("poi-map:m1x8efgh", validPoiMapConfig()),
+	}
+	if msg := validateDashboardWidgets(widgets); msg != "" {
+		t.Fatalf("expected two distinct poi map instances to validate, got %q", msg)
+	}
+}
+
+func TestValidateDashboardWidgets_RejectsDuplicatePoiMapInstance(t *testing.T) {
+	widgets := []dashboardLayoutItem{
+		poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig()),
+		poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig()),
+	}
+	if msg := validateDashboardWidgets(widgets); msg == "" {
+		t.Fatal("expected duplicate poi map token to be rejected")
+	}
+}
+
+func TestValidatePoiMapWidget_RejectsBadInput(t *testing.T) {
+	tooLongTitle := validPoiMapConfig()
+	tooLongTitle.Title = strings.Repeat("t", gaugeGroupTitleMaxLen+1)
+
+	noCategories := validPoiMapConfig()
+	noCategories.Categories = nil
+
+	unknownCategory := validPoiMapConfig()
+	unknownCategory.Categories = []string{"anchorage", "moon-base"}
+
+	tooSmallRange := validPoiMapConfig()
+	tooSmallRange.RangeNm = 0.4
+
+	tooBigRange := validPoiMapConfig()
+	tooBigRange.RangeNm = 25.1
+
+	unknownLayout := validPoiMapConfig()
+	unknownLayout.Layout = "carousel"
+
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"short token", poiMapWidget("poi-map:abc", validPoiMapConfig())},
+		{"missing config", poiMapWidget("poi-map:m1x8abcd", nil)},
+		{"title too long", poiMapWidget("poi-map:m1x8abcd", tooLongTitle)},
+		{"no categories", poiMapWidget("poi-map:m1x8abcd", noCategories)},
+		{"unknown category", poiMapWidget("poi-map:m1x8abcd", unknownCategory)},
+		{"range below minimum", poiMapWidget("poi-map:m1x8abcd", tooSmallRange)},
+		{"range above maximum", poiMapWidget("poi-map:m1x8abcd", tooBigRange)},
+		{"unknown layout", poiMapWidget("poi-map:m1x8abcd", unknownLayout)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+				t.Fatalf("expected %s to be rejected", tc.name)
+			}
+		})
+	}
+}
+
+// Reject rather than silently drop, matching the embed and gauge-group precedent.
+func TestValidateDashboardWidgetsRejectsMismatchedPoiMapConfig(t *testing.T) {
+	poiMap := validPoiMapConfig()
+
+	cases := []struct {
+		name   string
+		widget dashboardLayoutItem
+	}{
+		{"poi map config on a builtin", dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4, PoiMap: poiMap}},
+		{"poi map config on a gauge", dashboardLayoutItem{ID: "gauge:abcd1234", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig(), PoiMap: poiMap}},
+		{"poi map config on an embed", dashboardLayoutItem{ID: "embed:abcd1234", X: 0, Y: 0, W: 4, H: 4, Embed: &dashboardEmbedConfig{URL: "https://grafana.local/a"}, PoiMap: poiMap}},
+		{"poi map config on a gauge group", dashboardLayoutItem{ID: "gauge-group:abcd1234", X: 0, Y: 0, W: 4, H: 4, GaugeGroup: validGaugeGroupConfig(), PoiMap: poiMap}},
+		{"poi map config on a lamp strip", dashboardLayoutItem{ID: "lamps:abcd1234", X: 0, Y: 0, W: 4, H: 4, Lamps: &dashboardLampStripConfig{Title: "X", ShowCheck: true}, PoiMap: poiMap}},
+		{"poi map config on a cluster", dashboardLayoutItem{ID: "cluster:abcd1234", X: 0, Y: 0, W: 4, H: 4, Cluster: &dashboardClusterConfig{Title: "X", Ring: *validGaugeConfig(), Centre: *validGaugeConfig()}, PoiMap: poiMap}},
+		{"gauge config on a poi map", poiMapWidget("poi-map:abcd1234", poiMap)},
+	}
+
+	for i, tc := range cases {
+		// The last case needs its own Gauge field set, which the table's shared
+		// shape above can't express without duplicating every other row.
+		if i == len(cases)-1 {
+			tc.widget.Gauge = validGaugeConfig()
+		}
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			t.Fatalf("%s: expected rejection", tc.name)
+		}
+	}
+}
+
+func TestDashboardPages_PoiMapConfigSurvivesReload(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	page := createTestDashboardPage(t, "Wall Nearby", []dashboardLayoutItem{
+		poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig()),
+	})
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	reloaded, ok := dashboardPagesState[page.ID]
+	dashboardPagesMu.RUnlock()
+	if !ok {
+		t.Fatal("expected the page to survive a reload")
+	}
+	if len(reloaded.Widgets) != 1 || reloaded.Widgets[0].PoiMap == nil {
+		t.Fatalf("expected the poi map config to survive, got %+v", reloaded.Widgets)
+	}
+	poiMap := reloaded.Widgets[0].PoiMap
+	if poiMap.Title != "Nearby" || poiMap.RangeNm != 5 || poiMap.Layout != "split" {
+		t.Fatalf("expected the poi map's fields to survive, got %+v", poiMap)
+	}
+	if len(poiMap.Categories) != 3 || poiMap.Categories[0] != "anchorage" {
+		t.Fatalf("expected category order to survive, got %+v", poiMap.Categories)
+	}
+}
+
+// omitempty keeps existing dashboard-pages.json files byte-identical.
+func TestDashboardLayoutItem_OmitsPoiMapKeyWhenAbsent(t *testing.T) {
+	encoded, err := json.Marshal(dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4})
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "poiMap") {
+		t.Fatalf("expected no poiMap key on a widget without one, got %s", encoded)
+	}
+}
+
 // ── lamp strip widget (ADR 0052) ─────────────────────────────────────────────
 
 func lampStripWidget(id string, config *dashboardLampStripConfig) dashboardLayoutItem {
