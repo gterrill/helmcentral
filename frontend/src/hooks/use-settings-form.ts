@@ -49,11 +49,17 @@ export type SettingsPayload = {
     mode?: string
   }
   // ADR 0093: the onboard assistant. `notes` are the operator's standing
-  // notes, injected verbatim into every system prompt.
+  // notes, injected verbatim into every system prompt. The voice phase adds
+  // three switches, all default false: `voice_input` (a microphone button
+  // in the header, https-only), `read_aloud` (speak the spoken summary of
+  // each reply), and `wake_word` ("Hey Mate" always-listening).
   assistant?: {
     enabled?: boolean
     model?: string
     notes?: string
+    voice_input?: boolean
+    read_aloud?: boolean
+    wake_word?: boolean
   }
   units?: string
 }

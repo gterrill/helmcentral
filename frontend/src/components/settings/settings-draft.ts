@@ -55,6 +55,9 @@ export interface RegularSettingsDraft {
   assistantEnabled: boolean
   assistantModel: string
   assistantNotes: string
+  assistantVoiceInput: boolean
+  assistantReadAloud: boolean
+  assistantWakeWord: boolean
 }
 
 export const initialRegularSettingsDraft: RegularSettingsDraft = {
@@ -90,6 +93,9 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantEnabled: false,
   assistantModel: 'anthropic/claude-sonnet-4.5',
   assistantNotes: '',
+  assistantVoiceInput: false,
+  assistantReadAloud: false,
+  assistantWakeWord: false,
 }
 
 /** Builds the draft's starting values from a freshly-fetched settings payload. */
@@ -157,6 +163,10 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   // default model id — same reasoning as mayaraAddress above.
   if (typeof settings.assistant?.model === 'string') draft.assistantModel = settings.assistant.model
   if (typeof settings.assistant?.notes === 'string') draft.assistantNotes = settings.assistant.notes
+  // Voice phase (ADR 0093): all three default false, same as assistantEnabled.
+  if (typeof settings.assistant?.voice_input === 'boolean') draft.assistantVoiceInput = settings.assistant.voice_input
+  if (typeof settings.assistant?.read_aloud === 'boolean') draft.assistantReadAloud = settings.assistant.read_aloud
+  if (typeof settings.assistant?.wake_word === 'boolean') draft.assistantWakeWord = settings.assistant.wake_word
 
   return draft
 }
@@ -211,6 +221,9 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantEnabled !== b.assistantEnabled) return false
   if (a.assistantModel !== b.assistantModel) return false
   if (a.assistantNotes !== b.assistantNotes) return false
+  if (a.assistantVoiceInput !== b.assistantVoiceInput) return false
+  if (a.assistantReadAloud !== b.assistantReadAloud) return false
+  if (a.assistantWakeWord !== b.assistantWakeWord) return false
 
   // Compare tankLabels: same keys and same value for each key
   const aLabelsKeys = Object.keys(a.tankLabels).sort()
@@ -285,6 +298,9 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       enabled: draft.assistantEnabled,
       model: draft.assistantModel.trim(),
       notes: draft.assistantNotes,
+      voice_input: draft.assistantVoiceInput,
+      read_aloud: draft.assistantReadAloud,
+      wake_word: draft.assistantWakeWord,
     },
   }
 }
