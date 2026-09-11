@@ -17,15 +17,16 @@ import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attributio
 import { useRadarCapabilities } from '@/hooks/use-radar-capabilities'
 import { useRadarEchoLayer } from '@/hooks/use-radar-echo-layer'
 import type { RadarEchoStatus } from '@/hooks/use-radar-echo-stream'
+import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
+import { VesselArrow } from '@/components/vessel-arrow-marker'
+import {
+  resolveMarkerLabelSuppression,
+  markerScaleForZoom,
+  LABEL_COLLISION_RADIUS_PX,
+  type MarkerLabelPoint,
+  type ScreenRect,
+} from '@/lib/marker-labels'
 
-// Carto basemap styles, served by our own backend rather than fetched
-// from basemaps.cartocdn.com directly: the backend rewrites the style's
-// tile/glyph/sprite URLs to same-origin /api/basemap paths and caches
-// every asset in SQLite, so the chart still draws with no uplink. See
-// docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
-const STYLE_LIGHT = '/api/basemap/style/positron'
-const STYLE_DARK = '/api/basemap/style/dark-matter'
-const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
 const SAT_HANDOFF_START_ZOOM = 9
 const SAT_HANDOFF_END_ZOOM = 10
@@ -100,73 +101,12 @@ export function resolveRadarEchoAvailability(params: {
   return { available: true, reason: null }
 }
 
-// ── AIS label collision avoidance ───────────────────────────────────────────
-// Design critique item 4: AIS labels are 9px map annotation (DESIGN.md's
-// legibility floor) and must stay there rather than growing to "fix"
-// legibility -- the fix is keeping them apart, not bigger. Two independent
-// collisions matter: a label sitting under the metric overlay or the control
-// stack (both draw at a much higher z-index and simply blot the text out),
-// and two vessel labels landing close enough on screen to overlap each
-// other. Both are resolved from already-projected screen pixels so the logic
-// stays a pure, deterministic function that needs no live map instance to
-// test.
-export interface ScreenRect {
-  left: number
-  top: number
-  right: number
-  bottom: number
-}
-
-export interface MarkerLabelPoint {
-  id: string
-  x: number
-  y: number
-  // Lower wins a collision with a higher value -- the vessel's distance from
-  // own ship, so the closer (more operationally relevant) vessel keeps its
-  // label and the farther one yields.
-  priority: number
-}
-
-// Half the label block's on-screen footprint (max-w-28 = 112px wide, two
-// lines of 9px text under the marker icon): two labels whose projected
-// centres land closer than this will visibly overlap.
-export const LABEL_COLLISION_RADIUS_PX = 50
-
-export function resolveMarkerLabelSuppression(
-  points: MarkerLabelPoint[],
-  avoidZones: ScreenRect[],
-): Set<string> {
-  const suppressed = new Set<string>()
-
-  for (const point of points) {
-    for (const zone of avoidZones) {
-      if (point.x >= zone.left && point.x <= zone.right && point.y >= zone.top && point.y <= zone.bottom) {
-        suppressed.add(point.id)
-        break
-      }
-    }
-  }
-
-  // Closest (highest-priority) vessel first, so a three-way pile-up keeps
-  // the single most relevant label rather than an arbitrary survivor.
-  const byPriority = [...points].sort((a, b) => a.priority - b.priority)
-  for (let i = 0; i < byPriority.length; i++) {
-    const a = byPriority[i]
-    if (suppressed.has(a.id)) continue
-    for (let j = i + 1; j < byPriority.length; j++) {
-      const b = byPriority[j]
-      if (suppressed.has(b.id)) continue
-      const dx = a.x - b.x
-      const dy = a.y - b.y
-      if (Math.sqrt(dx * dx + dy * dy) < LABEL_COLLISION_RADIUS_PX) {
-        // b comes after a in priority order, so it's the one that yields.
-        suppressed.add(b.id)
-      }
-    }
-  }
-
-  return suppressed
-}
+// AIS label collision avoidance (design critique item 4) now lives in
+// lib/marker-labels.ts, shared with the poi-map widget's own marker labels
+// (ADR 0091 phase 3b). Re-exported here so existing imports from this module
+// keep working unchanged.
+export { resolveMarkerLabelSuppression, LABEL_COLLISION_RADIUS_PX }
+export type { MarkerLabelPoint, ScreenRect }
 
 function readStoredZoom(): number | null {
   if (typeof window === 'undefined') return null
@@ -411,7 +351,7 @@ export function AnchorWatchMap({
     if (z !== undefined) setCurrentZoom(z)
   }, [])
   // Scale markers: full size at zoom 14+, shrink linearly down to 0.45× at zoom 10
-  const markerScale = Math.max(0.45, Math.min(1, (currentZoom - 10) / (14 - 10)))
+  const markerScale = markerScaleForZoom(currentZoom)
   const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
 
   useEffect(() => {
@@ -1432,16 +1372,7 @@ export function AnchorWatchMap({
             // icon is not a place you'd pin, and the range would read 0.
             onClick={handleSelfVesselClick}
           >
-            <div style={{
-              transform: `${vesselHeadingDeg !== null ? `rotate(${vesselHeadingDeg}deg) ` : ''}scale(${markerScale})`,
-              transformOrigin: 'center',
-              transition: 'transform 150ms ease-out',
-              filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.6))',
-            }}>
-              <svg width="22" height="32" viewBox="0 0 22 32" fill="none">
-                <path d="M11 2 L20 26 L11 22 L2 26 Z" fill="white" stroke="#0ea5e9" strokeWidth="1.5" />
-              </svg>
-            </div>
+            <VesselArrow headingDeg={vesselHeadingDeg} scale={markerScale} />
           </div>
         </Marker>
 

@@ -15,15 +15,8 @@ import type { SatChart } from '@/hooks/use-sat-charts'
 import { useImageryPrefetch } from '@/hooks/use-imagery-prefetch'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
+import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 
-// Carto basemap styles, served by our own backend rather than fetched
-// from basemaps.cartocdn.com directly: the backend rewrites the style's
-// tile/glyph/sprite URLs to same-origin /api/basemap paths and caches
-// every asset in SQLite, so the chart still draws with no uplink. See
-// docs/adr/0067-carto-basemap-proxy-and-offline-cache.md.
-const STYLE_LIGHT = '/api/basemap/style/positron'
-const STYLE_DARK = '/api/basemap/style/dark-matter'
-const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
 const WORLD_IMAGERY_MAX_ZOOM = 20
 const IMAGERY_ENABLED_KEY = 'routePlanner.imagery.enabled'
