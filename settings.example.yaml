@@ -98,3 +98,20 @@ influxdb:
 mayara:
   address: ""
   port: 6502
+
+# Onboard assistant: an OpenRouter-backed chat that can look up places, wind
+# forecasts and tides for the boat's own crew (ADR 0093). Off by default and
+# BYOK - the key lives in the secrets store (OPENROUTER_API_KEY via
+# Settings -> Assistant), never here. Every reply shows its own cost.
+#
+# assistant:
+#   enabled: false
+#   # Any OpenRouter model id that supports tool calling. Blank falls back to
+#   # this default.
+#   model: anthropic/claude-sonnet-4.5
+#   # Operator standing notes, injected verbatim into every system prompt.
+#   # This is where local knowledge that a general model would not know goes,
+#   # e.g. which anchorage suits which tide or wind:
+#   notes: |
+#     Queenfish fish Hill Inlet on a rising tide.
+#     Snorkel Blue Pearl Bay in the last 1-2h of flood up to high slack.

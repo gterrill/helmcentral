@@ -118,6 +118,15 @@ type settingsPayload struct {
 		Address string `json:"address"`
 		Port    int    `json:"port"`
 	} `json:"mayara"`
+	// Assistant configures the onboard OpenRouter-backed assistant (ADR
+	// 0093): off by default, BYOK (the key lives in the secrets store, not
+	// here), and Notes are operator standing notes injected verbatim into
+	// every system prompt.
+	Assistant struct {
+		Enabled bool   `json:"enabled"`
+		Model   string `json:"model"`
+		Notes   string `json:"notes"`
+	} `json:"assistant"`
 	Auth struct {
 		Mode string `json:"mode"`
 	} `json:"auth"`
@@ -207,6 +216,11 @@ func updateSettingsHandler(c echo.Context) error {
 	settings["mayara"] = map[string]any{
 		"address": normalized.Mayara.Address,
 		"port":    normalized.Mayara.Port,
+	}
+	settings["assistant"] = map[string]any{
+		"enabled": normalized.Assistant.Enabled,
+		"model":   normalized.Assistant.Model,
+		"notes":   normalized.Assistant.Notes,
 	}
 	settings["units"] = normalized.Units
 
@@ -395,6 +409,18 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		}
 	}
 
+	if assistantMap, ok := settings["assistant"].(map[string]any); ok {
+		if v, ok := assistantMap["enabled"].(bool); ok {
+			payload.Assistant.Enabled = v
+		}
+		// Unconditional, like the mayara address above: a model or notes
+		// value stored as blank must surface as blank, not be mistaken for
+		// "absent" and papered over with normalizeSettingsPayload({})'s
+		// default model.
+		payload.Assistant.Model = strings.TrimSpace(coerceString(assistantMap["model"]))
+		payload.Assistant.Notes = coerceString(assistantMap["notes"])
+	}
+
 	if authMap, ok := settings["auth"].(map[string]any); ok {
 		payload.Auth.Mode = strings.TrimSpace(coerceString(authMap["mode"]))
 	}
@@ -504,6 +530,13 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	if normalized.Mayara.Port <= 0 || normalized.Mayara.Port > 65535 {
 		normalized.Mayara.Port = defaultMayaraPort
 	}
+
+	normalized.Assistant.Enabled = req.Assistant.Enabled
+	normalized.Assistant.Model = strings.TrimSpace(req.Assistant.Model)
+	if normalized.Assistant.Model == "" {
+		normalized.Assistant.Model = defaultAssistantModel
+	}
+	normalized.Assistant.Notes = strings.TrimSpace(req.Assistant.Notes)
 
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {

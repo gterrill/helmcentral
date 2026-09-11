@@ -274,6 +274,112 @@ func TestValidateSettingsChangeDoesNotProbeMayara(t *testing.T) {
 	}
 }
 
+// TestSettingsPayloadRoundTripsAssistantBlock drives a real write/read cycle
+// through updateSettingsHandler, mirroring the mayara round trip above. It
+// also proves multi-line operator standing notes survive a YAML round trip
+// (yaml.v3 emits a block scalar for a string containing newlines, and
+// readSettings must decode it back to the exact same string).
+func TestSettingsPayloadRoundTripsAssistantBlock(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	notes := "Queenfish fish Hill Inlet on a rising tide.\nSnorkel Blue Pearl Bay in the last 1-2h of flood."
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.Enabled = true
+		p.Assistant.Model = "openai/gpt-4o"
+		p.Assistant.Notes = notes
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	payload := buildSettingsPayload(saved)
+	if !payload.Assistant.Enabled {
+		t.Fatalf("expected assistant.enabled to round-trip true")
+	}
+	if payload.Assistant.Model != "openai/gpt-4o" {
+		t.Fatalf("expected assistant.model to round-trip, got %q", payload.Assistant.Model)
+	}
+	if payload.Assistant.Notes != notes {
+		t.Fatalf("expected multi-line assistant.notes to survive a YAML round trip, got %q", payload.Assistant.Notes)
+	}
+
+	// Saving the assistant block must not disturb unrelated fields already on
+	// disk (writeTestSettings, settings_validation_test.go).
+	if payload.Boat.Model != "Test Boat" {
+		t.Fatalf("expected boat.model to survive untouched, got %q", payload.Boat.Model)
+	}
+	address, port := persistedSignalK(t, settingsPath)
+	if address != "203.0.113.1" || port != 3000 {
+		t.Fatalf("expected signalk.address/port to survive untouched, got %s:%d", address, port)
+	}
+}
+
+// TestNormalizeSettingsPayloadDefaultsAssistantModel pins a blank model to
+// defaultAssistantModel (the assistant cannot make a chat-completions call
+// with no model id) and confirms notes are trimmed but otherwise passed
+// through untouched.
+func TestNormalizeSettingsPayloadDefaultsAssistantModel(t *testing.T) {
+	blank := normalizeSettingsPayload(settingsPayload{})
+	if blank.Assistant.Model != defaultAssistantModel {
+		t.Fatalf("expected a blank assistant model to default to %q, got %q", defaultAssistantModel, blank.Assistant.Model)
+	}
+	if blank.Assistant.Enabled {
+		t.Fatalf("expected assistant.enabled to default to false")
+	}
+
+	req := settingsPayload{}
+	req.Assistant.Model = "  openai/gpt-4o  "
+	req.Assistant.Notes = "  keep the tide rules handy  "
+	normalized := normalizeSettingsPayload(req)
+	if normalized.Assistant.Model != "openai/gpt-4o" {
+		t.Fatalf("expected assistant.model to be trimmed, got %q", normalized.Assistant.Model)
+	}
+	if normalized.Assistant.Notes != "keep the tide rules handy" {
+		t.Fatalf("expected assistant.notes to be trimmed, got %q", normalized.Assistant.Notes)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesBlankAssistantModelFromDisk pins the
+// mayara-style unconditional assign: a model explicitly saved as "" on disk
+// must surface as "", not be mistaken for "absent" and papered over with
+// defaultAssistantModel.
+func TestBuildSettingsPayload_SurfacesBlankAssistantModelFromDisk(t *testing.T) {
+	settings := map[string]any{
+		"assistant": map[string]any{
+			"enabled": true,
+			"model":   "",
+			"notes":   "",
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+	if payload.Assistant.Model != "" {
+		t.Fatalf("expected a blank assistant.model on disk to surface as blank, got %q", payload.Assistant.Model)
+	}
+	if !payload.Assistant.Enabled {
+		t.Fatalf("expected assistant.enabled to surface as true")
+	}
+}
+
+// TestBuildSettingsPayload_AbsentAssistantBlockDefaults pins the read side
+// for settings.yaml files written before the assistant block existed: no
+// assistant key at all must yield the same defaults normalizeSettingsPayload
+// gives an empty payload, not a zero-value Model that would fail a chat
+// completion outright.
+func TestBuildSettingsPayload_AbsentAssistantBlockDefaults(t *testing.T) {
+	payload := buildSettingsPayload(map[string]any{})
+	if payload.Assistant.Enabled {
+		t.Fatalf("expected assistant.enabled to default to false when the block is absent")
+	}
+	if payload.Assistant.Model != defaultAssistantModel {
+		t.Fatalf("expected assistant.model to default to %q when the block is absent, got %q", defaultAssistantModel, payload.Assistant.Model)
+	}
+}
+
 // TestNormalizeSettingsPayload_PreservesGPSFromBowMZero guards the anchor
 // bow-offset correction (see docs on setAnchorWatch): gps_from_bow_m
 // defaults to 0, meaning "no correction", so 0 is a meaningful explicit
