@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useSettingsForm } from '@/hooks/use-settings-form'
+import { deepMergeSettings, useSettingsForm } from '@/hooks/use-settings-form'
 
 describe('useSettingsForm', () => {
   afterEach(() => {
@@ -98,5 +98,21 @@ describe('useSettingsForm', () => {
     })
 
     expect(result.current.error).toBe('Database connection failed')
+  })
+
+  // ADR 0093: the assistant settings block sits alongside `ui` at the top
+  // level of SettingsPayload. deepMergeSettings merges one level deep PER
+  // top-level key, so a patch that only touches `ui` must leave `assistant`
+  // (including its standing notes) untouched rather than wiping it out.
+  it('deepMergeSettings preserves assistant.notes when the patch only touches ui', () => {
+    const current = {
+      ui: { tide_provider: 'bom' },
+      assistant: { enabled: true, model: 'anthropic/claude-sonnet-4.5', notes: 'Queenfish on a rising tide.' },
+    }
+
+    const merged = deepMergeSettings(current, { ui: { tide_provider: 'noaa' } })
+
+    expect(merged.ui?.tide_provider).toBe('noaa')
+    expect(merged.assistant).toEqual(current.assistant)
   })
 })

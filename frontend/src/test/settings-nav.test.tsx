@@ -16,6 +16,13 @@ describe('SettingsNav', () => {
     expect(onSelect).toHaveBeenCalledWith('widgets')
   })
 
+  // ADR 0093: the onboard assistant gets its own settings section.
+  it('renders an Assistant nav button', () => {
+    render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: 'Assistant' })).toBeInTheDocument()
+  })
+
   it('marks only the active section as current', () => {
     const { rerender } = render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
 

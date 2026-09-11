@@ -48,6 +48,13 @@ export type SettingsPayload = {
   auth?: {
     mode?: string
   }
+  // ADR 0093: the onboard assistant. `notes` are the operator's standing
+  // notes, injected verbatim into every system prompt.
+  assistant?: {
+    enabled?: boolean
+    model?: string
+    notes?: string
+  }
   units?: string
 }
 

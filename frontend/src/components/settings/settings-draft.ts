@@ -52,6 +52,9 @@ export interface RegularSettingsDraft {
   mayaraAddress: string
   mayaraPort: string
   authMode: 'none' | 'signalk'
+  assistantEnabled: boolean
+  assistantModel: string
+  assistantNotes: string
 }
 
 export const initialRegularSettingsDraft: RegularSettingsDraft = {
@@ -84,6 +87,9 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   // the wrong box) rather than an obvious one (no address configured).
   mayaraAddress: '',
   mayaraPort: '6502',
+  assistantEnabled: false,
+  assistantModel: 'anthropic/claude-sonnet-4.5',
+  assistantNotes: '',
 }
 
 /** Builds the draft's starting values from a freshly-fetched settings payload. */
@@ -145,6 +151,13 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.mayara?.address === 'string') draft.mayaraAddress = settings.mayara.address
   if (typeof settings.mayara?.port === 'number') draft.mayaraPort = String(settings.mayara.port)
 
+  if (typeof settings.assistant?.enabled === 'boolean') draft.assistantEnabled = settings.assistant.enabled
+  // typeof, not truthy: a blank model on the server (nothing configured, or
+  // explicitly cleared) must hydrate as blank, not silently fall back to the
+  // default model id — same reasoning as mayaraAddress above.
+  if (typeof settings.assistant?.model === 'string') draft.assistantModel = settings.assistant.model
+  if (typeof settings.assistant?.notes === 'string') draft.assistantNotes = settings.assistant.notes
+
   return draft
 }
 
@@ -195,6 +208,9 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.influxdbBucket !== b.influxdbBucket) return false
   if (a.mayaraAddress !== b.mayaraAddress) return false
   if (a.mayaraPort !== b.mayaraPort) return false
+  if (a.assistantEnabled !== b.assistantEnabled) return false
+  if (a.assistantModel !== b.assistantModel) return false
+  if (a.assistantNotes !== b.assistantNotes) return false
 
   // Compare tankLabels: same keys and same value for each key
   const aLabelsKeys = Object.keys(a.tankLabels).sort()
@@ -264,6 +280,11 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
     },
     auth: {
       mode: draft.authMode,
+    },
+    assistant: {
+      enabled: draft.assistantEnabled,
+      model: draft.assistantModel.trim(),
+      notes: draft.assistantNotes,
     },
   }
 }

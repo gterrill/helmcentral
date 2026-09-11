@@ -9,6 +9,7 @@ import { SettingsNav, SETTINGS_SECTIONS, type SettingsSectionId } from '@/compon
 import { SECRET_KEYS } from '@/hooks/use-secrets-status'
 import { AlarmsSection } from '@/components/settings/sections/alarms-section'
 import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor-watch-options-section'
+import { AssistantSection } from '@/components/settings/sections/assistant-section'
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
 import { GeneralSection } from '@/components/settings/sections/general-section'
 import { SecuritySection } from '@/components/settings/sections/security-section'
@@ -198,6 +199,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <WidgetsSection draft={draft} onChange={handleDraftChange} />
       case 'alarms':
         return <AlarmsSection />
+      case 'assistant':
+        return <AssistantSection draft={draft} onChange={handleDraftChange} />
       case 'security':
         return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':
