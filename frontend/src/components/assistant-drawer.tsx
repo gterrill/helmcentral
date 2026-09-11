@@ -1,21 +1,16 @@
-import { Loader2, Trash2 } from 'lucide-react'
-import { useCallback, useState, type KeyboardEvent } from 'react'
+import { Trash2 } from 'lucide-react'
 
-import { AssistantMarkdown } from '@/components/assistant-markdown'
+import { AssistantThread } from '@/components/assistant-thread'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useAssistantChat } from '@/hooks/use-assistant-chat'
-import { useAssistantConversations, type AssistantMessage } from '@/hooks/use-assistant-conversations'
+import { useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
 
 interface AssistantDrawerProps {
   canWrite: boolean
   onOpenSettings: () => void
 }
-
-const EXAMPLE_QUESTION =
-  "We're at Hook Reef. Should we visit Tongue Bay or Blue Pearl Bay first over the next two days?"
 
 // A short, local formatter - not a shared primitive, just readable list
 // rows. Coarsens to the largest unit that stays a whole number, the same
@@ -34,65 +29,20 @@ function formatRelativeTime(iso: string): string {
   return `${diffDays}d ago`
 }
 
-// ADR 0093: every reply's footer names what it cost, in full - which model
-// answered, how many tokens it used, and the price - so the running cost of
-// asking questions is never a surprise. Any part the server didn't report
-// (an optimistic local bubble has none of these yet) reads as `--` rather
-// than a confident-looking zero.
-function formatMessageFooter(message: AssistantMessage): string {
-  const model = message.model && message.model !== '' ? message.model : '--'
-  const tokens =
-    typeof message.promptTokens === 'number' && typeof message.completionTokens === 'number'
-      ? (message.promptTokens + message.completionTokens).toLocaleString()
-      : '--'
-  const cost = typeof message.costUsd === 'number' ? `$${message.costUsd.toFixed(4)}` : '--'
-  return `${model} · ${tokens} tokens · ${cost}`
-}
-
 /**
- * The onboard assistant panel (ADR 0093). Owns its own data - status,
- * conversation list/thread, and the chat send - the same way RadarDrawer
- * owns its map state: nothing else in the app needs any of it.
+ * The onboard assistant panel (ADR 0093), user-facing as "Mate". Owns its
+ * own data - status, conversation list/thread, and the chat send - the same
+ * way RadarDrawer owns its map state: nothing else in the app needs any of
+ * it. The list/thread split mirrors the Mate sheet (mate-sheet.tsx): this
+ * component owns the conversation-list column and the problem/loading
+ * states, and hands the thread column to the same AssistantThread the
+ * sheet uses, so the long-session panel and the quick voice channel render
+ * one conversation identically.
  */
 export function AssistantDrawer({ canWrite, onOpenSettings }: AssistantDrawerProps) {
   const status = useAssistantStatus()
   const conversations = useAssistantConversations()
   const chat = useAssistantChat()
-  const [content, setContent] = useState('')
-
-  const handleSend = useCallback(async () => {
-    const trimmed = content.trim()
-    if (trimmed === '' || chat.sending || !canWrite) return
-
-    let conversationId = conversations.activeId
-    if (conversationId === null) {
-      conversationId = await conversations.create()
-      if (conversationId === null) return
-    }
-
-    conversations.appendLocal({
-      id: `local-${Date.now()}`,
-      conversationId,
-      seq: -1,
-      role: 'user',
-      content: trimmed,
-      createdAt: new Date().toISOString(),
-    })
-    setContent('')
-
-    const reply = await chat.send(conversationId, trimmed)
-    if (reply) {
-      conversations.appendLocal(reply)
-      await conversations.refresh()
-    }
-  }, [content, chat, conversations, canWrite])
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault()
-      void handleSend()
-    }
-  }
 
   const body = (() => {
     if (status.loading) {
@@ -104,7 +54,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings }: AssistantDrawerPro
         <div className="max-w-md space-y-3 rounded-lg border bg-card p-4">
           <p className="text-sm text-foreground">{status.status.problem}</p>
           <Button variant="outline" onClick={onOpenSettings}>
-            Open Assistant settings
+            Open Mate settings
           </Button>
         </div>
       )
@@ -146,58 +96,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings }: AssistantDrawerPro
           </div>
         </div>
 
-        <div className="mx-auto flex min-h-0 w-full max-w-3xl min-w-0 flex-1 flex-col gap-3">
-          <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1 py-2">
-            {conversations.messages.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Try: &ldquo;{EXAMPLE_QUESTION}&rdquo;</p>
-            ) : (
-              conversations.messages.map((message) => (
-                <div key={message.id} className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                  {message.role === 'user' ? (
-                    <div className="max-w-[85%] min-w-0 whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-foreground">
-                      {message.content}
-                    </div>
-                  ) : (
-                    <div className="w-full min-w-0">
-                      <AssistantMarkdown content={message.content} />
-                      <p className="mt-4 border-t border-border pt-2 text-[11px] tabular-nums text-muted-foreground">
-                        {formatMessageFooter(message)}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-
-          {chat.sending && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{chat.statusText ?? 'Thinking…'}</span>
-            </div>
-          )}
-
-          {(chat.error || conversations.error) && (
-            <p className="text-sm text-destructive">{chat.error ?? conversations.error}</p>
-          )}
-
-          <div className="flex flex-col gap-1">
-            <Textarea
-              rows={3}
-              placeholder="Ask about the next couple of days…"
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={!canWrite}
-            />
-            {!canWrite && <p className="text-[11px] text-muted-foreground">Read-only session</p>}
-            <div className="flex justify-end">
-              <Button onClick={() => void handleSend()} disabled={chat.sending || !canWrite || content.trim() === ''}>
-                Send
-              </Button>
-            </div>
-          </div>
-        </div>
+        <AssistantThread canWrite={canWrite} conversations={conversations} chat={chat} />
       </div>
     )
   })()

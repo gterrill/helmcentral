@@ -138,9 +138,9 @@ describe('AssistantDrawer', () => {
     render(<AssistantDrawer canWrite onOpenSettings={onOpenSettings} />)
 
     expect(await screen.findByText('Set up an OpenRouter key in Settings → Assistant.')).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('Ask about the next couple of days…')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('Ask Mate about the next couple of days…')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Assistant settings' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Mate settings' }))
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
@@ -153,7 +153,7 @@ describe('AssistantDrawer', () => {
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
     expect(await screen.findByText('Hook Reef anchorages')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Ask about the next couple of days…')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask Mate about the next couple of days…')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeInTheDocument()
     // Empty-thread hint shows the Whitsundays example question.
     expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
@@ -166,7 +166,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite={false} onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask about the next couple of days…')
+    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…')
     expect(textarea).toBeDisabled()
     expect(screen.getByText('Read-only session')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
@@ -186,7 +186,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask about the next couple of days…') as HTMLTextAreaElement
+    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'Tongue Bay or Blue Pearl Bay first?' } })
 
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
@@ -216,7 +216,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask about the next couple of days…')
+    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…')
     fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
 
     act(() => { fireEvent.keyDown(textarea, { key: 'Enter' }) })
@@ -259,7 +259,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask about the next couple of days…')
+    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…')
     fireEvent.change(textarea, { target: { value: 'Any cost info?' } })
 
     await act(async () => {

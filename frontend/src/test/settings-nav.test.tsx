@@ -16,11 +16,12 @@ describe('SettingsNav', () => {
     expect(onSelect).toHaveBeenCalledWith('widgets')
   })
 
-  // ADR 0093: the onboard assistant gets its own settings section.
-  it('renders an Assistant nav button', () => {
+  // ADR 0093: the onboard assistant gets its own settings section, labelled
+  // "Mate" for the operator even though the section id stays 'assistant'.
+  it('renders a Mate nav button', () => {
     render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: 'Assistant' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mate' })).toBeInTheDocument()
   })
 
   it('marks only the active section as current', () => {

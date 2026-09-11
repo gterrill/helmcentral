@@ -18,15 +18,15 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
   return (
     <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
       <FieldSet>
-        <FieldLegend variant="label">Assistant</FieldLegend>
+        <FieldLegend variant="label">Mate</FieldLegend>
         <div className="space-y-3">
           <Field orientation="horizontal">
             <Switch
               checked={draft.assistantEnabled}
               onCheckedChange={(checked) => onChange({ assistantEnabled: checked })}
-              aria-label="Enable assistant"
+              aria-label="Enable Mate"
             />
-            <FieldLabel>Enable the onboard assistant</FieldLabel>
+            <FieldLabel>Enable Mate</FieldLabel>
           </Field>
 
           <Field>
@@ -35,7 +35,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
               id="assistant-model"
               value={draft.assistantModel}
               onChange={(e) => onChange({ assistantModel: e.target.value })}
-              aria-label="Assistant model"
+              aria-label="Mate model"
             />
             <FieldDescription>Any OpenRouter model id that supports tool calling</FieldDescription>
           </Field>
@@ -54,14 +54,58 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             id="assistant-notes"
             value={draft.assistantNotes}
             onChange={(e) => onChange({ assistantNotes: e.target.value })}
-            aria-label="Assistant standing notes"
+            aria-label="Mate standing notes"
             rows={8}
             maxLength={8000}
           />
           <FieldDescription>
-            Sent with every question. Put your own tide, fishing and anchorage rules here.
+            Sent with every question you ask Mate. Put your own tide, fishing and anchorage rules here.
           </FieldDescription>
         </Field>
+      </FieldSet>
+
+      {/* ADR 0093 voice phase: push-to-talk input, reading the spoken summary
+          back aloud, and the always-listening "Hey Mate" wake word - each its
+          own switch since each has its own cost (an https requirement, a
+          voice interrupting the cabin, battery and a cloud-speech vendor). */}
+      <FieldSet>
+        <FieldLegend variant="label">Voice</FieldLegend>
+        <div className="space-y-3">
+          <Field orientation="horizontal">
+            <Switch
+              checked={draft.assistantVoiceInput}
+              onCheckedChange={(checked) => onChange({ assistantVoiceInput: checked })}
+              aria-label="Voice input"
+            />
+            <FieldLabel>Voice input</FieldLabel>
+          </Field>
+          <FieldDescription>
+            A microphone button in the header. Needs the app opened over https.
+          </FieldDescription>
+
+          <Field orientation="horizontal">
+            <Switch
+              checked={draft.assistantReadAloud}
+              onCheckedChange={(checked) => onChange({ assistantReadAloud: checked })}
+              aria-label="Read replies aloud"
+            />
+            <FieldLabel>Read replies aloud</FieldLabel>
+          </Field>
+          <FieldDescription>Mate reads the spoken summary of each reply.</FieldDescription>
+
+          <Field orientation="horizontal">
+            <Switch
+              checked={draft.assistantWakeWord}
+              onCheckedChange={(checked) => onChange({ assistantWakeWord: checked })}
+              aria-label="Listen for Hey Mate"
+            />
+            <FieldLabel>Listen for Hey Mate</FieldLabel>
+          </Field>
+          <FieldDescription>
+            Keeps the microphone open while the app is on screen and answers when you say Hey Mate. Uses
+            battery and, in Chrome, sends audio to Google; off by default.
+          </FieldDescription>
+        </div>
       </FieldSet>
 
       <FieldDescription>

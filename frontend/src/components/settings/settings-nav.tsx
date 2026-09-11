@@ -21,7 +21,7 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> 
   { id: 'anchor-watch', label: 'Anchor Watch' },
   { id: 'mayara', label: 'Mayara' },
   { id: 'alarms', label: 'Alarms' },
-  { id: 'assistant', label: 'Assistant' },
+  { id: 'assistant', label: 'Mate' },
   { id: 'widgets', label: 'Widgets' },
   { id: 'security', label: 'Security' },
 ]

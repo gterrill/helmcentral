@@ -35,6 +35,7 @@ import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
 import { AssistantDrawer } from '@/components/assistant-drawer'
+import { MateSheet } from '@/components/mate-sheet'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
 import {
@@ -185,6 +186,7 @@ import {
   type AppLocation,
   type PanelId,
 } from '@/lib/app-location'
+import { screenContextFor } from '@/lib/mate-screen'
 
 const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
@@ -193,7 +195,7 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
   { id: 'radar', label: 'Radar', icon: RadarIcon },
   { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
   { id: 'alarms', label: 'Alarms', icon: BellRing },
-  { id: 'assistant', label: 'Assistant', icon: Sparkles },
+  { id: 'assistant', label: 'Mate', icon: Sparkles },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
 
@@ -385,6 +387,24 @@ export function App() {
   // effectiveWidgets below.
   const { ribbon, saveRibbon } = useDashboardRibbon()
   const [ribbonDialogOpen, setRibbonDialogOpen] = useState(false)
+
+  // The Mate sheet (ADR 0093 voice phase): a quick channel over whatever
+  // page is on screen, opened by the header's "Ask Mate" button (and later
+  // by voice) rather than navigating away to the Assistant panel. Mounted
+  // once here, not per-panel, so it keeps its own thread across opens/closes
+  // the same way the panel's own conversation does. `mateSheetQuestion` is
+  // cleared on close so reopening later with no question never re-sends a
+  // stale one.
+  const [mateSheetOpen, setMateSheetOpen] = useState(false)
+  const [mateSheetQuestion, setMateSheetQuestion] = useState<string | undefined>(undefined)
+  const openMate = useCallback((question?: string) => {
+    setMateSheetQuestion(question)
+    setMateSheetOpen(true)
+  }, [])
+  const mateScreen = useMemo(
+    () => screenContextFor({ panel: activePanel, section: settingsSection }, activePage?.name ?? null),
+    [activePanel, settingsSection, activePage],
+  )
 
   // Gates the two URL-writing effects below on the shell actually being
   // shown (mirrors the render gate further down): while auth is still
@@ -1957,6 +1977,13 @@ export function App() {
                 )}
               </>
             )}
+            {/* ADR 0093 voice phase: opens the Mate sheet over whatever page is
+                behind it, without navigating away - the shell-wide "push to
+                talk" entry point the plan calls for, though this button is
+                the tap-only affordance; voice itself lands in a later phase. */}
+            <Button variant="ghost" size="icon" aria-label="Ask Mate" onClick={() => openMate()}>
+              <Sparkles className="h-4 w-4" />
+            </Button>
             <VesselStatusBar
               isDark={isDarkTheme}
               onToggleDarkMode={toggleDarkMode}
@@ -2035,6 +2062,17 @@ export function App() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <MateSheet
+        open={mateSheetOpen}
+        onOpenChange={(open) => {
+          setMateSheetOpen(open)
+          if (!open) setMateSheetQuestion(undefined)
+        }}
+        initialQuestion={mateSheetQuestion}
+        screen={mateScreen}
+        canWrite={canWrite}
+      />
 
       <Toaster isDarkTheme={isDarkTheme} />
     </SidebarProvider>

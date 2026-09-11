@@ -41,9 +41,9 @@ describe('AssistantSection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
     renderSection()
 
-    expect(screen.getByLabelText('Enable assistant')).toBeInTheDocument()
-    expect(screen.getByLabelText('Assistant model')).toBeInTheDocument()
-    expect(screen.getByLabelText('Assistant standing notes')).toBeInTheDocument()
+    expect(screen.getByLabelText('Enable Mate')).toBeInTheDocument()
+    expect(screen.getByLabelText('Mate model')).toBeInTheDocument()
+    expect(screen.getByLabelText('Mate standing notes')).toBeInTheDocument()
 
     vi.unstubAllGlobals()
   })
@@ -53,7 +53,7 @@ describe('AssistantSection', () => {
     const { latestDraft } = renderSection()
     expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(true)
 
-    fireEvent.click(screen.getByLabelText('Enable assistant'))
+    fireEvent.click(screen.getByLabelText('Enable Mate'))
 
     expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
 
@@ -65,7 +65,7 @@ describe('AssistantSection', () => {
     const { latestDraft } = renderSection()
     expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(true)
 
-    fireEvent.change(screen.getByLabelText('Assistant model'), { target: { value: 'anthropic/claude-opus-4' } })
+    fireEvent.change(screen.getByLabelText('Mate model'), { target: { value: 'anthropic/claude-opus-4' } })
 
     expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
 
@@ -77,10 +77,58 @@ describe('AssistantSection', () => {
     const { latestDraft } = renderSection()
     expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(true)
 
-    fireEvent.change(screen.getByLabelText('Assistant standing notes'), {
+    fireEvent.change(screen.getByLabelText('Mate standing notes'), {
       target: { value: 'Queenfish on a rising tide at Tongue Bay.' },
     })
 
+    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
+
+    vi.unstubAllGlobals()
+  })
+
+  // ADR 0093 voice phase: three switches, all off by default.
+  it('renders the three voice switches by aria-label', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    renderSection()
+
+    expect(screen.getByLabelText('Voice input')).toBeInTheDocument()
+    expect(screen.getByLabelText('Read replies aloud')).toBeInTheDocument()
+    expect(screen.getByLabelText('Listen for Hey Mate')).toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('toggling Voice input marks the form dirty', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { latestDraft } = renderSection()
+
+    fireEvent.click(screen.getByLabelText('Voice input'))
+
+    expect(latestDraft().assistantVoiceInput).toBe(true)
+    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
+
+    vi.unstubAllGlobals()
+  })
+
+  it('toggling Read replies aloud marks the form dirty', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { latestDraft } = renderSection()
+
+    fireEvent.click(screen.getByLabelText('Read replies aloud'))
+
+    expect(latestDraft().assistantReadAloud).toBe(true)
+    expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
+
+    vi.unstubAllGlobals()
+  })
+
+  it('toggling Listen for Hey Mate marks the form dirty', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const { latestDraft } = renderSection()
+
+    fireEvent.click(screen.getByLabelText('Listen for Hey Mate'))
+
+    expect(latestDraft().assistantWakeWord).toBe(true)
     expect(draftsEqual(latestDraft(), initialRegularSettingsDraft)).toBe(false)
 
     vi.unstubAllGlobals()
@@ -102,6 +150,9 @@ describe('assistant settings-draft plumbing', () => {
       enabled: true,
       model: 'anthropic/claude-sonnet-4.5',
       notes: 'Queenfish on a rising tide.',
+      voice_input: false,
+      read_aloud: false,
+      wake_word: false,
     })
   })
 
@@ -145,5 +196,43 @@ describe('assistant settings-draft plumbing', () => {
     expect(draft.assistantEnabled).toBe(false)
     expect(draft.assistantModel).toBe('anthropic/claude-sonnet-4.5')
     expect(draft.assistantNotes).toBe('')
+  })
+
+  // ADR 0093 voice phase: voice_input/read_aloud/wake_word, all default false.
+  it('buildRegularSettingsPatch emits the voice switches', () => {
+    const draft: RegularSettingsDraft = {
+      ...initialRegularSettingsDraft,
+      assistantVoiceInput: true,
+      assistantReadAloud: true,
+      assistantWakeWord: true,
+    }
+
+    const patch = buildRegularSettingsPatch(draft)
+
+    expect(patch.assistant).toMatchObject({
+      voice_input: true,
+      read_aloud: true,
+      wake_word: true,
+    })
+  })
+
+  it('hydrateDraftFromSettings round-trips the voice switches', () => {
+    const settings: SettingsPayload = {
+      assistant: { voice_input: true, read_aloud: true, wake_word: true },
+    }
+
+    const draft = hydrateDraftFromSettings(settings)
+
+    expect(draft.assistantVoiceInput).toBe(true)
+    expect(draft.assistantReadAloud).toBe(true)
+    expect(draft.assistantWakeWord).toBe(true)
+  })
+
+  it('hydrates the voice switches to false when the server omits them', () => {
+    const draft = hydrateDraftFromSettings({})
+
+    expect(draft.assistantVoiceInput).toBe(false)
+    expect(draft.assistantReadAloud).toBe(false)
+    expect(draft.assistantWakeWord).toBe(false)
   })
 })

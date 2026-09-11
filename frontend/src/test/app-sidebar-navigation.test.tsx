@@ -38,6 +38,10 @@ vi.mock('@/hooks/use-auth', () => ({
 // answered with a stable "unconfigured" status so the drawer renders its
 // zero-state card instead of chasing conversation-list/thread fetches this
 // stub doesn't otherwise answer.
+// The Mate sheet (ADR 0093 voice phase) is now mounted once in the shell
+// regardless of panel, so its own useAssistantConversations fetches
+// unconditionally too - answered with an empty list so it settles quietly
+// rather than tripping the "Unhandled fetch" guard other suites use.
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
@@ -46,6 +50,9 @@ beforeEach(() => {
     }
     if (url.endsWith('/api/assistant/status')) {
       return { ok: true, json: async () => ({ enabled: false, configured: false, model: '', problem: 'Set up the assistant in Settings → Assistant.' }) }
+    }
+    if (url.endsWith('/api/assistant/conversations')) {
+      return { ok: true, json: async () => ({ conversations: [] }) }
     }
     return { ok: false, json: async () => ({}) }
   }))
@@ -347,12 +354,27 @@ describe('App sidebar navigation', () => {
     expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
   })
 
-  it('opens the Assistant panel from the sidebar', async () => {
+  it('opens the Mate panel from the sidebar', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /assistant/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mate' }))
 
     expect(await screen.findByTestId('assistant-drawer')).toBeInTheDocument()
+  })
+
+  // ADR 0093 voice phase: the header's "Ask Mate" button opens the Mate
+  // sheet over whatever page is on screen, rather than navigating to the
+  // Assistant panel - the dashboard grid stays visible behind it.
+  it('opens the Mate sheet from the header button, without leaving the dashboard', async () => {
+    render(<App />)
+
+    expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Mate' }))
+
+    expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
+    // The dashboard is still there, behind the sheet.
+    expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
   })
 
   it('footers the sidebar with the version the backend reports', async () => {
