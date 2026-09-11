@@ -159,6 +159,30 @@ instead reports a category as truncated when its returned count lands
 exactly on the cap - an honest, if imperfect, heuristic (see
 `osm-overpass.go`'s doc comment), accepted in preference to the extra load.
 
+### The Nearby widget is a sixth multi-instance dashboard widget
+
+The plan's moving-map widget (`poi-map:`) follows the exact precedent
+`embed:` set in ADR 0031 and every multi-instance widget since: a
+`<kind>:<token>` id, a per-instance config object riding on the layout item
+(`dashboardPoiMapConfig` in `backend/dashboard_pages.go`), and
+`validatePoiMapWidget` reusing this ADR's own `poiRadiusNmMin`/`Max` and
+`isValidPOICategory` so a config that saves can never be rejected by the
+`GET /api/poi` call it goes on to make. A single global "Nearby" panel was
+not considered seriously: an operator anchored in one bay and passage-making
+past the next wants different ranges and different categories on different
+pages, which is exactly the shape of problem `embed:` already solved by
+being placeable more than once.
+
+The widget adds no new backend behaviour beyond the widget config itself -
+it calls the same `GET /api/poi` this ADR's other decisions already shape.
+Polling, backoff and "never invent a feature" on a failed fetch are frontend
+concerns (`frontend/src/hooks/use-poi.ts`), not a plugin-kind decision:
+`GET /api/poi` already returns a clear `fetched_at` and cache flag for a
+poller to build a data-age display against, and a 502/503 (this handler's
+own signal that the provider is unavailable) is exactly what an exponential
+backoff exists to protect a rate-limited public Overpass instance from a
+sixty-second poll made worse by a retry storm.
+
 ## Consequences
 
 Positive:

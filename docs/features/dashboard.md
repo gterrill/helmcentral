@@ -33,7 +33,7 @@ you placing them on an ordinary phone or tablet page too, but they were
 sized for the kiosk's seven-row fold first. See [Set up a wall
 display](../how-to/set-up-a-wall-display.md).
 
-Two additional widget types are configurable:
+Three additional widget types are configurable:
 
 - **Gauge widgets** bind to any path your SignalK server publishes, with a
   numeric, radial, bar, lamp or trend display. Their coloured bands reuse the
@@ -47,6 +47,10 @@ Two additional widget types are configurable:
   ordinary dashboard leave it framed so the gear icon and title stay
   reachable. Layout mode always shows the frame regardless of this setting,
   so an embed is never unreachable to reconfigure.
+- **Nearby map** widgets show points of interest around the vessel: bays,
+  islands, marinas, fuel, boat ramps, moorings, historic landmarks,
+  lookouts, dive and snorkel spots, and walking trails. See [Nearby
+  map](#nearby-map) below.
 
 ## The indicator ribbon
 
@@ -334,6 +338,46 @@ to show a number built from a burn rate that stopped being true hours ago.
 Fuel aboard carries the same treatment against its own tank readings: a tank
 sensor that has gone quiet blanks that figure too, rather than showing a
 level from before it stopped reporting.
+
+## Nearby map
+
+A moving map centred on the vessel, showing the points of interest within a
+range you set. Add it from the widget picker like an embed or a gauge; each
+instance keeps its own range, categories, layout and toggles, so one page can
+show anchorages and dive spots while another shows fuel and boat ramps.
+
+Two layouts: map only, or map and list. The list ranks the five nearest
+matches by distance, each with its category icon, name, distance and
+bearing, and a one-line description when one is available. The same five
+carry a numbered badge on the map so the list and the chart agree on which
+marker is which; every matching feature within range still shows on the map,
+badge or no badge.
+
+Categories: anchorages, bays and islands; marinas, fuel, boat ramps and
+moorings; historic landmarks; lookouts; dive and snorkel spots; and walking
+trails. Coverage depends on how thoroughly your cruising ground has been
+mapped in the underlying data source, and varies by category: mooring fields
+and fuel docks are usually well tagged, dive and snorkel spots much less so.
+
+Two switches control what else the map shows: nearby AIS traffic, and your
+own vessel's trail. Both default on for AIS and off for the trail; turn
+either off if the map feels busy at a low zoom.
+
+The map follows the vessel, holding north up. If the position feed reports a
+GPS fix it does not trust, the map holds its last known position instead of
+jumping to an unreliable one, and shows a small amber GNSS badge until a good
+fix returns.
+
+A footer under the list names the current data provider and how old its
+answer is. If a fetch fails, the list keeps showing what it last knew, aged
+and marked with the error, rather than going blank or inventing a result.
+The wait for a fresh answer backs off automatically while the provider is
+unavailable, so a slow patch of coastline does not turn into a hammering
+retry loop.
+
+See [Add a Nearby map](../how-to/add-a-nearby-map.md) for setup, and
+[POI categories](../reference/poi-categories.md) for what each category
+actually matches.
 
 ## Beyond the grid
 
