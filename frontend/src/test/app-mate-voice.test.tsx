@@ -1,0 +1,317 @@
+/**
+ * ADR 0093 voice phase, "App-wide voice": the header mic button and its
+ * Alt+M shortcut, mounted once in App.tsx via hooks/use-mate-voice.ts so
+ * push-to-talk works on every panel and dashboard page, not just the Mate
+ * panel/sheet. Mirrors App.smoke.test.tsx's minimal mock scaffold (most
+ * hooks left real, backed by a blanket "not found" fetch stub) plus a
+ * FakeSpeechRecognition (same shape as use-speech-input.test.ts's) and a
+ * couple of mutable fixtures so voiceInput/canWrite can vary per test.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { App } from '../App'
+
+interface FakeResultAlternative { transcript: string }
+interface FakeResult extends Array<FakeResultAlternative> { isFinal: boolean }
+
+class FakeSpeechRecognition {
+  lang = ''
+  continuous = false
+  interimResults = false
+  onresult: ((event: { resultIndex: number; results: ArrayLike<FakeResult> }) => void) | null = null
+  onerror: ((event: { error: string }) => void) | null = null
+  onend: (() => void) | null = null
+  aborted = false
+
+  constructor() {
+    instances.push(this)
+  }
+
+  start() {}
+  stop() {}
+  abort() { this.aborted = true }
+
+  emitResult(transcript: string, isFinal: boolean) {
+    const result: FakeResult = Object.assign([{ transcript }], { isFinal })
+    this.onresult?.({ resultIndex: 0, results: [result] })
+  }
+}
+
+let instances: FakeSpeechRecognition[] = []
+
+function currentRecognition(): FakeSpeechRecognition {
+  return instances[instances.length - 1]
+}
+
+// Mutable so individual tests can flip voiceInput/canWrite without a
+// separate vi.mock per scenario - reset to the common baseline (voice on,
+// writable) in beforeEach.
+const mockAssistantVoice = { voiceInput: true, readAloud: false, wakeWord: false }
+const mockAuth = { canWrite: true }
+
+vi.mock('@/hooks/use-auth', () => ({
+  refreshAuthState: vi.fn().mockResolvedValue({ mode: 'none', user: null }),
+  useAuth: () => ({
+    mode: 'signalk' as const,
+    user: { username: 'skipper' },
+    role: mockAuth.canWrite ? 'readwrite' : 'read',
+    loading: false,
+    error: null,
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
+}))
+
+vi.mock('@/hooks/use-app-config', () => ({
+  useAppConfig: () => ({
+    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    anchor: {
+      bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
+      hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
+      gpsFromBowM: 0, loaM: 0,
+    },
+    assistant: { ...mockAssistantVoice },
+    loaded: true,
+  }),
+  publishAppConfigSettings: vi.fn(),
+}))
+
+vi.mock('@/hooks/use-vessel-state', () => ({
+  useVesselState: () => ({
+    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
+    headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
+    windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
+    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
+    generatorManualStart: false, generatorManualStartTimer: 0,
+    generatorRunningByCondition: null, generatorRuntime: null,
+    engine0Rpm: null, engine1Rpm: null, gnssQualityIndicator: null, gnssHdop: null,
+    gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false,
+  }),
+}))
+
+vi.mock('@/hooks/use-electrical-state', () => ({
+  useElectricalState: () => ({
+    batterySocPercent: null, batteryCapacityAh: null, chargingCurrentA: null,
+    chargingPowerW: null, solarOutputW: null, acOutputW: null, dc12vPowerW: null,
+    dc12vCurrentA: null, dc24vVoltageV: null, acLoadsW: null,
+    generatorRealPowerW: null, batteryRatePercentPerHour: null, timeToGoHours: null,
+    charger0CurrentA: null, charger0AcIn1CurrentA: null,
+    charger0ChargingMode: null, charger0Error: null,
+  }),
+}))
+
+vi.mock('@/hooks/use-solar-state', () => ({
+  useSolarState: () => ({ currentW: null, todayKWh: null, yesterdayKWh: null, peakTodayW: null, controllers: [] }),
+}))
+
+vi.mock('@/hooks/use-nearby-vessels', () => ({
+  useNearbyVessels: () => ({ vessels: [], loading: false }),
+}))
+
+vi.mock('@/hooks/use-radar-targets', () => ({
+  useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
+}))
+
+vi.mock('@/hooks/use-anchor-watch', () => ({
+  useAnchorWatch: () => ({
+    anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
+    rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
+    distanceMeters: null, bearingDeg: null,
+    planningDepthM: null, planningTideHeightFt: null,
+    setAnchorHere: vi.fn(), updateRadius: vi.fn(),
+    updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),
+    clearAnchor: vi.fn(),
+  }),
+}))
+
+vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
+
+vi.mock('@/hooks/use-tanks-state', () => ({
+  useTanksState: () => ({ tanks: [], loading: false }),
+}))
+
+vi.mock('@/hooks/use-tide-today', () => ({
+  useTideToday: () => ({
+    tide: {
+      current_tide_height_ft: -1, tide_direction: 'n/a',
+      high_tide_time: new Date(0).toISOString(), high_tide_height_ft: -1,
+      low_tide_time: new Date(0).toISOString(), low_tide_height_ft: -1,
+    },
+  }),
+}))
+
+vi.mock('@/hooks/use-weather-today', () => ({
+  useWeatherToday: () => ({
+    weather: {
+      temperature_f: -1, condition: 'n/a',
+      wind_speed_kts: -1, wind_direction: 'n/a', wind_gust_kts: -1, precipitation_pct: -1,
+      provider: '', cached: false, updated_at: '', ttl_seconds: 0,
+    },
+  }),
+}))
+
+vi.mock('@/hooks/use-weather-forecast', () => ({
+  useWeatherForecast: () => ({ forecast: [], loading: false, error: null, provider: null, refetch: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-wave-forecast', () => ({
+  useWaveForecast: () => ({ days: [], seaTemperatureF: null, provider: null, loading: false, error: null, refetch: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-czone-switches', () => ({
+  useCZoneSwitches: () => ({ switches: [], loading: false, pending: {}, toggleSwitch: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], since: 'window' }) }))
+
+vi.mock('@/hooks/use-routes', () => ({
+  useRoutes: () => ({ routes: [], loading: false, error: null, refetch: vi.fn(), createRoute: vi.fn(), updateRoute: vi.fn(), deleteRoute: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-sat-charts', () => ({
+  useSatCharts: () => ({ charts: [], loading: false, error: null, uploadChart: vi.fn(), deleteChart: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-dashboard-route', () => ({
+  useDashboardRouteId: () => [null, vi.fn()],
+}))
+
+vi.mock('@/hooks/use-route-activation', () => ({
+  useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
+  useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
+}))
+
+vi.mock('@/hooks/use-forecast-warnings', () => ({
+  useForecastWarnings: () => ({ activeWarning: null }),
+  findActiveWindBulletin: () => null,
+}))
+
+vi.mock('@/hooks/use-server-trails', () => ({
+  useServerTrails: () => ({ getSelfTrail: vi.fn(), getAisTrails: vi.fn() }),
+}))
+
+vi.mock('@/hooks/use-dark-mode', () => ({
+  useDarkMode: () => [false, vi.fn()],
+}))
+
+function stubFetch() {
+  const conversations: Array<{ id: string; title: string; created_at: string; updated_at: string }> = []
+  let counter = 0
+
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
+    const method = (init?.method ?? 'GET').toUpperCase()
+
+    if (url.endsWith('/api/health')) {
+      return { ok: true, json: async () => ({ status: 'ok', version: 'v0.20.0', revision: 'deadbeef' }) }
+    }
+    if (url.endsWith('/api/assistant/status')) {
+      return { ok: true, json: async () => ({ enabled: false, configured: false, model: '' }) }
+    }
+    if (url.endsWith('/api/assistant/conversations') && method === 'GET') {
+      return { ok: true, json: async () => ({ conversations }) }
+    }
+    if (url.endsWith('/api/assistant/conversations') && method === 'POST') {
+      counter += 1
+      const id = `new-${counter}`
+      const now = new Date().toISOString()
+      const conversation = { id, title: 'New conversation', created_at: now, updated_at: now }
+      conversations.unshift(conversation)
+      return { ok: true, status: 201, json: async () => conversation }
+    }
+    // Everything else (dashboard pages, routes, tanks, ...) reports "not
+    // found" rather than being individually stubbed - the hooks behind
+    // them tolerate that (App.smoke.test.tsx pins this), and nothing this
+    // file asserts on depends on their data.
+    return { ok: false, json: async () => ({}) }
+  }))
+}
+
+describe('App-wide voice (ADR 0093)', () => {
+  beforeEach(() => {
+    instances = []
+    mockAssistantVoice.voiceInput = true
+    mockAssistantVoice.readAloud = false
+    mockAssistantVoice.wakeWord = false
+    mockAuth.canWrite = true
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    stubFetch()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the mic button when voice input is on and the session can write', () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+
+    expect(screen.getByRole('button', { name: 'Talk to Mate' })).toBeInTheDocument()
+  })
+
+  it('hides the mic button when voice input is off', () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    mockAssistantVoice.voiceInput = false
+    render(<App />)
+
+    expect(screen.queryByRole('button', { name: 'Talk to Mate' })).not.toBeInTheDocument()
+  })
+
+  it('hides the mic button for a read-only session', () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    mockAuth.canWrite = false
+    render(<App />)
+
+    expect(screen.queryByRole('button', { name: 'Talk to Mate' })).not.toBeInTheDocument()
+  })
+
+  it('disables the mic button and names the cause when there is no recognition API', () => {
+    render(<App />)
+
+    const button = screen.getByRole('button', { name: 'Talk to Mate' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', 'This browser has no speech recognition.')
+  })
+
+  it('opens the Mate sheet with the transcript once the mic delivers a final result', async () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to Mate' }))
+    expect(instances).toHaveLength(1)
+
+    currentRecognition().emitResult('how does the passage look', true)
+
+    expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
+    expect(await screen.findByText('how does the passage look')).toBeInTheDocument()
+  })
+
+  it('Alt+M triggers push-to-talk from anywhere in the shell', async () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+
+    fireEvent.keyDown(window, { altKey: true, code: 'KeyM' })
+    await waitFor(() => expect(instances).toHaveLength(1))
+
+    currentRecognition().emitResult('what about tomorrow', true)
+
+    expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
+    expect(await screen.findByText('what about tomorrow')).toBeInTheDocument()
+  })
+
+  it('Escape cancels push-to-talk while listening', async () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to Mate' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Talk to Mate' })).toHaveAttribute('aria-pressed', 'true'))
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(currentRecognition().aborted).toBe(true)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Talk to Mate' })).toHaveAttribute('aria-pressed', 'false'))
+  })
+})

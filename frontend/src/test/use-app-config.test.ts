@@ -215,4 +215,43 @@ describe('useAppConfig', () => {
     expect(result.current.ui.distanceUnits).toBe('imperial')
     expect(result.current.anchor.chainOnboardM).toBe(90)
   })
+
+  // ADR 0093 voice phase: App.tsx reads these three switches live (the
+  // header mic button, wake-word listening, and MateSheet's read-aloud) the
+  // same way it already reads ui/anchor - see hooks/use-mate-voice.ts and
+  // components/mate-sheet.tsx.
+  it('defaults the assistant voice block to all-off when absent', async () => {
+    vi.stubGlobal('fetch', settingsResponse({}))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.assistant).toEqual({ voiceInput: false, readAloud: false, wakeWord: false })
+  })
+
+  it('applies the assistant voice block from the settings endpoint', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      assistant: { voice_input: true, read_aloud: true, wake_word: false },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+
+    await waitFor(() => expect(result.current.assistant.voiceInput).toBe(true))
+    expect(result.current.assistant.readAloud).toBe(true)
+    expect(result.current.assistant.wakeWord).toBe(false)
+  })
+
+  it('ignores non-boolean values in the assistant voice block', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      assistant: { voice_input: 'yes', read_aloud: 1, wake_word: null },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.assistant).toEqual({ voiceInput: false, readAloud: false, wakeWord: false })
+  })
 })

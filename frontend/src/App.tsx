@@ -5,6 +5,8 @@ import {
   LampCeiling,
   LayoutDashboard,
   Map,
+  Mic,
+  MicOff,
   MonitorPlay,
   Plus,
   Radar as RadarIcon,
@@ -13,6 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
@@ -108,8 +111,10 @@ import { useAutopilot } from '@/hooks/use-autopilot'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
-import { FORECAST_REFRESH_SECONDS } from '@/config/app-config'
+import { FORECAST_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
 import { useAppConfig } from '@/hooks/use-app-config'
+import { useMateVoice } from '@/hooks/use-mate-voice'
+import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import {
   DASHBOARD_WIDGET_IDS,
@@ -187,6 +192,7 @@ import {
   type PanelId,
 } from '@/lib/app-location'
 import { screenContextFor } from '@/lib/mate-screen'
+import { cn } from '@/lib/utils'
 
 const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
@@ -216,7 +222,11 @@ export function App() {
   const canWrite = auth.mode !== 'signalk' || auth.role === 'readwrite' || auth.role === 'admin'
   const canAdmin = auth.mode !== 'signalk' || auth.role === 'admin'
 
-  const { ui: uiConfig, anchor: anchorConfig } = useAppConfig()
+  // `assistant` defaults defensively: several existing test suites mock
+  // useAppConfig with only the ui/anchor blocks they exercise, and this
+  // keeps them passing without every one of them growing an unrelated
+  // voice-config fixture.
+  const { ui: uiConfig, anchor: anchorConfig, assistant: assistantVoiceConfig = fallbackAssistantVoiceConfig } = useAppConfig()
   // ADR 0074: seeds the shell's initial panel/section/page from the URL the
   // app was loaded with. Computed once via a lazy initializer — this only
   // matters for the very first render, and re-parsing it on every render
@@ -405,6 +415,62 @@ export function App() {
     () => screenContextFor({ panel: activePanel, section: settingsSection }, activePage?.name ?? null),
     [activePanel, settingsSection, activePage],
   )
+
+  // App-wide voice (ADR 0093 voice phase, "App-wide voice"): mounted once
+  // here, not in the Mate panel/sheet, so push-to-talk - and, once the
+  // switch is on, "Hey Mate" - work from any page. `prime` only unlocks
+  // speechSynthesis from push-to-talk's own tap (a user gesture); the actual
+  // speaking of a reply happens in MateSheet, which owns its own
+  // useSpeechOutput instance. Both voiceInput and wakeWord are anded with
+  // `!isKiosk` here rather than in the hook itself - the wall display has no
+  // microphone and isn't a control surface, and this is the one place that
+  // already knows which shell is rendering.
+  const mateSpeechOutput = useSpeechOutput()
+  const mateVoice = useMateVoice({
+    voiceInput: assistantVoiceConfig.voiceInput && !isKiosk,
+    wakeWord: assistantVoiceConfig.wakeWord && !isKiosk,
+    readAloud: assistantVoiceConfig.readAloud,
+    canWrite,
+    prime: mateSpeechOutput.prime,
+    onQuestion: openMate,
+  })
+  const { pushToTalk: mateVoicePushToTalk, cancel: mateVoiceCancel, listening: mateVoiceListening, error: mateVoiceError } = mateVoice
+  // Drives the header mic's small dot and its title while wake mode is
+  // actually running - mirrors the same condition useMateVoice itself gates
+  // wake mode on, so the dot never claims to be listening when it isn't.
+  const mateWakeActive = assistantVoiceConfig.wakeWord && assistantVoiceConfig.voiceInput && mateVoice.supported && canWrite && !isKiosk
+
+  // A recognition error (blocked mic, no speech, offline) surfaces once as a
+  // toast rather than a persistent banner - voice is a convenience on top of
+  // typing into Mate, not a primary control path that needs to stay visible.
+  useEffect(() => {
+    if (mateVoiceError) toast.error(mateVoiceError)
+  }, [mateVoiceError])
+
+  // Alt+M push-to-talk from anywhere in the shell, and Escape to cancel
+  // while listening - both ignored while typing into a field, so they don't
+  // fight ordinary text entry (a settings field, the Mate composer itself).
+  useEffect(() => {
+    if (!assistantVoiceConfig.voiceInput || isKiosk) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const isEditable = target !== null
+        && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+
+      if (event.altKey && event.code === 'KeyM' && !isEditable) {
+        event.preventDefault()
+        mateVoicePushToTalk()
+        return
+      }
+      if (event.key === 'Escape' && mateVoiceListening) {
+        mateVoiceCancel()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [assistantVoiceConfig.voiceInput, isKiosk, mateVoicePushToTalk, mateVoiceCancel, mateVoiceListening])
 
   // Gates the two URL-writing effects below on the shell actually being
   // shown (mirrors the render gate further down): while auth is still
@@ -1984,6 +2050,40 @@ export function App() {
             <Button variant="ghost" size="icon" aria-label="Ask Mate" onClick={() => openMate()}>
               <Sparkles className="h-4 w-4" />
             </Button>
+            {/* ADR 0093 voice phase, "App-wide voice": push-to-talk from the
+                header, on every panel and dashboard page - Settings → Mate →
+                "Voice input" gates it, and it's hidden for a read-only
+                session the same way write controls are elsewhere. */}
+            {assistantVoiceConfig.voiceInput && canWrite && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Talk to Mate"
+                  aria-pressed={mateVoiceListening}
+                  disabled={!mateVoice.supported}
+                  title={
+                    !mateVoice.supported
+                      ? (mateVoice.unsupportedReason === 'insecure-context'
+                        ? 'Voice input needs the app opened over https'
+                        : 'This browser has no speech recognition.')
+                      : mateWakeActive ? 'Listening for Hey Mate' : undefined
+                  }
+                  className={cn('relative', mateVoiceListening && 'text-primary')}
+                  onClick={mateVoicePushToTalk}
+                >
+                  {mateVoice.supported ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                  {mateWakeActive && (
+                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+                  )}
+                </Button>
+                {mateVoiceListening && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {mateVoice.armed ? 'Mate is listening…' : mateVoice.interim !== '' ? mateVoice.interim : 'Listening…'}
+                  </span>
+                )}
+              </div>
+            )}
             <VesselStatusBar
               isDark={isDarkTheme}
               onToggleDarkMode={toggleDarkMode}
@@ -2072,6 +2172,7 @@ export function App() {
         initialQuestion={mateSheetQuestion}
         screen={mateScreen}
         canWrite={canWrite}
+        readAloud={assistantVoiceConfig.readAloud}
       />
 
       <Toaster isDarkTheme={isDarkTheme} />

@@ -18,6 +18,16 @@ export type MayaraConfig = {
   port: number
 }
 
+// ADR 0093 voice phase: the three Settings → Mate → Voice switches, read
+// live the same way distance units and the anchor geometry are (see
+// hooks/use-app-config.ts) so hooks/use-mate-voice.ts and MateSheet see a
+// save take effect immediately rather than needing a reload.
+export type AssistantVoiceConfig = {
+  voiceInput: boolean
+  readAloud: boolean
+  wakeWord: boolean
+}
+
 export type DistanceUnits = 'metric' | 'imperial'
 
 export type UiConfig = {
@@ -65,6 +75,12 @@ export const fallbackMayaraConfig: MayaraConfig = {
   port: 6502,
 }
 
+export const fallbackAssistantVoiceConfig: AssistantVoiceConfig = {
+  voiceInput: false,
+  readAloud: false,
+  wakeWord: false,
+}
+
 /** The subset of GET /api/settings this module reads. */
 export type AppConfigSettings = {
   ui?: {
@@ -84,6 +100,11 @@ export type AppConfigSettings = {
   mayara?: {
     address?: string
     port?: number
+  }
+  assistant?: {
+    voice_input?: boolean
+    read_aloud?: boolean
+    wake_word?: boolean
   }
 }
 
@@ -169,4 +190,17 @@ export function normalizeMayaraConfig(settings: AppConfigSettings | null | undef
   const port = validPort(mayara?.port, fallbackMayaraConfig.port)
 
   return { address, port }
+}
+
+// Each switch defaults false independently on a non-boolean value, rather
+// than falling the whole block back to defaults - same per-field discipline
+// as normalizeAnchorConfig/normalizeMayaraConfig above.
+export function normalizeAssistantVoiceConfig(settings: AppConfigSettings | null | undefined): AssistantVoiceConfig {
+  const assistant = settings?.assistant
+
+  return {
+    voiceInput: typeof assistant?.voice_input === 'boolean' ? assistant.voice_input : fallbackAssistantVoiceConfig.voiceInput,
+    readAloud: typeof assistant?.read_aloud === 'boolean' ? assistant.read_aloud : fallbackAssistantVoiceConfig.readAloud,
+    wakeWord: typeof assistant?.wake_word === 'boolean' ? assistant.wake_word : fallbackAssistantVoiceConfig.wakeWord,
+  }
 }

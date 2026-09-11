@@ -3,13 +3,16 @@ import { useEffect, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import {
   fallbackAnchorConfig,
+  fallbackAssistantVoiceConfig,
   fallbackMayaraConfig,
   fallbackUiConfig,
   normalizeAnchorConfig,
+  normalizeAssistantVoiceConfig,
   normalizeMayaraConfig,
   normalizeUiConfig,
   type AnchorConfig,
   type AppConfigSettings,
+  type AssistantVoiceConfig,
   type MayaraConfig,
   type UiConfig,
 } from '@/config/app-config'
@@ -18,6 +21,9 @@ export type AppConfig = {
   ui: UiConfig
   anchor: AnchorConfig
   mayara: MayaraConfig
+  /** ADR 0093 voice phase: Settings → Mate → Voice, read live by
+   * hooks/use-mate-voice.ts and components/mate-sheet.tsx. */
+  assistant: AssistantVoiceConfig
   /** False until the backend's settings have been applied (or have failed). */
   loaded: boolean
 }
@@ -26,6 +32,7 @@ const defaultAppConfig: AppConfig = {
   ui: fallbackUiConfig,
   anchor: fallbackAnchorConfig,
   mayara: fallbackMayaraConfig,
+  assistant: fallbackAssistantVoiceConfig,
   loaded: false,
 }
 
@@ -47,6 +54,7 @@ function toAppConfig(settings: AppConfigSettings | null): AppConfig {
     ui: normalizeUiConfig(settings),
     anchor: normalizeAnchorConfig(settings),
     mayara: normalizeMayaraConfig(settings),
+    assistant: normalizeAssistantVoiceConfig(settings),
     loaded: true,
   }
 }

@@ -8,6 +8,34 @@ import { MateSheet } from '@/components/mate-sheet'
 // question opens it with `initialQuestion`, which it sends at once with
 // `spoken: true` and the current `screen`; opened without one, it just
 // shows whatever thread is already active.
+//
+// Read-aloud (also ADR 0093 voice phase) speaks the `## Spoken summary`
+// section of a reply that arrived from a spoken question - jsdom has no
+// speechSynthesis, so a fake is installed the same way
+// use-speech-output.test.ts installs one.
+
+class FakeUtterance {
+  text: string
+  onstart: (() => void) | null = null
+  onend: (() => void) | null = null
+  onerror: (() => void) | null = null
+  constructor(text?: string) { this.text = text ?? '' }
+}
+
+class FakeSpeechSynthesis {
+  spoken: FakeUtterance[] = []
+  getVoices() { return [] }
+  speak(utterance: FakeUtterance) { this.spoken.push(utterance) }
+  cancel() {}
+}
+
+let fakeSynth: FakeSpeechSynthesis
+
+function installFakeSpeechSynthesis() {
+  fakeSynth = new FakeSpeechSynthesis()
+  vi.stubGlobal('speechSynthesis', fakeSynth)
+  vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance)
+}
 
 interface ConversationRecord {
   id: string
@@ -83,7 +111,7 @@ describe('MateSheet', () => {
   it('does not render the thread while closed', () => {
     vi.stubGlobal('fetch', buildFetch())
 
-    render(<MateSheet open={false} onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite />)
+    render(<MateSheet open={false} onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} />)
 
     expect(screen.queryByRole('heading', { name: 'Mate' })).not.toBeInTheDocument()
   })
@@ -91,7 +119,7 @@ describe('MateSheet', () => {
   it('opens with no initial question and just shows the thread and composer', async () => {
     vi.stubGlobal('fetch', buildFetch())
 
-    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite />)
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} />)
 
     expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Ask Mate about the next couple of days…')).toBeInTheDocument()
@@ -121,6 +149,7 @@ describe('MateSheet', () => {
         initialQuestion="How does tomorrow look?"
         screen={{ panel: 'forecast' }}
         canWrite
+        readAloud={false}
       />,
     )
 
@@ -148,6 +177,7 @@ describe('MateSheet', () => {
         initialQuestion="How does tomorrow look?"
         screen={{ panel: 'forecast' }}
         canWrite={false}
+        readAloud={false}
       />,
     )
 
@@ -164,7 +194,7 @@ describe('MateSheet', () => {
     const onOpenChange = vi.fn()
     vi.stubGlobal('fetch', buildFetch())
 
-    render(<MateSheet open onOpenChange={onOpenChange} screen={{ panel: 'forecast' }} canWrite />)
+    render(<MateSheet open onOpenChange={onOpenChange} screen={{ panel: 'forecast' }} canWrite readAloud={false} />)
     await screen.findByRole('heading', { name: 'Mate' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
@@ -172,5 +202,127 @@ describe('MateSheet', () => {
     // The Base UI dialog's onOpenChange also carries an event-details object
     // as a second argument - only the boolean matters to MateSheet's caller.
     await waitFor(() => expect(onOpenChange.mock.calls[0]?.[0]).toBe(false))
+  })
+})
+
+describe('MateSheet read-aloud', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('speaks the extracted spoken summary when a spoken reply arrives', async () => {
+    installFakeSpeechSynthesis()
+    vi.stubGlobal('fetch', buildFetch((conversationId) => sseMessageResponse(
+      {
+        id: 'm1',
+        conversation_id: conversationId,
+        seq: 1,
+        role: 'assistant',
+        content: '## Passage plan\n\nDetail.\n\n## Spoken summary\n\nFine tomorrow, light winds.',
+        created_at: '2026-09-12T00:00:00Z',
+      },
+      { id: conversationId, title: 'How does tomorrow look?', created_at: '2026-09-12T00:00:00Z', updated_at: '2026-09-12T00:00:01Z' },
+    )))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+      />,
+    )
+
+    await screen.findByText(/Fine tomorrow, light winds\./)
+    await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
+    expect(fakeSynth.spoken[0].text).toBe('Fine tomorrow, light winds.')
+  })
+
+  it('does not speak when readAloud is off', async () => {
+    installFakeSpeechSynthesis()
+    vi.stubGlobal('fetch', buildFetch((conversationId) => sseMessageResponse(
+      { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: '## Spoken summary\n\nFine tomorrow.', created_at: '' },
+      { id: conversationId, title: '', created_at: '', updated_at: '' },
+    )))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud={false}
+      />,
+    )
+
+    await screen.findByText(/Fine tomorrow\./)
+    expect(fakeSynth.spoken).toHaveLength(0)
+  })
+
+  it('shows a stop button while speaking, which stops the reading', async () => {
+    installFakeSpeechSynthesis()
+    vi.stubGlobal('fetch', buildFetch((conversationId) => sseMessageResponse(
+      { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: '## Spoken summary\n\nFine tomorrow.', created_at: '' },
+      { id: conversationId, title: '', created_at: '', updated_at: '' },
+    )))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+      />,
+    )
+
+    await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
+    expect(screen.queryByRole('button', { name: 'Stop reading' })).not.toBeInTheDocument()
+
+    fakeSynth.spoken[0].onstart?.()
+    expect(await screen.findByRole('button', { name: 'Stop reading' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop reading' }))
+    fakeSynth.spoken[0].onend?.()
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop reading' })).not.toBeInTheDocument())
+  })
+
+  it('stops speech when the sheet closes', async () => {
+    installFakeSpeechSynthesis()
+    const cancelSpy = vi.spyOn(fakeSynth, 'cancel')
+    vi.stubGlobal('fetch', buildFetch((conversationId) => sseMessageResponse(
+      { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: '## Spoken summary\n\nFine tomorrow.', created_at: '' },
+      { id: conversationId, title: '', created_at: '', updated_at: '' },
+    )))
+
+    const { rerender } = render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+      />,
+    )
+    await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
+    fakeSynth.spoken[0].onstart?.()
+
+    rerender(
+      <MateSheet
+        open={false}
+        onOpenChange={vi.fn()}
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+      />,
+    )
+
+    expect(cancelSpy).toHaveBeenCalled()
   })
 })
