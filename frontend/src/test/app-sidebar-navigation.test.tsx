@@ -34,12 +34,21 @@ vi.mock('@/hooks/use-auth', () => ({
 // /api/health is answered for real: the sidebar footer's version stamp is the
 // one thing in this file that reads it, and a failed probe would render the
 // "version unavailable" branch instead of a version.
+// The assistant panel (ADR 0093) is reached via the sidebar in this suite -
+// answered with a stable "unconfigured" status so the drawer renders its
+// zero-state card instead of chasing conversation-list/thread fetches this
+// stub doesn't otherwise answer.
 beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => (
-    typeof url === 'string' && url.endsWith('/api/health')
-      ? { ok: true, json: async () => ({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' }) }
-      : { ok: false, json: async () => ({}) }
-  )))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
+    if (url.endsWith('/api/health')) {
+      return { ok: true, json: async () => ({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' }) }
+    }
+    if (url.endsWith('/api/assistant/status')) {
+      return { ok: true, json: async () => ({ enabled: false, configured: false, model: '', problem: 'Set up the assistant in Settings → Assistant.' }) }
+    }
+    return { ok: false, json: async () => ({}) }
+  }))
 })
 
 // ── hook mocks (mirrors App.smoke.test.tsx) ────────────────────────────────────
@@ -336,6 +345,14 @@ describe('App sidebar navigation', () => {
     // DepthTideTile's onOpen now routes to 'forecast', not the removed 'tides' panel.
     expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
     expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
+  })
+
+  it('opens the Assistant panel from the sidebar', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /assistant/i }))
+
+    expect(await screen.findByTestId('assistant-drawer')).toBeInTheDocument()
   })
 
   it('footers the sidebar with the version the backend reports', async () => {

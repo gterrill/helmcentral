@@ -32,12 +32,21 @@ vi.mock('@/hooks/use-auth', () => ({
 }))
 
 // ── stub fetch so components that call it don't throw ─────────────────────────
+// The assistant panel (ADR 0093) is reachable via /assistant in this suite -
+// answered with a stable "unconfigured" status so the drawer renders its
+// zero-state card instead of chasing conversation-list/thread fetches this
+// stub doesn't otherwise answer.
 beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => (
-    typeof url === 'string' && url.endsWith('/api/health')
-      ? { ok: true, json: async () => ({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' }) }
-      : { ok: false, json: async () => ({}) }
-  )))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
+    if (url.endsWith('/api/health')) {
+      return { ok: true, json: async () => ({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' }) }
+    }
+    if (url.endsWith('/api/assistant/status')) {
+      return { ok: true, json: async () => ({ enabled: false, configured: false, model: '', problem: 'Set up the assistant in Settings → Assistant.' }) }
+    }
+    return { ok: false, json: async () => ({}) }
+  }))
 })
 
 // ── hook mocks (mirrors app-sidebar-navigation.test.tsx) ───────────────────────
@@ -286,6 +295,14 @@ describe('App deep links', () => {
     expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
     expect(window.location.pathname).toBe('/forecast')
     expect(document.title).toBe('Forecast · Helmcentral')
+  })
+
+  it('opens the Assistant panel directly', () => {
+    window.history.replaceState({}, '', '/assistant')
+    render(<App />)
+
+    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/assistant')
   })
 
   it('opens the SignalK settings section directly', () => {

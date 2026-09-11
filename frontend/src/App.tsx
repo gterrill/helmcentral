@@ -10,6 +10,7 @@ import {
   Radar as RadarIcon,
   Route,
   Settings,
+  Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
@@ -33,6 +34,7 @@ import { AlarmsDrawer } from '@/components/alarms-drawer'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
+import { AssistantDrawer } from '@/components/assistant-drawer'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
 import {
@@ -191,6 +193,7 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
   { id: 'radar', label: 'Radar', icon: RadarIcon },
   { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
   { id: 'alarms', label: 'Alarms', icon: BellRing },
+  { id: 'assistant', label: 'Assistant', icon: Sparkles },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
 
@@ -1628,6 +1631,16 @@ export function App() {
         )
       case 'radar':
         return <RadarDrawer latitude={latitude} longitude={longitude} />
+      case 'assistant':
+        return (
+          <AssistantDrawer
+            canWrite={canWrite}
+            onOpenSettings={() => requestNavigate('settings', () => {
+              setSettingsSection('assistant')
+              setActivePanel('settings')
+            })}
+          />
+        )
       case 'settings':
         return (
           <SettingsPage

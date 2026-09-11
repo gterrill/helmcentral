@@ -31,7 +31,7 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/dashboard/%E0%A4%A')).toEqual({ panel: null, pageId: null })
   })
 
-  it.each(['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'kiosk'] as const)(
+  it.each(['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'assistant', 'kiosk'] as const)(
     'parses /%s as that panel',
     (panel) => {
       expect(parseAppLocation(`/${panel}`)).toEqual({ panel })
@@ -82,7 +82,7 @@ describe('formatAppLocation', () => {
     expect(formatAppLocation({ panel: null, pageId: 'a b' }, ctx)).toBe('/dashboard/a%20b')
   })
 
-  it.each(['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'kiosk'] as const)(
+  it.each(['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'assistant', 'kiosk'] as const)(
     'formats a panel as /%s',
     (panel) => {
       expect(formatAppLocation({ panel }, ctx)).toBe(`/${panel}`)
@@ -106,7 +106,7 @@ describe('formatAppLocation', () => {
 describe('parse/format fixed point', () => {
   const paths = [
     '/', '/dashboard/p2', '/dashboard/a%20b', '/forecast', '/routes', '/charts',
-    '/radar', '/anchor-watch', '/alarms', '/settings', '/settings/signalk', '/kiosk',
+    '/radar', '/anchor-watch', '/alarms', '/assistant', '/settings', '/settings/signalk', '/kiosk',
   ]
 
   it.each(paths)('format(parse(%s)) === %s', (path) => {
@@ -143,6 +143,7 @@ describe('isCanonicalAppPath', () => {
     expect(isCanonicalAppPath('/settings', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/settings/signalk', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/forecast', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/assistant', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/kiosk', baseCtx)).toBe(true)
   })
 
