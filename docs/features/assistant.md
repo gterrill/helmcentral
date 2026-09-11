@@ -30,6 +30,10 @@ a provider is down, or no tide provider is configured, it says which one
 failed. It never invents a forecast for a place it couldn't find, or a tide
 time from a provider that returned nothing.
 
+Place search queries the same Overpass server as the place name shown on
+the position tile. The configuration reference explains how to point that
+at a mirror if your boat's connection can't reach the default one.
+
 ## What leaves the boat
 
 Every question sends your position, the question text itself, and whatever

@@ -175,6 +175,20 @@ func main() {
 	e := echo.New()
 	port := getEnv("PORT", "8080")
 
+	// Overpass endpoint for place-name resolution (place_name.go) and the
+	// assistant's find_places tool (assistant_tools.go). Resolved early,
+	// before either of those code paths can run, and fails fast on a
+	// present-but-malformed OVERPASS_API_URL rather than silently keeping
+	// the default (AGENTS.md's fail-fast / no-masking-fallback policy).
+	var err error
+	overpassAPIURL, err = resolveOverpassAPIURL(os.Getenv("OVERPASS_API_URL"))
+	if err != nil {
+		log.Fatalf("overpass: %v", err)
+	}
+	if overpassAPIURL != defaultOverpassAPIURL {
+		log.Printf("overpass: using %s", overpassAPIURL)
+	}
+
 	// Middleware
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())

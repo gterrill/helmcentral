@@ -30,8 +30,38 @@ import (
 // docs/adr/0056.
 var placeNameRadiiMeters = []int{400, 1500, 5000}
 
-const overpassAPIURL = "https://overpass-api.de/api/interpreter"
+const defaultOverpassAPIURL = "https://overpass-api.de/api/interpreter"
 const overpassTimeout = 20 * time.Second
+
+// overpassAPIURL is the Overpass endpoint used by both place-name
+// resolution (this file) and the assistant's find_places tool
+// (assistant_tools.go), via the shared postOverpassQuery below. It is
+// resolved once at startup by resolveOverpassAPIURL from OVERPASS_API_URL
+// (main.go's main), and initialised to the default here so tests that never
+// run main() still get it.
+var overpassAPIURL = defaultOverpassAPIURL
+
+// resolveOverpassAPIURL reads the optional OVERPASS_API_URL environment
+// variable, defaulting to defaultOverpassAPIURL when raw is blank or
+// whitespace-only - an unset OVERPASS_API_URL is the normal case, not a
+// mistake. A non-blank value must parse as an absolute https URL with a
+// host; this mirrors the POI plugin's resolveOverpassURL
+// (docs/examples/poi-plugins/osm-overpass/osm-overpass.go) validation
+// exactly, including never falling back to the default silently on a
+// malformed value - a set-but-broken OVERPASS_API_URL almost certainly did
+// not mean "use overpass-api.de", so it surfaces as an error instead, per
+// AGENTS.md's fail-fast / no-masking-fallback policy.
+func resolveOverpassAPIURL(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultOverpassAPIURL, nil
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", fmt.Errorf("OVERPASS_API_URL: must be an absolute https URL, got %q", raw)
+	}
+	return trimmed, nil
+}
 
 // overpassFetcher is the minimal interface place name resolution needs from
 // an HTTP client, mirroring tileFetcher (tile_cache.go:60) so tests can

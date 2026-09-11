@@ -33,6 +33,7 @@ services:
     working_dir: /app
     environment:
       - SETTINGS_FILE=/app/settings.yaml
+      - OVERPASS_API_URL=${OVERPASS_API_URL:-}
     ports:
       - "8080:8080"
     volumes:
@@ -92,6 +93,7 @@ services:
     environment:
       - HELMCENTRAL_STATE_DIR=/state
       - SETTINGS_FILE=/state/settings.yaml
+      - OVERPASS_API_URL=${OVERPASS_API_URL:-}
     # Re-seeds on every container start, so `make e2e-reset` (or any restart)
     # returns the stack to a known state regardless of what the last run
     # clicked. air restarts the binary, not the container, so an in-progress
