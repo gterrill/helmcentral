@@ -50,14 +50,20 @@ func writeAssistantSettingsFixture(t *testing.T, enabled bool, model string) str
 // fakeAssistantRunner is a whole-run assistantRunnerFace test double: it
 // emits one status event (proving the handler wires emit through to
 // whatever newAssistantRunner returns) and then returns a canned reply or
-// error, with no real OpenRouter or tool-call machinery involved.
+// error, with no real OpenRouter or tool-call machinery involved. gotSystem
+// records the system prompt run was actually called with, so a test can
+// assert on what postAssistantMessageHandler built for that turn (e.g. the
+// "## Spoken summary" instruction and a screen-context sentence) without
+// scripting an OpenRouter doer.
 type fakeAssistantRunner struct {
-	emit  assistantEmitter
-	reply assistantReply
-	err   error
+	emit      assistantEmitter
+	reply     assistantReply
+	err       error
+	gotSystem string
 }
 
 func (f *fakeAssistantRunner) run(ctx context.Context, system string, history []openRouterMessage) (assistantReply, error) {
+	f.gotSystem = system
 	f.emit("status", assistantStatus("Thinking…"))
 	if f.err != nil {
 		return assistantReply{}, f.err
@@ -351,6 +357,20 @@ func TestDeleteAssistantConversationHandler_KnownIDReturns204(t *testing.T) {
 
 // ── POST /api/assistant/conversations/:id/messages ─────────────────────
 
+func TestTrimmedAssistantScreenField_TrimsAndCapsAt80Runes(t *testing.T) {
+	if got := trimmedAssistantScreenField("  forecast  "); got != "forecast" {
+		t.Fatalf("expected trimming, got %q", got)
+	}
+	long := strings.Repeat("a", 200)
+	got := trimmedAssistantScreenField(long)
+	if len([]rune(got)) != assistantScreenFieldMaxRunes {
+		t.Fatalf("expected the field capped at %d runes, got %d", assistantScreenFieldMaxRunes, len([]rune(got)))
+	}
+	if got != strings.Repeat("a", assistantScreenFieldMaxRunes) {
+		t.Fatalf("expected the capped field to be a prefix of the input, got %q", got)
+	}
+}
+
 func TestPostAssistantMessageHandler_BlankContentReturns400(t *testing.T) {
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/x/messages", `{"content":"   "}`, "x")
 	if err := postAssistantMessageHandler(c); err != nil {
@@ -444,8 +464,9 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
+	var runner *fakeAssistantRunner
 	swapAssistantRunner(t, func(apiKey, model, settingsPath string, emit assistantEmitter) assistantRunnerFace {
-		return &fakeAssistantRunner{emit: emit, reply: assistantReply{
+		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content:          "Tongue Bay first, on the rising tide.",
 			Model:            "openai/gpt-4o",
 			PromptTokens:     120,
@@ -453,6 +474,7 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 			CostUSD:          0.0184,
 			ToolRounds:       2,
 		}}
+		return runner
 	})
 
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages",
@@ -514,6 +536,67 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	}
 	if updated.Title != "Tongue Bay or Blue Pearl Bay first?" {
 		t.Fatalf("expected the title to derive from the first user message, got %q", updated.Title)
+	}
+
+	// A POST with no spoken/screen fields (this test's body is bare
+	// {"content": ...}) must build byte-for-byte the same system prompt it
+	// did before those fields existed - neither addition present.
+	if runner == nil || runner.gotSystem == "" {
+		t.Fatalf("expected the runner to have recorded a system prompt")
+	}
+	if strings.Contains(runner.gotSystem, "Spoken summary") {
+		t.Fatalf("expected no spoken-summary instruction with no spoken field, got:\n%s", runner.gotSystem)
+	}
+	if strings.Contains(runner.gotSystem, "The operator is looking at") {
+		t.Fatalf("expected no screen sentence with no screen field, got:\n%s", runner.gotSystem)
+	}
+}
+
+// TestPostAssistantMessageHandler_SpokenAndScreenReachSystemPrompt proves
+// the mate-voice-assistant plan's spoken/screen POST fields actually reach
+// the system prompt for that turn: fakeAssistantRunner records the system
+// string run() was called with, so this checks it directly rather than
+// re-deriving buildAssistantSystemPrompt's own rendering (already covered in
+// assistant_prompt_test.go).
+func TestPostAssistantMessageHandler_SpokenAndScreenReachSystemPrompt(t *testing.T) {
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	store := withTestAssistantStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	conv, err := store.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	var runner *fakeAssistantRunner
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, emit assistantEmitter) assistantRunnerFace {
+		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
+			Content: "The upper atmosphere chart is the 500mb height and vorticity pattern.",
+			Model:   "openai/gpt-4o",
+		}}
+		return runner
+	})
+
+	body := `{"content":"How does the upper atmosphere graph work?","spoken":true,"screen":{"panel":"forecast"}}`
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if ct := rec.Header().Get(echo.HeaderContentType); ct != "text/event-stream" {
+		t.Fatalf("expected text/event-stream (i.e. the request reached the runner), got %q: %s", ct, rec.Body.String())
+	}
+
+	if runner == nil || runner.gotSystem == "" {
+		t.Fatalf("expected the runner to have recorded a system prompt")
+	}
+	if !strings.Contains(runner.gotSystem, "## Spoken summary") {
+		t.Fatalf("expected the system prompt to carry the spoken-summary instruction, got:\n%s", runner.gotSystem)
+	}
+	if !strings.Contains(runner.gotSystem, "Forecast panel") {
+		t.Fatalf("expected the system prompt to name the Forecast panel, got:\n%s", runner.gotSystem)
 	}
 }
 

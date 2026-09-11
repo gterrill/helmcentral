@@ -31,6 +31,25 @@ const assistantMaxMessageChars = 8000
 // panel's truncated row still reads as a sentence rather than a mid-word cut.
 const assistantTitleMaxRunes = 60
 
+// assistantScreenFieldMaxRunes bounds each field of a POST's screen context
+// (panel/section/page). These are short UI identifiers, not operator text,
+// so this is a defensive cap rather than a real limit any legitimate caller
+// approaches - it exists so a malformed or hostile client can never grow the
+// system prompt through this path.
+const assistantScreenFieldMaxRunes = 80
+
+// trimmedAssistantScreenField trims s and caps it at
+// assistantScreenFieldMaxRunes runes, for one field of a POST's screen
+// context (postAssistantMessageHandler).
+func trimmedAssistantScreenField(s string) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) > assistantScreenFieldMaxRunes {
+		runes = runes[:assistantScreenFieldMaxRunes]
+	}
+	return string(runes)
+}
+
 // assistantReadiness is what GET /api/assistant/status reports, and what
 // postAssistantMessageHandler checks before it will start a run. Problem is
 // empty exactly when the assistant is ready to answer; it never causes a
@@ -248,6 +267,14 @@ func postAssistantMessageHandler(c echo.Context) error {
 
 	var body struct {
 		Content string `json:"content"`
+		// Spoken and Screen are both optional and turn-scoped (mate-voice-
+		// assistant plan): an absent body field leaves assistantPromptContext's
+		// Spoken/Screen at their zero value, which buildAssistantSystemPrompt
+		// already renders as "say nothing about this" - a plain text-composer
+		// question must produce byte-for-byte the same prompt it did before
+		// these fields existed.
+		Spoken bool                    `json:"spoken"`
+		Screen *assistantScreenContext `json:"screen"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -298,6 +325,14 @@ func postAssistantMessageHandler(c echo.Context) error {
 	previousMessages = append(previousMessages, userRow)
 
 	pc := collectAssistantPromptContext(settingsPath, time.Now())
+	pc.Spoken = body.Spoken
+	if body.Screen != nil {
+		pc.Screen = assistantScreenContext{
+			Panel:   trimmedAssistantScreenField(body.Screen.Panel),
+			Section: trimmedAssistantScreenField(body.Screen.Section),
+			Page:    trimmedAssistantScreenField(body.Screen.Page),
+		}
+	}
 	system := buildAssistantSystemPrompt(pc)
 
 	header := c.Response().Header()
