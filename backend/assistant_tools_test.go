@@ -929,6 +929,288 @@ func TestExecuteGetTides_EmptyWindowAddsNote(t *testing.T) {
 	}
 }
 
+// ── estimate_passage ────────────────────────────────────────────────────
+
+func TestFuelRateInstancesFromSnapshot_DiscoversInstanceNames(t *testing.T) {
+	withGlobalSnapshot(t, snapshotWithSelfValues(map[string]any{
+		"propulsion.port.fuel.rate":      1e-05,
+		"propulsion.starboard.fuel.rate": 1e-05,
+	}))
+
+	got := fuelRateInstancesFromSnapshot()
+	if len(got) != 2 || got[0] != "port" || got[1] != "starboard" {
+		t.Fatalf("expected [port starboard], got %v", got)
+	}
+}
+
+func TestFuelRateInstancesFromSnapshot_NoTreeIsNil(t *testing.T) {
+	withGlobalSnapshot(t, newSignalKSnapshot())
+
+	if got := fuelRateInstancesFromSnapshot(); got != nil {
+		t.Fatalf("expected nil when the snapshot has no self tree, got %v", got)
+	}
+}
+
+// stubInfluxRangeByPath returns an injectable influxRange func backed by a
+// fixed map of path -> series, for estimate_passage tests that need no real
+// InfluxDB connection at all. A path with no entry returns an empty series
+// (not an error) - queryInfluxPathRange's own "no data" contract.
+func stubInfluxRangeByPath(series map[string][]telemetryPoint) func(path string, start, stop time.Time, every string) ([]telemetryPoint, error) {
+	return func(path string, start, stop time.Time, every string) ([]telemetryPoint, error) {
+		return series[path], nil
+	}
+}
+
+// singleBandPerformanceSeries builds a fixed three-sample series for sog,
+// port and starboard fuel rate, and port revolutions that buildPerformanceTable
+// turns into exactly one surviving band: 5.0 m/s (~9.7kts, band 9),
+// 0.000013 m3/s per engine (93.6 L/h summed), 30.25 Hz (1815 rpm).
+func singleBandPerformanceSeries() map[string][]telemetryPoint {
+	points := []telemetryPoint{
+		{Timestamp: time.Unix(0, 0).UTC(), Value: 0},
+		{Timestamp: time.Unix(600, 0).UTC(), Value: 0},
+		{Timestamp: time.Unix(1200, 0).UTC(), Value: 0},
+	}
+	sog := make([]telemetryPoint, len(points))
+	fuel := make([]telemetryPoint, len(points))
+	rpm := make([]telemetryPoint, len(points))
+	for i, p := range points {
+		sog[i] = telemetryPoint{Timestamp: p.Timestamp, Value: 5.0}
+		fuel[i] = telemetryPoint{Timestamp: p.Timestamp, Value: 0.000013}
+		rpm[i] = telemetryPoint{Timestamp: p.Timestamp, Value: 30.25}
+	}
+	return map[string][]telemetryPoint{
+		"navigation.speedOverGround":     sog,
+		"propulsion.port.fuel.rate":      fuel,
+		"propulsion.starboard.fuel.rate": fuel,
+		"propulsion.port.revolutions":    rpm,
+	}
+}
+
+func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
+	deps := assistantToolDeps{
+		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+	}
+
+	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	if err != nil {
+		t.Fatalf("execute estimate_passage: %v", err)
+	}
+
+	var result assistantEstimatePassageResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+
+	if result.DistanceNm != 20 {
+		t.Errorf("expected distance_nm=20, got %v", result.DistanceNm)
+	}
+	if result.SpeedKts != 10 {
+		t.Errorf("expected speed_kts=10, got %v", result.SpeedKts)
+	}
+	if result.SpeedSource != "requested" {
+		t.Errorf("expected speed_source=requested, got %q", result.SpeedSource)
+	}
+	if result.Hours != 2.0 {
+		t.Errorf("expected hours=2.0 (20nm at 10kts), got %v", result.Hours)
+	}
+	if result.Litres != 187 {
+		t.Errorf("expected litres=187 (2h at 93.6 L/h, rounded), got %v", result.Litres)
+	}
+	if result.LPerH != 93.6 {
+		t.Errorf("expected l_per_h=93.6 (two engines summed), got %v", result.LPerH)
+	}
+	if result.RPM != 1815 {
+		t.Errorf("expected rpm=1815, got %v", result.RPM)
+	}
+	if result.HistoryDays != 90 {
+		t.Errorf("expected the default history_days=90, got %d", result.HistoryDays)
+	}
+	if result.Samples != 3 {
+		t.Errorf("expected samples=3, got %d", result.Samples)
+	}
+	if len(result.Instances) != 2 || result.Instances[0] != "port" || result.Instances[1] != "starboard" {
+		t.Errorf("expected instances=[port starboard], got %v", result.Instances)
+	}
+	if result.InstancesAssumed {
+		t.Errorf("expected instances_assumed=false when the snapshot named the instances")
+	}
+	if len(result.Table) != 1 || result.Table[0].SOGKtsMin != 9 {
+		t.Errorf("expected a single band 9 in the table, got %+v", result.Table)
+	}
+	if !strings.Contains(result.Note, "head seas add time and fuel") {
+		t.Errorf("expected the observed-conditions note, got %q", result.Note)
+	}
+}
+
+func TestExecuteEstimatePassage_OmittedSpeedUsesMostSampledBand(t *testing.T) {
+	deps := assistantToolDeps{
+		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+	}
+
+	// 97nm at the single band's 9.7kts mean is exactly 10.0 hours, chosen so
+	// the expected value is exact rather than needing its own rounding.
+	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":97}`))
+	if err != nil {
+		t.Fatalf("execute estimate_passage: %v", err)
+	}
+
+	var result assistantEstimatePassageResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+
+	if result.SpeedSource != "most_sampled_band" {
+		t.Errorf("expected speed_source=most_sampled_band, got %q", result.SpeedSource)
+	}
+	if result.SpeedKts != 9.7 {
+		t.Errorf("expected speed_kts=9.7 (the single band's mean), got %v", result.SpeedKts)
+	}
+	if result.Hours != 10.0 {
+		t.Errorf("expected hours=10.0, got %v", result.Hours)
+	}
+	if result.Litres != 936 {
+		t.Errorf("expected litres=936 (10h at 93.6 L/h), got %v", result.Litres)
+	}
+}
+
+func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
+	deps := assistantToolDeps{
+		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange:       stubInfluxRangeByPath(map[string][]telemetryPoint{}), // every path comes back empty
+		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+	}
+
+	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"days":30}`))
+	if err == nil {
+		t.Fatalf("expected an error when there is no underway history in the window")
+	}
+	if !strings.Contains(err.Error(), "no underway history in the last 30 days") {
+		t.Errorf("expected the error to name the window, got %q", err.Error())
+	}
+}
+
+func TestExecuteEstimatePassage_UnknownInstancesFallsBackAndFlagsAssumed(t *testing.T) {
+	deps := assistantToolDeps{
+		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		fuelRateInstances: func() []string { return nil }, // snapshot has no propulsion tree yet
+	}
+
+	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	if err != nil {
+		t.Fatalf("execute estimate_passage: %v", err)
+	}
+
+	var result assistantEstimatePassageResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+	if !result.InstancesAssumed {
+		t.Errorf("expected instances_assumed=true when the snapshot named no instances")
+	}
+	if len(result.Instances) != 2 || result.Instances[0] != "port" || result.Instances[1] != "starboard" {
+		t.Errorf("expected the port/starboard fallback, got %v", result.Instances)
+	}
+	// The fallback names must actually be the ones queried, not just
+	// reported: singleBandPerformanceSeries only has data under
+	// propulsion.port.* and propulsion.starboard.*, so a wrong guess would
+	// have produced the empty-table error instead of a result.
+	if len(result.Table) == 0 {
+		t.Fatalf("expected a non-empty table, proving the fallback names were actually queried")
+	}
+}
+
+func TestExecuteEstimatePassage_FuelAboardKnownAddsMargin(t *testing.T) {
+	deps := assistantToolDeps{
+		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+		fuelAboardM3:      func() (float64, bool) { return 0.6, true }, // 600 L aboard
+	}
+
+	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	if err != nil {
+		t.Fatalf("execute estimate_passage: %v", err)
+	}
+
+	var result assistantEstimatePassageResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+
+	if result.FuelAboardL == nil || *result.FuelAboardL != 600 {
+		t.Fatalf("expected fuel_aboard_l=600 (0.6 m3), got %v", result.FuelAboardL)
+	}
+	// litres=187 (asserted in TestExecuteEstimatePassage_RequestedSpeed for
+	// the same inputs), so fuel_after_l = 600 - 187 = 413.
+	if result.FuelAfterL == nil || *result.FuelAfterL != 600-result.Litres {
+		t.Fatalf("expected fuel_after_l=aboard-litres (%v), got %v", 600-result.Litres, result.FuelAfterL)
+	}
+	if strings.Contains(result.Note, "fuel aboard unknown") {
+		t.Errorf("expected no 'fuel aboard unknown' note when fuel aboard is known, got %q", result.Note)
+	}
+}
+
+func TestExecuteEstimatePassage_FuelAboardUnknownOmitsFieldsAndNotesIt(t *testing.T) {
+	deps := assistantToolDeps{
+		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
+		fuelRateInstances: func() []string { return []string{"port", "starboard"} },
+		fuelAboardM3:      func() (float64, bool) { return 0, false },
+	}
+
+	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	if err != nil {
+		t.Fatalf("execute estimate_passage: %v", err)
+	}
+
+	// Check the raw JSON, not just the decoded struct, so an accidental
+	// "fuel_aboard_l":0 (rather than a genuinely absent key) would fail
+	// this test - omitempty on a nil *float64 must drop the key entirely.
+	var raw2 map[string]any
+	if err := json.Unmarshal([]byte(raw), &raw2); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+	if _, present := raw2["fuel_aboard_l"]; present {
+		t.Errorf("expected fuel_aboard_l to be absent from the JSON, got %v", raw2["fuel_aboard_l"])
+	}
+	if _, present := raw2["fuel_after_l"]; present {
+		t.Errorf("expected fuel_after_l to be absent from the JSON, got %v", raw2["fuel_after_l"])
+	}
+
+	var result assistantEstimatePassageResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+	if result.FuelAboardL != nil || result.FuelAfterL != nil {
+		t.Fatalf("expected both fuel fields nil, got aboard=%v after=%v", result.FuelAboardL, result.FuelAfterL)
+	}
+	if !strings.Contains(result.Note, "fuel aboard unknown") {
+		t.Errorf("expected the note to mention fuel aboard is unknown, got %q", result.Note)
+	}
+}
+
+func TestExecuteEstimatePassage_DistanceRequired(t *testing.T) {
+	deps := assistantToolDeps{now: time.Now}
+	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":0}`))
+	if err == nil {
+		t.Fatalf("expected an error when distance_nm is missing/zero")
+	}
+}
+
+func TestExecuteEstimatePassage_NonPositiveSpeedIsError(t *testing.T) {
+	deps := assistantToolDeps{now: time.Now}
+	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":0}`))
+	if err == nil {
+		t.Fatalf("expected an error for a non-positive speed_kts")
+	}
+}
+
 // ── describeAssistantToolCall ───────────────────────────────────────────
 
 func TestDescribeAssistantToolCall(t *testing.T) {
@@ -941,6 +1223,8 @@ func TestDescribeAssistantToolCall(t *testing.T) {
 		{"get_wind_forecast", `{"lat":-20.1,"lon":149.1,"name":"Blue Pearl Bay"}`, "Fetching wind forecast for Blue Pearl Bay…"},
 		{"get_wind_forecast", `{"lat":-20.1234,"lon":149.5678}`, "Fetching wind forecast for -20.1234,149.5678…"},
 		{"get_tides", `{"lat":-20.1,"lon":149.1,"name":"Blue Pearl Bay"}`, "Fetching tides near Blue Pearl Bay…"},
+		{"estimate_passage", `{"distance_nm":42,"speed_kts":8.5}`, "Estimating 42 nm at 8.5 kts from the log…"},
+		{"estimate_passage", `{"distance_nm":42}`, "Estimating 42 nm at cruising speed from the log…"},
 	}
 	for _, tc := range cases {
 		got := describeAssistantToolCall(tc.name, json.RawMessage(tc.args))
@@ -961,6 +1245,30 @@ func TestAssistantToolDefinitions_FindPlacesDescriptionMentionsBareFeatureName(t
 		return
 	}
 	t.Fatal("find_places tool definition not found")
+}
+
+func TestAssistantToolDefinitions_FourToolsIncludingEstimatePassage(t *testing.T) {
+	tools := assistantToolDefinitions()
+	if len(tools) != 4 {
+		t.Fatalf("expected 4 tool definitions, got %d: %+v", len(tools), tools)
+	}
+
+	var names []string
+	for _, tool := range tools {
+		names = append(names, tool.Function.Name)
+	}
+	for _, want := range []string{"find_places", "get_wind_forecast", "get_tides", "estimate_passage"} {
+		found := false
+		for _, name := range names {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected a %q tool definition, got %v", want, names)
+		}
+	}
 }
 
 // ── dispatch / truncation ───────────────────────────────────────────────

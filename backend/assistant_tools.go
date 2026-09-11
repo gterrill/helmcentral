@@ -57,9 +57,9 @@ const assistantMaxTideDays = 8
 // capToolResultJSON.
 const assistantMaxToolResultChars = 12000
 
-// assistantToolDeps are every real-world dependency the three tools need,
+// assistantToolDeps are every real-world dependency the four tools need,
 // injected so tests supply fakes/stubs instead of a live SignalK, WASM
-// plugin registry or Overpass endpoint.
+// plugin registry, Overpass endpoint or InfluxDB connection.
 type assistantToolDeps struct {
 	now         func() time.Time
 	vesselState func() (vesselStateData, error)
@@ -68,6 +68,26 @@ type assistantToolDeps struct {
 	tides       func() (tideProvider, string, error)
 	overpass    overpassFetcher
 	routes      func() []routeData
+	// influxRange is estimate_passage's only I/O dependency: any SignalK
+	// path's history over an explicit range, aggregated to fixed-size
+	// buckets. Production wires queryInfluxPathRange (influx.go); tests
+	// supply a canned series with no InfluxDB connection at all.
+	influxRange func(path string, start, stop time.Time, every string) ([]telemetryPoint, error)
+	// fuelRateInstances names the propulsion instances (e.g. "port",
+	// "starboard") this vessel's SignalK tree actually publishes a
+	// fuel.rate for, so estimate_passage never has to hardcode engine
+	// names. nil when the snapshot has none yet (no vessel tree, or a dev
+	// backend with no SignalK at all) - executeEstimatePassage falls back
+	// to a named pair and says so.
+	fuelRateInstances func() []string
+	// fuelAboardM3 is the vessel's current fuel volume (helmcentral.fuel.volume,
+	// ADR 0084 - the same derived path the Tanks tile reads), for
+	// estimate_passage's fuel margin. ok is false whenever the figure is
+	// not currently defined (no tank reporting both a level and a
+	// capacity, or the input too stale to publish - see
+	// freshEnoughToPublish), which estimate_passage reports as "unknown"
+	// rather than a fabricated zero.
+	fuelAboardM3 func() (float64, bool)
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -86,9 +106,48 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		tides: func() (tideProvider, string, error) {
 			return resolveTideProvider(settingsPath)
 		},
-		overpass: overpassHTTPClient,
-		routes:   assistantRouteSnapshot,
+		overpass:          overpassHTTPClient,
+		routes:            assistantRouteSnapshot,
+		influxRange:       queryInfluxPathRange,
+		fuelRateInstances: fuelRateInstancesFromSnapshot,
+		fuelAboardM3:      fuelAboardM3FromDerivedPaths,
 	}
+}
+
+// fuelAboardM3FromDerivedPaths reads helmcentral.fuel.volume (ADR 0084) from
+// derivedPathValues, the same map-of-latest-values signalk_paths.go already
+// reads from to answer the gauge-values stream. ok is false when the value
+// is nil - not currently defined, never a fabricated zero (AGENTS.md's
+// fallback policy).
+func fuelAboardM3FromDerivedPaths() (float64, bool) {
+	value := derivedPathValues()[fuelVolumePath]
+	if value == nil {
+		return 0, false
+	}
+	return *value, true
+}
+
+// fuelRateInstancesFromSnapshot names every propulsion instance the live
+// SignalK tree publishes a fuel.rate for ("port", "starboard", or whatever
+// this vessel actually has), the same way fuelRatePaths (derived_paths.go)
+// already discovers those paths for the derived fuel-economy figures - no
+// configuration, no hardcoded engine count. Returns nil when the snapshot
+// has no self tree yet, which executeEstimatePassage treats as "unknown"
+// rather than "no engines".
+func fuelRateInstancesFromSnapshot() []string {
+	tree := globalSignalKSnapshot.selfTree()
+	if tree == nil {
+		return nil
+	}
+
+	var instances []string
+	for _, path := range fuelRatePaths(tree) {
+		instance := strings.TrimSuffix(strings.TrimPrefix(path, "propulsion."), ".fuel.rate")
+		if instance != "" {
+			instances = append(instances, instance)
+		}
+	}
+	return instances
 }
 
 // assistantRouteSnapshot copies the saved routes under routesMu's read lock
@@ -188,6 +247,31 @@ func assistantToolDefinitions() []openRouterTool {
 				}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "estimate_passage",
+				Description: "Estimate passage time and fuel from this vessel's own logged performance (speed " +
+					"over ground against total fuel rate and rpm, from the last N days of telemetry). Give the " +
+					"distance and the planned speed; omit speed to use the most-sampled cruising band. Observed " +
+					"data spans whatever conditions occurred; head seas will add time and fuel.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"distance_nm": {"type": "number", "description": "Passage distance in nautical miles."},
+						"speed_kts": {
+							"type": "number",
+							"description": "Planned speed over ground in knots. Omit to use the vessel's most-sampled cruising band."
+						},
+						"days": {
+							"type": "integer",
+							"description": "Days of logged telemetry to draw the speed-to-burn table from, 7 to 365 (default 90)."
+						}
+					},
+					"required": ["distance_nm"]
+				}`),
+			},
+		},
 	}
 }
 
@@ -207,6 +291,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeGetWindForecast(args)
 	case "get_tides":
 		return d.executeGetTides(args)
+	case "estimate_passage":
+		return d.executeEstimatePassage(args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -231,6 +317,15 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return fmt.Sprintf("Fetching wind forecast for %s…", assistantLocationLabel(args))
 	case "get_tides":
 		return fmt.Sprintf("Fetching tides near %s…", assistantLocationLabel(args))
+	case "estimate_passage":
+		var a assistantEstimatePassageArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "Estimating the passage from the log…"
+		}
+		if a.SpeedKts != nil {
+			return fmt.Sprintf("Estimating %g nm at %g kts from the log…", a.DistanceNm, *a.SpeedKts)
+		}
+		return fmt.Sprintf("Estimating %g nm at cruising speed from the log…", a.DistanceNm)
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}
@@ -1172,6 +1267,209 @@ func (d assistantToolDeps) executeGetTides(raw json.RawMessage) (string, error) 
 		}
 		result.Extremes = result.Extremes[:len(result.Extremes)-1]
 		result.Truncated = true
+		return true
+	}
+	return capToolResultJSON(&result, shrink)
+}
+
+// ── estimate_passage ────────────────────────────────────────────────────
+
+// assistantEstimatePassageDefaultHistoryDays, ...MinHistoryDays and
+// ...MaxHistoryDays bound estimate_passage's days argument: 90 by default is
+// long enough to average out any one trip's conditions; below
+// MinHistoryDays a single passage would masquerade as the boat's whole
+// performance envelope; past MaxHistoryDays a re-engined or re-propped
+// boat's stale numbers would still count.
+const (
+	assistantEstimatePassageDefaultHistoryDays = 90
+	assistantEstimatePassageMinHistoryDays     = 7
+	assistantEstimatePassageMaxHistoryDays     = 365
+)
+
+// assistantEstimatePassageFallbackInstances is what estimate_passage assumes
+// when the SignalK snapshot has no propulsion tree to discover instance
+// names from at all (a dev backend with no SignalK connected) - this
+// vessel's two actual engines, named directly rather than guessed at any
+// wider scope. A result built on this fallback carries instances_assumed:
+// true so the model and operator both know it is an assumption, not a
+// discovery.
+var assistantEstimatePassageFallbackInstances = []string{"port", "starboard"}
+
+// assistantEstimatePassageArgs is estimate_passage's argument shape.
+// SpeedKts is a pointer so "the model left it out" (nil, use the
+// most-sampled cruising band) is distinguishable from a genuine zero, which
+// is never a valid planned speed anyway.
+type assistantEstimatePassageArgs struct {
+	DistanceNm float64  `json:"distance_nm"`
+	SpeedKts   *float64 `json:"speed_kts"`
+	Days       int      `json:"days"`
+}
+
+type assistantEstimatePassageResult struct {
+	DistanceNm float64 `json:"distance_nm"`
+	SpeedKts   float64 `json:"speed_kts"`
+	// SpeedSource is "requested" when speed_kts came from the model, or
+	// "most_sampled_band" when it was omitted and estimate_passage picked
+	// the vessel's most-sampled cruising band instead.
+	SpeedSource      string            `json:"speed_source"`
+	Hours            float64           `json:"hours"`
+	Litres           float64           `json:"litres"`
+	LPerH            float64           `json:"l_per_h"`
+	RPM              float64           `json:"rpm"`
+	HistoryDays      int               `json:"history_days"`
+	Samples          int               `json:"samples"`
+	Instances        []string          `json:"instances"`
+	InstancesAssumed bool              `json:"instances_assumed"`
+	Table            []performanceBand `json:"table"`
+	// FuelAboardL and FuelAfterL are omitted entirely (nil pointers,
+	// omitempty) when fuelAboardM3 reports the fuel volume as not
+	// currently defined - the note says so instead, rather than the model
+	// seeing a 0 that reads as an empty tank.
+	FuelAboardL *float64 `json:"fuel_aboard_l,omitempty"`
+	FuelAfterL  *float64 `json:"fuel_after_l,omitempty"`
+	Note        string   `json:"note"`
+}
+
+// executeEstimatePassage joins this vessel's own logged speed over ground,
+// total fuel rate and rpm (buildPerformanceTable, assistant_performance.go)
+// over the requested history window, then reads a burn rate and rpm off
+// that table at the requested speed (or the most-sampled band, when the
+// model left speed out) to turn a bare distance into an hours-and-litres
+// estimate. Every number here is this vessel's own history, not a polar or
+// a fuel curve looked up from a manufacturer spec sheet - see ADR 0093
+// section 12.
+func (d assistantToolDeps) executeEstimatePassage(raw json.RawMessage) (string, error) {
+	var args assistantEstimatePassageArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return "", fmt.Errorf("parse estimate_passage arguments: %w", err)
+	}
+	if args.DistanceNm <= 0 {
+		return "", fmt.Errorf("estimate_passage: distance_nm is required and must be greater than zero")
+	}
+	if args.SpeedKts != nil && *args.SpeedKts <= 0 {
+		return "", fmt.Errorf("estimate_passage: speed_kts must be greater than zero")
+	}
+
+	days := clampAssistantDays(args.Days, assistantEstimatePassageDefaultHistoryDays, assistantEstimatePassageMaxHistoryDays)
+	if days < assistantEstimatePassageMinHistoryDays {
+		days = assistantEstimatePassageMinHistoryDays
+	}
+
+	stop := d.now()
+	start := stop.AddDate(0, 0, -days)
+
+	instances := d.fuelRateInstances()
+	instancesAssumed := false
+	if len(instances) == 0 {
+		instances = assistantEstimatePassageFallbackInstances
+		instancesAssumed = true
+	}
+
+	sog, err := d.influxRange("navigation.speedOverGround", start, stop, assistantPerformanceQueryEvery)
+	if err != nil {
+		return "", fmt.Errorf("estimate_passage: %w", err)
+	}
+
+	fuelRates := make([][]telemetryPoint, 0, len(instances))
+	for _, instance := range instances {
+		series, ferr := d.influxRange(fmt.Sprintf("propulsion.%s.fuel.rate", instance), start, stop, assistantPerformanceQueryEvery)
+		if ferr != nil {
+			return "", fmt.Errorf("estimate_passage: %w", ferr)
+		}
+		fuelRates = append(fuelRates, series)
+	}
+
+	// rpm comes from one representative instance rather than an average
+	// across every engine: this boat's twin engines run matched revs under
+	// way, and averaging would need its own timestamp join - with its own
+	// "one instance missing" question - for a figure that is illustrative
+	// context, not the thing estimate_passage is actually estimating.
+	rpm, err := d.influxRange(fmt.Sprintf("propulsion.%s.revolutions", instances[0]), start, stop, assistantPerformanceQueryEvery)
+	if err != nil {
+		return "", fmt.Errorf("estimate_passage: %w", err)
+	}
+
+	table := buildPerformanceTable(sog, fuelRates, rpm, assistantPerformanceMinSOGKts)
+	if len(table) == 0 {
+		return "", fmt.Errorf("estimate_passage: no underway history in the last %d days", days)
+	}
+
+	speedKts := 0.0
+	speedSource := "requested"
+	if args.SpeedKts != nil {
+		speedKts = *args.SpeedKts
+	} else {
+		band, _ := mostSampledBand(table)
+		speedKts = band.SOGKtsMean
+		speedSource = "most_sampled_band"
+	}
+
+	lPerH, rpmAtSpeed, ok := estimateAtSpeed(table, speedKts)
+	if !ok {
+		return "", fmt.Errorf("estimate_passage: no underway history in the last %d days", days)
+	}
+
+	hours := args.DistanceNm / speedKts
+	litres := hours * lPerH
+	litresRounded := math.Round(litres)
+
+	totalSamples := 0
+	for _, band := range table {
+		totalSamples += band.Samples
+	}
+
+	// Fuel aboard (helmcentral.fuel.volume, ADR 0084 - the same figure the
+	// Tanks tile shows) turns the burn estimate into a margin. Absent
+	// whenever fuelAboardM3 is unset (a test double that does not care
+	// about it) or reports the figure as not currently defined - never a
+	// fabricated zero that would read as an empty tank.
+	var fuelAboardL, fuelAfterL *float64
+	aboardM3, aboardOK := 0.0, false
+	if d.fuelAboardM3 != nil {
+		aboardM3, aboardOK = d.fuelAboardM3()
+	}
+	note := "observed across whatever conditions occurred in the window; head seas add time and fuel"
+	if aboardOK {
+		aboard := math.Round(aboardM3 * 1000)
+		after := aboard - litresRounded
+		fuelAboardL, fuelAfterL = &aboard, &after
+	} else {
+		note += "; fuel aboard unknown"
+	}
+
+	result := assistantEstimatePassageResult{
+		DistanceNm:       args.DistanceNm,
+		SpeedKts:         roundTo1(speedKts),
+		SpeedSource:      speedSource,
+		Hours:            roundTo1(hours),
+		Litres:           litresRounded,
+		LPerH:            roundTo1(lPerH),
+		RPM:              math.Round(rpmAtSpeed),
+		HistoryDays:      days,
+		Samples:          totalSamples,
+		Instances:        instances,
+		InstancesAssumed: instancesAssumed,
+		Table:            table,
+		FuelAboardL:      fuelAboardL,
+		FuelAfterL:       fuelAfterL,
+		Note:             note,
+	}
+
+	shrink := func() bool {
+		if len(result.Table) == 0 {
+			return false
+		}
+		// Drop the least-sampled band first - it says the least about the
+		// boat's own performance, and every summary field above (hours,
+		// litres, l_per_h, rpm) was already computed before the table is
+		// trimmed, so shrinking it never changes the answer already given.
+		leastIdx := 0
+		for i, band := range result.Table {
+			if band.Samples < result.Table[leastIdx].Samples {
+				leastIdx = i
+			}
+		}
+		result.Table = append(result.Table[:leastIdx], result.Table[leastIdx+1:]...)
 		return true
 	}
 	return capToolResultJSON(&result, shrink)
