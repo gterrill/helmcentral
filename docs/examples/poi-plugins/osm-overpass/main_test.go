@@ -51,6 +51,21 @@ func TestBuildOverpassPOIQuery_UsesRequestedPositionAndRadius(t *testing.T) {
 	}
 }
 
+// The host (backend/wasm_plugin.go) aborts any plugin call after
+// WASM_PLUGIN_TIMEOUT_MS (15s by default), so a server-side Overpass budget
+// at or above that can never actually be used - it only makes Overpass keep
+// working a query the host has already abandoned. This pins the
+// server-side budget below that host ceiling.
+func TestBuildOverpassPOIQuery_ServerSideTimeoutStaysUnderHostBudget(t *testing.T) {
+	q := buildOverpassPOIQuery(-20.4467, 149.0353, 9260, []string{"anchorage"})
+	if !strings.Contains(q, "[timeout:12]") {
+		t.Fatalf("expected the query to request a 12s Overpass timeout, got:\n%s", q)
+	}
+	if strings.Contains(q, "[timeout:60]") {
+		t.Fatalf("expected the query to no longer request a 60s Overpass timeout, got:\n%s", q)
+	}
+}
+
 // ── classification ───────────────────────────────────────────────────────
 
 func TestClassifyElement_MatchesEachCategoryTable(t *testing.T) {

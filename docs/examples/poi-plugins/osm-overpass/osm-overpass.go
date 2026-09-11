@@ -220,7 +220,12 @@ func buildOverpassPOIQuery(lat, lon float64, radiusM int, categories []string) s
 	around := fmt.Sprintf("(around:%d,%.6f,%.6f)", radiusM, lat, lon)
 
 	var b strings.Builder
-	b.WriteString("[out:json][timeout:60];\n")
+	// 12s, not Overpass's usual 60s default: the host aborts this whole
+	// plugin call after WASM_PLUGIN_TIMEOUT_MS (15s by default,
+	// backend/wasm_plugin.go), so the server-side budget must stay under
+	// that ceiling or Overpass just keeps working a query the host has
+	// already abandoned.
+	b.WriteString("[out:json][timeout:12];\n")
 	for i, id := range orderRequestedCategories(categories) {
 		cat := poiCategoryByID[id]
 		setName := fmt.Sprintf("c%d", i)
