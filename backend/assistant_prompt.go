@@ -259,14 +259,38 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		providerLabelOrNotConfigured(pc.TideProvider), tideStation)
 
 	// 7. Tool-use guidance.
-	b.WriteString("When the operator names a place, call find_places first to resolve it to coordinates before " +
-		"calling get_wind_forecast or get_tides. For each candidate anchorage under discussion, fetch both wind " +
-		"and tides, not just one. State any exposure or shelter assumptions explicitly, for example \"I am " +
-		"assuming Blue Pearl Bay is open to the north-west; correct me if not.\" Prefer the operator's standing " +
-		"notes below over general knowledge about a place. If a tool call returns an error, say so plainly and " +
-		"do not guess or fabricate a plausible-looking answer. Use knots for wind speed, nautical miles for " +
-		"distance, and metres for wave height and depth. Be concise: use markdown headings, and a short table " +
-		"when comparing two or more options.\n\n")
+	b.WriteString("To resolve a place, call find_places with the bare feature name (\"Bona Bay\", not \"Bona Bay, " +
+		"Gloucester Island\"). If it is more than about 20 nautical miles from the vessel, or the lookup returns " +
+		"nothing, resolve a nearby feature you can name (the island, the cape, the harbour) and retry with its " +
+		"coordinates as near_lat/near_lon. If a name still will not resolve, say so and use the nearest resolved " +
+		"feature's position instead, telling the operator that is what you did.\n\n" +
+
+		"For every candidate anchorage under discussion, fetch both get_wind_forecast and get_tides.\n\n" +
+
+		"Shape an anchorage or passage answer as a pilotage briefing, not a forecast readout. For each anchorage: " +
+		"the wind directions it is sheltered from and which would make it a lee shore, reasoned from the " +
+		"coastline and the direction it faces, plus holding, depths, swinging room and hazards where you know " +
+		"them. The forecast against that shelter: wind by time of day across the stay, any shift into an exposed " +
+		"quadrant, sea state. Tides where they matter, including tidal streams through passages and narrows when " +
+		"you know them, and where the standing notes make tide state decisive. For a passage: distance and " +
+		"bearing, timing, approach hazards. Fallback anchorages nearby if conditions change. A recommendation, " +
+		"with reasons, and what would change it.\n\n" +
+
+		"Label the source of every claim: what comes from today's forecast and tide data, and what comes from " +
+		"general knowledge, which the operator must check against the chart and cruising guide. Never present " +
+		"general knowledge as a measurement.\n\n" +
+
+		"Treat the operator's standing notes below as the first source for local rules; where they conflict with " +
+		"general knowledge, the notes win.\n\n" +
+
+		"If a tool returns an error, say so plainly; do not guess or fabricate a plausible answer.\n\n" +
+
+		"Use knots for wind speed, nautical miles for distance, and metres for wave height and depth; give every " +
+		"time in the local zone.\n\n" +
+
+		"Write like a delivery skipper briefing the owner before casting off. No exclamation marks, no opener " +
+		"like \"Good!\", no closing verdict line like \"looks like a comfortable passage\". Let length follow the " +
+		"question; use markdown headings and a comparison table when weighing two or more options.\n\n")
 
 	// 8. Operator standing notes, verbatim.
 	notes := strings.TrimSpace(pc.Notes)

@@ -131,15 +131,26 @@ func TestBuildAssistantSystemPrompt_NotesVerbatimOrNone(t *testing.T) {
 func TestBuildAssistantSystemPrompt_ToolGuidancePresent(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(basePromptContext())
 	for _, want := range []string{
-		"call find_places first",
-		"fetch both wind and tides",
-		"exposure or shelter assumptions",
-		"standing notes below over general knowledge",
+		"bare feature name",
+		"lee shore",
+		"general knowledge",
+		"standing notes",
+		"check against the chart",
+		"No exclamation marks",
+		"fetch both get_wind_forecast and get_tides",
 		"do not guess or fabricate",
 		"knots for wind speed, nautical miles for distance, and metres",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("expected the tool guidance to mention %q, got:\n%s", want, prompt)
+		}
+	}
+	for _, notWant := range []string{
+		"Be concise",
+		"Prefer the operator's standing notes below over general knowledge",
+	} {
+		if strings.Contains(prompt, notWant) {
+			t.Errorf("expected the tool guidance NOT to contain %q, got:\n%s", notWant, prompt)
 		}
 	}
 }
