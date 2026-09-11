@@ -14,6 +14,10 @@ before:
     # `//go:embed all:dist` compiling for developers who have not built the
     # frontend; without it a release build leaves the repo unable to `go build`.
     - sh -c "rm -rf backend/dist && cp -R frontend/dist backend/dist && touch backend/dist/.gitkeep"
+    # Same reasoning as the dist hook above, for the operator manual the
+    # assistant's read_manual tool embeds (backend/assistant_manual.go):
+    # without this a release build ships Mate with no manual staged at all.
+    - sh -c "rm -rf backend/manual && mkdir -p backend/manual && cp -R docs/features docs/how-to docs/reference backend/manual/ && touch backend/manual/.gitkeep"
 
 # The Go module lives in backend/, not at the repo root; without this
 # GoReleaser runs `go list -m` at the root, finds no go.mod, and fails.

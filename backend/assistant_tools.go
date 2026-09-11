@@ -88,6 +88,10 @@ type assistantToolDeps struct {
 	// freshEnoughToPublish), which estimate_passage reports as "unknown"
 	// rather than a fabricated zero.
 	fuelAboardM3 func() (float64, bool)
+	// manual names the embedded operator manual pages read_manual serves
+	// (assistant_manual.go). Production returns globalManual, loaded once
+	// at startup; tests inject a fixed slice with no embedding involved.
+	manual func() []manualPage
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -111,6 +115,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxRange:       queryInfluxPathRange,
 		fuelRateInstances: fuelRateInstancesFromSnapshot,
 		fuelAboardM3:      fuelAboardM3FromDerivedPaths,
+		manual:            func() []manualPage { return globalManual },
 	}
 }
 
@@ -276,6 +281,29 @@ func assistantToolDefinitions() []openRouterTool {
 				}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: openRouterFunctionDef{
+				Name: "read_manual",
+				Description: "Read one page of Helmcentral's own operator manual, or one section of it by " +
+					"heading. Use it before answering any question about how Helmcentral itself works, what a " +
+					"panel or tile shows, or how to set something up; quote the manual rather than guessing.",
+				Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"page": {
+							"type": "string",
+							"description": "A manual page id from the manual index, e.g. \"features/forecast\"."
+						},
+						"section": {
+							"type": "string",
+							"description": "Optional: the text of a \"## \" heading on that page, to return just that section."
+						}
+					},
+					"required": ["page"]
+				}`),
+			},
+		},
 	}
 }
 
@@ -297,6 +325,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeGetTides(args)
 	case "estimate_passage":
 		return d.executeEstimatePassage(args)
+	case "read_manual":
+		return d.executeReadManual(args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -330,6 +360,16 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 			return fmt.Sprintf("Estimating %g nm at %g kts from the log…", a.DistanceNm, *a.SpeedKts)
 		}
 		return fmt.Sprintf("Estimating %g nm at cruising speed from the log…", a.DistanceNm)
+	case "read_manual":
+		var a assistantReadManualArgs
+		page := ""
+		if json.Unmarshal(args, &a) == nil {
+			page = strings.TrimSpace(a.Page)
+		}
+		if page == "" {
+			page = "a page"
+		}
+		return fmt.Sprintf("Reading the manual: %s…", page)
 	default:
 		return fmt.Sprintf("Running %s…", name)
 	}
@@ -1558,6 +1598,76 @@ func (d assistantToolDeps) executeEstimatePassage(raw json.RawMessage) (string, 
 			}
 		}
 		result.Table = append(result.Table[:leastIdx], result.Table[leastIdx+1:]...)
+		return true
+	}
+	return capToolResultJSON(&result, shrink)
+}
+
+// ── read_manual ─────────────────────────────────────────────────────────
+
+type assistantReadManualArgs struct {
+	Page    string `json:"page"`
+	Section string `json:"section"`
+}
+
+type assistantReadManualResult struct {
+	Page    string `json:"page"`
+	Title   string `json:"title"`
+	Section string `json:"section,omitempty"`
+	Content string `json:"content"`
+	// Truncated marks a content string capToolResultJSON's shrink had to
+	// halve to fit the chat-context budget - a legible partial answer, not
+	// the AGENTS.md fallback-policy kind of masked failure (see
+	// capToolResultJSON's own doc comment).
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+func (d assistantToolDeps) executeReadManual(raw json.RawMessage) (string, error) {
+	var args assistantReadManualArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return "", fmt.Errorf("parse read_manual arguments: %w", err)
+	}
+
+	pages := d.manual()
+	if len(pages) == 0 {
+		return "", fmt.Errorf("the manual is not embedded in this build (run make manual-stage)")
+	}
+
+	page := strings.TrimSpace(args.Page)
+	ids := make([]string, 0, len(pages))
+	var found *manualPage
+	for i := range pages {
+		ids = append(ids, pages[i].ID)
+		if pages[i].ID == page {
+			found = &pages[i]
+		}
+	}
+	if found == nil {
+		return "", fmt.Errorf("read_manual: unknown page %q; valid ids are: %s", page, strings.Join(ids, ", "))
+	}
+
+	result := assistantReadManualResult{Page: found.ID, Title: found.Title, Content: found.Body}
+
+	if section := strings.TrimSpace(args.Section); section != "" {
+		text, ok := manualSection(found.Body, section)
+		if !ok {
+			headings := manualPageHeadings(found.Body)
+			return "", fmt.Errorf("read_manual: unknown section %q on page %q; valid headings are: %s", section, found.ID, strings.Join(headings, ", "))
+		}
+		result.Section = section
+		result.Content = text
+	}
+
+	// Halve the content string until the encoding fits the tool-result
+	// budget, rather than one of the list-trimming shrinks the other tools
+	// use above - a manual page's content is prose, not a list of rows.
+	shrink := func() bool {
+		runes := []rune(result.Content)
+		if len(runes) == 0 {
+			return false
+		}
+		result.Content = string(runes[:len(runes)/2])
+		result.Truncated = true
 		return true
 	}
 	return capToolResultJSON(&result, shrink)

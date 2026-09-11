@@ -31,6 +31,13 @@ backend/data/alarm-transports.json
 !backend/dist/
 backend/dist/*
 !backend/dist/.gitkeep
+# Same reasoning as backend/dist above, for the operator manual staged into
+# backend/manual for //go:embed (the Makefile's manual-stage target, the
+# Dockerfile and the GoReleaser hooks copy docs/features, docs/how-to and
+# docs/reference there) - the docs tree is the source of truth, not this copy.
+!backend/manual/
+backend/manual/*
+!backend/manual/.gitkeep
 settings.yaml
 .claude/settings.json
 /backend-data/

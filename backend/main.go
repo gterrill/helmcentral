@@ -320,6 +320,24 @@ func main() {
 	}
 	globalAssistantStore = as
 
+	// The assistant's read_manual tool (mate-voice-assistant plan, "App-wide
+	// voice"): docs/features, docs/how-to and docs/reference staged into
+	// backend/manual (Makefile's manual-stage target, the Dockerfile and
+	// .goreleaser.yaml, mirroring how backend/dist stages the frontend for
+	// static.go's //go:embed). Not fatal when empty: a host `go build` with
+	// no staging step is a legitimate developer build, and read_manual
+	// itself reports the gap to the model rather than failing startup.
+	manualPages, err := loadManual(manualFS, "manual")
+	if err != nil {
+		log.Fatalf("failed to load the embedded operator manual: %v", err)
+	}
+	globalManual = manualPages
+	if len(globalManual) == 0 {
+		log.Printf("manual not staged; read_manual will report it")
+	} else {
+		log.Printf("loaded %d operator manual page(s)", len(globalManual))
+	}
+
 	// Registered web push devices. Its own file rather than the alarm log's:
 	// these are durable device registrations whose loss cannot be recovered
 	// without physically revisiting every phone, unlike the log's prunable

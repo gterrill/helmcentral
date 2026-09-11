@@ -40,6 +40,12 @@ services:
       - ./backend:/app
       - ./settings.yaml:/app/settings.yaml
       - ./plugins:/app/plugins
+      # Live docs, read-only, so air's build embeds the operator manual the
+      # assistant's read_manual tool serves (backend/assistant_manual.go)
+      # without a separate manual-stage step on every edit.
+      - ./docs/features:/app/manual/features:ro
+      - ./docs/how-to:/app/manual/how-to:ro
+      - ./docs/reference:/app/manual/reference:ro
       # air recompiles on every save, so the Go build and module caches grow
       # continuously. Left unmounted they land in the container's writable
       # layer (measured at 1.46GB: ~754MB build + ~749MB modules) and are
@@ -112,6 +118,10 @@ services:
       - ./plugins:/app/plugins
       - ./e2e/settings.seed.yaml:/seed/settings.seed.yaml:ro
       - e2e_state:/state
+      # Same rationale as backend-dev's manual mounts above.
+      - ./docs/features:/app/manual/features:ro
+      - ./docs/how-to:/app/manual/how-to:ro
+      - ./docs/reference:/app/manual/reference:ro
       # Same rationale as backend-dev above. Its own volumes, not shared with
       # backend-dev: two air instances compiling into one cache would race.
       - e2e_go_build_cache:/root/.cache/go-build

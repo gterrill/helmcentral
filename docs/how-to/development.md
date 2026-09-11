@@ -57,7 +57,9 @@ goreleaser build --snapshot --clean   # cross-compiles every published target
 ```
 
 Build hooks build the frontend and stage it into `backend/dist` for the
-`//go:embed`, so a snapshot binary includes the frontend just as a release does.
+`//go:embed`, so a snapshot binary includes the frontend just as a release does;
+run `make manual-stage` first if you want a local `go build`/`go run` to embed
+the operator manual Mate's `read_manual` tool serves.
 
 Tagging `vX.Y.Z` and pushing runs
 [.github/workflows/release.yml](../../.github/workflows/release.yml), which

@@ -1354,6 +1354,7 @@ func TestDescribeAssistantToolCall(t *testing.T) {
 		{"get_tides", `{"lat":-20.1,"lon":149.1,"name":"Blue Pearl Bay"}`, "Fetching tides near Blue Pearl Bay…"},
 		{"estimate_passage", `{"distance_nm":42,"speed_kts":8.5}`, "Estimating 42 nm at 8.5 kts from the log…"},
 		{"estimate_passage", `{"distance_nm":42}`, "Estimating 42 nm at cruising speed from the log…"},
+		{"read_manual", `{"page":"features/forecast"}`, "Reading the manual: features/forecast…"},
 	}
 	for _, tc := range cases {
 		got := describeAssistantToolCall(tc.name, json.RawMessage(tc.args))
@@ -1389,17 +1390,17 @@ func TestAssistantToolDefinitions_GetWindForecastDescribesCourseDeg(t *testing.T
 	t.Fatal("get_wind_forecast tool definition not found")
 }
 
-func TestAssistantToolDefinitions_FourToolsIncludingEstimatePassage(t *testing.T) {
+func TestAssistantToolDefinitions_FiveToolsIncludingReadManual(t *testing.T) {
 	tools := assistantToolDefinitions()
-	if len(tools) != 4 {
-		t.Fatalf("expected 4 tool definitions, got %d: %+v", len(tools), tools)
+	if len(tools) != 5 {
+		t.Fatalf("expected 5 tool definitions, got %d: %+v", len(tools), tools)
 	}
 
 	var names []string
 	for _, tool := range tools {
 		names = append(names, tool.Function.Name)
 	}
-	for _, want := range []string{"find_places", "get_wind_forecast", "get_tides", "estimate_passage"} {
+	for _, want := range []string{"find_places", "get_wind_forecast", "get_tides", "estimate_passage", "read_manual"} {
 		found := false
 		for _, name := range names {
 			if name == want {
