@@ -814,6 +814,135 @@ func TestExecuteGetWindForecast_ClampsDays(t *testing.T) {
 	}
 }
 
+func TestExecuteGetWindForecast_CourseDegAddsRelativeAngles(t *testing.T) {
+	// Local time at lon 149.1 is UTC+10; both kept hours land on
+	// 2026-09-12, a 3-hour boundary apart, so a single day summary covers
+	// both.
+	now := time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC) // local 12:00, %3==0
+	lat, lon := -20.1, 149.1
+	courseDeg := 303.0
+
+	weatherStub := &capturingWeatherProvider{
+		bundle: weatherForecastBundle{
+			Hourly: []weatherHourPoint{
+				// local 12:00: real wind, 168 degrees off a 303 degree
+				// course - a following wind, not the "port beam to port
+				// quarter" the model once called it.
+				{Time: now, WindSpeedMS: 5.0, WindGustMS: 6.0, WindDirectionDeg: 135},
+				// local 15:00: the all-zero sentinel row, wind direction
+				// unknown - the relative fields must stay nil, not fold to
+				// a fabricated "head".
+				{Time: now.Add(3 * time.Hour)},
+			},
+		},
+	}
+	waveStub := &stubWaveProvider{
+		id: "open-meteo-marine",
+		bundle: waveForecastBundle{
+			Hourly: []waveHourPoint{
+				// 45 degrees (NE): forward of a 303 degree course's
+				// quarter, not "on or abaft the beam".
+				{Time: now, WaveHeightM: 1.0, WavePeriodS: 6, WaveDirectionDeg: 45},
+			},
+		},
+	}
+
+	deps := assistantToolDeps{
+		now:     func() time.Time { return now },
+		weather: func() (weatherProvider, string, error) { return weatherStub, "capturing-weather", nil },
+		waves:   func() (waveProvider, string, error) { return waveStub, "open-meteo-marine", nil },
+	}
+
+	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(
+		fmt.Sprintf(`{"lat":%f,"lon":%f,"days":1,"course_deg":%f}`, lat, lon, courseDeg)))
+	if err != nil {
+		t.Fatalf("execute get_wind_forecast: %v", err)
+	}
+
+	var result assistantWindForecastResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+
+	if result.CourseDeg == nil || *result.CourseDeg != courseDeg {
+		t.Fatalf("expected course_deg=%g echoed in the header, got %v", courseDeg, result.CourseDeg)
+	}
+
+	if len(result.Hourly) != 2 {
+		t.Fatalf("expected 2 kept hourly rows, got %d: %+v", len(result.Hourly), result.Hourly)
+	}
+
+	windyRow := result.Hourly[0]
+	if windyRow.RelWindDeg == nil || *windyRow.RelWindDeg != 168 {
+		t.Errorf("expected rel_wind_deg=168, got %v", windyRow.RelWindDeg)
+	}
+	if windyRow.RelWind == nil || *windyRow.RelWind != "following" {
+		t.Errorf("expected rel_wind=following, got %v", windyRow.RelWind)
+	}
+	if windyRow.RelWaveDeg == nil || *windyRow.RelWaveDeg != 102 {
+		t.Errorf("expected rel_wave_deg=102, got %v", windyRow.RelWaveDeg)
+	}
+	if windyRow.RelWave == nil || *windyRow.RelWave != "quarter" {
+		t.Errorf("expected rel_wave=quarter, got %v", windyRow.RelWave)
+	}
+
+	sentinelRow := result.Hourly[1]
+	if sentinelRow.RelWindDeg != nil || sentinelRow.RelWind != nil {
+		t.Errorf("expected nil rel_wind fields when wind direction is unknown, got %+v", sentinelRow)
+	}
+	if sentinelRow.RelWaveDeg != nil || sentinelRow.RelWave != nil {
+		t.Errorf("expected nil rel_wave fields when there is no matching wave row, got %+v", sentinelRow)
+	}
+
+	if len(result.Days) != 1 {
+		t.Fatalf("expected 1 day summary, got %d: %+v", len(result.Days), result.Days)
+	}
+	if result.Days[0].RelWindPrevailing == nil || *result.Days[0].RelWindPrevailing != "following" {
+		t.Errorf("expected rel_wind_prevailing=following, got %v", result.Days[0].RelWindPrevailing)
+	}
+}
+
+func TestExecuteGetWindForecast_NoCourseDegOmitsRelativeAngles(t *testing.T) {
+	now := time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC) // local 12:00, %3==0
+	weatherStub := &capturingWeatherProvider{
+		bundle: weatherForecastBundle{
+			Hourly: []weatherHourPoint{
+				{Time: now, WindSpeedMS: 5.0, WindGustMS: 6.0, WindDirectionDeg: 135},
+			},
+		},
+	}
+	deps := assistantToolDeps{
+		now:     func() time.Time { return now },
+		weather: func() (weatherProvider, string, error) { return weatherStub, "capturing-weather", nil },
+		waves:   func() (waveProvider, string, error) { return nil, "", fmt.Errorf("no wave plugin installed") },
+	}
+
+	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-20.1,"lon":149.1}`))
+	if err != nil {
+		t.Fatalf("execute get_wind_forecast: %v", err)
+	}
+
+	// course_deg was never given, so the output must be byte-for-byte what
+	// it was before this field existed: no rel_wind/rel_wave keys at all,
+	// not even a null one.
+	for _, notWant := range []string{"rel_wind", "rel_wave", "course_deg"} {
+		if strings.Contains(raw, notWant) {
+			t.Errorf("expected no %q in the result when course_deg is omitted, got %s", notWant, raw)
+		}
+	}
+
+	var result assistantWindForecastResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result.CourseDeg != nil {
+		t.Errorf("expected course_deg=nil in the header, got %v", *result.CourseDeg)
+	}
+	if len(result.Hourly) != 1 || result.Hourly[0].RelWind != nil {
+		t.Errorf("expected rel_wind=nil on the row, got %+v", result.Hourly[0])
+	}
+}
+
 // ── get_tides ───────────────────────────────────────────────────────────
 
 func TestExecuteGetTides_NearestStationWindowedExtremesAustraliaBrisbane(t *testing.T) {
@@ -1245,6 +1374,19 @@ func TestAssistantToolDefinitions_FindPlacesDescriptionMentionsBareFeatureName(t
 		return
 	}
 	t.Fatal("find_places tool definition not found")
+}
+
+func TestAssistantToolDefinitions_GetWindForecastDescribesCourseDeg(t *testing.T) {
+	for _, tool := range assistantToolDefinitions() {
+		if tool.Function.Name != "get_wind_forecast" {
+			continue
+		}
+		if !strings.Contains(string(tool.Function.Parameters), "course_deg") {
+			t.Fatalf("expected the get_wind_forecast parameters to mention %q, got: %s", "course_deg", tool.Function.Parameters)
+		}
+		return
+	}
+	t.Fatal("get_wind_forecast tool definition not found")
 }
 
 func TestAssistantToolDefinitions_FourToolsIncludingEstimatePassage(t *testing.T) {

@@ -190,7 +190,8 @@ func TestBuildAssistantSystemPrompt_ToolGuidancePresent(t *testing.T) {
 		"knots for wind speed, nautical miles for distance, and metres",
 		"estimate_passage",
 		"following sea",
-		"relative to the course",
+		"course_deg",
+		"rel_wind",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("expected the tool guidance to mention %q, got:\n%s", want, prompt)

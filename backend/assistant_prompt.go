@@ -297,7 +297,9 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		"coordinates as near_lat/near_lon. If a name still will not resolve, say so and use the nearest resolved " +
 		"feature's position instead, telling the operator that is what you did.\n\n" +
 
-		"For every candidate anchorage under discussion, fetch both get_wind_forecast and get_tides.\n\n" +
+		"For every candidate anchorage under discussion, fetch both get_wind_forecast and get_tides. Fetch the " +
+		"forecast once per position with enough days for the whole plan; do not re-fetch the same position " +
+		"under a different name.\n\n" +
 
 		"Shape an anchorage or passage answer as a pilotage briefing, not a forecast readout. For each anchorage: " +
 		"the wind directions it is sheltered from and which would make it a lee shore, reasoned from the " +
@@ -309,8 +311,9 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		"with reasons, and what would change it.\n\n" +
 
 		"For the passage, call estimate_passage with the distance and planned speed and report time, fuel burn " +
-		"and fuel margin. State the wind and sea angle relative to the course (head, beam, quartering, following) " +
-		"and what that means for comfort and speed on this hull; a power catamaran runs comfortably in a " +
+		"and fuel margin. Pass course_deg, the planned course over ground for that leg, to get_wind_forecast, " +
+		"and read the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, " +
+		"quarter, following); do not work the angle out yourself. A power catamaran runs comfortably in a " +
 		"following sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
 
 		"Label the source of every claim: what comes from today's forecast and tide data, and what comes from " +

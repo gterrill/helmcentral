@@ -221,7 +221,11 @@ func assistantToolDefinitions() []openRouterTool {
 							"type": "integer",
 							"description": "Number of days to forecast, 1 to 10 (default 3). Use the fewest days you need."
 						},
-						"name": {"type": "string", "description": "Optional label for the location, for display only."}
+						"name": {"type": "string", "description": "Optional label for the location, for display only."},
+						"course_deg": {
+							"type": "number",
+							"description": "The vessel's intended course over ground in degrees true, 0 to 360; when given, each row and each day summary also carries the wind and wave angle relative to the bow."
+						}
 					},
 					"required": ["lat", "lon"]
 				}`),
@@ -338,6 +342,18 @@ type assistantLocationArgs struct {
 	Lon  float64 `json:"lon"`
 	Days int     `json:"days"`
 	Name string  `json:"name"`
+}
+
+// assistantWindForecastArgs is get_wind_forecast's own argument shape:
+// assistantLocationArgs plus an optional course_deg, the vessel's intended
+// course over ground. get_tides has no use for a course, so it keeps using
+// bare assistantLocationArgs; this extra field is exclusive to
+// get_wind_forecast. CourseDeg is a pointer so "the model left it out" (no
+// relative-angle fields in the result at all) is distinguishable from a
+// genuine course of 0 (due north).
+type assistantWindForecastArgs struct {
+	assistantLocationArgs
+	CourseDeg *float64 `json:"course_deg"`
 }
 
 // assistantLocationLabel names a location argument set for a status line:
@@ -905,6 +921,19 @@ type assistantWindHour struct {
 	WaveM   *float64 `json:"wave_m"`
 	WaveS   *float64 `json:"wave_s"`
 	WaveDir *string  `json:"wave_dir"`
+	// RelWindDeg/RelWind and RelWaveDeg/RelWave are the wind/wave angle
+	// relative to the course_deg the model passed to get_wind_forecast
+	// (relativeAngleDeg/relativeAngleLabel, assistant_geometry.go) - the
+	// host doing this arithmetic instead of the model is the whole point
+	// (ADR 0093 §2). omitempty on all four: a call with no course_deg
+	// leaves every one of these nil, so the result is byte-for-byte what
+	// it was before this field existed. Also nil, even when course_deg is
+	// given, whenever the underlying direction itself is unknown (Dir/
+	// WaveDir nil) or there is no matching wave row.
+	RelWindDeg *int    `json:"rel_wind_deg,omitempty"`
+	RelWind    *string `json:"rel_wind,omitempty"`
+	RelWaveDeg *int    `json:"rel_wave_deg,omitempty"`
+	RelWave    *string `json:"rel_wave,omitempty"`
 }
 
 type assistantDaySummary struct {
@@ -913,12 +942,20 @@ type assistantDaySummary struct {
 	WindKtsMax    *int    `json:"wind_kts_max"`
 	GustKtsMax    *int    `json:"gust_kts_max"`
 	DirPrevailing *string `json:"dir_prevailing"`
+	// RelWindPrevailing is the modal rel_wind label across the day's kept
+	// rows (assistantDayAggregate.prevailingRelWind), present only when
+	// course_deg was given - see RelWind above.
+	RelWindPrevailing *string `json:"rel_wind_prevailing,omitempty"`
 }
 
 type assistantWindForecastResult struct {
-	Name            string                `json:"name"`
-	Lat             float64               `json:"lat"`
-	Lon             float64               `json:"lon"`
+	Name string  `json:"name"`
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+	// CourseDeg echoes the model's course_deg argument back, present only
+	// when it was given - the signal to the model that rel_wind/rel_wave
+	// are populated below rather than silently absent.
+	CourseDeg       *float64              `json:"course_deg,omitempty"`
 	Timezone        string                `json:"timezone"`
 	WeatherProvider string                `json:"weather_provider"`
 	WaveProvider    string                `json:"wave_provider"`
@@ -939,6 +976,11 @@ type assistantDayAggregate struct {
 	gustMax  *int
 	dirVotes map[string]int
 	dirOrder []string
+	// relWindVotes/relWindOrder are the same vote-counting shape as
+	// dirVotes/dirOrder, over each kept row's rel_wind label rather than
+	// its compass direction - only populated when course_deg was given.
+	relWindVotes map[string]int
+	relWindOrder []string
 }
 
 func (a *assistantDayAggregate) addWind(v int) {
@@ -972,12 +1014,36 @@ func (a *assistantDayAggregate) addDir(dir string) {
 // prevailing returns the mode of the recorded direction votes, ties broken
 // by first-seen order so the result is deterministic.
 func (a *assistantDayAggregate) prevailing() *string {
+	return modeVote(a.dirVotes, a.dirOrder)
+}
+
+func (a *assistantDayAggregate) addRelWind(label string) {
+	if a.relWindVotes == nil {
+		a.relWindVotes = map[string]int{}
+	}
+	if _, seen := a.relWindVotes[label]; !seen {
+		a.relWindOrder = append(a.relWindOrder, label)
+	}
+	a.relWindVotes[label]++
+}
+
+// prevailingRelWind returns the mode of the recorded rel_wind label votes -
+// the day summary's rel_wind_prevailing - ties broken by first-seen order
+// exactly like prevailing() above.
+func (a *assistantDayAggregate) prevailingRelWind() *string {
+	return modeVote(a.relWindVotes, a.relWindOrder)
+}
+
+// modeVote returns the highest-voted key in order, or nil when order is
+// empty. Shared by prevailing() and prevailingRelWind(), which differ only
+// in which vote map/order pair they track.
+func modeVote(votes map[string]int, order []string) *string {
 	best := ""
 	bestCount := 0
-	for _, dir := range a.dirOrder {
-		if a.dirVotes[dir] > bestCount {
-			best = dir
-			bestCount = a.dirVotes[dir]
+	for _, key := range order {
+		if votes[key] > bestCount {
+			best = key
+			bestCount = votes[key]
 		}
 	}
 	if best == "" {
@@ -987,7 +1053,7 @@ func (a *assistantDayAggregate) prevailing() *string {
 }
 
 func (d assistantToolDeps) executeGetWindForecast(raw json.RawMessage) (string, error) {
-	var args assistantLocationArgs
+	var args assistantWindForecastArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("parse get_wind_forecast arguments: %w", err)
 	}
@@ -1058,11 +1124,28 @@ func (d assistantToolDeps) executeGetWindForecast(raw json.RawMessage) (string, 
 		}
 		row.WindKts, row.GustKts, row.Dir, row.DirDeg = windKts, gustKts, dir, dirDeg
 
+		// course_deg is the model passing along the vessel's intended
+		// course over ground; the host computes the relative angle rather
+		// than leaving the model to subtract bearings itself (ADR 0093
+		// §2). Nil whenever the wind direction itself is unknown (dir ==
+		// nil), even with course_deg given.
+		if args.CourseDeg != nil && dir != nil {
+			relDeg := relativeAngleDeg(*args.CourseDeg, hp.WindDirectionDeg)
+			relLabel := relativeAngleLabel(relDeg)
+			row.RelWindDeg, row.RelWind = &relDeg, &relLabel
+		}
+
 		if whp, ok := waveByUnix[hp.Time.Unix()]; ok && whp.WavePeriodS != 0 {
 			hm := roundTo1(whp.WaveHeightM)
 			ps := roundTo1(whp.WavePeriodS)
 			wd := degreesToDirection(whp.WaveDirectionDeg)
 			row.WaveM, row.WaveS, row.WaveDir = &hm, &ps, &wd
+
+			if args.CourseDeg != nil {
+				relDeg := relativeAngleDeg(*args.CourseDeg, whp.WaveDirectionDeg)
+				relLabel := relativeAngleLabel(relDeg)
+				row.RelWaveDeg, row.RelWave = &relDeg, &relLabel
+			}
 		}
 
 		hourly = append(hourly, row)
@@ -1083,17 +1166,21 @@ func (d assistantToolDeps) executeGetWindForecast(raw json.RawMessage) (string, 
 		if dir != nil {
 			agg.addDir(*dir)
 		}
+		if row.RelWind != nil {
+			agg.addRelWind(*row.RelWind)
+		}
 	}
 
 	days2 := make([]assistantDaySummary, 0, len(dayOrder))
 	for _, dayKey := range dayOrder {
 		agg := dayAggs[dayKey]
 		days2 = append(days2, assistantDaySummary{
-			Date:          dayKey,
-			WindKtsMin:    agg.windMin,
-			WindKtsMax:    agg.windMax,
-			GustKtsMax:    agg.gustMax,
-			DirPrevailing: agg.prevailing(),
+			Date:              dayKey,
+			WindKtsMin:        agg.windMin,
+			WindKtsMax:        agg.windMax,
+			GustKtsMax:        agg.gustMax,
+			DirPrevailing:     agg.prevailing(),
+			RelWindPrevailing: agg.prevailingRelWind(),
 		})
 	}
 
@@ -1107,6 +1194,7 @@ func (d assistantToolDeps) executeGetWindForecast(raw json.RawMessage) (string, 
 		Name:            strings.TrimSpace(args.Name),
 		Lat:             args.Lat,
 		Lon:             args.Lon,
+		CourseDeg:       args.CourseDeg,
 		Timezone:        tz,
 		WeatherProvider: providerID,
 		WaveProvider:    waveProviderID,

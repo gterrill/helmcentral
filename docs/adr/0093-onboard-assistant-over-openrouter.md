@@ -83,6 +83,16 @@ rung and result count it resolved to), so a failed or surprising lookup can
 be diagnosed from the log after the fact rather than only from what the
 operator happened to see live.
 
+`get_wind_forecast` also takes an optional `course_deg`, the vessel's
+intended course over ground: when given, every hourly row and day summary
+carries the wind and wave angle relative to that course (`rel_wind`/
+`rel_wave`, banded head through following) already computed. This exists
+because the model was once asked about a 303°T course against a forecast SE
+(135°T) wind and called it a beam-to-quarter wind, when it is in fact close
+to dead astern; modular bearing subtraction is exactly the kind of
+arithmetic a language model gets wrong silently, so it belongs on the host
+side, not worked out by the model by eye.
+
 ### 3. A hand-rolled OpenRouter client, not go-openai
 
 `backend/openrouter_client.go` talks to OpenRouter's chat-completions

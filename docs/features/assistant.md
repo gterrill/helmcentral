@@ -34,6 +34,11 @@ Place search queries the same Overpass server as the place name shown on
 the position tile. The configuration reference explains how to point that
 at a mirror if your boat's connection can't reach the default one.
 
+When it plans a passage leg, it works out the wind and sea angle against
+your planned course itself, rather than leaving a language model to
+subtract bearings by eye: a following sea and a head sea get called
+correctly instead of guessed at.
+
 When InfluxDB is configured, it can also estimate how long a passage will
 take and how much fuel it will burn, from your own boat's logged speed over
 ground and fuel-rate history, not a manufacturer's polar or fuel curve.
