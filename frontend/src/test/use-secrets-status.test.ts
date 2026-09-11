@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useSecretsStatus } from '@/hooks/use-secrets-status'
+import { useSecretsStatus, SECRET_KEYS } from '@/hooks/use-secrets-status'
 
 const secretsGetResponse = {
   SIGNALK_USERNAME: false,
@@ -15,6 +15,12 @@ const secretsGetResponse = {
 describe('useSecretsStatus', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  // ADR 0093: the onboard assistant reads its OpenRouter key through the
+  // same encrypted secrets store as every other provider credential.
+  it('includes OPENROUTER_API_KEY among the known secret keys', () => {
+    expect(SECRET_KEYS).toContain('OPENROUTER_API_KEY')
   })
 
   it('saveTouchedKeys only sends the touched subset of the given keys', async () => {
