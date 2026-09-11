@@ -24,6 +24,13 @@ var knownSecretKeys = []string{
 	"SIGNALK_USERNAME", "SIGNALK_PASSWORD", "INFLUXDB_TOKEN",
 	"SMTP_PASSWORD", "NTFY_TOKEN", "WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY",
 	"VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "GOOGLE_PLACES_API_KEY",
+	// OPENROUTER_API_KEY backs the onboard assistant's outbound LLM calls
+	// (ADR 0065 §5, ADR 0093). It belongs in knownSecretKeys only, never in
+	// coreEnvSecretKeys: the assistant handlers read it directly from
+	// globalSecretsStore, the same way ADR 0065 §5 required for the
+	// inventory vision call, so it never enters the process environment
+	// where a WASM plugin's ${VAR} config expansion could reach it.
+	"OPENROUTER_API_KEY",
 }
 
 // coreEnvSecretKeys is the subset of knownSecretKeys trusted, non-sandboxed

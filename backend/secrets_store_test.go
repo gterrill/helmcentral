@@ -286,6 +286,22 @@ func TestIsKnownSecretKey(t *testing.T) {
 	}
 }
 
+// TestIsKnownSecretKey_OpenRouterAPIKey pins OPENROUTER_API_KEY (ADR 0065 §5,
+// ADR 0093) as a stored secret that trusted host code reads directly from
+// globalSecretsStore rather than through LoadIntoEnv/coreEnvSecretKeys - see
+// coreEnvSecretKeys's own doc comment for why WEATHERKIT_* is excluded the
+// same way.
+func TestIsKnownSecretKey_OpenRouterAPIKey(t *testing.T) {
+	if !isKnownSecretKey("OPENROUTER_API_KEY") {
+		t.Errorf("expected OPENROUTER_API_KEY to be a known secret key")
+	}
+	for _, key := range coreEnvSecretKeys {
+		if key == "OPENROUTER_API_KEY" {
+			t.Fatalf("OPENROUTER_API_KEY must never appear in coreEnvSecretKeys: it must not enter the process environment where a WASM plugin's ${VAR} config expansion could reach it")
+		}
+	}
+}
+
 func TestSecretsStore_All_ReflectsSetKeys(t *testing.T) {
 	store := newTestSecretsStore(t)
 
