@@ -57,6 +57,16 @@ func TestAssistantHullTypePhrase(t *testing.T) {
 	}
 }
 
+func TestBuildAssistantSystemPrompt_IdentityNamesMate(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	if !strings.HasPrefix(prompt, "You are Mate, the onboard passage-planning assistant aboard") {
+		t.Fatalf("expected the identity line to open with Mate's name, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "The crew address you as Mate.") {
+		t.Fatalf("expected the identity line to tell Mate how the crew addresses it, got:\n%s", prompt)
+	}
+}
+
 func TestBuildAssistantSystemPrompt_IdentityLineIncludesHullPhrase(t *testing.T) {
 	pc := basePromptContext()
 	pc.BoatModel = "2025 Granocean W-60"
@@ -81,7 +91,7 @@ func TestBuildAssistantSystemPrompt_IdentityLineOmitsHullPhraseWhenBlank(t *test
 	// example regardless of this vessel's own hull type, so the assertion
 	// is scoped to the identity sentence rather than the whole prompt.
 	identityLine := strings.SplitN(prompt, "\n", 2)[0]
-	want := "You are the onboard passage-planning assistant aboard the vessel, a 2025 Granocean W-60 (LOA unknown)."
+	want := "You are Mate, the onboard passage-planning assistant aboard the vessel, a 2025 Granocean W-60 (LOA unknown). The crew address you as Mate."
 	if identityLine != want {
 		t.Fatalf("expected the identity line unchanged when hull type is blank, got:\n%s", identityLine)
 	}
@@ -226,6 +236,107 @@ func TestBuildAssistantSystemPrompt_ProviderLine(t *testing.T) {
 	}
 }
 
+// ── screen context (mate-voice-assistant plan, "app-wide voice") ───────
+
+func TestBuildAssistantSystemPrompt_ScreenSentenceForKnownPanel(t *testing.T) {
+	pc := basePromptContext()
+	pc.Screen = assistantScreenContext{Panel: "forecast"}
+
+	prompt := buildAssistantSystemPrompt(pc)
+	if !strings.Contains(prompt, "The operator is looking at the Forecast panel.") {
+		t.Fatalf("expected the screen sentence for the forecast panel, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_ScreenSentenceForDashboardPage(t *testing.T) {
+	pc := basePromptContext()
+	pc.Screen = assistantScreenContext{Page: "Engine Room"}
+
+	prompt := buildAssistantSystemPrompt(pc)
+	if !strings.Contains(prompt, "The operator is looking at the dashboard page named Engine Room.") {
+		t.Fatalf("expected the screen sentence for a dashboard page, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_ScreenSentenceForSettingsSection(t *testing.T) {
+	pc := basePromptContext()
+	pc.Screen = assistantScreenContext{Panel: "settings", Section: "network"}
+
+	prompt := buildAssistantSystemPrompt(pc)
+	if !strings.Contains(prompt, "Settings (section network) panel") {
+		t.Fatalf("expected the screen sentence to name the settings section, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_ScreenSentenceUnknownPanelPrintsVerbatim(t *testing.T) {
+	pc := basePromptContext()
+	pc.Screen = assistantScreenContext{Panel: "custom-widget"}
+
+	prompt := buildAssistantSystemPrompt(pc)
+	if !strings.Contains(prompt, "The operator is looking at the custom-widget panel.") {
+		t.Fatalf("expected an unrecognised panel id to print verbatim, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_ScreenSentenceOmittedWhenAbsent(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	if strings.Contains(prompt, "The operator is looking at") {
+		t.Fatalf("expected no screen sentence when the screen context is empty, got:\n%s", prompt)
+	}
+}
+
+// ── spoken summary instruction ──────────────────────────────────────────
+
+func TestBuildAssistantSystemPrompt_SpokenAddsSummaryInstruction(t *testing.T) {
+	pc := basePromptContext()
+	pc.Spoken = true
+
+	prompt := buildAssistantSystemPrompt(pc)
+	if !strings.Contains(prompt, "## Spoken summary") {
+		t.Fatalf("expected the spoken-summary instruction to name the heading, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "at most three sentences") {
+		t.Fatalf("expected the spoken-summary instruction to cap the length, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_SpokenFalseOmitsSummaryInstruction(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	if strings.Contains(prompt, "Spoken summary") {
+		t.Fatalf("expected no spoken-summary instruction when spoken is false, got:\n%s", prompt)
+	}
+}
+
+// ── operator manual (read_manual tool, mate-voice-assistant plan) ──────
+
+func TestBuildAssistantSystemPrompt_ManualIndexLinePresentWhenPagesExist(t *testing.T) {
+	pc := basePromptContext()
+	pc.ManualPages = []manualPage{
+		{ID: "features/alarms", Title: "Alarms"},
+		{ID: "features/forecast", Title: "Forecast"},
+	}
+
+	prompt := buildAssistantSystemPrompt(pc)
+	want := "Manual pages: features/alarms (Alarms), features/forecast (Forecast)"
+	if !strings.Contains(prompt, want) {
+		t.Fatalf("expected the manual index line, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_ManualIndexLineOmittedWhenNoPages(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	if strings.Contains(prompt, "Manual pages:") {
+		t.Fatalf("expected no manual index line when no pages are embedded, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_ReadManualGuidancePresent(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	if !strings.Contains(prompt, "call read_manual for the relevant page first") {
+		t.Fatalf("expected the read_manual tool-use guidance, got:\n%s", prompt)
+	}
+}
+
 // ── collectAssistantPromptContext ──────────────────────────────────────
 
 func writeAssistantPromptSettings(t *testing.T) string {
@@ -299,6 +410,19 @@ func TestCollectAssistantPromptContext_NoAnchorWatchUsesRoamingPlaceName(t *test
 	pc := collectAssistantPromptContext(settingsPath, time.Now())
 	if pc.PlaceName != "Roaming Place" {
 		t.Fatalf("expected the roaming place name with no anchor watch active, got %q", pc.PlaceName)
+	}
+}
+
+func TestCollectAssistantPromptContext_CopiesGlobalManual(t *testing.T) {
+	settingsPath := writeAssistantPromptSettings(t)
+
+	prevManual := globalManual
+	globalManual = []manualPage{{ID: "features/forecast", Title: "Forecast"}}
+	t.Cleanup(func() { globalManual = prevManual })
+
+	pc := collectAssistantPromptContext(settingsPath, time.Now())
+	if len(pc.ManualPages) != 1 || pc.ManualPages[0].ID != "features/forecast" {
+		t.Fatalf("expected collectAssistantPromptContext to copy globalManual, got %+v", pc.ManualPages)
 	}
 }
 

@@ -115,3 +115,16 @@ mayara:
 #   notes: |
 #     Queenfish fish Hill Inlet on a rising tide.
 #     Snorkel Blue Pearl Bay in the last 1-2h of flood up to high slack.
+#   # Show a microphone button in the composer that transcribes speech to
+#   # the question, using the browser's own speech recognition. Off by
+#   # default; needs https or localhost (browsers refuse microphone access
+#   # on plain http).
+#   voice_input: false
+#   # Read the "## Spoken summary" section of a voice question's reply aloud
+#   # with the browser's speech synthesis. Off by default.
+#   read_aloud: false
+#   # Listen continuously for "Hey Mate" while the app is open and treat what
+#   # follows as the question, instead of requiring a tap to start listening.
+#   # Off by default: it costs battery and, in Chrome, streams continuously
+#   # to Google.
+#   wake_word: false

@@ -380,6 +380,56 @@ func TestBuildSettingsPayload_AbsentAssistantBlockDefaults(t *testing.T) {
 	}
 }
 
+// TestSettingsPayloadRoundTripsAssistantVoiceSettings drives the same
+// write/read cycle as TestSettingsPayloadRoundTripsAssistantBlock above for
+// the three voice switches (mate-voice-assistant plan phase 1/2): all three
+// must round-trip true independently of assistant.enabled/model/notes.
+func TestSettingsPayloadRoundTripsAssistantVoiceSettings(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.VoiceInput = true
+		p.Assistant.ReadAloud = true
+		p.Assistant.WakeWord = true
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	payload := buildSettingsPayload(saved)
+	if !payload.Assistant.VoiceInput {
+		t.Fatalf("expected assistant.voice_input to round-trip true")
+	}
+	if !payload.Assistant.ReadAloud {
+		t.Fatalf("expected assistant.read_aloud to round-trip true")
+	}
+	if !payload.Assistant.WakeWord {
+		t.Fatalf("expected assistant.wake_word to round-trip true")
+	}
+}
+
+// TestBuildSettingsPayload_AbsentAssistantBlockDefaultsVoiceSettingsFalse
+// mirrors TestBuildSettingsPayload_AbsentAssistantBlockDefaults above for the
+// three voice switches: a settings.yaml written before they existed (or with
+// no assistant block at all) must surface every one of them as false, never
+// a guessed true.
+func TestBuildSettingsPayload_AbsentAssistantBlockDefaultsVoiceSettingsFalse(t *testing.T) {
+	payload := buildSettingsPayload(map[string]any{})
+	if payload.Assistant.VoiceInput {
+		t.Fatalf("expected assistant.voice_input to default to false when the block is absent")
+	}
+	if payload.Assistant.ReadAloud {
+		t.Fatalf("expected assistant.read_aloud to default to false when the block is absent")
+	}
+	if payload.Assistant.WakeWord {
+		t.Fatalf("expected assistant.wake_word to default to false when the block is absent")
+	}
+}
+
 // TestNormalizeSettingsPayload_PreservesGPSFromBowMZero guards the anchor
 // bow-offset correction (see docs on setAnchorWatch): gps_from_bow_m
 // defaults to 0, meaning "no correction", so 0 is a meaningful explicit

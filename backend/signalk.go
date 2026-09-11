@@ -118,14 +118,20 @@ type settingsPayload struct {
 		Address string `json:"address"`
 		Port    int    `json:"port"`
 	} `json:"mayara"`
-	// Assistant configures the onboard OpenRouter-backed assistant (ADR
-	// 0093): off by default, BYOK (the key lives in the secrets store, not
-	// here), and Notes are operator standing notes injected verbatim into
-	// every system prompt.
+	// Assistant configures the onboard OpenRouter-backed assistant, Mate
+	// (ADR 0093): off by default, BYOK (the key lives in the secrets store,
+	// not here), and Notes are operator standing notes injected verbatim
+	// into every system prompt. VoiceInput/ReadAloud/WakeWord gate the
+	// frontend's voice features (mate-voice-assistant plan phase 1/2); the
+	// backend stores and round-trips them but does not otherwise act on
+	// them.
 	Assistant struct {
-		Enabled bool   `json:"enabled"`
-		Model   string `json:"model"`
-		Notes   string `json:"notes"`
+		Enabled    bool   `json:"enabled"`
+		Model      string `json:"model"`
+		Notes      string `json:"notes"`
+		VoiceInput bool   `json:"voice_input"`
+		ReadAloud  bool   `json:"read_aloud"`
+		WakeWord   bool   `json:"wake_word"`
 	} `json:"assistant"`
 	Auth struct {
 		Mode string `json:"mode"`
@@ -218,9 +224,12 @@ func updateSettingsHandler(c echo.Context) error {
 		"port":    normalized.Mayara.Port,
 	}
 	settings["assistant"] = map[string]any{
-		"enabled": normalized.Assistant.Enabled,
-		"model":   normalized.Assistant.Model,
-		"notes":   normalized.Assistant.Notes,
+		"enabled":     normalized.Assistant.Enabled,
+		"model":       normalized.Assistant.Model,
+		"notes":       normalized.Assistant.Notes,
+		"voice_input": normalized.Assistant.VoiceInput,
+		"read_aloud":  normalized.Assistant.ReadAloud,
+		"wake_word":   normalized.Assistant.WakeWord,
 	}
 	settings["units"] = normalized.Units
 
@@ -419,6 +428,19 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		// default model.
 		payload.Assistant.Model = strings.TrimSpace(coerceString(assistantMap["model"]))
 		payload.Assistant.Notes = coerceString(assistantMap["notes"])
+		// The three voice switches all default false, the same as Enabled -
+		// a settings.yaml written before they existed (or one where the
+		// operator has simply never turned them on) must surface as off,
+		// never a guessed true.
+		if v, ok := assistantMap["voice_input"].(bool); ok {
+			payload.Assistant.VoiceInput = v
+		}
+		if v, ok := assistantMap["read_aloud"].(bool); ok {
+			payload.Assistant.ReadAloud = v
+		}
+		if v, ok := assistantMap["wake_word"].(bool); ok {
+			payload.Assistant.WakeWord = v
+		}
 	}
 
 	if authMap, ok := settings["auth"].(map[string]any); ok {
@@ -537,6 +559,9 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 		normalized.Assistant.Model = defaultAssistantModel
 	}
 	normalized.Assistant.Notes = strings.TrimSpace(req.Assistant.Notes)
+	normalized.Assistant.VoiceInput = req.Assistant.VoiceInput
+	normalized.Assistant.ReadAloud = req.Assistant.ReadAloud
+	normalized.Assistant.WakeWord = req.Assistant.WakeWord
 
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {

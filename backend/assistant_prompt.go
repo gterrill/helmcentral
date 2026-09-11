@@ -69,6 +69,35 @@ type assistantPromptContext struct {
 	// where anchorage exposure knowledge and rules like "queenfish bite best
 	// on a rising tide" live (ADR 0093).
 	Notes string
+
+	// ManualPages is globalManual (assistant_manual.go) at the time this
+	// context was collected - the embedded operator manual's index, listed
+	// in the prompt so the model knows what read_manual can return before
+	// calling it. Empty on a build with no manual staged, in which case the
+	// prompt simply omits the index line.
+	ManualPages []manualPage
+
+	// Spoken and Screen are turn-scoped: postAssistantMessageHandler sets
+	// them straight from that one POST's body, after calling
+	// collectAssistantPromptContext, rather than reading them from settings
+	// or any persisted state - they describe this question, not the boat.
+	// Spoken is true when the operator asked by voice (mate-voice-assistant
+	// plan phase 1) and wants a reply that can be read aloud. Screen names
+	// what the operator was looking at when they asked (phase "App-wide
+	// voice").
+	Spoken bool
+	Screen assistantScreenContext
+}
+
+// assistantScreenContext is what the frontend was showing when the operator
+// asked - the panel id, its settings section (only meaningful when
+// Panel=="settings"), and the dashboard page name (only meaningful when
+// Panel==""). See postAssistantMessageHandler's bind struct, which decodes
+// this from the POST body's "screen" field.
+type assistantScreenContext struct {
+	Panel   string `json:"panel"`
+	Section string `json:"section"`
+	Page    string `json:"page"`
 }
 
 // collectAssistantPromptContext reads settings once via readSettings +
@@ -137,6 +166,8 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 		pc.WarningFetchedAt = reading.FetchedAt
 	}
 
+	pc.ManualPages = globalManual
+
 	return pc
 }
 
@@ -190,6 +221,57 @@ func assistantHullTypePhrase(hullType string) string {
 	}
 }
 
+// assistantPanelLabels names the dashboard panels the "app-wide voice"
+// screen-context feature can identify precisely (mate-voice-assistant plan).
+// A panel id outside this map is printed verbatim by assistantScreenSentence
+// rather than dropped - a newly added panel this map hasn't caught up with
+// still tells the model something, just not a pretty label.
+var assistantPanelLabels = map[string]string{
+	"forecast":     "Forecast",
+	"routes":       "Routes",
+	"charts":       "Charts",
+	"radar":        "Radar",
+	"anchor-watch": "Anchor Watch",
+	"alarms":       "Alarms",
+	"assistant":    "Mate",
+}
+
+// assistantScreenSentence renders one sentence naming what the operator was
+// looking at when they asked (screen.Panel/Section/Page, set for this turn
+// only by postAssistantMessageHandler from the POST body's "screen" field),
+// or "" when every field is blank - the ordinary case, which must leave the
+// prompt byte-for-byte what it was before this feature existed.
+func assistantScreenSentence(screen assistantScreenContext) string {
+	panel := strings.TrimSpace(screen.Panel)
+	section := strings.TrimSpace(screen.Section)
+	page := strings.TrimSpace(screen.Page)
+
+	if panel == "" && section == "" && page == "" {
+		return ""
+	}
+
+	if panel == "" {
+		if page != "" {
+			return fmt.Sprintf("The operator is looking at the dashboard page named %s.\n\n", page)
+		}
+		// A section with neither a panel nor a page named is not a shape the
+		// frontend is expected to send, but it still names something rather
+		// than silently dropping it.
+		return fmt.Sprintf("The operator is looking at the Settings panel (section %s).\n\n", section)
+	}
+
+	label, known := assistantPanelLabels[panel]
+	switch {
+	case panel == "settings" && section != "":
+		label = fmt.Sprintf("Settings (section %s)", section)
+	case panel == "settings":
+		label = "Settings"
+	case !known:
+		label = panel
+	}
+	return fmt.Sprintf("The operator is looking at the %s panel.\n\n", label)
+}
+
 // providerLabelOrNotConfigured names a configured provider id, or says so
 // plainly when settings carries none - never a guessed default, since the
 // model needs to know when it's working with nothing rather than a real
@@ -226,9 +308,9 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		loaLabel = fmt.Sprintf("%.1fm", pc.LOAM)
 	}
 	if hullPhrase := assistantHullTypePhrase(pc.HullType); hullPhrase != "" {
-		fmt.Fprintf(&b, "You are the onboard passage-planning assistant aboard %s, a %s %s (LOA %s).\n\n", vesselLabel, boatModel, hullPhrase, loaLabel)
+		fmt.Fprintf(&b, "You are Mate, the onboard passage-planning assistant aboard %s, a %s %s (LOA %s). The crew address you as Mate.\n\n", vesselLabel, boatModel, hullPhrase, loaLabel)
 	} else {
-		fmt.Fprintf(&b, "You are the onboard passage-planning assistant aboard %s, a %s (LOA %s).\n\n", vesselLabel, boatModel, loaLabel)
+		fmt.Fprintf(&b, "You are Mate, the onboard passage-planning assistant aboard %s, a %s (LOA %s). The crew address you as Mate.\n\n", vesselLabel, boatModel, loaLabel)
 	}
 
 	// 2. Local time.
@@ -290,7 +372,24 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		providerLabelOrNotConfigured(pc.WeatherProvider), providerLabelOrNotConfigured(pc.WaveProvider),
 		providerLabelOrNotConfigured(pc.TideProvider), tideStation)
 
+	if indexLine := manualIndexLine(pc.ManualPages); indexLine != "" {
+		b.WriteString(indexLine)
+		b.WriteString("\n\n")
+	}
+
+	// 6a. Screen context: only present when the POST for this turn carried a
+	// non-empty screen field (postAssistantMessageHandler), so a
+	// text-composer question - the overwhelming majority - renders exactly
+	// as it did before this field existed.
+	if sentence := assistantScreenSentence(pc.Screen); sentence != "" {
+		b.WriteString(sentence)
+	}
+
 	// 7. Tool-use guidance.
+	b.WriteString("When the question is about Helmcentral itself, what a panel or chart shows or how to " +
+		"configure it, call read_manual for the relevant page first and answer from it; when it is about the " +
+		"sea, use the forecast, tide and passage tools as usual.\n\n")
+
 	b.WriteString("To resolve a place, call find_places with the bare feature name (\"Bona Bay\", not \"Bona Bay, " +
 		"Gloucester Island\"). If it is more than about 20 nautical miles from the vessel, or the lookup returns " +
 		"nothing, resolve a nearby feature you can name (the island, the cape, the harbour) and retry with its " +
@@ -334,6 +433,16 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		"Write like a delivery skipper briefing the owner before casting off. No exclamation marks, no opener " +
 		"like \"Good!\", no closing verdict line like \"looks like a comfortable passage\". Let length follow the " +
 		"question; use markdown headings and a comparison table when weighing two or more options.\n\n")
+
+	// 7 continued: only present for this turn when the POST carried
+	// spoken:true (postAssistantMessageHandler) - a voice question wants a
+	// short read-aloud tail on top of the written briefing above, not
+	// instead of it.
+	if pc.Spoken {
+		b.WriteString("The operator asked by voice. End the answer with a heading exactly `## Spoken summary` " +
+			"followed by at most three sentences that can be read aloud: the recommendation and the one number " +
+			"that matters. Everything above that heading is the written briefing as usual.\n\n")
+	}
 
 	// 8. Operator standing notes, verbatim.
 	notes := strings.TrimSpace(pc.Notes)
