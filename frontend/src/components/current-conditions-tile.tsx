@@ -71,7 +71,13 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
   const tempMax = tempBand ? Math.ceil(tempBand.high) + 5 : 40
 
   const rainLine =
-    rain === null ? '—' : rain === 'none' ? 'No rain expected next 24 h' : `Rain likely from ${rain.label} (${Math.round(rain.chancePct)}%)`
+    rain === null
+      ? '—'
+      : rain === 'none'
+        ? 'No rain expected next 24 h'
+        : rain.isNow
+          ? `Rain likely now (${Math.round(rain.chancePct)}%)`
+          : `Rain likely from ${rain.label} (${Math.round(rain.chancePct)}%)`
 
   return (
     <Tile title="Current Conditions" stale={depthStale} staleLabel={formatDataAge(depthLastUpdateAgeS)}>

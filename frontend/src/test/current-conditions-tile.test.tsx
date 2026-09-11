@@ -168,6 +168,36 @@ describe('CurrentConditionsTile', () => {
     expect(screen.getByText(/60%/)).toBeInTheDocument()
   })
 
+  test('shows "Rain likely now" when the first over-threshold bucket is the current hour', () => {
+    // The tile derives nowHour from new Date().getHours() (local time), which
+    // shifts with the machine's timezone even though the fake system time
+    // above is fixed in UTC - so the precip bucket under test has to line up
+    // with whatever hour that resolves to here, not a hardcoded one.
+    const nowHour = new Date().getHours()
+
+    render(
+      <CurrentConditionsTile
+        depth={5}
+        depthLastUpdateAgeS={0}
+        windSpeedApparentKts={10}
+        maxGustKts={NO_GUSTS}
+        weather={weather()}
+        forecast={[
+          day({
+            hourlyPrecip: [
+              { label: 'now', hourOfDay: nowHour, precipChancePct: 50, precipIntensityMm: 1 },
+            ],
+          }),
+        ]}
+        distanceUnits="metric"
+      />,
+    )
+
+    expect(screen.getByText(/rain likely now/i)).toBeInTheDocument()
+    expect(screen.getByText(/50%/)).toBeInTheDocument()
+    expect(screen.queryByText(/rain likely from/i)).not.toBeInTheDocument()
+  })
+
   test('shows "no rain expected" when the forecast has data but stays under threshold', () => {
     render(
       <CurrentConditionsTile

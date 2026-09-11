@@ -61,7 +61,7 @@ export function nextRain(
   forecastDays: WeatherForecastDay[],
   nowHour: number,
   thresholdPct = 40,
-): { label: string; chancePct: number } | 'none' | null {
+): { label: string; chancePct: number; isNow: boolean } | 'none' | null {
   const points = next24hWindow<WeatherHourlyPrecipPoint>(forecastDays, nowHour, (d) => d.hourlyPrecip)
 
   const withData = points.filter((p): p is WeatherHourlyPrecipPoint & { precipChancePct: number } => p.precipChancePct !== null)
@@ -73,5 +73,13 @@ export function nextRain(
   const firstOverThreshold = withData.find((p) => p.precipChancePct >= thresholdPct)
   if (!firstOverThreshold) return 'none'
 
-  return { label: firstOverThreshold.label, chancePct: firstOverThreshold.precipChancePct }
+  // next24hWindow orders today's remaining hours (hourOfDay >= nowHour)
+  // before tomorrow's leading hours (hourOfDay < nowHour), so a match on
+  // nowHour itself can only be today's current hour, never a point carried
+  // over from tomorrow's window.
+  return {
+    label: firstOverThreshold.label,
+    chancePct: firstOverThreshold.precipChancePct,
+    isNow: firstOverThreshold.hourOfDay === nowHour,
+  }
 }

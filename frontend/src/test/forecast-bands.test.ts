@@ -176,13 +176,30 @@ describe('nextRain', () => {
       }),
     ]
     const result = nextRain(days, 0)
-    expect(result).toEqual({ label: 'first-over', chancePct: 50 })
+    expect(result).toEqual({ label: 'first-over', chancePct: 50, isNow: false })
   })
 
   it('respects a custom threshold parameter', () => {
     const days = [day({ dayKey: 'd0', hourlyPrecip: [precipPoint(0, 60, 'sixty')] })]
     expect(nextRain(days, 0, 70)).toBe('none')
-    expect(nextRain(days, 0, 50)).toEqual({ label: 'sixty', chancePct: 60 })
+    expect(nextRain(days, 0, 50)).toEqual({ label: 'sixty', chancePct: 60, isNow: true })
+  })
+
+  it('marks isNow true when the first over-threshold hour is the current hour', () => {
+    const days = [day({ dayKey: 'd0', hourlyPrecip: [precipPoint(11, 50, '11AM')] })]
+    const result = nextRain(days, 11)
+    expect(result).toEqual({ label: '11AM', chancePct: 50, isNow: true })
+  })
+
+  it('marks isNow false when the first over-threshold hour is later than the current hour', () => {
+    const days = [
+      day({
+        dayKey: 'd0',
+        hourlyPrecip: [precipPoint(11, 20, '11AM'), precipPoint(14, 50, '2PM')],
+      }),
+    ]
+    const result = nextRain(days, 11)
+    expect(result).toEqual({ label: '2PM', chancePct: 50, isNow: false })
   })
 
   it("returns 'none' when real data is mixed with nulls but none cross threshold", () => {
