@@ -14,6 +14,8 @@ meets your needs.
   heavy-weather warning signs the wave graph watches for.
 - [Anchor watch](features/anchor-watch.md), including the rode planner.
 - [Alarms](features/alarms.md), rules, transports and the decisions behind them.
+- [Assistant](features/assistant.md), a chat panel that answers passage-planning
+  questions using the boat's own live data.
 - [Inventory tracking](features/inventory-tracking.md), designed but not yet built.
 
 ## How-to guides
@@ -26,6 +28,7 @@ Steps for specific tasks.
 - [Pin an indicator ribbon](how-to/pin-an-indicator-ribbon.md)
 - [Set up a wall display](how-to/set-up-a-wall-display.md)
 - [Add a Nearby map](how-to/add-a-nearby-map.md)
+- [Set up the assistant](how-to/set-up-the-assistant.md)
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
 - [Development](how-to/development.md), running the stack, tests and release builds.
 

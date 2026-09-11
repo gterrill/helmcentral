@@ -9,6 +9,13 @@ Follows the precedent of
 Reverses the remaining scope boundary of ADR 0043 and completes the direction
 [ADR 0053](0053-engine-profiles.md) started.
 
+§5's client choice is superseded: [ADR 0093](0093-onboard-assistant-over-openrouter.md)
+replaces the `go-openai` client named below with a hand-rolled OpenRouter
+client, built for its own, independent use case (the onboard assistant) and
+reused by this section's photo-label reading whenever that is built. Every
+other house rule in §5 (BYOK, off by default, key in `knownSecretKeys` only,
+never `coreEnvSecretKeys`) stands as written.
+
 ## Context
 
 ADR 0043 drew a line: maintenance and inventory *records* live in a separate

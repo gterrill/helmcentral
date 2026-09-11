@@ -94,6 +94,7 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 | `PLUGIN_OVERRIDES_DB_PATH` | `data/plugin_overrides.sqlite` |
 | `NEARBY_CONTACTS_DB_PATH` | `data/nearby-contacts.sqlite` |
 | `WEBPUSH_DB_PATH` | `data/webpush-subscriptions.sqlite` |
+| `ASSISTANT_DB_PATH` | `data/assistant.sqlite` |
 | `TILE_CACHE_PATH` | `data/tile-cache.sqlite` |
 | `SAT_CHARTS_DIR` | `data/sat-charts` |
 | `PLUGINS_TIDES_DIR` | `plugins/tides` |
@@ -104,12 +105,17 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 
 ## Secrets
 
-SignalK credentials, `INFLUXDB_TOKEN`, the `WEATHERKIT_*` keys and the
-`VAPID_*` web push keys are **not** environment variables in normal use. They
-reside in an AES-256-GCM encrypted SQLite store and are managed from the
-Secrets panel in the Settings UI. Keeping them out of the process environment
-is deliberate: every WASM plugin's `${VAR}` configuration expansion reads
-from the environment, so a value placed there is accessible to any plugin.
+SignalK credentials, `INFLUXDB_TOKEN`, the `WEATHERKIT_*` keys,
+`OPENROUTER_API_KEY` and the `VAPID_*` web push keys are **not** environment
+variables in normal use. They reside in an AES-256-GCM encrypted SQLite store
+and are managed from the Secrets panel in the Settings UI. Keeping them out
+of the process environment is deliberate: every WASM plugin's `${VAR}`
+configuration expansion reads from the environment, so a value placed there
+is accessible to any plugin.
+
+The `assistant:` block in `settings.yaml` (enabled, model, standing notes)
+holds the assistant's non-secret configuration; see
+[Assistant](../features/assistant.md) for what each field does.
 
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to being managed
 from the UI. The VAPID keypair is self-issued, generated automatically on first
