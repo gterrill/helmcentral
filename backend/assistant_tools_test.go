@@ -490,6 +490,112 @@ func TestAssistantTitleCase(t *testing.T) {
 	}
 }
 
+func TestAssistantExactNameVariants_CommaQualifierIncludesBareHead(t *testing.T) {
+	variants := assistantExactNameVariants("Bona Bay, Gloucester Island")
+	want := "Bona Bay"
+	found := false
+	for _, v := range variants {
+		if v == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected variants for %q to include the bare head %q, got %v", "Bona Bay, Gloucester Island", want, variants)
+	}
+}
+
+func TestExecuteFindPlaces_QualifierResolvesCentresRung2AndReportsCentredOn(t *testing.T) {
+	vesselLat, vesselLon := -20.1, 149.1
+	qualifierLat, qualifierLon := -19.8, 148.5 // "Gloucester Island", well outside rung 2's 20nm radius from the vessel
+
+	fetcher := &sequentialOverpassFetcher{
+		responses: []fakeOverpassResponse{
+			{body: []byte(`{"elements":[]}`)}, // rung 1: exact match for the full query, nothing
+			{body: []byte(fmt.Sprintf(`{"elements":[{"type":"node","id":1,"lat":%.6f,"lon":%.6f,"tags":{"name":"Gloucester Island","place":"island"}}]}`, qualifierLat, qualifierLon))}, // qualifier exact lookup: one hit
+			{body: []byte(`{"elements":[]}`)}, // rung 2: partial match, nothing (not the point of this test)
+		},
+	}
+	deps := assistantToolDeps{
+		vesselState: func() (vesselStateData, error) {
+			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
+		},
+		overpass: fetcher,
+		routes:   func() []routeData { return nil },
+	}
+
+	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
+	if err != nil {
+		t.Fatalf("execute find_places: %v", err)
+	}
+	if fetcher.callCount() != 3 {
+		t.Fatalf("expected 3 overpass calls (rung 1, qualifier lookup, rung 2), got %d", fetcher.callCount())
+	}
+	if !strings.Contains(fetcher.queryAt(1), `["name"="Gloucester Island"]`) {
+		t.Errorf("expected the qualifier lookup to search the exact qualifier name, got: %s", fetcher.queryAt(1))
+	}
+
+	wantSouth, wantWest, wantNorth, wantEast := assistantBoundingBox(qualifierLat, qualifierLon, assistantFindPlacesRegexRadiusNm)
+	wantBbox := overpassBoundingBoxClause(wantSouth, wantWest, wantNorth, wantEast)
+	if !strings.Contains(fetcher.queryAt(2), wantBbox) {
+		t.Errorf("expected rung 2's bbox to be centred on the qualifier hit (%s), got: %s", wantBbox, fetcher.queryAt(2))
+	}
+
+	var result assistantFindPlacesResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+	if result.CentredOn != "Gloucester Island" {
+		t.Errorf("expected centred_on=%q, got %q", "Gloucester Island", result.CentredOn)
+	}
+	if result.Centre == nil || result.Centre.Lat != qualifierLat || result.Centre.Lon != qualifierLon {
+		t.Errorf("expected centre to be the qualifier hit's coordinates (%v,%v), got %+v", qualifierLat, qualifierLon, result.Centre)
+	}
+}
+
+func TestExecuteFindPlaces_QualifierDoesNotResolveFallsBackToVesselCentre(t *testing.T) {
+	vesselLat, vesselLon := -20.1, 149.1
+	fetcher := &sequentialOverpassFetcher{
+		responses: []fakeOverpassResponse{
+			{body: []byte(`{"elements":[]}`)}, // rung 1: nothing
+			{body: []byte(`{"elements":[]}`)}, // qualifier lookup: nothing resolves
+			{body: []byte(`{"elements":[]}`)}, // rung 2: nothing
+		},
+	}
+	deps := assistantToolDeps{
+		vesselState: func() (vesselStateData, error) {
+			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
+		},
+		overpass: fetcher,
+		routes:   func() []routeData { return nil },
+	}
+
+	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
+	if err != nil {
+		t.Fatalf("execute find_places: %v", err)
+	}
+	if fetcher.callCount() != 3 {
+		t.Fatalf("expected 3 overpass calls even when the qualifier does not resolve, got %d", fetcher.callCount())
+	}
+
+	wantSouth, wantWest, wantNorth, wantEast := assistantBoundingBox(vesselLat, vesselLon, assistantFindPlacesRegexRadiusNm)
+	wantBbox := overpassBoundingBoxClause(wantSouth, wantWest, wantNorth, wantEast)
+	if !strings.Contains(fetcher.queryAt(2), wantBbox) {
+		t.Errorf("expected rung 2's bbox to fall back to the vessel centre (%s), got: %s", wantBbox, fetcher.queryAt(2))
+	}
+
+	var result assistantFindPlacesResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+	if result.CentredOn != "" {
+		t.Errorf("expected no centred_on when the qualifier does not resolve, got %q", result.CentredOn)
+	}
+	if result.Centre == nil || result.Centre.Lat != vesselLat || result.Centre.Lon != vesselLon {
+		t.Errorf("expected centre to remain the vessel position, got %+v", result.Centre)
+	}
+}
+
 func TestExecuteFindPlaces_NoFixAndNoNearArgsReturnsNoteNotError(t *testing.T) {
 	fetcher := &fakeOverpassFetcher{}
 	deps := assistantToolDeps{
@@ -842,6 +948,19 @@ func TestDescribeAssistantToolCall(t *testing.T) {
 			t.Errorf("describeAssistantToolCall(%q, %s) = %q, want %q", tc.name, tc.args, got, tc.want)
 		}
 	}
+}
+
+func TestAssistantToolDefinitions_FindPlacesDescriptionMentionsBareFeatureName(t *testing.T) {
+	for _, tool := range assistantToolDefinitions() {
+		if tool.Function.Name != "find_places" {
+			continue
+		}
+		if !strings.Contains(tool.Function.Description, "bare feature name") {
+			t.Fatalf("expected the find_places description to mention %q, got: %s", "bare feature name", tool.Function.Description)
+		}
+		return
+	}
+	t.Fatal("find_places tool definition not found")
 }
 
 // ── dispatch / truncation ───────────────────────────────────────────────

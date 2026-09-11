@@ -76,7 +76,12 @@ Overpass rate limit) is not swallowed. Its error is handed back to the model
 as ordinary tool content (`{"error": "..."}`), so the model can say "I
 couldn't get tides for that position" in its own answer, and the same
 failure is also emitted as a status line the operator sees live, so a dead
-tool is visible even before the model gets a chance to react to it.
+tool is visible even before the model gets a chance to react to it. Every
+tool call is also logged server-side before and after it runs, with its
+arguments, duration and result size (and, for `find_places`, the search
+rung and result count it resolved to), so a failed or surprising lookup can
+be diagnosed from the log after the fact rather than only from what the
+operator happened to see live.
 
 ### 3. A hand-rolled OpenRouter client, not go-openai
 
@@ -182,7 +187,12 @@ derived distance, bearing, ranking) applied here to two sources instead of
 one. When a waypoint and an OSM result name the same feature within 500m,
 the waypoint wins on dedupe, since it was added to the candidate list first
 and an operator's own named waypoint is a more deliberate answer than
-Overpass's guess at the same spot.
+Overpass's guess at the same spot. A query that keeps a qualifier after a
+comma ("Bona Bay, Gloucester Island") also tries the bare head as a rung 1
+variant, and when rung 1 still finds nothing, one extra exact-name lookup
+resolves the qualifier itself so rung 2's tight 20 nautical mile box can be
+centred on it instead of on the vessel, which matters whenever the named
+feature sits further from the vessel than that radius covers.
 
 ### 9. `time/tzdata` embedded for the static binary
 

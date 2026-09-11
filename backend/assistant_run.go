@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"strings"
 	"time"
 )
 
@@ -142,15 +144,21 @@ func (r *assistantRunner) run(ctx context.Context, system string, history []open
 			args := json.RawMessage(call.Function.Arguments)
 			r.emit("status", assistantStatus(describeAssistantToolCall(call.Function.Name, args)))
 
+			log.Printf("assistant: tool %s %s", call.Function.Name, compactAssistantToolArgs(args))
+			toolStart := time.Now()
 			result, terr := r.tools.execute(ctx, call.Function.Name, args)
+			elapsed := time.Since(toolStart).Round(time.Millisecond)
 			if terr != nil {
 				oneLine := firstErrorLine(terr)
+				log.Printf("assistant: tool %s failed after %s: %v", call.Function.Name, elapsed, terr)
 				errBody, merr := json.Marshal(map[string]string{"error": oneLine})
 				if merr != nil {
 					return assistantReply{}, fmt.Errorf("marshal tool error for %q: %w", call.Function.Name, merr)
 				}
 				result = string(errBody)
 				r.emit("status", assistantStatus(fmt.Sprintf("%s failed: %s", call.Function.Name, oneLine)))
+			} else {
+				log.Printf("assistant: tool %s -> %d chars in %s%s", call.Function.Name, len(result), elapsed, assistantFindPlacesLogSuffix(call.Function.Name, result))
 			}
 
 			messages = append(messages, openRouterMessage{
@@ -162,6 +170,38 @@ func (r *assistantRunner) run(ctx context.Context, system string, history []open
 
 		reply.ToolRounds++
 	}
+}
+
+// compactAssistantToolArgs trims a tool call's raw arguments to 200 runes
+// for the "about to call" log line - long enough to show a query, coordinates
+// and any day count, short enough that a pathological argument (or a model
+// that pastes something huge into a string field) never floods the log.
+func compactAssistantToolArgs(args json.RawMessage) string {
+	runes := []rune(strings.TrimSpace(string(args)))
+	if len(runes) > 200 {
+		runes = runes[:200]
+	}
+	return string(runes)
+}
+
+// assistantFindPlacesLogSuffix decodes just the "search" and "results"
+// fields of a successful find_places result for the "tool ... -> N chars"
+// log line, so a failed or surprising lookup (the wrong rung, or zero
+// results) can be diagnosed from the log after the fact without persisting
+// the full tool transcript (ADR 0093 section 6 deliberately does not).
+// Empty for any other tool, or if result does not decode as JSON.
+func assistantFindPlacesLogSuffix(name, result string) string {
+	if name != "find_places" {
+		return ""
+	}
+	var decoded struct {
+		Search  string            `json:"search"`
+		Results []json.RawMessage `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		return ""
+	}
+	return fmt.Sprintf(" (search=%s, results=%d)", decoded.Search, len(decoded.Results))
 }
 
 // assistantHistoryMessages converts a conversation's persisted rows

@@ -324,6 +324,8 @@ func postAssistantMessageHandler(c echo.Context) error {
 		emit("error", map[string]string{"error": firstErrorLine(runErr)})
 		return nil
 	}
+	log.Printf("assistant: conversation %s answered by %s in %d tool rounds, %d prompt + %d completion tokens, $%.4f",
+		id, reply.Model, reply.ToolRounds, reply.PromptTokens, reply.CompletionTokens, reply.CostUSD)
 
 	assistantRow, err := globalAssistantStore.AppendMessage(assistantMessage{
 		ConversationID:   id,

@@ -119,7 +119,9 @@ func assistantToolDefinitions() []openRouterTool {
 					"to one or more candidate positions with distance and bearing, searching the vessel's saved " +
 					"route waypoints first and then OpenStreetMap. Centres on the vessel's current position unless " +
 					"near_lat/near_lon are given. Call this before any forecast or tide tool for a place you only " +
-					"know by name.",
+					"know by name. Pass the bare feature name (e.g. \"Bona Bay\", not \"Bona Bay, Gloucester " +
+					"Island\"). For a place more than about 20 nm from the vessel, or when a lookup returns " +
+					"nothing, pass near_lat/near_lon of a resolved nearby feature and retry.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -332,7 +334,14 @@ type assistantPlaceCandidate struct {
 }
 
 type assistantFindPlacesResult struct {
-	Centre    *assistantLatLon          `json:"centre,omitempty"`
+	Centre *assistantLatLon `json:"centre,omitempty"`
+	// CentredOn names the qualifier feature (e.g. "Gloucester Island") rung
+	// 2's bbox was centred on, when the query carried a comma-qualifier that
+	// resolved and rung 1 found nothing at the vessel/near_* centre - see
+	// executeFindPlaces. Empty whenever rung 2 centred on the ordinary
+	// vessel/near_* position, including when a qualifier was present but did
+	// not resolve.
+	CentredOn string                    `json:"centred_on,omitempty"`
 	RadiusNm  float64                   `json:"radius_nm,omitempty"`
 	Search    string                    `json:"search,omitempty"`
 	Results   []assistantPlaceCandidate `json:"results"`
@@ -410,6 +419,13 @@ func assistantFirstLetterUpperCase(s string) string {
 // its first letter upper-cased. This covers the common capitalisation
 // conventions a real OSM name tag actually uses without paying an
 // unindexed regex's server cost for it - see ADR 0093 section 8.
+//
+// A query that carries a qualifier after a comma ("Bona Bay, Gloucester
+// Island") also gets the same three variants of just the head before the
+// comma ("Bona Bay") - an operator or a model asking about a named feature
+// tends to keep the qualifier for clarity, but OSM's own name tag almost
+// never does, so searching only the qualified string would miss the exact
+// tag that is actually there.
 func assistantExactNameVariants(query string) []string {
 	normalized := strings.Join(strings.Fields(query), " ")
 	if normalized == "" {
@@ -422,6 +438,16 @@ func assistantExactNameVariants(query string) []string {
 		assistantFirstLetterUpperCase(normalized),
 	}
 
+	if head, _, ok := strings.Cut(normalized, ","); ok {
+		if headNormalized := strings.Join(strings.Fields(head), " "); headNormalized != "" {
+			candidates = append(candidates,
+				headNormalized,
+				assistantTitleCase(headNormalized),
+				assistantFirstLetterUpperCase(headNormalized),
+			)
+		}
+	}
+
 	seen := make(map[string]bool, len(candidates))
 	out := make([]string, 0, len(candidates))
 	for _, v := range candidates {
@@ -432,6 +458,37 @@ func assistantExactNameVariants(query string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// assistantFindPlacesQualifier returns the trimmed text after a query's
+// first comma ("Bona Bay, Gloucester Island" -> "Gloucester Island"), or ""
+// when the query carries no comma or the qualifier is blank. This is the
+// feature find_places tries to resolve on its own, centring rung 2 on it,
+// when the bare query (assistantExactNameVariants' head variants) does not
+// resolve within rung 1's full radius - see executeFindPlaces.
+func assistantFindPlacesQualifier(query string) string {
+	_, tail, ok := strings.Cut(query, ",")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(tail)
+}
+
+// nearestAssistantPlaceCandidate returns the candidate with the smallest
+// DistanceNm, or false when candidates is empty. Used to pick which
+// resolved qualifier hit find_places should centre rung 2's search on, when
+// the qualifier query returns more than one candidate.
+func nearestAssistantPlaceCandidate(candidates []assistantPlaceCandidate) (assistantPlaceCandidate, bool) {
+	if len(candidates) == 0 {
+		return assistantPlaceCandidate{}, false
+	}
+	nearest := candidates[0]
+	for _, c := range candidates[1:] {
+		if c.DistanceNm < nearest.DistanceNm {
+			nearest = c
+		}
+	}
+	return nearest, true
 }
 
 // buildOverpassExactNameQuery builds rung 1's Overpass QL: an untagged,
@@ -653,10 +710,34 @@ func (d assistantToolDeps) executeFindPlaces(raw json.RawMessage) (string, error
 	// operator's own answer is already in hand, and rung 2's regex union is
 	// the expensive query (ADR 0093 section 8: 2 to 5s at 20nm, and it times
 	// out server-side well before 100nm).
+	//
+	// A query carrying a comma-qualifier ("Bona Bay, Gloucester Island")
+	// gets one extra exact-name lookup for the qualifier alone, at rung 1's
+	// full radius, before rung 2 runs: when it resolves, rung 2's tight box
+	// is centred on the nearest such hit rather than the vessel/near_*
+	// centre, since the named feature can sit well outside rung 2's 20nm
+	// radius from the vessel (a bay named for the island it is on, tens of
+	// miles away). When the qualifier does not resolve, rung 2 falls back to
+	// centring on the vessel/near_* position exactly as before. This is at
+	// most one extra Overpass call, and only on this path.
 	var regexCandidates []assistantPlaceCandidate
+	var centredOn string
+	regexCentreLat, regexCentreLon := lat, lon
 	ranRung2 := len(exactCandidates) == 0 && !waypointHit
 	if ranRung2 {
-		regexSouth, regexWest, regexNorth, regexEast := assistantBoundingBox(lat, lon, assistantFindPlacesRegexRadiusNm)
+		if qualifier := assistantFindPlacesQualifier(query); qualifier != "" {
+			qSouth, qWest, qNorth, qEast := assistantBoundingBox(lat, lon, assistantFindPlacesRadiusNm)
+			qElements, qerr := postOverpassQuery(d.overpass, buildOverpassExactNameQuery(qualifier, qSouth, qWest, qNorth, qEast))
+			if qerr != nil {
+				return "", fmt.Errorf("find_places: %w", qerr)
+			}
+			if nearest, ok := nearestAssistantPlaceCandidate(assistantOverpassElementsToCandidates(qElements, lat, lon)); ok {
+				regexCentreLat, regexCentreLon = nearest.Lat, nearest.Lon
+				centredOn = nearest.Name
+			}
+		}
+
+		regexSouth, regexWest, regexNorth, regexEast := assistantBoundingBox(regexCentreLat, regexCentreLon, assistantFindPlacesRegexRadiusNm)
 		regexElements, err := postOverpassQuery(d.overpass, buildOverpassNameSearchQuery(query, regexSouth, regexWest, regexNorth, regexEast))
 		if err != nil {
 			return "", fmt.Errorf("find_places: %w", err)
@@ -689,11 +770,16 @@ func (d assistantToolDeps) executeFindPlaces(raw json.RawMessage) (string, error
 		candidates = candidates[:maxResults]
 	}
 
+	centre := assistantLatLon{Lat: lat, Lon: lon}
+	if centredOn != "" {
+		centre = assistantLatLon{Lat: regexCentreLat, Lon: regexCentreLon}
+	}
 	result := assistantFindPlacesResult{
-		Centre:   &assistantLatLon{Lat: lat, Lon: lon},
-		RadiusNm: radiusUsed,
-		Search:   search,
-		Results:  candidates,
+		Centre:    &centre,
+		CentredOn: centredOn,
+		RadiusNm:  radiusUsed,
+		Search:    search,
+		Results:   candidates,
 	}
 	if len(candidates) == 0 {
 		result.Note = fmt.Sprintf(

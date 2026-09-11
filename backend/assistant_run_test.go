@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"testing"
@@ -225,6 +226,55 @@ func TestAssistantRunner_TwoToolCallsInOneTurnBothExecutedAndTokensSummed(t *tes
 	}
 	if tm, ok := toolByID["call_2"]; !ok || string(tm.Content) != `{"days":[]}` {
 		t.Fatalf("expected tool message for call_2 with matching content, got %+v ok=%v", tm, ok)
+	}
+}
+
+// TestAssistantRunner_LogsToolCallBeforeAndAfter captures package log output
+// (log.SetOutput to a buffer, restored on cleanup) around a run with one
+// tool call, so a failed or slow lookup can be diagnosed from the server log
+// after the fact rather than only from what the operator saw live in the
+// SSE stream (see assistant_run.go's compactAssistantToolArgs and
+// assistantFindPlacesLogSuffix).
+func TestAssistantRunner_LogsToolCallBeforeAndAfter(t *testing.T) {
+	var logBuf bytes.Buffer
+	origOutput := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(origOutput)
+		log.SetFlags(origFlags)
+	})
+
+	round0 := chatResponse(t, http.StatusOK, openRouterChatResponse{
+		Choices: []openRouterChoice{{
+			Message: openRouterMessage{
+				Role: "assistant",
+				ToolCalls: []openRouterToolCall{
+					{ID: "call_1", Type: "function", Function: openRouterToolCallFunction{Name: "find_places", Arguments: openRouterArguments(`{"query":"Tongue Bay"}`)}},
+				},
+			},
+		}},
+	})
+	round1 := finalResponse(t, "done", "m", openRouterUsage{})
+
+	doer := &queuedChatDoer{responses: []*http.Response{round0, round1}, errs: []error{nil, nil}}
+	tools := &fakeToolExecutor{results: map[string]string{
+		"find_places": `{"search":"exact","results":[{"name":"Tongue Bay"}]}`,
+	}}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	if _, err := runner.run(context.Background(), "system", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, "assistant: tool find_places") {
+		t.Fatalf("expected a log line for the tool call, got:\n%s", logged)
+	}
+	if !strings.Contains(logged, "-> ") {
+		t.Fatalf("expected a log line reporting the result size/duration, got:\n%s", logged)
 	}
 }
 
