@@ -62,6 +62,44 @@ returned as an explicit error from `fetch_poi` - never as an empty feature
 list, which the host would otherwise be unable to tell apart from a
 genuinely quiet patch of water.
 
+If the public `overpass-api.de` instance is unreachable or persistently rate
+limiting your boat's connection, point this plugin at a different Overpass
+mirror instead - see "Pointing at an Overpass mirror" below.
+
+## Pointing at an Overpass mirror
+
+By default this plugin queries the public `overpass-api.de` instance
+(`defaultOverpassAPIURL` in `osm-overpass.go`). An operator can override this
+with the optional `overpass_url` key in a companion `osm-overpass.config.json`
+file:
+
+```jsonc
+// osm-overpass.config.json
+{
+  "overpass_url": "https://overpass.kumi.systems/api/interpreter"
+}
+```
+
+`resolveOverpassURL` (`osm-overpass.go`) requires the value to parse as an
+absolute `https://` URL. A present-but-malformed value fails the `fetch_poi`
+call outright, naming the `overpass_url` key in the error - it never falls
+back to the default silently, since a config.json edit that didn't produce a
+usable URL almost certainly wasn't meant to keep querying overpass-api.de.
+Leaving the key out of config.json entirely keeps the default.
+
+**Changing this value does not by itself grant network access to the new
+host.** The Extism sandbox's network allowlist is enforced from
+`osm-overpass.allowed_hosts.json` (or the Settings allowlist override,
+[ADR 0024](../../../adr/0024-plugin-descriptions-and-allowlist-overrides.md)),
+independently of this config value. Point `overpass_url` at a mirror and
+forget to add its host to the allowlist, and the request fails at the
+sandbox boundary instead - update both together:
+
+```jsonc
+// osm-overpass.allowed_hosts.json
+["overpass-api.de", "overpass.kumi.systems", "en.wikipedia.org"]
+```
+
 ## Wikipedia enrichment
 
 After classification, the nearest `detail_limit` features (config, default
@@ -172,8 +210,9 @@ capture-environment workaround only, not a design decision.
 
 ## Endpoints this plugin uses
 
-1. POI data: `POST https://overpass-api.de/api/interpreter` with the query
-   Overpass QL body built by `buildOverpassPOIQuery`.
+1. POI data: `POST https://overpass-api.de/api/interpreter` (or the
+   `overpass_url` override - see "Pointing at an Overpass mirror" above) with
+   the query Overpass QL body built by `buildOverpassPOIQuery`.
 2. Wikipedia enrichment: `GET https://en.wikipedia.org/api/rest_v1/page/summary/<Title>`.
 
 See [Overpass QL's documentation](https://wiki.openstreetmap.org/wiki/Overpass_API/Overpass_QL)

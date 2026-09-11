@@ -13,6 +13,12 @@
 // detected explicitly and returned as an error, never silently read as an
 // empty result: see looksLikeOverpassRateLimit in osm-overpass.go.
 //
+// The Overpass endpoint itself defaults to the public overpass-api.de but
+// can be pointed at a mirror via the optional "overpass_url" config key -
+// see resolveOverpassURL in osm-overpass.go and this plugin's README. A
+// malformed override fails the call outright rather than silently using the
+// default.
+//
 // After classification, the nearest detail_limit (config, default 5)
 // features carrying an OSM "wikipedia" tag are enriched with the first
 // sentence of the English Wikipedia REST page summary. A feature that has
@@ -99,7 +105,13 @@ func fetchPOI() int32 {
 
 	query := buildOverpassPOIQuery(input.Lat, input.Lon, input.RadiusM, input.Categories)
 
-	req := pdk.NewHTTPRequest(pdk.MethodPost, overpassAPIURL)
+	overpassURL, err := resolveOverpassURL(pdk.GetConfig("overpass_url"))
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	req := pdk.NewHTTPRequest(pdk.MethodPost, overpassURL)
 	req.SetHeader("Content-Type", "application/x-www-form-urlencoded")
 	req.SetHeader("User-Agent", "helmcentral-osm-overpass-plugin/1.0")
 	req.SetBody([]byte("data=" + url.QueryEscape(query)))

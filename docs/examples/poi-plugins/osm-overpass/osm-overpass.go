@@ -20,7 +20,9 @@ import (
 	"strings"
 )
 
-const overpassAPIURL = "https://overpass-api.de/api/interpreter"
+// defaultOverpassAPIURL is the Overpass endpoint used when config.json
+// carries no "overpass_url" override - see resolveOverpassURL.
+const defaultOverpassAPIURL = "https://overpass-api.de/api/interpreter"
 const wikipediaSummaryURLFmt = "https://en.wikipedia.org/api/rest_v1/page/summary/%s"
 
 // defaultDetailLimit is how many of the nearest wikipedia-tagged features
@@ -454,6 +456,32 @@ func resolveDetailLimit(raw string, present bool) int {
 		return defaultDetailLimit
 	}
 	return n
+}
+
+// resolveOverpassURL reads the optional "overpass_url" plugin config value,
+// defaulting to defaultOverpassAPIURL when config.json carries no such key.
+// Unlike resolveDetailLimit above, a present-but-malformed value does NOT
+// fall back to the default - a config.json edit that failed to produce a
+// usable URL almost certainly did not mean "use overpass-api.de", so this
+// returns an error naming the "overpass_url" key rather than masking the
+// mistake. The value must parse as an absolute https URL.
+//
+// Pointing this at a mirror (e.g. https://overpass.kumi.systems/api/interpreter)
+// does not by itself grant network access to it: the mirror's host still has
+// to be added to this plugin's osm-overpass.allowed_hosts.json (or the
+// Settings allowlist override, docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md),
+// or the request fails at the sandbox boundary instead. See this plugin's
+// README.
+func resolveOverpassURL(raw string, present bool) (string, error) {
+	if !present {
+		return defaultOverpassAPIURL, nil
+	}
+	trimmed := strings.TrimSpace(raw)
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", fmt.Errorf("overpass_url: must be an absolute https URL, got %q", raw)
+	}
+	return trimmed, nil
 }
 
 // nearestWikipediaFeatures returns the indexes of features carrying a

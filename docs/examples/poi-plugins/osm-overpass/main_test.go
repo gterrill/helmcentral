@@ -321,6 +321,49 @@ func TestResolveDetailLimit_FallsBackOnUnparseableValue(t *testing.T) {
 	}
 }
 
+func TestResolveOverpassURL_DefaultsWhenAbsent(t *testing.T) {
+	got, err := resolveOverpassURL("", false)
+	if err != nil {
+		t.Fatalf("expected no error when overpass_url is absent, got %v", err)
+	}
+	if got != defaultOverpassAPIURL {
+		t.Fatalf("expected default %q, got %q", defaultOverpassAPIURL, got)
+	}
+}
+
+func TestResolveOverpassURL_AcceptsValidOverride(t *testing.T) {
+	const mirror = "https://overpass.kumi.systems/api/interpreter"
+	got, err := resolveOverpassURL(mirror, true)
+	if err != nil {
+		t.Fatalf("expected a valid https override to be accepted, got error %v", err)
+	}
+	if got != mirror {
+		t.Fatalf("expected %q, got %q", mirror, got)
+	}
+}
+
+func TestResolveOverpassURL_RejectsMalformedValueRatherThanFallingBack(t *testing.T) {
+	cases := []string{
+		"not a url",
+		"overpass.kumi.systems/api/interpreter",        // no scheme
+		"http://overpass.kumi.systems/api/interpreter", // not https
+		"https://", // no host
+		"ftp://overpass.kumi.systems/api/interpreter", // wrong scheme
+	}
+	for _, raw := range cases {
+		got, err := resolveOverpassURL(raw, true)
+		if err == nil {
+			t.Fatalf("expected an error for malformed overpass_url %q, got url %q with no error", raw, got)
+		}
+		if !strings.Contains(err.Error(), "overpass_url") {
+			t.Fatalf("expected the error to name the overpass_url key, got %v", err)
+		}
+		if got != "" {
+			t.Fatalf("expected no fallback to the default on a malformed value, got %q", got)
+		}
+	}
+}
+
 // ── live fixtures ────────────────────────────────────────────────────────
 //
 // Captured from a live Overpass server against the plan's exact query

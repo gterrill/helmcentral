@@ -16,7 +16,7 @@ The six registries (`backend/tide_providers.go`,
 | Tides | `plugins/tides/` | `PLUGINS_TIDES_DIR` | `bom` (Australia), `noaa` (US) |
 | Weather | `plugins/weather/` | `PLUGINS_WEATHER_DIR` | `open-meteo` (worldwide, keyless, **default**), `weatherkit` (Apple, needs keys) |
 | Waves | `plugins/waves/` | `PLUGINS_WAVES_DIR` | `open-meteo-marine` (**default**) |
-| Points of interest | `plugins/poi/` | `PLUGINS_POI_DIR` | `osm-overpass` (worldwide, keyless, **default**), `google-places` (needs a key, partial category coverage) |
+| Points of interest | `plugins/poi/` | `PLUGINS_POI_DIR` | `osm-overpass` (worldwide, keyless, **default**; optional `overpass_url` config to use a mirror), `google-places` (needs a key, partial category coverage) |
 | Forecast warnings | `plugins/forecast-warnings/` | `PLUGINS_FORECAST_WARNINGS_DIR` | `bom` (Australia, **default**), `nws` (US) |
 | Upper air | `plugins/upper-air/` | `PLUGINS_UPPER_AIR_DIR` | `open-meteo-upper` (worldwide, keyless) |
 
