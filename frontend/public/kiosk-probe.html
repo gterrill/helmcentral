@@ -70,7 +70,7 @@
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     grid-template-rows: repeat(2, 1fr);
     gap: 8px;
     padding: 8px;
@@ -225,6 +225,15 @@
   (function checkStructuredClone() {
     var ok = typeof structuredClone === 'function';
     addCheck('structuredClone', ok, "typeof === 'function'");
+  })();
+
+  // 4b. Regex lookbehind. Safari gained it in 16.4; a lookbehind literal in
+  // the app's entry chunk is a parse-time SyntaxError on anything older, so
+  // this is the check that would have named the 2026-09-12 white screen.
+  (function checkLookbehind() {
+    var lbOk = true, lbDetail = 'parses (?<=a)b';
+    try { new RegExp('(?<=a)b'); } catch (e) { lbOk = false; lbDetail = String(e && e.message || e).slice(0, 80); }
+    addCheck('regex lookbehind', lbOk, lbDetail);
   })();
 
   // 5. EventSource, ResizeObserver, matchMedia, Intl timezone.
