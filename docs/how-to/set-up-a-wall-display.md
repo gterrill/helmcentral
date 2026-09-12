@@ -14,8 +14,10 @@ glance; read the actual results from the backend log instead, on the boat
 box:
 
 ```
-docker compose logs backend | grep 'kiosk probe'
+docker compose logs helmcentral | grep 'kiosk probe'
 ```
+
+A white screen on the wall also lands in that log: the app shell posts the first startup error as a `kiosk probe: [FAIL] boot error` line naming the message and the script position, so a browser that cannot parse the bundle explains itself without a keyboard.
 
 That prints a header line (user agent, viewport, rotation), one line per
 check, and a footer with the pass count. The checks are: a hardware WebGL2

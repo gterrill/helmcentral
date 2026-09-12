@@ -21,6 +21,46 @@
   </head>
   <body style="margin: 0; padding: 0;">
     <div id="root"></div>
+    <!--
+      Boot-error reporter (ADR 0089). A kiosk has no keyboard and no devtools,
+      and a module that fails to parse leaves a white screen with nothing to
+      read. This classic script runs even when the module below cannot, and
+      posts the first error or unhandled rejection of the page load to the
+      backend log through the kiosk probe endpoint. ES5 on purpose.
+    -->
+    <script>
+      (function () {
+        var sent = false;
+        function report(detail) {
+          if (sent) return;
+          sent = true;
+          try {
+            var body = JSON.stringify({
+              user_agent: navigator.userAgent,
+              viewport: { w: window.innerWidth, h: window.innerHeight },
+              rotate: 0,
+              checks: [{ name: 'boot error', pass: false, detail: String(detail).slice(0, 500) }]
+            });
+            if (window.fetch) {
+              fetch('/api/kiosk-probe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true })['catch'](function () {});
+            } else if (window.XMLHttpRequest) {
+              var xhr = new XMLHttpRequest();
+              xhr.open('POST', '/api/kiosk-probe', true);
+              xhr.setRequestHeader('Content-Type', 'application/json');
+              xhr.send(body);
+            }
+          } catch (e) {}
+        }
+        window.addEventListener('error', function (ev) {
+          var where = (ev.filename || '?') + ':' + (ev.lineno || 0);
+          report((ev.message || 'error') + ' at ' + where);
+        });
+        window.addEventListener('unhandledrejection', function (ev) {
+          var r = ev.reason;
+          report('unhandled rejection: ' + (r && r.message ? r.message : String(r)));
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
