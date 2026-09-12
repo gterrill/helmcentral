@@ -15,9 +15,9 @@ export function formatClock(date: Date) {
   return { timePart, meridiem }
 }
 
-export function formatDate(date: Date) {
+export function formatDate(date: Date, options?: { compact?: boolean }) {
   return new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
+    weekday: options?.compact ? 'short' : 'long',
     month: 'short',
     day: 'numeric',
     year: 'numeric',

@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Sunrise, Sunset } from 'lucide-react'
 
 import { Tile } from '@/components/ui/tile'
-import { useVesselIdentity, formatClock } from '@/hooks/use-vessel-identity'
+import { useVesselIdentity, formatClock, formatDate } from '@/hooks/use-vessel-identity'
 import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
 
 export interface ClockTileNextWaypoint {
@@ -42,23 +42,34 @@ export const ClockTile = memo(function ClockTile({
   placeName,
   nextWaypoint,
 }: ClockTileProps) {
-  const { clock, currentDate } = useVesselIdentity()
+  const { now, clock } = useVesselIdentity()
+  // The header (vessel-status-bar.tsx) shares formatDate's full-weekday output via
+  // currentDate; this tile is two grid columns wide (~300px) and a long weekday
+  // ("SATURDAY, SEP 12, 2026") wraps to a second line there, pushing the place
+  // chip below the tile's bottom edge. The compact option keeps formatDate's
+  // weekday-first ordering but stays short enough to hold one line at minW.
+  const compactDate = formatDate(now, { compact: true }).toUpperCase()
   const etaLabel = nextWaypoint
     ? `ETA ${nextWaypoint.label} ${nextWaypoint.etaAt ? hhmm(formatClock(nextWaypoint.etaAt).timePart) : '—'}${nextWaypoint.basis === 'plan' ? ' (plan)' : ''}`
     : '—'
 
   return (
     <Tile title="Clock">
-      <div className="mt-2 flex h-full flex-col justify-between gap-3">
+      <div className="mt-1 flex h-full flex-col justify-between gap-2">
         <div>
           <time className="flex items-baseline gap-1 font-display leading-none tabular-nums text-gauge-secondary">
             <span className="text-7xl">{hhmm(clock.timePart)}</span>
             <span className="text-2xl">{clock.meridiem}</span>
           </time>
-          <p className="mt-1 text-xl uppercase tracking-[0.08em] text-muted-foreground">{currentDate}</p>
+          <p
+            data-testid="clock-date"
+            className="mt-1 truncate whitespace-nowrap text-xl uppercase tracking-[0.08em] text-muted-foreground"
+          >
+            {compactDate}
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4 text-lg tabular-nums">
+        <div className="flex flex-wrap items-center gap-3 text-lg tabular-nums">
           <span className="flex items-center gap-1.5">
             <Sunrise className="h-4 w-4 text-gauge-primary" aria-hidden="true" />
             {sunriseTime ?? '—'}
@@ -74,7 +85,7 @@ export const ClockTile = memo(function ClockTile({
         </div>
 
         <div>
-          <div className="truncate rounded-md bg-gauge-secondary/10 px-3 py-2 font-display text-lg text-gauge-secondary">
+          <div className="truncate rounded-md bg-gauge-secondary/10 px-3 py-1.5 font-display text-lg text-gauge-secondary">
             {placeName ?? '—'}
           </div>
           <p data-testid="clock-eta" className="mt-1 truncate text-[11px] text-muted-foreground">

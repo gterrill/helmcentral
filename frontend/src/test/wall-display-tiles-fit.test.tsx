@@ -137,6 +137,10 @@ describe('wall-display tiles fit their registered grid constraint', () => {
   })
 
   test('clock-tile', () => {
+    // Local-time constructor fixes the calendar date to Sep 12, 2026 - a
+    // Saturday, the longest-weekday scenario that was observed wrapping the
+    // date line and clipping the place chip below it at this tile's minW.
+    vi.setSystemTime(new Date(2026, 8, 12, 14, 0, 0))
     const { minW, minH } = WIDGET_CONSTRAINTS.clock!
     renderAtGridBox(
       <ClockTile
