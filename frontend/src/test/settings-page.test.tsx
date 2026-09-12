@@ -227,3 +227,29 @@ describe('SettingsPage imperative save handle', () => {
     await expect(ref.current!.save()).rejects.toThrow('boom')
   })
 })
+
+// ADR 0095: one Manual button per section, calling back with that section's
+// manual target rather than each section rendering its own.
+describe('SettingsPage Manual button', () => {
+  it('calls onOpenManual with the active section\'s manual target', () => {
+    const onOpenManual = vi.fn()
+    render(
+      <SettingsPage
+        autoCloseAnchorWatchEnabled
+        onAutoCloseAnchorWatchToggle={vi.fn()}
+        onOpenManual={onOpenManual}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alarms' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open the manual for this section' }))
+
+    expect(onOpenManual).toHaveBeenCalledWith({ page: 'features/alarms', heading: 'Getting told' })
+  })
+
+  it('renders no Manual button when onOpenManual is not passed - existing callers are untouched', () => {
+    render(<SettingsPage autoCloseAnchorWatchEnabled onAutoCloseAnchorWatchToggle={vi.fn()} />)
+
+    expect(screen.queryByRole('button', { name: 'Open the manual for this section' })).not.toBeInTheDocument()
+  })
+})

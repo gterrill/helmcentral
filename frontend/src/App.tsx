@@ -1,6 +1,8 @@
 import {
   Anchor,
   BellRing,
+  BookOpen,
+  CircleHelp,
   CloudSun,
   LampCeiling,
   LayoutDashboard,
@@ -39,6 +41,7 @@ import { RadarTargetsTile } from '@/components/radar-targets-tile'
 import { RadarDrawer } from '@/components/radar-drawer'
 import { AssistantDrawer } from '@/components/assistant-drawer'
 import { MateSheet } from '@/components/mate-sheet'
+import { ManualSheet } from '@/components/manual-sheet'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
 import {
@@ -192,6 +195,7 @@ import {
   type PanelId,
 } from '@/lib/app-location'
 import { screenContextFor } from '@/lib/mate-screen'
+import { manualTargetFor, type ManualTarget } from '@/lib/manual-links'
 import { cn } from '@/lib/utils'
 
 const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
@@ -421,6 +425,17 @@ export function App() {
     () => screenContextFor({ panel: activePanel, section: settingsSection }, activePage?.name ?? null),
     [activePanel, settingsSection, activePage],
   )
+
+  // The in-app manual (ADR 0095): a right-hand sheet, mounted once here
+  // beside the Mate sheet, opened by the header's contextual `?`, the
+  // sidebar's Manual item, or Settings' own Manual button - each hands
+  // openManual a ManualTarget (or null for the contents page).
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualTarget, setManualTarget] = useState<ManualTarget | null>(null)
+  const openManual = useCallback((target: ManualTarget | null) => {
+    setManualTarget(target)
+    setManualOpen(true)
+  }, [])
 
   // App-wide voice (ADR 0093 voice phase, "App-wide voice"): mounted once
   // here, not in the Mate panel/sheet, so push-to-talk - and, once the
@@ -1763,6 +1778,7 @@ export function App() {
             onDirtyChange={setSettingsDirty}
             activeSectionId={settingsSection}
             onSectionChange={setSettingsSection}
+            onOpenManual={openManual}
           />
         )
       case 'anchor-watch':
@@ -1879,7 +1895,10 @@ export function App() {
   // The wall display (ADR 0089) reuses dashboardGrid directly rather than
   // the ordinary shell: no sidebar, no header, no SidebarProvider. toastRef
   // already null-checks everywhere it's read and no tile calls useSidebar,
-  // so nothing downstream depends on SidebarProvider being mounted.
+  // so nothing downstream depends on SidebarProvider being mounted. This
+  // also means the manual (ADR 0095) needs no separate kiosk gating - the
+  // header `?`, the sidebar Manual item and <ManualSheet> itself are all
+  // declared below this return and never reached on an unattended screen.
   if (isKiosk) {
     return (
       <KioskShell rotate={kioskOptions.rotate} alarms={alarms}>
@@ -1971,6 +1990,16 @@ export function App() {
                 <span>Wall display</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
+            {/* ADR 0095: opens the contents page of the in-app manual. Never
+                `isActive` (it's a sheet over whatever's on screen, not a
+                panel of its own) and carries no PanelId or URL - ADR 0074
+                keeps sheets out of the address bar. */}
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip="Manual" onClick={() => openManual(null)}>
+                <BookOpen />
+                <span>Manual</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter>
@@ -2050,6 +2079,20 @@ export function App() {
                 )}
               </>
             )}
+            {/* ADR 0095: the contextual manual - lands on the current
+                screen's page (and heading, for the three dashboard
+                sub-panels that share features/dashboard). `title` is how
+                neighbouring header buttons carry a tooltip, same as this
+                one's neighbours below. */}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Open the manual"
+              title="Manual for this screen"
+              onClick={() => openManual(manualTargetFor({ panel: activePanel, section: settingsSection }))}
+            >
+              <CircleHelp className="h-4 w-4" />
+            </Button>
             {/* ADR 0093 voice phase: opens the Mate sheet over whatever page is
                 behind it, without navigating away - the shell-wide "push to
                 talk" entry point the plan calls for, though this button is
@@ -2193,6 +2236,16 @@ export function App() {
           setMatePanelConversationId(id)
           setMateSheetOpen(false)
           requestNavigate('assistant', () => setActivePanel('assistant'))
+        }}
+      />
+
+      <ManualSheet
+        open={manualOpen}
+        onOpenChange={setManualOpen}
+        target={manualTarget}
+        onAskMate={(question) => {
+          setManualOpen(false)
+          openMate(question)
         }}
       />
 
