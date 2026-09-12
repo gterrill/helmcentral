@@ -197,6 +197,29 @@ vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, vi.fn()],
 }))
 
+// [P1, impeccable critique 2026-09-12] a live alarm has to stay legible over
+// the Mate sheet's own scrim - see the stacking test below. One live alarm
+// is enough to drive the banner; collisionAlarmStatesByVessel is also
+// re-exported from this module (App.tsx imports both), so it has to be
+// mocked here too rather than just useAlarms.
+const mockAlarm = {
+  rule_id: 'helmcentral:test-alarm',
+  label: 'Test alarm',
+  path: 'notifications.test',
+  phase: 'active' as const,
+  state: 'alarm' as const,
+  value: 1,
+  message: 'Test alarm firing',
+  silenced: false,
+  can_silence: false,
+  can_acknowledge: true,
+}
+
+vi.mock('@/hooks/use-alarms', () => ({
+  useAlarms: () => ({ alarms: [mockAlarm], worst: 'alarm', acknowledge: vi.fn(), silence: vi.fn() }),
+  collisionAlarmStatesByVessel: () => new Map(),
+}))
+
 function stubFetch() {
   const conversations: Array<{ id: string; title: string; created_at: string; updated_at: string }> = []
   let counter = 0
@@ -323,10 +346,11 @@ describe('App-wide voice (ADR 0093)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Talk to Mate' })).toHaveAttribute('aria-pressed', 'false'))
   })
 
-  // ADR 0094: "Open in Mate" hands the sheet's active conversation to the
+  // ADR 0094: "Open the Mate page" (renamed from "Open in Mate" - impeccable
+  // critique 2026-09-12 P2) hands the sheet's active conversation to the
   // full panel and navigates there, closing the sheet - without it, the
   // sheet was the only way to see a thread at all.
-  it('Open in Mate from the sheet lands on the Mate panel with that conversation requested', async () => {
+  it('Open the Mate page from the sheet lands on the Mate panel with that conversation requested', async () => {
     const fetchMock = stubFetch()
     render(<App />)
 
@@ -336,12 +360,42 @@ describe('App-wide voice (ADR 0093)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations', expect.objectContaining({ method: 'POST' })))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open in Mate' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open the Mate page' }))
 
     await waitFor(() => expect(document.title).toBe('Mate · Helmcentral'))
     expect(screen.queryByRole('heading', { name: 'Mate' })).not.toBeInTheDocument()
     // The panel's own hook instance opened the same conversation the sheet
     // had active, not whatever it would otherwise have picked as newest.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations/new-1'))
+  })
+
+  // [P1, impeccable critique 2026-09-12] the sheet's overlay used to be a
+  // flat 80% black scrim that dimmed a live, unacknowledged alarm on the
+  // page behind it. Lowering the overlay's own opacity (mate-sheet.test.tsx
+  // covers that) only helps so much - the banner also needs to sit above
+  // the sheet's stacking context outright so it reads at full strength
+  // rather than through a haze. jsdom can't measure actual paint order, so
+  // this checks the one thing that determines it: the banner's own z-index
+  // class has to be numerically higher than the overlay's (z-50).
+  it('keeps the alarm banner above the Mate sheet overlay in stacking order', async () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+
+    const bannerStack = await screen.findByTestId('alarm-banner-stack')
+    expect(screen.getByText(/Test alarm firing/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Mate' }))
+    await screen.findByRole('heading', { name: 'Mate' })
+
+    const overlay = document.querySelector('[role="presentation"][data-open]')
+    expect(overlay).not.toBeNull()
+
+    const zIndexOf = (className: string): number => {
+      const match = className.match(/z-\[(\d+)\]|(?:^|\s)z-(\d+)(?:\s|$)/)
+      if (!match) throw new Error(`no z-index class found in: ${className}`)
+      return Number(match[1] ?? match[2])
+    }
+
+    expect(zIndexOf(bannerStack.className)).toBeGreaterThan(zIndexOf(overlay!.className))
   })
 })

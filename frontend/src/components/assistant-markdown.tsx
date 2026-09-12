@@ -17,8 +17,11 @@ import remarkGfm from 'remark-gfm'
 // so a reply repaints correctly across the light/dark/instrument themes
 // the same as every other surface in the app.
 const components: Components = {
+  // One visible step above h2 (impeccable critique 2026-09-12, P3) - the two
+  // used to render identically, so a reply using both levels had no
+  // hierarchy between them.
   h1: ({ children }) => (
-    <h3 className="mb-2 mt-6 text-base font-semibold leading-snug text-foreground first:mt-0">{children}</h3>
+    <h3 className="mb-2 mt-6 text-lg font-semibold leading-snug text-foreground first:mt-0">{children}</h3>
   ),
   h2: ({ children }) => (
     <h3 className="mb-2 mt-6 text-base font-semibold leading-snug text-foreground first:mt-0">{children}</h3>

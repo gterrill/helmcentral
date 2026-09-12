@@ -408,10 +408,10 @@ export function App() {
   const [mateSheetOpen, setMateSheetOpen] = useState(false)
   const [mateSheetQuestion, setMateSheetQuestion] = useState<string | undefined>(undefined)
   // Which conversation the Mate PANEL should open (ADR 0094): set only by
-  // the sheet's "Open in Mate" button, which hands over whatever thread was
-  // active there. Null means "whatever the panel already had", not "start a
-  // fresh one" - the panel's own hook falls back to its usual newest-thread
-  // behaviour when this is null.
+  // the sheet's "Open the Mate page" button, which hands over whatever
+  // thread was active there. Null means "whatever the panel already had",
+  // not "start a fresh one" - the panel's own hook falls back to its usual
+  // newest-thread behaviour when this is null.
   const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(null)
   const openMate = useCallback((question?: string) => {
     setMateSheetQuestion(question)
@@ -2102,7 +2102,16 @@ export function App() {
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
             <ConnectionBanner />
-            <AlarmBanner alarms={alarms} onOpen={() => requestNavigate('alarms', () => setActivePanel('alarms'))} />
+            {/* z-[60] lifts a live alarm above the Mate sheet's own stacking
+                context (overlay and popup both z-50) so it reads at full
+                strength - not through the sheet's scrim - while the sheet is
+                open (impeccable critique 2026-09-12, P1). `relative` gives
+                the z-index something to apply against; this sits in normal
+                document flow otherwise, so it doesn't cover the sheet's own
+                header when the two don't actually overlap on screen. */}
+            <div className="relative z-[60]" data-testid="alarm-banner-stack">
+              <AlarmBanner alarms={alarms} onOpen={() => requestNavigate('alarms', () => setActivePanel('alarms'))} />
+            </div>
 
             <div className="min-h-0 flex-1">
               {activePanel === null ? (

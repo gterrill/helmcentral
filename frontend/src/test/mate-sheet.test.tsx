@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 
 import { MateSheet } from '@/components/mate-sheet'
 
@@ -155,7 +155,7 @@ describe('MateSheet', () => {
     await waitFor(() => expect(textarea).toHaveFocus())
   })
 
-  it('Open in Mate hands the active conversation to the panel and closes the sheet', async () => {
+  it('Open the Mate page hands the active conversation to the panel and closes the sheet', async () => {
     const onOpenChange = vi.fn()
     const onOpenPanel = vi.fn()
     vi.stubGlobal('fetch', buildFetch((conversationId) => sseMessageResponse(
@@ -177,7 +177,7 @@ describe('MateSheet', () => {
 
     await screen.findByText('Fine tomorrow.')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open in Mate' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open the Mate page' }))
 
     expect(onOpenPanel).toHaveBeenCalledWith('new-1')
     expect(onOpenChange).toHaveBeenCalledWith(false)
@@ -250,6 +250,120 @@ describe('MateSheet', () => {
   // back through the onOpenChange prop App.tsx uses to close it. The
   // built-in close button is the one guaranteed, stable way to trigger that
   // dismissal from a test without fighting jsdom's native keydown routing.
+  // [P0, impeccable critique 2026-09-12] jsdom does not run layout, so this
+  // cannot measure the composer's on-screen pixel position the way the
+  // critique did (textarea top at 1261px, off a 1000px-tall viewport). What
+  // it can check is the thing that actually produces that bug: the wrapper
+  // around AssistantThread used to be a plain block `<div>`, so
+  // AssistantThread's own `flex-1 min-h-0 flex-col` chain had no flex parent
+  // to size against, and the message list's `overflow-y-auto` never got a
+  // bounded height to scroll within - the thread just grew forever and
+  // pushed the composer below the fold. This asserts the unbroken
+  // flex/min-h-0 chain from the dialog down to the scrolling message list,
+  // which is what has to hold for real layout to bound that height.
+  it('keeps an unbroken flex/min-h-0 chain from the dialog to the scrolling message list', async () => {
+    vi.stubGlobal('fetch', buildFetch())
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    const dialog = await screen.findByRole('dialog')
+
+    const region = within(dialog).getByTestId('mate-sheet-thread-region')
+    expect(region.className).toEqual(expect.stringContaining('flex'))
+    expect(region.className).toEqual(expect.stringContaining('min-h-0'))
+    expect(region.className).toEqual(expect.stringContaining('flex-1'))
+    expect(region.className).toEqual(expect.stringContaining('flex-col'))
+
+    const threadRoot = within(region).getByTestId('assistant-thread-root')
+    expect(threadRoot.className).toEqual(expect.stringContaining('flex'))
+    expect(threadRoot.className).toEqual(expect.stringContaining('min-h-0'))
+    expect(threadRoot.className).toEqual(expect.stringContaining('flex-1'))
+    expect(threadRoot.className).toEqual(expect.stringContaining('flex-col'))
+
+    const scrollList = within(threadRoot).getByTestId('assistant-thread-scroll')
+    expect(scrollList.className).toEqual(expect.stringContaining('flex-1'))
+    expect(scrollList.className).toEqual(expect.stringContaining('min-h-0'))
+    expect(scrollList.className).toEqual(expect.stringContaining('overflow-y-auto'))
+  })
+
+  // [P1, impeccable critique 2026-09-12] the primitive's close control used
+  // to be a bare 16 px `X` with no Button wrapper, well under AGENTS.md's
+  // 40 px control floor (a moving boat, wet hands). It has to have an
+  // accessible name of "Close" (the sr-only text) and carry the same
+  // `size="icon"` classes (h-10 w-10 = 40x40) every other icon button in
+  // this sheet's header already uses.
+  it('gives the close button the 40 px control floor', async () => {
+    vi.stubGlobal('fetch', buildFetch())
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    const closeButton = await screen.findByRole('button', { name: 'Close' })
+    expect(closeButton.className).toEqual(expect.stringContaining('h-10'))
+    expect(closeButton.className).toEqual(expect.stringContaining('w-10'))
+  })
+
+  // [P1, impeccable critique 2026-09-12] the primitive's overlay used to be
+  // a flat 80% black scrim (`bg-black/80`), which dims a live, unacknowledged
+  // alarm on the page behind the sheet right when the skipper is heads-down
+  // answering a question. A theme-aware token keeps the same fade without
+  // going to opaque black.
+  // [P2, impeccable critique 2026-09-12] all three header actions used to be
+  // aria-label only, with no visible label and no title tooltip - a first
+  // timer (persona Jordan) has nothing to go on for three unlabelled icons.
+  // [P3, impeccable critique 2026-09-12] SheetTitle's own default is
+  // text-lg (18px); DESIGN.md's Title token is 1rem (text-base).
+  it('sets the sheet title to the Title token size, not the primitive default', async () => {
+    vi.stubGlobal('fetch', buildFetch())
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    const title = await screen.findByRole('heading', { name: 'Mate' })
+    expect(title.className).toEqual(expect.stringContaining('text-base'))
+  })
+
+  it('gives every header action a title tooltip, including read-aloud once it is showing', async () => {
+    installFakeSpeechSynthesis()
+    vi.stubGlobal('fetch', buildFetch((conversationId) => sseMessageResponse(
+      { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: '## Spoken summary\n\nFine tomorrow.', created_at: '' },
+      { id: conversationId, title: '', created_at: '', updated_at: '' },
+    )))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+        onOpenPanel={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByRole('button', { name: 'New conversation' })).toHaveAttribute('title', 'New conversation')
+    expect(screen.getByRole('button', { name: 'Open the Mate page' })).toHaveAttribute('title', 'Open the Mate page')
+
+    await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
+    fakeSynth.spoken[0].onstart?.()
+    expect(await screen.findByRole('button', { name: 'Stop reading' })).toHaveAttribute('title', 'Stop reading')
+  })
+
+  it('uses a light theme-aware scrim, not the primitive default 80% black', async () => {
+    vi.stubGlobal('fetch', buildFetch())
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+    await screen.findByRole('dialog')
+
+    // Base UI's Dialog Backdrop renders with role="presentation" and
+    // data-open once mounted open - it shares the bare role with an inert
+    // background placeholder Base UI also renders, which has no class of
+    // its own, so data-open is what picks out the real backdrop.
+    const overlay = document.querySelector('[role="presentation"][data-open]')
+    expect(overlay).not.toBeNull()
+    expect(overlay!.className).not.toEqual(expect.stringContaining('bg-black'))
+    expect(overlay!.className).toEqual(expect.stringContaining('bg-background/60'))
+  })
+
   it('closes via onOpenChange(false) when the sheet is dismissed', async () => {
     const onOpenChange = vi.fn()
     vi.stubGlobal('fetch', buildFetch())

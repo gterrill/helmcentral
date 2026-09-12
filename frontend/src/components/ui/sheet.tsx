@@ -6,6 +6,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 const Sheet = SheetPrimitive.Root
 
@@ -21,7 +22,11 @@ const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Backdrop
     className={cn(
-      "fixed inset-0 z-50 bg-black/80 transition-opacity data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
+      // A light, theme-aware scrim rather than the primitive's default 80%
+      // black - that flat black dimmed a live, unacknowledged alarm on the
+      // page behind the sheet (impeccable critique 2026-09-12, P1). The
+      // banner itself is lifted above this overlay separately (see App.tsx).
+      "fixed inset-0 z-50 bg-background/60 transition-opacity data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
       className
     )}
     {...props}
@@ -31,7 +36,7 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = "SheetOverlay"
 
 const sheetVariants = cva(
-  "fixed z-50 gap-4 bg-background p-6 shadow-lg transition-transform ease-in-out data-[ending-style]:duration-300 data-[starting-style]:duration-500",
+  "fixed z-[70] gap-4 bg-background p-6 shadow-lg transition-transform ease-in-out data-[ending-style]:duration-300 data-[starting-style]:duration-500",
   {
     variants: {
       side: {
@@ -65,10 +70,22 @@ const SheetContent = React.forwardRef<
       {...props}
     >
       {children}
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </SheetPrimitive.Close>
+      {/* AGENTS.md's 40 px control floor (a moving boat, wet hands) applies here
+          same as any other control - rendered through the shared Button so this
+          gets the same size-icon dimensions and focus-visible ring as every other
+          icon button, rather than a hand-styled 16 px target of its own. */}
+      <SheetPrimitive.Close
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute right-2 top-2 opacity-70 ring-offset-background transition-opacity hover:opacity-100 disabled:pointer-events-none"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </Button>
+        }
+      />
     </SheetPrimitive.Popup>
   </SheetPortal>
 ))
@@ -80,7 +97,11 @@ const SheetHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col space-y-2 text-center sm:text-left",
+      // Both current consumers (mate-sheet.tsx's flex-row header, sidebar.tsx's
+      // sr-only mobile header) override or hide this text-align entirely, so
+      // it stayed dead in both; drop it here rather than let a future
+      // consumer inherit centred/left text-align by accident.
+      "flex flex-col space-y-2",
       className
     )}
     {...props}

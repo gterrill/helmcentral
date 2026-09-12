@@ -142,6 +142,64 @@ describe('AssistantThread', () => {
     expect(screen.getByText('Fetching wind forecast for Tongue Bay…')).toBeInTheDocument()
   })
 
+  // [P1, impeccable critique 2026-09-12] useAssistantChat.abort() already
+  // existed (wired only to unmount and a superseding send) but there was no
+  // way for the operator to cancel a question in flight themselves.
+  it('shows a Stop button while sending, which calls abort and leaves a Stopped. line', () => {
+    const abort = vi.fn()
+    const { rerender } = render(
+      <AssistantThread
+        canWrite
+        conversations={buildConversations()}
+        chat={buildChat({ sending: true, statusText: 'Fetching wind forecast for Tongue Bay…', abort })}
+      />,
+    )
+
+    const stopButton = screen.getByRole('button', { name: 'Stop asking' })
+    fireEvent.click(stopButton)
+    expect(abort).toHaveBeenCalledTimes(1)
+
+    // The hook's own abort() sets sending false and leaves error null - the
+    // rerender below is what that looks like from the caller's side.
+    rerender(
+      <AssistantThread
+        canWrite
+        conversations={buildConversations()}
+        chat={buildChat({ sending: false, statusText: null, error: null, abort })}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Stop asking' })).not.toBeInTheDocument()
+    expect(screen.getByText('Stopped.')).toBeInTheDocument()
+  })
+
+  it('does not show the Stop button or the Stopped. line while idle', () => {
+    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+
+    expect(screen.queryByRole('button', { name: 'Stop asking' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
+  })
+
+  it('clears the Stopped. line once a new question is sent', async () => {
+    const send = vi.fn().mockResolvedValue(null)
+    const abort = vi.fn()
+    const conversations = buildConversations()
+
+    const { rerender } = render(
+      <AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true, send, abort })} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Stop asking' }))
+    rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: false, send, abort })} />)
+    expect(screen.getByText('Stopped.')).toBeInTheDocument()
+
+    const textarea = screen.getByPlaceholderText('Ask Mate about the next couple of days…')
+    fireEvent.change(textarea, { target: { value: 'A follow-up' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'A follow-up'))
+    expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
+  })
+
   it('surfaces a chat or conversations error', () => {
     render(
       <AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ error: 'upstream 401' })} />,

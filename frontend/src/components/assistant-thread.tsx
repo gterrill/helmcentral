@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { Loader2, Square } from 'lucide-react'
 import { useCallback, useState, type KeyboardEvent, type Ref } from 'react'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
@@ -48,10 +48,18 @@ interface AssistantThreadProps {
  */
 export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef }: AssistantThreadProps) {
   const [content, setContent] = useState('')
+  // [P1, ADR 0093/impeccable critique 2026-09-12] chat.abort() already
+  // cancelled a request on unmount or a superseding send, but the operator
+  // had no way to cancel a question themselves. Purely a local "did the
+  // operator just stop this" flag - chat.error stays null through an abort,
+  // so this is the only way to tell "stopped" apart from "idle before the
+  // first question", and it clears the moment the next question is sent.
+  const [stopped, setStopped] = useState(false)
 
   const handleSend = useCallback(async () => {
     const trimmed = content.trim()
     if (trimmed === '' || chat.sending || !canWrite) return
+    setStopped(false)
 
     let conversationId = conversations.activeId
     if (conversationId === null) {
@@ -76,6 +84,11 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     }
   }, [content, chat, conversations, canWrite])
 
+  const handleStop = useCallback(() => {
+    chat.abort()
+    setStopped(true)
+  }, [chat])
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -84,8 +97,14 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   }
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-3xl min-w-0 flex-1 flex-col gap-3">
-      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1 py-2">
+    <div
+      className="mx-auto flex min-h-0 w-full max-w-3xl min-w-0 flex-1 flex-col gap-3"
+      data-testid="assistant-thread-root"
+    >
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1 py-2"
+        data-testid="assistant-thread-scroll"
+      >
         {conversations.messages.length === 0 ? (
           <p className="text-sm text-muted-foreground">Ask Mate: &ldquo;{EXAMPLE_QUESTION}&rdquo;</p>
         ) : (
@@ -112,8 +131,13 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span>{chat.statusText ?? 'Thinking…'}</span>
+          <Button variant="ghost" size="icon" className="ml-auto" aria-label="Stop asking" onClick={handleStop}>
+            <Square className="h-4 w-4" />
+          </Button>
         </div>
       )}
+
+      {stopped && !chat.sending && <p className="text-[11px] text-muted-foreground">Stopped.</p>}
 
       {(chat.error || conversations.error) && (
         <p className="text-sm text-destructive">{chat.error ?? conversations.error}</p>

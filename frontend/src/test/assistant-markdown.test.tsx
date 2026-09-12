@@ -32,6 +32,22 @@ describe('AssistantMarkdown', () => {
     expect(screen.getByText('Safe text')).toBeInTheDocument()
   })
 
+  // [P3, impeccable critique 2026-09-12] h1 and h2 used to render identically
+  // (both `text-base`) - a reply with both levels had no visible hierarchy
+  // between them.
+  it('gives h1 a visible step above h2', () => {
+    const content = '# Top level\n\n## Second level\n\nBody text.'
+
+    render(<AssistantMarkdown content={content} />)
+
+    const h1 = screen.getByText('Top level')
+    const h2 = screen.getByText('Second level')
+
+    expect(h1.className).toEqual(expect.stringContaining('text-lg'))
+    expect(h1.className).not.toEqual(expect.stringContaining('text-base'))
+    expect(h2.className).toEqual(expect.stringContaining('text-base'))
+  })
+
   it('gives a link target=_blank and rel=noreferrer', () => {
     render(<AssistantMarkdown content="[OpenRouter](https://openrouter.ai)" />)
 
