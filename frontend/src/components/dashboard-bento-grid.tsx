@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
 import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, isPoiMapWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId } from '@/lib/dashboard-widgets'
+import { TileErrorBoundary } from '@/components/tile-error-boundary'
 
 const ReactGridLayout = WidthProvider(GridLayout)
 
@@ -237,7 +238,9 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
     >
       <div className="bento-hero-frame h-full w-full overflow-hidden rounded-xl">
         <div className="bento-hero-scale [&>*]:h-full">
-          {renderWidget(heroWidget)}
+          <TileErrorBoundary key={heroWidget.id} widget={heroWidget}>
+            {renderWidget(heroWidget)}
+          </TileErrorBoundary>
         </div>
       </div>
       {editing && (
@@ -294,7 +297,9 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               // would clip. Mirrors RGL's own row maths (rowHeight + margin).
               style={{ minHeight: w.h * GRID_ROW_HEIGHT + (w.h - 1) * GRID_MARGIN }}
             >
-              {renderWidget(w)}
+              <TileErrorBoundary key={w.id} widget={w}>
+                {renderWidget(w)}
+              </TileErrorBoundary>
             </div>
           ))}
         </div>
@@ -331,7 +336,11 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               <div aria-hidden="true" className="h-full w-full" />
             ) : (
               <>
-                <div className="h-full [&>*]:h-full">{renderWidget(w)}</div>
+                <div className="h-full [&>*]:h-full">
+                  <TileErrorBoundary key={w.id} widget={w}>
+                    {renderWidget(w)}
+                  </TileErrorBoundary>
+                </div>
                 {editing && (
                   <>
                     <button

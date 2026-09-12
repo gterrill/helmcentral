@@ -314,6 +314,17 @@ it can change with a firmware update in a way this ADR's reasoning does not.
 - The frameless embed, the points-of-interest map and the purpose-built
   wall-display tiles (clock, current conditions, forecast days, sea state)
   remain open work, tracked separately from this decision.
+- Two follow-on hardening gaps turned up once the feed was cycling
+  unattended: a tile that throws during render used to take the whole app
+  down with it (React 19 unmounts the entire root on an uncaught render
+  error), and the Nearby and anchor-watch tiles both mount a MapLibre map,
+  which throws outright on a browser with no WebGL2 — exactly what the
+  wall's WPE WebKit 2.38 browser is. `TileErrorBoundary` now wraps every
+  widget the grid renders, so a tile that throws shows a failed-tile card
+  in its own slot and the feed keeps cycling instead of blanking every page
+  until someone reloads it by hand; `hasWebGL2()` (`lib/webgl.ts`) lets
+  those two map tiles check first and degrade to a one-line "needs WebGL2"
+  note in place of the map, rather than finding out by throwing.
 
 ## Related
 
