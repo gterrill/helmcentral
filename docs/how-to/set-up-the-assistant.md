@@ -1,12 +1,13 @@
-# Set up the assistant
+# Set up Mate
 
-See [Assistant](../features/assistant.md) for what it does, what leaves the
-boat, and what it isn't.
+See [Mate](../features/assistant.md) for what it does, what leaves the boat,
+and what it isn't. For voice, once Mate itself is configured, see [Talk to
+Mate](talk-to-mate.md).
 
 ## 1. Get an OpenRouter key
 
-The assistant is bring-your-own-key: Helmcentral doesn't supply a model or
-pay for your questions.
+Mate is bring-your-own-key: Helmcentral doesn't supply a model or pay for
+your questions.
 
 1. Create an account at <https://openrouter.ai>.
 2. Add credit to it. OpenRouter is pay-as-you-go; a few dollars covers a
@@ -16,7 +17,7 @@ pay for your questions.
 
 ## 2. Configure it in Helmcentral
 
-With write access, open **Settings → Assistant**:
+With write access, open **Settings → Mate**:
 
 1. Paste the key into the **OpenRouter API key** field.
 2. Choose a model. The default, `anthropic/claude-sonnet-4.5`, works out of
@@ -30,12 +31,12 @@ With write access, open **Settings → Assistant**:
    Snorkel Blue Pearl Bay in the last 1-2h of flood up to high slack.
    ```
 
-4. Switch the assistant on.
+4. Switch Mate on.
 5. Choose **Save**.
 
 ## 3. Ask it something
 
-Open the Assistant panel and try the question it's built around:
+Open the Mate panel and try the question it's built around:
 
 > We're at Hook Reef. Should we visit Tongue Bay or Blue Pearl Bay first
 > over the next two days?
@@ -45,12 +46,12 @@ tides for both, then a short answer with a comparison table.
 
 ## If it says "No endpoints found that support tool use"
 
-The model you picked doesn't support tool calling, which the assistant
-needs for every question beyond small talk. Go back to Settings →
-Assistant and choose a different model. `anthropic/claude-sonnet-4.5` is
-the tested default; most current flagship models from the major providers
-support tool calling, but not every model OpenRouter lists does, and
-OpenRouter's own model list marks which ones do.
+The model you picked doesn't support tool calling, which Mate needs for
+every question beyond small talk. Go back to Settings → Mate and choose a
+different model. `anthropic/claude-sonnet-4.5` is the tested default; most
+current flagship models from the major providers support tool calling, but
+not every model OpenRouter lists does, and OpenRouter's own model list marks
+which ones do.
 
 ## Write access and cost
 

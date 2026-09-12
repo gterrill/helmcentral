@@ -45,7 +45,7 @@ block, or your shell.
 | `VESSEL_STATUS` | `At Anchor` | Fallback status when SignalK reports none |
 | `HELMCENTRAL_MASTER_KEY` | *(auto-generated)* | Base64, exactly 32 bytes. Overrides the generated `data/secrets.key`. |
 | `CORS_ALLOWED_ORIGINS` | *(unset)* | Comma-separated extra origins allowed to call the API with credentials, on top of the server's own origin (always allowed). Only needed for a frontend hosted somewhere other than this binary. |
-| `OVERPASS_API_URL` | `https://overpass-api.de/api/interpreter` | Overpass server used for place-name resolution (the position tile) and the assistant's place search. Must be an absolute `https://` URL. The POI plugin queries Overpass independently and has its own `overpass_url` config key; see [its README](../examples/poi-plugins/osm-overpass/README.md#pointing-at-an-overpass-mirror) for pointing that at a mirror too. |
+| `OVERPASS_API_URL` | `https://overpass-api.de/api/interpreter` | Overpass server used for place-name resolution (the position tile) and Mate's place search. Must be an absolute `https://` URL. The POI plugin queries Overpass independently and has its own `overpass_url` config key; see [its README](../examples/poi-plugins/osm-overpass/README.md#pointing-at-an-overpass-mirror) for pointing that at a mirror too. |
 | `INFLUX_SOC_MEASUREMENT` | `electrical.batteries.0.capacity.stateOfCharge` | The state-of-charge measurement the Battery & Power tile's overnight (dawn) projection reads, and the path its state-of-charge bands look for a matching alarm rule on. |
 | `DAWN_LINEAR_FALLBACK` | `true` | When overnight state-of-charge history is unavailable (InfluxDB not configured, unreachable, or too few usable nights), extrapolate the live rate to sunrise and label the result as such. Set `false` to show a dash with the reason instead. |
 | `INFLUX_SHORE_MEASUREMENT` | `electrical.chargers.0.acin.1.current` | The charger's AC input current. A night with a reading above 0.5 A is excluded from the overnight model as shore-powered. |
@@ -115,8 +115,17 @@ configuration expansion reads from the environment, so a value placed there
 is accessible to any plugin.
 
 The `assistant:` block in `settings.yaml` (enabled, model, standing notes)
-holds the assistant's non-secret configuration; see
-[Assistant](../features/assistant.md) for what each field does.
+holds Mate's non-secret configuration; see [Mate](../features/assistant.md)
+for what each field does.
+
+`ASSISTANT_DB_PATH` holds conversations, not the operator manual Mate reads
+from when a question is about Helmcentral itself. That manual is staged into
+`backend/manual` from `docs/features`, `docs/how-to` and `docs/reference`,
+the same way the built frontend is staged into `backend/dist`: `make
+manual-stage` does it for a local `go build`/`go run`, and both a container
+build and a release build stage it themselves as part of their own build
+steps. A binary built without that step still runs; Mate just says the
+manual isn't embedded rather than answering from an empty one.
 
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to being managed
 from the UI. The VAPID keypair is self-issued, generated automatically on first
