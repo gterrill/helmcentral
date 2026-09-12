@@ -1,5 +1,13 @@
 # Helmcentral documentation
 
+These pages ship inside Helmcentral itself, so they're on the boat whether
+or not the boat has a connection. The `?` button in the app's header opens
+the page for whatever screen you're looking at; the sidebar's **Manual**
+item opens this contents page instead. Links within this manual stay in
+the app; a link to something outside it, an ADR, an example plugin's
+source, the release workflow, opens on GitHub, which does need a
+connection.
+
 Documentation here is split by what you are trying to do, following the
 [Diátaxis](https://diataxis.fr/) distinction between task instructions and
 reference material.

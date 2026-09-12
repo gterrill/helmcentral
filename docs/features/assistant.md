@@ -68,8 +68,8 @@ you ask, and how Helmcentral's own features work. A question asked from the
 sheet over the Forecast panel arrives with that noted, so "explain how the
 upper atmosphere graph works" gets answered as a question about the panel
 you're on, not a guess at what you might mean. And for a question about
-Helmcentral itself, Mate reads the operator manual, the same pages this
-documentation site is built from, and answers from what the docs actually
+Helmcentral itself, Mate reads the operator manual, the same pages the
+Manual button in the app opens, and answers from what the docs actually
 say rather than from a general impression of what a 500mb chart usually
 shows. Ask "what does the upper air chart on the forecast panel actually
 show" and it reads this manual's own [Forecast](forecast.md) page and quotes

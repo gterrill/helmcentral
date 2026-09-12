@@ -1,5 +1,8 @@
 # The dashboard
 
+The dashboard is a set of pages you arrange yourself, each one a grid of
+widgets showing the boat's live SignalK data.
+
 ## Connection loss
 
 If the dashboard loses its connection to Helmcentral, a non-dismissible

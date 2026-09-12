@@ -198,7 +198,9 @@ Contracts, the sandbox model, and how to build a plugin:
 
 ## Documentation
 
-Start with [docs/index.md](docs/index.md).
+Start with [docs/index.md](docs/index.md). These pages also ship inside
+Helmcentral itself: the `?` button in the app's header opens the page for
+whatever screen you're on.
 
 | | |
 | --- | --- |
