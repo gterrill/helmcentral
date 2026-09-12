@@ -31,7 +31,12 @@ type kioskProbeRequest struct {
 		W int `json:"w"`
 		H int `json:"h"`
 	} `json:"viewport"`
-	Rotate int               `json:"rotate"`
+	Rotate int `json:"rotate"`
+	// Height mirrors the kiosk route's own ?height=<px> option (ADR 0089):
+	// present only when the probe URL carried a valid height, so a pointer
+	// distinguishes "not set" from the zero value rather than guessing from
+	// a magic number.
+	Height *int              `json:"height,omitempty"`
 	Checks []kioskProbeCheck `json:"checks"`
 }
 
@@ -73,7 +78,11 @@ func kioskProbeHandler(c echo.Context) error {
 		}
 	}
 
-	log.Printf("kiosk probe: ua=%q viewport=%dx%d rotate=%d", req.UserAgent, req.Viewport.W, req.Viewport.H, req.Rotate)
+	if req.Height != nil {
+		log.Printf("kiosk probe: ua=%q viewport=%dx%d rotate=%d height=%d", req.UserAgent, req.Viewport.W, req.Viewport.H, req.Rotate, *req.Height)
+	} else {
+		log.Printf("kiosk probe: ua=%q viewport=%dx%d rotate=%d", req.UserAgent, req.Viewport.W, req.Viewport.H, req.Rotate)
+	}
 	passed := 0
 	for _, check := range req.Checks {
 		status := "FAIL"

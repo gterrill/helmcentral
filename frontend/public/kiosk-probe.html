@@ -142,6 +142,24 @@
   var rotated = params.get('rotate') === '180';
   if (rotated) document.body.classList.add('rotate-180');
 
+  // Mirrors /kiosk's own ?height=<px> option (ADR 0089): a kiosk browser can
+  // report a viewport taller than the panel it actually drives, so this
+  // constrains the probe's own root box to the panel's real height at the
+  // top of the viewport instead of the full (oversized) one, the same
+  // 200-4320 integer range lib/kiosk.ts's parseKioskOptions accepts. Kept
+  // null (full viewport, unchanged behaviour) for anything else.
+  var rawHeight = params.get('height');
+  var parsedHeight = rawHeight === null ? NaN : Number(rawHeight);
+  var height = (Number.isInteger(parsedHeight) && parsedHeight >= 200 && parsedHeight <= 4320) ? parsedHeight : null;
+  if (height !== null) {
+    document.body.style.position = 'fixed';
+    document.body.style.top = '0';
+    document.body.style.left = '0';
+    document.body.style.width = '100vw';
+    document.body.style.height = height + 'px';
+    document.body.style.overflow = 'hidden';
+  }
+
   var grid = document.getElementById('grid');
   var checks = [];
 
@@ -292,6 +310,7 @@
         return { name: c.name, pass: c.pass, detail: c.detail };
       })
     };
+    if (height !== null) payload.height = height;
 
     fetch('/api/kiosk-probe', {
       method: 'POST',

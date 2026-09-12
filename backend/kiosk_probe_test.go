@@ -70,6 +70,64 @@ func TestKioskProbeHandler_ValidBodyLogsExpectedLinesAndReturns204(t *testing.T)
 	}
 }
 
+func TestKioskProbeHandler_LogsHeightWhenPresent(t *testing.T) {
+	buf := captureLogs(t)
+
+	body := map[string]any{
+		"user_agent": "Mozilla/5.0 (KioskBrowser)",
+		"viewport":   map[string]any{"w": 1920, "h": 1080},
+		"rotate":     180,
+		"height":     360,
+		"checks": []map[string]any{
+			{"name": "WebGL2 context", "pass": true, "detail": "renderer: llvmpipe"},
+		},
+	}
+	c, rec := newAuthRequest(t, http.MethodPost, "/api/kiosk-probe", body)
+
+	if err := kioskProbeHandler(c); err != nil {
+		t.Fatalf("kioskProbeHandler: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	got := buf.String()
+	want := `kiosk probe: ua="Mozilla/5.0 (KioskBrowser)" viewport=1920x1080 rotate=180 height=360`
+	if !strings.Contains(got, want) {
+		t.Fatalf("expected log output to contain %q, got:\n%s", want, got)
+	}
+}
+
+func TestKioskProbeHandler_OmitsHeightWhenAbsent(t *testing.T) {
+	buf := captureLogs(t)
+
+	body := map[string]any{
+		"user_agent": "Mozilla/5.0 (KioskBrowser)",
+		"viewport":   map[string]any{"w": 1920, "h": 360},
+		"rotate":     0,
+		"checks": []map[string]any{
+			{"name": "structuredClone", "pass": true, "detail": "ok"},
+		},
+	}
+	c, rec := newAuthRequest(t, http.MethodPost, "/api/kiosk-probe", body)
+
+	if err := kioskProbeHandler(c); err != nil {
+		t.Fatalf("kioskProbeHandler: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	got := buf.String()
+	if strings.Contains(got, "height=") {
+		t.Fatalf("expected no height= in log output when height is absent, got:\n%s", got)
+	}
+	wantHeader := `kiosk probe: ua="Mozilla/5.0 (KioskBrowser)" viewport=1920x360 rotate=0`
+	if !strings.Contains(got, wantHeader) {
+		t.Fatalf("expected log output to contain %q, got:\n%s", wantHeader, got)
+	}
+}
+
 func TestKioskProbeHandler_InvalidBodiesReturn400(t *testing.T) {
 	longString := strings.Repeat("x", 513)
 

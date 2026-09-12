@@ -35,7 +35,12 @@ usual fix on a small ARM board that ships an older WebKit by default.
 Add `?rotate=180` to the probe URL to also check a physically inverted
 screen: it rotates the page and embeds a camera feed, sized as one cell of
 the grid, if you have one configured, so you can confirm the feed keeps
-updating through an interruption without a page reload.
+updating through an interruption without a page reload. If the browser's
+own viewport is taller than the panel (see step 3's note on `height`), add
+`&height=<px>` too, for example `/kiosk-probe.html?rotate=180&height=360`:
+the probe constrains its grid to that band the same way `/kiosk` does, so
+you're checking the layout the panel will actually show rather than one
+spread across the browser's oversized framebuffer.
 
 ## 2. Flag the pages you want on the wall
 
