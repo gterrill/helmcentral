@@ -12,6 +12,7 @@ export type SettingsSectionId =
   | 'alarms'
   | 'assistant'
   | 'security'
+  | 'logs'
 
 export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> = [
   { id: 'general', label: 'General' },
@@ -24,6 +25,7 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> 
   { id: 'assistant', label: 'Mate' },
   { id: 'widgets', label: 'Widgets' },
   { id: 'security', label: 'Security' },
+  { id: 'logs', label: 'Logs' },
 ]
 
 interface SettingsNavProps {

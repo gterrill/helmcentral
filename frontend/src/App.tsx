@@ -411,14 +411,16 @@ export function App() {
   // stale one.
   const [mateSheetOpen, setMateSheetOpen] = useState(false)
   const [mateSheetQuestion, setMateSheetQuestion] = useState<string | undefined>(undefined)
+  const [mateSheetNewConversation, setMateSheetNewConversation] = useState(false)
   // Which conversation the Mate PANEL should open (ADR 0094): set only by
   // the sheet's "Open the Mate page" button, which hands over whatever
   // thread was active there. Null means "whatever the panel already had",
   // not "start a fresh one" - the panel's own hook falls back to its usual
   // newest-thread behaviour when this is null.
   const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(null)
-  const openMate = useCallback((question?: string) => {
+  const openMate = useCallback((question?: string, options?: { newConversation?: boolean }) => {
     setMateSheetQuestion(question)
+    setMateSheetNewConversation(Boolean(options?.newConversation))
     setMateSheetOpen(true)
   }, [])
   const mateScreen = useMemo(
@@ -1779,6 +1781,7 @@ export function App() {
             activeSectionId={settingsSection}
             onSectionChange={setSettingsSection}
             onOpenManual={openManual}
+            onAskMate={openMate}
           />
         )
       case 'anchor-watch':
@@ -2226,9 +2229,13 @@ export function App() {
         open={mateSheetOpen}
         onOpenChange={(open) => {
           setMateSheetOpen(open)
-          if (!open) setMateSheetQuestion(undefined)
+          if (!open) {
+            setMateSheetQuestion(undefined)
+            setMateSheetNewConversation(false)
+          }
         }}
         initialQuestion={mateSheetQuestion}
+        newConversation={mateSheetNewConversation}
         screen={mateScreen}
         canWrite={canWrite}
         readAloud={assistantVoiceConfig.readAloud}

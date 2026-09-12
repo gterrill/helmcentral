@@ -197,8 +197,14 @@ func main() {
 		log.Printf("overpass: using %s", overpassAPIURL)
 	}
 
+	// Capture logs to in-memory ring buffer for Settings -> Logs viewer
+	logWriter := initLogCapture()
+	e.Logger.SetOutput(logWriter)
+
 	// Middleware
-	e.Use(middleware.Logger())
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Output: logWriter,
+	}))
 	e.Use(middleware.Recover())
 	// corsMiddleware (cors.go) replaces AllowOrigins: []string{"*"}: that
 	// combined with credentials is rejected by every browser anyway, and was
@@ -587,6 +593,9 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// call. Wildcard path, not a :id param: page ids contain a slash
 		// ("features/dashboard").
 		{http.MethodGet, "/api/manual/*", tierRead, getManualPageHandler(func() []manualPage { return globalManual })},
+		// Settings -> Logs: in-memory log buffer retrieval and live SSE stream
+		{http.MethodGet, "/api/logs", tierRead, getLogsHandler},
+		{http.MethodGet, "/api/logs/stream", tierRead, logsStreamHandler},
 
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────

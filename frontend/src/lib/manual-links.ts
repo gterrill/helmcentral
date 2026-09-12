@@ -57,6 +57,7 @@ export const SETTINGS_MANUAL_TARGETS: Record<SettingsSectionId, ManualTarget> = 
   assistant: { page: 'how-to/set-up-the-assistant', heading: '2. Configure it in Helmcentral' },
   widgets: { page: 'reference/plugins' },
   security: { page: 'reference/configuration', heading: 'Security' },
+  logs: MANUAL_INDEX,
 }
 
 /** Where the dashboard grid itself (panel === null) opens in the manual. */

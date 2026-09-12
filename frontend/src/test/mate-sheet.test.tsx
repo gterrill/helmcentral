@@ -54,6 +54,7 @@ interface FetchLike {
 function buildFetch(
   onSendMessage?: (conversationId: string, body: Record<string, unknown>) => FetchLike,
   initialConversations: ConversationRecord[] = [],
+  onCreateConversation?: () => void,
 ) {
   const conversations: ConversationRecord[] = [...initialConversations]
   const messagesByConversation = new Map<string, Array<Record<string, unknown>>>()
@@ -68,6 +69,7 @@ function buildFetch(
 
     if (url.endsWith('/api/assistant/conversations') && method === 'POST') {
       counter += 1
+      onCreateConversation?.()
       const id = `new-${counter}`
       const now = new Date().toISOString()
       const conversation: ConversationRecord = { id, title: 'New conversation', created_at: now, updated_at: now }
@@ -156,6 +158,47 @@ describe('MateSheet', () => {
     await waitFor(() => expect(screen.queryByText('How does tomorrow look?')).not.toBeInTheDocument())
     const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
     await waitFor(() => expect(textarea).toHaveFocus())
+  })
+
+  it('creates a fresh thread before sending an initial question when requested', async () => {
+    let postedCreateCalls = 0
+    let sentBody: Record<string, unknown> | null = null
+    vi.stubGlobal('fetch', buildFetch(
+      (conversationId, body) => {
+        sentBody = body
+        return sseMessageResponse(
+          {
+            id: 'm1',
+            conversation_id: conversationId,
+            seq: 1,
+            role: 'assistant',
+            content: 'Fresh thread answer.',
+            created_at: '',
+          },
+          { id: conversationId, title: 'Fresh thread', created_at: '', updated_at: '' },
+        )
+      },
+      [],
+      () => {
+        postedCreateCalls += 1
+      },
+    ))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="Why did the logs fail?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud={false}
+        newConversation
+        onOpenPanel={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(postedCreateCalls).toBeGreaterThan(0))
+    await waitFor(() => expect(sentBody).toEqual({ content: 'Why did the logs fail?', spoken: true, screen: { panel: 'forecast' } }))
   })
 
   it('Open the Mate page hands the active conversation to the panel and closes the sheet', async () => {

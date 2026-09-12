@@ -15,6 +15,7 @@ import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
 import { GeneralSection } from '@/components/settings/sections/general-section'
 import { SecuritySection } from '@/components/settings/sections/security-section'
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
+import { LogsSection } from '@/components/settings/sections/logs-section'
 import { MayaraSection } from '@/components/settings/sections/mayara-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
 import { WidgetsSection } from '@/components/settings/sections/widgets-section'
@@ -47,6 +48,7 @@ interface SettingsPageProps {
    * caller and test is untouched.
    */
   onOpenManual?: (target: ManualTarget) => void
+  onAskMate?: (question: string, options?: { newConversation?: boolean }) => void
 }
 
 export interface SettingsPageHandle {
@@ -73,6 +75,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     activeSectionId: controlledSectionId,
     onSectionChange,
     onOpenManual,
+    onAskMate,
   },
   ref,
 ) {
@@ -226,6 +229,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
             onAutoCloseAnchorWatchToggle={onAutoCloseAnchorWatchToggle}
           />
         )
+      case 'logs':
+        return <LogsSection onAskMate={(question, options) => onAskMate?.(question, options)} />
       default:
         return null
     }

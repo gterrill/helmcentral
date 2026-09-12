@@ -36,6 +36,7 @@ interface MateSheetProps {
    * conversation is known. Absent for a plain "Ask Mate" open, which just
    * shows whatever thread is already current. */
   initialQuestion?: string
+  newConversation?: boolean
   screen: AssistantScreenContext
   canWrite: boolean
   /** Settings → Mate → "Read replies aloud" (ADR 0093 voice phase): when
@@ -59,7 +60,7 @@ interface MateSheetProps {
  * the sheet's thread survives being closed and reopened the same way the
  * panel's does.
  */
-export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrite, readAloud, onOpenPanel }: MateSheetProps) {
+export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel }: MateSheetProps) {
   const conversations = useAssistantConversations()
   const chat = useAssistantChat()
   const speechOutput = useSpeechOutput()
@@ -119,12 +120,14 @@ export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrit
       return
     }
     if (!initialQuestion || !canWrite || conversations.loading) return
-    if (sentQuestionRef.current === initialQuestion) return
-    sentQuestionRef.current = initialQuestion
+
+    const key = `${newConversation ? 'new:' : 'existing:'}${initialQuestion}`
+    if (sentQuestionRef.current === key) return
+    sentQuestionRef.current = key
 
     void (async () => {
       let conversationId = conversations.activeId
-      if (conversationId === null) {
+      if (newConversation || conversationId === null) {
         conversationId = await conversations.create()
         if (conversationId === null) return
       }
@@ -151,7 +154,7 @@ export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrit
         }
       }
     })()
-  }, [open, initialQuestion, canWrite, screen, conversations, chat, readAloud, speechOutput])
+  }, [open, initialQuestion, newConversation, canWrite, screen, conversations, chat, readAloud, speechOutput])
 
   // Closing the sheet stops whatever it was reading - the operator has
   // moved on, and a voice answer trailing off after the panel that gave it
