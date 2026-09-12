@@ -20,7 +20,11 @@ other, the same as any chat app. The header's sparkle button, on every panel
 and every dashboard page, opens Mate as a sheet over whatever you're already
 looking at instead, so asking a question about the forecast doesn't mean
 leaving it. Both talk to the same conversations; the sheet is just the quick
-channel for a question that doesn't need its own screen.
+channel for a question that doesn't need its own screen. The sheet keeps
+appending to whatever conversation is already current, no matter how long
+you leave it and come back, until you press its "New conversation" button.
+Its "Open in Mate" button hands that same thread to the full panel and
+takes you there, for when a question turns into a longer working session.
 
 ## What it knows
 

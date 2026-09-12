@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 
 // ADR 0093: the wire shape (Conversation/Message) is snake_case, persisted
@@ -68,7 +68,23 @@ function mapMessage(api: MessageApi): AssistantMessage {
   }
 }
 
-export function useAssistantConversations() {
+export interface UseAssistantConversationsOptions {
+  /** Selects this conversation on mount, when it is present in the freshly
+   * fetched list (ADR 0094: "Open in Mate" hands the panel a thread the
+   * sheet already has active). Falls back to the newest conversation the
+   * same as ever when absent, unset, or not found in the list - a stale or
+   * deleted id is never a reason to leave the panel on no thread at all. */
+  initialId?: string | null
+}
+
+export function useAssistantConversations(options?: UseAssistantConversationsOptions) {
+  const initialId = options?.initialId ?? null
+  // Captured once, at mount, via a lazy initializer the same way
+  // App.tsx's `initialLocation` is - only the very first render's value
+  // matters for the initial-selection effect below; a later change to
+  // `initialId` is handled by the separate re-select effect further down,
+  // not by re-running the mount fetch.
+  const [mountInitialId] = useState(() => initialId)
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AssistantMessage[]>([])
@@ -108,10 +124,12 @@ export function useAssistantConversations() {
     }
   }, [])
 
-  // Initial load opens the most recently updated thread rather than an empty
-  // pane: the panel is usually reopened to reread a plan, and the list is
-  // already sorted newest first by the server. A later refresh never changes
-  // the selection; only the operator (or create/remove) does that.
+  // Initial load opens `mountInitialId` when it names a conversation that
+  // actually exists in the freshly fetched list, otherwise the most recently
+  // updated thread rather than an empty pane: the panel is usually reopened
+  // to reread a plan, and the list is already sorted newest first by the
+  // server. A later refresh never changes the selection; only the operator
+  // (or create/remove/the re-select effect below) does that.
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -120,7 +138,10 @@ export function useAssistantConversations() {
         if (cancelled) return
         setConversations(list)
         setError(null)
-        if (list.length > 0) await select(list[0].id)
+        const target = mountInitialId !== null && list.some((c) => c.id === mountInitialId)
+          ? mountInitialId
+          : list[0]?.id ?? null
+        if (target !== null) await select(target)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -130,7 +151,23 @@ export function useAssistantConversations() {
     return () => {
       cancelled = true
     }
-  }, [fetchConversations, select])
+  }, [fetchConversations, select, mountInitialId])
+
+  // Re-selects when `initialId` changes to a new non-null value after mount
+  // (ADR 0094): "Open in Mate" can send an already-showing panel a different
+  // conversation than the one it has open, and re-selecting in place is what
+  // lets the caller avoid remounting the panel just to pick it up. Guarded
+  // against firing on mount itself - the effect above already resolved the
+  // initial selection - by comparing against the previous value rather than
+  // running unconditionally whenever `initialId` is non-null.
+  const previousInitialIdRef = useRef(initialId)
+  useEffect(() => {
+    const previous = previousInitialIdRef.current
+    previousInitialIdRef.current = initialId
+    if (initialId !== null && initialId !== previous) {
+      void select(initialId)
+    }
+  }, [initialId, select])
 
   const create = useCallback(async (): Promise<string | null> => {
     try {

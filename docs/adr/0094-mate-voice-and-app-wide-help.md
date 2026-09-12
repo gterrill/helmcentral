@@ -60,6 +60,17 @@ stays visible behind the answer. The full panel remains for a longer working
 session; the sheet is the quick channel that does not require leaving the
 page you were already looking at.
 
+The sheet holds exactly one thread: the current conversation, plus the
+composer, nothing more. It keeps appending to that conversation - the most
+recently updated one - across as many opens and closes as the operator
+likes, and there is no timer or staleness check that starts a new one on
+its own. Whether a run of questions belongs together is the operator's
+call, not a clock's: only the sheet header's "New conversation" button
+starts a fresh thread, and its "Open in Mate" button hands the current one
+to the full panel (`onOpenPanel`, closing the sheet) for whenever a quick
+question turns into a longer session that wants the conversation list and
+history the panel keeps and the sheet deliberately does not.
+
 ### 4. A question carries what is on screen and whether it was spoken
 
 The POST that asks a question can carry a `screen` object naming the panel,

@@ -201,7 +201,7 @@ function stubFetch() {
   const conversations: Array<{ id: string; title: string; created_at: string; updated_at: string }> = []
   let counter = 0
 
-  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
     const method = (init?.method ?? 'GET').toUpperCase()
 
@@ -222,12 +222,20 @@ function stubFetch() {
       conversations.unshift(conversation)
       return { ok: true, status: 201, json: async () => conversation }
     }
+    const conversationMatch = url.match(/\/api\/assistant\/conversations\/([^/]+)$/)
+    if (conversationMatch && method === 'GET') {
+      const id = decodeURIComponent(conversationMatch[1])
+      const conversation = conversations.find((c) => c.id === id) ?? { id, title: 'Untitled', created_at: '', updated_at: '' }
+      return { ok: true, json: async () => ({ conversation, messages: [] }) }
+    }
     // Everything else (dashboard pages, routes, tanks, ...) reports "not
     // found" rather than being individually stubbed - the hooks behind
     // them tolerate that (App.smoke.test.tsx pins this), and nothing this
     // file asserts on depends on their data.
     return { ok: false, json: async () => ({}) }
-  }))
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 describe('App-wide voice (ADR 0093)', () => {
@@ -313,5 +321,27 @@ describe('App-wide voice (ADR 0093)', () => {
 
     expect(currentRecognition().aborted).toBe(true)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Talk to Mate' })).toHaveAttribute('aria-pressed', 'false'))
+  })
+
+  // ADR 0094: "Open in Mate" hands the sheet's active conversation to the
+  // full panel and navigates there, closing the sheet - without it, the
+  // sheet was the only way to see a thread at all.
+  it('Open in Mate from the sheet lands on the Mate panel with that conversation requested', async () => {
+    const fetchMock = stubFetch()
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Mate' }))
+    await screen.findByRole('heading', { name: 'Mate' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations', expect.objectContaining({ method: 'POST' })))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Mate' }))
+
+    await waitFor(() => expect(document.title).toBe('Mate · Helmcentral'))
+    expect(screen.queryByRole('heading', { name: 'Mate' })).not.toBeInTheDocument()
+    // The panel's own hook instance opened the same conversation the sheet
+    // had active, not whatever it would otherwise have picked as newest.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations/new-1'))
   })
 })

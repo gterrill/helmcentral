@@ -111,7 +111,7 @@ describe('MateSheet', () => {
   it('does not render the thread while closed', () => {
     vi.stubGlobal('fetch', buildFetch())
 
-    render(<MateSheet open={false} onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} />)
+    render(<MateSheet open={false} onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
 
     expect(screen.queryByRole('heading', { name: 'Mate' })).not.toBeInTheDocument()
   })
@@ -119,10 +119,68 @@ describe('MateSheet', () => {
   it('opens with no initial question and just shows the thread and composer', async () => {
     vi.stubGlobal('fetch', buildFetch())
 
-    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} />)
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
 
     expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Ask Mate about the next couple of days…')).toBeInTheDocument()
+  })
+
+  // ADR 0094: the sheet is one thread plus the composer, and it keeps
+  // appending to the current conversation until the operator presses New -
+  // no time-based expiry. These two header buttons are how the operator
+  // starts a fresh thread or hands the current one off to the full page.
+  it('New conversation creates a fresh thread and focuses the composer', async () => {
+    vi.stubGlobal('fetch', buildFetch())
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud={false}
+        onOpenPanel={vi.fn()}
+      />,
+    )
+
+    // The initial question's optimistic bubble lands first - the sheet has
+    // an active thread with content before New is pressed.
+    await screen.findByText('How does tomorrow look?')
+
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+
+    await waitFor(() => expect(screen.queryByText('How does tomorrow look?')).not.toBeInTheDocument())
+    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…')
+    await waitFor(() => expect(textarea).toHaveFocus())
+  })
+
+  it('Open in Mate hands the active conversation to the panel and closes the sheet', async () => {
+    const onOpenChange = vi.fn()
+    const onOpenPanel = vi.fn()
+    vi.stubGlobal('fetch', buildFetch((conversationId) => sseMessageResponse(
+      { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: 'Fine tomorrow.', created_at: '' },
+      { id: conversationId, title: 'How does tomorrow look?', created_at: '', updated_at: '' },
+    )))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={onOpenChange}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud={false}
+        onOpenPanel={onOpenPanel}
+      />,
+    )
+
+    await screen.findByText('Fine tomorrow.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Mate' }))
+
+    expect(onOpenPanel).toHaveBeenCalledWith('new-1')
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it('sends the initial question at once with spoken:true and the screen', async () => {
@@ -150,6 +208,7 @@ describe('MateSheet', () => {
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud={false}
+        onOpenPanel={vi.fn()}
       />,
     )
 
@@ -178,6 +237,7 @@ describe('MateSheet', () => {
         screen={{ panel: 'forecast' }}
         canWrite={false}
         readAloud={false}
+        onOpenPanel={vi.fn()}
       />,
     )
 
@@ -194,7 +254,7 @@ describe('MateSheet', () => {
     const onOpenChange = vi.fn()
     vi.stubGlobal('fetch', buildFetch())
 
-    render(<MateSheet open onOpenChange={onOpenChange} screen={{ panel: 'forecast' }} canWrite readAloud={false} />)
+    render(<MateSheet open onOpenChange={onOpenChange} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
     await screen.findByRole('heading', { name: 'Mate' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
@@ -232,6 +292,7 @@ describe('MateSheet read-aloud', () => {
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
+        onOpenPanel={vi.fn()}
       />,
     )
 
@@ -255,6 +316,7 @@ describe('MateSheet read-aloud', () => {
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud={false}
+        onOpenPanel={vi.fn()}
       />,
     )
 
@@ -277,6 +339,7 @@ describe('MateSheet read-aloud', () => {
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
+        onOpenPanel={vi.fn()}
       />,
     )
 
@@ -308,6 +371,7 @@ describe('MateSheet read-aloud', () => {
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
+        onOpenPanel={vi.fn()}
       />,
     )
     await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
@@ -320,6 +384,7 @@ describe('MateSheet read-aloud', () => {
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
+        onOpenPanel={vi.fn()}
       />,
     )
 

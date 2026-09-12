@@ -193,4 +193,104 @@ describe('useAssistantConversations', () => {
     expect(result.current.messages).toHaveLength(1)
     expect(fetchMock.mock.calls.length).toBe(callCountBefore)
   })
+
+  // ADR 0094: "Open in Mate" hands the panel a conversation id the sheet
+  // already has active, so the panel's own hook instance needs to open that
+  // thread on mount rather than falling back to the newest one.
+  it('selects initialId on mount when it is present in the fetched list', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        return {
+          ok: true,
+          json: async () => ({
+            conversations: [conversationApi({ id: 'c1', title: 'Newest' }), conversationApi({ id: 'c2', title: 'Older' })],
+          }),
+        }
+      }
+      if (url === '/api/assistant/conversations/c2') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c2' }), messages: [messageApi({ conversation_id: 'c2', content: 'from c2' })] }) }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantConversations({ initialId: 'c2' }))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.activeId).toBe('c2')
+    expect(result.current.messages.map((m) => m.content)).toEqual(['from c2'])
+  })
+
+  it('falls back to the newest conversation when initialId is absent from the fetched list', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        return {
+          ok: true,
+          json: async () => ({
+            conversations: [conversationApi({ id: 'c1', title: 'Newest' }), conversationApi({ id: 'c2', title: 'Older' })],
+          }),
+        }
+      }
+      if (url === '/api/assistant/conversations/c1') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [] }) }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantConversations({ initialId: 'deleted-id' }))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.activeId).toBe('c1')
+  })
+
+  it('re-selects when initialId changes to a new non-null value after mount', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' })] }) }
+      }
+      if (url === '/api/assistant/conversations/c1') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [] }) }
+      }
+      if (url === '/api/assistant/conversations/c9') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c9' }), messages: [messageApi({ conversation_id: 'c9', content: 'from c9' })] }) }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result, rerender } = renderHook(
+      ({ initialId }: { initialId: string | null }) => useAssistantConversations({ initialId }),
+      { initialProps: { initialId: null as string | null } },
+    )
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.activeId).toBe('c1')
+
+    rerender({ initialId: 'c9' })
+
+    await waitFor(() => expect(result.current.activeId).toBe('c9'))
+    expect(result.current.messages.map((m) => m.content)).toEqual(['from c9'])
+  })
+
+  it('does not re-select on mount just because initialId happens to be non-null', async () => {
+    // Guards against the re-select effect firing a second, redundant GET for
+    // the same id the mount effect already selected.
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1' })] }) }
+      }
+      if (url === '/api/assistant/conversations/c1') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [] }) }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantConversations({ initialId: 'c1' }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    const selectCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/assistant/conversations/c1')
+    expect(selectCalls).toHaveLength(1)
+  })
 })

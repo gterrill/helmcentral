@@ -1,5 +1,5 @@
 import { Loader2 } from 'lucide-react'
-import { useCallback, useState, type KeyboardEvent } from 'react'
+import { useCallback, useState, type KeyboardEvent, type Ref } from 'react'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
 import { Button } from '@/components/ui/button'
@@ -33,6 +33,10 @@ interface AssistantThreadProps {
    * voice phase) wants this when it opens with no question already in
    * flight; the panel never sets it, matching its pre-extraction behaviour. */
   autoFocus?: boolean
+  /** Forwarded straight to the composer's textarea (ADR 0094): the sheet's
+   * "New conversation" button focuses it directly after `create()` resolves,
+   * which `autoFocus` alone can't do since that only ever fires on mount. */
+  composerRef?: Ref<HTMLTextAreaElement>
 }
 
 /**
@@ -42,7 +46,7 @@ interface AssistantThreadProps {
  * sheet can host the same thread over whatever page is behind it - neither
  * owns any data itself, both hand it a conversations/chat pair.
  */
-export function AssistantThread({ canWrite, conversations, chat, autoFocus }: AssistantThreadProps) {
+export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef }: AssistantThreadProps) {
   const [content, setContent] = useState('')
 
   const handleSend = useCallback(async () => {
@@ -117,6 +121,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus }: As
 
       <div className="flex flex-col gap-1">
         <Textarea
+          ref={composerRef}
           rows={3}
           placeholder="Ask Mate about the next couple of days…"
           value={content}

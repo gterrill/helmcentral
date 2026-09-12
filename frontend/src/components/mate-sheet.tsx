@@ -1,5 +1,5 @@
-import { Square } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { Maximize2, MessageSquarePlus, Square } from 'lucide-react'
+import { useCallback, useEffect, useRef } from 'react'
 
 import { AssistantThread } from '@/components/assistant-thread'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,11 @@ interface MateSheetProps {
    * on, the answer to a spoken question is read aloud as soon as it
    * arrives. */
   readAloud: boolean
+  /** "Open in Mate" (ADR 0094) hands the sheet's current conversation - or
+   * null, when none is active yet - to the caller, which is expected to
+   * navigate to the full Mate panel and select it there. The sheet closes
+   * itself right after; it does not wait for the panel to actually mount. */
+  onOpenPanel: (conversationId: string | null) => void
 }
 
 /**
@@ -41,10 +46,33 @@ interface MateSheetProps {
  * the sheet's thread survives being closed and reopened the same way the
  * panel's does.
  */
-export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrite, readAloud }: MateSheetProps) {
+export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrite, readAloud, onOpenPanel }: MateSheetProps) {
   const conversations = useAssistantConversations()
   const chat = useAssistantChat()
   const speechOutput = useSpeechOutput()
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+
+  // "New conversation" (ADR 0094): the sheet is one thread plus the
+  // composer, and it keeps appending to the current conversation - no
+  // time-based expiry - until the operator explicitly asks for a fresh one
+  // here. create() both creates and selects the new conversation; focusing
+  // the composer straight after is what autoFocus alone can't do, since that
+  // only ever fires on mount.
+  const handleNewConversation = useCallback(() => {
+    void (async () => {
+      await conversations.create()
+      composerRef.current?.focus()
+    })()
+  }, [conversations])
+
+  // "Open in Mate" (ADR 0094): hands the active conversation to the full
+  // panel and closes the sheet. Not gated on chat.sending - a reply in
+  // flight keeps running server side, and the panel shows it once that
+  // thread loads there.
+  const handleOpenInPanel = useCallback(() => {
+    onOpenPanel(conversations.activeId)
+    onOpenChange(false)
+  }, [conversations.activeId, onOpenPanel, onOpenChange])
 
   // Sends `initialQuestion` exactly once per open. Waits on
   // conversations.loading so it doesn't create a fresh conversation before
@@ -104,21 +132,32 @@ export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrit
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex h-full min-w-0 flex-col gap-4 sm:max-w-xl">
         <SheetHeader className="flex-row items-center justify-between space-y-0">
-          <SheetTitle>Mate</SheetTitle>
-          {speechOutput.speaking && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Stop reading"
-              className="mr-6"
-              onClick={() => speechOutput.stop()}
-            >
-              <Square className="h-4 w-4" />
+          <SheetTitle className="min-w-0 truncate">Mate</SheetTitle>
+          {/* mr-6 clears the Sheet's own absolute-positioned close button
+              (top-4 right-4) - the same offset the stop-reading button used
+              on its own before these two joined it. */}
+          <div className="mr-6 flex shrink-0 items-center gap-1">
+            <Button variant="ghost" size="icon" aria-label="New conversation" onClick={handleNewConversation}>
+              <MessageSquarePlus className="h-4 w-4" />
             </Button>
-          )}
+            <Button variant="ghost" size="icon" aria-label="Open in Mate" onClick={handleOpenInPanel}>
+              <Maximize2 className="h-4 w-4" />
+            </Button>
+            {speechOutput.speaking && (
+              <Button variant="ghost" size="icon" aria-label="Stop reading" onClick={() => speechOutput.stop()}>
+                <Square className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
         </SheetHeader>
         <div className="min-h-0 min-w-0 flex-1">
-          <AssistantThread canWrite={canWrite} conversations={conversations} chat={chat} autoFocus={!initialQuestion} />
+          <AssistantThread
+            canWrite={canWrite}
+            conversations={conversations}
+            chat={chat}
+            autoFocus={!initialQuestion}
+            composerRef={composerRef}
+          />
         </div>
       </SheetContent>
     </Sheet>

@@ -407,6 +407,12 @@ export function App() {
   // stale one.
   const [mateSheetOpen, setMateSheetOpen] = useState(false)
   const [mateSheetQuestion, setMateSheetQuestion] = useState<string | undefined>(undefined)
+  // Which conversation the Mate PANEL should open (ADR 0094): set only by
+  // the sheet's "Open in Mate" button, which hands over whatever thread was
+  // active there. Null means "whatever the panel already had", not "start a
+  // fresh one" - the panel's own hook falls back to its usual newest-thread
+  // behaviour when this is null.
+  const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(null)
   const openMate = useCallback((question?: string) => {
     setMateSheetQuestion(question)
     setMateSheetOpen(true)
@@ -1745,6 +1751,7 @@ export function App() {
               setSettingsSection('assistant')
               setActivePanel('settings')
             })}
+            initialConversationId={matePanelConversationId}
           />
         )
       case 'settings':
@@ -2173,6 +2180,11 @@ export function App() {
         screen={mateScreen}
         canWrite={canWrite}
         readAloud={assistantVoiceConfig.readAloud}
+        onOpenPanel={(id) => {
+          setMatePanelConversationId(id)
+          setMateSheetOpen(false)
+          requestNavigate('assistant', () => setActivePanel('assistant'))
+        }}
       />
 
       <Toaster isDarkTheme={isDarkTheme} />

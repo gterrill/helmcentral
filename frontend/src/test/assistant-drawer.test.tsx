@@ -241,6 +241,26 @@ describe('AssistantDrawer', () => {
     expect(screen.queryByText('Fetching wind forecast for Tongue Bay…')).not.toBeInTheDocument()
   })
 
+  // ADR 0094: "Open in Mate" hands the drawer a conversation id from the
+  // sheet, and the drawer's own hook instance has to open that thread on
+  // mount rather than the newest one in the list.
+  it('opens the requested initialConversationId instead of the newest conversation', async () => {
+    vi.stubGlobal('fetch', buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [
+        { id: 'c1', title: 'Newest', created_at: '2026-09-11T00:00:00Z', updated_at: '2026-09-11T00:00:00Z' },
+        { id: 'c2', title: 'Older, requested', created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z' },
+      ],
+    }))
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} initialConversationId="c2" />)
+
+    expect(await screen.findByText('Older, requested')).toBeInTheDocument()
+    // The list still shows both; c2 is the one selected as active.
+    const button = screen.getByText('Older, requested').closest('button')
+    await waitFor(() => expect(button?.parentElement).toHaveClass('bg-primary/10'))
+  })
+
   it('renders -- for every footer field the server did not report', async () => {
     vi.stubGlobal('fetch', buildAssistantFetch({
       status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },

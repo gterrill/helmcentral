@@ -10,6 +10,12 @@ import { useAssistantStatus } from '@/hooks/use-assistant-status'
 interface AssistantDrawerProps {
   canWrite: boolean
   onOpenSettings: () => void
+  /** Selects this conversation on mount (or re-selects it if it later
+   * changes to a new id, without remounting the panel) rather than the
+   * newest one - ADR 0094's "Open in Mate" hands the panel the sheet's
+   * active thread this way. Absent, or falling outside the fetched list,
+   * for the ordinary "Mate" nav click behaves exactly as before. */
+  initialConversationId?: string | null
 }
 
 // A short, local formatter - not a shared primitive, just readable list
@@ -39,9 +45,9 @@ function formatRelativeTime(iso: string): string {
  * sheet uses, so the long-session panel and the quick voice channel render
  * one conversation identically.
  */
-export function AssistantDrawer({ canWrite, onOpenSettings }: AssistantDrawerProps) {
+export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationId }: AssistantDrawerProps) {
   const status = useAssistantStatus()
-  const conversations = useAssistantConversations()
+  const conversations = useAssistantConversations({ initialId: initialConversationId })
   const chat = useAssistantChat()
 
   const body = (() => {
