@@ -215,7 +215,7 @@ export function PoiMapTile({
         <div
           ref={mapContainerRef}
           data-testid="poi-map-container"
-          className="relative h-full min-h-0 overflow-hidden rounded-md"
+          className="relative isolate h-full min-h-0 overflow-hidden rounded-md"
         >
           <Map
             ref={mapRef}

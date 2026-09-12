@@ -383,7 +383,7 @@ export function RoutePlannerMap({
   const mapStyle = isDarkTheme ? STYLE_DARK : STYLE_LIGHT
 
   return (
-    <div className={cn('relative overflow-hidden rounded-lg', className)} data-testid="route-planner-map">
+    <div className={cn('relative isolate overflow-hidden rounded-lg', className)} data-testid="route-planner-map">
       <Map
         ref={mapRef}
         mapLib={maplibregl}

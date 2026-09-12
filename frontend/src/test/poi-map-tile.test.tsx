@@ -117,6 +117,17 @@ function renderTile(props: Partial<React.ComponentProps<typeof PoiMapTile>> = {}
 }
 
 describe('PoiMapTile', () => {
+  // Same guard as the anchor and route maps: the map container owns its
+  // own stacking context so nothing drawn over the canvas can escape above
+  // a sheet or the mobile sidebar.
+  it('isolates its overlays so they cannot draw above a sheet', () => {
+    usePoiMock.mockReturnValue(poiResult({}))
+
+    renderTile()
+
+    expect(screen.getByTestId('poi-map-container').className.split(/\s+/)).toContain('isolate')
+  })
+
   it('renders one marker per feature and rank badges matching the ranked list rows', () => {
     const features = [
       feature({ id: 'a', name: 'A', distanceM: 100 }),

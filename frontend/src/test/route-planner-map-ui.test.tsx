@@ -184,6 +184,25 @@ describe('RoutePlannerMap', () => {
     vi.restoreAllMocks()
   })
 
+  // The waypoint markers, controls and scale stack at z-index 100 to 2100
+  // to sit above the MapLibre canvas. Without a stacking context on the
+  // wrapper those values escape into the page and beat the Sheet
+  // primitive's z-[70], so the controls drew through the mobile sidebar
+  // and the manual sheet. `isolate` keeps them inside.
+  it('isolates its overlays so they cannot draw above a sheet', () => {
+    render(
+      <RoutePlannerMap
+        waypoints={[]}
+        onWaypointsChange={() => undefined}
+        isDarkTheme={false}
+        vesselLat={-25.29}
+        vesselLon={152.91}
+      />,
+    )
+
+    expect(screen.getByTestId('route-planner-map').className.split(/\s+/)).toContain('isolate')
+  })
+
   it('centers the initial view on the vessel position when there are no waypoints', () => {
     render(
       <RoutePlannerMap
