@@ -65,7 +65,7 @@ describe('AssistantThread', () => {
     expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
   })
 
-  it('renders messages with the assistant reply footer, cost first and mechanics in a tooltip', () => {
+  it('renders messages with the assistant reply footer, cost first and mechanics in a tooltip', async () => {
     const conversations = buildConversations({
       messages: [
         {
@@ -83,7 +83,8 @@ describe('AssistantThread', () => {
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
 
     expect(screen.getByText('Tongue Bay or Blue Pearl Bay first?')).toBeInTheDocument()
-    expect(screen.getByText('Blue Pearl Bay first, on the flood.')).toBeInTheDocument()
+    // Assistant content renders through the now-lazy AssistantMarkdown.
+    expect(await screen.findByText('Blue Pearl Bay first, on the flood.')).toBeInTheDocument()
     // Cost leads, to 3 decimal places, then the tool-round count.
     const footer = screen.getByText('$0.018 · 1 tool round')
     expect(footer).toBeInTheDocument()

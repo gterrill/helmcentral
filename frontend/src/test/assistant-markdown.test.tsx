@@ -8,7 +8,13 @@ import { render, screen } from '@testing-library/react'
 import { AssistantMarkdown } from '@/components/assistant-markdown'
 
 describe('AssistantMarkdown', () => {
-  it('renders a GFM table', () => {
+  // AssistantMarkdown now renders its content through a React.lazy-loaded
+  // impl chunk (kiosk bundle-split), so the markdown output is not there on
+  // the first synchronous render - only the Suspense fallback is. The first
+  // content-bearing assertion in each test below awaits it with findBy*;
+  // whatever follows on the same rendered tree can stay a plain getBy* once
+  // that first await has resolved.
+  it('renders a GFM table', async () => {
     const content = [
       '| Anchorage | Wind |',
       '| --- | --- |',
@@ -18,29 +24,29 @@ describe('AssistantMarkdown', () => {
 
     render(<AssistantMarkdown content={content} />)
 
-    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(await screen.findByRole('table')).toBeInTheDocument()
     expect(screen.getByText('Tongue Bay')).toBeInTheDocument()
   })
 
-  it('does not render a raw <script> or <img> tag from the input', () => {
+  it('does not render a raw <script> or <img> tag from the input', async () => {
     const content = '<script>window.__pwned = true</script>\n\n![alt](https://example.com/x.png)\n\nSafe text'
 
     const { container } = render(<AssistantMarkdown content={content} />)
 
+    expect(await screen.findByText('Safe text')).toBeInTheDocument()
     expect(container.querySelector('script')).toBeNull()
     expect(container.querySelector('img')).toBeNull()
-    expect(screen.getByText('Safe text')).toBeInTheDocument()
   })
 
   // [P3, impeccable critique 2026-09-12] h1 and h2 used to render identically
   // (both `text-base`) - a reply with both levels had no visible hierarchy
   // between them.
-  it('gives h1 a visible step above h2', () => {
+  it('gives h1 a visible step above h2', async () => {
     const content = '# Top level\n\n## Second level\n\nBody text.'
 
     render(<AssistantMarkdown content={content} />)
 
-    const h1 = screen.getByText('Top level')
+    const h1 = await screen.findByText('Top level')
     const h2 = screen.getByText('Second level')
 
     expect(h1.className).toEqual(expect.stringContaining('text-lg'))
@@ -48,10 +54,10 @@ describe('AssistantMarkdown', () => {
     expect(h2.className).toEqual(expect.stringContaining('text-base'))
   })
 
-  it('gives a link target=_blank and rel=noreferrer', () => {
+  it('gives a link target=_blank and rel=noreferrer', async () => {
     render(<AssistantMarkdown content="[OpenRouter](https://openrouter.ai)" />)
 
-    const link = screen.getByRole('link', { name: 'OpenRouter' })
+    const link = await screen.findByRole('link', { name: 'OpenRouter' })
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noreferrer')
     expect(link).toHaveAttribute('href', 'https://openrouter.ai')
@@ -65,7 +71,7 @@ describe('AssistantMarkdown', () => {
 // is held to the same bar here rather than duplicating this guard in its
 // own test file.
 const GUARD_RELATIVE_PATHS = [
-  '../components/assistant-markdown.tsx',
+  '../components/assistant-markdown-impl.tsx',
   '../components/assistant-drawer.tsx',
 ]
 

@@ -61,6 +61,15 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
 
   const bodyRef = useRef<HTMLDivElement>(null)
   const [missingHeading, setMissingHeading] = useState<string | null>(null)
+  // Bumped every time ManualMarkdown's lazy impl actually renders this
+  // content (onRendered below). manual.page/current.heading alone aren't
+  // enough to key the scroll effect on: ManualMarkdown is now behind
+  // React.lazy (kiosk bundle-split), so the first time a page with a
+  // deep-linked heading opens, the impl chunk may still be loading when this
+  // effect first runs - the heading element doesn't exist yet, and neither
+  // dependency changes again once it does mount, so without this the effect
+  // would never get a second chance to find it.
+  const [renderTick, setRenderTick] = useState(0)
 
   // Scrolls to the current target's heading once its page has loaded. A
   // heading that isn't actually on the page never fails silently - the
@@ -81,7 +90,7 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
       if (bodyRef.current) bodyRef.current.scrollTop = 0
       setMissingHeading(current.heading)
     }
-  }, [manual.page, current.heading])
+  }, [manual.page, current.heading, renderTick])
 
   const openContents = () => setHistory((prev) => [...prev, MANUAL_INDEX])
 
@@ -176,6 +185,7 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
                 content={manualBodyWithoutTitle(manual.page.body)}
                 pageId={manual.page.id}
                 onNavigate={handleNavigate}
+                onRendered={() => setRenderTick((t) => t + 1)}
               />
             </>
           ) : null}

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
@@ -58,6 +59,10 @@ describe('ManualSheet', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.resetModules()
+    // A no-op unless the deep-linked-heading test below registered it -
+    // clears that per-test mock so it can never leak into a later test that
+    // needs the real ManualMarkdown.
+    vi.doUnmock('@/components/manual-markdown')
   })
 
   it('does not render while closed, and fetches nothing', async () => {
@@ -86,7 +91,10 @@ describe('ManualSheet', () => {
     })
 
     expect(await screen.findByRole('heading', { name: 'Forecast' })).toBeInTheDocument()
-    expect(screen.getByText('Body text.')).toBeInTheDocument()
+    // Body content renders through the now-lazy ManualMarkdown, so this is
+    // the assertion that has to await - the sheet's own title (above) loads
+    // independently of that chunk.
+    expect(await screen.findByText('Body text.')).toBeInTheDocument()
     // The group line under the title names which part of the manual this is.
     expect(screen.getByText('Feature')).toBeInTheDocument()
   })
@@ -144,6 +152,87 @@ describe('ManualSheet', () => {
     await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled())
   })
 
+  // ManualMarkdown renders behind React.lazy now (kiosk bundle-split), so
+  // the scroll-to-heading effect above can no longer assume the heading
+  // element exists the moment manual.page/current.heading settle - the impl
+  // chunk might still be loading. manual-sheet.tsx's fix is a second trigger
+  // (onRendered -> renderTick) tied to the renderer actually mounting. A
+  // real React.lazy() resolves in a single microtask, too fast to expose
+  // the race, so this mocks ManualMarkdown itself with a fake that holds
+  // back both the heading markup and the onRendered call until a
+  // test-controlled promise resolves - same "capture a resolver, control
+  // the timing by hand" idiom as the "shows three loading skeletons before
+  // the page arrives" test above, applied to the renderer instead of fetch.
+  it('scrolls to a deep-linked heading only once the lazy renderer has mounted it', async () => {
+    let resolveRendered: () => void = () => {}
+    const rendered = new Promise<void>((resolve) => {
+      resolveRendered = resolve
+    })
+
+    // Inlines renderManualSheet's own reset+import steps instead of calling
+    // it, because vi.doMock has to be registered *after* vi.resetModules()
+    // - the same order buildFetch's sibling suite (web-push-section.test.tsx)
+    // uses - or the reset wipes out the registration before manual-sheet.tsx
+    // ever gets a chance to import the mocked module.
+    vi.resetModules()
+    vi.doMock('@/components/manual-markdown', () => ({
+      ManualMarkdown: ({ onRendered }: { onRendered?: () => void }) => {
+        const [ready, setReady] = useState(false)
+        useEffect(() => {
+          let cancelled = false
+          void rendered.then(() => {
+            if (!cancelled) setReady(true)
+          })
+          return () => {
+            cancelled = true
+          }
+        }, [])
+        useEffect(() => {
+          if (ready) onRendered?.()
+        }, [ready, onRendered])
+        return ready ? <h3 id="route-planning">Route planning</h3> : null
+      },
+    }))
+    const { ManualSheet } = await import('@/components/manual-sheet')
+
+    vi.stubGlobal(
+      'fetch',
+      buildFetch({
+        'features/dashboard': {
+          id: 'features/dashboard',
+          title: 'The dashboard',
+          body: '# The dashboard\n\n### Route planning\n\nPlanning detail.',
+        },
+      }),
+    )
+    // vi.spyOn on an already-spied prototype method (the preceding test
+    // spies the same Element.prototype.scrollIntoView) returns the existing
+    // spy rather than a fresh one, and this suite never restores mocks
+    // between tests - so its call count has to be cleared explicitly, or a
+    // call from an earlier test would already satisfy "not called" below.
+    const scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
+    scrollIntoViewSpy.mockClear()
+
+    render(
+      <ManualSheet
+        open
+        onOpenChange={vi.fn()}
+        target={{ page: 'features/dashboard', heading: 'Route planning' }}
+        onAskMate={vi.fn()}
+      />,
+    )
+
+    // The page itself has loaded (the sheet's own title renders it), but the
+    // fake renderer is still holding back its heading markup - the bug this
+    // guards against would have the scroll effect give up right here.
+    await screen.findByRole('heading', { name: 'The dashboard' })
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled()
+
+    resolveRendered()
+
+    await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled())
+  })
+
   it('shows a one-line notice, and never a blank page, when the target heading is not on the page', async () => {
     vi.stubGlobal(
       'fetch',
@@ -164,7 +253,9 @@ describe('ManualSheet', () => {
     })
 
     expect(await screen.findByText('Section "Nonexistent section" is not on this page')).toBeInTheDocument()
-    expect(screen.getByText('Intro text.')).toBeInTheDocument()
+    // Body content renders through the now-lazy ManualMarkdown independently
+    // of the notice above, so this still needs its own await.
+    expect(await screen.findByText('Intro text.')).toBeInTheDocument()
   })
 
   it('a page link pushes history, revealing Back, and Back returns to the previous page', async () => {
