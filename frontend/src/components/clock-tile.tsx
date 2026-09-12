@@ -42,13 +42,13 @@ export const ClockTile = memo(function ClockTile({
   placeName,
   nextWaypoint,
 }: ClockTileProps) {
-  const { now, clock } = useVesselIdentity()
+  const { now, clock, timeZone } = useVesselIdentity()
   // The header (vessel-status-bar.tsx) shares formatDate's full-weekday output via
   // currentDate; this tile is two grid columns wide (~300px) and a long weekday
   // ("SATURDAY, SEP 12, 2026") wraps to a second line there, pushing the place
   // chip below the tile's bottom edge. The compact option keeps formatDate's
   // weekday-first ordering but stays short enough to hold one line at minW.
-  const compactDate = formatDate(now, { compact: true }).toUpperCase()
+  const compactDate = formatDate(now, { compact: true, timeZone }).toUpperCase()
   const etaLabel = nextWaypoint
     ? `ETA ${nextWaypoint.label} ${nextWaypoint.etaAt ? hhmm(formatClock(nextWaypoint.etaAt).timePart) : '—'}${nextWaypoint.basis === 'plan' ? ' (plan)' : ''}`
     : '—'
@@ -60,6 +60,17 @@ export const ClockTile = memo(function ClockTile({
           <time className="flex items-baseline gap-1 font-display leading-none tabular-nums text-gauge-secondary">
             <span className="text-7xl">{hhmm(clock.timePart)}</span>
             <span className="text-2xl">{clock.meridiem}</span>
+            {/* UTC only ever means "no position fix yet" (vesselLocalTimezoneName's
+                honest fallback, ADR 0035) — flagging it here explains an otherwise
+                wrong-looking clock. A real vessel offset needs no such caveat. */}
+            {timeZone === 'UTC' && (
+              <span
+                data-testid="clock-timezone-label"
+                className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+              >
+                UTC
+              </span>
+            )}
           </time>
           <p
             data-testid="clock-date"

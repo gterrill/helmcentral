@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { ClockTile } from '@/components/clock-tile'
@@ -179,5 +179,45 @@ describe('ClockTile', () => {
 
     expect(screen.getByText('Airlie Beach')).toBeInTheDocument()
     expect(screen.getByTestId('clock-eta')).toHaveTextContent('Mooloolaba Marina')
+  })
+
+  // ── vessel-local timezone label (live finding: the wall display's Ubuntu
+  // box stays on UTC while the boat sits at UTC+10, so its clock read 08:31
+  // PM at 06:31 AM boat time) ────────────────────────────────────────────
+
+  function stubVesselStateWithTimezone(timezone: string) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.includes('/api/vessel-state')) {
+          return { ok: true, json: async () => ({ datetime: NOW.toISOString(), timezone }) }
+        }
+        return { ok: false, json: async () => ({}) }
+      }),
+    )
+  }
+
+  test('shows a small UTC label beside the meridiem when the vessel zone is UTC because no position is known', async () => {
+    vi.useRealTimers()
+    stubVesselStateWithTimezone('UTC')
+
+    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName={null} nextWaypoint={null} />)
+
+    expect(await screen.findByTestId('clock-timezone-label')).toHaveTextContent('UTC')
+  })
+
+  test('shows no zone label once a real vessel-local offset is known', async () => {
+    vi.useRealTimers()
+    stubVesselStateWithTimezone('Etc/GMT-10')
+
+    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName={null} nextWaypoint={null} />)
+
+    // Wait for the vessel-state fetch to actually land (the date jumps from
+    // whatever "today" was at mount to NOW's date) before asserting the
+    // label's absence — otherwise absence would be a false negative from
+    // asserting before the response was even processed.
+    await waitFor(() => expect(screen.getByTestId('clock-date')).toHaveTextContent('MON, JUN 15, 2026'))
+    expect(screen.queryByTestId('clock-timezone-label')).not.toBeInTheDocument()
   })
 })

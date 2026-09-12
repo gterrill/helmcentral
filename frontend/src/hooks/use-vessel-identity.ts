@@ -3,25 +3,53 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { useAppConfig } from '@/hooks/use-app-config'
 
-export function formatClock(date: Date) {
-  const value = new Intl.DateTimeFormat('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  }).format(date)
+// The vessel's local zone (backend/weather_tide.go's vesselLocalTimezoneName,
+// ADR 0035) can be an IANA name Intl has never heard of only if the backend
+// itself starts sending something malformed — that upstream contract is
+// worth failing loudly for, but not by crashing the wall display's clock.
+// Warn once per bad zone name rather than throwing, and rather than warning
+// on every per-second tick.
+const warnedInvalidTimeZones = new Set<string>()
+
+function dateTimeFormat(options: Intl.DateTimeFormatOptions, timeZone?: string): Intl.DateTimeFormat {
+  if (timeZone) {
+    try {
+      return new Intl.DateTimeFormat('en-US', { ...options, timeZone })
+    } catch (error) {
+      if (!warnedInvalidTimeZones.has(timeZone)) {
+        warnedInvalidTimeZones.add(timeZone)
+        console.warn(`use-vessel-identity: unknown timezone "${timeZone}", falling back to the browser zone`, error)
+      }
+    }
+  }
+  return new Intl.DateTimeFormat('en-US', options)
+}
+
+export function formatClock(date: Date, timeZone?: string) {
+  const value = dateTimeFormat(
+    {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    },
+    timeZone,
+  ).format(date)
 
   const [timePart = '--:--:--', meridiem = ''] = value.toUpperCase().split(/\s+/)
   return { timePart, meridiem }
 }
 
-export function formatDate(date: Date, options?: { compact?: boolean }) {
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: options?.compact ? 'short' : 'long',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(date)
+export function formatDate(date: Date, options?: { compact?: boolean; timeZone?: string }) {
+  return dateTimeFormat(
+    {
+      weekday: options?.compact ? 'short' : 'long',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    },
+    options?.timeZone,
+  ).format(date)
 }
 
 export function useVesselIdentity() {
@@ -30,6 +58,7 @@ export function useVesselIdentity() {
   const [boatName, setBoatName] = useState<string | null>(null)
   const [boatModel, setBoatModel] = useState<string | null>(null)
   const [signalkConnected, setSignalkConnected] = useState<boolean | null>(null)
+  const [timeZone, setTimeZone] = useState<string | undefined>(undefined)
   const { ui: uiConfig } = useAppConfig()
   const refreshSeconds = uiConfig.vesselStateRefreshSeconds
 
@@ -49,6 +78,7 @@ export function useVesselIdentity() {
         const data = (await response.json()) as {
           status?: string
           datetime?: string
+          timezone?: string
           depth?: number
           name?: string
           vessel_prefix?: string
@@ -70,6 +100,10 @@ export function useVesselIdentity() {
           if (!Number.isNaN(backendTime.getTime())) {
             setNow(backendTime)
           }
+        }
+
+        if (data.timezone) {
+          setTimeZone(data.timezone)
         }
 
         setSignalkConnected(data.source === 'signalk')
@@ -115,8 +149,8 @@ export function useVesselIdentity() {
     // Re-arms the poll when the operator changes the refresh interval.
   }, [refreshSeconds])
 
-  const currentDate = useMemo(() => formatDate(now).toUpperCase(), [now])
-  const clock = useMemo(() => formatClock(now), [now])
+  const currentDate = useMemo(() => formatDate(now, { timeZone }).toUpperCase(), [now, timeZone])
+  const clock = useMemo(() => formatClock(now, timeZone), [now, timeZone])
 
-  return { now, currentDate, clock, vesselStatus, boatName, boatModel, signalkConnected }
+  return { now, currentDate, clock, vesselStatus, boatName, boatModel, signalkConnected, timeZone }
 }
