@@ -15,14 +15,29 @@ const EXAMPLE_QUESTION =
 // asking questions is never a surprise. Any part the server didn't report
 // (an optimistic local bubble has none of these yet) reads as `--` rather
 // than a confident-looking zero.
+//
+// [impeccable critique 2026-09-12, PFD Learning #18] the price is the one
+// decision-relevant figure here - the model slug and token count are
+// backend mechanics, not something the operator reads at a glance to
+// decide anything. formatMessageFooter leads with cost (plus a tool-round
+// count when the reply made one), and formatMessageFooterTitle carries the
+// model/tokens detail into the footer's `title` tooltip instead.
 function formatMessageFooter(message: AssistantMessage): string {
+  const cost = typeof message.costUsd === 'number' ? `$${message.costUsd.toFixed(3)}` : '--'
+  const parts = [cost]
+  if (typeof message.toolRounds === 'number') {
+    parts.push(`${message.toolRounds} tool round${message.toolRounds === 1 ? '' : 's'}`)
+  }
+  return parts.join(' · ')
+}
+
+function formatMessageFooterTitle(message: AssistantMessage): string {
   const model = message.model && message.model !== '' ? message.model : '--'
   const tokens =
     typeof message.promptTokens === 'number' && typeof message.completionTokens === 'number'
       ? (message.promptTokens + message.completionTokens).toLocaleString()
       : '--'
-  const cost = typeof message.costUsd === 'number' ? `$${message.costUsd.toFixed(4)}` : '--'
-  return `${model} · ${tokens} tokens · ${cost}`
+  return `${model} · ${tokens} tokens`
 }
 
 interface AssistantThreadProps {
@@ -111,13 +126,16 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
           conversations.messages.map((message) => (
             <div key={message.id} className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
               {message.role === 'user' ? (
-                <div className="max-w-[85%] min-w-0 whitespace-pre-wrap rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-foreground">
+                <div className="max-w-[85%] min-w-0 whitespace-pre-wrap rounded-lg border border-border bg-secondary px-4 py-3 text-sm leading-relaxed text-foreground">
                   {message.content}
                 </div>
               ) : (
                 <div className="w-full min-w-0">
                   <AssistantMarkdown content={message.content} />
-                  <p className="mt-4 border-t border-border pt-2 text-[11px] tabular-nums text-muted-foreground">
+                  <p
+                    className="mt-4 border-t border-border pt-2 text-[11px] tabular-nums text-muted-foreground"
+                    title={formatMessageFooterTitle(message)}
+                  >
                     {formatMessageFooter(message)}
                   </p>
                 </div>
@@ -139,15 +157,15 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
 
       {stopped && !chat.sending && <p className="text-[11px] text-muted-foreground">Stopped.</p>}
 
-      {(chat.error || conversations.error) && (
-        <p className="text-sm text-destructive">{chat.error ?? conversations.error}</p>
+      {(chat.error || conversations.errorMessage) && (
+        <p className="text-sm text-destructive">{chat.error ?? conversations.errorMessage}</p>
       )}
 
       <div className="flex flex-col gap-1">
         <Textarea
           ref={composerRef}
           rows={3}
-          placeholder="Ask Mate about the next couple of days…"
+          placeholder="Ask about a passage, an anchorage, or how a panel works…"
           value={content}
           onChange={(event) => setContent(event.target.value)}
           onKeyDown={handleKeyDown}

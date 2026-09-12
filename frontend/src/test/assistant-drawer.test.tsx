@@ -138,7 +138,7 @@ describe('AssistantDrawer', () => {
     render(<AssistantDrawer canWrite onOpenSettings={onOpenSettings} />)
 
     expect(await screen.findByText('Set up an OpenRouter key in Settings → Assistant.')).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('Ask Mate about the next couple of days…')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Mate settings' }))
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
@@ -153,7 +153,7 @@ describe('AssistantDrawer', () => {
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
     expect(await screen.findByText('Hook Reef anchorages')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Ask Mate about the next couple of days…')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeInTheDocument()
     // Empty-thread hint shows the Whitsundays example question.
     expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
@@ -166,7 +166,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite={false} onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…')
+    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
     expect(textarea).toBeDisabled()
     expect(screen.getByText('Read-only session')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
@@ -186,7 +186,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…') as HTMLTextAreaElement
+    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'Tongue Bay or Blue Pearl Bay first?' } })
 
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
@@ -200,7 +200,8 @@ describe('AssistantDrawer', () => {
     })
 
     await waitFor(() => expect(screen.getByText('Blue Pearl Bay first, on the flood.')).toBeInTheDocument())
-    expect(screen.getByText('anthropic/claude-sonnet-4.5 · 1,200 tokens · $0.0184')).toBeInTheDocument()
+    // Cost leads the visible footer; model/tokens moved to its title tooltip.
+    expect(screen.getByTitle('anthropic/claude-sonnet-4.5 · 1,200 tokens')).toHaveTextContent('$0.018')
     // The optimistic user bubble is also in the thread.
     expect(screen.getByText('Tongue Bay or Blue Pearl Bay first?')).toBeInTheDocument()
     // The composer clears after a successful send.
@@ -216,7 +217,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…')
+    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
     fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
 
     act(() => { fireEvent.keyDown(textarea, { key: 'Enter' }) })
@@ -279,7 +280,7 @@ describe('AssistantDrawer', () => {
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
 
-    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…')
+    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
     fireEvent.change(textarea, { target: { value: 'Any cost info?' } })
 
     await act(async () => {
@@ -288,6 +289,6 @@ describe('AssistantDrawer', () => {
     })
 
     await waitFor(() => expect(screen.getByText('No cost reported.')).toBeInTheDocument())
-    expect(screen.getByText('-- · -- tokens · --')).toBeInTheDocument()
+    expect(screen.getByTitle('-- · -- tokens')).toHaveTextContent('--')
   })
 })

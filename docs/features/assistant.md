@@ -143,13 +143,16 @@ of the coast doesn't get answered in light of yesterday's passage. The sheet
 and the full panel share the same conversations, so a question asked from
 the sheet is still there if you later open the full Mate panel.
 
-Every reply's footer shows which model answered, how many tokens the
-question and answer used between them, and what OpenRouter charged for
-that exact reply, for example `anthropic/claude-sonnet-4.5 · 3,214 tokens ·
-$0.0184`. A question that also has Mate read the manual costs a little more,
-since that's one extra round trip to the model before the answer comes back.
+Every reply's footer leads with what OpenRouter charged for that exact
+reply, for example `$0.056`. A question that also had Mate read the manual
+shows a tool-round count alongside it (`$0.056 · 1 tool round`), since
+that's one extra round trip to the model before the answer comes back.
 There's no separate bill to check afterwards: the running cost of asking
-questions is on the screen every time you ask one.
+questions is on the screen every time you ask one. Which model answered and
+how many tokens the question and answer used between them are still there
+if you want them, in the tooltip you get from hovering the footer (or a
+long press on a touchscreen) - detail worth having on hand, not something
+you need at a glance every time.
 
 ## What it is not
 

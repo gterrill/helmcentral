@@ -51,8 +51,11 @@ interface FetchLike {
   body?: ReadableStream<Uint8Array> | null
 }
 
-function buildFetch(onSendMessage?: (conversationId: string, body: Record<string, unknown>) => FetchLike) {
-  const conversations: ConversationRecord[] = []
+function buildFetch(
+  onSendMessage?: (conversationId: string, body: Record<string, unknown>) => FetchLike,
+  initialConversations: ConversationRecord[] = [],
+) {
+  const conversations: ConversationRecord[] = [...initialConversations]
   const messagesByConversation = new Map<string, Array<Record<string, unknown>>>()
   let counter = 0
 
@@ -122,7 +125,7 @@ describe('MateSheet', () => {
     render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
 
     expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Ask Mate about the next couple of days…')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
   })
 
   // ADR 0094: the sheet is one thread plus the composer, and it keeps
@@ -151,7 +154,7 @@ describe('MateSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
 
     await waitFor(() => expect(screen.queryByText('How does tomorrow look?')).not.toBeInTheDocument())
-    const textarea = await screen.findByPlaceholderText('Ask Mate about the next couple of days…')
+    const textarea = await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
     await waitFor(() => expect(textarea).toHaveFocus())
   })
 
@@ -376,6 +379,140 @@ describe('MateSheet', () => {
     // The Base UI dialog's onOpenChange also carries an event-details object
     // as a second argument - only the boolean matters to MateSheet's caller.
     await waitFor(() => expect(onOpenChange.mock.calls[0]?.[0]).toBe(false))
+  })
+
+  // fix(frontend): say which thread the Mate sheet is in and what Mate can
+  // do (impeccable critique 2026-09-12, weak scent) - "Mate" alone doesn't
+  // say which of several open conversations the sheet is showing.
+  it('names the active conversation under "Mate" in the header', async () => {
+    vi.stubGlobal(
+      'fetch',
+      buildFetch(undefined, [
+        { id: 'c1', title: 'Hamilton Island to Gloucester Island, 14 Sep', created_at: '', updated_at: '' },
+      ]),
+    )
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    expect(await screen.findByText('Hamilton Island to Gloucester Island, 14 Sep')).toBeInTheDocument()
+  })
+
+  it('shows -- under "Mate" when there is no active thread', async () => {
+    vi.stubGlobal('fetch', buildFetch())
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    await screen.findByRole('heading', { name: 'Mate' })
+    expect(screen.getByText('--')).toBeInTheDocument()
+  })
+})
+
+// fix(frontend): make a failed Mate load recoverable - the sheet has no
+// conversation list of its own to fall back on, so a failed initial load
+// used to render the raw "HTTP 502" string with no way to try again short
+// of reloading the whole page.
+describe('MateSheet recoverable load failure', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function buildAlwaysFailingListFetch(status: number) {
+    return vi.fn(async (url: string) => {
+      if (url.endsWith('/api/assistant/conversations')) return { ok: false, status }
+      throw new Error(`unexpected fetch in this test: ${url}`)
+    })
+  }
+
+  it('shows a plain-English card in place of the thread, not the raw HTTP string', async () => {
+    vi.stubGlobal('fetch', buildAlwaysFailingListFetch(502))
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    expect(await screen.findByText("Mate's conversations could not be loaded.")).toBeInTheDocument()
+    expect(screen.getByText(/The server answered 502\. This is usually the boat's link dropping for a moment\./)).toBeInTheDocument()
+    expect(screen.queryByText(/HTTP 502/)).not.toBeInTheDocument()
+  })
+
+  it('gives the card a filled Try again and a ghost Open the Mate page action', async () => {
+    vi.stubGlobal('fetch', buildAlwaysFailingListFetch(502))
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    const headline = await screen.findByText("Mate's conversations could not be loaded.")
+    const card = headline.closest('div')
+    expect(card).not.toBeNull()
+
+    const tryAgain = within(card!).getByRole('button', { name: 'Try again' })
+    const openPage = within(card!).getByRole('button', { name: 'Open the Mate page' })
+    expect(tryAgain.className).toEqual(expect.stringContaining('h-10'))
+    expect(openPage.className).toEqual(expect.stringContaining('h-10'))
+  })
+
+  it('Try again reloads, and the thread replaces the card once it succeeds', async () => {
+    let listShouldFail = true
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/api/assistant/conversations')) {
+        if (listShouldFail) return { ok: false, status: 502 }
+        return { ok: true, json: async () => ({ conversations: [] }) }
+      }
+      throw new Error(`unexpected fetch in this test: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    const headline = await screen.findByText("Mate's conversations could not be loaded.")
+    const card = headline.closest('div')
+
+    listShouldFail = false
+    fireEvent.click(within(card!).getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(screen.queryByText("Mate's conversations could not be loaded.")).not.toBeInTheDocument())
+    expect(await screen.findByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
+  })
+
+  it('Open the Mate page on the card hands the panel null and closes the sheet', async () => {
+    const onOpenChange = vi.fn()
+    const onOpenPanel = vi.fn()
+    vi.stubGlobal('fetch', buildAlwaysFailingListFetch(502))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={onOpenChange}
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud={false}
+        onOpenPanel={onOpenPanel}
+      />,
+    )
+
+    const headline = await screen.findByText("Mate's conversations could not be loaded.")
+    const card = headline.closest('div')
+
+    fireEvent.click(within(card!).getByRole('button', { name: 'Open the Mate page' }))
+
+    expect(onOpenPanel).toHaveBeenCalledWith(null)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('reloads the conversation list every time the sheet opens', async () => {
+    const fetchMock = buildFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const listCalls = () => fetchMock.mock.calls.filter(([url]) => (url as string).endsWith('/api/assistant/conversations')).length
+
+    const { rerender } = render(
+      <MateSheet open={false} onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />,
+    )
+    await waitFor(() => expect(listCalls()).toBeGreaterThan(0))
+    const callsWhileClosed = listCalls()
+
+    rerender(
+      <MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />,
+    )
+
+    await waitFor(() => expect(listCalls()).toBeGreaterThan(callsWhileClosed))
   })
 })
 

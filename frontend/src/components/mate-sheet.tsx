@@ -16,6 +16,18 @@ import { extractSpokenSummary } from '@/lib/spoken-summary'
 // reads aloud as something short rather than the entire markdown document.
 const SPOKEN_FALLBACK_LENGTH = 300
 
+// Splits a describeLoadError() sentence into a headline (the first
+// sentence) and detail (everything after it) for the recoverable-load-
+// failure card below - the card puts the headline in full-strength text
+// and the detail in muted text, rather than one undifferentiated block.
+// A message with no second sentence (the plain "(HTTP <n>)" case) comes
+// back with an empty detail, which the card simply omits.
+function splitFirstSentence(message: string): { headline: string; detail: string } {
+  const match = /^(.+?[.!?])(?:\s+(.*))?$/.exec(message)
+  if (!match) return { headline: message, detail: '' }
+  return { headline: match[1], detail: match[2] ?? '' }
+}
+
 interface MateSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -75,6 +87,26 @@ export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrit
     onOpenChange(false)
   }, [conversations.activeId, onOpenPanel, onOpenChange])
 
+  // The recoverable-load-failure card's "Open the Mate page" (impeccable
+  // critique 2026-09-12, P0): a failed initial load never got an activeId,
+  // so unlike handleOpenInPanel above this always hands the full panel
+  // null rather than a conversation that was never selected - the panel
+  // falls back to its own newest-thread selection from there.
+  const handleOpenPanelFromErrorCard = useCallback(() => {
+    onOpenPanel(null)
+    onOpenChange(false)
+  }, [onOpenPanel, onOpenChange])
+
+  // Refetches every time the sheet opens, rather than once per app session
+  // (impeccable critique 2026-09-12, P0): the sheet has no conversation
+  // list of its own, so a load that failed while the sheet was last open
+  // otherwise had no way to recover short of reloading the whole page.
+  // Cheap to repeat - the sheet always opens onto the newest thread anyway.
+  useEffect(() => {
+    if (open) void conversations.reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
   // Sends `initialQuestion` exactly once per open. Waits on
   // conversations.loading so it doesn't create a fresh conversation before
   // the hook's own mount effect has had a chance to select the most
@@ -129,6 +161,20 @@ export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  const activeConversationTitle =
+    conversations.conversations.find((conversation) => conversation.id === conversations.activeId)?.title ?? null
+
+  // A failed load with nothing already on screen (impeccable critique
+  // 2026-09-12, P0): the sheet has no conversation list of its own to fall
+  // back on, so this is the only signal the operator gets that anything
+  // went wrong. Once at least one conversation has loaded, a later error
+  // falls through to AssistantThread's own error row instead - the thread
+  // is worth keeping visible at that point.
+  const loadError =
+    conversations.errorMessage !== null && conversations.conversations.length === 0
+      ? splitFirstSentence(conversations.errorMessage)
+      : null
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex h-full min-w-0 flex-col gap-4 sm:max-w-xl">
@@ -136,9 +182,18 @@ export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrit
             40 px close button (top-2 right-2) structurally, rather than a
             hand-tuned margin on the actions row next to it. */}
         <SheetHeader className="flex-row items-center justify-between space-y-0 pr-10">
-          {/* text-base matches DESIGN.md's Title token (1rem); the primitive's
-              own default is text-lg (18px). */}
-          <SheetTitle className="min-w-0 truncate text-base">Mate</SheetTitle>
+          <div className="min-w-0">
+            {/* text-base matches DESIGN.md's Title token (1rem); the primitive's
+                own default is text-lg (18px). */}
+            <SheetTitle className="truncate text-base">Mate</SheetTitle>
+            {/* Which thread this is (impeccable critique 2026-09-12, weak
+                scent - "Mate" alone doesn't say which of several open
+                conversations the sheet is showing). `--` before any thread
+                is selected, same as every other zero-state in this app. */}
+            <div className="truncate text-[11px] text-muted-foreground">
+              {activeConversationTitle ?? '--'}
+            </div>
+          </div>
           <div className="flex shrink-0 items-center gap-1">
             <Button
               variant="ghost"
@@ -182,13 +237,26 @@ export function MateSheet({ open, onOpenChange, initialQuestion, screen, canWrit
             a bounded height, and a long reply pushed the composer off the bottom of
             the viewport (impeccable critique 2026-09-12, P0). */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="mate-sheet-thread-region">
-          <AssistantThread
-            canWrite={canWrite}
-            conversations={conversations}
-            chat={chat}
-            autoFocus={!initialQuestion}
-            composerRef={composerRef}
-          />
+          {loadError ? (
+            <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+              <p className="text-sm text-foreground">{loadError.headline}</p>
+              {loadError.detail !== '' && <p className="text-sm text-muted-foreground">{loadError.detail}</p>}
+              <div className="flex gap-2">
+                <Button onClick={() => void conversations.reload()}>Try again</Button>
+                <Button variant="ghost" onClick={handleOpenPanelFromErrorCard}>
+                  Open the Mate page
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <AssistantThread
+              canWrite={canWrite}
+              conversations={conversations}
+              chat={chat}
+              autoFocus={!initialQuestion}
+              composerRef={composerRef}
+            />
+          )}
         </div>
       </SheetContent>
     </Sheet>

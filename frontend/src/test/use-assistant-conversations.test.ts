@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import { describeLoadError, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 
 // ADR 0093: conversation list + thread state for the assistant panel. The
 // wire shape is snake_case (Conversation/Message); the hook maps it to the
@@ -292,5 +292,106 @@ describe('useAssistantConversations', () => {
 
     const selectCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/assistant/conversations/c1')
     expect(selectCalls).toHaveLength(1)
+  })
+
+  // fix(frontend): make a failed Mate load recoverable - reload() repeats
+  // the initial load (list, then select the initial id if present else the
+  // newest) after clearing the stale error, so a dropped link doesn't
+  // strand the sheet/panel with no way out short of a full page reload.
+  it('reload clears the error and re-selects the newest conversation once the server recovers', async () => {
+    let serverIsUp = false
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        if (!serverIsUp) return { ok: false, status: 502 }
+        return { ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1', title: 'Hook Reef' })] }) }
+      }
+      if (url === '/api/assistant/conversations/c1') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c1' }), messages: [messageApi({ content: 'hello' })] }) }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toBe('HTTP 502')
+    expect(result.current.errorMessage).toBe(describeLoadError('HTTP 502'))
+    expect(result.current.conversations).toEqual([])
+    expect(result.current.activeId).toBeNull()
+
+    serverIsUp = true
+    await act(async () => {
+      await result.current.reload()
+    })
+
+    expect(result.current.error).toBeNull()
+    expect(result.current.errorMessage).toBeNull()
+    expect(result.current.activeId).toBe('c1')
+    expect(result.current.messages.map((m) => m.content)).toEqual(['hello'])
+  })
+
+  it('reload selects initialId again when the server recovers, same as the mount rule', async () => {
+    let serverIsUp = false
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') {
+        if (!serverIsUp) return { ok: false, status: 502 }
+        return {
+          ok: true,
+          json: async () => ({
+            conversations: [conversationApi({ id: 'c1', title: 'Newest' }), conversationApi({ id: 'c2', title: 'Requested' })],
+          }),
+        }
+      }
+      if (url === '/api/assistant/conversations/c2') {
+        return { ok: true, json: async () => ({ conversation: conversationApi({ id: 'c2' }), messages: [] }) }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantConversations({ initialId: 'c2' }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toBe('HTTP 502')
+
+    serverIsUp = true
+    await act(async () => {
+      await result.current.reload()
+    })
+
+    expect(result.current.activeId).toBe('c2')
+  })
+
+  it('reload sets loading while it runs', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ conversations: [] }) }))
+
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let pending: Promise<void> = Promise.resolve()
+    act(() => {
+      pending = result.current.reload()
+    })
+    expect(result.current.loading).toBe(true)
+
+    await act(async () => {
+      await pending
+    })
+    expect(result.current.loading).toBe(false)
+  })
+})
+
+describe('describeLoadError', () => {
+  it.each(['502', '503', '504'])('names a dropped link for HTTP %s', (code) => {
+    expect(describeLoadError(`HTTP ${code}`)).toBe(
+      `Mate's conversations could not be loaded. The server answered ${code}. This is usually the boat's link dropping for a moment.`,
+    )
+  })
+
+  it('names the status for any other HTTP code, without the link-dropping guess', () => {
+    expect(describeLoadError('HTTP 401')).toBe("Mate's conversations could not be loaded (HTTP 401).")
+  })
+
+  it('describes a network failure that never got a status code at all', () => {
+    expect(describeLoadError('Failed to fetch')).toBe("Mate's conversations could not be loaded. The server did not answer.")
   })
 })

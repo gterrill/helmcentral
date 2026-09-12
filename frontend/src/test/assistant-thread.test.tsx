@@ -21,11 +21,13 @@ function buildConversations(
     messages: [],
     loading: false,
     error: null,
+    errorMessage: null,
     select: vi.fn(),
     create: vi.fn(),
     remove: vi.fn(),
     appendLocal: vi.fn(),
     refresh: vi.fn().mockResolvedValue(undefined),
+    reload: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -60,10 +62,10 @@ describe('AssistantThread', () => {
     render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
 
     expect(screen.getByText(/Ask Mate: /)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Ask Mate about the next couple of days…')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeInTheDocument()
   })
 
-  it('renders messages with the assistant reply footer', () => {
+  it('renders messages with the assistant reply footer, cost first and mechanics in a tooltip', () => {
     const conversations = buildConversations({
       messages: [
         {
@@ -74,7 +76,7 @@ describe('AssistantThread', () => {
           content: 'Tongue Bay or Blue Pearl Bay first?',
           createdAt: '2026-09-11T00:00:00Z',
         },
-        assistantMessage(),
+        assistantMessage({ toolRounds: 1 }),
       ],
     })
 
@@ -82,7 +84,67 @@ describe('AssistantThread', () => {
 
     expect(screen.getByText('Tongue Bay or Blue Pearl Bay first?')).toBeInTheDocument()
     expect(screen.getByText('Blue Pearl Bay first, on the flood.')).toBeInTheDocument()
-    expect(screen.getByText('anthropic/claude-sonnet-4.5 · 1,200 tokens · $0.0184')).toBeInTheDocument()
+    // Cost leads, to 3 decimal places, then the tool-round count.
+    const footer = screen.getByText('$0.018 · 1 tool round')
+    expect(footer).toBeInTheDocument()
+    // Model and token count move to a title tooltip rather than the visible line.
+    expect(footer).toHaveAttribute('title', 'anthropic/claude-sonnet-4.5 · 1,200 tokens')
+  })
+
+  it('omits the tool-round part of the footer when tool_rounds was not reported', () => {
+    const conversations = buildConversations({ messages: [assistantMessage()] })
+
+    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+
+    expect(screen.getByText('$0.018')).toBeInTheDocument()
+  })
+
+  it('pluralises multiple tool rounds', () => {
+    const conversations = buildConversations({ messages: [assistantMessage({ toolRounds: 2 })] })
+
+    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+
+    expect(screen.getByText('$0.018 · 2 tool rounds')).toBeInTheDocument()
+  })
+
+  it('renders -- for every footer field the server did not report', () => {
+    const conversations = buildConversations({
+      messages: [
+        assistantMessage({ model: undefined, promptTokens: undefined, completionTokens: undefined, costUsd: undefined, toolRounds: undefined }),
+      ],
+    })
+
+    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+
+    const footer = screen.getByText('--')
+    expect(footer).toHaveAttribute('title', '-- · -- tokens')
+  })
+
+  // fix(frontend): put cost first in the Mate reply footer and give the
+  // operator's bubble a figure (impeccable critique 2026-09-12, Wertheimer
+  // 1923 figure-ground) - bg-muted on bg-background was a 2% step, so the
+  // operator's own words barely registered as a bubble at all.
+  it('gives the user bubble a border and the secondary surface token, so it reads as a figure', () => {
+    const conversations = buildConversations({
+      messages: [
+        {
+          id: 'u1',
+          conversationId: 'c1',
+          seq: 0,
+          role: 'user',
+          content: 'Tongue Bay or Blue Pearl Bay first?',
+          createdAt: '2026-09-11T00:00:00Z',
+        },
+      ],
+    })
+
+    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+
+    const bubble = screen.getByText('Tongue Bay or Blue Pearl Bay first?')
+    expect(bubble.className).toEqual(expect.stringContaining('border'))
+    expect(bubble.className).toEqual(expect.stringContaining('border-border'))
+    expect(bubble.className).toEqual(expect.stringContaining('bg-secondary'))
+    expect(bubble.className).not.toEqual(expect.stringContaining('bg-muted'))
   })
 
   it('Enter sends the composer content through the passed chat.send and appends it locally', async () => {
@@ -91,7 +153,7 @@ describe('AssistantThread', () => {
 
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ send })} />)
 
-    const textarea = screen.getByPlaceholderText('Ask Mate about the next couple of days…') as HTMLTextAreaElement
+    const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
@@ -107,7 +169,7 @@ describe('AssistantThread', () => {
     const send = vi.fn()
     render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
 
-    const textarea = screen.getByPlaceholderText('Ask Mate about the next couple of days…') as HTMLTextAreaElement
+    const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'Draft in progress' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
 
@@ -122,7 +184,7 @@ describe('AssistantThread', () => {
 
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ send })} />)
 
-    const textarea = screen.getByPlaceholderText('Ask Mate about the next couple of days…')
+    const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
     fireEvent.change(textarea, { target: { value: 'A fresh question' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
@@ -192,7 +254,7 @@ describe('AssistantThread', () => {
     rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: false, send, abort })} />)
     expect(screen.getByText('Stopped.')).toBeInTheDocument()
 
-    const textarea = screen.getByPlaceholderText('Ask Mate about the next couple of days…')
+    const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
     fireEvent.change(textarea, { target: { value: 'A follow-up' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
@@ -200,7 +262,7 @@ describe('AssistantThread', () => {
     expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
   })
 
-  it('surfaces a chat or conversations error', () => {
+  it('surfaces a chat error as-is - it already carries server-provided text', () => {
     render(
       <AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ error: 'upstream 401' })} />,
     )
@@ -208,10 +270,30 @@ describe('AssistantThread', () => {
     expect(screen.getByText('upstream 401')).toBeInTheDocument()
   })
 
+  // fix(frontend): make a failed Mate load recoverable - the raw `HTTP 502`
+  // string used to reach this row unchanged; it now goes through
+  // describeLoadError() before AssistantThread ever sees it.
+  it('surfaces a conversations load error as its friendly errorMessage, never the raw error', () => {
+    render(
+      <AssistantThread
+        canWrite
+        conversations={buildConversations({
+          error: 'HTTP 502',
+          errorMessage:
+            "Mate's conversations could not be loaded. The server answered 502. This is usually the boat's link dropping for a moment.",
+        })}
+        chat={buildChat()}
+      />,
+    )
+
+    expect(screen.getByText(/Mate's conversations could not be loaded/)).toBeInTheDocument()
+    expect(screen.queryByText('HTTP 502')).not.toBeInTheDocument()
+  })
+
   it('disables the composer and shows the read-only hint when canWrite is false', () => {
     render(<AssistantThread canWrite={false} conversations={buildConversations()} chat={buildChat()} />)
 
-    expect(screen.getByPlaceholderText('Ask Mate about the next couple of days…')).toBeDisabled()
+    expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeDisabled()
     expect(screen.getByText('Read-only session')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })

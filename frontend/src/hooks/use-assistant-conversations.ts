@@ -77,6 +77,29 @@ export interface UseAssistantConversationsOptions {
   initialId?: string | null
 }
 
+// A failed load surfaces `error` as the raw thrown message (an `HTTP <n>`
+// string from fetchConversations/select, or whatever a network failure's
+// TypeError carries) so tests and callers that want the exact wire detail
+// still have it. Nothing operator-facing should ever print that string
+// directly, though - this turns it into a plain sentence instead. 502/503/504
+// specifically call out a dropped link, since on this boat that is what they
+// almost always mean; any other HTTP status still names the code, since that
+// is a real server-side detail worth keeping rather than masking; anything
+// else (a network failure - "Failed to fetch", or any other TypeError) never
+// got as far as a status code at all, so it reads that way instead of
+// guessing at one.
+export function describeLoadError(err: string): string {
+  const httpMatch = /^HTTP (\d+)$/.exec(err)
+  if (httpMatch) {
+    const code = httpMatch[1]
+    if (code === '502' || code === '503' || code === '504') {
+      return `Mate's conversations could not be loaded. The server answered ${code}. This is usually the boat's link dropping for a moment.`
+    }
+    return `Mate's conversations could not be loaded (HTTP ${code}).`
+  }
+  return "Mate's conversations could not be loaded. The server did not answer."
+}
+
 export function useAssistantConversations(options?: UseAssistantConversationsOptions) {
   const initialId = options?.initialId ?? null
   // Captured once, at mount, via a lazy initializer the same way
@@ -124,34 +147,51 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     }
   }, [])
 
-  // Initial load opens `mountInitialId` when it names a conversation that
-  // actually exists in the freshly fetched list, otherwise the most recently
-  // updated thread rather than an empty pane: the panel is usually reopened
-  // to reread a plan, and the list is already sorted newest first by the
-  // server. A later refresh never changes the selection; only the operator
-  // (or create/remove/the re-select effect below) does that.
+  // Shared by the mount effect below and by `reload`: fetches the list, then
+  // opens `targetId` when it names a conversation that actually exists in
+  // the freshly fetched list, otherwise the most recently updated thread
+  // rather than an empty pane - the panel is usually reopened to reread a
+  // plan, and the list is already sorted newest first by the server.
+  // `isCancelled` lets the mount effect's cleanup skip state updates after
+  // an unmount without `reload` (which always runs to completion) having to
+  // carry that same plumbing.
+  const loadConversationsAndSelect = useCallback(async (targetId: string | null, isCancelled: () => boolean) => {
+    try {
+      const list = await fetchConversations()
+      if (isCancelled()) return
+      setConversations(list)
+      setError(null)
+      const target = targetId !== null && list.some((c) => c.id === targetId) ? targetId : list[0]?.id ?? null
+      if (target !== null) await select(target)
+    } catch (err) {
+      if (!isCancelled()) setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (!isCancelled()) setLoading(false)
+    }
+  }, [fetchConversations, select])
+
+  // A later refresh never changes the selection; only the operator (or
+  // create/remove/the re-select effect below, or an explicit `reload`) does
+  // that.
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      try {
-        const list = await fetchConversations()
-        if (cancelled) return
-        setConversations(list)
-        setError(null)
-        const target = mountInitialId !== null && list.some((c) => c.id === mountInitialId)
-          ? mountInitialId
-          : list[0]?.id ?? null
-        if (target !== null) await select(target)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
+    void loadConversationsAndSelect(mountInitialId, () => cancelled)
     return () => {
       cancelled = true
     }
-  }, [fetchConversations, select, mountInitialId])
+  }, [loadConversationsAndSelect, mountInitialId])
+
+  // Repeats the initial load on demand: a failed load otherwise has no way
+  // out short of remounting the whole hook. Clears the stale error and
+  // shows `loading` while it runs, then re-selects `mountInitialId` when
+  // present or the newest thread otherwise - the same rule the mount effect
+  // uses, since a caller asking to reload wants the same starting point it
+  // would have gotten on a fresh mount.
+  const reload = useCallback(async (): Promise<void> => {
+    setError(null)
+    setLoading(true)
+    await loadConversationsAndSelect(mountInitialId, () => false)
+  }, [loadConversationsAndSelect, mountInitialId])
 
   // Re-selects when `initialId` changes to a new non-null value after mount
   // (ADR 0094): "Open in Mate" can send an already-showing panel a different
@@ -221,5 +261,20 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     setMessages((previous) => [...previous, message])
   }, [])
 
-  return { conversations, activeId, messages, loading, error, select, create, remove, appendLocal, refresh }
+  const errorMessage = error !== null ? describeLoadError(error) : null
+
+  return {
+    conversations,
+    activeId,
+    messages,
+    loading,
+    error,
+    errorMessage,
+    select,
+    create,
+    remove,
+    appendLocal,
+    refresh,
+    reload,
+  }
 }
