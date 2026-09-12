@@ -582,6 +582,11 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/assistant/status", tierRead, assistantStatusHandler},
 		{http.MethodGet, "/api/assistant/conversations", tierRead, listAssistantConversationsHandler},
 		{http.MethodGet, "/api/assistant/conversations/:id", tierRead, getAssistantConversationHandler},
+		// The in-app Manual sheet's page fetch (ADR 0095), same embedded
+		// pages as read_manual above, reached by direct id instead of a tool
+		// call. Wildcard path, not a :id param: page ids contain a slash
+		// ("features/dashboard").
+		{http.MethodGet, "/api/manual/*", tierRead, getManualPageHandler(func() []manualPage { return globalManual })},
 
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────

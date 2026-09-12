@@ -47,6 +47,40 @@ func TestLoadManual_SortsByIDAndSkipsNonMarkdown(t *testing.T) {
 	}
 }
 
+// TestLoadManual_RootLevelPageIDHasNoDirectory pins loadManual's handling of
+// a page staged directly at the manual root - docs/index.md, staged as
+// backend/manual/index.md by the Makefile's manual-stage target - rather
+// than under one of the three directories: its ID must be the bare filename
+// with the extension stripped ("index"), not "/index" or "index/index",
+// since manualIndexLine and the in-app Manual sheet's /api/manual endpoint
+// both use ID as the page's address.
+func TestLoadManual_RootLevelPageIDHasNoDirectory(t *testing.T) {
+	fsys := fstest.MapFS{
+		"manual/index.md":           &fstest.MapFile{Data: []byte("# Helmcentral documentation\n\nContents.\n")},
+		"manual/features/alarms.md": &fstest.MapFile{Data: []byte("# Alarms\n\nAlarm body.\n")},
+	}
+	pages, err := loadManual(fsys, "manual")
+	if err != nil {
+		t.Fatalf("loadManual: %v", err)
+	}
+
+	byID := map[string]manualPage{}
+	for _, p := range pages {
+		byID[p.ID] = p
+	}
+	index, ok := byID["index"]
+	if !ok {
+		var ids []string
+		for id := range byID {
+			ids = append(ids, id)
+		}
+		t.Fatalf(`expected a root-level manual/index.md to load as page id "index", got ids %v`, ids)
+	}
+	if index.Title != "Helmcentral documentation" {
+		t.Fatalf("expected the root page's H1 as its title, got %q", index.Title)
+	}
+}
+
 func TestLoadManual_TitleFromH1OrIDFallback(t *testing.T) {
 	pages, err := loadManual(testManualFS(), "manual")
 	if err != nil {
