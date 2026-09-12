@@ -89,6 +89,28 @@ func TestWasmPOIProvider_FetchPOI_CachesWithinTTL(t *testing.T) {
 	}
 }
 
+// Limit is part of the provider contract input, so requests that differ only
+// by limit must not share one cache entry.
+func TestWasmPOIProvider_FetchPOI_DifferentLimitDoesNotHitSameCacheEntry(t *testing.T) {
+	provider := mustNewWasmPOIProvider(t, poiValidFixtureWasm)
+
+	first, err := provider.FetchPOI(10.0, 20.0, 9260, []string{"anchorage"}, 10)
+	if err != nil {
+		t.Fatalf("first FetchPOI returned error: %v", err)
+	}
+	if first.Cached {
+		t.Fatalf("expected first fetch to be live")
+	}
+
+	second, err := provider.FetchPOI(10.0, 20.0, 9260, []string{"anchorage"}, 20)
+	if err != nil {
+		t.Fatalf("second FetchPOI returned error: %v", err)
+	}
+	if second.Cached {
+		t.Fatalf("expected different limit values to use different cache entries")
+	}
+}
+
 // A position 0.01 degrees away (well under the 0.02 degree cache cell) must
 // still hit the same cache entry - the whole point of the cell is that small
 // vessel movement doesn't re-trigger a live Overpass/Places call.
@@ -111,23 +133,31 @@ func TestWasmPOIProvider_FetchPOI_CacheCellCollapsesNearbyPositions(t *testing.T
 // Categories in a different order must hit the same cache entry - the cache
 // key sorts categories before folding them in.
 func TestPOIWasmCacheKey_SortsCategoriesBeforeFolding(t *testing.T) {
-	a := poiWasmCacheKey(10.0, 20.0, 9260, []string{"bay", "anchorage"})
-	b := poiWasmCacheKey(10.0, 20.0, 9260, []string{"anchorage", "bay"})
+	a := poiWasmCacheKey(10.0, 20.0, 9260, []string{"bay", "anchorage"}, 50)
+	b := poiWasmCacheKey(10.0, 20.0, 9260, []string{"anchorage", "bay"}, 50)
 	if a != b {
 		t.Fatalf("expected category order to not affect the cache key, got %q vs %q", a, b)
 	}
 }
 
 func TestPOIWasmCacheKey_RoundsToTheDocumentedCell(t *testing.T) {
-	a := poiWasmCacheKey(10.001, 20.001, 9260, []string{"anchorage"})
-	b := poiWasmCacheKey(10.0, 20.0, 9260, []string{"anchorage"})
+	a := poiWasmCacheKey(10.001, 20.001, 9260, []string{"anchorage"}, 50)
+	b := poiWasmCacheKey(10.0, 20.0, 9260, []string{"anchorage"}, 50)
 	if a != b {
 		t.Fatalf("expected positions within one 0.02 degree cell to share a cache key, got %q vs %q", a, b)
 	}
 
-	c := poiWasmCacheKey(10.05, 20.0, 9260, []string{"anchorage"})
+	c := poiWasmCacheKey(10.05, 20.0, 9260, []string{"anchorage"}, 50)
 	if a == c {
 		t.Fatalf("expected a position a full cell away to get a distinct cache key")
+	}
+}
+
+func TestPOIWasmCacheKey_DiffersForDifferentLimits(t *testing.T) {
+	a := poiWasmCacheKey(10.0, 20.0, 9260, []string{"anchorage"}, 10)
+	b := poiWasmCacheKey(10.0, 20.0, 9260, []string{"anchorage"}, 20)
+	if a == b {
+		t.Fatalf("expected different limits to produce different cache keys")
 	}
 }
 
@@ -139,7 +169,7 @@ func TestWasmPOIProvider_FetchPOI_StaleOnErrorFallback(t *testing.T) {
 		t.Fatalf("initial FetchPOI returned error: %v", err)
 	}
 
-	cacheKey := poiWasmCacheKey(30.0, 40.0, 9260, []string{"anchorage"})
+	cacheKey := poiWasmCacheKey(30.0, 40.0, 9260, []string{"anchorage"}, 50)
 	provider.cache.mu.Lock()
 	entry, ok := provider.cache.data[cacheKey]
 	if !ok {

@@ -137,20 +137,20 @@ func mapWasmFetchPOIOutput(out wasmFetchPOIOutput) poiFetchResult {
 // onto one cached entry within the 6h TTL.
 const poiWasmCacheCellDegrees = 0.02
 
-// poiWasmCacheKey rounds lat/lon to the 0.02 degree cell, folds in radiusM
-// and the sorted category list (order-independent - the same set of
-// categories in a different order must hit the same entry), so a request
-// for a different radius or category set at the same rounded position
+// poiWasmCacheKey rounds lat/lon to the 0.02 degree cell, folds in radiusM,
+// limit, and the sorted category list (order-independent - the same set of
+// categories in a different order must hit the same entry), so a request for
+// a different radius, limit, or category set at the same rounded position
 // doesn't clobber a different combination's cache entry within the TTL
 // window - same reasoning as weatherWasmCacheKey/waveWasmCacheKey.
-func poiWasmCacheKey(lat, lon float64, radiusM int, categories []string) string {
+func poiWasmCacheKey(lat, lon float64, radiusM int, categories []string, limit int) string {
 	roundedLat := math.Round(lat/poiWasmCacheCellDegrees) * poiWasmCacheCellDegrees
 	roundedLon := math.Round(lon/poiWasmCacheCellDegrees) * poiWasmCacheCellDegrees
 
 	sorted := append([]string(nil), categories...)
 	sort.Strings(sorted)
 
-	return fmt.Sprintf("%.2f,%.2f,%d,%s", roundedLat, roundedLon, radiusM, strings.Join(sorted, "|"))
+	return fmt.Sprintf("%.2f,%.2f,%d,%d,%s", roundedLat, roundedLon, radiusM, limit, strings.Join(sorted, "|"))
 }
 
 // FetchPOI calls the guest's fetch_poi, unmarshals+maps the raw JSON into a
@@ -164,7 +164,7 @@ func (p *wasmPOIProvider) FetchPOI(lat, lon float64, radiusM int, categories []s
 		}
 	}()
 
-	key := poiWasmCacheKey(lat, lon, radiusM, categories)
+	key := poiWasmCacheKey(lat, lon, radiusM, categories, limit)
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true
