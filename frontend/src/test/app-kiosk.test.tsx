@@ -379,6 +379,36 @@ describe('App at /kiosk', () => {
     expect(screen.getByTestId('kiosk-alarm-pill')).toHaveTextContent('1 alarm')
   })
 
+  it('keeps inset-0 and sets no inline height with no ?height given', () => {
+    window.history.replaceState({}, '', '/kiosk')
+    render(<App />)
+
+    const root = screen.getByTestId('kiosk-root')
+    expect(root.className).toContain('inset-0')
+    expect(root.style.height).toBe('')
+  })
+
+  it('sets the root box height under ?height=360, dropping inset-0', () => {
+    window.history.replaceState({}, '', '/kiosk?height=360')
+    render(<App />)
+
+    const root = screen.getByTestId('kiosk-root')
+    expect(root.className).not.toContain('inset-0')
+    expect(root.style.height).toBe('360px')
+    expect(root.style.top).toBe('0px')
+    expect(root.style.width).toBe('100vw')
+  })
+
+  it('keeps the rotation on the same height-constrained box under ?height=360&rotate=180', () => {
+    window.history.replaceState({}, '', '/kiosk?height=360&rotate=180')
+    render(<App />)
+
+    const root = screen.getByTestId('kiosk-root')
+    expect(root.style.height).toBe('360px')
+    expect(root).toHaveAttribute('data-rotate', '180')
+    expect(root.style.transform).toBe('rotate(180deg)')
+  })
+
   it('does not render the pinned indicator ribbon, even when one is configured', () => {
     window.history.replaceState({}, '', '/kiosk')
     render(<App />)

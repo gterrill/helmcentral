@@ -1901,7 +1901,7 @@ export function App() {
   // declared below this return and never reached on an unattended screen.
   if (isKiosk) {
     return (
-      <KioskShell rotate={kioskOptions.rotate} alarms={alarms}>
+      <KioskShell rotate={kioskOptions.rotate} height={kioskOptions.height} alarms={alarms}>
         {pagesError ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Could not load dashboard pages. Retrying…

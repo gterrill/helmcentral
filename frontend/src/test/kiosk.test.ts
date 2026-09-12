@@ -33,21 +33,48 @@ describe('kioskRowsThatFit', () => {
 
 describe('parseKioskOptions', () => {
   it('defaults to no rotation and no pinned page', () => {
-    expect(parseKioskOptions('')).toEqual({ rotate: 0, pageId: null })
+    expect(parseKioskOptions('')).toEqual({ rotate: 0, pageId: null, height: null })
   })
 
   it('rotates only on the literal value 180', () => {
-    expect(parseKioskOptions('?rotate=180')).toEqual({ rotate: 180, pageId: null })
-    expect(parseKioskOptions('?rotate=90')).toEqual({ rotate: 0, pageId: null })
-    expect(parseKioskOptions('?rotate=-180')).toEqual({ rotate: 0, pageId: null })
+    expect(parseKioskOptions('?rotate=180')).toEqual({ rotate: 180, pageId: null, height: null })
+    expect(parseKioskOptions('?rotate=90')).toEqual({ rotate: 0, pageId: null, height: null })
+    expect(parseKioskOptions('?rotate=-180')).toEqual({ rotate: 0, pageId: null, height: null })
   })
 
   it('pins a page from ?page=', () => {
-    expect(parseKioskOptions('?page=abc-123')).toEqual({ rotate: 0, pageId: 'abc-123' })
+    expect(parseKioskOptions('?page=abc-123')).toEqual({ rotate: 0, pageId: 'abc-123', height: null })
   })
 
   it('reads both together', () => {
-    expect(parseKioskOptions('?rotate=180&page=abc-123')).toEqual({ rotate: 180, pageId: 'abc-123' })
+    expect(parseKioskOptions('?rotate=180&page=abc-123')).toEqual({ rotate: 180, pageId: 'abc-123', height: null })
+  })
+
+  it('accepts an integer height within 200 to 4320, inclusive of both ends', () => {
+    expect(parseKioskOptions('?height=360')).toEqual({ rotate: 0, pageId: null, height: 360 })
+    expect(parseKioskOptions('?height=200')).toEqual({ rotate: 0, pageId: null, height: 200 })
+    expect(parseKioskOptions('?height=4320')).toEqual({ rotate: 0, pageId: null, height: 4320 })
+  })
+
+  it('falls back to null (full viewport) for an out-of-range height', () => {
+    expect(parseKioskOptions('?height=199')).toEqual({ rotate: 0, pageId: null, height: null })
+    expect(parseKioskOptions('?height=4321')).toEqual({ rotate: 0, pageId: null, height: null })
+    expect(parseKioskOptions('?height=0')).toEqual({ rotate: 0, pageId: null, height: null })
+    expect(parseKioskOptions('?height=-360')).toEqual({ rotate: 0, pageId: null, height: null })
+  })
+
+  it('falls back to null for a non-numeric or non-integer height', () => {
+    expect(parseKioskOptions('?height=abc')).toEqual({ rotate: 0, pageId: null, height: null })
+    expect(parseKioskOptions('?height=360.5')).toEqual({ rotate: 0, pageId: null, height: null })
+    expect(parseKioskOptions('?height=')).toEqual({ rotate: 0, pageId: null, height: null })
+  })
+
+  it('reads height alongside rotate and page', () => {
+    expect(parseKioskOptions('?rotate=180&page=abc-123&height=360')).toEqual({
+      rotate: 180,
+      pageId: 'abc-123',
+      height: 360,
+    })
   })
 })
 

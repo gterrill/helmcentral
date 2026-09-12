@@ -69,6 +69,15 @@ run unattended. Add `?rotate=180` if the physical screen is mounted upside
 down. There is nothing to click; the screen has no sidebar, no header, and
 does not respond to Back or Forward.
 
+Some kiosk browsers report a viewport taller than the physical panel and
+just clip the rest, showing only the top of that oversized framebuffer. If
+that's what you're running (the probe step's header line prints the
+viewport it saw, so check that against the panel's actual pixel height),
+add `?height=<px>` set to the panel's real height, for example
+`/kiosk?rotate=180&height=360` for a 1920x360 strip. This constrains the
+feed, and the rotation, to that band at the top of the viewport instead of
+laying content out over the whole oversized one.
+
 To preview one specific page without waiting through the rotation, for
 example while you're still deciding whether it fits, add `?page=<page id>`
 (find the id in the address bar after selecting that page normally, at
@@ -86,11 +95,12 @@ For a small ARM board running Ubuntu Core's `wpe-webkit-mir-kiosk` snap
 up the change:
 
 ```
-sudo snap set wpe-webkit-mir-kiosk url="http://<helmcentral-host>:<port>/kiosk?rotate=180"
+sudo snap set wpe-webkit-mir-kiosk url="http://<helmcentral-host>:<port>/kiosk?rotate=180&height=360"
 sudo snap restart wpe-webkit-mir-kiosk
 ```
 
-Drop `?rotate=180` if the screen isn't mounted upside down.
+Drop `?rotate=180` if the screen isn't mounted upside down, and drop
+`&height=360` if the browser's own viewport already matches the panel.
 
 ## 4. Leave it running
 

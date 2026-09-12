@@ -30,14 +30,27 @@ export interface KioskOptions {
   rotate: 0 | 180
   /** `?page=<id>` pins one page, for authoring on the helm browser and for screenshots. */
   pageId: string | null
+  /**
+   * `?height=<px>` constrains the kiosk root to that many pixels at the top
+   * of the viewport, for a kiosk browser whose framebuffer is taller than
+   * the physical panel (a WPE-webkit build reporting 1920x1080 on a 1920x360
+   * strip). An integer from 200 to 4320; anything else (missing, fractional,
+   * non-numeric, out of range) is null, meaning the full viewport, matching
+   * the app's behaviour before this option existed.
+   */
+  height: number | null
 }
 
 /** Parses the kiosk route's own query string. Never throws on a malformed value. */
 export function parseKioskOptions(search: string): KioskOptions {
   const params = new URLSearchParams(search)
+  const rawHeight = params.get('height')
+  const parsedHeight = rawHeight === null ? NaN : Number(rawHeight)
+  const height = Number.isInteger(parsedHeight) && parsedHeight >= 200 && parsedHeight <= 4320 ? parsedHeight : null
   return {
     rotate: params.get('rotate') === '180' ? 180 : 0,
     pageId: params.get('page'),
+    height,
   }
 }
 

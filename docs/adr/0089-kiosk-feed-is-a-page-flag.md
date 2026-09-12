@@ -132,6 +132,22 @@ snap's own `url` setting); rewriting it on every rotation tick would fight
 that fixed configuration for no reader's benefit, since nothing is ever
 looking at the address bar on a screen with no chrome and no back button.
 
+A live pass on the boat's own wall display (2026-09-12) turned up a second
+mounting-specific property of exactly this shape: the ODROID's WPE-webkit
+browser reports a 1920x1080 viewport against a panel that is physically
+1920x360, and the panel simply shows the top band of whatever gets laid out
+across that oversized framebuffer. That is not a fact about the dashboard or
+about any page an operator has authored; it is a fact about this one screen
+and the browser sitting in front of it, exactly like `rotate`. `?height=<px>`
+(`parseKioskOptions`, an integer from 200 to 4320, otherwise null for the
+full viewport, same never-written-back treatment as `rotate` and `page`)
+joins them as a third mounting property carried on the URL rather than
+stored anywhere: `KioskShell` constrains its root to that height at the top
+of the viewport instead of the full `inset-0` box when it is set, and
+rotates that same constrained box in place, about its own centre, rather
+than rotating the entire oversized framebuffer about a centre the panel
+never shows half of.
+
 ### 4. The feed is recomputed at every advance, not memoised for a lap
 
 `kioskFeed(pages, { anchored })` (`lib/kiosk.ts`) filters to pages with

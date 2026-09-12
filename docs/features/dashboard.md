@@ -152,8 +152,13 @@ configured, even on a page that shows it everywhere else it's viewed. See
 lamps, add a lamp-strip widget to that page's own layout; it counts against
 the page's row budget and shows up on the fold guide like everything else.
 
-See [Set up a wall display](../how-to/set-up-a-wall-display.md) for
-mounting and orientation.
+Some kiosk browsers report a viewport taller than the panel actually is; the
+panel only ever displays the top of that framebuffer. The wall display's
+`height` option constrains the feed to a band that size at the top of the
+viewport, in place of the full viewport, and rotates that same band rather
+than the whole framebuffer. See [Set up a wall
+display](../how-to/set-up-a-wall-display.md) for mounting, orientation and
+this option.
 
 ## Linking to a page
 
@@ -173,6 +178,7 @@ The address bar tracks the current panel, so you can link directly to it.
 | `/settings/<section id>` | Settings, that section. |
 | `/kiosk` | The wall display: fullscreen, no sidebar, cycling through every kiosk-flagged page. |
 | `/kiosk?rotate=180` | The wall display, rotated 180 degrees for a screen mounted upside down. |
+| `/kiosk?rotate=180&height=360` | The wall display, rotated, and constrained to a 360px band at the top of the viewport for a kiosk browser that reports a taller framebuffer than the panel. |
 
 The first page uses `/` as its canonical address. If reordering changes which
 page is first, the address adjusts without switching the page you are viewing.
