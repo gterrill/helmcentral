@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "frontend/src/test/assistant-markdown.test.tsx"
+        ],
+        "createdAt": "2026-09-11T07:11:29.059Z",
+        "reason": "test fixture proving react-markdown drops raw <img> tags via disallowedElements; not a rendered image"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "frontend/src/test/manual-markdown.test.tsx"
+        ],
+        "createdAt": "2026-09-12T06:54:15.195Z",
+        "reason": "test fixture markdown string asserting react-markdown drops <img>, same pattern as assistant-markdown.test.tsx; never rendered as real UI"
+      }
+    ]
+  }
+}
