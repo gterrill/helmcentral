@@ -41,12 +41,15 @@ COPY backend/. .
 RUN rm -rf dist
 COPY --from=frontend-builder /app/frontend/dist ./dist
 
-# Stage the operator manual the assistant's read_manual tool embeds
-# (backend/assistant_manual.go) - same reasoning as the dist swap above.
+# Stage the operator manual the assistant's read_manual tool and the
+# in-app Manual sheet's /api/manual endpoint embed (backend/assistant_manual.go)
+# - same reasoning as the dist swap above. docs/index.md lands as page
+# "index", the contents page both land on.
 RUN rm -rf manual
 COPY docs/features ./manual/features
 COPY docs/how-to ./manual/how-to
 COPY docs/reference ./manual/reference
+COPY docs/index.md ./manual/index.md
 
 # GOARM is set only for 32-bit arm, where it selects the floating-point ABI;
 # it is meaningless on amd64 and arm64, so it stays unset there.

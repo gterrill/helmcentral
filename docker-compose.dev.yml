@@ -41,11 +41,15 @@ services:
       - ./settings.yaml:/app/settings.yaml
       - ./plugins:/app/plugins
       # Live docs, read-only, so air's build embeds the operator manual the
-      # assistant's read_manual tool serves (backend/assistant_manual.go)
-      # without a separate manual-stage step on every edit.
+      # assistant's read_manual tool and the in-app Manual sheet's
+      # /api/manual endpoint serve (backend/assistant_manual.go) without a
+      # separate manual-stage step on every edit. docs/index.md is a
+      # single-file mount, not a directory, since it stages as one file
+      # (manual/index.md), not a manual/index/ tree.
       - ./docs/features:/app/manual/features:ro
       - ./docs/how-to:/app/manual/how-to:ro
       - ./docs/reference:/app/manual/reference:ro
+      - ./docs/index.md:/app/manual/index.md:ro
       # air recompiles on every save, so the Go build and module caches grow
       # continuously. Left unmounted they land in the container's writable
       # layer (measured at 1.46GB: ~754MB build + ~749MB modules) and are
@@ -122,6 +126,7 @@ services:
       - ./docs/features:/app/manual/features:ro
       - ./docs/how-to:/app/manual/how-to:ro
       - ./docs/reference:/app/manual/reference:ro
+      - ./docs/index.md:/app/manual/index.md:ro
       # Same rationale as backend-dev above. Its own volumes, not shared with
       # backend-dev: two air instances compiling into one cache would race.
       - e2e_go_build_cache:/root/.cache/go-build

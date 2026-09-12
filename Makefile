@@ -1,15 +1,19 @@
 .PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs manual-stage
 
 # Stages the operator manual into backend/manual for the assistant's
-# read_manual tool (backend/assistant_manual.go's //go:embed all:manual),
-# the same copy the Dockerfile and .goreleaser.yaml do for a container or
-# release build. Needed before `go build`/`go run` picks up manual pages at
-# all - without it the binary still runs, just with read_manual reporting
-# the manual isn't staged.
+# read_manual tool and the in-app Manual sheet's /api/manual endpoint
+# (backend/assistant_manual.go's //go:embed all:manual), the same copy the
+# Dockerfile and .goreleaser.yaml do for a container or release build.
+# docs/index.md is staged alongside the three directories as page "index" -
+# it is the hand-written contents page both read_manual and the Manual sheet
+# land on. Needed before `go build`/`go run` picks up manual pages at all -
+# without it the binary still runs, just with read_manual and /api/manual
+# reporting the manual isn't staged.
 manual-stage:
 	rm -rf backend/manual
 	mkdir -p backend/manual
 	cp -R docs/features docs/how-to docs/reference backend/manual/
+	cp docs/index.md backend/manual/index.md
 	touch backend/manual/.gitkeep
 
 dev:
