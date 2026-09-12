@@ -16,7 +16,13 @@ import remarkGfm from 'remark-gfm'
 // Every override below reaches for a semantic token, not a literal colour,
 // so a reply repaints correctly across the light/dark/instrument themes
 // the same as every other surface in the app.
-const components: Components = {
+//
+// Exported as assistantMarkdownComponents (ADR 0095) so manual-markdown.tsx
+// can spread this same map and override only the handful of tags the Manual
+// sheet needs to behave differently - heading ids for scroll targets, and
+// links resolved against the manual tree instead of always opening a new
+// tab - rather than maintaining a second, near-identical style sheet.
+export const assistantMarkdownComponents: Components = {
   // One visible step above h2 (impeccable critique 2026-09-12, P3) - the two
   // used to render identically, so a reply using both levels had no
   // hierarchy between them.
@@ -80,7 +86,7 @@ interface AssistantMarkdownProps {
 export function AssistantMarkdown({ content }: AssistantMarkdownProps) {
   return (
     <div className="min-w-0 text-sm leading-relaxed text-foreground">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} components={assistantMarkdownComponents}>
         {content}
       </ReactMarkdown>
     </div>
