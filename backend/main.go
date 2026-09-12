@@ -856,6 +856,7 @@ func buildVesselStatePayload() map[string]any {
 		"vessel_prefix":                  vesselPrefix,
 		"status":                         state.Status,
 		"datetime":                       state.Datetime.Format(time.RFC3339),
+		"timezone":                       vesselLocalTimezoneName(state.Longitude),
 		"depth":                          state.Depth,
 		"depth_last_update_age_s":        state.DepthLastUpdateAge,
 		"length_overall_m":               lengthOverallM,

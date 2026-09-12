@@ -490,6 +490,47 @@ func TestVesselStateHandler_LengthOverallMAbsentSerializesAsNullNotSentinel(t *t
 	}
 }
 
+// TestBuildVesselStatePayload_TimezoneReflectsVesselLocalZone proves the
+// vessel-state payload carries the vessel's local zone derived from
+// longitude (ADR 0035), not the browser's. The wall display's Ubuntu box is
+// stuck on UTC, so the frontend clock needs this field to render the
+// vessel's actual local time rather than the browser's.
+func TestBuildVesselStatePayload_TimezoneReflectsVesselLocalZone(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	server := trustedSignalKPayloadServer(t, -21.1113, 148.9) // UTC+10
+	defer server.Close()
+	host, port := hostPort(t, server.URL)
+	t.Setenv("SETTINGS_FILE", writeTestSettings(t, host, port))
+
+	payload := buildVesselStatePayload()
+
+	if got := payload["timezone"]; got != "Etc/GMT-10" {
+		t.Fatalf("timezone: got %v, want %q", got, "Etc/GMT-10")
+	}
+}
+
+// TestBuildVesselStatePayload_TimezoneFallsBackToUTCForSentinelPosition is
+// the no-masking-fallback half: when the position resolves to the -1,-1
+// sentinel, the payload must report the honest UTC fallback rather than
+// inventing a zone from a bogus longitude.
+func TestBuildVesselStatePayload_TimezoneFallsBackToUTCForSentinelPosition(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	server := trustedSignalKPayloadServer(t, -1, -1)
+	defer server.Close()
+	host, port := hostPort(t, server.URL)
+	t.Setenv("SETTINGS_FILE", writeTestSettings(t, host, port))
+
+	payload := buildVesselStatePayload()
+
+	if got := payload["timezone"]; got != "UTC" {
+		t.Fatalf("timezone: got %v, want %q", got, "UTC")
+	}
+}
+
 // TestComputeMaxGustKtsFor_SkipsInMemoryWhenInfluxConfigured proves the
 // in-memory branch is not consulted when Influx is configured — not just
 // that its result is discarded, but that inMemoryMaxWindGustKts's
