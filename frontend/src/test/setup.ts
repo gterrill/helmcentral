@@ -58,6 +58,29 @@ beforeEach(() => {
   setViewportWidth(1280)
 })
 
+// jsdom implements <canvas> but never a rendering context unless the
+// `canvas` npm package is installed, so getContext('webgl2') returns null
+// here by default. lib/webgl.ts's hasWebGL2() probes exactly that before a
+// map-bearing tile mounts a map (ADR 0089 §11) — without this stub every
+// existing map test would silently fall onto the no-WebGL2 fallback panel
+// instead of the map it means to test. Stub a truthy context so the suite
+// defaults to "this browser can render maps", matching every real browser
+// these tiles ship to; a test exercising the fallback itself overrides
+// hasWebGL2 (webgl.test.ts stubs getContext directly; tile tests mock the
+// '@/lib/webgl' module). Only 'webgl2' is intercepted — any other context
+// id (e.g. echo-canvas.ts's '2d') falls through to jsdom's own behaviour.
+if (typeof HTMLCanvasElement.prototype.getContext === 'function') {
+  const originalGetContext = HTMLCanvasElement.prototype.getContext
+  HTMLCanvasElement.prototype.getContext = function (
+    this: HTMLCanvasElement,
+    contextId: string,
+    ...rest: unknown[]
+  ) {
+    if (contextId === 'webgl2') return {} as unknown as WebGL2RenderingContext
+    return (originalGetContext as (...args: unknown[]) => unknown).call(this, contextId, ...rest)
+  } as typeof HTMLCanvasElement.prototype.getContext
+}
+
 // jsdom keeps the URL across tests within a file, and App now reads it on
 // mount to seed a deep link (ADR 0074) — without this, a Forecast click in
 // one test (which pushes /forecast onto the shared jsdom location) would

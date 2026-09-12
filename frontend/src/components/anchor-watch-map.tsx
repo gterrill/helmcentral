@@ -18,6 +18,7 @@ import { useRadarCapabilities } from '@/hooks/use-radar-capabilities'
 import { useRadarEchoLayer } from '@/hooks/use-radar-echo-layer'
 import type { RadarEchoStatus } from '@/hooks/use-radar-echo-stream'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
+import { hasWebGL2 } from '@/lib/webgl'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import {
   resolveMarkerLabelSuppression,
@@ -326,6 +327,13 @@ export function AnchorWatchMap({
   className,
 }: AnchorWatchMapProps) {
   const hasAnchor = anchorLat !== null && anchorLon !== null
+  // WPE WebKit 2.38 (the wall-display kiosk browser) has no WebGL2, and
+  // MapLibre 5 throws synchronously when it can't get a context — mounting
+  // the map anyway would blank the whole app (ADR 0089 §11). The metric
+  // overlay and the zoom/expand controls below are unaffected: they read
+  // from props and from an optionally-chained mapRef that is simply never
+  // populated when the map itself doesn't mount.
+  const canRenderMap = hasWebGL2()
   const mapWrapperRef = useRef<HTMLDivElement | null>(null)
   const metricsPanelRef = useRef<HTMLDivElement | null>(null)
   const mapControlsRef = useRef<HTMLDivElement | null>(null)
@@ -1012,6 +1020,14 @@ export function AnchorWatchMap({
 
   return (
     <div ref={mapWrapperRef} className={cn('relative isolate overflow-hidden rounded-lg', className)}>
+      {!canRenderMap ? (
+        <div
+          data-testid="anchor-watch-map-webgl2-fallback"
+          className="flex h-full items-center justify-center px-3 text-center text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+        >
+          Map needs WebGL2, which this browser does not provide
+        </div>
+      ) : (
       <Map
         ref={mapRef}
         mapLib={maplibregl}
@@ -1504,6 +1520,7 @@ export function AnchorWatchMap({
           </Marker>
         )}
       </Map>
+      )}
 
       {editMode !== 'none' && (
         <div className="pointer-events-auto absolute inset-x-0 bottom-4 flex justify-center">

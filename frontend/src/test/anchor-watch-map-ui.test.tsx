@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import { PLACE_LABEL_LAYER_IDS } from '@/components/map-place-labels'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
@@ -7,6 +7,14 @@ import type { RodeMethodResult } from '@/lib/rode-plan'
 
 vi.mock('maplibre-gl', () => ({
   default: {},
+}))
+
+// True by default so every existing test below keeps mounting the real
+// (mocked) <Map> — only the "without WebGL2" block flips this, and resets
+// it in its own afterEach so no other test in this file is affected.
+let mockHasWebGL2 = true
+vi.mock('@/lib/webgl', () => ({
+  hasWebGL2: () => mockHasWebGL2,
 }))
 
 let lastInitialViewState: { latitude: number; longitude: number; zoom: number } | null = null
@@ -603,5 +611,25 @@ describe('AnchorWatchMap metric overlay contrast and duplication', () => {
     // Confirm entering an edit mode doesn't reintroduce a lighter ground.
     fireEvent.click(screen.getByRole('button', { name: 'Anchor position — click to reposition' }))
     expect(screen.getByTestId('anchor-watch-metrics').className).toMatch(/bg-black\/9\d/)
+  })
+})
+
+describe('AnchorWatchMap without WebGL2', () => {
+  afterEach(() => {
+    mockHasWebGL2 = true
+  })
+
+  it('shows the one-line fallback panel instead of mounting a map, and keeps the metric overlay live', () => {
+    mockHasWebGL2 = false
+
+    renderMap()
+
+    expect(screen.queryByTestId('map-root')).not.toBeInTheDocument()
+    expect(screen.getByTestId('anchor-watch-map-webgl2-fallback')).toHaveTextContent(
+      'Map needs WebGL2, which this browser does not provide',
+    )
+    // The overlay reads straight off props (depth, current, scope), not off
+    // any map state, so it keeps reporting real numbers with no map mounted.
+    expect(within(screen.getByTestId('anchor-watch-metrics')).getByText('3.2')).toBeInTheDocument()
   })
 })

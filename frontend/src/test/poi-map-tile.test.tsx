@@ -9,6 +9,14 @@ import type { UsePoiResult } from '@/hooks/use-poi'
 
 vi.mock('maplibre-gl', () => ({ default: {} }))
 
+// True by default so every existing test below keeps mounting the real
+// (mocked) <Map> — only the "without WebGL2" tests flip this, resetting it
+// in afterEach so no other test in this file is affected.
+let mockHasWebGL2 = true
+vi.mock('@/lib/webgl', () => ({
+  hasWebGL2: () => mockHasWebGL2,
+}))
+
 const easeToMock = vi.fn()
 const jumpToMock = vi.fn()
 // Distinct-per-marker projection so two markers can be made to "overlap" on
@@ -55,6 +63,7 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.useRealTimers()
   projectImpl = ([lng, lat]) => ({ x: lng, y: lat })
+  mockHasWebGL2 = true
 })
 
 function feature(overrides: Partial<PoiFeature>): PoiFeature {
@@ -322,5 +331,33 @@ describe('PoiMapTile', () => {
     renderTile()
 
     expect(screen.getByText('No points of interest in range')).toBeInTheDocument()
+  })
+
+  describe('without WebGL2', () => {
+    it('does not mount the map, shows the fallback panel, and keeps the ranked list working ("split" layout)', () => {
+      mockHasWebGL2 = false
+      const features = [feature({ id: 'a', name: 'A' }), feature({ id: 'b', name: 'B' })]
+      usePoiMock.mockReturnValue(poiResult({ features }))
+
+      renderTile({ config: config({ layout: 'split' }) })
+
+      expect(screen.queryByTestId('map-root')).not.toBeInTheDocument()
+      expect(screen.getByTestId('poi-map-webgl2-fallback')).toHaveTextContent(
+        'Map needs WebGL2, which this browser does not provide',
+      )
+      expect(screen.getAllByTestId('poi-list-row')).toHaveLength(2)
+    })
+
+    it('fills the tile with the fallback panel in "map" layout', () => {
+      mockHasWebGL2 = false
+      usePoiMock.mockReturnValue(poiResult({}))
+
+      renderTile({ config: config({ layout: 'map' }) })
+
+      expect(screen.queryByTestId('map-root')).not.toBeInTheDocument()
+      const fallback = screen.getByTestId('poi-map-webgl2-fallback')
+      expect(fallback).toHaveTextContent('Map needs WebGL2, which this browser does not provide')
+      expect(fallback.className).toContain('h-full')
+    })
   })
 })

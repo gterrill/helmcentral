@@ -20,6 +20,7 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 import type { DistanceUnits } from '@/config/app-config'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
+import { hasWebGL2 } from '@/lib/webgl'
 
 export interface PoiMapTileProps {
   config: PoiMapWidgetConfig
@@ -125,6 +126,13 @@ export function PoiMapTile({
   const dark = isDarkTheme || forceDark
   const mapStyle = dark ? STYLE_DARK : STYLE_LIGHT
 
+  // WPE WebKit 2.38 (the wall-display kiosk browser) has no WebGL2, and
+  // MapLibre 5 throws synchronously when it can't get a context — a single
+  // Nearby tile mounting a map there would blank the whole feed (ADR 0089
+  // §11). The ranked list beside it needs no WebGL at all, so only the map
+  // pane itself degrades.
+  const canRenderMap = hasWebGL2()
+
   const mapRef = useRef<MapRef | null>(null)
   const [mapContainerRef, measuredHeight] = useMeasuredHeight()
   const heightPx = measuredHeight > 0 ? measuredHeight : FALLBACK_HEIGHT
@@ -217,107 +225,118 @@ export function PoiMapTile({
           data-testid="poi-map-container"
           className="relative isolate h-full min-h-0 overflow-hidden rounded-md"
         >
-          <Map
-            ref={mapRef}
-            mapLib={maplibregl}
-            initialViewState={{
-              latitude: latitude ?? 0,
-              longitude: longitude ?? 0,
-              zoom,
-            }}
-            style={{ width: '100%', height: '100%' }}
-            mapStyle={mapStyle}
-            dragRotate={false}
-            onLoad={declutterLabels}
-            onMoveEnd={declutterLabels}
-          >
-            {/* Sourceless anchor layer, mounted first so later rasters
-                (OpenSeaMap) have a stable beforeId to pin themselves under
-                the vector labels — see route-planner-map.tsx's identical
-                comment for the full reasoning. */}
-            <Layer id="raster-overlay-anchor" type="background" paint={{ 'background-opacity': 0 }} />
-
-            <MapPlaceLabels isDarkTheme={dark} overImagery={false} />
-
-            <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
-              <Layer id="openseamap-layer" type="raster" beforeId="raster-overlay-anchor" paint={{ 'raster-opacity': 0.85 }} />
-            </Source>
-
-            {trailGeoJSON && trailGeoJSON.geometry.coordinates.length >= 2 && (
-              <Source id="poi-map-own-trail" type="geojson" data={trailGeoJSON}>
-                <Layer
-                  id="poi-map-own-trail-layer"
-                  type="line"
-                  paint={{ 'line-color': '#f59e0b', 'line-width': 2, 'line-opacity': 0.85 }}
-                  layout={{ 'line-join': 'round', 'line-cap': 'round' }}
-                />
-              </Source>
-            )}
-
-            {config.showAis && nearbyVessels.map((vessel) => {
-              if (vessel.lat === undefined || vessel.lon === undefined) return null
-              const collisionState = aisCollisionAlarms?.get(vessel.id)
-              const inCollisionAlarm = collisionState !== undefined
-              return (
-                <Marker key={vessel.id} latitude={vessel.lat} longitude={vessel.lon}>
-                  <div
-                    className={cn(
-                      'flex h-7 w-7 items-center justify-center rounded-full shadow-lg',
-                      inCollisionAlarm ? 'bg-red-600' : 'bg-amber-500/90',
-                    )}
-                    aria-label={`AIS vessel: ${vessel.name}`}
-                  >
-                    <Ship className="h-4 w-4 text-white" />
-                  </div>
-                </Marker>
-              )
-            })}
-
-            {poi.features.map((feature) => {
-              const rank = rankById[feature.id]
-              const category = poiCategoryById(feature.category)
-              const Icon = category?.icon ?? MapPin
-              const suppressed = suppressedLabelIds.has(feature.id)
-              return (
-                <Marker key={feature.id} latitude={feature.lat} longitude={feature.lon}>
-                  <div className="flex flex-col items-center" aria-label={`Point of interest: ${feature.name || category?.label || feature.category}`}>
-                    <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card shadow-md">
-                      <Icon className="h-3.5 w-3.5 text-foreground" />
-                      {rank !== undefined && (
-                        <span
-                          data-testid={`poi-marker-rank-${feature.id}`}
-                          className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground"
-                        >
-                          {rank}
-                        </span>
-                      )}
-                    </div>
-                    {!suppressed && feature.name && (
-                      <div className="mt-0.5 max-w-20 truncate text-center text-[9px] font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-                        {feature.name}
-                      </div>
-                    )}
-                  </div>
-                </Marker>
-              )
-            })}
-
-            {latitude !== null && longitude !== null && (
-              <Marker latitude={latitude} longitude={longitude}>
-                <div className="flex items-center justify-center" style={{ width: 40, height: 40 }}>
-                  <VesselArrow headingDeg={headingTrue} scale={1} />
-                </div>
-              </Marker>
-            )}
-          </Map>
-
-          {gnssCriticalAlert && (
+          {!canRenderMap ? (
             <div
-              data-testid="poi-map-gnss-badge"
-              className="absolute left-2 top-2 z-20 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"
+              data-testid="poi-map-webgl2-fallback"
+              className="flex h-full items-center justify-center px-3 text-center text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
             >
-              GNSS
+              Map needs WebGL2, which this browser does not provide
             </div>
+          ) : (
+            <>
+              <Map
+                ref={mapRef}
+                mapLib={maplibregl}
+                initialViewState={{
+                  latitude: latitude ?? 0,
+                  longitude: longitude ?? 0,
+                  zoom,
+                }}
+                style={{ width: '100%', height: '100%' }}
+                mapStyle={mapStyle}
+                dragRotate={false}
+                onLoad={declutterLabels}
+                onMoveEnd={declutterLabels}
+              >
+                {/* Sourceless anchor layer, mounted first so later rasters
+                    (OpenSeaMap) have a stable beforeId to pin themselves under
+                    the vector labels — see route-planner-map.tsx's identical
+                    comment for the full reasoning. */}
+                <Layer id="raster-overlay-anchor" type="background" paint={{ 'background-opacity': 0 }} />
+
+                <MapPlaceLabels isDarkTheme={dark} overImagery={false} />
+
+                <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
+                  <Layer id="openseamap-layer" type="raster" beforeId="raster-overlay-anchor" paint={{ 'raster-opacity': 0.85 }} />
+                </Source>
+
+                {trailGeoJSON && trailGeoJSON.geometry.coordinates.length >= 2 && (
+                  <Source id="poi-map-own-trail" type="geojson" data={trailGeoJSON}>
+                    <Layer
+                      id="poi-map-own-trail-layer"
+                      type="line"
+                      paint={{ 'line-color': '#f59e0b', 'line-width': 2, 'line-opacity': 0.85 }}
+                      layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+                    />
+                  </Source>
+                )}
+
+                {config.showAis && nearbyVessels.map((vessel) => {
+                  if (vessel.lat === undefined || vessel.lon === undefined) return null
+                  const collisionState = aisCollisionAlarms?.get(vessel.id)
+                  const inCollisionAlarm = collisionState !== undefined
+                  return (
+                    <Marker key={vessel.id} latitude={vessel.lat} longitude={vessel.lon}>
+                      <div
+                        className={cn(
+                          'flex h-7 w-7 items-center justify-center rounded-full shadow-lg',
+                          inCollisionAlarm ? 'bg-red-600' : 'bg-amber-500/90',
+                        )}
+                        aria-label={`AIS vessel: ${vessel.name}`}
+                      >
+                        <Ship className="h-4 w-4 text-white" />
+                      </div>
+                    </Marker>
+                  )
+                })}
+
+                {poi.features.map((feature) => {
+                  const rank = rankById[feature.id]
+                  const category = poiCategoryById(feature.category)
+                  const Icon = category?.icon ?? MapPin
+                  const suppressed = suppressedLabelIds.has(feature.id)
+                  return (
+                    <Marker key={feature.id} latitude={feature.lat} longitude={feature.lon}>
+                      <div className="flex flex-col items-center" aria-label={`Point of interest: ${feature.name || category?.label || feature.category}`}>
+                        <div className="relative flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card shadow-md">
+                          <Icon className="h-3.5 w-3.5 text-foreground" />
+                          {rank !== undefined && (
+                            <span
+                              data-testid={`poi-marker-rank-${feature.id}`}
+                              className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground"
+                            >
+                              {rank}
+                            </span>
+                          )}
+                        </div>
+                        {!suppressed && feature.name && (
+                          <div className="mt-0.5 max-w-20 truncate text-center text-[9px] font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                            {feature.name}
+                          </div>
+                        )}
+                      </div>
+                    </Marker>
+                  )
+                })}
+
+                {latitude !== null && longitude !== null && (
+                  <Marker latitude={latitude} longitude={longitude}>
+                    <div className="flex items-center justify-center" style={{ width: 40, height: 40 }}>
+                      <VesselArrow headingDeg={headingTrue} scale={1} />
+                    </div>
+                  </Marker>
+                )}
+              </Map>
+
+              {gnssCriticalAlert && (
+                <div
+                  data-testid="poi-map-gnss-badge"
+                  className="absolute left-2 top-2 z-20 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                >
+                  GNSS
+                </div>
+              )}
+            </>
           )}
         </div>
 
