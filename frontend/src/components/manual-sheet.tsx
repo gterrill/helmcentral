@@ -104,9 +104,11 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
   const groupLabel = manual.loading ? '--' : manualGroupLabel(current.page)
   // A page whose title hasn't loaded yet (still loading, or failed) falls
   // back to the same question the contents page uses - always a coherent
-  // sentence, never "How does the undefined page work?".
+  // sentence, never a question about an undefined page. The title is quoted
+  // rather than wrapped in "the ... page", so "The dashboard" and "Set up
+  // Mate" read naturally.
   const askMateQuestion =
-    isIndex || !manual.page ? 'What can Helmcentral do?' : `How does the ${manual.page.title} page work?`
+    isIndex || !manual.page ? 'What can Helmcentral do?' : `What does the manual say about "${manual.page.title}"?`
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

@@ -326,7 +326,7 @@ describe('ManualSheet', () => {
     await screen.findByText('Body.')
     fireEvent.click(screen.getByRole('button', { name: 'Ask Mate about this page' }))
 
-    expect(onAskMate).toHaveBeenCalledWith('How does the Forecast page work?')
+    expect(onAskMate).toHaveBeenCalledWith('What does the manual say about "Forecast"?')
   })
 
   it('Ask Mate seeds the contents question on the index page', async () => {
