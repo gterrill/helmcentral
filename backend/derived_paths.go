@@ -76,22 +76,30 @@ func freshEnoughToPublish(age float64) bool {
 }
 
 /*
-Heavy-weather trends (ADR 0070).
+Heavy-weather trends (ADR 0070, extended by ADR 0095).
 
-These exist because Surviving the Storm's advice is almost entirely about
-rates and relationships, and an alarm rule compares one path against one
-number. Deriving the rate here means the rule engine, its dwell and its
+These exist because both sources' advice is almost entirely about rates and
+relationships, and an alarm rule compares one path against one number.
+Deriving the figures here means the rule engine, its dwell and its
 hysteresis all work unchanged.
 
-pressureRate is the barometer's slope, the figure the book treats as the real
-warning. squashZoneIndex is the pattern it says onboard instruments are worst
+pressureRate is the barometer's slope (Surviving the Storm's figure).
+squashZoneIndex is the pattern that book says onboard instruments are worst
 at spotting and that causes the most trouble: the wind climbing while the
-barometer sits still.
+barometer sits still. pressureChange12h, pressureChange24h, stormIndex and
+severeThunderstormIndex are the Law of Storms ladder (R. J. Ellis,
+worldstormcentral.co, rules-for-storms-and-gales page): the barometer's
+tendency over a stated window, and two composite signatures built from it and
+an absolute-pressure gate.
 */
 const (
-	pressureRatePath     = derivedPathPrefix + "environment.pressureRate"
-	pressureChange3hPath = derivedPathPrefix + "environment.pressureChange3h"
-	squashZoneIndexPath  = derivedPathPrefix + "environment.squashZoneIndex"
+	pressureRatePath            = derivedPathPrefix + "environment.pressureRate"
+	pressureChange3hPath        = derivedPathPrefix + "environment.pressureChange3h"
+	squashZoneIndexPath         = derivedPathPrefix + "environment.squashZoneIndex"
+	pressureChange12hPath       = derivedPathPrefix + "environment.pressureChange12h"
+	pressureChange24hPath       = derivedPathPrefix + "environment.pressureChange24h"
+	stormIndexPath              = derivedPathPrefix + "environment.stormIndex"
+	severeThunderstormIndexPath = derivedPathPrefix + "environment.severeThunderstormIndex"
 )
 
 // SignalK paths these are derived from. Read through the snapshot rather than
@@ -134,6 +142,10 @@ var derivedPathIDs = []string{
 	pressureRatePath,
 	pressureChange3hPath,
 	squashZoneIndexPath,
+	pressureChange12hPath,
+	pressureChange24hPath,
+	stormIndexPath,
+	severeThunderstormIndexPath,
 	fuelVolumePath,
 	fuelTimeToEmptyPath,
 	fuelRangeAtCurrentBurnPath,
@@ -151,6 +163,10 @@ var derivedPathUnits = map[string]string{
 	pressureRatePath:             "Pa/s",
 	pressureChange3hPath:         "Pa",
 	squashZoneIndexPath:          "",
+	pressureChange12hPath:        "Pa",
+	pressureChange24hPath:        "Pa",
+	stormIndexPath:               "",
+	severeThunderstormIndexPath:  "",
 	fuelVolumePath:               "m3",
 	fuelTimeToEmptyPath:          "s",
 	fuelRangeAtCurrentBurnPath:   "m",
@@ -407,6 +423,10 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 		pressureRatePath:             nil,
 		pressureChange3hPath:         nil,
 		squashZoneIndexPath:          nil,
+		pressureChange12hPath:        nil,
+		pressureChange24hPath:        nil,
+		stormIndexPath:               nil,
+		severeThunderstormIndexPath:  nil,
 		fuelVolumePath:               nil,
 		fuelTimeToEmptyPath:          nil,
 		fuelRangeAtCurrentBurnPath:   nil,
@@ -418,6 +438,10 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 		pressureRatePath:             -1,
 		pressureChange3hPath:         -1,
 		squashZoneIndexPath:          -1,
+		pressureChange12hPath:        -1,
+		pressureChange24hPath:        -1,
+		stormIndexPath:               -1,
+		severeThunderstormIndexPath:  -1,
 		fuelVolumePath:               -1,
 		fuelTimeToEmptyPath:          -1,
 		fuelRangeAtCurrentBurnPath:   -1,
@@ -485,8 +509,27 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 	return values, ages
 }
 
+// pointsAfter slices an already-chronological points scan down to the
+// entries strictly after cutoff -- telemetryRingBuffer.since's own "after,
+// not after-or-equal" contract -- via a binary search rather than another
+// linear scan of the ring buffer itself. Used to turn one 24h
+// barometerHistory scan into the 12h and 3h windows the Law of Storms ladder
+// also needs (ADR 0095), instead of scanning the buffer three times for
+// three different cutoffs.
+func pointsAfter(points []telemetryPoint, cutoff time.Time) []telemetryPoint {
+	i := sort.Search(len(points), func(i int) bool {
+		return points[i].Timestamp.After(cutoff)
+	})
+	return points[i:]
+}
+
 // addWeatherTrendValues fills in the barometric and squash-zone paths, and
 // their ages, from the recorded history.
+//
+// One barometerHistory.since scan covers the full 24h Law of Storms window;
+// pointsAfter then slices that same scan down to the 12h and 3h windows
+// rather than walking the ring buffer three separate times for three
+// separate cutoffs.
 //
 // The squash-zone index is only reported once there is enough barometer
 // history to say the barometer is genuinely steady. Without that, "the
@@ -494,34 +537,77 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 // indistinguishable, and the second must not read as the first.
 //
 // Each value's age is the newest sample in its own ring-buffer window
-// (newestSampleAge): the slope covers the whole window, but it is only as
+// (newestSampleAge): a figure covers the whole window, but it is only as
 // fresh as the newest point still arriving into it. squashZoneIndex depends
-// on three buffers, so its age is the oldest of the three.
+// on three buffers, so its age is the oldest of the three; the storm and
+// severe-thunderstorm indices likewise take the oldest of the windows that
+// feed them.
 func addWeatherTrendValues(values map[string]*float64, ages map[string]float64, now time.Time) {
-	cutoff := now.Add(-pressureTrendWindow)
-	pressure := barometerHistory.since(cutoff)
-	pressureAge := newestSampleAge(pressure, now)
+	cutoff3h := now.Add(-pressureTrendWindow)
+	cutoff12h := now.Add(-pressureTendency12hWindow)
 
-	if rate, ok := linearSlopePerSecond(pressure); ok {
+	history := barometerHistory.since(now.Add(-pressureTendency24hWindow))
+	pressure := pointsAfter(history, cutoff3h)
+	twelveHour := pointsAfter(history, cutoff12h)
+
+	pressureAge := newestSampleAge(pressure, now)
+	twelveHourAge := newestSampleAge(twelveHour, now)
+	twentyFourHourAge := newestSampleAge(history, now)
+
+	rate, rateOK := linearSlopePerSecond(pressure)
+	if rateOK {
 		values[pressureRatePath] = &rate
 		ages[pressureRatePath] = pressureAge
 	}
-	if change, ok := changeOverWindow(pressure); ok {
-		values[pressureChange3hPath] = &change
+
+	// Gated on rateOK -- pressureRate's own trendMinimumSpan -- rather than
+	// tendencyOverWindow's much stricter window-minus-slack gate below: three
+	// hours has nothing shorter to fall back on while the buffer fills, and a
+	// short-span change under-reports a monotonic fall, which is the safe
+	// direction to be wrong in.
+	change3h, change3hOK := changeOverWindow(pressure)
+	change3hOK = change3hOK && rateOK
+	if change3hOK {
+		values[pressureChange3hPath] = &change3h
 		ages[pressureChange3hPath] = pressureAge
 	}
 
-	if _, ok := linearSlopePerSecond(pressure); !ok {
+	change12h, change12hOK := tendencyOverWindow(twelveHour, pressureTendency12hWindow)
+	if change12hOK {
+		values[pressureChange12hPath] = &change12h
+		ages[pressureChange12hPath] = twelveHourAge
+	}
+
+	if change24h, ok := tendencyOverWindow(history, pressureTendency24hWindow); ok {
+		values[pressureChange24hPath] = &change24h
+		ages[pressureChange24hPath] = twentyFourHourAge
+	}
+
+	if change3hOK {
+		currentPressure := pressure[len(pressure)-1].Value
+
+		stormIndex := stormSignature(change3h, currentPressure)
+		values[stormIndexPath] = &stormIndex
+		ages[stormIndexPath] = pressureAge
+
+		if change12hOK {
+			severeIndex := severeThunderstormSignature(change3h, change12h, currentPressure)
+			values[severeThunderstormIndexPath] = &severeIndex
+			ages[severeThunderstormIndexPath] = derivedInputAge(pressureAge, twelveHourAge)
+		}
+	}
+
+	if !rateOK {
 		return
 	}
-	windSpeed := trueWindSpeedHistory.since(cutoff)
+	windSpeed := trueWindSpeedHistory.since(cutoff3h)
 	if _, ok := linearSlopePerSecond(windSpeed); !ok {
 		return
 	}
-	windDirection := trueWindDirectionHistory.since(cutoff)
+	windDirection := trueWindDirectionHistory.since(cutoff3h)
 
-	index := squashZoneSignature(pressure, windSpeed, windDirection)
-	values[squashZoneIndexPath] = &index
+	squashIndex := squashZoneSignature(pressure, windSpeed, windDirection)
+	values[squashZoneIndexPath] = &squashIndex
 	ages[squashZoneIndexPath] = derivedInputAge(pressureAge, newestSampleAge(windSpeed, now), newestSampleAge(windDirection, now))
 }
 

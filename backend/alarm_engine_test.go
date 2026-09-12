@@ -288,6 +288,40 @@ func TestEngineWorstActiveStateWins(t *testing.T) {
 	}
 }
 
+// The Law of Storms ladder (ADR 0095) has four rules sharing pressureChange3h
+// (up-6, down-6, up-10, down-10), one on pressureChange24h and two on the
+// index paths. A 12mb rise satisfies both "above" thresholds on the shared
+// path and nothing else: not the "below" rules on the same path, not the
+// bomb rule (a different path, absent here), and not either index rule
+// (also absent, and the storm-signature one disabled besides).
+func TestLawOfStormsEngine_TwelveMillibarRiseRaisesTheUpRulesOnly(t *testing.T) {
+	engine := newAlarmEngine()
+	rules := lawOfStormsSeedRules()
+
+	read := fakeReader(map[string]float64{
+		pressureChange3hPath: 12 * pascalsPerMillibar, // 1200 Pa, a 12mb rise
+	})
+
+	t0 := time.Date(2026, 9, 12, 6, 0, 0, 0, time.UTC)
+	events := engine.evaluate(rules, read, t0)
+	if len(events) != 0 {
+		t.Fatalf("expected no events before the 900s dwell elapses, got %+v", events)
+	}
+
+	events = engine.evaluate(rules, read, t0.Add(16*time.Minute))
+	if len(events) != 2 {
+		t.Fatalf("expected exactly 2 raised events (the two 'up' rules), got %d: %+v", len(events), events)
+	}
+	for _, event := range events {
+		if event.Kind != alarmEventRaised {
+			t.Fatalf("expected a raised event, got %q", event.Kind)
+		}
+		if event.Rule.Op != alarmOpAbove {
+			t.Fatalf("a 12mb rise must only raise 'above' rules, got %q on %q", event.Rule.Op, event.Rule.Label)
+		}
+	}
+}
+
 func TestEngineForgetsStatusForDeletedRule(t *testing.T) {
 	engine := newAlarmEngine()
 	rule := lowVoltageRule()

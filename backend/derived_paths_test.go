@@ -192,7 +192,10 @@ func TestDerivedAwareAlarmReader_AbsentDerivedStaysAbsent(t *testing.T) {
 // The heavy-weather paths have to be listed and carry units, or the path
 // picker cannot offer them and an operator has nothing to bind a rule to.
 func TestHeavyWeatherDerivedPathsAreListedWithUnits(t *testing.T) {
-	for _, path := range []string{pressureRatePath, pressureChange3hPath, squashZoneIndexPath} {
+	for _, path := range []string{
+		pressureRatePath, pressureChange3hPath, squashZoneIndexPath,
+		pressureChange12hPath, pressureChange24hPath, stormIndexPath, severeThunderstormIndexPath,
+	} {
 		found := false
 		for _, id := range derivedPathIDs {
 			if id == path {
@@ -399,6 +402,202 @@ func TestDerivedPathAgesSquashZoneReportsOldestOfItsThreeInputs(t *testing.T) {
 	age := ages[squashZoneIndexPath]
 	if math.Abs(age-2400) > 5 {
 		t.Fatalf("expected ~2400s (wind direction's stalled 40 minutes), got %v", age)
+	}
+}
+
+// rampSince re-anchors weather_trend_test.go's ramp helper, which always
+// ends at the fixed trendNow, onto a real clock time instead. Needed here
+// because derivedPathValues and derivedPathAges go through
+// computeDerivedPaths, which reads barometerHistory relative to wall time
+// (time.Now().UTC()), not a fixture date.
+func rampSince(now time.Time, first, last float64, over time.Duration) []telemetryPoint {
+	points := ramp(first, last, over)
+	shifted := make([]telemetryPoint, len(points))
+	for i, p := range points {
+		shifted[i] = telemetryPoint{Value: p.Value, Timestamp: now.Add(p.Timestamp.Sub(trendNow))}
+	}
+	return shifted
+}
+
+/*
+Law of Storms derived paths (ADR 0095): the 12h and 24h barometer tendencies,
+and the storm and severe-thunderstorm signatures built from them alongside
+the existing 3h change.
+*/
+
+// A day of barometer history is enough to compute both longer tendencies:
+// half of a linear fall over 24h is what the same fall's first half looks
+// like at the 12h mark.
+func TestPressureChange12hAnd24hDerivedPathsReportTheTendency(t *testing.T) {
+	origBarometer := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(2000)
+	t.Cleanup(func() { barometerHistory = origBarometer })
+
+	now := time.Now().UTC()
+	for _, p := range rampSince(now, 101500, 99000, 24*time.Hour) {
+		barometerHistory.record(p.Value, p.Timestamp)
+	}
+
+	values := derivedPathValues()
+	change12h := values[pressureChange12hPath]
+	if change12h == nil {
+		t.Fatalf("expected a 12h tendency with 24h of history behind it")
+	}
+	// Half of a linear 2500 Pa fall over 24h is 1250 Pa over the last 12h.
+	if math.Abs(*change12h-(-1250)) > 5 {
+		t.Fatalf("12h change = %.1f Pa, want about -1250", *change12h)
+	}
+
+	change24h := values[pressureChange24hPath]
+	if change24h == nil {
+		t.Fatalf("expected a 24h tendency with 24h of history")
+	}
+	if math.Abs(*change24h-(-2500)) > 5 {
+		t.Fatalf("24h change = %.1f Pa, want about -2500", *change24h)
+	}
+}
+
+// 20 hours of history is enough to cover the 12h tendency's 11.5h gate but
+// not the 24h tendency's 23.5h one: the shorter window must report while the
+// longer one stays absent rather than presenting a partial 24h fall as the
+// whole one.
+func TestPressureChange24hAbsentUntilTheWindowIsCovered(t *testing.T) {
+	origBarometer := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(2000)
+	t.Cleanup(func() { barometerHistory = origBarometer })
+
+	now := time.Now().UTC()
+	for _, p := range rampSince(now, 101500, 100000, 20*time.Hour) {
+		barometerHistory.record(p.Value, p.Timestamp)
+	}
+
+	values := derivedPathValues()
+	if change24h := values[pressureChange24hPath]; change24h != nil {
+		t.Fatalf("expected no 24h tendency with only 20h of history, got %v", *change24h)
+	}
+	if change12h := values[pressureChange12hPath]; change12h == nil {
+		t.Fatalf("expected a 12h tendency: 20h of history covers the 11.5h gate")
+	}
+}
+
+// R. J. Ellis's storm/thunderstorm tier: a fall past 4mb in three hours with
+// the barometer already under 1009mb fires; the same fall ending above
+// 1009mb does not.
+//
+// The falls below are larger than the bare 4mb minimum on purpose: since()
+// and pointsAfter both exclude a sample sitting exactly at the window's
+// cutoff, a ramp built to land exactly on -400 Pa loses one step of it to
+// that boundary and reads as a hair short of the threshold. A wider margin
+// keeps the case about the threshold, not about ring-buffer boundary
+// arithmetic.
+func TestStormIndexDerivedPathFiresOnAFourMillibarFallBelow1009(t *testing.T) {
+	origBarometer := barometerHistory
+	t.Cleanup(func() { barometerHistory = origBarometer })
+	now := time.Now().UTC()
+
+	barometerHistory = newTelemetryRingBuffer(2000)
+	for _, p := range rampSince(now, 101300, 100700, 3*time.Hour) {
+		barometerHistory.record(p.Value, p.Timestamp)
+	}
+	values := derivedPathValues()
+	if index := values[stormIndexPath]; index == nil || *index != 1 {
+		t.Fatalf("expected the storm signature to fire for a 6mb fall ending at 1007mb, got %v", index)
+	}
+
+	barometerHistory = newTelemetryRingBuffer(2000)
+	for _, p := range rampSince(now, 101800, 101400, 3*time.Hour) {
+		barometerHistory.record(p.Value, p.Timestamp)
+	}
+	values = derivedPathValues()
+	if index := values[stormIndexPath]; index == nil || *index != 0 {
+		t.Fatalf("expected the same 4mb fall, ending at 1014mb, not to fire, got %v", index)
+	}
+}
+
+// The severe-thunderstorm index additionally needs a 12h tendency, so it
+// must stay absent until there is enough history to compute one from, even
+// though the 3h fall alone would already look like the plain storm
+// signature.
+func TestSevereThunderstormIndexAbsentUntilTwelveHoursOfHistory(t *testing.T) {
+	origBarometer := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(2000)
+	t.Cleanup(func() { barometerHistory = origBarometer })
+
+	now := time.Now().UTC()
+	for _, p := range rampSince(now, 102000, 99500, 10*time.Hour) {
+		barometerHistory.record(p.Value, p.Timestamp)
+	}
+
+	values := derivedPathValues()
+	if index := values[severeThunderstormIndexPath]; index != nil {
+		t.Fatalf("expected the severe-thunderstorm index to be absent without 12h of history, got %v", *index)
+	}
+}
+
+// Piecewise history: 1012.5mb 12h ago, 1008mb 3h ago, 1003.5mb now -- a 9mb
+// fall over the full 12h and a 4.5mb fall over the last 3h, both past the
+// severe-thunderstorm minimums, ending under 1005mb.
+func TestSevereThunderstormIndexDerivedPathFires(t *testing.T) {
+	origBarometer := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(2000)
+	t.Cleanup(func() { barometerHistory = origBarometer })
+
+	now := time.Now().UTC()
+	for _, p := range rampSince(now, 101250, 100800, 9*time.Hour) {
+		barometerHistory.record(p.Value, p.Timestamp.Add(-3*time.Hour))
+	}
+	for _, p := range rampSince(now, 100800, 100350, 3*time.Hour) {
+		barometerHistory.record(p.Value, p.Timestamp)
+	}
+
+	values := derivedPathValues()
+	index := values[severeThunderstormIndexPath]
+	if index == nil {
+		t.Fatalf("expected a severe-thunderstorm index with 12h of history behind the fall")
+	}
+	if *index != 1 {
+		t.Fatalf("expected the severe-thunderstorm signature to fire, got %v", *index)
+	}
+}
+
+// Each Law of Storms path's age is the newest sample in its own window, the
+// same rule pressureRate's own age already follows: a buffer that stopped
+// receiving samples makes every figure computed from it exactly that stale.
+//
+// The buffer stops 20, not 30, minutes before "now": tendencySpanSlack is
+// itself 30 minutes, and since()/pointsAfter exclude a sample sitting
+// exactly at a window's cutoff, so a buffer stale by exactly the slack
+// leaves no room at all for the span check to still clear window-slack --
+// the two boundaries collide. Twenty minutes' staleness leaves ten minutes
+// of margin against that same 30-minute slack.
+func TestDerivedPathAgesLawOfStormsPathsReportNewestBarometerSample(t *testing.T) {
+	origBarometer := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(2000)
+	t.Cleanup(func() { barometerHistory = origBarometer })
+
+	now := time.Now().UTC()
+	end := now.Add(-20 * time.Minute)
+	for _, p := range rampSince(end, 101500, 99000, 24*time.Hour) {
+		barometerHistory.record(p.Value, p.Timestamp)
+	}
+
+	ages := derivedPathAges(now)
+	for _, path := range []string{pressureChange12hPath, pressureChange24hPath, stormIndexPath, severeThunderstormIndexPath} {
+		age := ages[path]
+		if math.Abs(age-1200) > 5 {
+			t.Fatalf("%s age = %v, want about 1200 (the barometer buffer's newest sample, 20 minutes old)", path, age)
+		}
+	}
+}
+
+// The barometer buffer is windGustHistoryCapacity at the poller's cadence,
+// sized to hold exactly the 24h the weather-bomb tier needs -- pinned here so
+// a change to either constant has to walk through this test rather than
+// silently shortening the window the Law of Storms ladder relies on.
+func TestBarometerHistoryCoversTheTwentyFourHourWindow(t *testing.T) {
+	got := time.Duration(windGustHistoryCapacity) * trackPollInterval
+	if got != 24*time.Hour {
+		t.Fatalf("barometerHistory's capacity (%d) at a %s poll covers %s, want exactly 24h", windGustHistoryCapacity, trackPollInterval, got)
 	}
 }
 

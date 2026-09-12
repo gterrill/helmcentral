@@ -181,13 +181,16 @@ Nothing else changes.
 ## Alarm rules that use this
 
 The forecast page shows what is coming. For what is happening now, Helmcentral
-derives three values from the boat's own instruments that
+derives seven values from the boat's own instruments that
 [alarm rules](alarms.md) can bind to: the barometer's rate of change, its
-three-hour tendency, and a squash-zone signature that fires when the wind
-climbs while the barometer sits still.
+three-hour, twelve-hour and twenty-four-hour tendency, a squash-zone
+signature that fires when the wind climbs while the barometer sits still,
+and two further signatures that combine the tendency with the barometer's
+own height to flag a developing storm or severe thunderstorm.
 
-A set of rules using the book's thresholds ships with Helmcentral, disabled.
-See [Alarms](alarms.md).
+Rule sets built on these ship with Helmcentral: two rules from *Surviving
+the Storm*, disabled, and a seven-rule ladder built on the three-hour
+tendency table, mostly enabled. See [Alarms](alarms.md).
 
 ## On the dashboard and the wall display
 

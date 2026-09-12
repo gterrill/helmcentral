@@ -21,6 +21,14 @@ const (
 	defaultWindMaxAge             = 5 * time.Minute
 	defaultRPMMaxAge              = 30 * time.Second
 	defaultHouseBatteryCapacityAh = 1440
+
+	// trackPollInterval is startTrackPoller's cadence, the same poll every
+	// ring buffer in telemetry_history.go is sized against (windGustHistoryCapacity
+	// is 17280 samples at this interval, exactly 24h -- see
+	// TestBarometerHistoryCoversTheTwentyFourHourWindow). A named constant
+	// rather than a literal at the call site so that test can reference the
+	// same number this actually runs at, not a second copy of it.
+	trackPollInterval = 5 * time.Second
 )
 
 var (
@@ -381,6 +389,16 @@ func main() {
 	if err := seedForecastWarningsRules(); err != nil {
 		log.Printf("could not seed the forecast-warnings alarm rules: %v", err)
 	}
+	// Offers the Law of Storms ladder once per installation (ADR 0095): a
+	// coherent tendency ladder that replaces three of the heavy-weather
+	// set's five rules above. Most of its rules ship enabled -- unlike the
+	// heavy-weather set, this reads off a published ladder rather than one
+	// crew's uncalibrated numbers -- except the storm-signature tier, which
+	// the source page itself hedges. A failure here is not fatal, for the
+	// same reason as above.
+	if err := seedLawOfStormsRules(); err != nil {
+		log.Printf("could not seed the law-of-storms alarm rules: %v", err)
+	}
 	if err := loadAlarmTransports(); err != nil {
 		log.Fatalf("failed to load alarm transports: %v", err)
 	}
@@ -428,7 +446,7 @@ func main() {
 	go startAnchorDragWatcher(streamCtx, anchorDragCheckInterval)
 	go startForecastWarningsFetcher(streamCtx, forecastWarningsFetchInterval)
 
-	go startTrackPoller(5 * time.Second)
+	go startTrackPoller(trackPollInterval)
 	go startTideAutoUpdater(30 * time.Minute)
 	// Sweeps expired sessions once at startup and hourly thereafter
 	// (docs/adr/0040). Runs regardless of auth.mode — a mode:none boat can

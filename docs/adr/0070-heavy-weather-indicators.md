@@ -5,6 +5,8 @@ Accepted
 
 Extends ADR 0038 (alarms) and ADR 0055 (host-derived vessel paths). Fixes a defect in the latter.
 
+Amended by ADR 0095, which retires the three barometer-rate rules of section 5 below (Barometer falling, Barometer plummeting, Barometer down 3mb in three hours) in favour of the Law of Storms ladder.
+
 ## Context
 
 Steve and Linda Dashew's *Surviving the Storm* (Beowulf, 1999) was read against the forecast page and the alarm engine to see what of it could be encoded. The book is a heavy-weather seamanship text built from first-hand accounts and interviews with NOAA and Bureau of Meteorology forecasters, and it carries an unusual amount of quantitative advice: thresholds with numbers attached, most of them attributed.

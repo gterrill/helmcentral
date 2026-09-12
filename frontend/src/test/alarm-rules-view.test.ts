@@ -33,6 +33,10 @@ describe('ruleDomain', () => {
 
   it('strips a leading helmcentral namespace before taking the domain', () => {
     expect(ruleDomain('helmcentral.environment.pressureRate')).toBe('environment')
+    // The Law of Storms signature paths (ADR 0095) are derived paths under
+    // the same helmcentral.environment namespace as the tendency and
+    // forecast paths, so they group under environment the same way.
+    expect(ruleDomain('helmcentral.environment.stormIndex')).toBe('environment')
   })
 
   it('takes the whole path as the domain when it has only one segment', () => {

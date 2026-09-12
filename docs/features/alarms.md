@@ -142,6 +142,10 @@ zero when there is not enough history to answer.
 | `helmcentral.environment.pressureRate` | Pa/s | The barometer's rate of change over the last three hours. 100 Pa/hr is 1 mb/hr. |
 | `helmcentral.environment.pressureChange3h` | Pa | The plain three-hour tendency, the figure marine forecasts quote. |
 | `helmcentral.environment.squashZoneIndex` | none | 1 when the wind has climbed 10 knots in three hours while the barometer stayed within 1 mb and the direction held. Bind it with "above 0.5". |
+| `helmcentral.environment.pressureChange12h` | Pa | The twelve-hour barometric tendency. |
+| `helmcentral.environment.pressureChange24h` | Pa | The twenty-four-hour barometric tendency, the figure the weather-bomb rule below reads. |
+| `helmcentral.environment.stormIndex` | none | 1 when the barometer has fallen 4 mb or more in three hours and sits under 1009 mb, 0 otherwise. Bind it with "above 0.5". |
+| `helmcentral.environment.severeThunderstormIndex` | none | 1 when the barometer has fallen 4 mb or more in three hours, 8 mb or more in twelve hours, and sits under 1005 mb. Bind it with "above 0.5". |
 | `helmcentral.propulsion.fuelEconomy` | m/m³ | The whole boat's distance per unit fuel, rather than one engine's. |
 | `helmcentral.fuel.volume` | m3 | Fuel aboard, summed across every tank that reports both a level and a capacity. Empty when no tank reports both. |
 | `helmcentral.fuel.timeToEmpty` | s | Fuel aboard divided by the current total burn. Empty while stopped, with the engines off, or with no fuel volume to divide. |
@@ -153,9 +157,14 @@ These need the boat to be publishing `environment.outside.pressure` and, for
 the squash-zone index, true wind speed and direction. If these inputs are
 missing, the value stays absent and does not satisfy a rule.
 
-The barometer paths need half an hour of history before they report anything,
-and clear when Helmcentral restarts. This avoids deriving a weather trend from
-too few readings.
+The three-hour barometer paths, the rate, the three-hour tendency and the
+storm signature, need thirty minutes of history before they report anything.
+The twelve-hour tendency needs eleven and a half hours, and the
+twenty-four-hour tendency and the weather bomb rule need twenty-three and a
+half hours. The severe-thunderstorm signature needs whatever the twelve-hour
+tendency needs, since it reads both windows at once. All of them clear when
+Helmcentral restarts, since the history they are built from is kept in
+memory rather than on disk.
 
 The fuel-economy and fuel paths go absent for a second reason as well: if any
 reading they are built from (a fuel tank's level or capacity, an engine's fuel
@@ -178,14 +187,11 @@ Zealand and Australia as getting more than its share. See
 
 ## The heavy-weather rule set
 
-Helmcentral ships five rules using thresholds from that book, created once on
+Helmcentral ships two rules using thresholds from that book, created once on
 first run:
 
 | Rule | Fires when | Severity |
 | --- | --- | --- |
-| Barometer falling | Falling faster than 1 mb/hr | warn |
-| Barometer plummeting | Falling faster than 2 mb/hr | alarm |
-| Barometer down 3mb in three hours | Three-hour tendency past -3 mb | warn |
 | Squash zone | The signature above holds | warn |
 | Tropical barometer anomaly | Three-hour tendency past -1.5 mb | alert |
 
@@ -211,6 +217,41 @@ system moving at 15 knots closes 190 miles a day on a boat running with it and
 At anchor this does not apply. Underway, account for your course relative to
 the weather system when interpreting an alarm; the thresholds do not adjust
 for it.
+
+## The Law of Storms barometer rules
+
+R. J. Ellis, "Secret Law of Storms", worldstormcentral.co (Rules for storms
+and gales page), turns the same three-hour tendency into a ladder: a 6 mb
+move either way means strong wind, a 10 mb move either way means gale, and
+two further rules read the tendency against the barometer's own height
+rather than its movement alone. Helmcentral ships seven rules from this
+ladder, created once on first run:
+
+| Rule | Fires when | Severity |
+| --- | --- | --- |
+| Barometer up 6 mb in three hours | Three-hour tendency past +6 mb | warn |
+| Barometer down 6 mb in three hours | Three-hour tendency past -6 mb | warn |
+| Barometer up 10 mb in three hours | Three-hour tendency past +10 mb | alarm |
+| Barometer down 10 mb in three hours | Three-hour tendency past -10 mb | alarm |
+| Storm signature | Barometer down 4 mb in three hours with pressure under 1009 mb | alert |
+| Severe thunderstorm signature | Barometer down 4 mb in three hours and 8 mb in twelve hours with pressure under 1005 mb | alarm |
+| Weather bomb | Twenty-four-hour tendency past -24 mb | emergency |
+
+**Six of these seven arrive switched on.** Unlike the two rules above, this
+is a single ladder rather than three rules restating one falling barometer,
+its windows match the tendency a marine forecast already quotes, and each
+rung's severity matches the wind range the page attributes to it.
+
+**Storm signature ships switched off.** The page itself calls 3 mb the
+minimum for this rule and 4 mb only "a margin of comfort" above that, and a
+4 mb fall under 1009 mb is a routine afternoon on a temperate coast, not the
+storm the label promises. Turn it on somewhere you judge it means something.
+
+**If you installed Helmcentral before this ladder shipped,** your rules list
+still carries Barometer falling, Barometer plummeting and Barometer down
+3mb in three hours. These three are retired in favour of the ladder above,
+but nothing deletes a rule for you: delete them yourself, once, and they
+stay gone.
 
 ## The forecast warning rules
 

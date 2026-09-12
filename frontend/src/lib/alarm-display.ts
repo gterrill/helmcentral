@@ -21,6 +21,24 @@ import { formatQuantity, quantityForSIUnit, unitOption } from '@/lib/quantities'
 export const FORECAST_WIND_WARNING_PATH = 'helmcentral.environment.forecastWindWarningLevel'
 export const FORECAST_SURF_WARNING_PATH = 'helmcentral.environment.forecastSurfWarning'
 
+// The Law of Storms barometer paths (ADR 0095). The three tendency paths
+// carry unit Pa (mb through ALARM_UNIT_OVERRIDES above), the two index
+// paths carry unit '' like the forecast paths do, so they get the same
+// path-keyed treatment rather than the generic above/below phrasing.
+export const PRESSURE_CHANGE_3H_PATH = 'helmcentral.environment.pressureChange3h'
+export const PRESSURE_CHANGE_12H_PATH = 'helmcentral.environment.pressureChange12h'
+export const PRESSURE_CHANGE_24H_PATH = 'helmcentral.environment.pressureChange24h'
+export const STORM_INDEX_PATH = 'helmcentral.environment.stormIndex'
+export const SEVERE_THUNDERSTORM_INDEX_PATH = 'helmcentral.environment.severeThunderstormIndex'
+
+// The English word for each tendency path's window, used in the card
+// sentence rather than the path's own camelCase name.
+const TENDENCY_WINDOW_WORDS: Record<string, string> = {
+  [PRESSURE_CHANGE_3H_PATH]: 'three hours',
+  [PRESSURE_CHANGE_12H_PATH]: 'twelve hours',
+  [PRESSURE_CHANGE_24H_PATH]: 'twenty-four hours',
+}
+
 const ALARM_UNIT_OVERRIDES: Record<string, string> = {
   'Pa/s': 'mbph',
   Pa: 'mb',
@@ -92,6 +110,55 @@ function forecastWarningSentence(alarm: ActiveAlarm): string | null {
 }
 
 /**
+ * The card sentence for the five Law of Storms barometer paths (ADR 0095),
+ * or null for every other path. The two index paths are unitless 0/1
+ * signature flags, exactly like the forecast ladder above, so they get
+ * fixed prose keyed on the path. The three tendency paths carry a Pa
+ * reading of a rise or fall over a fixed window; "now 6.0 mb" says nothing
+ * about which direction the barometer is moving or over what window, so
+ * this reads it as "Up"/"Down" over the window word instead. The sign of
+ * value has to actually agree with the op - an above rule reads a rise, so
+ * it needs value > 0, and a below rule reads a fall, so it needs value < 0 -
+ * the same guard the Pa/s falling-barometer special case above applies, or
+ * a below rule holding a stale positive reading would get "Down" language
+ * for something that isn't falling. clear_value, when the rule sets one, is
+ * held to the same side of zero as value: a clear point that crossed zero
+ * would mean the rule clears on the opposite phenomenon from the one it
+ * alarms on, which is not a shape any of the seeded rules produce.
+ *
+ * The index sentences below duplicate the backend's own numbers
+ * (weather_trend.go's lawOfStormsStormFall3hPa etc.), the same trade the
+ * forecast sentences above make with the forecast ladder's thresholds.
+ */
+function lawOfStormsSentence(alarm: ActiveAlarm): string | null {
+  if (alarm.path === STORM_INDEX_PATH) {
+    return 'Storm signature: barometer down 4 mb in three hours below 1009 mb.'
+  }
+  if (alarm.path === SEVERE_THUNDERSTORM_INDEX_PATH) {
+    return 'Severe thunderstorm signature: barometer down 4 mb in three hours and 8 mb in twelve hours below 1005 mb.'
+  }
+
+  const windowWord = TENDENCY_WINDOW_WORDS[alarm.path]
+  if (windowWord === undefined) return null
+
+  const { op, unit, value, clear_value: clearValue } = alarm
+  if (unit !== 'Pa' || (op !== 'above' && op !== 'below')) return null
+
+  const rising = op === 'above'
+  if (rising ? value <= 0 : value >= 0) return null
+  if (clearValue !== undefined && (rising ? clearValue <= 0 : clearValue >= 0)) return null
+
+  const direction = rising ? 'Up' : 'Down'
+  const magnitude = formatAlarmReading(Math.abs(value), unit)
+  const sentence = `${direction} ${magnitude} in ${windowWord}.`
+  if (clearValue === undefined) return sentence
+
+  const verb = rising ? 'rise' : 'fall'
+  const clears = formatAlarmReading(Math.abs(clearValue), unit)
+  return `${sentence} Clears once the ${verb} eases to ${clears}.`
+}
+
+/**
  * The operator-facing sentence for an alarm card: what it is doing now, and
  * what will clear it. A rule alarm renders its own sentence from the
  * structured fields; a bus notification (no rule behind it, so no op) has
@@ -122,6 +189,12 @@ export function alarmConditionSentence(alarm: ActiveAlarm): string {
   // integer is supposed to mean.
   const forecastSentence = forecastWarningSentence(alarm)
   if (forecastSentence !== null) return forecastSentence
+
+  // Same reasoning, same ordering: a stale Law of Storms rule was already
+  // caught by the op === 'stale' branch above, so this only ever sees a
+  // live reading.
+  const lawOfStormsSentenceResult = lawOfStormsSentence(alarm)
+  if (lawOfStormsSentenceResult !== null) return lawOfStormsSentenceResult
 
   if (op === 'equal' || op === 'notEqual') {
     return `Now ${formatAlarmReading(value, unit)}.`

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -283,48 +284,27 @@ func TestSeedHeavyWeatherRules_RunsOnceAndDoesNotResurrectDeleted(t *testing.T) 
 	}
 }
 
-// The thresholds convert the book's millibars into the SI units the derived
-// paths report, then round to two decimal places because that raw conversion
-// is what the operator sees and edits in the rules list. Getting the
-// underlying conversion wrong is the difference between a rule that fires on
-// a gale and one that never fires at all; getting the rounding wrong is a
-// seventeen-digit float staring back at whoever opens the rule.
-func TestSeedHeavyWeatherRules_ThresholdsAreInSIUnits(t *testing.T) {
+// The three overlapping rate/tendency rules moved to the Law of Storms
+// ladder (ADR 0095, alarm_seed_law_of_storms.go); only the two patterns
+// nothing else covers -- the squash zone and the tropical anomaly -- stay
+// seeded from here.
+func TestSeedHeavyWeatherRules_KeepsSquashZoneAndTropicalAnomalyOnly(t *testing.T) {
 	withTempAlarmRules(t)
 	if err := seedHeavyWeatherRules(); err != nil {
 		t.Fatalf("seeding failed: %v", err)
 	}
 
+	rules := listAlarmRules()
+	if len(rules) != 2 {
+		t.Fatalf("expected exactly 2 heavy-weather rules, got %d: %+v", len(rules), rules)
+	}
+
 	byLabel := map[string]alarmRule{}
-	for _, rule := range listAlarmRules() {
+	for _, rule := range rules {
 		byLabel[rule.Label] = rule
-	}
-
-	falling, ok := byLabel["Barometer falling"]
-	if !ok {
-		t.Fatalf("expected a 'Barometer falling' rule, got %v", byLabel)
-	}
-	// 1 mb/hr is 100 Pa over 3600 s, which is -0.02777... Pa/s, rounded to -0.03.
-	if falling.Value != -0.03 {
-		t.Fatalf("falling threshold = %v Pa/s, want exactly -0.03", falling.Value)
-	}
-	if falling.Hysteresis != 0.01 {
-		t.Fatalf("falling hysteresis = %v Pa/s, want exactly 0.01", falling.Hysteresis)
-	}
-	if falling.Op != alarmOpBelow {
-		t.Fatalf("a falling barometer is a 'below' rule, got %q", falling.Op)
-	}
-
-	plummeting, ok := byLabel["Barometer plummeting"]
-	if !ok {
-		t.Fatalf("expected a 'Barometer plummeting' rule, got %v", byLabel)
-	}
-	// 2 mb/hr is -0.05555... Pa/s, rounded to -0.06.
-	if plummeting.Value != -0.06 {
-		t.Fatalf("plummeting threshold = %v Pa/s, want exactly -0.06", plummeting.Value)
-	}
-	if plummeting.Hysteresis != 0.01 {
-		t.Fatalf("plummeting hysteresis = %v Pa/s, want exactly 0.01", plummeting.Hysteresis)
+		if rule.Path == pressureRatePath {
+			t.Fatalf("seeded rule %q still binds the retired pressureRate path", rule.Label)
+		}
 	}
 
 	squash, ok := byLabel["Squash zone"]
@@ -333,6 +313,20 @@ func TestSeedHeavyWeatherRules_ThresholdsAreInSIUnits(t *testing.T) {
 	}
 	if squash.Op != alarmOpAbove || squash.Value != 0.5 {
 		t.Fatalf("squash-zone rule should be 'above 0.5', got %q %v", squash.Op, squash.Value)
+	}
+
+	tropical, ok := byLabel["Tropical barometer anomaly"]
+	if !ok {
+		t.Fatalf("expected a 'Tropical barometer anomaly' rule")
+	}
+	if tropical.Op != alarmOpBelow || tropical.Value != -1.5*pascalsPerMillibar {
+		t.Fatalf("tropical-anomaly rule should be 'below -150', got %q %v", tropical.Op, tropical.Value)
+	}
+	// 0.3 * pascalsPerMillibar is 30.000000000000004 in float64, not a clean
+	// 30 -- an exact-equality check here would be testing a rounding
+	// artifact of the multiplication, not the threshold itself.
+	if math.Abs(tropical.Hysteresis-0.3*pascalsPerMillibar) > 1e-9 {
+		t.Fatalf("tropical-anomaly hysteresis = %v, want ~%v", tropical.Hysteresis, 0.3*pascalsPerMillibar)
 	}
 }
 
@@ -453,5 +447,145 @@ func TestSeedForecastWarningsRules_SeedsIndependentlyOfHeavyWeatherMarker(t *tes
 	rules := listAlarmRules()
 	if len(rules) != afterHeavyWeather+4 {
 		t.Fatalf("expected the forecast-warnings set to add 4 rules on top of the heavy-weather set, got %d total (was %d)", len(rules), afterHeavyWeather)
+	}
+}
+
+// --- Law of Storms seed set (ADR 0095) ---
+
+func TestSeedLawOfStormsRules_CreatesSevenRulesWithTheStormSignatureDisabled(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedLawOfStormsRules(); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	rules := listAlarmRules()
+	if len(rules) != 7 {
+		t.Fatalf("expected 7 law-of-storms rules, got %d", len(rules))
+	}
+
+	for _, rule := range rules {
+		if rule.Label == "Storm signature" {
+			if rule.Enabled {
+				t.Fatalf("the storm-signature rule must ship disabled: the source page hedges it, and a 4mb fall under 1009mb is routine on a temperate coast")
+			}
+			continue
+		}
+		if !rule.Enabled {
+			t.Fatalf("seeded rule %q must ship enabled", rule.Label)
+		}
+	}
+}
+
+// Getting a threshold's unit conversion wrong is the difference between a
+// rule that fires on a gale and one that never fires at all, the same stakes
+// TestSeedHeavyWeatherRules_KeepsSquashZoneAndTropicalAnomalyOnly's own
+// comment describes.
+func TestSeedLawOfStormsRules_ThresholdsAreInSIUnits(t *testing.T) {
+	withTempAlarmRules(t)
+	if err := seedLawOfStormsRules(); err != nil {
+		t.Fatalf("seeding failed: %v", err)
+	}
+
+	byLabel := map[string]alarmRule{}
+	for _, rule := range listAlarmRules() {
+		byLabel[rule.Label] = rule
+	}
+
+	up6, ok := byLabel["Barometer up 6 mb in three hours"]
+	if !ok || up6.Path != pressureChange3hPath || up6.Op != alarmOpAbove || up6.Value != 600 || up6.Hysteresis != 50 || up6.DwellSeconds != 900 || up6.State != alarmStateWarn {
+		t.Fatalf("unexpected up-6mb rule (ok=%v): %+v", ok, up6)
+	}
+
+	down6, ok := byLabel["Barometer down 6 mb in three hours"]
+	if !ok || down6.Path != pressureChange3hPath || down6.Op != alarmOpBelow || down6.Value != -600 || down6.Hysteresis != 50 || down6.DwellSeconds != 900 || down6.State != alarmStateWarn {
+		t.Fatalf("unexpected down-6mb rule (ok=%v): %+v", ok, down6)
+	}
+
+	up10, ok := byLabel["Barometer up 10 mb in three hours"]
+	if !ok || up10.Path != pressureChange3hPath || up10.Op != alarmOpAbove || up10.Value != 1000 || up10.Hysteresis != 50 || up10.DwellSeconds != 900 || up10.State != alarmStateAlarm {
+		t.Fatalf("unexpected up-10mb rule (ok=%v): %+v", ok, up10)
+	}
+
+	down10, ok := byLabel["Barometer down 10 mb in three hours"]
+	if !ok || down10.Path != pressureChange3hPath || down10.Op != alarmOpBelow || down10.Value != -1000 || down10.Hysteresis != 50 || down10.DwellSeconds != 900 || down10.State != alarmStateAlarm {
+		t.Fatalf("unexpected down-10mb rule (ok=%v): %+v", ok, down10)
+	}
+
+	storm, ok := byLabel["Storm signature"]
+	if !ok || storm.Path != stormIndexPath || storm.Op != alarmOpAbove || storm.Value != 0.5 || storm.DwellSeconds != 1800 || storm.State != alarmStateAlert || storm.Enabled {
+		t.Fatalf("unexpected storm-signature rule (ok=%v): %+v", ok, storm)
+	}
+
+	severe, ok := byLabel["Severe thunderstorm signature"]
+	if !ok || severe.Path != severeThunderstormIndexPath || severe.Op != alarmOpAbove || severe.Value != 0.5 || severe.DwellSeconds != 900 || severe.State != alarmStateAlarm || !severe.Enabled {
+		t.Fatalf("unexpected severe-thunderstorm rule (ok=%v): %+v", ok, severe)
+	}
+
+	bomb, ok := byLabel["Weather bomb"]
+	if !ok || bomb.Path != pressureChange24hPath || bomb.Op != alarmOpBelow || bomb.Value != -2400 || bomb.Hysteresis != 100 || bomb.DwellSeconds != 1800 || bomb.State != alarmStateEmergency || !bomb.Enabled {
+		t.Fatalf("unexpected weather-bomb rule (ok=%v): %+v", ok, bomb)
+	}
+}
+
+// Mirrors TestSeedForecastWarningsRules_RunsOnceAndDoesNotResurrectDeleted:
+// seeding is keyed on a marker in the file, not on the file being empty, so
+// a rule the operator deletes on purpose never comes back.
+func TestSeedLawOfStormsRules_RunsOnceAndDoesNotResurrectDeleted(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedLawOfStormsRules(); err != nil {
+		t.Fatalf("first seed failed: %v", err)
+	}
+	first := listAlarmRules()
+	if len(first) != 7 {
+		t.Fatalf("expected 7 seeded rules, got %d", len(first))
+	}
+
+	if err := deleteAlarmRule(first[0].ID); err != nil {
+		t.Fatalf("deleting a seeded rule failed: %v", err)
+	}
+	remaining := len(listAlarmRules())
+
+	if err := seedLawOfStormsRules(); err != nil {
+		t.Fatalf("second seed failed: %v", err)
+	}
+	if got := len(listAlarmRules()); got != remaining {
+		t.Fatalf("re-seeding changed the rule count from %d to %d", remaining, got)
+	}
+
+	// And the marker survives a reload from disk.
+	if err := loadAlarmRules(); err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	if err := seedLawOfStormsRules(); err != nil {
+		t.Fatalf("third seed failed: %v", err)
+	}
+	if got := len(listAlarmRules()); got != remaining {
+		t.Fatalf("seeding after a reload changed the rule count to %d, want %d", got, remaining)
+	}
+}
+
+// The three seed sets are keyed on independent markers: an installation that
+// already has the other two markers but not this one must still get the
+// law-of-storms set on its next boot.
+func TestSeedLawOfStormsRules_SeedsIndependentlyOfTheOtherMarkers(t *testing.T) {
+	withTempAlarmRules(t)
+
+	if err := seedHeavyWeatherRules(); err != nil {
+		t.Fatalf("seeding heavy weather failed: %v", err)
+	}
+	if err := seedForecastWarningsRules(); err != nil {
+		t.Fatalf("seeding forecast warnings failed: %v", err)
+	}
+	before := len(listAlarmRules())
+
+	if err := seedLawOfStormsRules(); err != nil {
+		t.Fatalf("seeding law-of-storms failed: %v", err)
+	}
+
+	rules := listAlarmRules()
+	if len(rules) != before+7 {
+		t.Fatalf("expected the law-of-storms set to add 7 rules on top of the others, got %d total (was %d)", len(rules), before)
 	}
 }

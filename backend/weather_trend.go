@@ -6,19 +6,25 @@ import (
 )
 
 /*
-Barometric and wind trends, for the derived paths the heavy-weather alarm
-rules bind to (ADR 0070).
+Barometric and wind trends, for the derived paths the barometer alarm rules
+bind to (ADR 0070, amended by ADR 0095).
 
-The thresholds and the reasoning behind them come from Steve and Linda
-Dashew's Surviving the Storm. Its central point about instrumentation is that
-the barometer's rate of change carries the warning, not its value, and that
-the one weather pattern most likely to catch a yacht out is the one where the
-barometer does nothing at all.
+Two sources feed different parts of this file. Steve and Linda Dashew's
+Surviving the Storm is where pressureRate, squashZoneSignature and the
+three-hour window itself come from; its central point about instrumentation
+is that the barometer's rate of change carries the warning, not its value,
+and that the one weather pattern most likely to catch a yacht out is the one
+where the barometer does nothing at all. R. J. Ellis's "Secret Law of
+Storms" (worldstormcentral.co, rules-for-storms-and-gales page) is where the
+12h and 24h tendency windows and stormSignature / severeThunderstormSignature
+come from: a ladder of tendency thresholds tied to the same three-hour
+reading every marine forecast already quotes, rather than one crew's read of
+a rate.
 
 Everything here returns absence rather than a number when the history is too
-short to support one. A slope drawn through two samples a minute apart can
-imply any weather at all, and an alarm that fires off that is an alarm the
-operator learns to switch off.
+short to support one. A slope, or a tendency, drawn through too short a span
+can imply any weather at all, and an alarm that fires off that is an alarm
+the operator learns to switch off.
 */
 
 // knotsToMetersPerSecond is the inverse of main.go's metersPerSecondToKnots,
@@ -27,7 +33,8 @@ const knotsToMetersPerSecond = 1 / metersPerSecondToKnots
 
 const (
 	// pascalsPerMillibar: SignalK publishes pressure in pascals, mariners
-	// think in millibars, and the book's numbers are all millibars.
+	// think in millibars, and both sources this file draws on talk in
+	// millibars.
 	pascalsPerMillibar = 100.0
 
 	// trendMinimumSpan is how much history a slope needs before it means
@@ -38,6 +45,21 @@ const (
 	// Three hours is the tendency period every marine forecast already uses,
 	// so the number is comparable with a published one.
 	pressureTrendWindow = 3 * time.Hour
+
+	// pressureTendency12hWindow and pressureTendency24hWindow are the two
+	// longer windows the Law of Storms ladder adds on top of the three-hour
+	// tendency above (ADR 0095): the severe-thunderstorm tier reads the 12h
+	// figure, the weather-bomb tier the 24h one.
+	pressureTendency12hWindow = 12 * time.Hour
+	pressureTendency24hWindow = 24 * time.Hour
+
+	// tendencySpanSlack is how far short of a full window tendencyOverWindow
+	// will still report a figure: 12h reports after 11.5h of history, 24h
+	// after 23.5h. Unlike trendMinimumSpan's 30 minutes, this gate sits right
+	// at the window's edge -- a 12h or 24h figure has nothing shorter to lean
+	// on while its own buffer fills, so reporting much earlier than the
+	// window itself would be presenting a partial fall as the whole one.
+	tendencySpanSlack = 30 * time.Minute
 )
 
 // Squash-zone thresholds (pages 89, 188). The wind rise is what marks the
@@ -116,6 +138,23 @@ func changeOverWindow(points []telemetryPoint) (float64, bool) {
 	return points[len(points)-1].Value - points[0].Value, true
 }
 
+// tendencyOverWindow is changeOverWindow's counterpart for a window with
+// nothing shorter to lean on while its buffer fills (ADR 0095): last minus
+// first, present only once the span covers window minus tendencySpanSlack.
+// The three-hour figure does not go through this -- see pressureChange3hPath's
+// own call site in addWeatherTrendValues -- because it can reuse pressureRate's
+// much looser trendMinimumSpan instead.
+func tendencyOverWindow(points []telemetryPoint, window time.Duration) (float64, bool) {
+	if len(points) < 2 {
+		return 0, false
+	}
+	first, last := points[0].Timestamp, points[len(points)-1].Timestamp
+	if last.Sub(first) < window-tendencySpanSlack {
+		return 0, false
+	}
+	return points[len(points)-1].Value - points[0].Value, true
+}
+
 // angularSpreadDegrees is how far a direction series wandered, in degrees,
 // measured as the largest shortest-way step from the first reading.
 //
@@ -177,4 +216,64 @@ func squashZoneSignature(pressure, windSpeed, windDirection []telemetryPoint) fl
 	}
 
 	return 1
+}
+
+/*
+Law of Storms barometer thresholds (ADR 0095), from R. J. Ellis, "Secret Law
+of Storms", worldstormcentral.co, rules-for-storms-and-gales page. Unlike the
+Dashew rate thresholds above, these read as a tendency over a stated window
+and gate the sharper falls on an absolute pressure, the way the page itself
+states them: a 4mb fall means something different starting from 1030mb than
+it does starting from 995mb.
+*/
+const (
+	// lawOfStormsStormFall3hPa is the page's minimum for its storm /
+	// thunderstorm tier: a 3mb fall in three hours is the floor it names, 4mb
+	// "a margin of comfort".
+	lawOfStormsStormFall3hPa = -4 * pascalsPerMillibar
+
+	// lawOfStormsStormMaxPressurePa: the fall alone is not the signature, or
+	// a 4mb fall from 1030mb would read as a storm warning. The page pairs
+	// the fall with pressure already down under 1009mb.
+	lawOfStormsStormMaxPressurePa = 1009 * pascalsPerMillibar
+
+	// lawOfStormsSevereFall12hPa is the severe-thunderstorm tier's 12h
+	// companion to the same 4mb 3h fall: 8mb over twelve hours.
+	lawOfStormsSevereFall12hPa = -8 * pascalsPerMillibar
+
+	// lawOfStormsSevereMaxPressurePa is the severe tier's own pressure gate,
+	// lower than the plain storm tier's: 1005mb rather than 1009mb.
+	lawOfStormsSevereMaxPressurePa = 1005 * pascalsPerMillibar
+)
+
+/*
+stormSignature reports 1 when a three-hour fall of at least
+lawOfStormsStormFall3hPa has brought the barometer under
+lawOfStormsStormMaxPressurePa, and 0 otherwise -- squashZoneSignature's own
+idiom: a number a rule can bind "above 0.5" to, with 0 a real "not this
+pattern right now" answer rather than absence. Absence -- not having a
+defined three-hour change to call this on at all -- is the caller's job, the
+same as squashZoneSignature.
+
+<= on the fall and strict < on the pressure: a fall of exactly 4mb qualifies,
+but a barometer sitting exactly at 1009mb has not yet gone under it.
+*/
+func stormSignature(change3h, pressurePa float64) float64 {
+	if change3h <= lawOfStormsStormFall3hPa && pressurePa < lawOfStormsStormMaxPressurePa {
+		return 1
+	}
+	return 0
+}
+
+// severeThunderstormSignature is stormSignature's harder tier: it additionally
+// needs the 12h fall past lawOfStormsSevereFall12hPa and the pressure under
+// the severe tier's own, lower, lawOfStormsSevereMaxPressurePa. All three
+// conditions, the same <=/< boundaries as stormSignature.
+func severeThunderstormSignature(change3h, change12h, pressurePa float64) float64 {
+	if change3h <= lawOfStormsStormFall3hPa &&
+		change12h <= lawOfStormsSevereFall12hPa &&
+		pressurePa < lawOfStormsSevereMaxPressurePa {
+		return 1
+	}
+	return 0
 }

@@ -2,12 +2,11 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"time"
 )
 
 /*
-The heavy-weather rule set (ADR 0070).
+The heavy-weather rule set (ADR 0070, reduced by ADR 0095).
 
 Every threshold below is taken from Steve and Linda Dashew's Surviving the
 Storm, and none of it has been calibrated against this vessel or this coast.
@@ -16,6 +15,13 @@ one very experienced crew's numbers, published in 1999, several of them
 attributed in the text to NOAA forecasters rather than derived from data the
 book shows. It is a far better place to start than an empty alarm centre, and
 it is not a measurement.
+
+This set originally shipped five rules. Three of them -- two rate-of-fall
+rules and a three-hour tendency rule, no rising-pressure counterpart and no
+absolute-pressure gate among them -- moved to the Law of Storms ladder
+(alarm_seed_law_of_storms.go), which reads as a coherent tendency ladder off
+the same sources marine forecasts already quote. pressureRatePath itself
+stays published for gauges; nothing here binds a rule to it any longer.
 
 The set is seeded once per installation, keyed on a marker in the rules file.
 A rule the operator deletes stays deleted.
@@ -28,60 +34,8 @@ into it, and the barometer reacts accordingly. At anchor this does not apply.
 */
 const heavyWeatherSeedMarker = "heavy-weather-v1"
 
-// millibarsPerHourToPascalsPerSecond converts the units the book talks in to
-// the units pressureRatePath reports. Getting this wrong is the difference
-// between a rule that fires on a gale and one that never fires at all.
-func millibarsPerHourToPascalsPerSecond(mbPerHour float64) float64 {
-	return mbPerHour * pascalsPerMillibar / 3600
-}
-
-// roundedForOperator rounds a converted threshold to two decimal places
-// before it goes into a seeded rule. This number is not a measurement, it is
-// a starting point the operator is meant to read, tune and eventually
-// override, and -1 mb/hr into Pa/s comes out of the conversion above as
-// -0.027777777777777776. The book's own figures are round numbers read off a
-// dial to begin with, so the seventeenth digit was never real precision, just
-// float64 noise standing between the operator and the number they need to
-// look at.
-func roundedForOperator(v float64) float64 {
-	return math.Round(v*100) / 100
-}
-
 func heavyWeatherSeedRules(now time.Time) []alarmRule {
 	return []alarmRule{
-		{
-			// Pages 82 and 85: falls of this order are what the crews in the
-			// book were logging in the hours before things got serious.
-			Label:        "Barometer falling",
-			Path:         pressureRatePath,
-			Op:           alarmOpBelow,
-			Value:        roundedForOperator(millibarsPerHourToPascalsPerSecond(-1)),
-			Hysteresis:   roundedForOperator(millibarsPerHourToPascalsPerSecond(0.2)),
-			DwellSeconds: 1800,
-			State:        alarmStateWarn,
-		},
-		{
-			// Page 128, 20mb in under 12 hours, and page 459, 12mb in 4. Both
-			// are around 2mb/hr sustained.
-			Label:        "Barometer plummeting",
-			Path:         pressureRatePath,
-			Op:           alarmOpBelow,
-			Value:        roundedForOperator(millibarsPerHourToPascalsPerSecond(-2)),
-			Hysteresis:   roundedForOperator(millibarsPerHourToPascalsPerSecond(0.2)),
-			DwellSeconds: 900,
-			State:        alarmStateAlarm,
-		},
-		{
-			// The three-hour tendency every marine forecast quotes, at the
-			// rate page 82's 18mb-in-under-24-hours works out to.
-			Label:        "Barometer down 3mb in three hours",
-			Path:         pressureChange3hPath,
-			Op:           alarmOpBelow,
-			Value:        -3 * pascalsPerMillibar,
-			Hysteresis:   0.5 * pascalsPerMillibar,
-			DwellSeconds: 1800,
-			State:        alarmStateWarn,
-		},
 		{
 			// Pages 89 and 188. The book calls squash zones the cause of the
 			// majority of heavy-weather trouble yachts meet, and names the

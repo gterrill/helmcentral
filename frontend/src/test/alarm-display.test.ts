@@ -8,6 +8,11 @@ import {
   formatAlarmTime,
   FORECAST_SURF_WARNING_PATH,
   FORECAST_WIND_WARNING_PATH,
+  PRESSURE_CHANGE_3H_PATH,
+  PRESSURE_CHANGE_12H_PATH,
+  PRESSURE_CHANGE_24H_PATH,
+  SEVERE_THUNDERSTORM_INDEX_PATH,
+  STORM_INDEX_PATH,
 } from '@/lib/alarm-display'
 
 function makeAlarm(overrides: Partial<ActiveAlarm> = {}): ActiveAlarm {
@@ -222,6 +227,107 @@ describe('alarmConditionSentence', () => {
       .toBe('Anchor dragging! Clears when the source clears it.')
     expect(alarmConditionSentence(makeAlarm({ op: undefined, unit: undefined, message: 'Anchor dragging?' })))
       .toBe('Anchor dragging? Clears when the source clears it.')
+  })
+
+  // Law of Storms tendency rules (ADR 0095) fire on a Pa reading of a
+  // pressureChangeNh derived path, so "now 6.0 mb" says nothing about
+  // whether the barometer is rising or falling on that window. Pa already
+  // maps to mb through ALARM_UNIT_OVERRIDES, so only the sailor's-words
+  // wrapper is new here, same trade as the Pa/s falling-barometer case
+  // above.
+  it('reads a rising three-hour tendency rule with its clear point', () => {
+    const alarm = makeAlarm({
+      label: 'Barometer up 6 mb in three hours',
+      path: PRESSURE_CHANGE_3H_PATH,
+      op: 'above',
+      unit: 'Pa',
+      value: 600,
+      clear_value: 550,
+    })
+    expect(alarmConditionSentence(alarm)).toBe('Up 6.0 mb in three hours. Clears once the rise eases to 5.5 mb.')
+  })
+
+  it('reads a falling twelve-hour tendency rule with no clear point configured', () => {
+    const alarm = makeAlarm({
+      label: 'Barometer down 8 mb in twelve hours',
+      path: PRESSURE_CHANGE_12H_PATH,
+      op: 'below',
+      unit: 'Pa',
+      value: -800,
+    })
+    expect(alarmConditionSentence(alarm)).toBe('Down 8.0 mb in twelve hours.')
+  })
+
+  it('reads the weather-bomb twenty-four-hour tendency rule with its clear point', () => {
+    const alarm = makeAlarm({
+      label: 'Weather bomb',
+      path: PRESSURE_CHANGE_24H_PATH,
+      op: 'below',
+      unit: 'Pa',
+      value: -2400,
+      clear_value: -2300,
+    })
+    expect(alarmConditionSentence(alarm)).toBe('Down 24.0 mb in twenty-four hours. Clears once the fall eases to 23.0 mb.')
+  })
+
+  // A below rule on a tendency path is not automatically a fall, the same
+  // guard as the Pa/s falling-barometer case: the value has to actually be
+  // negative, or a below rule holding a positive reading (which can happen
+  // transiently while the rule is still latched from an earlier fall) would
+  // get "Down" language for a reading that is not falling at all. It falls
+  // through to the ordinary above/below sentence instead.
+  it('falls through to the generic sentence when a below tendency rule holds a positive value', () => {
+    const alarm = makeAlarm({
+      label: 'Barometer down 6 mb in three hours',
+      path: PRESSURE_CHANGE_3H_PATH,
+      op: 'below',
+      unit: 'Pa',
+      value: 600,
+      clear_value: 650,
+    })
+    expect(alarmConditionSentence(alarm)).toBe('Now 6.0 mb. Clears above 6.5 mb.')
+  })
+
+  // The storm and severe-thunderstorm signatures are unitless 0/1 flags
+  // (the same shape as the forecast ladder above), so the sentence is fixed
+  // prose keyed on the path rather than the generic phrasing. The numbers
+  // in the prose duplicate the Go constants in weather_trend.go, the same
+  // trade the forecast sentences make with their own backend thresholds.
+  it('renders the storm-signature sentence, keyed on the storm index path', () => {
+    const alarm = makeAlarm({
+      label: 'Storm signature',
+      path: STORM_INDEX_PATH,
+      op: 'above',
+      unit: '',
+      value: 1,
+    })
+    expect(alarmConditionSentence(alarm)).toBe('Storm signature: barometer down 4 mb in three hours below 1009 mb.')
+  })
+
+  it('renders the severe-thunderstorm-signature sentence, keyed on the severe index path', () => {
+    const alarm = makeAlarm({
+      label: 'Severe thunderstorm signature',
+      path: SEVERE_THUNDERSTORM_INDEX_PATH,
+      op: 'above',
+      unit: '',
+      value: 1,
+    })
+    expect(alarmConditionSentence(alarm))
+      .toBe('Severe thunderstorm signature: barometer down 4 mb in three hours and 8 mb in twelve hours below 1005 mb.')
+  })
+
+  // A stale rule has to still read "No data." on a tendency path: the
+  // op === 'stale' branch sits above the Law of Storms check for exactly
+  // this reason, the same ordering the forecast paths rely on.
+  it('still reports no data for a stale rule on a tendency path', () => {
+    const alarm = makeAlarm({
+      path: PRESSURE_CHANGE_3H_PATH,
+      op: 'stale',
+      unit: 'Pa',
+      value: 0,
+      message: 'Barometer tendency: no data for 40m',
+    })
+    expect(alarmConditionSentence(alarm)).toContain('No data.')
   })
 })
 

@@ -120,3 +120,104 @@ func TestAngularSpreadDegrees_WrapsAtNorth(t *testing.T) {
 		t.Fatalf("spread = %.1f degrees, want 20", spread)
 	}
 }
+
+// A 12-hour or 24-hour tendency has nothing shorter to fall back on while its
+// own buffer fills, so it must stay absent until nearly the whole window is
+// covered -- not trendMinimumSpan's much looser 30 minutes, or a barely
+// half-filled 12-hour buffer would already be reporting a "12 hour" figure
+// built from a fraction of one.
+func TestTendencyOverWindow_AbsentUntilTheWindowIsNearlyCovered(t *testing.T) {
+	if _, ok := tendencyOverWindow(nil, pressureTendency12hWindow); ok {
+		t.Fatalf("expected absence with no history")
+	}
+	// 11 hours is short of the 11.5h gate (12h minus the 30-minute slack).
+	if _, ok := tendencyOverWindow(ramp(101500, 100000, 11*time.Hour), pressureTendency12hWindow); ok {
+		t.Fatalf("expected absence just short of the 12h window")
+	}
+	if _, ok := tendencyOverWindow(ramp(101500, 100000, 11*time.Hour+30*time.Minute), pressureTendency12hWindow); !ok {
+		t.Fatalf("expected a tendency once the span reaches the 11.5h gate")
+	}
+}
+
+// The 12-hour and 24-hour tendencies are last-minus-first over their own
+// window, the same arithmetic as changeOverWindow, just gated on a longer
+// span.
+func TestTendencyOverWindow_TwelveAndTwentyFourHourWindows(t *testing.T) {
+	twelveHour, ok := tendencyOverWindow(ramp(101500, 99500, pressureTendency12hWindow), pressureTendency12hWindow)
+	if !ok {
+		t.Fatalf("expected a 12h tendency")
+	}
+	if math.Abs(twelveHour-(-2000)) > 1 {
+		t.Fatalf("12h tendency = %.1f Pa, want -2000", twelveHour)
+	}
+
+	twentyFourHour, ok := tendencyOverWindow(ramp(101500, 99000, pressureTendency24hWindow), pressureTendency24hWindow)
+	if !ok {
+		t.Fatalf("expected a 24h tendency")
+	}
+	if math.Abs(twentyFourHour-(-2500)) > 1 {
+		t.Fatalf("24h tendency = %.1f Pa, want -2500", twentyFourHour)
+	}
+}
+
+// R. J. Ellis's storm/thunderstorm tier: a 4mb fall in three hours, with the
+// barometer already under 1009mb.
+func TestStormSignature_FourMillibarFallBelow1009(t *testing.T) {
+	cases := []struct {
+		change3h, pressurePa, want float64
+	}{
+		{-400, 100800, 1}, // 4mb fall, 1008mb: both conditions hold
+		{-400, 100900, 0}, // exact boundary: pressure must be strictly under 1009mb
+		{-500, 100000, 1}, // a bigger fall under a lower pressure
+		{-300, 100800, 0}, // only a 3mb fall, short of the 4mb minimum
+		{-400, 101000, 0}, // a 4mb fall, but the pressure is still above 1009mb
+	}
+	for _, c := range cases {
+		if got := stormSignature(c.change3h, c.pressurePa); got != c.want {
+			t.Fatalf("stormSignature(%v, %v) = %v, want %v", c.change3h, c.pressurePa, got, c.want)
+		}
+	}
+}
+
+// The severe-thunderstorm tier needs both the 3h and the 12h fall past their
+// own minimums, and the pressure under the severe tier's lower gate.
+func TestSevereThunderstormSignature_NeedsBothWindowsAndThePressure(t *testing.T) {
+	// All three conditions hold: a 4mb fall in 3h, an 8mb fall in 12h, under 1005mb.
+	if got := severeThunderstormSignature(-400, -800, 100000); got != 1 {
+		t.Fatalf("expected the severe-thunderstorm signature, got %v", got)
+	}
+	// The 3h fall alone is not enough without the matching 12h fall.
+	if got := severeThunderstormSignature(-400, -500, 100000); got != 0 {
+		t.Fatalf("a 5mb 12h fall is short of the 8mb minimum, got %v", got)
+	}
+	// The 12h fall alone is not enough without the matching 3h fall.
+	if got := severeThunderstormSignature(-200, -800, 100000); got != 0 {
+		t.Fatalf("a 2mb 3h fall is short of the 4mb minimum, got %v", got)
+	}
+	// Both falls present, but the pressure has not dropped enough.
+	if got := severeThunderstormSignature(-400, -800, 100600); got != 0 {
+		t.Fatalf("pressure above 1005mb should not fire, got %v", got)
+	}
+	// Exact pressure boundary: strict less-than, same as stormSignature.
+	if got := severeThunderstormSignature(-400, -800, 100500); got != 0 {
+		t.Fatalf("pressure exactly at 1005mb should not fire (strict <), got %v", got)
+	}
+}
+
+// The four Law of Storms thresholds are the page's millibar figures
+// converted to the pascals the derived paths report in, not left as
+// millibars to be misread as one 100th of that.
+func TestLawOfStormsThresholdsAreInPascals(t *testing.T) {
+	if lawOfStormsStormFall3hPa != -400 {
+		t.Fatalf("stormFall3h = %v Pa, want -400", lawOfStormsStormFall3hPa)
+	}
+	if lawOfStormsStormMaxPressurePa != 100900 {
+		t.Fatalf("stormMaxPressure = %v Pa, want 100900", lawOfStormsStormMaxPressurePa)
+	}
+	if lawOfStormsSevereFall12hPa != -800 {
+		t.Fatalf("severeFall12h = %v Pa, want -800", lawOfStormsSevereFall12hPa)
+	}
+	if lawOfStormsSevereMaxPressurePa != 100500 {
+		t.Fatalf("severeMaxPressure = %v Pa, want 100500", lawOfStormsSevereMaxPressurePa)
+	}
+}
