@@ -1011,7 +1011,7 @@ export function AnchorWatchMap({
   }, [aisVessels, currentZoom, renderKey, vesselLat, vesselLon, hasAnchor])
 
   return (
-    <div ref={mapWrapperRef} className={cn('relative overflow-hidden rounded-lg', className)}>
+    <div ref={mapWrapperRef} className={cn('relative isolate overflow-hidden rounded-lg', className)}>
       <Map
         ref={mapRef}
         mapLib={maplibregl}
