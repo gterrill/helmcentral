@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, test } from 'vitest'
 
 import { DialRing, arcEndFraction } from '@/components/ui/dial-ring'
+import { parseCssColor } from './color'
 
 function ticks(container: HTMLElement) {
   return [...container.querySelectorAll('[data-tick]')]
@@ -193,10 +194,15 @@ describe('needle', () => {
  * what makes it readable at the angle a helm dial is actually read from.
  */
 describe('redline', () => {
-  /** jsdom normalises the hsl() the zone vocabulary is written in. */
+  /**
+   * jsdom normalises the hsl() the zone vocabulary is written in to rgb();
+   * happy-dom keeps it as hsl(). parseCssColor handles both so this check
+   * means the same thing under either environment.
+   */
   function isRed(style: string | null) {
-    const [r, g, b] = (style ?? '').match(/rgb\((\d+), (\d+), (\d+)\)/)?.slice(1).map(Number) ?? []
-    return r > 150 && g < 90 && b < 90
+    const rgb = parseCssColor(style)
+    if (!rgb) return false
+    return rgb.r > 150 && rgb.g < 90 && rgb.b < 90
   }
 
   const redlined = (

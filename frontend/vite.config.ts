@@ -91,18 +91,35 @@ export default defineConfig(({ mode }) => ({
     outDir: 'dist',
   },
   test: {
-    environment: 'jsdom',
+    // Migrated from jsdom: Vitest's own breakdown showed per-file environment
+    // setup as the dominant cost, roughly 2-3x cheaper here than under jsdom on
+    // the same machine, with no change to test bodies. setup.ts carries the two
+    // happy-dom-specific stubs this move needed (window.confirm/alert, which
+    // neither environment implements, and forcing off Element.getAnimations,
+    // which happy-dom implements and jsdom doesn't, so Base UI's exit-animation
+    // completion hook took its synchronous no-Animations-API fallback under
+    // jsdom but not here).
+    environment: 'happy-dom',
+    // Unlike jsdom, happy-dom actually navigates an <iframe>'s src, which
+    // means EmbedTile's tests (fixtures point at real boat and Grafana hosts,
+    // e.g. 192.168.50.240:3030) were making real outbound TCP connections
+    // that only failed because nothing in this sandbox answers on them. No
+    // test depended on that navigation completing, so turn it off rather
+    // than let the suite's pass/fail depend on network reachability.
+    environmentOptions: {
+      happyDOM: { settings: { navigation: { disableChildFrameNavigation: true } } },
+    },
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     // Worker threads rather than Vitest's default child-process forks. Nearly
-    // all of this suite's wall clock is per-file fixed cost (jsdom setup, then
+    // all of this suite's wall clock is per-file fixed cost (happy-dom setup, then
     // transforming and importing the module graph) rather than the test bodies
     // themselves, and threads start cheaper and share a module cache across
     // files, which cuts transform and import time roughly in half.
     //
     // Files stay isolated (pool isolation is still on): the suite depends on
     // it, since Testing Library's auto-cleanup is per-file and sharing one
-    // jsdom document across files leaves mounted trees behind, breaking every
+    // happy-dom document across files leaves mounted trees behind, breaking every
     // getByText that then matches twice.
     pool: 'threads',
   },

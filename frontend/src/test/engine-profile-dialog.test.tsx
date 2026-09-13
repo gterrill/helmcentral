@@ -102,6 +102,19 @@ describe('EngineProfileDialog', () => {
     const onApply = renderDialog()
     await screen.findByTestId('engine-profile-preview')
 
+    // The instance field seeds from published paths, a separate fetch from
+    // the one the preview above waits on. An effect keyed off that seed
+    // re-sets the field whenever it changes, so typing over it before the
+    // seed has landed is a race: on an unlucky interleaving the seeding
+    // effect runs after this test's own change event and clobbers it back to
+    // 'propulsion.port', the default the mocked paths resolve to. Waiting for
+    // that seed first (as the sibling 'suggests instances' test already
+    // does) means the effect's dependencies are settled before this test
+    // overwrites the value, so it can't fire again afterwards.
+    await waitFor(() => {
+      expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.port')
+    })
+
     fireEvent.change(screen.getByLabelText(/engine instance/i), { target: { value: 'propulsion.starboard' } })
     fireEvent.change(screen.getByLabelText(/tile title/i), { target: { value: 'Starboard' } })
     fireEvent.click(screen.getByRole('button', { name: /^Add tile$/ }))

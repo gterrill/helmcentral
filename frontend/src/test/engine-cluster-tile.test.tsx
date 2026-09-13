@@ -66,8 +66,15 @@ describe('cluster canvas geometry', () => {
     const top = parseFloat(dial.style.top) - overhang
     const bottom = parseFloat(dial.style.top) + parseFloat(dial.style.height) + overhang
 
+    // happy-dom rounds a serialised inline px value to 6 decimal places on
+    // read-back (jsdom keeps the full string React wrote), so summing three
+    // un-rounded parseFloat results and comparing against one rounded one can
+    // land a few millionths of a pixel over. PX_EPSILON is an order of
+    // magnitude above that rounding noise and eight orders below anything
+    // that would matter on screen.
+    const PX_EPSILON = 1e-4
     expect(top).toBeGreaterThanOrEqual(0)
-    expect(bottom).toBeLessThanOrEqual(parseFloat(canvas.style.height))
+    expect(bottom).toBeLessThanOrEqual(parseFloat(canvas.style.height) + PX_EPSILON)
   })
 
   test('centres the dial on the block of boxes', () => {

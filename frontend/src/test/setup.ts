@@ -27,6 +27,34 @@ if (typeof Element.prototype.scrollIntoView === 'undefined') {
   Element.prototype.scrollIntoView = () => {}
 }
 
+// Neither jsdom nor happy-dom implements window.confirm/alert (both are
+// `undefined`, not e.g. a no-op returning false), so any test that spies on
+// them with vi.spyOn needs a real function there to spy on first.
+if (typeof window.confirm === 'undefined') {
+  window.confirm = () => false
+}
+if (typeof window.alert === 'undefined') {
+  window.alert = () => {}
+}
+
+// Unlike jsdom, happy-dom implements Element.getAnimations() (returning an
+// empty array rather than throwing or being absent). Base UI's exit-animation
+// completion hook (useAnimationsFinished, used by Dialog/AlertDialog/Tabs to
+// keep the outgoing element mounted until its close transition finishes)
+// explicitly treats a missing getAnimations as "finish synchronously" and its
+// presence as "wait a requestAnimationFrame plus a Promise.all([]).then(...)
+// microtask before unmounting". Under jsdom every Base UI close/tab-switch is
+// synchronous, which is what this suite's fireEvent-based tests assume; under
+// happy-dom the outgoing panel/dialog is still in the DOM (mid `data-ending-
+// style`) when the assertion runs immediately after. Force the API away so
+// both environments take the synchronous fallback Base UI already ships for
+// browsers that lack it, rather than rewriting every such test to await a
+// frame it doesn't otherwise care about.
+if (typeof Element.prototype.getAnimations === 'function') {
+  // @ts-expect-error - deliberately removing the API, not adding a stub
+  delete Element.prototype.getAnimations
+}
+
 // jsdom doesn't implement EventSource, which the shared telemetry stream
 // (ADR 0037) opens as soon as any telemetry hook mounts — so without this every
 // test that renders App throws ReferenceError. The stub records listeners and
@@ -45,6 +73,36 @@ if (typeof globalThis.EventSource === 'undefined') {
     dispatchEvent() { return false }
     close() { this.readyState = 2 }
   } as unknown as typeof EventSource
+}
+
+// Unlike jsdom's WebSocket, which never actually opens a socket in this
+// setup, happy-dom's WebSocket dials a real connection. use-radar-echo-
+// stream.ts opens one as soon as a radar tile mounts, so any test that
+// mounts one incidentally (a full dashboard render, say) made a real,
+// slow, non-deterministic outbound connection attempt to a host nothing in
+// the test run is listening on. Force it off (not guarded on `undefined`,
+// since happy-dom's is a real function) to an inert stub that never
+// connects. use-radar-echo-stream.test.ts installs its own fake via
+// vi.stubGlobal('WebSocket', ...) before each of its tests, which replaces
+// this one.
+if (typeof globalThis.WebSocket === 'function') {
+  globalThis.WebSocket = class {
+    static readonly CONNECTING = 0
+    static readonly OPEN = 1
+    static readonly CLOSING = 2
+    static readonly CLOSED = 3
+
+    readyState = 0
+    binaryType: 'blob' | 'arraybuffer' = 'blob'
+
+    constructor(public url: string) {}
+
+    addEventListener() {}
+    removeEventListener() {}
+    dispatchEvent() { return false }
+    send() {}
+    close() { this.readyState = 3 }
+  } as unknown as typeof WebSocket
 }
 
 // jsdom doesn't implement window.matchMedia or window.innerWidth changes; stub both via
