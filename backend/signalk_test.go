@@ -412,6 +412,62 @@ func TestSettingsPayloadRoundTripsAssistantVoiceSettings(t *testing.T) {
 	}
 }
 
+// TestSettingsPayloadRoundTripsAssistantAutoRouterSettings proves the three
+// OpenRouter Auto Router knobs persist through updateSettingsHandler and read
+// back through buildSettingsPayload unchanged.
+func TestSettingsPayloadRoundTripsAssistantAutoRouterSettings(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.AllowedModels = []string{"anthropic/*", "openai/gpt-5*"}
+		p.Assistant.ExcludedModels = []string{"openai/gpt-4o-mini"}
+		p.Assistant.CostTier = "xhigh"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	payload := buildSettingsPayload(saved)
+	if got, want := payload.Assistant.AllowedModels, []string{"anthropic/*", "openai/gpt-5*"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("expected assistant.allowed_models to round-trip %v, got %v", want, got)
+	}
+	if got, want := payload.Assistant.ExcludedModels, []string{"openai/gpt-4o-mini"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected assistant.excluded_models to round-trip %v, got %v", want, got)
+	}
+	if payload.Assistant.CostTier != "xhigh" {
+		t.Fatalf("expected assistant.cost_tier to round-trip xhigh, got %q", payload.Assistant.CostTier)
+	}
+}
+
+func TestNormalizeSettingsPayload_AssistantAutoRouterFieldsTrimmedAndValidated(t *testing.T) {
+	req := settingsPayload{}
+	req.Assistant.AllowedModels = []string{"  anthropic/*  ", "", "  openai/gpt-5*"}
+	req.Assistant.ExcludedModels = []string{"", "  openai/gpt-4o-mini  "}
+	req.Assistant.CostTier = "  XHIGH  "
+
+	normalized := normalizeSettingsPayload(req)
+
+	if got, want := normalized.Assistant.AllowedModels, []string{"anthropic/*", "openai/gpt-5*"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("expected trimmed assistant.allowed_models %v, got %v", want, got)
+	}
+	if got, want := normalized.Assistant.ExcludedModels, []string{"openai/gpt-4o-mini"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected trimmed assistant.excluded_models %v, got %v", want, got)
+	}
+	if normalized.Assistant.CostTier != "xhigh" {
+		t.Fatalf("expected lowercase assistant.cost_tier xhigh, got %q", normalized.Assistant.CostTier)
+	}
+
+	req.Assistant.CostTier = "not-a-tier"
+	normalized = normalizeSettingsPayload(req)
+	if normalized.Assistant.CostTier != "" {
+		t.Fatalf("expected invalid assistant.cost_tier to normalize to blank, got %q", normalized.Assistant.CostTier)
+	}
+}
+
 // TestBuildSettingsPayload_AbsentAssistantBlockDefaultsVoiceSettingsFalse
 // mirrors TestBuildSettingsPayload_AbsentAssistantBlockDefaults above for the
 // three voice switches: a settings.yaml written before they existed (or with

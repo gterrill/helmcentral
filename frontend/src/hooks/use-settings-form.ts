@@ -57,6 +57,9 @@ export type SettingsPayload = {
     enabled?: boolean
     model?: string
     notes?: string
+    allowed_models?: string[]
+    excluded_models?: string[]
+    cost_tier?: string
     voice_input?: boolean
     read_aloud?: boolean
     wake_word?: boolean

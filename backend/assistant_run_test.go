@@ -278,6 +278,78 @@ func TestAssistantRunner_LogsToolCallBeforeAndAfter(t *testing.T) {
 	}
 }
 
+func TestAssistantRunner_OpenRouterAutoAddsAutoRouterPlugin(t *testing.T) {
+	round0 := finalResponse(t, "ok", "openrouter/auto", usage(10, 5, 0.001))
+	doer := &queuedChatDoer{responses: []*http.Response{round0}, errs: []error{nil}}
+	tools := &fakeToolExecutor{results: map[string]string{}}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{
+		doer:   doer,
+		apiKey: "test-key",
+		model:  "openrouter/auto",
+		autoRouter: assistantAutoRouterOptions{
+			AllowedModels:  []string{"anthropic/*"},
+			ExcludedModels: []string{"openai/gpt-4o-mini"},
+			CostTier:       "high",
+		},
+		tools: tools,
+		emit:  emit,
+	}
+
+	if _, err := runner.run(context.Background(), "system prompt", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(doer.requests) != 1 {
+		t.Fatalf("expected one request, got %d", len(doer.requests))
+	}
+	if len(doer.requests[0].Plugins) != 1 {
+		t.Fatalf("expected one plugin, got %+v", doer.requests[0].Plugins)
+	}
+	plugin := doer.requests[0].Plugins[0]
+	if plugin.ID != "auto-router" {
+		t.Fatalf("expected auto-router plugin id, got %q", plugin.ID)
+	}
+	if len(plugin.AllowedModels) != 1 || plugin.AllowedModels[0] != "anthropic/*" {
+		t.Fatalf("unexpected allowed_models: %+v", plugin.AllowedModels)
+	}
+	if len(plugin.ExcludedModels) != 1 || plugin.ExcludedModels[0] != "openai/gpt-4o-mini" {
+		t.Fatalf("unexpected excluded_models: %+v", plugin.ExcludedModels)
+	}
+	if plugin.CostTier != "high" {
+		t.Fatalf("expected cost_tier=high, got %q", plugin.CostTier)
+	}
+}
+
+func TestAssistantRunner_NonAutoModelOmitsAutoRouterPlugin(t *testing.T) {
+	round0 := finalResponse(t, "ok", "anthropic/claude-sonnet-4.5", usage(10, 5, 0.001))
+	doer := &queuedChatDoer{responses: []*http.Response{round0}, errs: []error{nil}}
+	tools := &fakeToolExecutor{results: map[string]string{}}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{
+		doer:   doer,
+		apiKey: "test-key",
+		model:  "anthropic/claude-sonnet-4.5",
+		autoRouter: assistantAutoRouterOptions{
+			AllowedModels: []string{"anthropic/*"},
+			CostTier:      "high",
+		},
+		tools: tools,
+		emit:  emit,
+	}
+
+	if _, err := runner.run(context.Background(), "system prompt", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(doer.requests) != 1 {
+		t.Fatalf("expected one request, got %d", len(doer.requests))
+	}
+	if len(doer.requests[0].Plugins) != 0 {
+		t.Fatalf("expected no plugins for non-auto model, got %+v", doer.requests[0].Plugins)
+	}
+}
+
 func TestAssistantRunner_EmitsStatusEventsInOrder(t *testing.T) {
 	round0 := chatResponse(t, http.StatusOK, openRouterChatResponse{
 		Choices: []openRouterChoice{{

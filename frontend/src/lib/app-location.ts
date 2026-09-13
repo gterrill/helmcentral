@@ -55,7 +55,12 @@ export function parseAppLocation(pathname: string): AppLocation {
   }
 
   if (first === 'settings') {
-    const section = second !== undefined && isSettingsSectionId(second) ? second : 'general'
+    let section: SettingsSectionId = 'general'
+    if (second === 'mate' || second === 'assistant') {
+      section = 'assistant'
+    } else if (second !== undefined && isSettingsSectionId(second)) {
+      section = second
+    }
     return { panel: 'settings', section }
   }
 
@@ -84,6 +89,7 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
 
   if (loc.panel === 'settings') {
     const section = loc.section ?? 'general'
+    if (section === 'assistant') return '/settings/mate'
     return section === 'general' ? '/settings' : `/settings/${section}`
   }
 

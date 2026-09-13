@@ -586,6 +586,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// a conversation's history are read-only, same tier as everything
 		// else above.
 		{http.MethodGet, "/api/assistant/status", tierRead, assistantStatusHandler},
+		{http.MethodGet, "/api/assistant/models", tierAdmin, assistantModelsHandler},
 		{http.MethodGet, "/api/assistant/conversations", tierRead, listAssistantConversationsHandler},
 		{http.MethodGet, "/api/assistant/conversations/:id", tierRead, getAssistantConversationHandler},
 		// The in-app Manual sheet's page fetch (ADR 0095), same embedded

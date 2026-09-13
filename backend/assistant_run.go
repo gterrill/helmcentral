@@ -65,11 +65,34 @@ type assistantToolExecutor interface {
 
 // assistantRunner drives one assistant reply's agentic tool loop.
 type assistantRunner struct {
-	doer   openRouterDoer
-	apiKey string
-	model  string
-	tools  assistantToolExecutor
-	emit   assistantEmitter
+	doer       openRouterDoer
+	apiKey     string
+	model      string
+	autoRouter assistantAutoRouterOptions
+	tools      assistantToolExecutor
+	emit       assistantEmitter
+}
+
+func autoRouterPluginForModel(model string, opts assistantAutoRouterOptions) *openRouterPlugin {
+	trimmed := strings.TrimSpace(strings.ToLower(model))
+	pluginID := ""
+	switch trimmed {
+	case "openrouter/auto":
+		pluginID = "auto-router"
+	case "openrouter/auto-beta":
+		pluginID = "auto-beta-router"
+	default:
+		return nil
+	}
+	if len(opts.AllowedModels) == 0 && len(opts.ExcludedModels) == 0 && strings.TrimSpace(opts.CostTier) == "" {
+		return nil
+	}
+	return &openRouterPlugin{
+		ID:             pluginID,
+		AllowedModels:  opts.AllowedModels,
+		ExcludedModels: opts.ExcludedModels,
+		CostTier:       strings.TrimSpace(opts.CostTier),
+	}
 }
 
 // run asks the model for a reply, answers any tool calls it makes, and
@@ -103,6 +126,9 @@ func (r *assistantRunner) run(ctx context.Context, system string, history []open
 			Messages: messages,
 			Tools:    assistantToolDefinitions(),
 			Usage:    &openRouterUsageOption{Include: true},
+		}
+		if plugin := autoRouterPluginForModel(r.model, r.autoRouter); plugin != nil {
+			req.Plugins = []openRouterPlugin{*plugin}
 		}
 		forcedFinal := round == assistantMaxToolRounds
 		if forcedFinal {

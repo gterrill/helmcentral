@@ -217,6 +217,13 @@ func TestBuildAssistantSystemPrompt_ToolGuidancePresent(t *testing.T) {
 	}
 }
 
+func TestBuildAssistantSystemPrompt_AsksToCreateRouteForPassage(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	if !strings.Contains(prompt, "Would you like me to create a route for this passage?") {
+		t.Fatalf("expected the prompt to tell Mate to offer route creation as a follow-up, got:\n%s", prompt)
+	}
+}
+
 func TestBuildAssistantSystemPrompt_ProviderLine(t *testing.T) {
 	pc := basePromptContext()
 	pc.WeatherProvider = "open-meteo"

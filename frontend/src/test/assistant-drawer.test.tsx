@@ -159,6 +159,26 @@ describe('AssistantDrawer', () => {
     expect(screen.getByText(/Tongue Bay or Blue Pearl Bay/)).toBeInTheDocument()
   })
 
+  it('shows a search box above the list and filters conversations by query', async () => {
+    vi.stubGlobal('fetch', buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      conversations: [
+        { id: 'c1', title: 'Gloucester Island Anchorages', created_at: '2026-09-11T00:00:00Z', updated_at: '2026-09-11T00:00:00Z' },
+        { id: 'c2', title: 'Hamilton Island Weather', created_at: '2026-09-10T00:00:00Z', updated_at: '2026-09-10T00:00:00Z' },
+      ],
+    }))
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
+
+    const search = await screen.findByPlaceholderText('Search conversations')
+    expect(search).toBeInTheDocument()
+
+    fireEvent.change(search, { target: { value: 'gloucester' } })
+
+    expect(screen.getByText('Gloucester Island Anchorages')).toBeInTheDocument()
+    expect(screen.queryByText('Hamilton Island Weather')).not.toBeInTheDocument()
+  })
+
   it('disables the composer and shows the read-only hint when canWrite is false', async () => {
     vi.stubGlobal('fetch', buildAssistantFetch({
       status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },

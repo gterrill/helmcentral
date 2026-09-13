@@ -161,6 +161,13 @@ type openRouterUsageOption struct {
 	Include bool `json:"include"`
 }
 
+type openRouterPlugin struct {
+	ID             string   `json:"id"`
+	AllowedModels  []string `json:"allowed_models,omitempty"`
+	ExcludedModels []string `json:"excluded_models,omitempty"`
+	CostTier       string   `json:"cost_tier,omitempty"`
+}
+
 // openRouterChatRequest is the request body for POST
 // /api/v1/chat/completions. ToolChoice is a bare string ("none" to force a
 // final answer with no further tool calls, see assistant_run.go); omitted
@@ -169,6 +176,7 @@ type openRouterChatRequest struct {
 	Model      string                 `json:"model"`
 	Messages   []openRouterMessage    `json:"messages"`
 	Tools      []openRouterTool       `json:"tools,omitempty"`
+	Plugins    []openRouterPlugin     `json:"plugins,omitempty"`
 	ToolChoice string                 `json:"tool_choice,omitempty"`
 	Usage      *openRouterUsageOption `json:"usage,omitempty"`
 }

@@ -15,6 +15,8 @@ export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 
 export type ScopeMethod = 'catenary' | 'ratio'
 
+export type AssistantCostTier = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
 /**
  * Local-form mirror of every field owned by the "regular" settings
  * sections (SignalK Connection, Boat & UI, Labels, Anchor, InfluxDB) plus
@@ -55,6 +57,9 @@ export interface RegularSettingsDraft {
   assistantEnabled: boolean
   assistantModel: string
   assistantNotes: string
+  assistantAllowedModels: string[]
+  assistantExcludedModels: string[]
+  assistantCostTier: AssistantCostTier
   assistantVoiceInput: boolean
   assistantReadAloud: boolean
   assistantWakeWord: boolean
@@ -93,9 +98,27 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantEnabled: false,
   assistantModel: 'anthropic/claude-sonnet-4.5',
   assistantNotes: '',
+  assistantAllowedModels: [],
+  assistantExcludedModels: [],
+  assistantCostTier: '',
   assistantVoiceInput: false,
   assistantReadAloud: false,
   assistantWakeWord: false,
+}
+
+function normalizeModelPatterns(values: string[] | undefined): string[] {
+  if (!Array.isArray(values)) return []
+  return values
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+}
+
+function normalizeAssistantCostTier(value: string | undefined): AssistantCostTier {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized === '' || normalized === 'low' || normalized === 'medium' || normalized === 'high' || normalized === 'xhigh' || normalized === 'max') {
+    return normalized
+  }
+  return ''
 }
 
 /** Builds the draft's starting values from a freshly-fetched settings payload. */
@@ -163,6 +186,9 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   // default model id — same reasoning as mayaraAddress above.
   if (typeof settings.assistant?.model === 'string') draft.assistantModel = settings.assistant.model
   if (typeof settings.assistant?.notes === 'string') draft.assistantNotes = settings.assistant.notes
+  draft.assistantAllowedModels = normalizeModelPatterns(settings.assistant?.allowed_models)
+  draft.assistantExcludedModels = normalizeModelPatterns(settings.assistant?.excluded_models)
+  draft.assistantCostTier = normalizeAssistantCostTier(settings.assistant?.cost_tier)
   // Voice phase (ADR 0093): all three default false, same as assistantEnabled.
   if (typeof settings.assistant?.voice_input === 'boolean') draft.assistantVoiceInput = settings.assistant.voice_input
   if (typeof settings.assistant?.read_aloud === 'boolean') draft.assistantReadAloud = settings.assistant.read_aloud
@@ -221,9 +247,19 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantEnabled !== b.assistantEnabled) return false
   if (a.assistantModel !== b.assistantModel) return false
   if (a.assistantNotes !== b.assistantNotes) return false
+  if (a.assistantCostTier !== b.assistantCostTier) return false
   if (a.assistantVoiceInput !== b.assistantVoiceInput) return false
   if (a.assistantReadAloud !== b.assistantReadAloud) return false
   if (a.assistantWakeWord !== b.assistantWakeWord) return false
+
+  if (a.assistantAllowedModels.length !== b.assistantAllowedModels.length) return false
+  for (let i = 0; i < a.assistantAllowedModels.length; i++) {
+    if (a.assistantAllowedModels[i] !== b.assistantAllowedModels[i]) return false
+  }
+  if (a.assistantExcludedModels.length !== b.assistantExcludedModels.length) return false
+  for (let i = 0; i < a.assistantExcludedModels.length; i++) {
+    if (a.assistantExcludedModels[i] !== b.assistantExcludedModels[i]) return false
+  }
 
   // Compare tankLabels: same keys and same value for each key
   const aLabelsKeys = Object.keys(a.tankLabels).sort()
@@ -298,6 +334,9 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       enabled: draft.assistantEnabled,
       model: draft.assistantModel.trim(),
       notes: draft.assistantNotes,
+      allowed_models: normalizeModelPatterns(draft.assistantAllowedModels),
+      excluded_models: normalizeModelPatterns(draft.assistantExcludedModels),
+      cost_tier: normalizeAssistantCostTier(draft.assistantCostTier),
       voice_input: draft.assistantVoiceInput,
       read_aloud: draft.assistantReadAloud,
       wake_word: draft.assistantWakeWord,

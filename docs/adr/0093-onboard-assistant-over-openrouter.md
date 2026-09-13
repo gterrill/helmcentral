@@ -285,6 +285,27 @@ already reads its fuel-aboard figure from; both fields are left out of the
 result entirely, rather than reported as zero, whenever that figure is not
 currently defined.
 
+### 13. OpenRouter Auto with explicit routing constraints
+
+Mate now supports two model-selection modes in Settings: fixed model id, and
+OpenRouter Auto (`openrouter/auto`).
+
+For fixed mode, the settings UI does not present an unbounded free-text model
+catalog as the primary choice. It loads the model list from OpenRouter with
+`supported_parameters=tools` and offers that filtered set, because tool
+calling is required for Mate's core path and models without tool support are a
+known hard failure.
+
+For Auto mode, the assistant settings include optional routing constraints:
+`allowed_models`, `excluded_models`, and `cost_tier` (`low`, `medium`,
+`high`, `xhigh`, `max`). These fields are normalized host-side (trimmed lists;
+invalid cost tier dropped) and persisted in `settings.yaml`.
+
+On request execution, those fields are forwarded to OpenRouter as an
+auto-router plugin only when the configured model is an Auto variant
+(`openrouter/auto` or `openrouter/auto-beta`). For non-Auto model ids, the
+fields remain inert by design.
+
 ### Rejected
 
 **A WASM plugin.** Covered in decision 1: the plugin timeout, the lack of a

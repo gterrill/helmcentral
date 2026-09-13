@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
-import { Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Search, Trash2 } from 'lucide-react'
 
 import { AssistantThread } from '@/components/assistant-thread'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { useAssistantChat } from '@/hooks/use-assistant-chat'
 import { useAssistantConversations } from '@/hooks/use-assistant-conversations'
@@ -51,6 +52,13 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
   const status = useAssistantStatus()
   const conversations = useAssistantConversations({ initialId: initialConversationId })
   const chat = useAssistantChat()
+  const [query, setQuery] = useState('')
+
+  const filteredConversations = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (needle === '') return conversations.conversations
+    return conversations.conversations.filter((conversation) => conversation.title.toLowerCase().includes(needle))
+  }, [conversations.conversations, query])
 
   useEffect(() => {
     if (conversations.loading) return
@@ -75,37 +83,54 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
 
     return (
       <div className="flex h-full min-h-0 w-full flex-col gap-4 lg:flex-row">
-        <div className="flex min-w-0 shrink-0 gap-2 lg:w-56 lg:flex-col">
+        <div className="flex min-w-0 shrink-0 gap-2 lg:w-64 lg:flex-col">
           <Button variant="outline" onClick={() => void conversations.create()}>
             New conversation
           </Button>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search conversations"
+              aria-label="Search conversations"
+              className="h-9 pl-9"
+            />
+          </div>
           <div className="flex min-h-0 min-w-0 flex-1 gap-1 overflow-x-auto lg:flex-col lg:overflow-x-visible lg:overflow-y-auto">
-            {conversations.conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                className={cn(
-                  'group flex w-56 shrink-0 items-center gap-1 rounded-md px-2 py-1.5 lg:w-auto',
-                  conversations.activeId === conversation.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
-                )}
-              >
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 text-left"
-                  onClick={() => void conversations.select(conversation.id)}
-                >
-                  <div className="truncate text-sm">{conversation.title}</div>
-                  <div className="text-[11px] text-muted-foreground">{formatRelativeTime(conversation.updatedAt)}</div>
-                </button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Delete ${conversation.title}`}
-                  onClick={() => void conversations.remove(conversation.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+            {filteredConversations.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border px-2 py-3 text-xs text-muted-foreground">
+                No matching conversations
               </div>
-            ))}
+            ) : (
+              filteredConversations.map((conversation) => (
+                <div
+                  key={conversation.id}
+                  className={cn(
+                    'group flex w-56 shrink-0 items-center gap-1 rounded-md px-2 py-1.5 lg:w-auto',
+                    conversations.activeId === conversation.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => void conversations.select(conversation.id)}
+                  >
+                    <div className="truncate text-sm">{conversation.title}</div>
+                    <div className="text-[11px] text-muted-foreground">{formatRelativeTime(conversation.updatedAt)}</div>
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Delete ${conversation.title}`}
+                    onClick={() => void conversations.remove(conversation.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))
+            )}
           </div>
         </div>
 

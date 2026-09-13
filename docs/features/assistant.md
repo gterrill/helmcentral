@@ -121,6 +121,17 @@ You bring your own OpenRouter account and your own key. You choose the
 model. Different model providers have different data-retention and training
 policies; check the one you pick if that matters to you.
 
+Settings now supports two routing modes:
+
+1. A fixed model id, chosen from a tool-capable model list fetched from
+	OpenRouter.
+2. OpenRouter Auto (`openrouter/auto`), with optional routing constraints:
+	allowed model patterns, excluded model ids, and a cost tier cap (`low`,
+	`medium`, `high`, `xhigh`, `max`).
+
+Auto routing only applies when the model is set to OpenRouter Auto; for any
+other model id, those routing constraints are ignored.
+
 ## Standing notes
 
 Settings → Mate has a notes field that gets sent with every question, word

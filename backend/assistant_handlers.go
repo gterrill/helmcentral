@@ -5,8 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"net/http"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +67,26 @@ type assistantReadiness struct {
 	Model      string `json:"model"`
 	Problem    string `json:"problem,omitempty"`
 }
+
+const openRouterModelsListURL = "https://openrouter.ai/api/v1/models"
+
+type assistantAutoRouterOptions struct {
+	AllowedModels  []string
+	ExcludedModels []string
+	CostTier       string
+}
+
+type assistantModelOption struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Price      float64 `json:"price"`
+	CreatedAt  string  `json:"created_at"`
+	Throughput float64 `json:"throughput"`
+	Latency    float64 `json:"latency"`
+	Popularity float64 `json:"popularity"`
+}
+
+var assistantOpenRouterDoer openRouterDoer = openRouterHTTPClient
 
 // checkAssistantReadiness reads settings and the OpenRouter key once and
 // decides whether the assistant can run. apiKey is returned only when
@@ -149,6 +175,58 @@ func assistantConversationTitle(content string) string {
 	return string(truncated)
 }
 
+func assistantSummaryTitle(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return ""
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.EqualFold(strings.TrimSpace(line), "## Spoken summary") {
+			start = i + 1
+			break
+		}
+	}
+	if start == -1 {
+		return ""
+	}
+
+	var section []string
+	for i := start; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			if len(section) > 0 {
+				section = append(section, "")
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "## ") {
+			break
+		}
+		section = append(section, line)
+	}
+
+	text := strings.Join(section, " ")
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	// Strip common markdown emphasis and links, then collapse whitespace so the
+	// title is readable as a short label in the list column.
+	re := regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
+	text = re.ReplaceAllString(text, "$1")
+	text = strings.NewReplacer("`", "", "**", "", "__", "", "*", "", "_", "").Replace(text)
+	text = strings.Join(strings.Fields(text), " ")
+	text = strings.Trim(text, "-:;,. ")
+	if text == "" {
+		return ""
+	}
+	return assistantConversationTitle(text)
+}
+
 // assistantSettingsPath resolves settings.yaml the same way every other
 // handler in this package does (signalk.go's handlers each inline this
 // getEnv call rather than sharing a helper).
@@ -163,6 +241,250 @@ func assistantStatusHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, readiness)
+}
+
+// GET /api/assistant/models
+func assistantModelsHandler(c echo.Context) error {
+	upstreamURL := openRouterModelsListURL + "?" + (url.Values{"supported_parameters": {"tools"}}).Encode()
+	sortBy, sortDesc := assistantModelSortQuery(c.QueryParam("sort"), c.QueryParam("order"))
+	page := intQueryParamWithDefault(c.QueryParam("page"), 1)
+	pageSize := intQueryParamWithDefault(c.QueryParam("page_size"), 20)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, upstreamURL, nil)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "build openrouter models request"})
+	}
+
+	resp, err := assistantOpenRouterDoer.Do(req)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "openrouter models request failed"})
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "read openrouter models response"})
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "openrouter models endpoint returned non-2xx"})
+	}
+
+	var parsed struct {
+		Data []struct {
+			ID                  string   `json:"id"`
+			Name                string   `json:"name"`
+			SupportedParameters []string `json:"supported_parameters"`
+			Created             int64    `json:"created"`
+			CreatedAt           string   `json:"created_at"`
+			Pricing             struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+			TopProvider struct {
+				Throughput float64 `json:"throughput"`
+				Latency    float64 `json:"latency"`
+			} `json:"top_provider"`
+			Throughput float64 `json:"throughput"`
+			Latency    float64 `json:"latency"`
+			Popularity float64 `json:"popularity"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "parse openrouter models response"})
+	}
+
+	models := make([]assistantModelOption, 0, len(parsed.Data))
+	for _, model := range parsed.Data {
+		if !containsString(model.SupportedParameters, "tools") {
+			continue
+		}
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			name = model.ID
+		}
+		throughput := model.TopProvider.Throughput
+		if throughput == 0 {
+			throughput = model.Throughput
+		}
+		latency := model.TopProvider.Latency
+		if latency == 0 {
+			latency = model.Latency
+		}
+		createdAt := strings.TrimSpace(model.CreatedAt)
+		if createdAt == "" && model.Created > 0 {
+			createdAt = time.Unix(model.Created, 0).UTC().Format(time.RFC3339)
+		}
+		models = append(models, assistantModelOption{
+			ID:         model.ID,
+			Name:       name,
+			Price:      assistantModelPrice(model.Pricing.Prompt, model.Pricing.Completion),
+			CreatedAt:  createdAt,
+			Throughput: throughput,
+			Latency:    latency,
+			Popularity: model.Popularity,
+		})
+	}
+	sort.SliceStable(models, func(i, j int) bool {
+		return assistantModelLess(models[i], models[j], sortBy, sortDesc)
+	})
+
+	total := len(models)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	paged := models[start:end]
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"models": paged,
+		"page": map[string]any{
+			"index":        page,
+			"size":         pageSize,
+			"total_models": total,
+			"total_pages":  maxInt(1, int(math.Ceil(float64(total)/float64(pageSize)))),
+		},
+		"sort": map[string]any{
+			"by":    sortBy,
+			"order": ternaryOrder(sortDesc),
+		},
+	})
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func assistantModelPrice(prompt, completion string) float64 {
+	promptPrice, _ := strconv.ParseFloat(strings.TrimSpace(prompt), 64)
+	completionPrice, _ := strconv.ParseFloat(strings.TrimSpace(completion), 64)
+	if promptPrice <= 0 && completionPrice <= 0 {
+		return 0
+	}
+	if promptPrice <= 0 {
+		return completionPrice
+	}
+	if completionPrice <= 0 {
+		return promptPrice
+	}
+	return (promptPrice + completionPrice) / 2.0
+}
+
+func assistantModelSortQuery(sortByRaw, orderRaw string) (string, bool) {
+	sortBy := strings.TrimSpace(strings.ToLower(sortByRaw))
+	order := strings.TrimSpace(strings.ToLower(orderRaw))
+	desc := order == "desc"
+	switch sortBy {
+	case "price":
+		if order == "" {
+			desc = false
+		}
+		return "price", desc
+	case "throughput":
+		if order == "" {
+			desc = true
+		}
+		return "throughput", desc
+	case "latency":
+		if order == "" {
+			desc = false
+		}
+		return "latency", desc
+	case "popular":
+		if order == "" {
+			desc = true
+		}
+		return "popular", desc
+	case "newest":
+		if order == "" {
+			desc = true
+		}
+		return "newest", desc
+	default:
+		return "popular", true
+	}
+}
+
+func assistantModelLess(a, b assistantModelOption, sortBy string, desc bool) bool {
+	cmp := 0
+	switch sortBy {
+	case "price":
+		cmp = compareFloat(a.Price, b.Price)
+	case "throughput":
+		cmp = compareFloat(a.Throughput, b.Throughput)
+	case "latency":
+		cmp = compareFloat(a.Latency, b.Latency)
+	case "newest":
+		cmp = compareString(a.CreatedAt, b.CreatedAt)
+	default:
+		cmp = compareFloat(a.Popularity, b.Popularity)
+	}
+	if cmp == 0 {
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	}
+	if desc {
+		return cmp > 0
+	}
+	return cmp < 0
+}
+
+func compareFloat(a, b float64) int {
+	if a == b {
+		return 0
+	}
+	if a > b {
+		return 1
+	}
+	return -1
+}
+
+func compareString(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if a > b {
+		return 1
+	}
+	return -1
+}
+
+func intQueryParamWithDefault(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func ternaryOrder(desc bool) string {
+	if desc {
+		return "desc"
+	}
+	return "asc"
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // GET /api/assistant/conversations
@@ -239,13 +561,14 @@ func deleteAssistantConversationHandler(c echo.Context) error {
 // straight through. A package-level var (not a plain function) so tests can
 // substitute a fake whole-run implementation without touching
 // postAssistantMessageHandler.
-var newAssistantRunner = func(apiKey, model, settingsPath string, emit assistantEmitter) assistantRunnerFace {
+var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 	return &assistantRunner{
-		doer:   openRouterHTTPClient,
-		apiKey: apiKey,
-		model:  model,
-		tools:  assistantProductionToolDeps(settingsPath),
-		emit:   emit,
+		doer:       openRouterHTTPClient,
+		apiKey:     apiKey,
+		model:      model,
+		autoRouter: autoRouter,
+		tools:      assistantProductionToolDeps(settingsPath),
+		emit:       emit,
 	}
 }
 
@@ -294,6 +617,16 @@ func postAssistantMessageHandler(c echo.Context) error {
 	}
 	if readiness.Problem != "" {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": readiness.Problem})
+	}
+	settingsMap, err := readSettings(settingsPath)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("read settings for assistant routing: %v", err)})
+	}
+	settingsPayload := buildSettingsPayload(settingsMap)
+	autoRouter := assistantAutoRouterOptions{
+		AllowedModels:  settingsPayload.Assistant.AllowedModels,
+		ExcludedModels: settingsPayload.Assistant.ExcludedModels,
+		CostTier:       settingsPayload.Assistant.CostTier,
 	}
 
 	if _, ok, err := globalAssistantStore.GetConversation(id); err != nil {
@@ -352,7 +685,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 		c.Response().Flush()
 	}
 
-	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, emit)
+	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, emit)
 	reply, runErr := runner.run(c.Request().Context(), system, assistantHistoryMessages(previousMessages))
 	if runErr != nil {
 		log.Printf("assistant: run failed for conversation %s: %v", id, runErr)
@@ -361,6 +694,14 @@ func postAssistantMessageHandler(c echo.Context) error {
 	}
 	log.Printf("assistant: conversation %s answered by %s in %d tool rounds, %d prompt + %d completion tokens, $%.4f",
 		id, reply.Model, reply.ToolRounds, reply.PromptTokens, reply.CompletionTokens, reply.CostUSD)
+
+	if summaryTitle := assistantSummaryTitle(reply.Content); summaryTitle != "" {
+		if err := globalAssistantStore.SetTitle(id, summaryTitle); err != nil {
+			log.Printf("assistant: update conversation summary title for %s: %v", id, err)
+			emit("error", map[string]string{"error": firstErrorLine(err)})
+			return nil
+		}
+	}
 
 	assistantRow, err := globalAssistantStore.AppendMessage(assistantMessage{
 		ConversationID:   id,

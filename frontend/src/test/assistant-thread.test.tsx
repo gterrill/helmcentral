@@ -85,10 +85,10 @@ describe('AssistantThread', () => {
     expect(screen.getByText('Tongue Bay or Blue Pearl Bay first?')).toBeInTheDocument()
     // Assistant content renders through the now-lazy AssistantMarkdown.
     expect(await screen.findByText('Blue Pearl Bay first, on the flood.')).toBeInTheDocument()
-    // Cost leads, to 3 decimal places, then the tool-round count.
-    const footer = screen.getByText('$0.018 · 1 tool round')
+    // Cost leads, to 3 decimal places, then the model, then the tool-round count.
+    const footer = screen.getByText('$0.018 · anthropic/claude-sonnet-4.5 · 1 tool round')
     expect(footer).toBeInTheDocument()
-    // Model and token count move to a title tooltip rather than the visible line.
+    // The tooltip still carries the model+token details for quick hover inspection.
     expect(footer).toHaveAttribute('title', 'anthropic/claude-sonnet-4.5 · 1,200 tokens')
   })
 
@@ -97,7 +97,7 @@ describe('AssistantThread', () => {
 
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
 
-    expect(screen.getByText('$0.018')).toBeInTheDocument()
+    expect(screen.getByText('$0.018 · anthropic/claude-sonnet-4.5')).toBeInTheDocument()
   })
 
   it('pluralises multiple tool rounds', () => {
@@ -105,7 +105,7 @@ describe('AssistantThread', () => {
 
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
 
-    expect(screen.getByText('$0.018 · 2 tool rounds')).toBeInTheDocument()
+    expect(screen.getByText('$0.018 · anthropic/claude-sonnet-4.5 · 2 tool rounds')).toBeInTheDocument()
   })
 
   it('renders -- for every footer field the server did not report', () => {
@@ -117,7 +117,7 @@ describe('AssistantThread', () => {
 
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
 
-    const footer = screen.getByText('--')
+    const footer = screen.getByText('-- · --')
     expect(footer).toHaveAttribute('title', '-- · -- tokens')
   })
 

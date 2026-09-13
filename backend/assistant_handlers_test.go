@@ -89,7 +89,7 @@ func (b *blockingAssistantRunner) run(ctx context.Context, system string, histor
 
 // swapAssistantRunner replaces newAssistantRunner for the duration of a
 // test, restoring the previous value on cleanup.
-func swapAssistantRunner(t *testing.T, fn func(apiKey, model, settingsPath string, emit assistantEmitter) assistantRunnerFace) {
+func swapAssistantRunner(t *testing.T, fn func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace) {
 	t.Helper()
 	prev := newAssistantRunner
 	newAssistantRunner = fn
@@ -235,6 +235,121 @@ func TestAssistantStatusHandler_AllSetIsReadyWithEchoedModel(t *testing.T) {
 	}
 	if status.Model != "openai/gpt-4o" {
 		t.Errorf("expected the model to be echoed, got %q", status.Model)
+	}
+}
+
+func TestAssistantModelsHandler_ReturnsToolCapableModelsFromOpenRouter(t *testing.T) {
+	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusOK, `{
+		"data": [
+			{"id": "anthropic/claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "supported_parameters": ["tools", "temperature"]},
+			{"id": "openai/gpt-4o-mini", "supported_parameters": ["tools"]}
+		]
+	}`)}}
+	prev := assistantOpenRouterDoer
+	assistantOpenRouterDoer = fake
+	t.Cleanup(func() { assistantOpenRouterDoer = prev })
+
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/models", "", "")
+	if err := assistantModelsHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.requests) != 1 {
+		t.Fatalf("expected one upstream call, got %d", len(fake.requests))
+	}
+	if got := fake.requests[0].URL.String(); got != "https://openrouter.ai/api/v1/models?supported_parameters=tools" {
+		t.Fatalf("expected tools-filtered models URL, got %q", got)
+	}
+
+	var resp struct {
+		Models []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.Models) != 2 {
+		t.Fatalf("expected 2 models, got %+v", resp.Models)
+	}
+	if resp.Models[0].ID != "anthropic/claude-sonnet-4.5" || resp.Models[0].Name != "Claude Sonnet 4.5" {
+		t.Fatalf("unexpected first model: %+v", resp.Models[0])
+	}
+	// Name falls back to the id when upstream omits it.
+	if resp.Models[1].ID != "openai/gpt-4o-mini" || resp.Models[1].Name != "openai/gpt-4o-mini" {
+		t.Fatalf("unexpected second model: %+v", resp.Models[1])
+	}
+}
+
+func TestAssistantModelsHandler_UpstreamErrorReturnsBadGateway(t *testing.T) {
+	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusBadGateway, `{"error":"upstream"}`)}}
+	prev := assistantOpenRouterDoer
+	assistantOpenRouterDoer = fake
+	t.Cleanup(func() { assistantOpenRouterDoer = prev })
+
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/models", "", "")
+	if err := assistantModelsHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAssistantModelsHandler_SortsAndPaginatesServerSide(t *testing.T) {
+	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusOK, `{
+		"data": [
+			{"id": "vendor/fast", "name": "Fast", "supported_parameters": ["tools"], "pricing": {"prompt": "0.003", "completion": "0.006"}, "popularity": 50, "top_provider": {"throughput": 100, "latency": 30}, "created": 1725753600},
+			{"id": "vendor/cheap", "name": "Cheap", "supported_parameters": ["tools"], "pricing": {"prompt": "0.001", "completion": "0.001"}, "popularity": 20, "top_provider": {"throughput": 40, "latency": 20}, "created": 1725840000},
+			{"id": "vendor/steady", "name": "Steady", "supported_parameters": ["tools"], "pricing": {"prompt": "0.002", "completion": "0.002"}, "popularity": 80, "top_provider": {"throughput": 70, "latency": 25}, "created": 1725926400}
+		]
+	}`)}}
+	prev := assistantOpenRouterDoer
+	assistantOpenRouterDoer = fake
+	t.Cleanup(func() { assistantOpenRouterDoer = prev })
+
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/models?sort=price&order=asc&page=2&page_size=1", "", "")
+	if err := assistantModelsHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Models []struct {
+			ID    string  `json:"id"`
+			Name  string  `json:"name"`
+			Price float64 `json:"price"`
+		} `json:"models"`
+		Page struct {
+			Index      int `json:"index"`
+			Size       int `json:"size"`
+			Total      int `json:"total_models"`
+			TotalPages int `json:"total_pages"`
+		} `json:"page"`
+		Sort struct {
+			By    string `json:"by"`
+			Order string `json:"order"`
+		} `json:"sort"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.Models) != 1 {
+		t.Fatalf("expected one model on page 2, got %+v", resp.Models)
+	}
+	if resp.Models[0].ID != "vendor/steady" {
+		t.Fatalf("expected the middle-priced model on page 2, got %+v", resp.Models[0])
+	}
+	if resp.Page.Index != 2 || resp.Page.Size != 1 || resp.Page.Total != 3 || resp.Page.TotalPages != 3 {
+		t.Fatalf("unexpected page metadata: %+v", resp.Page)
+	}
+	if resp.Sort.By != "price" || resp.Sort.Order != "asc" {
+		t.Fatalf("unexpected sort metadata: %+v", resp.Sort)
 	}
 }
 
@@ -465,7 +580,7 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content:          "Tongue Bay first, on the rising tide.",
 			Model:            "openai/gpt-4o",
@@ -558,6 +673,46 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 // string run() was called with, so this checks it directly rather than
 // re-deriving buildAssistantSystemPrompt's own rendering (already covered in
 // assistant_prompt_test.go).
+func TestPostAssistantMessageHandler_UsesSpokenSummaryAsConversationTitle(t *testing.T) {
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	store := withTestAssistantStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	conv, err := store.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	var runner *fakeAssistantRunner
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
+			Content: "## Spoken summary\n\nGloucester Island Anchorages\n\n## Passage plan\n\nWe should favour the north side.",
+			Model:   "openai/gpt-4o",
+		}}
+		return runner
+	})
+
+	body := `{"content":"What are recommended anchorages around Gloucester Island?"}`
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if ct := rec.Header().Get(echo.HeaderContentType); ct != "text/event-stream" {
+		t.Fatalf("expected text/event-stream, got %q: %s", ct, rec.Body.String())
+	}
+
+	updated, ok, err := store.GetConversation(conv.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetConversation: ok=%v err=%v", ok, err)
+	}
+	if updated.Title != "Gloucester Island Anchorages" {
+		t.Fatalf("expected AI spoken summary title, got %q", updated.Title)
+	}
+}
+
 func TestPostAssistantMessageHandler_SpokenAndScreenReachSystemPrompt(t *testing.T) {
 	secrets := withTestSecretsStore(t)
 	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
@@ -572,7 +727,7 @@ func TestPostAssistantMessageHandler_SpokenAndScreenReachSystemPrompt(t *testing
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "The upper atmosphere chart is the 500mb height and vorticity pattern.",
 			Model:   "openai/gpt-4o",
@@ -613,7 +768,7 @@ func TestPostAssistantMessageHandler_RunnerErrorEmitsErrorEventAndPersistsOnlyUs
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, err: fmt.Errorf("openrouter status 401: invalid api key")}
 	})
 
@@ -658,7 +813,7 @@ func TestPostAssistantMessageHandler_SecondRequestWhileFirstInFlightReturns409(t
 
 	started := make(chan struct{})
 	proceed := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		return &blockingAssistantRunner{started: started, proceed: proceed, reply: assistantReply{Content: "ok"}}
 	})
 
@@ -692,6 +847,7 @@ func TestBuildAPIRoutes_AssistantRoutesHaveExpectedTiers(t *testing.T) {
 	sessions := newTestSessionStore(t)
 	want := map[string]apiTier{
 		"GET /api/assistant/status":                      tierRead,
+		"GET /api/assistant/models":                      tierAdmin,
 		"GET /api/assistant/conversations":               tierRead,
 		"GET /api/assistant/conversations/:id":           tierRead,
 		"POST /api/assistant/conversations":              tierWrite,

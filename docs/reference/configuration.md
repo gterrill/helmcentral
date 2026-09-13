@@ -114,9 +114,21 @@ of the process environment is deliberate: every WASM plugin's `${VAR}`
 configuration expansion reads from the environment, so a value placed there
 is accessible to any plugin.
 
-The `assistant:` block in `settings.yaml` (enabled, model, standing notes)
-holds Mate's non-secret configuration; see [Mate](../features/assistant.md)
-for what each field does.
+The `assistant:` block in `settings.yaml` holds Mate's non-secret
+configuration:
+
+- `enabled`
+- `model`
+- `notes`
+- `allowed_models` (list of model patterns for OpenRouter Auto)
+- `excluded_models` (list of model ids to block for OpenRouter Auto)
+- `cost_tier` (`low`, `medium`, `high`, `xhigh`, `max`)
+- `voice_input`
+- `read_aloud`
+- `wake_word`
+
+`allowed_models`, `excluded_models`, and `cost_tier` only affect routing when
+`model` is `openrouter/auto` (or `openrouter/auto-beta`).
 
 `ASSISTANT_DB_PATH` holds conversations, not the operator manual Mate reads
 from when a question is about Helmcentral itself. That manual is staged into

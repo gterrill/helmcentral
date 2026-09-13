@@ -24,7 +24,8 @@ const EXAMPLE_QUESTION =
 // model/tokens detail into the footer's `title` tooltip instead.
 function formatMessageFooter(message: AssistantMessage): string {
   const cost = typeof message.costUsd === 'number' ? `$${message.costUsd.toFixed(3)}` : '--'
-  const parts = [cost]
+  const model = message.model && message.model !== '' ? message.model : '--'
+  const parts = [cost, model]
   if (typeof message.toolRounds === 'number') {
     parts.push(`${message.toolRounds} tool round${message.toolRounds === 1 ? '' : 's'}`)
   }

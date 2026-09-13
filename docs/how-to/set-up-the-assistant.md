@@ -20,10 +20,16 @@ your questions.
 With write access, open **Settings → Mate**:
 
 1. Paste the key into the **OpenRouter API key** field.
-2. Choose a model. The default, `anthropic/claude-sonnet-4.5`, works out of
-   the box; any OpenRouter model id that supports tool calling will work.
-   Leave this field blank to fall back to the default.
-3. Write your standing notes. This is anything about your own cruising
+2. Choose your routing mode:
+   - Turn on **Use OpenRouter Auto** to use `openrouter/auto`.
+   - Leave it off to pick a fixed model from the tool-capable model dropdown
+     (the list is fetched from OpenRouter with tool support filtering).
+3. Optional: when Auto is on, set routing constraints:
+   - **Auto cost tier**: `low`, `medium`, `high`, `xhigh`, or `max`.
+   - **Allowed models**: comma-separated model patterns (for example
+     `anthropic/*`).
+   - **Excluded models**: comma-separated model ids to block.
+4. Write your standing notes. This is anything about your own cruising
    ground you want on every answer, for example:
 
    ```
@@ -31,8 +37,8 @@ With write access, open **Settings → Mate**:
    Snorkel Blue Pearl Bay in the last 1-2h of flood up to high slack.
    ```
 
-4. Switch Mate on.
-5. Choose **Save**.
+5. Switch Mate on.
+6. Choose **Save**.
 
 ## 3. Ask it something
 
@@ -46,12 +52,10 @@ tides for both, then a short answer with a comparison table.
 
 ## If it says "No endpoints found that support tool use"
 
-The model you picked doesn't support tool calling, which Mate needs for
-every question beyond small talk. Go back to Settings → Mate and choose a
-different model. `anthropic/claude-sonnet-4.5` is the tested default; most
-current flagship models from the major providers support tool calling, but
-not every model OpenRouter lists does, and OpenRouter's own model list marks
-which ones do.
+The selected model path cannot execute tool calls. If you are on a fixed
+model, choose a different model from the dropdown. If you are on OpenRouter
+Auto, relax `allowed models`/`excluded models`/`cost tier` so Auto still has
+at least one tool-capable model available.
 
 ## Write access and cost
 

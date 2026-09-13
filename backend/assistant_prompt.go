@@ -416,7 +416,8 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		"and fuel margin; pass that bearing as course_deg to get_wind_forecast for the destination and read " +
 		"the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, quarter, " +
 		"following); do not work the angle out yourself. A power catamaran runs comfortably in a following " +
-		"sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
+		"sea and slows and burns more into a head sea. Say which it is for this passage. If the answer includes " +
+		"a passage recommendation, end with a brief follow-up question: \"Would you like me to create a route for this passage?\"\n\n" +
 
 		"Label the source of every claim: what comes from today's forecast and tide data, and what comes from " +
 		"general knowledge, which the operator must check against the chart and cruising guide. Never present " +

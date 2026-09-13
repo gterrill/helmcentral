@@ -126,12 +126,15 @@ type settingsPayload struct {
 	// backend stores and round-trips them but does not otherwise act on
 	// them.
 	Assistant struct {
-		Enabled    bool   `json:"enabled"`
-		Model      string `json:"model"`
-		Notes      string `json:"notes"`
-		VoiceInput bool   `json:"voice_input"`
-		ReadAloud  bool   `json:"read_aloud"`
-		WakeWord   bool   `json:"wake_word"`
+		Enabled        bool     `json:"enabled"`
+		Model          string   `json:"model"`
+		Notes          string   `json:"notes"`
+		AllowedModels  []string `json:"allowed_models"`
+		ExcludedModels []string `json:"excluded_models"`
+		CostTier       string   `json:"cost_tier"`
+		VoiceInput     bool     `json:"voice_input"`
+		ReadAloud      bool     `json:"read_aloud"`
+		WakeWord       bool     `json:"wake_word"`
 	} `json:"assistant"`
 	Auth struct {
 		Mode string `json:"mode"`
@@ -224,12 +227,15 @@ func updateSettingsHandler(c echo.Context) error {
 		"port":    normalized.Mayara.Port,
 	}
 	settings["assistant"] = map[string]any{
-		"enabled":     normalized.Assistant.Enabled,
-		"model":       normalized.Assistant.Model,
-		"notes":       normalized.Assistant.Notes,
-		"voice_input": normalized.Assistant.VoiceInput,
-		"read_aloud":  normalized.Assistant.ReadAloud,
-		"wake_word":   normalized.Assistant.WakeWord,
+		"enabled":         normalized.Assistant.Enabled,
+		"model":           normalized.Assistant.Model,
+		"notes":           normalized.Assistant.Notes,
+		"allowed_models":  normalized.Assistant.AllowedModels,
+		"excluded_models": normalized.Assistant.ExcludedModels,
+		"cost_tier":       normalized.Assistant.CostTier,
+		"voice_input":     normalized.Assistant.VoiceInput,
+		"read_aloud":      normalized.Assistant.ReadAloud,
+		"wake_word":       normalized.Assistant.WakeWord,
 	}
 	settings["units"] = normalized.Units
 
@@ -428,6 +434,9 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		// default model.
 		payload.Assistant.Model = strings.TrimSpace(coerceString(assistantMap["model"]))
 		payload.Assistant.Notes = coerceString(assistantMap["notes"])
+		payload.Assistant.AllowedModels = coerceStringList(assistantMap["allowed_models"])
+		payload.Assistant.ExcludedModels = coerceStringList(assistantMap["excluded_models"])
+		payload.Assistant.CostTier = strings.TrimSpace(strings.ToLower(coerceString(assistantMap["cost_tier"])))
 		// The three voice switches all default false, the same as Enabled -
 		// a settings.yaml written before they existed (or one where the
 		// operator has simply never turned them on) must surface as off,
@@ -559,6 +568,9 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 		normalized.Assistant.Model = defaultAssistantModel
 	}
 	normalized.Assistant.Notes = strings.TrimSpace(req.Assistant.Notes)
+	normalized.Assistant.AllowedModels = normalizeAssistantModelPatterns(req.Assistant.AllowedModels)
+	normalized.Assistant.ExcludedModels = normalizeAssistantModelPatterns(req.Assistant.ExcludedModels)
+	normalized.Assistant.CostTier = normalizeAssistantCostTier(req.Assistant.CostTier)
 	normalized.Assistant.VoiceInput = req.Assistant.VoiceInput
 	normalized.Assistant.ReadAloud = req.Assistant.ReadAloud
 	normalized.Assistant.WakeWord = req.Assistant.WakeWord
@@ -584,6 +596,49 @@ func isSupportedHullType(value string) bool {
 func isSupportedScopeMethod(value string) bool {
 	trimmed := strings.TrimSpace(value)
 	return trimmed == "catenary" || trimmed == "ratio"
+}
+
+func normalizeAssistantModelPatterns(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return []string{}
+	}
+	return out
+}
+
+func normalizeAssistantCostTier(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", "low", "medium", "high", "xhigh", "max":
+		return strings.TrimSpace(strings.ToLower(value))
+	default:
+		return ""
+	}
+}
+
+func coerceStringList(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return []string{}
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(coerceString(item))
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return []string{}
+	}
+	return out
 }
 
 func getSignalKSettingsHandler(c echo.Context) error {
