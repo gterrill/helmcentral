@@ -6,8 +6,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -57,6 +60,15 @@ func settingsFileForServer(t *testing.T, serverURL string) string {
 		t.Fatalf("could not write temp settings: %v", err)
 	}
 	return path
+}
+
+func resetTracksStateForTest(t *testing.T) {
+	t.Helper()
+	trackMu.Lock()
+	selfTrack = newVesselTrail()
+	trackMu.Unlock()
+
+	tracksAISTrails = newTracksAISTrailsCache()
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────────
@@ -302,6 +314,131 @@ func TestSampleTracks_RecordsWindAndDepthHistoryEvenWithoutValidPosition(t *test
 	depthPts := depthHistory.since(time.Time{})
 	if len(depthPts) != 1 {
 		t.Fatalf("expected 1 depth sample recorded despite missing position, got %d", len(depthPts))
+	}
+}
+
+func TestGetTracksHandler_CachesAISFetchAndRevalidatesETag(t *testing.T) {
+	resetTracksStateForTest(t)
+
+	recordTrackSelf(-25.29, 152.91)
+
+	tracksBody := map[string]any{
+		"vessels.urn:mrn:imo:mmsi:123456789": map[string]any{
+			"type":        "MultiLineString",
+			"coordinates": [][][]float64{{{152.91, -25.29}, {152.92, -25.30}}},
+		},
+	}
+	vesselsBody := map[string]any{
+		"urn:mrn:imo:mmsi:123456789": map[string]any{
+			"name": "PEGASUS",
+		},
+	}
+
+	tracksJSON, _ := json.Marshal(tracksBody)
+	vesselsJSON, _ := json.Marshal(vesselsBody)
+
+	var trackCalls atomic.Int32
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	snapshot := newSignalKSnapshot()
+	for id, tree := range vesselsBody {
+		if asMap, ok := tree.(map[string]any); ok {
+			snapshot.contexts[vesselContextPrefix+id] = asMap
+		}
+	}
+	snapshot.contexts["vessels.self"] = map[string]any{"name": "TESTSELF"}
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/tracks") || strings.Contains(r.URL.Path, "v1/api/tracks"):
+			if trackCalls.Add(1) == 1 {
+				select {
+				case started <- struct{}{}:
+				default:
+				}
+			}
+			<-release
+			w.Write(tracksJSON)
+		case strings.Contains(r.URL.Path, "/vessels/self"):
+			w.Write([]byte(`{"name":"TESTSELF"}`))
+		case strings.HasSuffix(r.URL.Path, "/vessels"):
+			w.Write(vesselsJSON)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
+	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
+	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
+
+	type responseResult struct {
+		rec *httptest.ResponseRecorder
+		err error
+	}
+	doRequest := func(etag string) responseResult {
+		req := httptest.NewRequest(http.MethodGet, "/api/tracks", nil)
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		rec := httptest.NewRecorder()
+		if err := getTracksHandler(echo.New().NewContext(req, rec)); err != nil {
+			return responseResult{err: err}
+		}
+		return responseResult{rec: rec}
+	}
+
+	results := make(chan responseResult, 3)
+	go func() { results <- doRequest("") }()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first tracks request never reached the upstream server")
+	}
+
+	go func() { results <- doRequest("") }()
+	go func() { results <- doRequest("") }()
+
+	close(release)
+
+	var firstETag string
+	for i := 0; i < 3; i++ {
+		res := <-results
+		if res.err != nil {
+			t.Fatalf("tracks handler returned error: %v", res.err)
+		}
+		if res.rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", res.rec.Code)
+		}
+		if firstETag == "" {
+			firstETag = res.rec.Header().Get("ETag")
+		}
+	}
+
+	if got := trackCalls.Load(); got != 1 {
+		t.Fatalf("expected one upstream AIS fetch to satisfy three concurrent requests, got %d", got)
+	}
+	if firstETag == "" {
+		t.Fatal("expected an ETag on the cached tracks response")
+	}
+
+	revalidated := doRequest(firstETag)
+	if revalidated.err != nil {
+		t.Fatalf("ETag revalidation request failed: %v", revalidated.err)
+	}
+	if revalidated.rec.Code != http.StatusNotModified {
+		t.Fatalf("expected 304 Not Modified for matching ETag, got %d", revalidated.rec.Code)
+	}
+	if body := strings.TrimSpace(revalidated.rec.Body.String()); body != "" {
+		t.Fatalf("expected empty body for 304 response, got %q", body)
 	}
 }
 

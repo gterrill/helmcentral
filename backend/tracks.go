@@ -20,6 +20,96 @@ var (
 	selfTrack = newVesselTrail()
 )
 
+const tracksAISTrailsCacheMaxAge = 15 * time.Second
+
+type tracksAISTrailsCacheSnapshot struct {
+	fetchedAt time.Time
+	trails    map[string][]trackPoint
+}
+
+type tracksAISTrailsCache struct {
+	mu         sync.Mutex
+	cond       *sync.Cond
+	refreshing bool
+	snapshot   tracksAISTrailsCacheSnapshot
+}
+
+var tracksAISTrails = newTracksAISTrailsCache()
+
+func newTracksAISTrailsCache() *tracksAISTrailsCache {
+	c := &tracksAISTrailsCache{}
+	c.cond = sync.NewCond(&c.mu)
+	return c
+}
+
+func cloneTrackPointMap(src map[string][]trackPoint) map[string][]trackPoint {
+	if len(src) == 0 {
+		return map[string][]trackPoint{}
+	}
+	cloned := make(map[string][]trackPoint, len(src))
+	for vesselID, pts := range src {
+		copied := make([]trackPoint, len(pts))
+		copy(copied, pts)
+		cloned[vesselID] = copied
+	}
+	return cloned
+}
+
+func (s tracksAISTrailsCacheSnapshot) fresh() bool {
+	return !s.fetchedAt.IsZero() && time.Since(s.fetchedAt) < tracksAISTrailsCacheMaxAge
+}
+
+func (c *tracksAISTrailsCache) get(settingsPath string) map[string][]trackPoint {
+	c.mu.Lock()
+	for c.refreshing {
+		if len(c.snapshot.trails) > 0 {
+			trails := cloneTrackPointMap(c.snapshot.trails)
+			c.mu.Unlock()
+			return trails
+		}
+		c.cond.Wait()
+	}
+	if c.snapshot.fresh() {
+		trails := cloneTrackPointMap(c.snapshot.trails)
+		c.mu.Unlock()
+		return trails
+	}
+	c.refreshing = true
+	c.mu.Unlock()
+
+	trails, err := fetchSignalKAISTrailsResult(settingsPath)
+	return c.finishRefresh(trails, err)
+}
+
+func (c *tracksAISTrailsCache) refresh(settingsPath string) map[string][]trackPoint {
+	c.mu.Lock()
+	for c.refreshing {
+		c.cond.Wait()
+	}
+	c.refreshing = true
+	c.mu.Unlock()
+
+	trails, err := fetchSignalKAISTrailsResult(settingsPath)
+	return c.finishRefresh(trails, err)
+}
+
+func (c *tracksAISTrailsCache) finishRefresh(trails map[string][]trackPoint, err error) map[string][]trackPoint {
+	c.mu.Lock()
+	defer func() {
+		c.refreshing = false
+		c.cond.Broadcast()
+		c.mu.Unlock()
+	}()
+
+	if err == nil {
+		c.snapshot = tracksAISTrailsCacheSnapshot{fetchedAt: time.Now().UTC(), trails: cloneTrackPointMap(trails)}
+	} else if len(c.snapshot.trails) == 0 {
+		c.snapshot = tracksAISTrailsCacheSnapshot{fetchedAt: time.Now().UTC(), trails: map[string][]trackPoint{}}
+	}
+
+	return cloneTrackPointMap(c.snapshot.trails)
+}
+
 // motoringTrail is kept separately: only records motoring state fixes,
 // starting empty and filling purely from live sampling.
 var (
@@ -118,6 +208,8 @@ func sampleTracks(settingsPath string) {
 
 		// Also record post-anchor ring-buffer and motoring trail
 		recordSelfTrailPoint(state.Latitude, state.Longitude)
+
+		tracksAISTrails.refresh(settingsPath)
 		if isMotoring(state.Status) {
 			recordMotoringPoint(state.Latitude, state.Longitude)
 		}
@@ -208,7 +300,7 @@ type signalKTrackSnapshot struct {
 	} `json:"geometry,omitempty"`
 }
 
-func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
+func fetchSignalKAISTrailsResult(settingsPath string) (map[string][]trackPoint, error) {
 	address, port, err := loadSignalKSettings(settingsPath)
 	if err != nil {
 		address = defaultSignalKAddress
@@ -217,7 +309,7 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 
 	signalkURL := buildSignalKURL(address, port)
 	if signalkURL == "" {
-		return map[string][]trackPoint{}
+		return map[string][]trackPoint{}, nil
 	}
 
 	tracksPath := getEnv("SIGNALK_TRACKS_PATH", "/signalk/v1/api/tracks")
@@ -226,21 +318,21 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 	client := &http.Client{Timeout: 4 * time.Second}
 	response, err := client.Get(tracksURL)
 	if err != nil {
-		return map[string][]trackPoint{}
+		return map[string][]trackPoint{}, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return map[string][]trackPoint{}
+		return map[string][]trackPoint{}, nil
 	}
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return map[string][]trackPoint{}
+		return map[string][]trackPoint{}, err
 	}
 
 	var payload map[string]signalKTrackSnapshot
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return map[string][]trackPoint{}
+		return map[string][]trackPoint{}, err
 	}
 
 	nameMap, nameErr := fetchSignalKVesselNameMap()
@@ -306,7 +398,15 @@ func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
 		}
 	}
 
-	return result
+	return result, nil
+}
+
+func fetchSignalKAISTrails(settingsPath string) map[string][]trackPoint {
+	trails, err := fetchSignalKAISTrailsResult(settingsPath)
+	if err != nil {
+		return map[string][]trackPoint{}
+	}
+	return trails
 }
 
 // GET /api/tracks?since=<RFC3339>
@@ -328,12 +428,16 @@ func getTracksHandler(c echo.Context) error {
 	selfPts := selfTrack.pointsSince(since)
 	trackMu.RUnlock()
 
-	aisWire := fetchSignalKAISTrails(getEnv("SETTINGS_FILE", "../settings.yaml"))
-
-	return c.JSON(http.StatusOK, map[string]any{
+	aisWire := tracksAISTrails.get(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	payload := map[string]any{
 		"self": toWire(selfPts),
 		"ais":  aisWire,
-	})
+	}
+	etag, etagErr := weakETagForJSON(payload)
+	if etagErr != nil {
+		log.Printf("Failed to build tracks ETag: %v", etagErr)
+	}
+	return respondJSONWithETag(c, http.StatusOK, etag, payload)
 }
 
 // GET /api/tracks/motoring
