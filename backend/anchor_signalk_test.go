@@ -80,6 +80,7 @@ func TestAnchorLifecyclePublishesPositionAndExplicitNull(t *testing.T) {
 }
 
 func TestAnchorPublishFailureIsExplicitAndRetainsWatch(t *testing.T) {
+	shortenSignalKConfirmWindow(t)
 	stub := anchorPublishEnv(t)
 	code, _ := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0})
 	if code != http.StatusOK {
@@ -120,6 +121,7 @@ func TestAnchorPersistFailureDoesNotPublish(t *testing.T) {
 }
 
 func TestAnchorRaiseMustConfirmExplicitNullNotMissingPath(t *testing.T) {
+	shortenSignalKConfirmWindow(t)
 	stub := anchorPublishEnv(t)
 	stub.mu.Lock()
 	stub.ingest = false

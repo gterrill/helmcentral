@@ -26,6 +26,24 @@ type publishStub struct {
 	server  *httptest.Server
 }
 
+// shortenSignalKConfirmWindow collapses the publish-confirmation poll to
+// millisecond scale for tests that exercise the "server never ingests" failure
+// path. Those tests wait out the full window by design, and there is nothing
+// to observe by doing that at production speed. Restored via t.Cleanup so
+// tests that rely on the real window (async-ingestion success paths) are
+// unaffected.
+func shortenSignalKConfirmWindow(t *testing.T) {
+	t.Helper()
+	prevWindow := signalKPublishConfirmWindow
+	prevInterval := signalKPublishConfirmInterval
+	signalKPublishConfirmWindow = 60 * time.Millisecond
+	signalKPublishConfirmInterval = 5 * time.Millisecond
+	t.Cleanup(func() {
+		signalKPublishConfirmWindow = prevWindow
+		signalKPublishConfirmInterval = prevInterval
+	})
+}
+
 func newPublishStub(t *testing.T) *publishStub {
 	t.Helper()
 	stub := &publishStub{modelSt: http.StatusNotFound, model: "", ingest: true}
@@ -197,6 +215,7 @@ func TestPublishSignalKNotificationAuthenticatesAsTheServiceAccount(t *testing.T
 // that only wrote and returned nil reported success it had not achieved — which
 // is how the old transport went its entire life delivering nothing.
 func TestPublishSignalKNotificationFailsWhenTheServerDoesNotIngestIt(t *testing.T) {
+	shortenSignalKConfirmWindow(t)
 	stub := newPublishStub(t)
 	stub.mu.Lock()
 	stub.ingest = false
@@ -233,6 +252,7 @@ func TestPublishSignalKNotificationConfirmsAClear(t *testing.T) {
 // that answers with a cleared notification has not accepted the raise, and
 // reporting success there would be the silent delivery failure again.
 func TestPublishSignalKNotificationRejectsARaiseThatReadsBackCleared(t *testing.T) {
+	shortenSignalKConfirmWindow(t)
 	stub := newPublishStub(t)
 	stub.mu.Lock()
 	stub.ingest = false

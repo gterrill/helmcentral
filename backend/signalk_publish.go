@@ -21,7 +21,7 @@ const signalKPublishStreamPath = "/signalk/v1/stream?subscribe=none"
 // looking at a notification's $source can see which producer raised it.
 const signalKPublishSourceLabel = "helmcentral"
 
-const (
+var (
 	// A publish is confirmed by reading the value back out of the server's own
 	// model. Ingestion is asynchronous, so this polls briefly rather than
 	// reading once and calling a race a failure.
