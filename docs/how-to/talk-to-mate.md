@@ -12,7 +12,7 @@ your phone already uses for push notification alarms
 Tailscale](../reference/configuration.md#web-push-over-tailscale) for how
 that address is set up if you haven't already). The LAN `http://<ip>:8080`
 address still works for everything else; it just won't offer you the
-microphone.
+microphone. Open Mate itself at `https://<machine>.<tailnet>.ts.net/mate`.
 
 ## 2. Turn voice on
 

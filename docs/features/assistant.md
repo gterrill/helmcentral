@@ -26,6 +26,9 @@ you leave it and come back, until you press its "New conversation" button.
 Its "Open in Mate" button hands that same thread to the full panel and
 takes you there, for when a question turns into a longer working session.
 
+The panel lives at `/mate`. A specific conversation can be opened directly at
+`/mate/<thread-id>`, for example `/mate/12345`.
+
 ## What it knows
 
 Every question starts with your vessel's live position, heading, speed and

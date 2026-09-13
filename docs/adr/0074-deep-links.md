@@ -53,6 +53,8 @@ The URL forms are:
 | `/` | dashboard, first page |
 | `/dashboard/<pageId>` | dashboard, that page |
 | `/forecast` `/routes` `/charts` `/radar` `/anchor-watch` `/alarms` | that panel |
+| `/mate` | Mate panel |
+| `/mate/<threadId>` | Mate panel, that conversation |
 | `/settings` | settings, General section |
 | `/settings/<sectionId>` | settings, that section |
 
