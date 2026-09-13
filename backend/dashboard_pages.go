@@ -153,8 +153,9 @@ const (
 )
 
 // Empty means "always" - an unset page needs no value, matching skin and
-// hero's own empty-string-means-default convention.
-var validKioskWhen = map[string]bool{"": true, "always": true, "anchored": true}
+// hero's own empty-string-means-default convention. The explicit values
+// mirror signalk-autostate's navigation.state vocabulary.
+var validKioskWhen = map[string]bool{"": true, "always": true, "anchored": true, "motoring": true, "sailing": true, "moored": true}
 
 // validateKioskFields holds the rules for the three kiosk fields together,
 // shared by create (an all-at-once body) and patch (a field-by-field

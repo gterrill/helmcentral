@@ -86,7 +86,7 @@ describe('kioskFeed', () => {
       page('c', { kiosk: true, kiosk_seconds: 0 }),
       page('d', { kiosk: true, kiosk_seconds: 30, widgets: [] }),
     ]
-    expect(kioskFeed(pages, { anchored: false }).map((p) => p.id)).toEqual(['a'])
+    expect(kioskFeed(pages, { navigationState: null }).map((p) => p.id)).toEqual(['a'])
   })
 
   it('preserves the given (server) order', () => {
@@ -94,22 +94,34 @@ describe('kioskFeed', () => {
       page('z', { kiosk: true, kiosk_seconds: 10 }),
       page('a', { kiosk: true, kiosk_seconds: 10 }),
     ]
-    expect(kioskFeed(pages, { anchored: false }).map((p) => p.id)).toEqual(['z', 'a'])
+    expect(kioskFeed(pages, { navigationState: null }).map((p) => p.id)).toEqual(['z', 'a'])
   })
 
-  it('excludes an anchored-only page when the anchor is not down', () => {
+  it('includes a state-conditioned page only when navigation state matches', () => {
     const pages = [page('a', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'anchored' })]
-    expect(kioskFeed(pages, { anchored: false })).toEqual([])
-    expect(kioskFeed(pages, { anchored: true }).map((p) => p.id)).toEqual(['a'])
+    expect(kioskFeed(pages, { navigationState: 'moored' })).toEqual([])
+    expect(kioskFeed(pages, { navigationState: 'anchored' }).map((p) => p.id)).toEqual(['a'])
   })
 
-  it('includes an "always" or unset condition regardless of anchor state', () => {
+  it('includes motoring/sailing/moored pages only in those states', () => {
+    const pages = [
+      page('m', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'motoring' }),
+      page('s', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'sailing' }),
+      page('d', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'moored' }),
+    ]
+    expect(kioskFeed(pages, { navigationState: 'motoring' }).map((p) => p.id)).toEqual(['m'])
+    expect(kioskFeed(pages, { navigationState: 'sailing' }).map((p) => p.id)).toEqual(['s'])
+    expect(kioskFeed(pages, { navigationState: 'moored' }).map((p) => p.id)).toEqual(['d'])
+  })
+
+  it('includes an "always" or unset condition regardless of navigation state', () => {
     const pages = [
       page('a', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'always' }),
       page('b', { kiosk: true, kiosk_seconds: 10 }),
     ]
-    expect(kioskFeed(pages, { anchored: false }).map((p) => p.id)).toEqual(['a', 'b'])
-    expect(kioskFeed(pages, { anchored: true }).map((p) => p.id)).toEqual(['a', 'b'])
+    expect(kioskFeed(pages, { navigationState: null }).map((p) => p.id)).toEqual(['a', 'b'])
+    expect(kioskFeed(pages, { navigationState: 'motoring' }).map((p) => p.id)).toEqual(['a', 'b'])
+    expect(kioskFeed(pages, { navigationState: 'anchored' }).map((p) => p.id)).toEqual(['a', 'b'])
   })
 })
 

@@ -14,7 +14,7 @@ export interface UseKioskRotationOptions {
   /** Gates everything below — false while the app isn't on /kiosk at all. */
   enabled: boolean
   pages: readonly KioskEligiblePage[]
-  anchored: boolean
+  navigationState: string | null
   /** `?page=<id>` (lib/kiosk.ts's parseKioskOptions): pins one page for
    * authoring on the helm browser and for screenshots. No timer runs. */
   pinnedPageId: string | null
@@ -38,7 +38,7 @@ const EMPTY_FEED_POLL_MS = 15_000
 export function useKioskRotation({
   enabled,
   pages,
-  anchored,
+  navigationState,
   pinnedPageId,
   refetch,
   onShow,
@@ -54,8 +54,8 @@ export function useKioskRotation({
   // mean a lap that never completes.
   const pagesRef = useRef(pages)
   pagesRef.current = pages
-  const anchoredRef = useRef(anchored)
-  anchoredRef.current = anchored
+  const navigationStateRef = useRef(navigationState)
+  navigationStateRef.current = navigationState
   const refetchRef = useRef(refetch)
   refetchRef.current = refetch
   const onShowRef = useRef(onShow)
@@ -92,7 +92,7 @@ export function useKioskRotation({
     }
 
     function currentFeed(): KioskEligiblePage[] {
-      const ctx: KioskFeedContext = { anchored: anchoredRef.current }
+      const ctx: KioskFeedContext = { navigationState: navigationStateRef.current }
       return kioskFeed(pagesRef.current, ctx)
     }
 

@@ -24,10 +24,11 @@ import type { DashboardPage } from '@/hooks/use-dashboard-pages'
  */
 export function KioskPageGlyph({ page }: { page: DashboardPage }) {
   if (!page.kiosk || !page.kiosk_seconds) return null
+  const whenSuffix = page.kiosk_when && page.kiosk_when !== 'always' ? `, while ${page.kiosk_when}` : ''
   return (
     <span
       className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
-      title={`On the wall display, ${page.kiosk_seconds}s${page.kiosk_when === 'anchored' ? ', while anchored' : ''}`}
+      title={`On the wall display, ${page.kiosk_seconds}s${whenSuffix}`}
     >
       <MonitorPlay className="h-3 w-3" aria-hidden="true" />
       {page.kiosk_seconds}s

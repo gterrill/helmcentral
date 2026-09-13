@@ -2726,6 +2726,26 @@ func TestCreateDashboardPageHandler_RejectsUnknownKioskWhen(t *testing.T) {
 	}
 }
 
+func TestCreateDashboardPageHandler_AcceptsAutoStateKioskWhen(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	for _, when := range []string{"motoring", "sailing", "moored"} {
+		c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+			"name":          "Wall: " + when,
+			"widgets":       sampleDashboardWidgets(),
+			"kiosk":         true,
+			"kiosk_seconds": 30,
+			"kiosk_when":    when,
+		})
+		if err := createDashboardPageHandler(c); err != nil {
+			t.Fatalf("createDashboardPageHandler returned error: %v", err)
+		}
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("kiosk_when=%q: expected status %d, got %d: %s", when, http.StatusCreated, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestPatchDashboardPageHandler_KioskOnlyPatchSucceedsAndReusesStoredSeconds(t *testing.T) {
 	setupDashboardPagesTest(t)
 
@@ -2872,6 +2892,27 @@ func TestPatchDashboardPageHandler_UntickKeepsSecondsAndCondition(t *testing.T) 
 	}
 	if updated.KioskSeconds != 60 || updated.KioskWhen != "anchored" {
 		t.Fatalf("expected untick to remember seconds and condition, got seconds=%d when=%q", updated.KioskSeconds, updated.KioskWhen)
+	}
+}
+
+func TestPatchDashboardPageHandler_AcceptsAutoStateKioskWhen(t *testing.T) {
+	setupDashboardPagesTest(t)
+	page := createTestDashboardPage(t, "Cluster preview", sampleDashboardWidgets())
+
+	for _, when := range []string{"motoring", "sailing", "moored"} {
+		c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+			"kiosk":         true,
+			"kiosk_seconds": 30,
+			"kiosk_when":    when,
+		})
+		c.SetParamNames("id")
+		c.SetParamValues(page.ID)
+		if err := patchDashboardPageHandler(c); err != nil {
+			t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("kiosk_when=%q: expected status %d, got %d: %s", when, http.StatusOK, rec.Code, rec.Body.String())
+		}
 	}
 }
 

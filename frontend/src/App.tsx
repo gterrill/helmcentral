@@ -855,7 +855,7 @@ export function App() {
   const { feedEmpty: kioskFeedEmpty } = useKioskRotation({
     enabled: isKiosk,
     pages,
-    anchored: hasActiveAnchorWatch,
+    navigationState,
     pinnedPageId: kioskOptions.pageId,
     refetch: refetchPages,
     onShow: setActivePageId,

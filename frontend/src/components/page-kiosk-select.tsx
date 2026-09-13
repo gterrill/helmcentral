@@ -7,13 +7,13 @@ export interface KioskablePage {
   name: string
   kiosk?: boolean
   kiosk_seconds?: number
-  kiosk_when?: 'always' | 'anchored'
+  kiosk_when?: 'always' | 'anchored' | 'motoring' | 'sailing' | 'moored'
 }
 
 export interface KioskPatch {
   kiosk?: boolean
   kiosk_seconds?: number
-  kiosk_when?: 'always' | 'anchored'
+  kiosk_when?: 'always' | 'anchored' | 'motoring' | 'sailing' | 'moored'
 }
 
 interface PageKioskSelectProps {
@@ -102,10 +102,13 @@ export function PageKioskSelect({ page, onPatch }: PageKioskSelectProps) {
             aria-label={`Kiosk condition for ${page.name}`}
             className="cursor-pointer bg-transparent text-xs font-semibold uppercase tracking-[0.1em] outline-none"
             value={page.kiosk_when ?? 'always'}
-            onChange={(e) => onPatch(page.id, { kiosk_when: e.target.value as 'always' | 'anchored' })}
+            onChange={(e) => onPatch(page.id, { kiosk_when: e.target.value as 'always' | 'anchored' | 'motoring' | 'sailing' | 'moored' })}
           >
             <option value="always">Always</option>
             <option value="anchored">While anchored</option>
+            <option value="motoring">While motoring</option>
+            <option value="sailing">While sailing</option>
+            <option value="moored">While moored</option>
           </select>
         </>
       )}

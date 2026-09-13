@@ -61,13 +61,13 @@ export interface KioskEligiblePage {
   id: string
   kiosk?: boolean
   kiosk_seconds?: number
-  kiosk_when?: 'always' | 'anchored'
+  kiosk_when?: 'always' | 'anchored' | 'motoring' | 'sailing' | 'moored'
   widgets: DashboardLayoutItem[]
 }
 
 export interface KioskFeedContext {
-  /** Whether the anchor watch is currently active (App.tsx's hasActiveAnchorWatch). */
-  anchored: boolean
+  /** Current vessel navigation.state, typically from signalk-autostate. */
+  navigationState: string | null
 }
 
 /**
@@ -77,15 +77,14 @@ export interface KioskFeedContext {
  * A page needs kiosk on, a positive duration, and at least one widget: an
  * empty page flagged for kiosk would show nothing for its whole slot, which
  * is a mistake to skip rather than a blank screen to render. A page whose
- * condition is "anchored" drops out entirely (not just "shows nothing") the
- * moment the anchor comes up, so the feed never offers a slot the wall has
- * nothing to fill.
+ * condition no longer matches drops out entirely (not just "shows nothing"),
+ * so the feed never offers a slot the wall has nothing to fill.
  */
 export function kioskFeed(pages: readonly KioskEligiblePage[], ctx: KioskFeedContext): KioskEligiblePage[] {
   return pages.filter((page) => {
     if (!page.kiosk || !page.kiosk_seconds || page.kiosk_seconds <= 0) return false
     if (page.widgets.length === 0) return false
-    if (page.kiosk_when === 'anchored' && !ctx.anchored) return false
+    if (page.kiosk_when && page.kiosk_when !== 'always' && page.kiosk_when !== ctx.navigationState) return false
     return true
   })
 }

@@ -446,4 +446,16 @@ describe('DashboardPageSwitcher', () => {
     const row = screen.getByText('Wall: Anchor').closest('button') as HTMLElement
     expect(within(row).getByTitle(/while anchored/)).toBeInTheDocument()
   })
+
+  it('shows motoring in the kiosk glyph tooltip for motoring pages', () => {
+    const pages: DashboardPage[] = [
+      { id: 'p1', name: 'Wall: Engines', widgets: [], created_at: '', updated_at: '', kiosk: true, kiosk_seconds: 30, kiosk_when: 'motoring' },
+      { id: 'p2', name: 'Active Page', widgets: [], created_at: '', updated_at: '' },
+    ]
+    render(<DashboardPageSwitcher pages={pages} activePageId="p2" {...mockFns()} />)
+    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+
+    const row = screen.getByText('Wall: Engines').closest('button') as HTMLElement
+    expect(within(row).getByTitle(/while motoring/)).toBeInTheDocument()
+  })
 })

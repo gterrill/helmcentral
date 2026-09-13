@@ -40,6 +40,13 @@ describe('PageKioskSelect', () => {
     expect(screen.getByLabelText('Kiosk condition for Cluster preview')).toHaveValue('anchored')
   })
 
+  test('offers autostate navigation conditions', () => {
+    render(<PageKioskSelect page={{ id: 'p1', name: 'Cluster preview', kiosk: true, kiosk_seconds: 30 }} onPatch={vi.fn()} />)
+    const select = screen.getByLabelText('Kiosk condition for Cluster preview') as HTMLSelectElement
+    const options = Array.from(select.options).map((option) => option.value)
+    expect(options).toEqual(['always', 'anchored', 'motoring', 'sailing', 'moored'])
+  })
+
   test('commits an in-range duration on blur', () => {
     const onPatch = vi.fn()
     render(<PageKioskSelect page={{ id: 'p1', name: 'Cluster preview', kiosk: true, kiosk_seconds: 30 }} onPatch={onPatch} />)

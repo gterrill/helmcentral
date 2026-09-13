@@ -24,7 +24,7 @@ export interface DashboardPage {
    */
   kiosk?: boolean
   kiosk_seconds?: number
-  kiosk_when?: 'always' | 'anchored'
+  kiosk_when?: 'always' | 'anchored' | 'motoring' | 'sailing' | 'moored'
   created_at: string
   updated_at: string
 }

@@ -28,7 +28,7 @@ describe('useKioskRotation', () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages = [page('a'), page('b')]
-    renderHook(() => useKioskRotation({ enabled: true, pages, anchored: false, pinnedPageId: null, refetch, onShow }))
+    renderHook(() => useKioskRotation({ enabled: true, pages, navigationState: null, pinnedPageId: null, refetch, onShow }))
 
     expect(onShow).toHaveBeenCalledWith('a')
     expect(refetch).not.toHaveBeenCalled()
@@ -38,7 +38,7 @@ describe('useKioskRotation', () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages = [page('a'), page('b'), page('c')]
-    renderHook(() => useKioskRotation({ enabled: true, pages, anchored: false, pinnedPageId: null, refetch, onShow }))
+    renderHook(() => useKioskRotation({ enabled: true, pages, navigationState: null, pinnedPageId: null, refetch, onShow }))
 
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
 
@@ -50,7 +50,7 @@ describe('useKioskRotation', () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages = [page('a'), page('b')]
-    renderHook(() => useKioskRotation({ enabled: true, pages, anchored: false, pinnedPageId: null, refetch, onShow }))
+    renderHook(() => useKioskRotation({ enabled: true, pages, navigationState: null, pinnedPageId: null, refetch, onShow }))
 
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) }) // a -> b
     expect(refetch).not.toHaveBeenCalled()
@@ -66,7 +66,7 @@ describe('useKioskRotation', () => {
     let pages = [page('a'), page('b')]
     const { rerender } = renderHook(
       (props: { pages: KioskEligiblePage[] }) =>
-        useKioskRotation({ enabled: true, pages: props.pages, anchored: false, pinnedPageId: null, refetch, onShow }),
+        useKioskRotation({ enabled: true, pages: props.pages, navigationState: null, pinnedPageId: null, refetch, onShow }),
       { initialProps: { pages } },
     )
     expect(onShow).toHaveBeenLastCalledWith('a')
@@ -85,32 +85,52 @@ describe('useKioskRotation', () => {
     expect(onShow).not.toHaveBeenCalledWith('b')
   })
 
-  it('drops an anchored-only page after its slot and re-admits it once anchored flips true again', async () => {
+  it('drops a state-conditioned page after its slot and re-admits it once navigation state matches again', async () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages = [page('a'), page('x', { kiosk_when: 'anchored' })]
-    let anchored = true
+    let navigationState: 'anchored' | 'moored' = 'anchored'
     const { rerender } = renderHook(
-      (props: { anchored: boolean }) =>
-        useKioskRotation({ enabled: true, pages, anchored: props.anchored, pinnedPageId: null, refetch, onShow }),
-      { initialProps: { anchored } },
+      (props: { navigationState: 'anchored' | 'moored' }) =>
+        useKioskRotation({ enabled: true, pages, navigationState: props.navigationState, pinnedPageId: null, refetch, onShow }),
+      { initialProps: { navigationState } },
     )
     expect(onShow).toHaveBeenLastCalledWith('a')
 
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
-    expect(onShow).toHaveBeenLastCalledWith('x') // anchored, so "x" is in the feed
+    expect(onShow).toHaveBeenLastCalledWith('x') // anchored state, so "x" is in the feed
 
-    // The anchor comes up mid-slot; "x" still finishes showing before it
-    // drops out on the next advance.
-    anchored = false
-    rerender({ anchored })
+    // State moves away from anchored mid-slot; "x" still finishes showing
+    // before it drops out on the next advance.
+    navigationState = 'moored'
+    rerender({ navigationState })
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
     expect(onShow).toHaveBeenLastCalledWith('a') // wrapped past "x", which is gone
 
-    anchored = true
-    rerender({ anchored })
+    navigationState = 'anchored'
+    rerender({ navigationState })
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
     expect(onShow).toHaveBeenLastCalledWith('x') // re-admitted
+  })
+
+  it('only includes motoring pages while navigation state is motoring', async () => {
+    const onShow = vi.fn()
+    const refetch = vi.fn().mockResolvedValue(undefined)
+    const pages = [page('a'), page('m', { kiosk_when: 'motoring' })]
+    let navigationState: 'moored' | 'motoring' = 'moored'
+    const { rerender } = renderHook(
+      (props: { navigationState: 'moored' | 'motoring' }) =>
+        useKioskRotation({ enabled: true, pages, navigationState: props.navigationState, pinnedPageId: null, refetch, onShow }),
+      { initialProps: { navigationState } },
+    )
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(onShow).toHaveBeenLastCalledWith('a')
+
+    navigationState = 'motoring'
+    rerender({ navigationState })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(onShow).toHaveBeenLastCalledWith('m')
   })
 
   it('recovers immediately once pages become available, without waiting for the poll', async () => {
@@ -123,7 +143,7 @@ describe('useKioskRotation', () => {
     let pages: KioskEligiblePage[] = []
     const { result, rerender } = renderHook(
       (props: { pages: KioskEligiblePage[] }) =>
-        useKioskRotation({ enabled: true, pages: props.pages, anchored: false, pinnedPageId: null, refetch, onShow }),
+        useKioskRotation({ enabled: true, pages: props.pages, navigationState: null, pinnedPageId: null, refetch, onShow }),
       { initialProps: { pages } },
     )
     expect(result.current.feedEmpty).toBe(true)
@@ -146,7 +166,7 @@ describe('useKioskRotation', () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages: KioskEligiblePage[] = []
-    renderHook(() => useKioskRotation({ enabled: true, pages, anchored: false, pinnedPageId: null, refetch, onShow }))
+    renderHook(() => useKioskRotation({ enabled: true, pages, navigationState: null, pinnedPageId: null, refetch, onShow }))
 
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
     expect(refetch).toHaveBeenCalledTimes(1)
@@ -160,7 +180,7 @@ describe('useKioskRotation', () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages = [page('a', { kiosk_seconds: 5 }), page('b', { kiosk_seconds: 5 })]
-    renderHook(() => useKioskRotation({ enabled: true, pages, anchored: false, pinnedPageId: 'b', refetch, onShow }))
+    renderHook(() => useKioskRotation({ enabled: true, pages, navigationState: null, pinnedPageId: 'b', refetch, onShow }))
 
     expect(onShow).toHaveBeenCalledWith('b')
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
@@ -172,7 +192,7 @@ describe('useKioskRotation', () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages = [page('a')]
-    renderHook(() => useKioskRotation({ enabled: false, pages, anchored: false, pinnedPageId: null, refetch, onShow }))
+    renderHook(() => useKioskRotation({ enabled: false, pages, navigationState: null, pinnedPageId: null, refetch, onShow }))
 
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(onShow).not.toHaveBeenCalled()
