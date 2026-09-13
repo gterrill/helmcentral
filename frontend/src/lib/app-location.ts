@@ -14,6 +14,7 @@ export interface AppLocation {
   panel: PanelId | null
   pageId?: string | null
   section?: SettingsSectionId
+  conversationId?: string | null
 }
 
 export interface LocationContext {
@@ -58,6 +59,12 @@ export function parseAppLocation(pathname: string): AppLocation {
     return { panel: 'settings', section }
   }
 
+  // ADR 0094 named the assistant "Mate" in the UI. Keep /assistant as a
+  // tolerated legacy alias, but canonicalize to /mate via formatAppLocation.
+  if (first === 'mate' || first === 'assistant') {
+    return { panel: 'assistant', conversationId: second !== undefined ? decodePageId(second) : null }
+  }
+
   if (PANEL_ID_SET.has(first)) {
     return { panel: first as PanelId }
   }
@@ -78,6 +85,11 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
   if (loc.panel === 'settings') {
     const section = loc.section ?? 'general'
     return section === 'general' ? '/settings' : `/settings/${section}`
+  }
+
+  if (loc.panel === 'assistant') {
+    if (!loc.conversationId) return '/mate'
+    return `/mate/${encodeURIComponent(loc.conversationId)}`
   }
 
   return `/${loc.panel}`

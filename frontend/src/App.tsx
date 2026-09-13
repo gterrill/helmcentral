@@ -417,7 +417,7 @@ export function App() {
   // thread was active there. Null means "whatever the panel already had",
   // not "start a fresh one" - the panel's own hook falls back to its usual
   // newest-thread behaviour when this is null.
-  const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(null)
+  const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(initialLocation.conversationId ?? null)
   const openMate = useCallback((question?: string, options?: { newConversation?: boolean }) => {
     setMateSheetQuestion(question)
     setMateSheetNewConversation(Boolean(options?.newConversation))
@@ -524,6 +524,9 @@ export function App() {
     if (loc.panel === 'settings') {
       setSettingsSection(loc.section ?? 'general')
     }
+    if (loc.panel === 'assistant') {
+      setMatePanelConversationId(loc.conversationId ?? null)
+    }
   }, [pages, pagesLoading, setActivePageId])
 
   // The single writer of window.location (ADR 0074). Chosen over pushing at
@@ -553,7 +556,12 @@ export function App() {
     const ctx = { firstPageId: pages[0]?.id ?? null, knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
     const firstPageChanged = previousFirstPageIdRef.current !== ctx.firstPageId
     previousFirstPageIdRef.current = ctx.firstPageId
-    const next = formatAppLocation({ panel: activePanel, pageId: activePageId, section: settingsSection }, ctx)
+    const next = formatAppLocation({
+      panel: activePanel,
+      pageId: activePageId,
+      section: settingsSection,
+      conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
+    }, ctx)
     const path = window.location.pathname
     if (next === path) return // popstate, or a clean deep link, already put us here
 
@@ -563,7 +571,7 @@ export function App() {
     // current bar non-canonical.
     const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
-  }, [shellVisible, isKiosk, activePanel, activePageId, settingsSection, pages, pagesLoading, canAdmin])
+  }, [shellVisible, isKiosk, activePanel, activePageId, settingsSection, matePanelConversationId, pages, pagesLoading, canAdmin])
 
   // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
   // page still gets to veto the navigation exactly as a sidebar click
@@ -1769,6 +1777,7 @@ export function App() {
               setActivePanel('settings')
             })}
             initialConversationId={matePanelConversationId}
+            onActiveConversationChange={setMatePanelConversationId}
           />
         )
       case 'settings':

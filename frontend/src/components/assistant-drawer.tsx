@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Trash2 } from 'lucide-react'
 
 import { AssistantThread } from '@/components/assistant-thread'
@@ -16,6 +17,7 @@ interface AssistantDrawerProps {
    * active thread this way. Absent, or falling outside the fetched list,
    * for the ordinary "Mate" nav click behaves exactly as before. */
   initialConversationId?: string | null
+  onActiveConversationChange?: (id: string | null) => void
 }
 
 // A short, local formatter - not a shared primitive, just readable list
@@ -45,10 +47,15 @@ function formatRelativeTime(iso: string): string {
  * sheet uses, so the long-session panel and the quick voice channel render
  * one conversation identically.
  */
-export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationId }: AssistantDrawerProps) {
+export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationId, onActiveConversationChange }: AssistantDrawerProps) {
   const status = useAssistantStatus()
   const conversations = useAssistantConversations({ initialId: initialConversationId })
   const chat = useAssistantChat()
+
+  useEffect(() => {
+    if (conversations.loading) return
+    onActiveConversationChange?.(conversations.activeId)
+  }, [onActiveConversationChange, conversations.activeId, conversations.loading])
 
   const body = (() => {
     if (status.loading) {

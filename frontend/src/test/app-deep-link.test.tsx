@@ -32,7 +32,7 @@ vi.mock('@/hooks/use-auth', () => ({
 }))
 
 // ── stub fetch so components that call it don't throw ─────────────────────────
-// The assistant panel (ADR 0093) is reachable via /assistant in this suite -
+// The assistant panel (ADR 0093) is reachable via /mate in this suite -
 // answered with a stable "unconfigured" status so the drawer renders its
 // zero-state card instead of chasing conversation-list/thread fetches this
 // stub doesn't otherwise answer.
@@ -297,12 +297,28 @@ describe('App deep links', () => {
     expect(document.title).toBe('Forecast · Helmcentral')
   })
 
-  it('opens the Assistant panel directly', () => {
+  it('opens the Mate panel directly', () => {
+    window.history.replaceState({}, '', '/mate')
+    render(<App />)
+
+    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/mate')
+  })
+
+  it('opens a thread deeplink at /mate/<threadId> and keeps the pathname', () => {
+    window.history.replaceState({}, '', '/mate/12345')
+    render(<App />)
+
+    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/mate/12345')
+  })
+
+  it('treats /assistant as a legacy alias and normalises it to /mate', () => {
     window.history.replaceState({}, '', '/assistant')
     render(<App />)
 
     expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument()
-    expect(window.location.pathname).toBe('/assistant')
+    expect(window.location.pathname).toBe('/mate')
   })
 
   it('opens the SignalK settings section directly', () => {
