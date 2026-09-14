@@ -114,6 +114,12 @@ describe('kioskFeed', () => {
     expect(kioskFeed(pages, { navigationState: 'moored' }).map((p) => p.id)).toEqual(['d'])
   })
 
+  it('treats engine-running navigation aliases as motoring', () => {
+    const pages = [page('m', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'motoring' })]
+    expect(kioskFeed(pages, { navigationState: 'under way using engine' }).map((p) => p.id)).toEqual(['m'])
+    expect(kioskFeed(pages, { navigationState: 'under_way_using_engine' }).map((p) => p.id)).toEqual(['m'])
+  })
+
   it('includes an "always" or unset condition regardless of navigation state', () => {
     const pages = [
       page('a', { kiosk: true, kiosk_seconds: 10, kiosk_when: 'always' }),

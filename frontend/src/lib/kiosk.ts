@@ -70,6 +70,13 @@ export interface KioskFeedContext {
   navigationState: string | null
 }
 
+function normalizeKioskState(state: string | null): string | null {
+  if (typeof state !== 'string') return null
+  const normalized = state.trim().toLowerCase().replaceAll('_', ' ')
+  if (normalized === 'under way using engine') return 'motoring'
+  return normalized || null
+}
+
 /**
  * The pages that belong in the wall-display rotation right now, in server
  * order (feed order is page order — there is no separate kiosk ordering).
@@ -81,10 +88,11 @@ export interface KioskFeedContext {
  * so the feed never offers a slot the wall has nothing to fill.
  */
 export function kioskFeed(pages: readonly KioskEligiblePage[], ctx: KioskFeedContext): KioskEligiblePage[] {
+  const navState = normalizeKioskState(ctx.navigationState)
   return pages.filter((page) => {
     if (!page.kiosk || !page.kiosk_seconds || page.kiosk_seconds <= 0) return false
     if (page.widgets.length === 0) return false
-    if (page.kiosk_when && page.kiosk_when !== 'always' && page.kiosk_when !== ctx.navigationState) return false
+    if (page.kiosk_when && page.kiosk_when !== 'always' && page.kiosk_when !== navState) return false
     return true
   })
 }
