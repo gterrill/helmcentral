@@ -170,7 +170,9 @@ func (p *wasmForecastWarningsProvider) FetchWarnings(lat, lon float64) (bundle f
 		return cached, nil
 	}
 
-	fetched, ferr := p.fetchFromPlugin(lat, lon)
+	fetched, ferr := p.cache.singleflightFetch(key, func() (forecastWarningsBundle, error) {
+		return p.fetchFromPlugin(lat, lon)
+	})
 	if ferr != nil {
 		if stale, ok := p.cache.getStale(key); ok {
 			stale.Cached = true

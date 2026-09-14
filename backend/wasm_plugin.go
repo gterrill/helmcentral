@@ -38,6 +38,7 @@ import (
 
 	extism "github.com/extism/go-sdk"
 	"github.com/tetratelabs/wazero"
+	"golang.org/x/sync/singleflight"
 )
 
 // wasmModuleConfig gives every guest instance real wall-clock time via WASI.
@@ -480,15 +481,43 @@ type wasmCacheEntry[T any] struct {
 	CachedAt time.Time `json:"cached_at"`
 }
 
+const (
+	// wasmPluginCacheMaxAge bounds how long a fetched entry is kept as a
+	// stale-on-error fallback. A stale entry exists so an upstream outage
+	// still has something to serve, not so entries pile up all season -
+	// pruned on every set() call.
+	wasmPluginCacheMaxAge = 7 * 24 * time.Hour
+
+	// wasmPluginCacheMaxEntries caps how many distinct keys one plugin's
+	// disk cache holds, evicting the oldest (by CachedAt) once exceeded.
+	// Without this the file only ever grows (observed live: 2.6-4.6MB,
+	// 19-49 keys after one season), and every miss rewrites the whole
+	// thing to disk.
+	wasmPluginCacheMaxEntries = 64
+)
+
 // wasmPluginCache is a generic in-memory + disk-persisted TTL cache, keyed
 // by an arbitrary string key (e.g. a tide station ID). One cache (and one
 // disk file) per plugin instance, mirroring bomTideCache/bomTideCacheDisk's
 // shape from tide_provider_bom.go: in-memory map + mutex + JSON-on-disk
 // persistence + stale-on-fetch-error fallback via getStale.
+//
+// writeMu is separate from mu: mu only ever needs to be held for the brief
+// in-memory map read/write, while writeMu serialises the much slower
+// marshal-to-disk step itself (persistToDisk copies the map under mu, then
+// writes under writeMu) so two concurrent misses can never interleave their
+// writes to the same cache file.
+//
+// group merges concurrent fetches for the same key (singleflightFetch
+// below) so N callers racing a miss for the same key cost one upstream
+// call, not N - shared by every adapter (weather, wave, upper-air, POI,
+// tide, forecast warnings) since they all go through this one generic type.
 type wasmPluginCache[T any] struct {
-	mu   sync.RWMutex
-	data map[string]wasmCacheEntry[T]
-	path string
+	mu      sync.RWMutex
+	data    map[string]wasmCacheEntry[T]
+	path    string
+	writeMu sync.Mutex
+	group   singleflight.Group
 }
 
 func newWasmPluginCache[T any](path string) *wasmPluginCache[T] {
@@ -516,8 +545,52 @@ func (c *wasmPluginCache[T]) getStale(key string) (T, bool) {
 func (c *wasmPluginCache[T]) set(key string, value T) {
 	c.mu.Lock()
 	c.data[key] = wasmCacheEntry[T]{Value: value, CachedAt: time.Now().UTC()}
+	c.pruneLocked()
 	c.mu.Unlock()
 	c.persistToDisk()
+}
+
+// pruneLocked drops entries older than wasmPluginCacheMaxAge, then - if
+// still over wasmPluginCacheMaxEntries - evicts the oldest (by CachedAt)
+// until back at the cap. Called from set() with c.mu already held for
+// writing. Cache sizes here (tens of keys) make the linear scans below
+// cheap; this isn't a hot path.
+func (c *wasmPluginCache[T]) pruneLocked() {
+	cutoff := time.Now().UTC().Add(-wasmPluginCacheMaxAge)
+	for key, entry := range c.data {
+		if entry.CachedAt.Before(cutoff) {
+			delete(c.data, key)
+		}
+	}
+
+	for len(c.data) > wasmPluginCacheMaxEntries {
+		oldestKey := ""
+		var oldestAt time.Time
+		for key, entry := range c.data {
+			if oldestKey == "" || entry.CachedAt.Before(oldestAt) {
+				oldestKey, oldestAt = key, entry.CachedAt
+			}
+		}
+		delete(c.data, oldestKey)
+	}
+}
+
+// singleflightFetch runs fetch for key, merging concurrent callers racing a
+// cache miss for the same key into the one in-flight call - so a weather
+// widget and the assistant asking about the same position at the same
+// moment cost one plugin instantiation and one upstream request, not two.
+// Every adapter's Fetch* method goes through this same generic cache type,
+// so all of them get the merge by calling this instead of their own
+// fetchFromPlugin directly.
+func (c *wasmPluginCache[T]) singleflightFetch(key string, fetch func() (T, error)) (T, error) {
+	v, err, _ := c.group.Do(key, func() (any, error) {
+		return fetch()
+	})
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return v.(T), nil
 }
 
 // loadFromDisk populates the cache from c.path, tolerating a missing file
@@ -574,6 +647,13 @@ func (c *wasmPluginCache[T]) loadFromDisk() {
 	c.mu.Unlock()
 }
 
+// persistToDisk copies the in-memory map under a read lock, then writes it
+// under writeMu - never both at once. writeMu (not mu) guards the write
+// itself so that two concurrent set() calls serialise their disk writes in
+// some order rather than interleaving them: writeJSONFileAtomic already
+// writes to its own unique temp file and renames atomically, but without
+// this serialisation two writers could still race the rename, with the
+// loser's snapshot (which could be the newer one) silently lost.
 func (c *wasmPluginCache[T]) persistToDisk() {
 	c.mu.RLock()
 	payload := make(map[string]wasmCacheEntry[T], len(c.data))
@@ -582,6 +662,8 @@ func (c *wasmPluginCache[T]) persistToDisk() {
 	}
 	c.mu.RUnlock()
 
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	if err := writeJSONFileAtomic(c.path, payload); err != nil {
 		log.Printf("wasm plugins: failed to persist cache to %s: %v", c.path, err)
 	}

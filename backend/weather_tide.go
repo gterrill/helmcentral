@@ -162,6 +162,18 @@ func cacheFilePath(envKey, fallback string) string {
 	return fallback
 }
 
+// writeJSONFileAtomic marshals value and writes it to path atomically:
+// a unique temp file (os.CreateTemp, never a fixed "path+.tmp" name two
+// concurrent writers could both open), fsync'd before close, then renamed
+// into place. Every caller across the codebase (alarm rules/transports,
+// anchor watch/placemarks, routes, dashboard pages, the WASM plugin disk
+// caches) goes through this one function, so a caller with no lock of its
+// own around a concurrent-write path (e.g. wasmPluginCache.persistToDisk,
+// which adds its own writeMu on top for exactly this reason) still can't
+// corrupt the file: two overlapping writers each get their own temp file,
+// and the rename that lands last simply wins outright, never a half-A
+// half-B interleave. json.Marshal, not MarshalIndent - none of these files
+// are hand-edited, and indentation exists only to cost bytes and CPU.
 func writeJSONFileAtomic(path string, value any) error {
 	dir := filepath.Dir(path)
 	if dir != "" && dir != "." {
@@ -170,13 +182,34 @@ func writeJSONFileAtomic(path string, value any) error {
 		}
 	}
 
-	payload, err := json.MarshalIndent(value, "", "  ")
+	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
 
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, payload, 0o644); err != nil {
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	// Cleans up the temp file on any early return below; a no-op once the
+	// rename at the end has already moved it into place.
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(payload); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// os.CreateTemp makes the file 0600; match the plain 0644 files this
+	// atomic-write path has always produced.
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
 		return err
 	}
 

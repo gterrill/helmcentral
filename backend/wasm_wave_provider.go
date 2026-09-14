@@ -149,6 +149,17 @@ func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, erro
 // The empty timezone is deliberate: fetch_waves takes no timezone (waves are
 // a continuous hourly series with no daily rollup to place on a boundary),
 // so unlike weather there is no zone dimension for the key to distinguish.
+//
+// Unlike weather (see weatherFetchMaxDays), FetchWaves does NOT fetch a
+// fixed maximum and slice: waveForecastBundle carries only a flat Hourly
+// series (wave_providers.go), with no per-day array and no timezone the
+// host is told about, so there is no host-understood day boundary to cut
+// on. Any cut the host invented (a UTC day? the vessel's local day, guessed
+// from longitude?) would be assuming a convention that might not match what
+// the plugin/upstream actually means by "N days" - exactly the kind of
+// plugin-specific-format guess this fix is supposed to avoid. So wave keeps
+// one cache entry per requested days value, same as before; it still
+// benefits from the write-race fix, eviction, and singleflight merge below.
 func waveWasmCacheKey(lat, lon float64, days int) string {
 	return weatherWasmCacheKey(lat, lon, days, "")
 }
@@ -171,7 +182,9 @@ func (p *wasmWaveProvider) FetchWaves(lat, lon float64, days int) (bundle waveFo
 		return cached, nil
 	}
 
-	fetched, ferr := p.fetchFromPlugin(lat, lon, days)
+	fetched, ferr := p.cache.singleflightFetch(key, func() (waveForecastBundle, error) {
+		return p.fetchFromPlugin(lat, lon, days)
+	})
 	if ferr != nil {
 		if stale, ok := p.cache.getStale(key); ok {
 			stale.Cached = true

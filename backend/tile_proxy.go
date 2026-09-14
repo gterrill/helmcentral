@@ -22,6 +22,17 @@ var transparentPNG1x1 = buildTransparentPNG1x1()
 // capped from ever asking.
 const worldImageryMaxZoom = 20
 
+// tileCacheControl is the normal Cache-Control for a genuine tile at the
+// requested key - imagery doesn't change on human timescales, so the
+// browser is told to hold onto it for a while.
+const tileCacheControl = "public, max-age=1800"
+
+// degradedTileCacheControl is used instead for a coarser or blank fallback
+// (resolveWorldImageryTile's `degraded` return) - short on purpose, so the
+// browser retries this exact tile again soon rather than pinning today's
+// degraded answer for the same 30 minutes a real tile gets.
+const degradedTileCacheControl = "public, max-age=60"
+
 func buildTransparentPNG1x1() []byte {
 	img := image.NewNRGBA(image.Rect(0, 0, 1, 1))
 	img.Set(0, 0, color.NRGBA{R: 0, G: 0, B: 0, A: 0})
@@ -56,12 +67,22 @@ func proxyWorldImageryTileHandler(cache *tileCache, fetcher tileFetcher) echo.Ha
 		}
 		zInt, xInt, yInt = clampTileCoords(zInt, xInt, yInt, worldImageryMaxZoom)
 
-		data, contentType, err := resolveWorldImageryTile(cache, fetcher, worldImagerySource, zInt, xInt, yInt)
+		data, contentType, degraded, err := resolveWorldImageryTile(cache, fetcher, worldImagerySource, zInt, xInt, yInt)
 		if err != nil {
 			return err
 		}
 
-		c.Response().Header().Set("Cache-Control", "public, max-age=1800")
+		if degraded {
+			// A coarser or blank fallback is never persisted under this
+			// tile's own key (see resolveWorldImageryTile), so the browser
+			// must not sit on it for the normal 30 minutes either - a short
+			// TTL means the next pan/zoom over this same tile retries
+			// upstream once the link is back, instead of a permanently
+			// blurred or blank spot only a full cache wipe would cure.
+			c.Response().Header().Set("Cache-Control", degradedTileCacheControl)
+		} else {
+			c.Response().Header().Set("Cache-Control", tileCacheControl)
+		}
 		return c.Blob(http.StatusOK, contentType, data)
 	}
 }

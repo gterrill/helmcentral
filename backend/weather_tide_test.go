@@ -8,11 +8,89 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
+
+func TestWriteJSONFileAtomic_RoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "data.json")
+	want := map[string]int{"a": 1, "b": 2}
+
+	if err := writeJSONFileAtomic(path, want); err != nil {
+		t.Fatalf("writeJSONFileAtomic: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	var got map[string]int
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal written file: %v", err)
+	}
+	if got["a"] != 1 || got["b"] != 2 {
+		t.Fatalf("unexpected content: %+v", got)
+	}
+
+	// No leftover temp file in the same directory - CreateTemp's file must
+	// have been renamed away, not merely written and left behind.
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "data.json" {
+		t.Fatalf("expected exactly one file (data.json) in the directory, got %+v", entries)
+	}
+}
+
+// TestWriteJSONFileAtomic_ConcurrentWritesNeverCorruptTheFile is the direct
+// regression test for the write race this fix addresses: the old
+// implementation copied under a read lock, then wrote to a FIXED
+// "path+.tmp" name with no lock held during the write itself, so two
+// concurrent writers could interleave their bytes into the same temp file
+// before either renamed - reproducing the corrupt
+// weather_wasm_weatherkit_cache.json ("Extra data" partway through) found on
+// the laptop. Every writer here targets the exact same path concurrently;
+// the file must always be valid, parseable JSON afterward, whichever
+// writer's content happened to win the last rename.
+func TestWriteJSONFileAtomic_ConcurrentWritesNeverCorruptTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.json")
+
+	const writers = 50
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			// A payload large enough that a naive interleaved write (rather
+			// than each writer getting its own temp file) would be very
+			// likely to produce visibly truncated/mixed JSON.
+			values := make([]int, 500)
+			for j := range values {
+				values[j] = n*1000 + j
+			}
+			if err := writeJSONFileAtomic(path, map[string]any{"writer": n, "values": values}); err != nil {
+				t.Errorf("writeJSONFileAtomic: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read final file: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("final file is not valid JSON (corrupted by a concurrent write): %v\ncontent: %s", err, raw)
+	}
+	if _, ok := decoded["writer"]; !ok {
+		t.Fatalf("expected a complete object with a \"writer\" key, got %+v", decoded)
+	}
+}
 
 func writeTideTodaySettings(t *testing.T, provider, stationID string) string {
 	t.Helper()

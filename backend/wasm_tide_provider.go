@@ -153,7 +153,9 @@ func (p *wasmTideProvider) FetchTideChart(stationID string) (result tideChartRes
 		return cached, nil
 	}
 
-	fetched, ferr := p.fetchFromPlugin(stationID)
+	fetched, ferr := p.cache.singleflightFetch(stationID, func() (tideChartResult, error) {
+		return p.fetchFromPlugin(stationID)
+	})
 	if ferr != nil {
 		if stale, ok := p.cache.getStale(stationID); ok {
 			stale.Cached = true

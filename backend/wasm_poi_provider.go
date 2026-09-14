@@ -171,7 +171,9 @@ func (p *wasmPOIProvider) FetchPOI(lat, lon float64, radiusM int, categories []s
 		return cached, nil
 	}
 
-	fetched, ferr := p.fetchFromPlugin(lat, lon, radiusM, categories, limit)
+	fetched, ferr := p.cache.singleflightFetch(key, func() (poiFetchResult, error) {
+		return p.fetchFromPlugin(lat, lon, radiusM, categories, limit)
+	})
 	if ferr != nil {
 		if stale, ok := p.cache.getStale(key); ok {
 			stale.Cached = true

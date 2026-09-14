@@ -12,6 +12,7 @@ require (
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/labstack/echo/v4 v4.11.4
 	github.com/tetratelabs/wazero v1.9.0
+	golang.org/x/sync v0.10.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.34.4
 )

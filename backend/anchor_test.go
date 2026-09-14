@@ -348,8 +348,21 @@ func TestSetAnchorWatch_ResolvesAndPinsPlaceNameAsync(t *testing.T) {
 
 	waitForCondition(t, 2*time.Second, func() bool {
 		anchorWatchMu.RLock()
-		defer anchorWatchMu.RUnlock()
-		return anchorWatchState != nil && anchorWatchState.PlaceName == "Goldsmith Island"
+		resolved := anchorWatchState != nil && anchorWatchState.PlaceName == "Goldsmith Island"
+		anchorWatchMu.RUnlock()
+		if !resolved {
+			return false
+		}
+		// resolveAndPinAnchorWatchPlaceName updates the in-memory state and
+		// THEN calls saveAnchorWatch (writeJSONFileAtomic, which now
+		// fsyncs) - both on the same background goroutine, but with no
+		// signal back to this goroutine for "the save has landed too".
+		// Checking the file's own content directly here (rather than
+		// racing straight into the memory-wipe-and-reload below the moment
+		// the in-memory flag flips) is what makes this wait actually wait
+		// for the persisted write, not just the update that precedes it.
+		raw, err := os.ReadFile(anchorWatchFilePath())
+		return err == nil && strings.Contains(string(raw), "Goldsmith Island")
 	})
 
 	// Persisted, not just held in memory: reload from disk the way a

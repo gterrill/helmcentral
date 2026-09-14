@@ -201,8 +201,10 @@ func TestWasmWeatherProvider_FetchForecast_StaleOnErrorFallback(t *testing.T) {
 	// package, unexported field access - mirrors
 	// TestWasmPluginCache_PastTTLMissesButGetStaleHits in wasm_plugin_test.go)
 	// so the next FetchForecast call is forced to attempt a live call rather
-	// than serving a within-TTL hit.
-	cacheKey := "30.0,40.0,2,Etc/GMT-3"
+	// than serving a within-TTL hit. FetchForecast always caches under
+	// weatherFetchMaxDays regardless of the days argument (2, above) - see
+	// weatherFetchMaxDays's doc comment.
+	cacheKey := weatherWasmCacheKey(30.0, 40.0, weatherFetchMaxDays, "Etc/GMT-3")
 	provider.cache.mu.Lock()
 	entry, ok := provider.cache.data[cacheKey]
 	if !ok {
@@ -227,6 +229,98 @@ func TestWasmWeatherProvider_FetchForecast_StaleOnErrorFallback(t *testing.T) {
 	}
 	if stale.Current.TemperatureC != fresh.Current.TemperatureC {
 		t.Fatalf("expected the stale fallback to carry the original fetched data")
+	}
+}
+
+// TestSliceWeatherForecastBundle_TrimsDaysAndMatchingHourly is the direct
+// unit test for the day-slicing fix: a bundle fetched for the full
+// weatherFetchMaxDays window, sliced to fewer days, keeps only that many
+// Days entries and only the Hourly entries that actually fall within them -
+// using nothing but the typed Start/Time fields the host already parses,
+// no plugin-specific format knowledge.
+func TestSliceWeatherForecastBundle_TrimsDaysAndMatchingHourly(t *testing.T) {
+	day0 := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	day1 := day0.AddDate(0, 0, 1)
+	day2 := day0.AddDate(0, 0, 2)
+
+	bundle := weatherForecastBundle{
+		Days: []weatherDayPoint{
+			{Start: day0, Condition: "day0"},
+			{Start: day1, Condition: "day1"},
+			{Start: day2, Condition: "day2"},
+		},
+		Hourly: []weatherHourPoint{
+			{Time: day0.Add(3 * time.Hour)},
+			{Time: day0.Add(20 * time.Hour)},
+			{Time: day1.Add(3 * time.Hour)},
+			{Time: day1.Add(20 * time.Hour)},
+			{Time: day2.Add(3 * time.Hour)},
+		},
+	}
+
+	sliced := sliceWeatherForecastBundle(bundle, 2)
+
+	if len(sliced.Days) != 2 || sliced.Days[0].Condition != "day0" || sliced.Days[1].Condition != "day1" {
+		t.Fatalf("expected exactly [day0, day1], got %+v", sliced.Days)
+	}
+	if len(sliced.Hourly) != 4 {
+		t.Fatalf("expected 4 hourly entries (2 per day for day0/day1), got %d: %+v", len(sliced.Hourly), sliced.Hourly)
+	}
+	for _, hp := range sliced.Hourly {
+		if !hp.Time.Before(day2) {
+			t.Errorf("expected every remaining hourly entry to fall before day2's start, got %v", hp.Time)
+		}
+	}
+}
+
+// TestSliceWeatherForecastBundle_NoOpWhenDaysCoversOrExceedsTheWholeBundle
+// covers both no-op cases: a non-positive days, and a days at or past the
+// bundle's actual length (a plugin that returned fewer than
+// weatherFetchMaxDays days must never be padded out).
+func TestSliceWeatherForecastBundle_NoOpWhenDaysCoversOrExceedsTheWholeBundle(t *testing.T) {
+	bundle := weatherForecastBundle{
+		Days:   []weatherDayPoint{{Condition: "only-day"}},
+		Hourly: []weatherHourPoint{{Time: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)}},
+	}
+
+	for _, days := range []int{0, -1, 1, 5} {
+		sliced := sliceWeatherForecastBundle(bundle, days)
+		if len(sliced.Days) != 1 || len(sliced.Hourly) != 1 {
+			t.Errorf("days=%d: expected the bundle unchanged, got Days=%+v Hourly=%+v", days, sliced.Days, sliced.Hourly)
+		}
+	}
+}
+
+// TestWasmWeatherProvider_FetchForecast_SharesOneCacheEntryAcrossDays is the
+// end-to-end proof of the fix, through a real compiled plugin: a
+// weatherToday-shaped call (days=1) and a weatherForecast-shaped call
+// (days=2, the max this fixture actually returns) at the same position
+// share ONE cache entry - the second call is served from cache even though
+// its own days argument differs from the first's - rather than each days
+// value paying its own upstream fetch.
+func TestWasmWeatherProvider_FetchForecast_SharesOneCacheEntryAcrossDays(t *testing.T) {
+	provider := mustNewWasmWeatherProvider(t, weatherValidFixtureWasm)
+
+	today, err := provider.FetchForecast(-27.4, 153.0, 1, "Etc/GMT-10")
+	if err != nil {
+		t.Fatalf("first FetchForecast (days=1) returned error: %v", err)
+	}
+	if today.Cached {
+		t.Fatalf("expected the first fetch to be a live (non-cached) fetch")
+	}
+	if len(today.Days) != 1 {
+		t.Fatalf("expected days=1 to return exactly 1 day, got %d", len(today.Days))
+	}
+
+	forecast, err := provider.FetchForecast(-27.4, 153.0, 2, "Etc/GMT-10")
+	if err != nil {
+		t.Fatalf("second FetchForecast (days=2) returned error: %v", err)
+	}
+	if !forecast.Cached {
+		t.Fatalf("expected the days=2 call at the same position to hit the same max-days cache entry the days=1 call already populated")
+	}
+	if len(forecast.Days) != 2 {
+		t.Fatalf("expected days=2 to return 2 days, got %d", len(forecast.Days))
 	}
 }
 

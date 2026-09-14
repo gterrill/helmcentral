@@ -242,21 +242,63 @@ func mapWasmFetchForecastOutput(out wasmFetchForecastOutput) (weatherForecastBun
 	return bundle, nil
 }
 
+// weatherFetchMaxDays is the number of days FetchForecast always asks the
+// guest for and caches, regardless of how many days a caller actually
+// wants - weatherToday wants 1, weatherForecast wants 10, and the assistant
+// clamps to assistantMaxForecastDays (also 10, assistant_tools.go). Fetching
+// the maximum once and slicing per caller (sliceWeatherForecastBundle below)
+// turns what used to be up to three separate cache entries - and, on a cold
+// cache, three separate upstream round trips for the exact same
+// position - into one. Bump this if a caller is ever given a longer window.
+const weatherFetchMaxDays = 10
+
 // weatherWasmCacheKey rounds lat/lon to 1 decimal place (same rounding the
-// pre-Phase-3 weatherToday cache used) and folds in days, so a
-// weatherToday(days=1) call and a weatherForecast(days=10) call at the same
-// position never share - and silently truncate - each other's cached bundle.
-// timezone is folded in for the same reason: it selects the day-rollup
-// boundaries, so bundles built on different boundaries are different data.
+// pre-Phase-3 weatherToday cache used) and folds in days, so callers that
+// still key by their own days value (waveWasmCacheKey, upperAirWasmCacheKey)
+// don't share - and silently truncate - each other's cached bundle.
+// weatherWasmProvider itself always passes weatherFetchMaxDays here now
+// (see FetchForecast), so weatherToday and weatherForecast requests at the
+// same position DO share one entry - that's the fix, not a bug. timezone is
+// folded in because it selects the day-rollup boundaries, so bundles built
+// on different boundaries are different data.
 func weatherWasmCacheKey(lat, lon float64, days int, timezone string) string {
 	roundedLat := math.Round(lat*10) / 10
 	roundedLon := math.Round(lon*10) / 10
 	return fmt.Sprintf("%.1f,%.1f,%d,%s", roundedLat, roundedLon, days, timezone)
 }
 
+// sliceWeatherForecastBundle trims a bundle fetched for weatherFetchMaxDays
+// down to the caller's actual days. This needs no plugin-specific knowledge
+// of the guest's wire format: mapWasmFetchForecastOutput has already parsed
+// Days[].Start and Hourly[].Time into real time.Time values, so the host can
+// cut on them directly. days <= 0 or already covering the whole bundle is a
+// no-op (a plugin that returns fewer than weatherFetchMaxDays days is left
+// exactly as it answered, never padded).
+func sliceWeatherForecastBundle(bundle weatherForecastBundle, days int) weatherForecastBundle {
+	if days <= 0 || days >= len(bundle.Days) {
+		return bundle
+	}
+
+	cutoff := bundle.Days[days].Start
+	bundle.Days = bundle.Days[:days]
+
+	hourly := make([]weatherHourPoint, 0, len(bundle.Hourly))
+	for _, hp := range bundle.Hourly {
+		if hp.Time.Before(cutoff) {
+			hourly = append(hourly, hp)
+		}
+	}
+	bundle.Hourly = hourly
+
+	return bundle
+}
+
 // FetchForecast calls the guest's fetch_forecast, unmarshals+maps the raw
 // JSON into a typed weatherForecastBundle, and applies the same TTL cache +
-// stale-on-error fallback pattern as wasmTideProvider.FetchTideChart.
+// stale-on-error fallback pattern as wasmTideProvider.FetchTideChart. It
+// always fetches/caches weatherFetchMaxDays and slices to the caller's days
+// on the way out (sliceWeatherForecastBundle) - see weatherFetchMaxDays's
+// doc comment for why.
 func (p *wasmWeatherProvider) FetchForecast(lat, lon float64, days int, timezone string) (bundle weatherForecastBundle, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -265,18 +307,20 @@ func (p *wasmWeatherProvider) FetchForecast(lat, lon float64, days int, timezone
 		}
 	}()
 
-	key := weatherWasmCacheKey(lat, lon, days, timezone)
+	key := weatherWasmCacheKey(lat, lon, weatherFetchMaxDays, timezone)
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true
-		return cached, nil
+		return sliceWeatherForecastBundle(cached, days), nil
 	}
 
-	fetched, ferr := p.fetchFromPlugin(lat, lon, days, timezone)
+	fetched, ferr := p.cache.singleflightFetch(key, func() (weatherForecastBundle, error) {
+		return p.fetchFromPlugin(lat, lon, weatherFetchMaxDays, timezone)
+	})
 	if ferr != nil {
 		if stale, ok := p.cache.getStale(key); ok {
 			stale.Cached = true
-			return stale, nil
+			return sliceWeatherForecastBundle(stale, days), nil
 		}
 		return weatherForecastBundle{}, ferr
 	}
@@ -285,7 +329,7 @@ func (p *wasmWeatherProvider) FetchForecast(lat, lon float64, days int, timezone
 	fetched.Cached = false
 	p.cache.set(key, fetched)
 
-	return fetched, nil
+	return sliceWeatherForecastBundle(fetched, days), nil
 }
 
 func (p *wasmWeatherProvider) fetchFromPlugin(lat, lon float64, days int, timezone string) (weatherForecastBundle, error) {

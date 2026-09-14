@@ -27,9 +27,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -151,6 +156,177 @@ func TestWasmPluginCache_LoadFromDisk_DiscardsOldFlatFormat(t *testing.T) {
 	}
 	if logBuf.Len() == 0 {
 		t.Errorf("expected a warning to be logged about the old-format cache file")
+	}
+}
+
+// TestWasmPluginCache_LoadFromDisk_UnparsableFileLogsAndStartsEmpty confirms
+// loadFromDisk logs the path and the parse error for a file that exists but
+// isn't valid JSON at all (as opposed to the old-flat-format case above,
+// which is a different failure mode with its own test) - and, having
+// logged, leaves the cache empty rather than partially populated. Starting
+// empty after logging is the documented fine outcome; silently starting
+// empty with nothing logged is the bug this guards against.
+func TestWasmPluginCache_LoadFromDisk_UnparsableFileLogsAndStartsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "corrupt_cache.json")
+	if err := os.WriteFile(path, []byte(`{"STATION1": {"value":`), 0o644); err != nil {
+		t.Fatalf("write corrupt cache file: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	origOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(origOutput)
+
+	cache := newWasmPluginCache[wasmPluginCacheTestValue](path)
+	cache.loadFromDisk()
+
+	if _, ok := cache.get("STATION1", time.Hour); ok {
+		t.Fatalf("expected the unparsable file to leave the cache empty")
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, path) {
+		t.Errorf("expected the log line to name the cache file path %q, got: %q", path, logged)
+	}
+}
+
+// TestWasmPluginCache_Set_PrunesEntriesOlderThanMaxAge is the direct test
+// for the "no eviction" fix: an entry old enough that it can no longer serve
+// even as a stale-on-error fallback must be dropped the next time set() is
+// called, not kept forever.
+func TestWasmPluginCache_Set_PrunesEntriesOlderThanMaxAge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	cache := newWasmPluginCache[wasmPluginCacheTestValue](path)
+
+	cache.set("old", wasmPluginCacheTestValue{Foo: "old"})
+	cache.mu.Lock()
+	entry := cache.data["old"]
+	entry.CachedAt = time.Now().UTC().Add(-wasmPluginCacheMaxAge - time.Hour)
+	cache.data["old"] = entry
+	cache.mu.Unlock()
+
+	// Any subsequent set() call prunes on its way in.
+	cache.set("new", wasmPluginCacheTestValue{Foo: "new"})
+
+	if _, ok := cache.getStale("old"); ok {
+		t.Fatalf("expected the entry older than wasmPluginCacheMaxAge to be pruned")
+	}
+	if _, ok := cache.getStale("new"); !ok {
+		t.Fatalf("expected the freshly set entry to survive pruning")
+	}
+}
+
+// TestWasmPluginCache_Set_EvictsOldestPastMaxEntries is the direct test for
+// the "file grows all season" fix: once past wasmPluginCacheMaxEntries, the
+// single oldest entry (by CachedAt) is evicted on the next set(), not
+// whatever happens to iterate first.
+func TestWasmPluginCache_Set_EvictsOldestPastMaxEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	cache := newWasmPluginCache[wasmPluginCacheTestValue](path)
+
+	// Fill to exactly the cap, each with a distinct, increasing CachedAt so
+	// "oldest" is unambiguous.
+	base := time.Now().UTC().Add(-time.Hour)
+	for i := 0; i < wasmPluginCacheMaxEntries; i++ {
+		key := fmt.Sprintf("k%d", i)
+		cache.set(key, wasmPluginCacheTestValue{Foo: key})
+		cache.mu.Lock()
+		entry := cache.data[key]
+		entry.CachedAt = base.Add(time.Duration(i) * time.Second)
+		cache.data[key] = entry
+		cache.mu.Unlock()
+	}
+
+	if _, ok := cache.getStale("k0"); !ok {
+		t.Fatalf("expected k0 (the oldest so far) to still be present before going over the cap")
+	}
+
+	// One more entry pushes the cache over the cap - k0 (the oldest) must
+	// be the one evicted, everything else must survive.
+	cache.set("newest", wasmPluginCacheTestValue{Foo: "newest"})
+
+	if _, ok := cache.getStale("k0"); ok {
+		t.Fatalf("expected the oldest entry (k0) to be evicted once over wasmPluginCacheMaxEntries")
+	}
+	for i := 1; i < wasmPluginCacheMaxEntries; i++ {
+		key := fmt.Sprintf("k%d", i)
+		if _, ok := cache.getStale(key); !ok {
+			t.Fatalf("expected %s to survive eviction (only the single oldest entry should be dropped)", key)
+		}
+	}
+	if _, ok := cache.getStale("newest"); !ok {
+		t.Fatalf("expected the newly set entry to be present")
+	}
+
+	cache.mu.RLock()
+	size := len(cache.data)
+	cache.mu.RUnlock()
+	if size != wasmPluginCacheMaxEntries {
+		t.Fatalf("expected cache size to stay at the cap (%d), got %d", wasmPluginCacheMaxEntries, size)
+	}
+}
+
+// TestWasmPluginCache_SingleflightFetch_ConcurrentMissesCauseOneUpstreamCall
+// is the direct test for the in-flight request merging fix: N goroutines
+// racing a miss for the same key must collapse into exactly one call to
+// fetch, all of them getting fetch's single result back.
+func TestWasmPluginCache_SingleflightFetch_ConcurrentMissesCauseOneUpstreamCall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	cache := newWasmPluginCache[wasmPluginCacheTestValue](path)
+
+	var calls atomic.Int32
+	release := make(chan struct{})
+	fetch := func() (wasmPluginCacheTestValue, error) {
+		calls.Add(1)
+		<-release // hold every caller "in flight" simultaneously
+		return wasmPluginCacheTestValue{Foo: "fetched"}, nil
+	}
+
+	const callers = 20
+	var wg sync.WaitGroup
+	results := make([]wasmPluginCacheTestValue, callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			v, err := cache.singleflightFetch("shared-key", fetch)
+			if err != nil {
+				t.Errorf("singleflightFetch: %v", err)
+				return
+			}
+			results[n] = v
+		}(i)
+	}
+
+	// Give every goroutine a chance to reach the fetch call before
+	// releasing it, so the merge is actually being exercised under real
+	// concurrency rather than resolving one at a time.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 upstream call for %d concurrent misses on the same key, got %d", callers, got)
+	}
+	for i, v := range results {
+		if v.Foo != "fetched" {
+			t.Errorf("caller %d: expected the shared fetched value, got %+v", i, v)
+		}
+	}
+}
+
+// TestWasmPluginCache_SingleflightFetch_ErrorPropagatesToAllWaiters proves
+// a failed fetch is reported to every merged caller, not silently turned
+// into a zero value for the followers.
+func TestWasmPluginCache_SingleflightFetch_ErrorPropagatesToAllWaiters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	cache := newWasmPluginCache[wasmPluginCacheTestValue](path)
+
+	wantErr := errors.New("simulated upstream failure")
+	_, err := cache.singleflightFetch("k", func() (wasmPluginCacheTestValue, error) {
+		return wasmPluginCacheTestValue{}, wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected the fetch error to propagate, got %v", err)
 	}
 }
 

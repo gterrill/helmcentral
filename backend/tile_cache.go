@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/singleflight"
 	_ "modernc.org/sqlite"
 )
 
@@ -49,6 +51,118 @@ const maxPrefetchTiles = 8000
 // concurrent tile fetches.
 const prefetchWorkerCount = 6
 
+// tileCircuitBreakerThreshold/tileCircuitBreakerCooldown govern
+// globalTileCircuitBreaker below: a handful of consecutive transport
+// failures (not a clean HTTP status like 404, which is a real answer, not
+// an outage) trips the breaker, which then skips every upstream attempt -
+// serving cache-only - for the cooldown. With the link genuinely down, a
+// live tile request or a prefetch worker would otherwise pay the fetch
+// client's own timeout (6s, newWorldImageryHTTPClient) on every single
+// tile, compounding across resolveWorldImageryTile's coarser-zoom walk.
+const (
+	tileCircuitBreakerThreshold = 3
+	tileCircuitBreakerCooldown  = 60 * time.Second
+)
+
+// tileTransportError marks an upstream tile fetch failure as transport-level
+// (DNS, TCP, TLS, a timed-out or dropped connection - anything below the
+// HTTP layer) as opposed to a clean HTTP response carrying a non-200 status
+// such as 404, which legitimately means "no tile here" and must never trip
+// the breaker: Esri and Carto both 404 constantly for out-of-coverage or
+// past-maxzoom tiles while perfectly reachable.
+type tileTransportError struct{ err error }
+
+func (e *tileTransportError) Error() string { return e.err.Error() }
+func (e *tileTransportError) Unwrap() error { return e.err }
+
+// tileCircuitBreaker is shared by both upstream tile fetchers (Esri World
+// Imagery and Carto vector basemap, via callThroughBreaker below): the
+// boat's uplink being down is one fact about the world, not a fact about
+// either provider individually, so one shared breaker discovers it once
+// instead of each provider spending its own tileCircuitBreakerThreshold
+// failures rediscovering the same outage.
+type tileCircuitBreaker struct {
+	mu              sync.Mutex
+	consecutiveFail int
+	openUntil       time.Time
+}
+
+var globalTileCircuitBreaker = &tileCircuitBreaker{}
+
+// errTileCircuitBreakerOpen is returned by callThroughBreaker in place of
+// ever touching the network while the breaker is open.
+var errTileCircuitBreakerOpen = errors.New("tile cache: circuit breaker open, skipping upstream")
+
+// allow reports whether an upstream attempt may proceed right now. Once
+// openUntil has passed, this returns true again (the "half-open" probe) -
+// a real attempt is allowed through, and its outcome (recordSuccess or
+// another recordTransportFailure) decides whether the breaker stays closed
+// or reopens for another cooldown.
+func (b *tileCircuitBreaker) allow() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return time.Now().After(b.openUntil)
+}
+
+// recordSuccess closes the breaker and clears its failure count, logging
+// only the actual open-to-closed transition.
+func (b *tileCircuitBreaker) recordSuccess() {
+	b.mu.Lock()
+	wasOpen := !b.openUntil.IsZero() && time.Now().Before(b.openUntil)
+	b.consecutiveFail = 0
+	b.openUntil = time.Time{}
+	b.mu.Unlock()
+	if wasOpen {
+		log.Printf("tile cache: circuit breaker closed, upstream reachable again")
+	}
+}
+
+// recordTransportFailure counts one transport-level failure and opens the
+// breaker once tileCircuitBreakerThreshold consecutive failures are seen,
+// logging only that transition (not every failure that leads up to it, and
+// never a repeat of an already-open breaker).
+func (b *tileCircuitBreaker) recordTransportFailure() {
+	b.mu.Lock()
+	b.consecutiveFail++
+	trip := b.consecutiveFail >= tileCircuitBreakerThreshold && time.Now().After(b.openUntil)
+	if trip {
+		b.openUntil = time.Now().Add(tileCircuitBreakerCooldown)
+	}
+	b.mu.Unlock()
+	if trip {
+		log.Printf("tile cache: circuit breaker open after %d consecutive transport failures, skipping upstream for %s", tileCircuitBreakerThreshold, tileCircuitBreakerCooldown)
+	}
+}
+
+// tileUpstreamFetchFunc is the shape shared by fetchWorldImageryUpstream and
+// fetchCartoVectorTileUpstream, letting both go through one breaker-gated
+// wrapper.
+type tileUpstreamFetchFunc func(fetcher tileFetcher, z, x, y int) ([]byte, string, error)
+
+// callThroughBreaker gates fetch through globalTileCircuitBreaker: while
+// open, upstream is never touched at all - no request is built, no timeout
+// is waited out, nothing - which is the entire point on a link that might
+// be completely absent. A successful call closes the breaker; a
+// transport-level failure counts toward tripping it; a clean HTTP-status
+// error (e.g. 404) does neither, since it isn't evidence the link is down.
+func callThroughBreaker(fetch tileUpstreamFetchFunc, fetcher tileFetcher, z, x, y int) ([]byte, string, error) {
+	if !globalTileCircuitBreaker.allow() {
+		return nil, "", errTileCircuitBreakerOpen
+	}
+
+	data, contentType, err := fetch(fetcher, z, x, y)
+	if err == nil {
+		globalTileCircuitBreaker.recordSuccess()
+		return data, contentType, nil
+	}
+
+	var transportErr *tileTransportError
+	if errors.As(err, &transportErr) {
+		globalTileCircuitBreaker.recordTransportFailure()
+	}
+	return nil, "", err
+}
+
 // globalTileCache is the process-wide tile cache instance, opened once in
 // main() and passed into the handler factories at route registration time.
 var globalTileCache *tileCache
@@ -77,13 +191,29 @@ type tileFetcher interface {
 // The DELETE /api/world-imagery/cache endpoint is the explicit escape
 // hatch if a cached result ever needs to be cleared (e.g. once Esri adds
 // coverage where a blank/degraded result was previously cached).
+//
+// resolveGroup merges concurrent resolves for the same (source,z,x,y) -
+// see resolveWorldImageryTile/resolveCartoVectorTile - so a browser
+// re-requesting a tile mid-fetch, or a live request racing a prefetch
+// worker over the same tile, costs one upstream attempt, not several.
 type tileCache struct {
-	db *sql.DB
+	db           *sql.DB
+	resolveGroup singleflight.Group
 }
 
 func tileCachePath() string {
 	return cacheFilePath("TILE_CACHE_PATH", "data/tile-cache.sqlite")
 }
+
+// tileCacheMaxOpenConns bounds the connection pool once WAL mode is on.
+// Rollback-journal mode (the modernc.org/sqlite default with no pragmas)
+// only ever allows one writer and blocks every reader behind it, which is
+// why this used to be capped at a single connection instead - a prefetch
+// job's writes would otherwise lock out the live map's reads for as long
+// as the job ran. WAL specifically permits concurrent readers alongside
+// one writer, so a small pool (not just 1, not unbounded) lets the live
+// tile proxy keep reading while a prefetch job's worker pool writes.
+const tileCacheMaxOpenConns = 4
 
 func newTileCache(dbPath string) (*tileCache, error) {
 	dir := filepath.Dir(dbPath)
@@ -93,21 +223,21 @@ func newTileCache(dbPath string) (*tileCache, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// WAL + synchronous(NORMAL) + busy_timeout(5000), via modernc's
+	// "?_pragma=" DSN form (applied per new connection - see
+	// applyQueryParams in modernc.org/sqlite). Without these, this ran in
+	// the driver's default rollback-journal mode on one connection (see
+	// tileCacheMaxOpenConns's doc comment for why that's a problem);
+	// busy_timeout makes a writer/writer conflict wait up to 5s instead of
+	// failing immediately with SQLITE_BUSY, which is what
+	// TestPrefetchWorldImageryJob_RunsToCompletionWithCorrectCounts used to
+	// hit intermittently before the single-connection cap papered over it.
+	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open tile cache database: %w", err)
 	}
-	// The prefetch worker pool (Section 2) hits this same *sql.DB
-	// concurrently from several goroutines. SQLite only allows one writer
-	// at a time and modernc.org/sqlite's default busy behavior surfaces
-	// that as a "database is locked" error rather than waiting - observed
-	// directly via TestPrefetchWorldImageryJob_RunsToCompletionWithCorrectCounts
-	// failing intermittently with SQLITE_BUSY before this was added.
-	// Capping the pool at one connection makes database/sql itself queue
-	// concurrent callers instead, which is simplest-correct at this app's
-	// scale (a personal dashboard / small fleet, same reasoning sat_charts.go
-	// documents for its own SQLite usage).
-	db.SetMaxOpenConns(1)
+	db.SetMaxOpenConns(tileCacheMaxOpenConns)
 
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tiles (
 		source TEXT NOT NULL,
@@ -250,7 +380,7 @@ func fetchWorldImageryUpstream(fetcher tileFetcher, z, x, y int) ([]byte, string
 
 	resp, err := fetcher.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("upstream request failed: %w", err)
+		return nil, "", &tileTransportError{err: fmt.Errorf("upstream request failed: %w", err)}
 	}
 	defer resp.Body.Close()
 
@@ -260,7 +390,7 @@ func fetchWorldImageryUpstream(fetcher tileFetcher, z, x, y int) ([]byte, string
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, "", fmt.Errorf("read upstream body: %w", err)
+		return nil, "", &tileTransportError{err: fmt.Errorf("read upstream body: %w", err)}
 	}
 
 	contentType := resp.Header.Get("Content-Type")
@@ -270,40 +400,76 @@ func fetchWorldImageryUpstream(fetcher tileFetcher, z, x, y int) ([]byte, string
 	return body, contentType, nil
 }
 
+// tileResolveResult carries resolveWorldImageryTile's outcome through its
+// singleflight.Group merge (singleflight.Do can only hand back one `any`
+// value per key, not resolveWorldImageryTile's three named returns).
+type tileResolveResult struct {
+	data        []byte
+	contentType string
+	degraded    bool
+}
+
 // resolveWorldImageryTile implements the cache-through + graceful-
 // degradation semantics shared by both the live tile proxy and the
 // prefetch worker pool:
 //  1. Cache hit at the requested (source,z,x,y) -> serve immediately, no
 //     upstream call.
-//  2. Cache miss -> fetch upstream. Success -> cache and serve.
+//  2. Cache miss -> fetch upstream (through the shared circuit breaker).
+//     Success -> cache and serve.
 //  3. Upstream failure -> retry at (z-1,x>>1,y>>1), then (z-2,...), up to
 //     maxDegradeLevels coarser levels, each checking the cache first (a
 //     coarser-level cache hit does not invoke the fetcher). The first
 //     level that yields bytes (from cache or a successful fetch) is
-//     served, and is ALSO cached under the originally-requested key so a
-//     repeat request for the same missing deep tile doesn't re-walk the
-//     fallback chain.
+//     served as a DEGRADED result.
 //  4. If every level is exhausted (or z runs below 0), fall back to the
-//     transparent blank tile, and cache that blank result under the
-//     original key too - deliberately no TTL, matching the rest of this
-//     cache; DELETE /api/world-imagery/cache is the explicit escape hatch
-//     to clear a stale blank result later.
+//     transparent blank tile - also DEGRADED.
+//
+// Unlike the pre-fix version, a degraded or blank result is never cached
+// under the originally-requested (z,x,y) key - only ever under a coarser
+// tile's own genuine key, when that coarser tile was actually,
+// successfully fetched (or already held) at that key. Caching a degraded
+// result at the fine key is exactly what let one offline pan blank or blur
+// a tile forever, curable only by wiping the whole cache; see
+// tile_proxy.go's short Cache-Control on a degraded response for the
+// matching browser-side half of this fix. The `degraded` return tells the
+// caller which Cache-Control to use.
+//
+// Concurrent callers for the same (source,z,x,y) are merged into one
+// resolve via cache.resolveGroup (singleflight), so a browser re-requesting
+// a tile mid-fetch, or a live request racing a prefetch worker on the same
+// tile, costs one upstream attempt, not two.
 //
 // Cache read/write errors (infrastructure failures, not upstream-imagery
 // availability) are surfaced to the caller rather than masked, per the
 // fail-fast policy - only the upstream-availability path degrades.
-func resolveWorldImageryTile(cache *tileCache, fetcher tileFetcher, source string, z, x, y int) ([]byte, string, error) {
+func resolveWorldImageryTile(cache *tileCache, fetcher tileFetcher, source string, z, x, y int) ([]byte, string, bool, error) {
+	key := fmt.Sprintf("%s/%d/%d/%d", source, z, x, y)
+	v, err, _ := cache.resolveGroup.Do(key, func() (any, error) {
+		data, contentType, degraded, err := resolveWorldImageryTileUncached(cache, fetcher, source, z, x, y)
+		if err != nil {
+			return nil, err
+		}
+		return tileResolveResult{data, contentType, degraded}, nil
+	})
+	if err != nil {
+		return nil, "", false, err
+	}
+	res := v.(tileResolveResult)
+	return res.data, res.contentType, res.degraded, nil
+}
+
+func resolveWorldImageryTileUncached(cache *tileCache, fetcher tileFetcher, source string, z, x, y int) ([]byte, string, bool, error) {
 	if data, contentType, ok, err := cache.get(source, z, x, y); err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	} else if ok {
-		return data, contentType, nil
+		return data, contentType, false, nil
 	}
 
-	if data, contentType, err := fetchWorldImageryUpstream(fetcher, z, x, y); err == nil {
+	if data, contentType, err := callThroughBreaker(fetchWorldImageryUpstream, fetcher, z, x, y); err == nil {
 		if err := cache.put(source, z, x, y, data, contentType); err != nil {
-			return nil, "", err
+			return nil, "", false, err
 		}
-		return data, contentType, nil
+		return data, contentType, false, nil
 	}
 
 	cz, cx, cy := z, x, y
@@ -314,29 +480,20 @@ func resolveWorldImageryTile(cache *tileCache, fetcher tileFetcher, source strin
 		}
 
 		if data, contentType, ok, err := cache.get(source, cz, cx, cy); err != nil {
-			return nil, "", err
+			return nil, "", false, err
 		} else if ok {
-			if err := cache.put(source, z, x, y, data, contentType); err != nil {
-				return nil, "", err
-			}
-			return data, contentType, nil
+			return data, contentType, true, nil
 		}
 
-		if data, contentType, err := fetchWorldImageryUpstream(fetcher, cz, cx, cy); err == nil {
+		if data, contentType, err := callThroughBreaker(fetchWorldImageryUpstream, fetcher, cz, cx, cy); err == nil {
 			if err := cache.put(source, cz, cx, cy, data, contentType); err != nil {
-				return nil, "", err
+				return nil, "", false, err
 			}
-			if err := cache.put(source, z, x, y, data, contentType); err != nil {
-				return nil, "", err
-			}
-			return data, contentType, nil
+			return data, contentType, true, nil
 		}
 	}
 
-	if err := cache.put(source, z, x, y, transparentPNG1x1, "image/png"); err != nil {
-		return nil, "", err
-	}
-	return transparentPNG1x1, "image/png", nil
+	return transparentPNG1x1, "image/png", true, nil
 }
 
 // cartoVectorTileHosts are the 4 subdomains Carto shards vector tile
@@ -367,7 +524,7 @@ func fetchCartoVectorTileUpstream(fetcher tileFetcher, z, x, y int) ([]byte, str
 
 	resp, err := fetcher.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("upstream request failed: %w", err)
+		return nil, "", &tileTransportError{err: fmt.Errorf("upstream request failed: %w", err)}
 	}
 	defer resp.Body.Close()
 
@@ -377,7 +534,7 @@ func fetchCartoVectorTileUpstream(fetcher tileFetcher, z, x, y int) ([]byte, str
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, "", fmt.Errorf("read upstream body: %w", err)
+		return nil, "", &tileTransportError{err: fmt.Errorf("read upstream body: %w", err)}
 	}
 
 	contentType := resp.Header.Get("Content-Type")
@@ -411,15 +568,35 @@ func fetchCartoVectorTileUpstream(fetcher tileFetcher, z, x, y int) ([]byte, str
 //     absent data, as opposed to wrong data presented as real.
 //
 // Cache read/write errors (infrastructure, not upstream availability) are
-// surfaced to the caller exactly as resolveWorldImageryTile does.
+// surfaced to the caller exactly as resolveWorldImageryTile does. Upstream
+// fetches go through the same shared circuit breaker as imagery
+// (callThroughBreaker), and concurrent callers for the same tile are
+// merged through cache.resolveGroup, same reasoning as
+// resolveWorldImageryTile.
 func resolveCartoVectorTile(cache *tileCache, fetcher tileFetcher, z, x, y int) ([]byte, string, error) {
+	key := fmt.Sprintf("%s/%d/%d/%d", cartoBasemapSource, z, x, y)
+	v, err, _ := cache.resolveGroup.Do(key, func() (any, error) {
+		data, contentType, err := resolveCartoVectorTileUncached(cache, fetcher, z, x, y)
+		if err != nil {
+			return nil, err
+		}
+		return tileResolveResult{data: data, contentType: contentType}, nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	res := v.(tileResolveResult)
+	return res.data, res.contentType, nil
+}
+
+func resolveCartoVectorTileUncached(cache *tileCache, fetcher tileFetcher, z, x, y int) ([]byte, string, error) {
 	if data, contentType, ok, err := cache.get(cartoBasemapSource, z, x, y); err != nil {
 		return nil, "", err
 	} else if ok {
 		return data, contentType, nil
 	}
 
-	data, contentType, err := fetchCartoVectorTileUpstream(fetcher, z, x, y)
+	data, contentType, err := callThroughBreaker(fetchCartoVectorTileUpstream, fetcher, z, x, y)
 	if err != nil {
 		return nil, "", err
 	}
@@ -634,7 +811,7 @@ func runPrefetchJob(job *prefetchJob, cache *tileCache, fetcher tileFetcher, til
 				var err error
 				switch t.kind {
 				case tileKindImagery:
-					_, _, err = resolveWorldImageryTile(cache, fetcher, worldImagerySource, t.z, t.x, t.y)
+					_, _, _, err = resolveWorldImageryTile(cache, fetcher, worldImagerySource, t.z, t.x, t.y)
 				case tileKindBasemap:
 					_, _, err = resolveCartoVectorTile(cache, fetcher, t.z, t.x, t.y)
 				default:

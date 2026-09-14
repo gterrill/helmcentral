@@ -31,7 +31,22 @@ import (
 var placeNameRadiiMeters = []int{400, 1500, 5000}
 
 const defaultOverpassAPIURL = "https://overpass-api.de/api/interpreter"
-const overpassTimeout = 20 * time.Second
+
+// overpassQueryTimeoutSeconds is embedded directly in the Overpass QL
+// [timeout:N] clause built below - the server-side budget Overpass itself
+// is told it has to answer within.
+const overpassQueryTimeoutSeconds = 25
+
+// overpassClientTimeoutBuffer is how much longer the HTTP client waits than
+// the budget it just told Overpass to use. Without a buffer, the client's
+// own deadline can fire while Overpass is still legitimately working right
+// up to the budget it was given - confirmed as this code's actual prior
+// behavior (a 20s client timeout against a 25s query timeout).
+const overpassClientTimeoutBuffer = 5 * time.Second
+
+// overpassTimeout is the HTTP client timeout, derived from
+// overpassQueryTimeoutSeconds so the two can never drift back out of order.
+const overpassTimeout = time.Duration(overpassQueryTimeoutSeconds)*time.Second + overpassClientTimeoutBuffer
 
 // overpassAPIURL is the Overpass endpoint used by both place-name
 // resolution (this file) and the assistant's find_places tool
@@ -146,8 +161,8 @@ func featureKind(tags map[string]string) string {
 func buildOverpassQuery(radiusMeters int, lat, lon float64) string {
 	around := fmt.Sprintf("%d,%.6f,%.6f", radiusMeters, lat, lon)
 	return fmt.Sprintf(
-		`[out:json][timeout:25];(nwr["seamark:type"="anchorage"](around:%s);nwr["natural"="bay"](around:%s);nwr["place"~"^(island|islet|rock)$"](around:%s););out tags center 20;`,
-		around, around, around,
+		`[out:json][timeout:%d];(nwr["seamark:type"="anchorage"](around:%s);nwr["natural"="bay"](around:%s);nwr["place"~"^(island|islet|rock)$"](around:%s););out tags center 20;`,
+		overpassQueryTimeoutSeconds, around, around, around,
 	)
 }
 
@@ -297,6 +312,16 @@ const (
 	placeNameCacheTTL         = 24 * time.Hour
 	placeNameCacheMaxEntries  = 512
 	placeNameCacheCellDegrees = 0.005 // ~550m, matches the tightest resolution ring
+
+	// placeNameEmptyCacheTTL is the TTL for a cell where the ladder ran to
+	// the end and genuinely found no named feature - a real result (per
+	// AGENTS.md's fail-fast policy, "no named feature here" is a legitimate
+	// answer, not a masking fallback), but a much less durable one than a
+	// resolved name: open water a boat is passing through today may well be
+	// in range of a newly-tagged feature, or simply a different cell,
+	// tomorrow. Shorter than placeNameCacheTTL so an empty cell is retried
+	// well within one cruising day rather than once every 24h.
+	placeNameEmptyCacheTTL = 6 * time.Hour
 )
 
 type placeNameCacheEntry struct {
@@ -328,20 +353,33 @@ func placeNameCacheKey(lat, lon float64) string {
 	return fmt.Sprintf("%.3f,%.3f", cellLat, cellLon)
 }
 
+// get applies placeNameEmptyCacheTTL to a cached empty result and the
+// longer placeNameCacheTTL to a cached name - an empty cell is a real
+// answer (see placeNameEmptyCacheTTL's doc comment) but a less durable one.
 func (s *placeNameCacheStore) get(key string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.data[key]
-	if !ok || time.Since(entry.cachedAt) >= placeNameCacheTTL {
+	if !ok {
+		return "", false
+	}
+	ttl := placeNameCacheTTL
+	if entry.name == "" {
+		ttl = placeNameEmptyCacheTTL
+	}
+	if time.Since(entry.cachedAt) >= ttl {
 		return "", false
 	}
 	return entry.name, true
 }
 
-// put caches a successful resolution only. An Overpass hiccup must never
-// pin a blank name for the TTL - that's exactly the masking fallback
-// AGENTS.md rules out, so callers only reach put with a non-empty, actually
-// resolved name; a failure retries on the next tick instead.
+// put caches a genuinely completed resolution, named or empty - see
+// placeNameEmptyCacheTTL's doc comment for why an empty result is cached at
+// all (it's a real "no named feature here" answer, not a masking
+// fallback). An Overpass hiccup must still never pin a blank name: callers
+// only reach put after resolvePlaceName returns with no error at all; a
+// failure never calls put and retries (subject to backoff) on the next
+// tick instead.
 func (s *placeNameCacheStore) put(key, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -356,24 +394,95 @@ func (s *placeNameCacheStore) put(key, name string) {
 	s.data[key] = placeNameCacheEntry{name: name, cachedAt: time.Now()}
 }
 
+// placeNameBackoffInitial/placeNameBackoffMax bound the backoff ladder a
+// resolution failure engages: 1 minute, doubling each further failure, up
+// to 15 minutes. Offshore, this is the difference between a dead Overpass
+// endpoint being retried every 5s poll tick forever and being retried on a
+// schedule that actually gives the link a chance to recover.
+const (
+	placeNameBackoffInitial = 1 * time.Minute
+	placeNameBackoffMax     = 15 * time.Minute
+)
+
+// placeNameBackoffState tracks the Overpass failure backoff window. active
+// gates resolveAndCachePlaceName from even attempting a live call while
+// backed off, so at most one real attempt (and therefore at most one
+// recordFailure/recordSuccess call) happens per window - which is what
+// keeps the "log once per state change" requirement true without any
+// separate rate-limiting on the logging itself.
+type placeNameBackoffState struct {
+	mu        sync.Mutex
+	until     time.Time
+	nextDelay time.Duration
+}
+
+var placeNameBackoff = &placeNameBackoffState{}
+
+func (b *placeNameBackoffState) active() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return time.Now().Before(b.until)
+}
+
+// recordFailure opens (or extends) the backoff window: the first failure
+// after a clear window starts the ladder at placeNameBackoffInitial; a
+// failure while already backed off doubles the delay, capped at
+// placeNameBackoffMax.
+func (b *placeNameBackoffState) recordFailure() {
+	b.mu.Lock()
+	if b.nextDelay <= 0 {
+		b.nextDelay = placeNameBackoffInitial
+	} else {
+		b.nextDelay *= 2
+		if b.nextDelay > placeNameBackoffMax {
+			b.nextDelay = placeNameBackoffMax
+		}
+	}
+	delay := b.nextDelay
+	b.until = time.Now().Add(delay)
+	b.mu.Unlock()
+	log.Printf("place name: Overpass lookup failed, backing off for %s", delay)
+}
+
+// recordSuccess clears the backoff window and resets the ladder, logging
+// only if backoff was actually engaged - the common case (no prior
+// failure) must stay silent.
+func (b *placeNameBackoffState) recordSuccess() {
+	b.mu.Lock()
+	wasEngaged := b.nextDelay > 0
+	b.until = time.Time{}
+	b.nextDelay = 0
+	b.mu.Unlock()
+	if wasEngaged {
+		log.Printf("place name: Overpass lookups recovered, backoff cleared")
+	}
+}
+
 // resolveAndCachePlaceName is the cache-first entry point: a cache hit
-// returns immediately with no upstream call; a miss resolves live and, only
-// on success, caches the result. A resolution failure logs explicitly and
-// returns "" without touching the cache.
+// (named or a still-fresh empty result, see placeNameEmptyCacheTTL) returns
+// immediately with no upstream call. A miss resolves live UNLESS a prior
+// failure's backoff window is still open, in which case it returns ""
+// without touching Overpass at all. A resolution failure logs explicitly,
+// engages/extends the backoff window, and returns "" without caching
+// anything; a genuine completion - named or empty - clears backoff and
+// caches the result either way.
 func resolveAndCachePlaceName(fetcher overpassFetcher, lat, lon float64) string {
 	key := placeNameCacheKey(lat, lon)
 	if name, ok := placeNameCache.get(key); ok {
 		return name
 	}
 
+	if placeNameBackoff.active() {
+		return ""
+	}
+
 	name, err := resolvePlaceName(fetcher, lat, lon)
 	if err != nil {
 		log.Printf("place name: resolve failed for %.4f,%.4f: %v", lat, lon, err)
+		placeNameBackoff.recordFailure()
 		return ""
 	}
-	if name == "" {
-		return ""
-	}
+	placeNameBackoff.recordSuccess()
 
 	placeNameCache.put(key, name)
 	return name

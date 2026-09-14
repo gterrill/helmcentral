@@ -74,14 +74,39 @@ func resetPlaceNameCache(t *testing.T) {
 	t.Cleanup(func() { placeNameCache = orig })
 }
 
+// resetPlaceNameBackoff clears the package-level Overpass backoff window for
+// the duration of the test, restoring the original afterward - mirrors
+// resetPlaceNameCache so a failure induced by one test's fake fetcher can
+// never leak a backoff window into another test (or into a later call
+// within the same test that expects a real retry).
+func resetPlaceNameBackoff(t *testing.T) {
+	t.Helper()
+	placeNameBackoff.mu.Lock()
+	origUntil, origDelay := placeNameBackoff.until, placeNameBackoff.nextDelay
+	placeNameBackoff.until = time.Time{}
+	placeNameBackoff.nextDelay = 0
+	placeNameBackoff.mu.Unlock()
+	t.Cleanup(func() {
+		placeNameBackoff.mu.Lock()
+		placeNameBackoff.until, placeNameBackoff.nextDelay = origUntil, origDelay
+		placeNameBackoff.mu.Unlock()
+	})
+}
+
 // withFakeOverpassFetcher swaps the package-level overpassHTTPClient (used
 // by both the tick and setAnchorWatch's async resolve) for fetcher, and
-// restores the original afterward.
+// restores the original afterward. It also resets the Overpass backoff
+// window (resetPlaceNameBackoff): that state is process-wide and keyed on
+// real wall-clock time (up to placeNameBackoffMax, 15 minutes), so a
+// failure induced by one test's fake fetcher would otherwise silently
+// suppress every other test's resolution attempts - including successful
+// ones - for however much of that window the rest of the run takes.
 func withFakeOverpassFetcher(t *testing.T, fetcher overpassFetcher) {
 	t.Helper()
 	orig := overpassHTTPClient
 	overpassHTTPClient = fetcher
 	t.Cleanup(func() { overpassHTTPClient = orig })
+	resetPlaceNameBackoff(t)
 }
 
 // waitForCondition polls cond until it returns true or timeout elapses,
@@ -308,6 +333,7 @@ func TestBestNamedFeatureSkipsTheUnnamedIslet(t *testing.T) {
 
 func TestPlaceNameFailureIsNotCached(t *testing.T) {
 	resetPlaceNameCache(t)
+	resetPlaceNameBackoff(t)
 
 	// Overpass's real rate-limit signature: HTTP 200, text/html body
 	// containing this exact marker string (captured while fetching this
@@ -331,6 +357,12 @@ func TestPlaceNameFailureIsNotCached(t *testing.T) {
 		t.Fatalf("a failed lookup must not be cached")
 	}
 
+	// The failure above just opened a backoff window; clear it to simulate
+	// "enough time has passed" without an actual sleep, isolating this
+	// test's own retry-after-failure assertion from the separate backoff
+	// behavior covered by the Test*Backoff* tests below.
+	resetPlaceNameBackoff(t)
+
 	// A second call must retry the upstream rather than serving a cached
 	// blank, and once Overpass succeeds, the resolved name is what's cached.
 	fetcher2 := &fakeOverpassFetcher{fixtures: map[int][]byte{
@@ -342,6 +374,196 @@ func TestPlaceNameFailureIsNotCached(t *testing.T) {
 	}
 	if cached, ok := placeNameCache.get(key); !ok || cached != "Goldsmith Island" {
 		t.Fatalf("expected the successful resolution to be cached, got %q ok=%v", cached, ok)
+	}
+}
+
+// ── Empty results: cached with a shorter TTL, refetched after it ──────────
+
+// allRingsEmptyFixtures makes every one of placeNameRadiiMeters's rings
+// return zero elements, so resolvePlaceName genuinely exhausts the ladder
+// with no error - the real "no named feature here" case, not a failure.
+func allRingsEmptyFixtures() map[int][]byte {
+	fixtures := map[int][]byte{}
+	for _, radius := range placeNameRadiiMeters {
+		fixtures[radius] = []byte(`{"elements":[]}`)
+	}
+	return fixtures
+}
+
+func TestResolveAndCachePlaceName_EmptyResultIsCachedAndNotRefetchedWithinTTL(t *testing.T) {
+	resetPlaceNameCache(t)
+	resetPlaceNameBackoff(t)
+
+	fetcher := &fakeOverpassFetcher{fixtures: allRingsEmptyFixtures()}
+
+	got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon)
+	if got != "" {
+		t.Fatalf("expected an empty name when every ring is genuinely empty, got %q", got)
+	}
+	if want := len(placeNameRadiiMeters); fetcher.callCount() != want {
+		t.Fatalf("expected the ladder to walk all %d rings, got %d calls", want, fetcher.callCount())
+	}
+
+	key := placeNameCacheKey(goldsmithLat, goldsmithLon)
+	if _, ok := placeNameCache.get(key); !ok {
+		t.Fatalf("expected the genuine empty result to be cached (a real answer, not a masking fallback)")
+	}
+
+	// A second call within the TTL must be served from the cache: no
+	// further upstream calls at all.
+	got2 := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon)
+	if got2 != "" {
+		t.Fatalf("expected the cached empty result, got %q", got2)
+	}
+	if fetcher.callCount() != len(placeNameRadiiMeters) {
+		t.Fatalf("expected no additional upstream calls while the empty result is within its TTL, got %d total calls", fetcher.callCount())
+	}
+}
+
+func TestResolveAndCachePlaceName_EmptyResultRefetchedAfterItsTTL(t *testing.T) {
+	resetPlaceNameCache(t)
+	resetPlaceNameBackoff(t)
+
+	fetcher := &fakeOverpassFetcher{fixtures: allRingsEmptyFixtures()}
+	if got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon); got != "" {
+		t.Fatalf("expected an empty result, got %q", got)
+	}
+
+	// Backdate the cached empty entry past placeNameEmptyCacheTTL (same
+	// package, unexported field access - mirrors the TTL-expiry tests
+	// elsewhere in this package).
+	key := placeNameCacheKey(goldsmithLat, goldsmithLon)
+	placeNameCache.mu.Lock()
+	entry := placeNameCache.data[key]
+	entry.cachedAt = time.Now().Add(-placeNameEmptyCacheTTL - time.Minute)
+	placeNameCache.data[key] = entry
+	placeNameCache.mu.Unlock()
+
+	if _, ok := placeNameCache.get(key); ok {
+		t.Fatalf("expected the backdated empty entry to have expired")
+	}
+
+	// A resolve past the empty-result TTL must walk Overpass again.
+	if got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon); got != "" {
+		t.Fatalf("expected an empty result again, got %q", got)
+	}
+	if want := 2 * len(placeNameRadiiMeters); fetcher.callCount() != want {
+		t.Fatalf("expected a full second ladder walk after TTL expiry, got %d total calls (want %d)", fetcher.callCount(), want)
+	}
+}
+
+// TestPlaceNameCacheGet_NamedEntryUsesTheLongerTTL is the direct unit test
+// that get() applies placeNameCacheTTL (not the shorter empty TTL) to a
+// named entry - the regression guard for the two TTLs actually being
+// selected on the right branch.
+func TestPlaceNameCacheGet_NamedEntryUsesTheLongerTTL(t *testing.T) {
+	store := &placeNameCacheStore{data: make(map[string]placeNameCacheEntry)}
+	store.put("k", "Goldsmith Island")
+
+	store.mu.Lock()
+	entry := store.data["k"]
+	entry.cachedAt = time.Now().Add(-placeNameEmptyCacheTTL - time.Minute)
+	store.data["k"] = entry
+	store.mu.Unlock()
+
+	// Older than the empty-result TTL but still within the named-result
+	// TTL - must still be a hit.
+	if name, ok := store.get("k"); !ok || name != "Goldsmith Island" {
+		t.Fatalf("expected a named entry to survive past placeNameEmptyCacheTTL (it must use the longer placeNameCacheTTL), got name=%q ok=%v", name, ok)
+	}
+}
+
+// ── Backoff after error, recovery on success ───────────────────────────────
+
+func TestResolveAndCachePlaceName_BackoffSkipsUpstreamAfterAFailure(t *testing.T) {
+	resetPlaceNameCache(t)
+	resetPlaceNameBackoff(t)
+
+	rateLimitedBody := []byte(`<html><body>Dispatcher_Client::request_read_and_idx::rate_limited</body></html>`)
+	fetcher := &fakeOverpassFetcher{
+		fixtures: map[int][]byte{400: rateLimitedBody},
+		types:    map[int]string{400: "text/html"},
+	}
+
+	if got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon); got != "" {
+		t.Fatalf("expected an empty result on the failing first call, got %q", got)
+	}
+	if fetcher.callCount() != 1 {
+		t.Fatalf("expected exactly 1 upstream call for the first (failing) attempt, got %d", fetcher.callCount())
+	}
+
+	// A different position (so the cache can't be the reason for the
+	// no-op) must still be skipped entirely while backoff is active - the
+	// whole point being that Overpass itself, not just this one cell, is
+	// assumed unreachable for the window.
+	if got := resolveAndCachePlaceName(fetcher, lindemanLat, lindemanLon); got != "" {
+		t.Fatalf("expected an empty result while backed off, got %q", got)
+	}
+	if fetcher.callCount() != 1 {
+		t.Fatalf("expected no additional upstream call while backoff is active, got %d total calls", fetcher.callCount())
+	}
+}
+
+func TestPlaceNameBackoff_DoublesOnRepeatedFailureUpToMax(t *testing.T) {
+	b := &placeNameBackoffState{}
+
+	b.recordFailure()
+	if b.nextDelay != placeNameBackoffInitial {
+		t.Fatalf("expected the first failure to set the initial delay %s, got %s", placeNameBackoffInitial, b.nextDelay)
+	}
+
+	// Force the window open (as if still within it) so the next failure
+	// doubles rather than restarting the ladder.
+	b.until = time.Now().Add(time.Hour)
+	b.recordFailure()
+	if want := 2 * placeNameBackoffInitial; b.nextDelay != want {
+		t.Fatalf("expected the second consecutive failure to double to %s, got %s", want, b.nextDelay)
+	}
+
+	// Keep doubling well past placeNameBackoffMax - it must clamp, not
+	// overflow past it.
+	for i := 0; i < 10; i++ {
+		b.until = time.Now().Add(time.Hour)
+		b.recordFailure()
+	}
+	if b.nextDelay != placeNameBackoffMax {
+		t.Fatalf("expected the delay to clamp at placeNameBackoffMax (%s), got %s", placeNameBackoffMax, b.nextDelay)
+	}
+}
+
+func TestPlaceNameBackoff_RecordSuccessClearsTheLadder(t *testing.T) {
+	b := &placeNameBackoffState{}
+	b.recordFailure()
+	if !b.active() {
+		t.Fatalf("expected backoff to be active immediately after a failure")
+	}
+
+	b.recordSuccess()
+	if b.active() {
+		t.Fatalf("expected recordSuccess to clear the backoff window")
+	}
+
+	// The ladder must also have reset, not merely the window - a failure
+	// right after a success starts back at the initial delay.
+	b.recordFailure()
+	if b.nextDelay != placeNameBackoffInitial {
+		t.Fatalf("expected the ladder to restart at the initial delay after a success, got %s", b.nextDelay)
+	}
+}
+
+// ── HTTP client timeout vs. the query's own [timeout:N] ────────────────────
+
+func TestOverpassTimeouts_ClientTimeoutExceedsQueryTimeout(t *testing.T) {
+	if overpassTimeout <= time.Duration(overpassQueryTimeoutSeconds)*time.Second {
+		t.Fatalf("expected the HTTP client timeout (%s) to exceed the query's own [timeout:%ds], it must not give up while Overpass is still working within its stated budget", overpassTimeout, overpassQueryTimeoutSeconds)
+	}
+}
+
+func TestBuildOverpassQuery_EmbeddedTimeoutMatchesTheConstant(t *testing.T) {
+	query := buildOverpassQuery(400, goldsmithLat, goldsmithLon)
+	want := fmt.Sprintf("[timeout:%d]", overpassQueryTimeoutSeconds)
+	if !strings.Contains(query, want) {
+		t.Fatalf("expected the built query to embed %q, got: %s", want, query)
 	}
 }
 
@@ -420,6 +642,16 @@ func TestUpdateTickPlaceName_FillsUnresolvedAnchorPlaceNameOnRetry(t *testing.T)
 		defer anchorWatchMu.RUnlock()
 		return anchorWatchState.PlaceName == "Goldsmith Island"
 	})
+
+	// resolveAndPinAnchorWatchPlaceName's background goroutine updates the
+	// in-memory state above and THEN calls saveAnchorWatch (a real file
+	// write, now fsync'd) before it returns and clears placeNameResolve's
+	// in-flight flag. Without waiting for that flag to clear too, the test
+	// can return - and t.TempDir() can start tearing down its directory -
+	// while that write is still in flight, intermittently racing the
+	// temp-dir cleanup (observed: ENOENT/EINVAL from writeJSONFileAtomic,
+	// and "directory not empty" from TempDir's own cleanup).
+	waitForPlaceNameResolveIdle(t)
 }
 
 // ── /api/place-name handler: pure cache read, anchor override ──────────────

@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,6 +56,15 @@ func newTestTileCache(t *testing.T) *tileCache {
 		t.Fatalf("newTileCache: %v", err)
 	}
 	t.Cleanup(func() { _ = tc.close() })
+	// globalTileCircuitBreaker is process-wide state keyed on real
+	// wall-clock time (up to tileCircuitBreakerCooldown), same leak concern
+	// as place_name.go's backoff: a transport failure induced by any
+	// test's fake fetcher (this package has several, e.g. basemap_proxy_
+	// test.go's failingFetcher) would otherwise silently suppress upstream
+	// attempts in every OTHER test that shares this same window - and
+	// every test that resolves a tile constructs its cache through this
+	// one helper, so resetting it here covers the whole suite.
+	resetTileCircuitBreaker(t)
 	return tc
 }
 
@@ -164,19 +175,27 @@ func TestProxyWorldImageryTileHandler_DegradesToParentTileOnUpstream404(t *testi
 	if fetcher.callCount() != 2 {
 		t.Fatalf("expected 2 fetcher calls (failed z10, successful z9), got %d", fetcher.callCount())
 	}
+	if cc := rec1.Header().Get("Cache-Control"); cc != degradedTileCacheControl {
+		t.Fatalf("expected a degraded result to get the short Cache-Control %q, got %q", degradedTileCacheControl, cc)
+	}
 
-	// Repeat identical request: should be served entirely from the cache
-	// entry written under the ORIGINAL requested key, with no further
-	// fetcher invocations.
+	// Repeat identical request: the degraded z9 bytes are NOT cached under
+	// the z10 key (that's the fix - see resolveWorldImageryTile), so this
+	// makes one more attempt at z10 (fails again, same as before) but then
+	// hits the z9 tile already cached under ITS OWN key from the first
+	// request - one more fetcher call, not a full re-walk.
 	c2, rec2 := newTileProxyRequest("10", "500", "600")
 	if err := handler(c2); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
 	if !bytes.Equal(rec2.Body.Bytes(), parentBytes) {
-		t.Fatalf("expected cached degraded bytes %q on repeat, got %q", parentBytes, rec2.Body.Bytes())
+		t.Fatalf("expected degraded parent bytes %q on repeat, got %q", parentBytes, rec2.Body.Bytes())
 	}
-	if fetcher.callCount() != 2 {
-		t.Fatalf("expected fetcher call count to stay at 2 on repeat request, got %d", fetcher.callCount())
+	if fetcher.callCount() != 3 {
+		t.Fatalf("expected exactly 1 additional fetcher call on repeat (retry z10, then a cache hit on z9's own key), got %d total calls", fetcher.callCount())
+	}
+	if cc := rec2.Header().Get("Cache-Control"); cc != degradedTileCacheControl {
+		t.Fatalf("expected the repeat's degraded result to also get the short Cache-Control %q, got %q", degradedTileCacheControl, cc)
 	}
 }
 
@@ -202,18 +221,24 @@ func TestProxyWorldImageryTileHandler_FallsBackToBlankAfterExhaustingDegradeLeve
 	if fetcher.callCount() != 5 {
 		t.Fatalf("expected 5 fetcher calls (original + 4 degrade levels), got %d", fetcher.callCount())
 	}
+	if cc := rec1.Header().Get("Cache-Control"); cc != degradedTileCacheControl {
+		t.Fatalf("expected the blank fallback to get the short Cache-Control %q, got %q", degradedTileCacheControl, cc)
+	}
 
-	// Repeat: the blank result is now cached under the original key too, so
-	// no further fetcher calls should occur.
+	// Repeat: the blank result is deliberately NOT cached under the
+	// original key (that's the fix - a permanently blank tile after one
+	// offline pan is exactly the bug), and nothing else got cached either
+	// (every level 404'd, none succeeded), so this walks the full ladder
+	// again - 5 more fetcher calls, not zero.
 	c2, rec2 := newTileProxyRequest("10", "500", "600")
 	if err := handler(c2); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
 	if !bytes.Equal(rec2.Body.Bytes(), transparentPNG1x1) {
-		t.Fatalf("expected cached transparent blank PNG on repeat, got %d bytes", len(rec2.Body.Bytes()))
+		t.Fatalf("expected transparent blank PNG on repeat, got %d bytes", len(rec2.Body.Bytes()))
 	}
-	if fetcher.callCount() != 5 {
-		t.Fatalf("expected fetcher call count to stay at 5 on repeat request, got %d", fetcher.callCount())
+	if fetcher.callCount() != 10 {
+		t.Fatalf("expected a full second ladder walk on repeat (5 more calls, 10 total) since nothing was cached under the requested key, got %d total calls", fetcher.callCount())
 	}
 }
 
@@ -348,6 +373,292 @@ func TestNewWorldImageryHTTPClient_HasSixSecondTimeout(t *testing.T) {
 	wantTimeout := 6 * time.Second
 	if got := client.Timeout; got != wantTimeout {
 		t.Fatalf("expected timeout %v, got %v", wantTimeout, got)
+	}
+}
+
+// ── circuit breaker: shared by the imagery and vector-tile fetchers ────────
+
+// resetTileCircuitBreaker clears the package-level globalTileCircuitBreaker
+// for the duration of the test, restoring the original afterward - the
+// same leak concern as place_name.go's backoff: this state is keyed on
+// real wall-clock time (up to tileCircuitBreakerCooldown), so a test that
+// trips it would otherwise silently suppress every other test's upstream
+// calls for the rest of that window.
+func resetTileCircuitBreaker(t *testing.T) {
+	t.Helper()
+	globalTileCircuitBreaker.mu.Lock()
+	origFail, origUntil := globalTileCircuitBreaker.consecutiveFail, globalTileCircuitBreaker.openUntil
+	globalTileCircuitBreaker.consecutiveFail = 0
+	globalTileCircuitBreaker.openUntil = time.Time{}
+	globalTileCircuitBreaker.mu.Unlock()
+	t.Cleanup(func() {
+		globalTileCircuitBreaker.mu.Lock()
+		globalTileCircuitBreaker.consecutiveFail, globalTileCircuitBreaker.openUntil = origFail, origUntil
+		globalTileCircuitBreaker.mu.Unlock()
+	})
+}
+
+// transportFailFetcher always fails at the transport level (fetcher.Do
+// itself returns an error), the same shape a dead uplink actually produces
+// - as opposed to fakeUpstreamResponse(http.StatusNotFound, ...), which is
+// a clean HTTP response and must never trip the breaker.
+func transportFailFetcher() *fakeTileFetcher {
+	return &fakeTileFetcher{responder: func(req *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("simulated transport failure (connection refused)")
+	}}
+}
+
+func TestResolveWorldImageryTile_BreakerOpensAfterConsecutiveTransportFailuresAndSkipsUpstream(t *testing.T) {
+	resetTileCircuitBreaker(t)
+	cache := newTestTileCache(t)
+	fetcher := transportFailFetcher()
+
+	// Each resolve at a distinct (z,x,y) walks the original zoom plus
+	// maxDegradeLevels coarser ones, all of which fail the same way -
+	// tileCircuitBreakerThreshold consecutive transport failures trips the
+	// breaker well before that first resolve even returns.
+	_, _, _, err := resolveWorldImageryTile(cache, fetcher, worldImagerySource, 10, 500, 600)
+	if err != nil {
+		t.Fatalf("expected the blank fallback (no error) even with the breaker tripping mid-walk, got %v", err)
+	}
+	callsAfterFirst := fetcher.callCount()
+	if callsAfterFirst < tileCircuitBreakerThreshold {
+		t.Fatalf("expected at least %d real attempts before the breaker could trip, got %d", tileCircuitBreakerThreshold, callsAfterFirst)
+	}
+
+	// A second resolve for a DIFFERENT tile (so the cache can't be why)
+	// must skip upstream entirely while the breaker is open: no new
+	// fetcher calls at all.
+	_, _, _, err = resolveWorldImageryTile(cache, fetcher, worldImagerySource, 11, 700, 800)
+	if err != nil {
+		t.Fatalf("expected the blank fallback (no error) while the breaker is open, got %v", err)
+	}
+	if got := fetcher.callCount(); got != callsAfterFirst {
+		t.Fatalf("expected no additional upstream calls while the breaker is open, got %d (was %d)", got, callsAfterFirst)
+	}
+}
+
+func TestResolveCartoVectorTile_BreakerOpensAndSkipsUpstream(t *testing.T) {
+	resetTileCircuitBreaker(t)
+	cache := newTestTileCache(t)
+	fetcher := transportFailFetcher()
+
+	for i := 0; i < tileCircuitBreakerThreshold; i++ {
+		if _, _, err := resolveCartoVectorTile(cache, fetcher, 10, i, i); err == nil {
+			t.Fatalf("expected an error on a transport failure with nothing cached")
+		}
+	}
+	tripped := fetcher.callCount()
+	if tripped < tileCircuitBreakerThreshold {
+		t.Fatalf("expected at least %d real attempts, got %d", tileCircuitBreakerThreshold, tripped)
+	}
+
+	if _, _, err := resolveCartoVectorTile(cache, fetcher, 12, 999, 999); err == nil {
+		t.Fatalf("expected an error while the breaker is open (cache-only, nothing cached)")
+	}
+	if got := fetcher.callCount(); got != tripped {
+		t.Fatalf("expected no additional upstream call while the breaker is open, got %d (was %d)", got, tripped)
+	}
+}
+
+// TestResolveWorldImageryTile_StatusErrorsNeverTripTheBreaker is the direct
+// regression guard for "not HTTP 404": a clean 404 response is a real
+// answer (no coverage at this tile), not evidence the link is down, and
+// must never count toward the breaker even after far more than
+// tileCircuitBreakerThreshold of them.
+func TestResolveWorldImageryTile_StatusErrorsNeverTripTheBreaker(t *testing.T) {
+	resetTileCircuitBreaker(t)
+	cache := newTestTileCache(t)
+	fetcher := &fakeTileFetcher{responder: func(req *http.Request) (*http.Response, error) {
+		return fakeUpstreamResponse(http.StatusNotFound, "text/plain", nil), nil
+	}}
+
+	// One resolve alone makes 5 real (non-transport) failed attempts
+	// (original + 4 degrade levels), already more than
+	// tileCircuitBreakerThreshold - if 404s counted, the breaker would be
+	// open by the end of this single call.
+	if _, _, _, err := resolveWorldImageryTile(cache, fetcher, worldImagerySource, 10, 500, 600); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !globalTileCircuitBreaker.allow() {
+		t.Fatalf("expected the breaker to remain closed after nothing but clean 404 responses")
+	}
+}
+
+func TestTileCircuitBreaker_HalfOpensAfterCooldownAndClosesOnSuccess(t *testing.T) {
+	b := &tileCircuitBreaker{}
+
+	for i := 0; i < tileCircuitBreakerThreshold; i++ {
+		b.recordTransportFailure()
+	}
+	if b.allow() {
+		t.Fatalf("expected the breaker to be open immediately after tripping")
+	}
+
+	// Force the cooldown to have already elapsed rather than sleeping in
+	// the test.
+	b.mu.Lock()
+	b.openUntil = time.Now().Add(-time.Millisecond)
+	b.mu.Unlock()
+
+	if !b.allow() {
+		t.Fatalf("expected the breaker to half-open (allow a trial attempt) once the cooldown has elapsed")
+	}
+
+	b.recordSuccess()
+	if !b.allow() {
+		t.Fatalf("expected the breaker to stay closed after a successful half-open probe")
+	}
+	b.mu.Lock()
+	failCount := b.consecutiveFail
+	b.mu.Unlock()
+	if failCount != 0 {
+		t.Fatalf("expected recordSuccess to reset the failure count, got %d", failCount)
+	}
+}
+
+// ── per-key in-flight merging ────────────────────────────────────────────
+
+func TestResolveWorldImageryTile_ConcurrentMissesForSameTileCauseOneUpstreamCall(t *testing.T) {
+	resetTileCircuitBreaker(t)
+	cache := newTestTileCache(t)
+	wantBytes := []byte("upstream-tile-bytes")
+
+	release := make(chan struct{})
+	var calls int32
+	fetcher := &fakeTileFetcher{responder: func(req *http.Request) (*http.Response, error) {
+		atomic.AddInt32(&calls, 1)
+		<-release
+		return fakeUpstreamResponse(http.StatusOK, "image/jpeg", wantBytes), nil
+	}}
+
+	const callers = 10
+	var wg sync.WaitGroup
+	errs := make([]error, callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			_, _, _, err := resolveWorldImageryTile(cache, fetcher, worldImagerySource, 10, 500, 600)
+			errs[n] = err
+		}(i)
+	}
+
+	time.Sleep(50 * time.Millisecond) // let every goroutine reach the fetcher
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("expected exactly 1 upstream call for %d concurrent misses on the same tile, got %d", callers, got)
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("caller %d: unexpected error: %v", i, err)
+		}
+	}
+}
+
+func TestResolveCartoVectorTile_ConcurrentMissesForSameTileCauseOneUpstreamCall(t *testing.T) {
+	resetTileCircuitBreaker(t)
+	cache := newTestTileCache(t)
+	wantBytes := []byte("upstream-mvt-bytes")
+
+	release := make(chan struct{})
+	var calls int32
+	fetcher := &fakeTileFetcher{responder: func(req *http.Request) (*http.Response, error) {
+		atomic.AddInt32(&calls, 1)
+		<-release
+		return fakeUpstreamResponse(http.StatusOK, "application/x-protobuf", wantBytes), nil
+	}}
+
+	const callers = 10
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := resolveCartoVectorTile(cache, fetcher, 12, 3000, 2000); err != nil {
+				t.Errorf("resolveCartoVectorTile: %v", err)
+			}
+		}()
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("expected exactly 1 upstream call for %d concurrent misses on the same tile, got %d", callers, got)
+	}
+}
+
+// ── SQLite pragmas: WAL, synchronous NORMAL, busy_timeout ──────────────────
+
+func TestNewTileCache_OpensInWALModeWithMultipleConnectionsAllowed(t *testing.T) {
+	cache := newTestTileCache(t)
+
+	var journalMode string
+	if err := cache.db.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if strings.ToLower(journalMode) != "wal" {
+		t.Fatalf("expected journal_mode=wal, got %q", journalMode)
+	}
+
+	var synchronous int
+	if err := cache.db.QueryRow(`PRAGMA synchronous`).Scan(&synchronous); err != nil {
+		t.Fatalf("PRAGMA synchronous: %v", err)
+	}
+	// SQLite reports synchronous as an integer: 0=OFF, 1=NORMAL, 2=FULL.
+	if synchronous != 1 {
+		t.Fatalf("expected synchronous=NORMAL (1), got %d", synchronous)
+	}
+
+	var busyTimeoutMS int
+	if err := cache.db.QueryRow(`PRAGMA busy_timeout`).Scan(&busyTimeoutMS); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if busyTimeoutMS != 5000 {
+		t.Fatalf("expected busy_timeout=5000ms, got %d", busyTimeoutMS)
+	}
+
+	if got := cache.db.Stats().MaxOpenConnections; got != tileCacheMaxOpenConns {
+		t.Fatalf("expected MaxOpenConnections=%d, got %d", tileCacheMaxOpenConns, got)
+	}
+}
+
+// TestNewTileCache_ConcurrentReadDuringWriteDoesNotError is a light
+// end-to-end check that WAL mode actually delivers what it's for here: a
+// reader isn't blocked out by an in-progress writer, unlike the old
+// rollback-journal/single-connection setup this replaces.
+func TestNewTileCache_ConcurrentReadDuringWriteDoesNotError(t *testing.T) {
+	cache := newTestTileCache(t)
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 20)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			if err := cache.put(worldImagerySource, 10, n, n, []byte("tile"), "image/jpeg"); err != nil {
+				errCh <- fmt.Errorf("put: %w", err)
+			}
+		}(i)
+	}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			if _, _, _, err := cache.get(worldImagerySource, 10, n, n); err != nil {
+				errCh <- fmt.Errorf("get: %w", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent read/write error: %v", err)
 	}
 }
 

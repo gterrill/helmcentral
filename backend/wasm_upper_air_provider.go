@@ -122,7 +122,9 @@ func (p *wasmUpperAirProvider) FetchUpperAir(lat, lon float64, days int) (bundle
 		return cached, nil
 	}
 
-	fetched, ferr := p.fetchFromPlugin(lat, lon, days)
+	fetched, ferr := p.cache.singleflightFetch(key, func() (upperAirBundle, error) {
+		return p.fetchFromPlugin(lat, lon, days)
+	})
 	if ferr != nil {
 		if stale, ok := p.cache.getStale(key); ok {
 			stale.Cached = true
