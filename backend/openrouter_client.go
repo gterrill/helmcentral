@@ -21,11 +21,25 @@ import (
 // client, and one POST behind one Do(req) seam is all this needs.
 const openRouterChatCompletionsURL = "https://openrouter.ai/api/v1/chat/completions"
 
-// openRouterCompletionTimeout bounds a single chat-completion round trip.
-// The assistant's agentic loop (assistant_run.go) makes several of these per
-// reply, each independently timed out so one slow round never wedges the
-// whole conversation.
-const openRouterCompletionTimeout = 60 * time.Second
+// openRouterResponseHeaderTimeout bounds how long the transport will wait
+// for a dead upstream to send response headers at all. It does not bound
+// reading a slow model's body once headers arrive - that is
+// openRouterCompletionTimeout's job below, via the per-round context
+// assistant_run.go derives from it. A var, not a const, so a test can
+// shrink it and build a fresh client with newOpenRouterHTTPClient rather
+// than waiting out a real 60s.
+var openRouterResponseHeaderTimeout = 60 * time.Second
+
+// openRouterCompletionTimeout bounds one whole chat-completion round trip,
+// body included. The assistant's agentic loop (assistant_run.go) derives
+// each round's context deadline from this. It used to also be the
+// *http.Client's own Timeout field, which capped the entire request
+// (headers and body together) at 60s - long enough that a genuinely slow
+// but healthy model's full answer could fail after the operator had
+// already waited the whole 60s for it. 180s replaces that: the transport's
+// ResponseHeaderTimeout above still fails a dead upstream fast, and this is
+// now the only thing bounding a live one. A var so a test can shrink it.
+var openRouterCompletionTimeout = 180 * time.Second
 
 // openRouterDoer is the minimal interface the client needs from an HTTP
 // client, mirroring overpassFetcher (place_name.go) so tests can inject a
@@ -34,10 +48,24 @@ type openRouterDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+// newOpenRouterHTTPClient builds the production openRouterDoer: an
+// *http.Client with no overall Timeout field (that used to cap the whole
+// request, body included - see openRouterCompletionTimeout above) and a
+// cloned default transport whose ResponseHeaderTimeout still fails a dead
+// upstream quickly. Cloning http.DefaultTransport, rather than starting
+// from a bare &http.Transport{}, keeps its other defaults (proxy from the
+// environment, connection pooling, TLS handshake timeout) instead of
+// silently losing them.
+func newOpenRouterHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = openRouterResponseHeaderTimeout
+	return &http.Client{Transport: transport}
+}
+
 // openRouterHTTPClient is the production openRouterDoer. Tests swap it, or
 // pass a fake directly to openRouterChatCompletion, and restore it
 // afterward.
-var openRouterHTTPClient openRouterDoer = &http.Client{Timeout: openRouterCompletionTimeout}
+var openRouterHTTPClient openRouterDoer = newOpenRouterHTTPClient()
 
 // openRouterFunctionDef describes one callable tool in the OpenAI
 // function-calling shape OpenRouter proxies unchanged.
@@ -145,14 +173,82 @@ type openRouterToolCall struct {
 	Function openRouterToolCallFunction `json:"function"`
 }
 
+// openRouterCacheControl is the {"type":"ephemeral"} marker OpenRouter
+// documents for a provider-side prompt-caching breakpoint. Helmcentral only
+// ever sets it on a system message's first content block, and only for an
+// Anthropic model (assistant_run.go's assistantSystemMessage, ADR 0093's
+// prompt-caching follow-up) - see openRouterContentBlock.
+type openRouterCacheControl struct {
+	Type string `json:"type"`
+}
+
+// openRouterContentBlock is one block of a chat message's content when it
+// is sent as an array rather than a plain string. Helmcentral only ever
+// builds these for the system message it sends an Anthropic model: a
+// cache_control breakpoint on the block carrying the stable prefix tells
+// Anthropic's own cache (via OpenRouter) that everything up to and
+// including that block is eligible to be reused on the next turn.
+type openRouterContentBlock struct {
+	Type         string                  `json:"type"`
+	Text         string                  `json:"text"`
+	CacheControl *openRouterCacheControl `json:"cache_control,omitempty"`
+}
+
 // openRouterMessage is one turn of the conversation: system, user,
 // assistant or tool. ToolCalls is set on an assistant message that invoked
 // tools; ToolCallID identifies which call a tool-role message answers.
+//
+// Content is a plain string for every message this codebase builds except
+// one: the system message sent to an Anthropic model, which needs an array
+// of content blocks instead so a cache_control breakpoint can mark the end
+// of the reusable prefix (assistant_run.go's assistantSystemMessage).
+// contentBlocks carries that array when set; MarshalJSON below prefers it
+// over Content whenever it is non-empty. It is never populated by decoding
+// an incoming response - openRouterContent's own UnmarshalJSON already
+// tolerates a response that comes back as an array of text parts (some
+// models emit that shape) and folds it into the plain Content string, which
+// is all any caller here has ever needed to read back.
 type openRouterMessage struct {
 	Role       string               `json:"role"`
 	Content    openRouterContent    `json:"content,omitempty"`
 	ToolCalls  []openRouterToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string               `json:"tool_call_id,omitempty"`
+
+	contentBlocks []openRouterContentBlock
+}
+
+// MarshalJSON encodes exactly what the plain struct tags above used to -
+// including omitting the "content" key entirely on a tool_calls-only
+// assistant message - unless contentBlocks is set, in which case an array
+// of content blocks is encoded instead of Content's plain string. This is
+// the only place in the codebase that builds a content-blocks message (see
+// openRouterMessage's own doc comment), so every message on every other
+// model still encodes exactly as it always did.
+func (m openRouterMessage) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Role       string               `json:"role"`
+		Content    json.RawMessage      `json:"content,omitempty"`
+		ToolCalls  []openRouterToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string               `json:"tool_call_id,omitempty"`
+	}
+	w := wire{Role: m.Role, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
+
+	switch {
+	case len(m.contentBlocks) > 0:
+		data, err := json.Marshal(m.contentBlocks)
+		if err != nil {
+			return nil, fmt.Errorf("marshal openrouter content blocks: %w", err)
+		}
+		w.Content = data
+	case m.Content != "":
+		data, err := json.Marshal(m.Content)
+		if err != nil {
+			return nil, fmt.Errorf("marshal openrouter content: %w", err)
+		}
+		w.Content = data
+	}
+
+	return json.Marshal(w)
 }
 
 // openRouterUsageOption requests OpenRouter's per-reply cost accounting.

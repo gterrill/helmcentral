@@ -283,15 +283,25 @@ func providerLabelOrNotConfigured(id string) string {
 	return id
 }
 
-// buildAssistantSystemPrompt renders pc into the assistant's system prompt,
-// in a fixed section order (ADR 0093): identity, local time, position,
-// live heading/speed/wind, marine warnings, configured providers, tool-use
-// guidance, and the operator's standing notes. Every live field that might
-// carry vesselStateData's -1 "unknown" sentinel is guarded before
-// formatting, so the literal string "-1" can never appear in the output -
-// a model reasoning over "-1 kts" or "-1 degrees" as if it were a real
-// reading would be worse than no prompt at all.
-func buildAssistantSystemPrompt(pc assistantPromptContext) string {
+// assistantSystemPromptParts renders pc into the system prompt's stable
+// prefix and live suffix, in that order. Identity, the fixed tool-use
+// guidance, the manual index and the operator's standing notes are
+// byte-identical for every turn of a conversation that hasn't had its
+// settings or manual changed, so they go in the stable prefix; position,
+// time, heading, speed, wind, marine warnings, configured providers, screen
+// context and the spoken-summary instruction can all differ turn to turn,
+// so they go in the live suffix, last.
+//
+// This split exists for provider-side prompt caching (ADR 0093's follow-up):
+// OpenRouter's cache for Anthropic models only ever matches from the start
+// of the prompt, so nothing before the first per-turn field was ever being
+// reused between turns while it sat after those live fields. assistant_
+// run.go's assistantSystemMessage uses this split to mark an Anthropic
+// model's cache_control breakpoint at the boundary between stable and live.
+// buildAssistantSystemPrompt below is just stable+live concatenated, for
+// every existing caller/test that only needs the whole prompt as one string
+// and does not care about the cache boundary.
+func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string) {
 	var b strings.Builder
 
 	// 1. Identity.
@@ -313,79 +323,7 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		fmt.Fprintf(&b, "You are Mate, the onboard passage-planning assistant aboard %s, a %s (LOA %s). The crew address you as Mate.\n\n", vesselLabel, boatModel, loaLabel)
 	}
 
-	// 2. Local time.
-	loc := vesselLocalLocation(pc.Longitude)
-	fmt.Fprintf(&b, "Local time: %s (%s, derived from the vessel's longitude). Give every time in this zone unless a tool result states a different zone.\n\n",
-		pc.Now.In(loc).Format("Monday 2 January 2006 15:04"), assistantTimeZoneLabel(pc.Longitude))
-
-	// 3. Position + place name.
-	if hasUsableVesselPosition(pc.Latitude, pc.Longitude) {
-		if place := strings.TrimSpace(pc.PlaceName); place != "" {
-			fmt.Fprintf(&b, "Position: %.4f, %.4f (near %s).\n\n", pc.Latitude, pc.Longitude, place)
-		} else {
-			fmt.Fprintf(&b, "Position: %.4f, %.4f.\n\n", pc.Latitude, pc.Longitude)
-		}
-	} else {
-		b.WriteString("Position unknown: ask the operator for the vessel's position or a place name to plan around.\n\n")
-	}
-
-	// 4. Live heading / speed / apparent wind.
-	headingLabel := "unknown"
-	if pc.HeadingTrue >= 0 {
-		headingLabel = fmt.Sprintf("%.0f° true", pc.HeadingTrue)
-	}
-	sogLabel := "unknown"
-	if pc.SpeedOverGroundKts >= 0 {
-		sogLabel = fmt.Sprintf("%.1f kts", pc.SpeedOverGroundKts)
-	}
-	windLabel := "unknown"
-	if pc.WindSpeedApparentKts >= 0 && pc.WindAngleApparentDeg >= 0 {
-		if side := strings.TrimSpace(pc.WindSide); side != "" {
-			windLabel = fmt.Sprintf("%.0f kts at %.0f° (%s)", pc.WindSpeedApparentKts, pc.WindAngleApparentDeg, side)
-		} else {
-			windLabel = fmt.Sprintf("%.0f kts at %.0f°", pc.WindSpeedApparentKts, pc.WindAngleApparentDeg)
-		}
-	}
-	fmt.Fprintf(&b, "Heading: %s. Speed over ground: %s. Apparent wind: %s.\n\n", headingLabel, sogLabel, windLabel)
-
-	// 5. Marine warnings.
-	switch {
-	case !pc.WarningOK:
-		b.WriteString("Marine warnings: the forecast warnings feed has not reported yet.\n\n")
-	case pc.WarningLevel <= 0:
-		fmt.Fprintf(&b, "Marine warnings: no official marine warning as of %s.\n\n", pc.WarningFetchedAt.In(loc).Format("15:04"))
-	default:
-		line := fmt.Sprintf("Marine warnings: %s in force (wind level %d).", assistantWarningLevelLabel(pc.WarningLevel), pc.WarningLevel)
-		if pc.WarningSurf {
-			line += " A surf advisory is also in force."
-		}
-		b.WriteString(line)
-		b.WriteString("\n\n")
-	}
-
-	// 6. Configured providers and tide station.
-	tideStation := strings.TrimSpace(pc.TideStationName)
-	if tideStation == "" {
-		tideStation = "none configured"
-	}
-	fmt.Fprintf(&b, "Weather provider: %s. Wave provider: %s. Tide provider: %s. Configured tide station: %s.\n\n",
-		providerLabelOrNotConfigured(pc.WeatherProvider), providerLabelOrNotConfigured(pc.WaveProvider),
-		providerLabelOrNotConfigured(pc.TideProvider), tideStation)
-
-	if indexLine := manualIndexLine(pc.ManualPages); indexLine != "" {
-		b.WriteString(indexLine)
-		b.WriteString("\n\n")
-	}
-
-	// 6a. Screen context: only present when the POST for this turn carried a
-	// non-empty screen field (postAssistantMessageHandler), so a
-	// text-composer question - the overwhelming majority - renders exactly
-	// as it did before this field existed.
-	if sentence := assistantScreenSentence(pc.Screen); sentence != "" {
-		b.WriteString(sentence)
-	}
-
-	// 7. Tool-use guidance.
+	// 2. Tool-use guidance - fixed wording, identical for every turn.
 	b.WriteString("When the question is about Helmcentral itself, what a panel or chart shows or how to " +
 		"configure it, call read_manual for the relevant page first and answer from it; when it is about the " +
 		"sea, use the forecast, tide and passage tools as usual.\n\n")
@@ -435,22 +373,110 @@ func buildAssistantSystemPrompt(pc assistantPromptContext) string {
 		"like \"Good!\", no closing verdict line like \"looks like a comfortable passage\". Let length follow the " +
 		"question; use markdown headings and a comparison table when weighing two or more options.\n\n")
 
-	// 7 continued: only present for this turn when the POST carried
-	// spoken:true (postAssistantMessageHandler) - a voice question wants a
-	// short read-aloud tail on top of the written briefing above, not
-	// instead of it.
-	if pc.Spoken {
-		b.WriteString("The operator asked by voice. End the answer with a heading exactly `## Spoken summary` " +
-			"followed by at most three sentences that can be read aloud: the recommendation and the one number " +
-			"that matters. Everything above that heading is the written briefing as usual.\n\n")
+	// 3. Manual index - stable for the life of this build (globalManual is
+	// loaded once at startup).
+	if indexLine := manualIndexLine(pc.ManualPages); indexLine != "" {
+		b.WriteString(indexLine)
+		b.WriteString("\n\n")
 	}
 
-	// 8. Operator standing notes, verbatim.
+	// 4. Operator standing notes - changes only when the operator edits
+	// settings.yaml's assistant.notes in Settings, not per turn.
 	notes := strings.TrimSpace(pc.Notes)
 	if notes == "" {
 		notes = "(none)"
 	}
-	fmt.Fprintf(&b, "Operator standing notes:\n%s", notes)
+	fmt.Fprintf(&b, "Operator standing notes:\n%s\n\n", notes)
 
-	return b.String()
+	stable = b.String()
+
+	// 5. Live vessel context - last, because every field here can differ
+	// from the previous turn (position, time, heading, wind, warnings) or
+	// is turn-scoped (screen, spoken).
+	var lb strings.Builder
+
+	loc := vesselLocalLocation(pc.Longitude)
+	fmt.Fprintf(&lb, "Local time: %s (%s, derived from the vessel's longitude). Give every time in this zone unless a tool result states a different zone.\n\n",
+		pc.Now.In(loc).Format("Monday 2 January 2006 15:04"), assistantTimeZoneLabel(pc.Longitude))
+
+	if hasUsableVesselPosition(pc.Latitude, pc.Longitude) {
+		if place := strings.TrimSpace(pc.PlaceName); place != "" {
+			fmt.Fprintf(&lb, "Position: %.4f, %.4f (near %s).\n\n", pc.Latitude, pc.Longitude, place)
+		} else {
+			fmt.Fprintf(&lb, "Position: %.4f, %.4f.\n\n", pc.Latitude, pc.Longitude)
+		}
+	} else {
+		lb.WriteString("Position unknown: ask the operator for the vessel's position or a place name to plan around.\n\n")
+	}
+
+	headingLabel := "unknown"
+	if pc.HeadingTrue >= 0 {
+		headingLabel = fmt.Sprintf("%.0f° true", pc.HeadingTrue)
+	}
+	sogLabel := "unknown"
+	if pc.SpeedOverGroundKts >= 0 {
+		sogLabel = fmt.Sprintf("%.1f kts", pc.SpeedOverGroundKts)
+	}
+	windLabel := "unknown"
+	if pc.WindSpeedApparentKts >= 0 && pc.WindAngleApparentDeg >= 0 {
+		if side := strings.TrimSpace(pc.WindSide); side != "" {
+			windLabel = fmt.Sprintf("%.0f kts at %.0f° (%s)", pc.WindSpeedApparentKts, pc.WindAngleApparentDeg, side)
+		} else {
+			windLabel = fmt.Sprintf("%.0f kts at %.0f°", pc.WindSpeedApparentKts, pc.WindAngleApparentDeg)
+		}
+	}
+	fmt.Fprintf(&lb, "Heading: %s. Speed over ground: %s. Apparent wind: %s.\n\n", headingLabel, sogLabel, windLabel)
+
+	switch {
+	case !pc.WarningOK:
+		lb.WriteString("Marine warnings: the forecast warnings feed has not reported yet.\n\n")
+	case pc.WarningLevel <= 0:
+		fmt.Fprintf(&lb, "Marine warnings: no official marine warning as of %s.\n\n", pc.WarningFetchedAt.In(loc).Format("15:04"))
+	default:
+		line := fmt.Sprintf("Marine warnings: %s in force (wind level %d).", assistantWarningLevelLabel(pc.WarningLevel), pc.WarningLevel)
+		if pc.WarningSurf {
+			line += " A surf advisory is also in force."
+		}
+		lb.WriteString(line)
+		lb.WriteString("\n\n")
+	}
+
+	tideStation := strings.TrimSpace(pc.TideStationName)
+	if tideStation == "" {
+		tideStation = "none configured"
+	}
+	fmt.Fprintf(&lb, "Weather provider: %s. Wave provider: %s. Tide provider: %s. Configured tide station: %s.\n\n",
+		providerLabelOrNotConfigured(pc.WeatherProvider), providerLabelOrNotConfigured(pc.WaveProvider),
+		providerLabelOrNotConfigured(pc.TideProvider), tideStation)
+
+	// 5a. Screen context: only present when the POST for this turn carried a
+	// non-empty screen field (postAssistantMessageHandler), so a
+	// text-composer question - the overwhelming majority - renders exactly
+	// as it did before this field existed.
+	if sentence := assistantScreenSentence(pc.Screen); sentence != "" {
+		lb.WriteString(sentence)
+	}
+
+	// 5b. Spoken-summary instruction: only present for this turn when the
+	// POST carried spoken:true (postAssistantMessageHandler) - fixed
+	// wording, but its presence is turn-scoped exactly like Screen above.
+	if pc.Spoken {
+		lb.WriteString("The operator asked by voice. End the answer with a heading exactly `## Spoken summary` " +
+			"followed by at most three sentences that can be read aloud: the recommendation and the one number " +
+			"that matters. Everything above that heading is the written briefing as usual.\n\n")
+	}
+
+	live = lb.String()
+
+	return stable, live
+}
+
+// buildAssistantSystemPrompt renders pc into the assistant's system prompt
+// as one string (assistantSystemPromptParts' stable prefix and live suffix
+// concatenated) - every existing caller/test that just needs the whole
+// prompt and doesn't care about the prompt-caching boundary between the two
+// parts.
+func buildAssistantSystemPrompt(pc assistantPromptContext) string {
+	stable, live := assistantSystemPromptParts(pc)
+	return stable + live
 }

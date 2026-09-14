@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -62,8 +64,8 @@ type fakeAssistantRunner struct {
 	gotSystem string
 }
 
-func (f *fakeAssistantRunner) run(ctx context.Context, system string, history []openRouterMessage) (assistantReply, error) {
-	f.gotSystem = system
+func (f *fakeAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
+	f.gotSystem = systemStable + systemLive
 	f.emit("status", assistantStatus("Thinking…"))
 	if f.err != nil {
 		return assistantReply{}, f.err
@@ -81,7 +83,7 @@ type blockingAssistantRunner struct {
 	reply   assistantReply
 }
 
-func (b *blockingAssistantRunner) run(ctx context.Context, system string, history []openRouterMessage) (assistantReply, error) {
+func (b *blockingAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 	close(b.started)
 	<-b.proceed
 	return b.reply, nil
@@ -239,6 +241,7 @@ func TestAssistantStatusHandler_AllSetIsReadyWithEchoedModel(t *testing.T) {
 }
 
 func TestAssistantModelsHandler_ReturnsToolCapableModelsFromOpenRouter(t *testing.T) {
+	resetAssistantModelsCache(t)
 	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusOK, `{
 		"data": [
 			{"id": "anthropic/claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "supported_parameters": ["tools", "temperature"]},
@@ -285,6 +288,7 @@ func TestAssistantModelsHandler_ReturnsToolCapableModelsFromOpenRouter(t *testin
 }
 
 func TestAssistantModelsHandler_UpstreamErrorReturnsBadGateway(t *testing.T) {
+	resetAssistantModelsCache(t)
 	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusBadGateway, `{"error":"upstream"}`)}}
 	prev := assistantOpenRouterDoer
 	assistantOpenRouterDoer = fake
@@ -300,6 +304,7 @@ func TestAssistantModelsHandler_UpstreamErrorReturnsBadGateway(t *testing.T) {
 }
 
 func TestAssistantModelsHandler_SortsAndPaginatesServerSide(t *testing.T) {
+	resetAssistantModelsCache(t)
 	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusOK, `{
 		"data": [
 			{"id": "vendor/fast", "name": "Fast", "supported_parameters": ["tools"], "pricing": {"prompt": "0.003", "completion": "0.006"}, "popularity": 50, "top_provider": {"throughput": 100, "latency": 30}, "created": 1725753600},
@@ -354,6 +359,7 @@ func TestAssistantModelsHandler_SortsAndPaginatesServerSide(t *testing.T) {
 }
 
 func TestAssistantModelsHandler_FiltersByQueryBeforePagination(t *testing.T) {
+	resetAssistantModelsCache(t)
 	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusOK, `{
 		"data": [
 			{"id": "z-ai/glm-5.3", "name": "Z.ai: GLM 5.3", "supported_parameters": ["tools"]},
@@ -390,6 +396,182 @@ func TestAssistantModelsHandler_FiltersByQueryBeforePagination(t *testing.T) {
 	}
 	if resp.Page.Total != 1 || resp.Page.TotalPages != 1 {
 		t.Fatalf("expected filtered totals of 1, got %+v", resp.Page)
+	}
+}
+
+// resetAssistantModelsCache clears the package-level model-catalogue cache
+// so a test that swaps assistantOpenRouterDoer and expects exactly one
+// upstream call isn't served a stale hit left behind by an earlier test.
+func resetAssistantModelsCache(t *testing.T) {
+	t.Helper()
+	globalAssistantModelsCache = &assistantModelsCache{}
+}
+
+func TestAssistantModelsHandler_RepeatedSearchesWithinTTLMakeOneUpstreamCall(t *testing.T) {
+	resetAssistantModelsCache(t)
+	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusOK, `{
+		"data": [
+			{"id": "z-ai/glm-5.3", "name": "Z.ai: GLM 5.3", "supported_parameters": ["tools"]},
+			{"id": "anthropic/claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "supported_parameters": ["tools"]}
+		]
+	}`)}}
+	prev := assistantOpenRouterDoer
+	assistantOpenRouterDoer = fake
+	t.Cleanup(func() { assistantOpenRouterDoer = prev })
+
+	c1, rec1 := newAssistantEchoContext(http.MethodGet, "/api/assistant/models?q=glm", "", "")
+	if err := assistantModelsHandler(c1); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	c2, rec2 := newAssistantEchoContext(http.MethodGet, "/api/assistant/models?q=claude", "", "")
+	if err := assistantModelsHandler(c2); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	if len(fake.requests) != 1 {
+		t.Fatalf("expected the second search (still within the cache TTL) to reuse the cached catalogue, got %d upstream calls", len(fake.requests))
+	}
+
+	var resp2 struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("unmarshal second response: %v", err)
+	}
+	if len(resp2.Models) != 1 || resp2.Models[0].ID != "anthropic/claude-sonnet-4.5" {
+		t.Fatalf("expected the second search filtered from the cached catalogue, got %+v", resp2.Models)
+	}
+}
+
+func TestAssistantModelsCache_ReusesWithinTTL(t *testing.T) {
+	c := &assistantModelsCache{}
+	now := time.Now()
+	calls := 0
+	fetch := func() ([]assistantModelOption, error) {
+		calls++
+		return []assistantModelOption{{ID: "m"}}, nil
+	}
+
+	if _, err := c.get(now, fetch); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if _, err := c.get(now.Add(time.Minute), fetch); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one fetch for two calls within the TTL, got %d", calls)
+	}
+}
+
+func TestAssistantModelsCache_ExpiryRefetches(t *testing.T) {
+	c := &assistantModelsCache{}
+	now := time.Now()
+	calls := 0
+	fetch := func() ([]assistantModelOption, error) {
+		calls++
+		return []assistantModelOption{{ID: fmt.Sprintf("m%d", calls)}}, nil
+	}
+
+	first, err := c.get(now, fetch)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	second, err := c.get(now.Add(time.Minute), fetch)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected the second call inside the TTL to reuse the cache, got %d calls", calls)
+	}
+	if len(first) != 1 || len(second) != 1 || first[0].ID != second[0].ID {
+		t.Fatalf("expected the cached result to be returned unchanged, got %+v and %+v", first, second)
+	}
+
+	third, err := c.get(now.Add(assistantModelsCacheTTL+time.Minute), fetch)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected a refetch once the TTL has passed, got %d calls", calls)
+	}
+	if len(third) != 1 || third[0].ID != "m2" {
+		t.Fatalf("expected the refreshed catalogue, got %+v", third)
+	}
+}
+
+func TestAssistantModelsCache_ConcurrentMissesMakeOneCall(t *testing.T) {
+	c := &assistantModelsCache{}
+	var mu sync.Mutex
+	calls := 0
+	release := make(chan struct{})
+	fetch := func() ([]assistantModelOption, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		<-release
+		return []assistantModelOption{{ID: "m"}}, nil
+	}
+
+	const n = 5
+	var launched sync.WaitGroup
+	launched.Add(n)
+	var wg sync.WaitGroup
+	results := make([][]assistantModelOption, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			launched.Done()
+			results[i], errs[i] = c.get(time.Now(), fetch)
+		}(i)
+	}
+	launched.Wait()
+	close(release)
+	wg.Wait()
+
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("expected exactly one upstream fetch for concurrent misses, got %d", got)
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
+		if len(results[i]) != 1 || results[i][0].ID != "m" {
+			t.Fatalf("goroutine %d: unexpected result %+v", i, results[i])
+		}
+	}
+}
+
+func TestAssistantModelsCache_RefreshErrorSurfacesAndDoesNotPoisonCache(t *testing.T) {
+	c := &assistantModelsCache{}
+	now := time.Now()
+	wantErr := errors.New("upstream boom")
+
+	if _, err := c.get(now, func() ([]assistantModelOption, error) { return nil, wantErr }); err != wantErr {
+		t.Fatalf("expected the refresh error to surface, got %v", err)
+	}
+
+	got, err := c.get(now.Add(time.Second), func() ([]assistantModelOption, error) {
+		return []assistantModelOption{{ID: "ok"}}, nil
+	})
+	if err != nil {
+		t.Fatalf("expected a later call to retry rather than being stuck behind the error, got %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "ok" {
+		t.Fatalf("unexpected result: %+v", got)
 	}
 }
 

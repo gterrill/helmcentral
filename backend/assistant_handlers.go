@@ -135,9 +135,12 @@ func checkAssistantReadiness(settingsPath string) (assistantReadiness, string, e
 // implements. postAssistantMessageHandler depends on this interface, not
 // the concrete type, so tests can substitute a whole-run fake
 // (fakeAssistantRunner, assistant_handlers_test.go) instead of scripting an
-// OpenRouter doer for every handler-level test.
+// OpenRouter doer for every handler-level test. systemStable/systemLive are
+// assistant_prompt.go's assistantSystemPromptParts split, kept separate all
+// the way to here so assistant_run.go's assistantSystemMessage can mark an
+// Anthropic model's cache_control breakpoint at the boundary between them.
 type assistantRunnerFace interface {
-	run(ctx context.Context, system string, history []openRouterMessage) (assistantReply, error)
+	run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error)
 }
 
 // assistantRunsInFlight guards against two concurrent runs on the same
@@ -245,39 +248,100 @@ func assistantStatusHandler(c echo.Context) error {
 }
 
 // GET /api/assistant/models
-func assistantModelsHandler(c echo.Context) error {
-	upstreamURL := openRouterModelsListURL + "?" + (url.Values{"supported_parameters": {"tools"}}).Encode()
-	sortBy, sortDesc := assistantModelSortQuery(c.QueryParam("sort"), c.QueryParam("order"))
-	searchQuery := c.QueryParam("q")
-	page := intQueryParamWithDefault(c.QueryParam("page"), 1)
-	pageSize := intQueryParamWithDefault(c.QueryParam("page_size"), 20)
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 20
-	}
-	if pageSize > 100 {
-		pageSize = 100
+// assistantModelsCacheTTL bounds how long a parsed OpenRouter model
+// catalogue is reused. Every debounced keystroke in Settings > Assistant's
+// model search, every page turn and every sort change used to refetch
+// OpenRouter's whole /models catalogue, read the whole body and reparse it
+// from scratch; the catalogue itself changes on the order of days, so 15
+// minutes keeps this off the request path for the overwhelming majority of
+// that traffic while still picking up a newly listed or removed model the
+// same day.
+const assistantModelsCacheTTL = 15 * time.Minute
+
+// assistantModelsFetchTimeout bounds one upstream catalogue fetch.
+// assistantModelsCache.get holds its mutex across the whole fetch (see
+// below), so an unbounded request here would hang every other caller
+// queued behind it forever, not just this one.
+const assistantModelsFetchTimeout = 30 * time.Second
+
+// assistantModelsCache holds the last parsed OpenRouter model catalogue.
+// This is not keyed by the OpenRouter API key: fetchAssistantModelsFromOpenRouter
+// sends no Authorization header at all (checked - the /models list is
+// fetched anonymously; only the fixed ?supported_parameters=tools query
+// varies the upstream response), so every caller gets the same catalogue
+// and one shared cache entry is correct.
+//
+// get's mutex is held across the whole upstream fetch, not just the
+// read/write of the cached fields, so concurrent callers who all miss the
+// cache at once (a keystroke and a page change landing together) queue on
+// each other rather than each firing their own upstream request - only the
+// first actually calls OpenRouter, the rest see the freshly-populated cache
+// once they get the lock.
+type assistantModelsCache struct {
+	mu        sync.Mutex
+	models    []assistantModelOption
+	fetchedAt time.Time
+}
+
+var globalAssistantModelsCache = &assistantModelsCache{}
+
+// get returns the cached catalogue when it is still within
+// assistantModelsCacheTTL of fetchedAt, otherwise calls fetch, caches
+// whatever it returns, and returns that. A fetch error is never masked by
+// serving a stale catalogue past its TTL (AGENTS.md's fallback policy) - it
+// is returned as-is and nothing is cached, so the very next caller retries
+// cleanly rather than being stuck behind a cached error.
+func (c *assistantModelsCache) get(now time.Time, fetch func() ([]assistantModelOption, error)) ([]assistantModelOption, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.models != nil && now.Before(c.fetchedAt.Add(assistantModelsCacheTTL)) {
+		return c.models, nil
 	}
 
-	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, upstreamURL, nil)
+	models, err := fetch()
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "build openrouter models request"})
+		return nil, err
+	}
+	c.models = models
+	c.fetchedAt = now
+	return c.models, nil
+}
+
+// fetchAssistantModelsFromOpenRouter fetches and parses OpenRouter's whole
+// tool-capable model catalogue: one upstream call, no search/sort/paging
+// applied - those happen afterward, in memory, over whatever this returns
+// (assistantModelsHandler). Called through assistantModelsCache.get, never
+// directly by the handler.
+//
+// This uses a background context bounded by assistantModelsFetchTimeout
+// rather than any one HTTP request's context: the fetch may be serving
+// several callers at once (assistantModelsCache merges concurrent misses
+// into the one in flight), and a browser tab closing mid-fetch must not
+// cancel the request the other callers are waiting on.
+func fetchAssistantModelsFromOpenRouter() ([]assistantModelOption, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), assistantModelsFetchTimeout)
+	defer cancel()
+
+	upstreamURL := openRouterModelsListURL + "?" + (url.Values{"supported_parameters": {"tools"}}).Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build openrouter models request: %w", err)
 	}
 
 	resp, err := assistantOpenRouterDoer.Do(req)
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "openrouter models request failed"})
+		return nil, fmt.Errorf("openrouter models request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "read openrouter models response"})
+		return nil, fmt.Errorf("read openrouter models response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "openrouter models endpoint returned non-2xx"})
+		return nil, fmt.Errorf("openrouter models endpoint returned non-2xx (status %d)", resp.StatusCode)
 	}
 
 	var parsed struct {
@@ -301,7 +365,7 @@ func assistantModelsHandler(c echo.Context) error {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "parse openrouter models response"})
+		return nil, fmt.Errorf("parse openrouter models response: %w", err)
 	}
 
 	models := make([]assistantModelOption, 0, len(parsed.Data))
@@ -335,6 +399,39 @@ func assistantModelsHandler(c echo.Context) error {
 			Popularity: model.Popularity,
 		})
 	}
+	return models, nil
+}
+
+// GET /api/assistant/models
+func assistantModelsHandler(c echo.Context) error {
+	sortBy, sortDesc := assistantModelSortQuery(c.QueryParam("sort"), c.QueryParam("order"))
+	searchQuery := c.QueryParam("q")
+	page := intQueryParamWithDefault(c.QueryParam("page"), 1)
+	pageSize := intQueryParamWithDefault(c.QueryParam("page_size"), 20)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	// The catalogue itself (every tool-capable model OpenRouter lists) is
+	// cached; search, sort and paging below are applied in memory to a copy
+	// of it on every request, so a debounced keystroke never refetches
+	// OpenRouter (see assistantModelsCache).
+	cached, err := globalAssistantModelsCache.get(time.Now(), fetchAssistantModelsFromOpenRouter)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+	}
+
+	// A defensive copy: cached is the cache's own backing slice, and the
+	// sort below mutates in place - sorting it directly would silently
+	// reorder every other caller's cached catalogue too, and race with a
+	// concurrent reader.
+	models := append([]assistantModelOption(nil), cached...)
 	if strings.TrimSpace(searchQuery) != "" {
 		filtered := make([]assistantModelOption, 0, len(models))
 		for _, model := range models {
@@ -708,7 +805,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 			Page:    trimmedAssistantScreenField(body.Screen.Page),
 		}
 	}
-	system := buildAssistantSystemPrompt(pc)
+	systemStable, systemLive := assistantSystemPromptParts(pc)
 
 	header := c.Response().Header()
 	header.Set("Content-Type", "text/event-stream")
@@ -728,7 +825,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 	}
 
 	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, emit)
-	reply, runErr := runner.run(c.Request().Context(), system, assistantHistoryMessages(previousMessages))
+	reply, runErr := runner.run(c.Request().Context(), systemStable, systemLive, assistantHistoryMessages(previousMessages))
 	if runErr != nil {
 		log.Printf("assistant: run failed for conversation %s: %v", id, runErr)
 		emit("error", map[string]string{"error": firstErrorLine(runErr)})

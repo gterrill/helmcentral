@@ -447,3 +447,63 @@ func TestCollectAssistantPromptContext_FailedVesselStateFetchLeavesSentinels(t *
 		t.Fatalf("expected sentinel live values on a failed vessel state fetch, got %+v", pc)
 	}
 }
+
+// ── prompt-caching split (backend perf audit, Tier 3 item 3) ───────────
+
+func TestAssistantSystemPromptParts_ManualIndexBeforeLiveContext(t *testing.T) {
+	pc := basePromptContext()
+	pc.ManualPages = []manualPage{{ID: "features/forecast", Title: "Forecast"}}
+	pc.Latitude, pc.Longitude = -20.1, 149.1
+	pc.PlaceName = "Tongue Bay"
+
+	stable, live := assistantSystemPromptParts(pc)
+	if !strings.Contains(stable, "Manual pages:") {
+		t.Fatalf("expected the manual index in the stable prefix, got:\n%s", stable)
+	}
+	if strings.Contains(live, "Manual pages:") {
+		t.Fatalf("expected the manual index NOT to be in the live suffix, got:\n%s", live)
+	}
+	if !strings.Contains(live, "Position:") {
+		t.Fatalf("expected the position line in the live suffix, got:\n%s", live)
+	}
+	if strings.Contains(stable, "Position:") {
+		t.Fatalf("expected the position line NOT to be in the stable prefix, got:\n%s", stable)
+	}
+}
+
+func TestAssistantSystemPromptParts_IdentityAndGuidanceInStablePrefix(t *testing.T) {
+	stable, live := assistantSystemPromptParts(basePromptContext())
+	if !strings.HasPrefix(stable, "You are Mate,") {
+		t.Fatalf("expected the stable prefix to open with Mate's identity, got:\n%s", stable)
+	}
+	if !strings.Contains(stable, "fetch both get_wind_forecast and get_tides") {
+		t.Fatalf("expected the fixed tool-use guidance in the stable prefix, got:\n%s", stable)
+	}
+	if !strings.Contains(stable, "Operator standing notes:") {
+		t.Fatalf("expected standing notes in the stable prefix, got:\n%s", stable)
+	}
+	if strings.Contains(live, "fetch both get_wind_forecast and get_tides") {
+		t.Fatalf("expected the guidance NOT to be duplicated in the live suffix, got:\n%s", live)
+	}
+	if !strings.Contains(live, "Heading:") {
+		t.Fatalf("expected the live heading/speed/wind line in the live suffix, got:\n%s", live)
+	}
+}
+
+func TestAssistantSystemPromptParts_StablePrefixByteIdenticalAcrossTurns(t *testing.T) {
+	pc1 := basePromptContext()
+	pc1.Latitude, pc1.Longitude = -20.1, 149.1
+	pc1.HeadingTrue = 45
+
+	pc2 := basePromptContext()
+	pc2.Now = pc2.Now.Add(3 * time.Hour)
+	pc2.Latitude, pc2.Longitude = -19.5, 148.7
+	pc2.HeadingTrue = 210
+	pc2.SpeedOverGroundKts = 6.2
+
+	stable1, _ := assistantSystemPromptParts(pc1)
+	stable2, _ := assistantSystemPromptParts(pc2)
+	if stable1 != stable2 {
+		t.Fatalf("expected the stable prefix to be byte-identical across turns with different live context, got:\n%s\n---\n%s", stable1, stable2)
+	}
+}

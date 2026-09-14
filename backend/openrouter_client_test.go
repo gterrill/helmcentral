@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeOpenRouterDoer is an injectable openRouterDoer for tests, mirroring
@@ -259,5 +261,86 @@ func TestOpenRouterChatCompletion_PropagatesContextCancellation(t *testing.T) {
 	_, err := openRouterChatCompletion(ctx, ctxErrDoer{}, "sk", openRouterChatRequest{Model: "m"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled to propagate, got %v", err)
+	}
+}
+
+func TestOpenRouterHTTPClient_SlowBodyWithinDeadlineSucceeds(t *testing.T) {
+	origHeaderTimeout := openRouterResponseHeaderTimeout
+	origCompletionTimeout := openRouterCompletionTimeout
+	openRouterResponseHeaderTimeout = 50 * time.Millisecond
+	openRouterCompletionTimeout = 2 * time.Second
+	t.Cleanup(func() {
+		openRouterResponseHeaderTimeout = origHeaderTimeout
+		openRouterCompletionTimeout = origCompletionTimeout
+	})
+
+	body := `{"id":"gen-1","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"slow but complete"}}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		// Longer than the header timeout above, well inside the completion
+		// deadline below - proving a slow BODY, once headers have already
+		// arrived, is not what ResponseHeaderTimeout bounds.
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client := newOpenRouterHTTPClient()
+
+	ctx, cancel := context.WithTimeout(context.Background(), openRouterCompletionTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("expected the slow-body response to succeed once headers arrive fast, got: %v", err)
+	}
+	defer resp.Body.Close()
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(got) != body {
+		t.Fatalf("unexpected body: %s", got)
+	}
+}
+
+func TestOpenRouterHTTPClient_NoHeadersWithinHeaderTimeoutFailsClearly(t *testing.T) {
+	origHeaderTimeout := openRouterResponseHeaderTimeout
+	openRouterResponseHeaderTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { openRouterResponseHeaderTimeout = origHeaderTimeout })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Never responds within the header timeout below - a stand-in for a
+		// dead upstream.
+		time.Sleep(500 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := newOpenRouterHTTPClient()
+
+	// Generous relative to the header timeout, so a failure here is
+	// unambiguously the header timeout firing, not this outer deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	_, err = client.Do(req)
+	if err == nil {
+		t.Fatal("expected a dead upstream to fail once the header timeout elapses")
+	}
+	if !strings.Contains(err.Error(), "timeout awaiting response headers") {
+		t.Fatalf("expected a clear header-timeout error, got: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -1493,5 +1494,18 @@ func TestCapToolResultJSON_FallsBackWhenNothingLeftToShrink(t *testing.T) {
 	}
 	if decoded["truncated"] != true {
 		t.Fatalf("expected truncated=true in the fallback, got %v", decoded)
+	}
+}
+
+func TestAssistantToolDeps_ExecuteReturnsContextErrorWhenAlreadyCancelled(t *testing.T) {
+	deps := assistantToolDeps{manual: func() []manualPage {
+		return []manualPage{{ID: "features/forecast", Title: "Forecast", Body: "# Forecast"}}
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := deps.execute(ctx, "read_manual", json.RawMessage(`{"page":"features/forecast"}`))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected a cancelled context to short-circuit the tool, got %v", err)
 	}
 }

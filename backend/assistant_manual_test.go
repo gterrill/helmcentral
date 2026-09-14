@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -142,7 +143,7 @@ func TestExecuteReadManual_SuccessWholePage(t *testing.T) {
 	}
 	deps := assistantToolDeps{manual: func() []manualPage { return pages }}
 
-	raw, err := deps.executeReadManual(json.RawMessage(`{"page":"features/forecast"}`))
+	raw, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"features/forecast"}`))
 	if err != nil {
 		t.Fatalf("executeReadManual: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestExecuteReadManual_SuccessWithSection(t *testing.T) {
 	}
 	deps := assistantToolDeps{manual: func() []manualPage { return pages }}
 
-	raw, err := deps.executeReadManual(json.RawMessage(`{"page":"features/forecast","section":"upper air, days ahead"}`))
+	raw, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"features/forecast","section":"upper air, days ahead"}`))
 	if err != nil {
 		t.Fatalf("executeReadManual: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestExecuteReadManual_UnknownPageListsValidIDs(t *testing.T) {
 	}
 	deps := assistantToolDeps{manual: func() []manualPage { return pages }}
 
-	if _, err := deps.executeReadManual(json.RawMessage(`{"page":"nope"}`)); err == nil {
+	if _, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"nope"}`)); err == nil {
 		t.Fatalf("expected an error for an unknown page")
 	} else if !strings.Contains(err.Error(), "features/forecast") {
 		t.Fatalf("expected the error to list valid page ids, got %v", err)
@@ -202,7 +203,7 @@ func TestExecuteReadManual_UnknownSectionListsHeadings(t *testing.T) {
 	}
 	deps := assistantToolDeps{manual: func() []manualPage { return pages }}
 
-	if _, err := deps.executeReadManual(json.RawMessage(`{"page":"features/forecast","section":"nope"}`)); err == nil {
+	if _, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"features/forecast","section":"nope"}`)); err == nil {
 		t.Fatalf("expected an error for an unknown section")
 	} else if !strings.Contains(err.Error(), "Upper air, days ahead") {
 		t.Fatalf("expected the error to list the page's valid headings, got %v", err)
@@ -212,7 +213,7 @@ func TestExecuteReadManual_UnknownSectionListsHeadings(t *testing.T) {
 func TestExecuteReadManual_EmptyManualIsError(t *testing.T) {
 	deps := assistantToolDeps{manual: func() []manualPage { return nil }}
 
-	if _, err := deps.executeReadManual(json.RawMessage(`{"page":"features/forecast"}`)); err == nil {
+	if _, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"features/forecast"}`)); err == nil {
 		t.Fatalf("expected an error when the manual is empty")
 	} else if !strings.Contains(err.Error(), "make manual-stage") {
 		t.Fatalf("expected the error to name the fix, got %v", err)

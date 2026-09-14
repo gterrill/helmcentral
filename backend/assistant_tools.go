@@ -311,22 +311,28 @@ func assistantToolDefinitions() []openRouterTool {
 
 // execute runs one tool call by name and returns its result as compact
 // JSON, capped at assistantMaxToolResultChars (see capToolResultJSON). ctx
-// is accepted for symmetry with assistant_run.go's loop (a future tool
-// making its own outbound call would need it); none of the three tools
-// below do any I/O that takes a context today.
+// is the tool round's context: assistant_run.go's runToolRound now runs one
+// round's calls concurrently, one goroutine per call, all sharing this same
+// ctx, so a cancelled run (the operator closes the tab, or the run's own
+// timeout fires) is visible to every executeXxx below before it starts, and
+// between its outbound calls where it makes more than one. None of
+// Overpass (postOverpassQuery), InfluxDB (queryInfluxPathRange) or the
+// weather/wave/tide provider interfaces (weatherProvider.FetchForecast and
+// friends) take a context today, so a request already in flight when ctx
+// is cancelled still runs to completion - threading a context through those
+// layers is out of scope here (backend performance audit, Tier 3).
 func (d assistantToolDeps) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
-	_ = ctx
 	switch name {
 	case "find_places":
-		return d.executeFindPlaces(args)
+		return d.executeFindPlaces(ctx, args)
 	case "get_wind_forecast":
-		return d.executeGetWindForecast(args)
+		return d.executeGetWindForecast(ctx, args)
 	case "get_tides":
-		return d.executeGetTides(args)
+		return d.executeGetTides(ctx, args)
 	case "estimate_passage":
-		return d.executeEstimatePassage(args)
+		return d.executeEstimatePassage(ctx, args)
 	case "read_manual":
-		return d.executeReadManual(args)
+		return d.executeReadManual(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -786,7 +792,11 @@ func assistantOverpassElementsToCandidates(elements []overpassElement, lat, lon 
 	return out
 }
 
-func (d assistantToolDeps) executeFindPlaces(raw json.RawMessage) (string, error) {
+func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	var args assistantFindPlacesArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("parse find_places arguments: %w", err)
@@ -849,6 +859,9 @@ func (d assistantToolDeps) executeFindPlaces(raw json.RawMessage) (string, error
 	// waypoint already matched - it's cheap (ADR 0093 section 8 measured
 	// ~1s), and it's the only way OSM's own position for the same place
 	// ever reaches the model.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	exactSouth, exactWest, exactNorth, exactEast := assistantBoundingBox(lat, lon, assistantFindPlacesRadiusNm)
 	exactElements, err := postOverpassQuery(d.overpass, buildOverpassExactNameQuery(query, exactSouth, exactWest, exactNorth, exactEast))
 	if err != nil {
@@ -876,6 +889,9 @@ func (d assistantToolDeps) executeFindPlaces(raw json.RawMessage) (string, error
 	regexCentreLat, regexCentreLon := lat, lon
 	ranRung2 := len(exactCandidates) == 0 && !waypointHit
 	if ranRung2 {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		if qualifier := assistantFindPlacesQualifier(query); qualifier != "" {
 			qSouth, qWest, qNorth, qEast := assistantBoundingBox(lat, lon, assistantFindPlacesRadiusNm)
 			qElements, qerr := postOverpassQuery(d.overpass, buildOverpassExactNameQuery(qualifier, qSouth, qWest, qNorth, qEast))
@@ -888,6 +904,9 @@ func (d assistantToolDeps) executeFindPlaces(raw json.RawMessage) (string, error
 			}
 		}
 
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		regexSouth, regexWest, regexNorth, regexEast := assistantBoundingBox(regexCentreLat, regexCentreLon, assistantFindPlacesRegexRadiusNm)
 		regexElements, err := postOverpassQuery(d.overpass, buildOverpassNameSearchQuery(query, regexSouth, regexWest, regexNorth, regexEast))
 		if err != nil {
@@ -1092,7 +1111,11 @@ func modeVote(votes map[string]int, order []string) *string {
 	return &best
 }
 
-func (d assistantToolDeps) executeGetWindForecast(raw json.RawMessage) (string, error) {
+func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	var args assistantWindForecastArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("parse get_wind_forecast arguments: %w", err)
@@ -1108,6 +1131,10 @@ func (d assistantToolDeps) executeGetWindForecast(raw json.RawMessage) (string, 
 	bundle, err := provider.FetchForecast(args.Lat, args.Lon, days, tz)
 	if err != nil {
 		return "", fmt.Errorf("get_wind_forecast: weather provider %q: %w", providerID, err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 
 	var waveProviderID, wavesError string
@@ -1296,7 +1323,11 @@ type assistantGetTidesResult struct {
 
 func roundTo2(value float64) float64 { return math.Round(value*100) / 100 }
 
-func (d assistantToolDeps) executeGetTides(raw json.RawMessage) (string, error) {
+func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	var args assistantLocationArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("parse get_tides arguments: %w", err)
@@ -1466,7 +1497,11 @@ type assistantEstimatePassageResult struct {
 // estimate. Every number here is this vessel's own history, not a polar or
 // a fuel curve looked up from a manufacturer spec sheet - see ADR 0093
 // section 12.
-func (d assistantToolDeps) executeEstimatePassage(raw json.RawMessage) (string, error) {
+func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	var args assistantEstimatePassageArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("parse estimate_passage arguments: %w", err)
@@ -1500,11 +1535,18 @@ func (d assistantToolDeps) executeEstimatePassage(raw json.RawMessage) (string, 
 
 	fuelRates := make([][]telemetryPoint, 0, len(instances))
 	for _, instance := range instances {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		series, ferr := d.influxRange(fmt.Sprintf("propulsion.%s.fuel.rate", instance), start, stop, assistantPerformanceQueryEvery)
 		if ferr != nil {
 			return "", fmt.Errorf("estimate_passage: %w", ferr)
 		}
 		fuelRates = append(fuelRates, series)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 
 	// rpm comes from one representative instance rather than an average
@@ -1622,7 +1664,11 @@ type assistantReadManualResult struct {
 	Truncated bool `json:"truncated,omitempty"`
 }
 
-func (d assistantToolDeps) executeReadManual(raw json.RawMessage) (string, error) {
+func (d assistantToolDeps) executeReadManual(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	var args assistantReadManualArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("parse read_manual arguments: %w", err)

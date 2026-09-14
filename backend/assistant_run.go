@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,16 @@ import (
 // option or retries, while still bounding a runaway loop's latency and
 // OpenRouter spend.
 const assistantMaxToolRounds = 8
+
+// assistantMaxConcurrentToolCalls caps how many of one round's tool calls
+// run at once. The system prompt asks the model to fetch both a wind
+// forecast and tides for every candidate anchorage under discussion, so one
+// round can carry several slow plugin fetches; running them concurrently -
+// capped so a round with far more calls than the prompt actually asks for
+// still can't open an unbounded number of outbound requests at once - gets
+// the round back in roughly the time of its slowest call rather than their
+// sum.
+const assistantMaxConcurrentToolCalls = 4
 
 // assistantRunTimeout bounds one whole reply end to end, across every tool
 // round. openRouterCompletionTimeout (openrouter_client.go) bounds each
@@ -95,6 +106,46 @@ func autoRouterPluginForModel(model string, opts assistantAutoRouterOptions) *op
 	}
 }
 
+// assistantModelIsAnthropic reports whether model is one of OpenRouter's
+// Anthropic-hosted ids ("anthropic/..."), the only family assistantSystemMessage
+// builds a cache_control breakpoint for - see its own doc comment for why.
+func assistantModelIsAnthropic(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "anthropic/")
+}
+
+// assistantAnthropicCacheControl is the ephemeral prompt-caching breakpoint
+// marker assistantSystemMessage puts on the stable prefix's content block
+// for an Anthropic model. A shared pointer value (every call gets the same
+// one) since it never varies - always {"type":"ephemeral"}.
+var assistantAnthropicCacheControl = &openRouterCacheControl{Type: "ephemeral"}
+
+// assistantSystemMessage builds the run's system message from the stable
+// prefix and live suffix assistant_prompt.go's assistantSystemPromptParts
+// produces. For every model except an Anthropic one, this is exactly what
+// it always was: Content is the two parts joined back into one plain
+// string, byte-for-byte what buildAssistantSystemPrompt returns.
+//
+// For an Anthropic model, Content becomes two content blocks instead, with
+// the cache_control breakpoint on the first (openRouterContentBlock,
+// openrouter_client.go): OpenRouter's provider-side cache for Anthropic
+// models only ever matches from the very start of the prompt, so this is
+// what actually lets a later turn in the same conversation reuse the
+// stable part rather than reprocessing (and repaying for) the whole prompt
+// every time. Other providers behind OpenRouter are not known to
+// understand this content-array shape, which is why it is scoped to
+// Anthropic ids only rather than sent unconditionally.
+func assistantSystemMessage(model, systemStable, systemLive string) openRouterMessage {
+	if !assistantModelIsAnthropic(model) {
+		return openRouterMessage{Role: "system", Content: openRouterContent(systemStable + systemLive)}
+	}
+	msg := openRouterMessage{Role: "system"}
+	msg.contentBlocks = []openRouterContentBlock{
+		{Type: "text", Text: systemStable, CacheControl: assistantAnthropicCacheControl},
+		{Type: "text", Text: systemLive},
+	}
+	return msg
+}
+
 // run asks the model for a reply, answers any tool calls it makes, and
 // repeats until the model returns plain text or assistantMaxToolRounds is
 // reached, at which point tools are withdrawn (tool_choice "none") to force
@@ -104,12 +155,12 @@ func autoRouterPluginForModel(model string, opts assistantAutoRouterOptions) *op
 // policy). Every completion is independently timed out
 // (openRouterCompletionTimeout); the whole call is bounded by
 // assistantRunTimeout via ctx.
-func (r *assistantRunner) run(ctx context.Context, system string, history []openRouterMessage) (assistantReply, error) {
+func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 	ctx, cancel := context.WithTimeout(ctx, assistantRunTimeout)
 	defer cancel()
 
 	messages := make([]openRouterMessage, 0, len(history)+1)
-	messages = append(messages, openRouterMessage{Role: "system", Content: openRouterContent(system)})
+	messages = append(messages, assistantSystemMessage(r.model, systemStable, systemLive))
 	messages = append(messages, history...)
 
 	var reply assistantReply
@@ -162,15 +213,77 @@ func (r *assistantRunner) run(ctx context.Context, system string, history []open
 
 		messages = append(messages, choice)
 
-		for _, call := range choice.ToolCalls {
-			if call.ID == "" {
-				return assistantReply{}, fmt.Errorf("assistant requested tool %q with no tool_call id", call.Function.Name)
+		toolMessages, terr := r.runToolRound(ctx, choice.ToolCalls)
+		if terr != nil {
+			return assistantReply{}, terr
+		}
+		messages = append(messages, toolMessages...)
+
+		reply.ToolRounds++
+	}
+}
+
+// runToolRound executes one round's tool calls concurrently, capped at
+// assistantMaxConcurrentToolCalls, and returns their tool-role messages in
+// the same order as calls - the message history must list them in that
+// order regardless of which finished first, since each tool-role message's
+// tool_call_id has to line up with the assistant message that requested it.
+//
+// The "about to call" status event for each call is emitted here in the
+// outer, sequential loop, before that call's goroutine is even started, so
+// the SSE stream still announces tool calls in the order the model asked
+// for them - only the actual work (and a failure's status event) happens
+// concurrently. r.emit itself is not safe for concurrent use (it writes SSE
+// frames straight to the HTTP response), so every call to it from inside a
+// goroutine below is serialised through mu.
+//
+// Every tool assistant_tools.go defines (find_places, get_wind_forecast,
+// get_tides, estimate_passage, read_manual) only reads: none of them writes
+// to the conversation store, settings, or any other shared state, so
+// running a round's calls in parallel needs no locking beyond r.emit's own.
+// If a future tool ever needs to mutate shared state, it must either take
+// its own lock or be called out here as one that has to run serially.
+func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall) ([]openRouterMessage, error) {
+	for _, call := range calls {
+		if call.ID == "" {
+			return nil, fmt.Errorf("assistant requested tool %q with no tool_call id", call.Function.Name)
+		}
+	}
+
+	results := make([]openRouterMessage, len(calls))
+	sem := make(chan struct{}, assistantMaxConcurrentToolCalls)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	for i, call := range calls {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			mu.Lock()
+			if firstErr == nil {
+				firstErr = ctx.Err()
 			}
+			mu.Unlock()
+		}
+		mu.Lock()
+		stop := firstErr != nil
+		mu.Unlock()
+		if stop {
+			break
+		}
 
-			args := json.RawMessage(call.Function.Arguments)
-			r.emit("status", assistantStatus(describeAssistantToolCall(call.Function.Name, args)))
+		args := json.RawMessage(call.Function.Arguments)
+		mu.Lock()
+		r.emit("status", assistantStatus(describeAssistantToolCall(call.Function.Name, args)))
+		mu.Unlock()
+		log.Printf("assistant: tool %s %s", call.Function.Name, compactAssistantToolArgs(args))
 
-			log.Printf("assistant: tool %s %s", call.Function.Name, compactAssistantToolArgs(args))
+		wg.Add(1)
+		go func(i int, call openRouterToolCall, args json.RawMessage) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
 			toolStart := time.Now()
 			result, terr := r.tools.execute(ctx, call.Function.Name, args)
 			elapsed := time.Since(toolStart).Round(time.Millisecond)
@@ -179,23 +292,33 @@ func (r *assistantRunner) run(ctx context.Context, system string, history []open
 				log.Printf("assistant: tool %s failed after %s: %v", call.Function.Name, elapsed, terr)
 				errBody, merr := json.Marshal(map[string]string{"error": oneLine})
 				if merr != nil {
-					return assistantReply{}, fmt.Errorf("marshal tool error for %q: %w", call.Function.Name, merr)
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("marshal tool error for %q: %w", call.Function.Name, merr)
+					}
+					mu.Unlock()
+					return
 				}
 				result = string(errBody)
+				mu.Lock()
 				r.emit("status", assistantStatus(fmt.Sprintf("%s failed: %s", call.Function.Name, oneLine)))
+				mu.Unlock()
 			} else {
 				log.Printf("assistant: tool %s -> %d chars in %s%s", call.Function.Name, len(result), elapsed, assistantFindPlacesLogSuffix(call.Function.Name, result))
 			}
 
-			messages = append(messages, openRouterMessage{
-				Role:       "tool",
-				Content:    openRouterContent(result),
-				ToolCallID: call.ID,
-			})
-		}
-
-		reply.ToolRounds++
+			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(result), ToolCallID: call.ID}
+		}(i, call, args)
 	}
+
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 // compactAssistantToolArgs trims a tool call's raw arguments to 200 runes
