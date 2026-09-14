@@ -198,6 +198,11 @@ func sampleTracks(settingsPath string) {
 
 	solar, solarErr := fetchSignalKSolarState()
 	if solarErr == nil && solar.CurrentW >= 0 {
+		if hasUsableVesselPosition(state.Latitude, state.Longitude) {
+			solarStats.mu.Lock()
+			solarStats.loc = vesselLocalLocation(state.Longitude)
+			solarStats.mu.Unlock()
+		}
 		solarStats.record(solar.CurrentW, now)
 		solarPowerHistory.record(solar.CurrentW, now)
 	}

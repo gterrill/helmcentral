@@ -14,7 +14,8 @@ const solarMaxSampleGap = 30 * time.Second // ~6x the 5s poll cadence; caps Riem
 // today/yesterday energy and today's peak wattage.
 type solarDayStats struct {
 	mu           sync.Mutex
-	day          string // UTC "2006-01-02"; "" until the first sample
+	day          string // local "2006-01-02" in vesselLocalLocation(longitude); "" until first sample
+	loc          *time.Location
 	todayKWh     float64
 	yesterdayKWh float64 // -1 sentinel until the first day rollover
 	peakTodayW   float64 // -1 sentinel until the first sample of the day
@@ -27,12 +28,16 @@ func (s *solarDayStats) record(sampleW float64, ts time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	day := ts.UTC().Format("2006-01-02")
+	loc := s.loc
+	if loc == nil {
+		loc = time.UTC
+	}
+
+	day := ts.In(loc).Format("2006-01-02")
 	if day != s.day {
-		// No cross-midnight integration: the interval spanning the UTC day
-		// boundary is dropped from both days rather than split at
-		// midnight - an accepted simplification versus Influx's own
-		// boundary-aware query.
+		// No cross-local-midnight integration: the interval spanning the local day
+		// boundary is dropped from both days rather than split at midnight - an
+		// accepted simplification versus Influx's own boundary-aware query.
 		if s.day != "" {
 			s.yesterdayKWh = s.todayKWh
 		}

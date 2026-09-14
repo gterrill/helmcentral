@@ -99,6 +99,25 @@ func TestSolarDayStats_DayRolloverFreezesYesterdayAndResetsTodayAndPeak(t *testi
 	}
 }
 
+func TestSolarDayStats_RolloverUsesLocalMidnight(t *testing.T) {
+	loc := vesselLocalLocation(153.0) // UTC+10 for local-day semantics.
+	stats := &solarDayStats{yesterdayKWh: -1, peakTodayW: -1, loc: loc}
+
+	// 2026-07-21 14:00Z is 2026-07-22 00:00 local (UTC+10), so this is the
+	// first moment of the local day and should be treated as 2026-07-22, not
+	// 2026-07-21.
+	start := time.Date(2026, time.July, 21, 14, 0, 0, 0, time.UTC)
+	stats.record(500, start)
+	stats.record(500, start.Add(5*time.Second))
+
+	if stats.day != "2026-07-22" {
+		t.Fatalf("expected local day to be 2026-07-22 at UTC+10 midnight, got %q", stats.day)
+	}
+	if got := roundTo3(stats.todayKWh); got <= 0 {
+		t.Fatalf("expected the local-day total to accumulate from the first sample, got %v", got)
+	}
+}
+
 func TestInMemorySolarTodayKWh_NoSamplesReturnsSentinel(t *testing.T) {
 	solarStats = &solarDayStats{yesterdayKWh: -1, peakTodayW: -1}
 
