@@ -292,7 +292,7 @@ func startHeartbeat(ctx context.Context, interval time.Duration) {
 			}
 
 			active := activeAlarms()
-			sender.send(ctx, at, len(active), worstAlarmState())
+			sender.send(ctx, at, len(active), worstAlarmStateOf(active))
 		}
 	}
 }

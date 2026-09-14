@@ -10,9 +10,16 @@ import (
 // This is the point of the stream work: rules can name any path the server
 // publishes, not only the handful the fetchers were hand-wired to.
 func snapshotAlarmReader(snapshot *signalKSnapshot) alarmReader {
-	context := snapshot.selfContext()
-	tree := snapshot.selfTree()
+	return alarmReaderFromTree(snapshot, snapshot.selfContext(), snapshot.selfTree())
+}
 
+// alarmReaderFromTree is snapshotAlarmReader over an already-fetched self
+// tree and context, so a caller that has already paid for one selfTree()
+// copy for some other reason (computeDerivedPaths needs the tree itself to
+// find fuel paths; buildGaugeValuesPayload needs it for the same reason)
+// does not pay for a second whole-tree copy just to build a reader over the
+// same data (backend-perf-audit.md Tier 1 #2).
+func alarmReaderFromTree(snapshot *signalKSnapshot, context string, tree map[string]any) alarmReader {
 	return func(path string) alarmSample {
 		if tree == nil {
 			return alarmSample{}

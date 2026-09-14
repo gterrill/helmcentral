@@ -55,7 +55,11 @@ func splitNotificationVessel(path string) (branch, vesselID string) {
 // frozen node would outlive the target by however long this process keeps
 // running, which is the bug ADR 0057 §6 exists to close.
 func signalKCollisionNotifications(snapshot *signalKSnapshot, now time.Time) []alarmStatus {
-	vessels := snapshot.vesselsTree()
+	// vesselNotificationBranches copies only each vessel's notifications
+	// subtree, not everything AIS publishes about it the way vesselsTree()
+	// would -- this runs on every activeAlarms() call (backend-perf-audit.md
+	// Tier 1 #2), against however many AIS contexts this box has heard from.
+	vessels := snapshot.vesselNotificationBranches()
 	if len(vessels) == 0 {
 		return nil
 	}
@@ -63,7 +67,7 @@ func signalKCollisionNotifications(snapshot *signalKSnapshot, now time.Time) []a
 	self := strings.TrimPrefix(snapshot.selfContext(), vesselContextPrefix)
 
 	var out []alarmStatus
-	for vesselID, raw := range vessels {
+	for vesselID, tree := range vessels {
 		// "self" is checked alongside the resolved context because some
 		// servers report self unprefixed (see setSelfContext).
 		if vesselID == self || vesselID == "self" {
@@ -81,10 +85,6 @@ func signalKCollisionNotifications(snapshot *signalKSnapshot, now time.Time) []a
 			continue
 		}
 
-		tree, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
 		value, ok := collisionNotificationValue(tree)
 		if !ok {
 			continue

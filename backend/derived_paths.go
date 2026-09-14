@@ -3,6 +3,7 @@ package main
 import (
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -279,29 +280,67 @@ func derivedInputAge(ages ...float64) float64 {
 	return result
 }
 
-// fuelRatePaths finds every engine's burn path in the snapshot, so a boat with
-// one engine or three needs no configuration here.
-func fuelRatePaths(tree map[string]any) []string {
-	if tree == nil {
-		return nil
-	}
-
-	var paths []string
-	for _, entry := range collectSignalKPaths(tree) {
-		if strings.HasPrefix(entry.Path, "propulsion.") && strings.HasSuffix(entry.Path, ".fuel.rate") {
-			paths = append(paths, entry.Path)
-		}
-	}
-	sort.Strings(paths)
-	return paths
-}
-
 // fuelTankVolumePathPair is the currentLevel and capacity path for one fuel
 // tank, the two inputs fuelVolumeWithAge needs to turn that tank's ratio into
 // a volume.
 type fuelTankVolumePathPair struct {
 	currentLevelPath string
 	capacityPath     string
+}
+
+// collectFuelPaths finds every engine's burn path and every tanks.fuel.<id>
+// node that publishes both currentLevel and capacity, in one pass over an
+// already-collected path list -- a tank carrying only a level (tanks.fuel.0
+// and .1 on the reference vessel report a ratio with no known size) is
+// excluded rather than silently treated as a zero-sized tank.
+//
+// fuelRatePaths and fuelTankVolumePaths used to each call
+// collectSignalKPaths(tree) themselves, so computeDerivedPaths walked the
+// same already-copied tree twice for the same pass (backend-perf-audit.md
+// Tier 1 #2). Both now delegate here over one collectSignalKPaths call.
+func collectFuelPaths(entries []signalKPath) (ratePaths []string, tankPaths []fuelTankVolumePathPair) {
+	levels := map[string]bool{}
+	capacities := map[string]bool{}
+	const tankPrefix = "tanks.fuel."
+
+	for _, entry := range entries {
+		switch {
+		case strings.HasPrefix(entry.Path, "propulsion.") && strings.HasSuffix(entry.Path, ".fuel.rate"):
+			ratePaths = append(ratePaths, entry.Path)
+		case strings.HasPrefix(entry.Path, tankPrefix) && strings.HasSuffix(entry.Path, ".currentLevel"):
+			levels[strings.TrimSuffix(strings.TrimPrefix(entry.Path, tankPrefix), ".currentLevel")] = true
+		case strings.HasPrefix(entry.Path, tankPrefix) && strings.HasSuffix(entry.Path, ".capacity"):
+			capacities[strings.TrimSuffix(strings.TrimPrefix(entry.Path, tankPrefix), ".capacity")] = true
+		}
+	}
+	sort.Strings(ratePaths)
+
+	var ids []string
+	for id := range levels {
+		if capacities[id] {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+
+	tankPaths = make([]fuelTankVolumePathPair, 0, len(ids))
+	for _, id := range ids {
+		tankPaths = append(tankPaths, fuelTankVolumePathPair{
+			currentLevelPath: tankPrefix + id + ".currentLevel",
+			capacityPath:     tankPrefix + id + ".capacity",
+		})
+	}
+	return ratePaths, tankPaths
+}
+
+// fuelRatePaths finds every engine's burn path in the snapshot, so a boat with
+// one engine or three needs no configuration here.
+func fuelRatePaths(tree map[string]any) []string {
+	if tree == nil {
+		return nil
+	}
+	rates, _ := collectFuelPaths(collectSignalKPaths(tree))
+	return rates
 }
 
 // fuelTankVolumePaths finds every tanks.fuel.<id> node that publishes both
@@ -312,38 +351,8 @@ func fuelTankVolumePaths(tree map[string]any) []fuelTankVolumePathPair {
 	if tree == nil {
 		return nil
 	}
-
-	levels := map[string]bool{}
-	capacities := map[string]bool{}
-	const prefix = "tanks.fuel."
-	for _, entry := range collectSignalKPaths(tree) {
-		if !strings.HasPrefix(entry.Path, prefix) {
-			continue
-		}
-		switch {
-		case strings.HasSuffix(entry.Path, ".currentLevel"):
-			levels[strings.TrimSuffix(strings.TrimPrefix(entry.Path, prefix), ".currentLevel")] = true
-		case strings.HasSuffix(entry.Path, ".capacity"):
-			capacities[strings.TrimSuffix(strings.TrimPrefix(entry.Path, prefix), ".capacity")] = true
-		}
-	}
-
-	var ids []string
-	for id := range levels {
-		if capacities[id] {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-
-	pairs := make([]fuelTankVolumePathPair, 0, len(ids))
-	for _, id := range ids {
-		pairs = append(pairs, fuelTankVolumePathPair{
-			currentLevelPath: prefix + id + ".currentLevel",
-			capacityPath:     prefix + id + ".capacity",
-		})
-	}
-	return pairs
+	_, tanks := collectFuelPaths(collectSignalKPaths(tree))
+	return tanks
 }
 
 /*
@@ -416,8 +425,33 @@ func derivedPathAges(now time.Time) map[string]float64 {
 
 // computeDerivedPaths is derivedPathValues and derivedPathAges in one pass,
 // so a single build of the gauge-values payload does not walk the ring
-// buffers and the snapshot twice for the same numbers.
+// buffers and the snapshot twice for the same numbers. It always resolves
+// against globalSignalKSnapshot; computeDerivedPathsFromTree is the same
+// pass over an already-fetched tree, for a caller that also needs that tree
+// for something else.
 func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64) {
+	return computeDerivedPathsFromTree(globalSignalKSnapshot, globalSignalKSnapshot.selfContext(), globalSignalKSnapshot.selfTree(), now)
+}
+
+// computeDerivedPathsFromTree does computeDerivedPaths' work against a tree
+// and context the caller already has, rather than calling selfTree() a
+// second time.
+//
+// Before this, computeDerivedPaths cost two whole-tree copies of its own on
+// every call -- one to fetch tree, a second inside snapshotAlarmReader to
+// build read -- and, called once per helmcentral.* alarm rule per tick
+// (derivedAwareAlarmReader used to recompute this from scratch on every
+// derived-path read) or once per request inside the old
+// signalKPathsHandler's per-derived-path loop, that multiplied straight
+// through (backend-perf-audit.md Tier 1 #2). derivedAwareAlarmReader now
+// memoizes one call per reader instance, signalKPathsHandler calls this
+// once per request, and this function itself now takes one tree and builds
+// its reader from that same tree instead of fetching a second copy.
+//
+// fuelRatePaths and fuelTankVolumePaths also used to each walk the tree via
+// their own collectSignalKPaths call; collectFuelPaths does both in one
+// walk.
+func computeDerivedPathsFromTree(snapshot *signalKSnapshot, context string, tree map[string]any, now time.Time) (map[string]*float64, map[string]float64) {
 	values := map[string]*float64{
 		vesselFuelEconomyPath:        nil,
 		pressureRatePath:             nil,
@@ -459,13 +493,12 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 	// guard below.
 	addForecastWarningValues(values, ages, now)
 
-	tree := globalSignalKSnapshot.selfTree()
 	if tree == nil {
 		return values, ages
 	}
 
-	read := snapshotAlarmReader(globalSignalKSnapshot)
-	ratePaths := fuelRatePaths(tree)
+	read := alarmReaderFromTree(snapshot, context, tree)
+	ratePaths, tankPaths := collectFuelPaths(collectSignalKPaths(tree))
 
 	// Every fuel figure below reports its true age in ages[] regardless of
 	// freshness -- "the age still reports the oldest input so the reason is
@@ -473,7 +506,7 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 	// number) when that age clears derivedInputMaxAge. Below the guard the
 	// figure stays absent rather than a rule silently evaluating arithmetic
 	// done against a source that stopped reporting hours or days ago.
-	economy, economyAge, economyOK := vesselFuelEconomyWithAge(globalSignalKSnapshot, read, ratePaths, now)
+	economy, economyAge, economyOK := vesselFuelEconomyWithAge(snapshot, read, ratePaths, now)
 	if economyOK {
 		ages[vesselFuelEconomyPath] = economyAge
 		if freshEnoughToPublish(economyAge) {
@@ -481,8 +514,7 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 		}
 	}
 
-	tankPaths := fuelTankVolumePaths(tree)
-	volume, volumeAge, volumeOK := fuelVolumeWithAge(globalSignalKSnapshot, read, tankPaths, now)
+	volume, volumeAge, volumeOK := fuelVolumeWithAge(snapshot, read, tankPaths, now)
 	if volumeOK {
 		ages[fuelVolumePath] = volumeAge
 		if freshEnoughToPublish(volumeAge) {
@@ -490,7 +522,7 @@ func computeDerivedPaths(now time.Time) (map[string]*float64, map[string]float64
 		}
 	}
 
-	burn, burnAge, burnOK := totalFuelBurnWithAge(globalSignalKSnapshot, read, ratePaths, now)
+	burn, burnAge, burnOK := totalFuelBurnWithAge(snapshot, read, ratePaths, now)
 
 	if timeToEmpty, ttAge, ttOK := fuelTimeToEmptyWithAge(volume, volumeAge, volumeOK, burn, burnAge, burnOK); ttOK {
 		ages[fuelTimeToEmptyPath] = ttAge
@@ -677,17 +709,37 @@ computeDerivedPaths, the same figure ADR 0083's gauge-values stream already
 carries): the stream's last-message time is only a fallback for a path whose
 age is genuinely unknown (-1), the same "no evidence of staleness" case
 freshEnoughToPublish already treats as fresh.
+
+computeDerivedPaths used to run again on every single derived-path call this
+reader's closure received: an alarm tick with several helmcentral.* rules
+enabled reran the whole pass -- two self-tree copies, the fuel-path tree
+walks, the barometer ring scan -- once per rule (backend-perf-audit.md
+Tier 1 #2). now is fixed once, at the moment this reader is built, rather
+than re-read on every call; sync.Once then means the whole pass runs at most
+once per reader instance, however many derived-path rules that instance's
+caller reads through it, and never at all when it reads none (tracks.go's
+own use of this reader, for three ordinary SignalK paths, costs nothing
+extra from this).
 */
 func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 	published := snapshotAlarmReader(snapshot)
+	now := time.Now().UTC()
+
+	var (
+		once   sync.Once
+		values map[string]*float64
+		ages   map[string]float64
+	)
 
 	return func(path string) alarmSample {
 		if !isDerivedPath(path) {
 			return published(path)
 		}
 
-		now := time.Now().UTC()
-		values, ages := computeDerivedPaths(now)
+		once.Do(func() {
+			values, ages = computeDerivedPaths(now)
+		})
+
 		value, ok := values[path]
 		if !ok || value == nil {
 			return alarmSample{}

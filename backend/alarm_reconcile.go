@@ -59,12 +59,11 @@ func (r *busEchoReconciler) check(now time.Time, owned func(path string) bool, l
 		r.warnedDisabled = map[string]bool{}
 	}
 
-	tree := r.snapshot.selfTree()
-	if tree == nil {
-		return
-	}
-	root, ok := tree[notificationsRoot].(map[string]any)
-	if !ok {
+	// nodeAt copies only the notifications branch, not the whole self tree
+	// selfTree() would -- this runs every alarm tick (backend-perf-audit.md
+	// Tier 1 #2).
+	root := r.snapshot.nodeAt(notificationsRoot)
+	if root == nil {
 		return
 	}
 

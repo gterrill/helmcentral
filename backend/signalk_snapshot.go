@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"log"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -64,6 +67,17 @@ func newSignalKSnapshot() *signalKSnapshot {
 	}
 }
 
+// radarTargetDeltaPath reports whether path is one of mayara's own ARPA
+// target nodes, "radars.<radar id>.targets.<target id>" (see
+// testdata/mayara/target-delta.json). radar_source.go's REST poller is the
+// only consumer of radar targets anywhere in this codebase; nothing reads
+// one off the snapshot tree, so applyDelta drops these before they reach it
+// rather than storing and later evicting them.
+func radarTargetDeltaPath(path string) bool {
+	segments := strings.SplitN(path, ".", 4)
+	return len(segments) >= 3 && segments[0] == "radars" && segments[2] == "targets"
+}
+
 // applyDelta merges a delta message into the snapshot's tree. Deltas carry flat
 // dotted paths; they are reassembled into the nested shape the SignalK REST tree
 // has so lookupString/lookupNumber/lookupBool keep working unchanged.
@@ -82,6 +96,18 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 
 	for _, update := range d.Updates {
 		for _, val := range update.Values {
+			// mayara's ARPA target nodes are never read off this snapshot --
+			// radar_source.go's REST poller owns radar targets entirely -- and
+			// every target id it has ever assigned climbs forever and is
+			// replayed as a null on every resubscribe (~6,000 measured against
+			// the boat, signalk_stream.go's read-limit comment). Storing them
+			// bought nothing and cost every whole-tree copy in this file a
+			// little more each week, so they are dropped before they ever
+			// reach the tree or pathSeen.
+			if radarTargetDeltaPath(val.Path) {
+				continue
+			}
+
 			s.pathSeen[d.Context+"|"+val.Path] = now
 
 			// An empty path carries top-level scalars (e.g. name) which the REST
@@ -126,6 +152,17 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 	s.lastMessage = now
 }
 
+// snapshotWholeTreeCopies counts operations that deep-copy an entire
+// context's tree -- treeFor, and vesselsTree's per-vessel copy -- rather
+// than one of the leaf/branch accessors added for backend-perf-audit.md
+// Tier 1 #2 (nodeAt, vesselNotificationBranches). Tests use it to assert
+// that evaluating N alarm rules, or building the gauge-values payload, no
+// longer costs O(N) whole-tree copies -- the "dozens a second" the audit
+// measured at 1.2ms/1.4MB/8k allocs per copy of a 3,000-leaf tree. Atomic
+// because the delta stream writer and every reader touch it concurrently;
+// one atomic add is immaterial next to the copy it counts.
+var snapshotWholeTreeCopies int64
+
 // treeFor returns a deep copy of the tree for the given context, or nil if
 // the context is unknown. The returned map can be safely mutated without
 // affecting the snapshot.
@@ -140,6 +177,7 @@ func (s *signalKSnapshot) treeFor(context string) map[string]any {
 
 	// Handlers read this concurrently with the stream writing; returning the
 	// live map would race.
+	atomic.AddInt64(&snapshotWholeTreeCopies, 1)
 	return deepCopyMap(tree)
 }
 
@@ -208,15 +246,36 @@ func (s *signalKSnapshot) selfTree() map[string]any {
 	return s.treeFor(self)
 }
 
-// nodeAt resolves a dotted SignalK path to its leaf node within the self
-// tree -- the map carrying "value" and, when the source declared one, "meta"
-// -- so a caller can read metadata about a path (its unit, say) rather than
-// only the value snapshotAlarmReader hands back. Returns nil for an unknown
-// path or before the self tree exists, the same "absent, not a guess" answer
-// selfTree itself gives.
+// nodeAt resolves a dotted SignalK path to its node within the self tree --
+// the map carrying "value" and, when the source declared one, "meta" or
+// "timestamp" -- so a caller can read metadata about a path (its unit, its
+// freshest timestamp) without pulling in the value snapshotAlarmReader hands
+// back. Returns nil for an unknown path or before the self tree exists, the
+// same "absent, not a guess" answer selfTree itself gives.
+//
+// Walks the live tree under one RLock and copies only the node found,
+// instead of selfTree's whole-tree deep copy just to throw away everything
+// but that one node -- backend-perf-audit.md Tier 1 #2, paid once per
+// enabled alarm rule and once per gauge-bound path on every tick before
+// this.
 func (s *signalKSnapshot) nodeAt(path string) map[string]any {
-	tree := s.selfTree()
-	if tree == nil {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.selfCtx == "" {
+		return nil
+	}
+	return s.nodeAtLocked(s.selfCtx, path)
+}
+
+// nodeAtLocked is nodeAt's walk, callable only while s.mu is already held.
+// It reaches into s.contexts directly rather than through a locking
+// accessor: nothing here may call a method that itself takes s.mu, since a
+// recursive RLock deadlocks whenever a writer is queued between the two
+// acquisitions (the same hazard selfTree's own comment documents).
+func (s *signalKSnapshot) nodeAtLocked(context, path string) map[string]any {
+	tree, ok := s.contexts[context]
+	if !ok {
 		return nil
 	}
 
@@ -242,7 +301,11 @@ func (s *signalKSnapshot) nodeAt(path string) map[string]any {
 	if !ok {
 		return nil
 	}
-	return node
+	// Handlers read this concurrently with the stream writing; returning the
+	// live map would race. Unlike treeFor this does not count toward
+	// snapshotWholeTreeCopies: copying one node, not the whole tree, is
+	// exactly the point of this accessor.
+	return deepCopyMap(node)
 }
 
 // vesselsTree stands in for GET /signalk/v1/api/vessels, which is keyed by bare
@@ -256,9 +319,40 @@ func (s *signalKSnapshot) vesselsTree() map[string]any {
 		if !strings.HasPrefix(context, vesselContextPrefix) {
 			continue
 		}
+		atomic.AddInt64(&snapshotWholeTreeCopies, 1)
 		vessels[strings.TrimPrefix(context, vesselContextPrefix)] = deepCopyMap(tree)
 	}
 	return vessels
+}
+
+// vesselNotificationBranches returns, for every vessel context (self
+// included), a deep copy of just its notifications subtree, keyed by bare
+// vessel id the same way vesselsTree is.
+//
+// signalKCollisionNotifications is the only caller, and a target's
+// notifications.navigation.closestApproach leaf is the only field of
+// another vessel's tree this host ever reads (ADR 0057) -- copying the
+// whole tree per target, everything AIS publishes about it included, bought
+// nothing and cost more every week the snapshot ran (Tier 1 #3: nothing
+// evicted a stale AIS context before this).
+func (s *signalKSnapshot) vesselNotificationBranches() map[string]map[string]any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]map[string]any, len(s.contexts))
+	for context, tree := range s.contexts {
+		if !strings.HasPrefix(context, vesselContextPrefix) {
+			continue
+		}
+		root, ok := tree[notificationsRoot].(map[string]any)
+		if !ok {
+			continue
+		}
+		out[strings.TrimPrefix(context, vesselContextPrefix)] = map[string]any{
+			notificationsRoot: deepCopyMap(root),
+		}
+	}
+	return out
 }
 
 // stale returns true if the path was never seen for the context, or if
@@ -319,6 +413,107 @@ func (s *signalKSnapshot) lastSeen(context, path string) time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.pathSeen[context+"|"+path]
+}
+
+// vesselContextStaleAfter is how long a non-self vessel context may go
+// without a fresh delta before evictStaleVesselContexts drops it. Before
+// this, nothing ever evicted a context (collision_ais.go used to document
+// exactly that): every AIS target this box had ever heard from stayed in
+// the tree forever, so every whole-tree copy in this file got a little
+// slower every week it ran (backend-perf-audit.md Tier 1 #3). An hour is
+// comfortably longer than an ordinary AIS gap -- a target passing behind an
+// island, a VHF duty-cycle silence -- while still bounding growth to
+// "vessels heard within about the last hour," the same order of magnitude
+// as collisionTargetMaxAge and radarPresenceMaxAge's own "gone quiet" gates
+// elsewhere in this package.
+const vesselContextStaleAfter = 1 * time.Hour
+
+// evictStaleVesselContexts drops every non-self vessel context whose newest
+// pathSeen entry is older than vesselContextStaleAfter, taking every
+// pathSeen entry for that context with it. A context with no pathSeen entry
+// at all counts as stale too -- the same "no evidence of freshness" rule
+// stale() already applies to one path, applied here to a whole context. self
+// is never a candidate, whatever its own pathSeen ages look like: it is this
+// vessel, not a contact that can go out of range. Non-vessel contexts
+// (atons, aircraft, meteo) are left alone too -- they are not the "every AIS
+// target ever heard" growth this exists to bound, and nothing in this
+// package's hot paths copies them the way selfTree/vesselsTree do vessels.
+//
+// pathSeen stays the flat "<context>|<path>" map it always was, keyed by
+// path rather than by context first, so every direct pathSeen[...] access
+// this package's tests already make keeps working unchanged. Finding each
+// context's newest entry costs one pass over the whole map; cheap enough at
+// the sweeper's one-minute cadence (startVesselContextSweeper) that
+// restructuring pathSeen was not worth the churn to those tests.
+//
+// Returns the evicted contexts, sorted, so a caller can log exactly what
+// left.
+func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	newest := map[string]time.Time{}
+	for key, seen := range s.pathSeen {
+		context, _, ok := strings.Cut(key, "|")
+		if !ok {
+			continue
+		}
+		if seen.After(newest[context]) {
+			newest[context] = seen
+		}
+	}
+
+	var evicted []string
+	for context := range s.contexts {
+		if context == "" || context == s.selfCtx || !strings.HasPrefix(context, vesselContextPrefix) {
+			continue
+		}
+		if now.Sub(newest[context]) > vesselContextStaleAfter {
+			evicted = append(evicted, context)
+		}
+	}
+	sort.Strings(evicted)
+
+	for _, context := range evicted {
+		delete(s.contexts, context)
+		prefix := context + "|"
+		for key := range s.pathSeen {
+			if strings.HasPrefix(key, prefix) {
+				delete(s.pathSeen, key)
+			}
+		}
+	}
+
+	return evicted
+}
+
+// vesselContextSweepInterval is how often startVesselContextSweeper checks
+// for stale vessel contexts to evict. A one-minute cadence keeps the scan
+// (one pass over pathSeen, see evictStaleVesselContexts) cheap enough not to
+// measure while staying well under vesselContextStaleAfter's own hour.
+const vesselContextSweepInterval = 1 * time.Minute
+
+// startVesselContextSweeper runs evictStaleVesselContexts on
+// vesselContextSweepInterval until ctx is cancelled (backend-perf-audit.md
+// Tier 1 #3, "the snapshot never forgets"). A dedicated ticker rather than
+// piggybacking on the stream watchdog's 15s tick: the sweep's cadence has no
+// reason to track the watchdog's, and keeping them separate means changing
+// one interval can never accidentally change the other.
+func startVesselContextSweeper(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			evicted := globalSignalKSnapshot.evictStaleVesselContexts(now.UTC())
+			if len(evicted) > 0 {
+				log.Printf("signalk snapshot: evicted %d stale vessel context(s): %s", len(evicted), strings.Join(evicted, ", "))
+			}
+		}
+	}
 }
 
 // reconcileNotifications replaces the notifications subtree held for context

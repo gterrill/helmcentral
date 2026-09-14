@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1044,5 +1047,235 @@ func TestReconcileNotificationsAppliesALivenessPreservingReplacementSilently(t *
 	value := lookupAnyMap(snapshot.treeFor(ctx), "notifications", "electrical", "batteries", "house", "voltage", "value")
 	if message, _ := value["message"].(string); message != "High cell voltage" {
 		t.Fatalf("expected the server's copy applied even though it was not logged, got message %q", message)
+	}
+}
+
+// ── radar target deltas (backend-perf-audit.md Tier 1 #3) ─────────────────────
+
+// radarTargetDelta builds a delta carrying one mayara ARPA target node, the
+// shape captured in testdata/mayara/target-delta.json.
+func radarTargetDelta(radarID string, targetID int) signalKDelta {
+	return signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: "2026-08-28T02:01:13.963584Z",
+			SourceRef: "mayara",
+			Values: []signalKValue{{
+				Path:  "radars." + radarID + ".targets." + strconv.Itoa(targetID),
+				Value: map[string]any{"id": targetID, "status": "tracking"},
+			}},
+		}},
+	}
+}
+
+// Reproduces the growth backend-perf-audit.md Tier 1 #3 measured: mayara
+// target ids only climb and are replayed as nulls on every resubscribe, so
+// storing them cost every whole-tree copy in this file a little more every
+// week. radar_source.go's REST poller owns radar targets entirely; nothing
+// reads one off the snapshot, so applyDelta must never let one reach the
+// tree or pathSeen at all.
+func TestApplyDeltaDropsRadarTargetNodesFromTheSnapshot(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	for i := 0; i < 50; i++ {
+		snapshot.applyDelta(radarTargetDelta("fur6424A", 100000000+i), testNow)
+	}
+	// A null delta -- how mayara reports a lost or removed target -- must be
+	// dropped the same way, not create a value:nil leaf.
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "radars.fur6424A.targets.100000003", Value: nil}}}},
+	}, testNow)
+	// A control delta on the same radar is a different path shape
+	// ("radars.<id>.controls.*") and must still be stored -- only targets are
+	// dropped.
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "radars.fur6424A.controls.userName", Value: "Radar 1"}}}},
+	}, testNow)
+
+	tree := snapshot.treeFor("vessels.self")
+	radar := lookupAnyMap(tree, "radars", "fur6424A")
+	if radar == nil {
+		t.Fatalf("expected the radar branch to exist from the controls delta")
+	}
+	if _, ok := radar["targets"]; ok {
+		t.Fatalf("radar target nodes must never reach the snapshot tree, got %+v", radar["targets"])
+	}
+	if _, ok := radar["controls"]; !ok {
+		t.Fatalf("a radar control delta on the same radar must still be stored")
+	}
+
+	for key := range snapshot.pathSeen {
+		if strings.HasPrefix(key, "vessels.self|radars.") && strings.Contains(key, ".targets.") {
+			t.Fatalf("pathSeen must not accumulate radar target keys, got %q", key)
+		}
+	}
+}
+
+// ── vessel context eviction (backend-perf-audit.md Tier 1 #3) ─────────────────
+
+func TestEvictStaleVesselContextsDropsAContextQuietPastTheThreshold(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	stale := "vessels.urn:mrn:imo:mmsi:503016440"
+	snapshot.applyDelta(depthDelta(stale, 5.0), testNow)
+
+	now := testNow.Add(vesselContextStaleAfter + time.Minute)
+	evicted := snapshot.evictStaleVesselContexts(now)
+
+	if len(evicted) != 1 || evicted[0] != stale {
+		t.Fatalf("expected %q evicted, got %v", stale, evicted)
+	}
+	if snapshot.treeFor(stale) != nil {
+		t.Fatalf("evicted context's tree must be gone")
+	}
+	if _, present := snapshot.pathSeen[stale+"|environment.depth.belowTransducer"]; present {
+		t.Fatalf("evicted context's pathSeen entries must be gone")
+	}
+}
+
+func TestEvictStaleVesselContextsKeepsAFreshContext(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	fresh := "vessels.urn:mrn:imo:mmsi:503016441"
+	snapshot.applyDelta(depthDelta(fresh, 5.0), testNow)
+
+	now := testNow.Add(30 * time.Minute)
+	evicted := snapshot.evictStaleVesselContexts(now)
+
+	if len(evicted) != 0 {
+		t.Fatalf("expected nothing evicted within the staleness window, got %v", evicted)
+	}
+	if snapshot.treeFor(fresh) == nil {
+		t.Fatalf("a fresh context must survive the sweep")
+	}
+}
+
+// self must never be evicted, however old its own data looks -- it is this
+// vessel, not a contact that can go out of range.
+func TestEvictStaleVesselContextsNeverEvictsSelf(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	snapshot.applyDelta(depthDelta("vessels.self", 5.0), testNow)
+
+	now := testNow.Add(24 * time.Hour)
+	evicted := snapshot.evictStaleVesselContexts(now)
+
+	if len(evicted) != 0 {
+		t.Fatalf("expected self never evicted, got %v", evicted)
+	}
+	if snapshot.treeFor("vessels.self") == nil {
+		t.Fatalf("self's tree must survive the sweep")
+	}
+}
+
+// A vessel that reappears after eviction is stored again as an ordinary new
+// context -- eviction must leave nothing behind that would make a later
+// applyDelta for the same context behave differently from a first sighting.
+func TestEvictedVesselContextIsStoredAgainNormallyOnReappearance(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	ctx := "vessels.urn:mrn:imo:mmsi:503016442"
+	snapshot.applyDelta(depthDelta(ctx, 5.0), testNow)
+
+	afterSweep := testNow.Add(vesselContextStaleAfter + time.Minute)
+	if evicted := snapshot.evictStaleVesselContexts(afterSweep); len(evicted) != 1 {
+		t.Fatalf("expected the quiet context evicted first, got %v", evicted)
+	}
+
+	reappeared := afterSweep.Add(time.Minute)
+	snapshot.applyDelta(depthDelta(ctx, 7.5), reappeared)
+
+	tree := snapshot.treeFor(ctx)
+	if tree == nil {
+		t.Fatalf("expected the reappeared context to be stored")
+	}
+	if depth := lookupNumber(tree, "environment", "depth", "belowTransducer", "value"); depth != 7.5 {
+		t.Fatalf("depth after reappearance: got %v, want 7.5", depth)
+	}
+	if seen := snapshot.pathSeen[ctx+"|environment.depth.belowTransducer"]; !seen.Equal(reappeared) {
+		t.Fatalf("expected pathSeen refreshed to the reappearance time, got %v", seen)
+	}
+
+	// A second sweep right away must not re-evict a context that just came
+	// back to life.
+	if evicted := snapshot.evictStaleVesselContexts(reappeared); len(evicted) != 0 {
+		t.Fatalf("expected the reappeared context to survive an immediate sweep, got %v", evicted)
+	}
+}
+
+// ── whole-tree copy accounting (backend-perf-audit.md Tier 1 #2) ──────────────
+
+// nodeAt must still hand back an independent copy: mutating what it returns
+// must never be visible through a later nodeAt call, the same "handlers read
+// this concurrently with the stream writing" guarantee treeFor documents.
+func TestNodeAtReturnsACopyNotTheLiveNode(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "environment.depth.belowTransducer", Value: 2.5}}}},
+	}, testNow)
+
+	node := snapshot.nodeAt("environment.depth.belowTransducer")
+	if node == nil {
+		t.Fatalf("expected a node")
+	}
+	node["value"] = 999.0
+
+	again := snapshot.nodeAt("environment.depth.belowTransducer")
+	if again["value"] != 2.5 {
+		t.Fatalf("mutating a returned node must not affect the snapshot, got %v", again["value"])
+	}
+}
+
+// nodeAt must not touch snapshotWholeTreeCopies: copying one node, not the
+// whole tree, is the entire point of this accessor (backend-perf-audit.md
+// Tier 1 #2 measured selfTree()+walk at 1.2ms/8k allocs per call against a
+// 3,000-leaf tree, paid once per enabled alarm rule every tick before this).
+func TestNodeAtDoesNotCountAsAWholeTreeCopy(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "environment.depth.belowTransducer", Value: 2.5}}}},
+	}, testNow)
+
+	before := atomic.LoadInt64(&snapshotWholeTreeCopies)
+	for i := 0; i < 15; i++ {
+		snapshot.nodeAt("environment.depth.belowTransducer")
+	}
+	if after := atomic.LoadInt64(&snapshotWholeTreeCopies); after != before {
+		t.Fatalf("nodeAt must never deep-copy the whole tree, count went %d -> %d", before, after)
+	}
+}
+
+// vesselNotificationBranches must copy only the notifications branch per
+// vessel, never the whole vessel tree vesselsTree() would (collision_ais.go's
+// only caller reads nothing else off another vessel's tree).
+func TestVesselNotificationBranchesDoesNotCountAsAWholeTreeCopy(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	target := "vessels.urn:mrn:imo:mmsi:503016440"
+	snapshot.applyDelta(signalKDelta{
+		Context: target,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "notifications.navigation.closestApproach",
+			Value: collisionNotification("warn", "TASHTEGO - CPA WARNING"),
+		}}}},
+	}, testNow)
+
+	before := atomic.LoadInt64(&snapshotWholeTreeCopies)
+	branches := snapshot.vesselNotificationBranches()
+	if after := atomic.LoadInt64(&snapshotWholeTreeCopies); after != before {
+		t.Fatalf("vesselNotificationBranches must never deep-copy a whole vessel tree, count went %d -> %d", before, after)
+	}
+	if _, ok := branches[strings.TrimPrefix(target, vesselContextPrefix)]; !ok {
+		t.Fatalf("expected the target's notifications branch, got %v", branches)
 	}
 }

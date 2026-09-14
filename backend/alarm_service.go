@@ -213,8 +213,18 @@ func attachLoggedOccurrenceTimes(statuses []alarmStatus) []alarmStatus {
 }
 
 func worstAlarmState() string {
+	return worstAlarmStateOf(activeAlarms())
+}
+
+// worstAlarmStateOf is worstAlarmState over a slice a caller already built,
+// so a caller that needs both the list and the worst severity --
+// buildAlarmsPayload, startHeartbeat -- calls activeAlarms() exactly once
+// instead of twice (backend-perf-audit.md Tier 1 #2: activeAlarms merges
+// rule alarms with bus notifications and collision warnings, each of which
+// touches the snapshot, so calling it twice paid for that merge twice).
+func worstAlarmStateOf(alarms []alarmStatus) string {
 	worst := alarmStateNormal
-	for _, status := range activeAlarms() {
+	for _, status := range alarms {
 		if alarmStateRank[status.State] > alarmStateRank[worst] {
 			worst = status.State
 		}
@@ -307,10 +317,17 @@ func deleteAlarmRuleHandler(c echo.Context) error {
 
 // buildAlarmsPayload is shared by the REST handler and the SSE stream so the
 // two shapes cannot drift apart.
+//
+// One activeAlarms() call, not one for "alarms" and a second inside
+// worstAlarmState for "worst" -- each call re-merges rule alarms with bus
+// notifications and collision warnings from the snapshot, so calling it
+// twice paid for that merge twice on every build (backend-perf-audit.md
+// Tier 1 #2).
 func buildAlarmsPayload() map[string]any {
+	alarms := activeAlarms()
 	return map[string]any{
-		"alarms": activeAlarms(),
-		"worst":  worstAlarmState(),
+		"alarms": alarms,
+		"worst":  worstAlarmStateOf(alarms),
 	}
 }
 

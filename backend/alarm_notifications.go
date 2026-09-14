@@ -56,13 +56,13 @@ var (
 // longer has a rule for but another Helmcentral instance still published to
 // shows up as a ghost with no engine status behind it at all.
 func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) bool) []alarmStatus {
-	tree := snapshot.selfTree()
-	if tree == nil {
-		return nil
-	}
-
-	root, ok := tree[notificationsRoot].(map[string]any)
-	if !ok {
+	// nodeAt copies only the notifications branch, not the whole self tree
+	// selfTree() would -- this runs once per activeAlarms() call (the alarms
+	// SSE event, the REST handler, the heartbeat) and unitForAlarmPath below
+	// used to cost a second whole-tree copy per live notification on top of
+	// it (backend-perf-audit.md Tier 1 #2).
+	root := snapshot.nodeAt(notificationsRoot)
+	if root == nil {
 		return nil
 	}
 

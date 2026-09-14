@@ -450,6 +450,10 @@ func main() {
 	defer cancelStream()
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	go newRadarPoller(globalRadarTargetStore, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
+	// Drops non-self vessel contexts (AIS targets) this box has not heard
+	// from in an hour, so every whole-tree copy of the snapshot does not get
+	// a little slower every week it runs (backend-perf-audit.md Tier 1 #3).
+	go startVesselContextSweeper(streamCtx, vesselContextSweepInterval)
 	go startAlarmEvaluator(streamCtx, alarmEvaluationInterval)
 	go startNotificationDrainer(streamCtx, notifyDrainInterval)
 	go startStreamWatchdog(streamCtx, watchdogCheckInterval)

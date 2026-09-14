@@ -98,11 +98,18 @@ func signalKPathsHandler(c echo.Context) error {
 		paths = collectSignalKPaths(tree)
 	}
 
+	// Hoisted out of the loop below: this used to run inside the loop over
+	// derivedPathIDs, recomputing every derived path (two self-tree copies,
+	// the fuel-path tree walks, the barometer ring scan) once per id --
+	// 172-234ms measured against the boat for what should be one pass
+	// (backend-perf-audit.md Tier 1 #2).
+	derivedValues := derivedPathValues()
+
 	// Derived paths are listed alongside the published ones, or an operator
 	// has no way to find something to bind that the vessel never announces.
 	for _, derived := range derivedPathIDs {
 		entry := signalKPath{Path: derived, Units: derivedPathUnits[derived]}
-		if value := derivedPathValues()[derived]; value != nil {
+		if value := derivedValues[derived]; value != nil {
 			entry.Value = value
 		}
 		paths = append(paths, entry)
@@ -154,10 +161,17 @@ func buildGaugeValuesPayload() map[string]any {
 	ages := make(map[string]float64, len(paths))
 
 	now := time.Now().UTC()
-	derivedValues, derivedAges := computeDerivedPaths(now)
+
+	// One self-tree copy shared by computeDerivedPathsFromTree and the
+	// snapshot reader below, instead of each fetching its own -- this used to
+	// cost two whole-tree copies on every build (backend-perf-audit.md
+	// Tier 1 #2), once per second via the hub even before this fix.
+	context := globalSignalKSnapshot.selfContext()
+	tree := globalSignalKSnapshot.selfTree()
+	derivedValues, derivedAges := computeDerivedPathsFromTree(globalSignalKSnapshot, context, tree, now)
 
 	if len(paths) > 0 {
-		read := snapshotAlarmReader(globalSignalKSnapshot)
+		read := alarmReaderFromTree(globalSignalKSnapshot, context, tree)
 		for _, path := range paths {
 			// A derived path is computed rather than looked up, but rides the
 			// same event so every widget binds it the same way.
