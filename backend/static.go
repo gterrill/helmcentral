@@ -68,11 +68,21 @@ func registerStaticHandlerFS(e *echo.Echo, distFS fs.FS) {
 		// running for days reloads its tab far more often than a phone
 		// bookmark does, and a cached shell from before the last deploy
 		// names assets that no longer exist on disk - a blank kiosk screen
-		// with nothing in any log to say why. Hashed assets are unaffected:
-		// their filename already changes on every build, so the browser's
-		// default caching for them is correct and is left alone here.
-		if isShell {
+		// with nothing in any log to say why.
+		//
+		// Hashed assets are the opposite case: their filename already
+		// changes on every build (Vite's content hash), so the same name can
+		// never resolve to different bytes across a deploy. http.FileServer
+		// leaves them with no Cache-Control at all - and no ETag or
+		// Last-Modified either, since embed.FS reports a zero modtime for
+		// every file - so a kiosk reload was refetching the whole ~2.3MB
+		// bundle every single time. Tell the browser it never needs to
+		// revalidate.
+		switch {
+		case isShell:
 			c.Response().Header().Set("Cache-Control", "no-cache")
+		case strings.HasPrefix(reqPath, "assets/"):
+			c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		fileServer.ServeHTTP(c.Response().Writer, c.Request())
 		return nil

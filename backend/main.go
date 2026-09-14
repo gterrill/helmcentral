@@ -210,6 +210,11 @@ func main() {
 	// combined with credentials is rejected by every browser anyway, and was
 	// half the README's security warning (docs/adr/0040).
 	e.Use(corsMiddleware())
+	// gzip response compression (compression.go), skipping SSE streams, the
+	// radar websocket upgrade, and the already-compressed tile/image/font
+	// proxy endpoints - see compressionSkipper's doc comment for the full
+	// list and why each is excluded.
+	registerCompressionMiddleware(e)
 
 	// Encrypted secrets store. Must be opened and loaded into the process
 	// environment before any provider registration below, since SignalK

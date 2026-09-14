@@ -127,3 +127,50 @@ func TestStaticHandler_HashedAssetsAreNotNoCache(t *testing.T) {
 		t.Errorf("GET /assets/index-abc.js Cache-Control = %q, want anything but no-cache", cc)
 	}
 }
+
+// TestStaticHandler_HashedAssetsAreImmutable is the regression guard for the
+// kiosk-reload finding: every /assets/* file already carries a content hash
+// in its filename (Vite's build output), so a reload can never be served a
+// stale one under that name - it's safe, and worth 1.5-3MB of avoided
+// re-fetch per reload, to tell the browser to never revalidate it.
+func TestStaticHandler_HashedAssetsAreImmutable(t *testing.T) {
+	e := echo.New()
+	registerStaticHandlerFS(e, testDistFS())
+
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-abc.js", nil))
+
+	want := "public, max-age=31536000, immutable"
+	if cc := rec.Header().Get("Cache-Control"); cc != want {
+		t.Errorf("GET /assets/index-abc.js Cache-Control = %q, want %q", cc, want)
+	}
+}
+
+// TestStaticHandler_NonHashedPublicFilesAreNotImmutable guards the other
+// side: sw.js, the manifest and icons ship at a fixed, unhashed path (a
+// service worker in particular MUST be revalidated - browsers already cap
+// its own cache lifetime at 24h - so an immutable header on it would leave
+// a kiosk running a stale worker indefinitely). None of these live under
+// /assets/, so they must come back with no caching header added here at
+// all - whatever http.FileServer would have set on its own, unmodified.
+func TestStaticHandler_NonHashedPublicFilesAreNotImmutable(t *testing.T) {
+	dist := fstest.MapFS{
+		"index.html":           {Data: []byte(`<!doctype html><div id="root"></div>`)},
+		"assets/index-abc.js":  {Data: []byte(`console.log("app")`)},
+		"sw.js":                {Data: []byte(`self.addEventListener("install", () => {});`)},
+		"manifest.webmanifest": {Data: []byte(`{"name":"Helmcentral"}`)},
+		"icons/icon-192.png":   {Data: []byte("not a real png, just test bytes")},
+	}
+
+	e := echo.New()
+	registerStaticHandlerFS(e, dist)
+
+	for _, path := range []string{"/sw.js", "/manifest.webmanifest", "/icons/icon-192.png"} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		if cc := rec.Header().Get("Cache-Control"); cc == "public, max-age=31536000, immutable" {
+			t.Errorf("GET %s Cache-Control = %q, must not be the hashed-asset immutable header", path, cc)
+		}
+	}
+}

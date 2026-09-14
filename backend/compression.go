@@ -1,0 +1,116 @@
+package main
+
+import (
+	"strings"
+
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+)
+
+// compressionMinLength is the response-body size (bytes, uncompressed)
+// below which gzip is skipped. Under this, the gzip container's own framing
+// overhead can make the "compressed" response larger than the original, and
+// the CPU spent on both ends buys nothing - this is Echo's own MinLength
+// knob (middleware/compress.go), just given a non-zero default here.
+const compressionMinLength = 1024
+
+// noCompressRoutePatterns are registered Echo route patterns - what
+// echo.Context.Path() reports once a route has matched, e.g.
+// "/api/world-imagery/:z/:x/:y", never a resolved "/api/world-imagery/9/1/2"
+// - that must never be gzip-wrapped. Matching the pattern rather than the
+// resolved request path means a param value can never accidentally dodge,
+// or accidentally trigger, the skip.
+//
+// TestCompression_SkipListMatchesRegisteredRoutes (compression_test.go)
+// cross-checks every entry here against buildAPIRoutes (main.go), so a
+// route rename shows up as a test failure instead of a silently stale skip
+// list.
+var noCompressRoutePatterns = map[string]bool{
+	// Server-Sent Events (grep for "text/event-stream" turned up exactly
+	// these three handlers). Each one writes with an explicit
+	// response.Flush() after every event and exists specifically so that
+	// flush reaches the client immediately - gzip's own Flush() does forward
+	// bytes right away too (see the vendored
+	// echo/middleware/compress.go), but there is no requirement here to
+	// prove a streaming+compression interaction out, and leaving the wire
+	// format alone is the simpler, lower-risk choice for a stream that is
+	// mostly small, already-terse JSON frames anyway.
+	"/api/stream":      true, // vessel_state_stream.go: telemetryStream
+	"/api/logs/stream": true, // log_handlers.go: logsStreamHandler
+	// assistant_handlers.go: postAssistantMessageHandler streams its reply
+	// over SSE on the same connection that accepted the POST.
+	"/api/assistant/conversations/:id/messages": true,
+
+	// WebSocket upgrade (grep for "websocket.Accept" turned up exactly this
+	// one inbound upgrade; signalk_publish.go and signalk_stream.go dial
+	// *outbound* websockets to SignalK and are not HTTP routes at all).
+	// There is no HTTP response body to compress once the connection has
+	// been upgraded, and wrapping the writer risks breaking whatever
+	// hijack/upgrade path coder/websocket relies on.
+	"/api/radar/spokes": true, // radar_spoke_relay.go: radarSpokeRelayHandler
+
+	// Already-compressed tile/image/font proxy endpoints (tile_proxy.go,
+	// basemap_proxy.go, and the tile half of sat_charts.go): PNG/JPEG/WebP
+	// map tiles and protobuf vector tiles/glyphs gain nothing from a second
+	// compression pass, and it would spend CPU on every proxied fetch for
+	// no smaller a response.
+	"/api/world-imagery/:z/:x/:y":          true, // tile_proxy.go
+	"/api/sat-charts/:id/:z/:x/:y":         true, // sat_charts.go
+	"/api/basemap/style/:name":             true, // basemap_proxy.go
+	"/api/basemap/tilejson":                true, // basemap_proxy.go
+	"/api/basemap/tiles/:z/:x/:y":          true, // basemap_proxy.go
+	"/api/basemap/fonts/:fontstack/:range": true, // basemap_proxy.go
+	"/api/basemap/sprite/:name":            true, // basemap_proxy.go
+}
+
+// noCompressExtensions covers static files served from the embedded SPA
+// build (static.go): images and web fonts, which are already-compressed
+// binary formats. Matched against the actual request path rather than a
+// route pattern, because static.go registers one wildcard route ("/*") for
+// every file in dist - the pattern alone can't tell a font apart from a JS
+// bundle.
+//
+// woff2 is the audit's own example; plain .woff is included alongside it
+// for the same reason (its internal per-glyph tables are already
+// compressed) even though the current frontend build emits both formats
+// side by side for older browsers.
+var noCompressExtensions = []string{
+	".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".ico",
+	".woff", ".woff2",
+}
+
+// compressionSkipper decides which requests the gzip middleware leaves
+// alone: SSE streams, the websocket upgrade, the tile/image/font proxy
+// endpoints, already-compressed static file extensions, and any request
+// that already carries a byte Range. A Range header is the defensive case:
+// a range refers to offsets into the original representation, and
+// compressing the response out from under it would make those offsets
+// meaningless.
+func compressionSkipper(c echo.Context) bool {
+	if c.Request().Header.Get("Range") != "" {
+		return true
+	}
+	if noCompressRoutePatterns[c.Path()] {
+		return true
+	}
+	path := c.Request().URL.Path
+	for _, ext := range noCompressExtensions {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// registerCompressionMiddleware wires gzip response compression ahead of
+// every route registered on e - both the /api routes (registerAPIRoutes)
+// and the embedded SPA (registerStaticHandler) - so it must be called
+// before either. Order relative to the other e.Use() calls in main() does
+// not otherwise matter: Echo nests global middleware by registration order
+// regardless of when routes are added.
+func registerCompressionMiddleware(e *echo.Echo) {
+	e.Use(middleware.GzipWithConfig(middleware.GzipConfig{
+		Skipper:   compressionSkipper,
+		MinLength: compressionMinLength,
+	}))
+}
