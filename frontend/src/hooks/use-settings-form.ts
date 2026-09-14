@@ -14,7 +14,6 @@ export type SettingsPayload = {
     house_battery_capacity_ah?: number
   }
   ui?: {
-    vessel_state_refresh_seconds?: number
     tank_labels?: Record<string, string>
     tide_provider?: string
     tide_station_id?: string

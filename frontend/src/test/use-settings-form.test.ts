@@ -54,7 +54,6 @@ describe('useSettingsForm', () => {
         json: async () => ({
           ui: {
             tank_labels: { 'fuel.2': 'Port Fuel' },
-            vessel_state_refresh_seconds: 10,
           },
         }),
       }
@@ -78,7 +77,6 @@ describe('useSettingsForm', () => {
     // NOT dropped — the POST body is the full merged object, not a bare
     // patch.
     expect(body.ui.tank_labels).toEqual({ 'fuel.2': 'Port Fuel' })
-    expect(body.ui.vessel_state_refresh_seconds).toBe(10)
   })
 
   it('surfaces a save failure via the error field', async () => {

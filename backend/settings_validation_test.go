@@ -48,7 +48,6 @@ signalk:
 ui:
     tank_labels:
         fuel.2: PORT FWD
-    vessel_state_refresh_seconds: 10
 units: metric
 `, address, port)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -298,7 +297,7 @@ func TestValidateSettingsChange_DoesNotProbeWhenAuthModeIsUnchanged(t *testing.T
 	current.Auth.Mode = "signalk"
 
 	next := current
-	next.UI.VesselStateRefreshSeconds = 30
+	next.UI.TideAutoStation = true
 
 	if invalid := validateSettingsChange(current, next); invalid != nil {
 		t.Fatalf("an unchanged auth mode must not be re-probed, got %+v", invalid)
@@ -380,5 +379,58 @@ func TestSettingsPayload_NormalizesUnknownScopeMethodToRatio(t *testing.T) {
 	req.Anchor.ScopeMethod = "vibes"
 	if got := normalizeSettingsPayload(req).Anchor.ScopeMethod; got != "ratio" {
 		t.Fatalf("unknown anchor.scope_method should normalize to ratio, got %q", got)
+	}
+}
+
+// The boat's existing settings.yaml may still carry the retired
+// ui.vessel_state_refresh_seconds key from before that setting was removed.
+// readSettings decodes into a plain map, not the strict settingsPayload
+// struct, so loading a file with the stale key must not fail - and the first
+// save afterward must drop it from the file for good rather than copying it
+// forward on every subsequent save.
+func TestUpdateSettings_PurgesLegacyVesselStateRefreshKeyFromFile(t *testing.T) {
+	srv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer srv.Close()
+	host, port := hostPort(t, srv.URL)
+
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	body := fmt.Sprintf(`boat:
+    model: Test Boat
+signalk:
+    address: %s
+    port: %d
+ui:
+    tank_labels:
+        fuel.2: PORT FWD
+    vessel_state_refresh_seconds: 10
+units: metric
+`, host, port)
+	if err := os.WriteFile(settingsPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	current, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings carrying the retired key: %v", err)
+	}
+	// Must not panic or error just because the raw map holds a key the struct
+	// no longer knows about.
+	_ = buildSettingsPayload(current)
+
+	code, _ := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Boat.Model = "Changed Boat"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected save to succeed, got %d", code)
+	}
+
+	after, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings after save: %v", err)
+	}
+	uiMap, _ := after["ui"].(map[string]any)
+	if _, present := uiMap["vessel_state_refresh_seconds"]; present {
+		t.Fatalf("save must purge the retired vessel_state_refresh_seconds key, still present: %+v", uiMap)
 	}
 }

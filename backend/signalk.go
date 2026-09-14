@@ -22,7 +22,6 @@ import (
 
 const (
 	defaultDistanceUnits             = "metric"
-	defaultVesselStateRefreshSeconds = 10
 	defaultBowRollerHeightM          = 1.5
 	defaultChainSizeMM               = 12
 	defaultChainOnboardM             = 150
@@ -83,7 +82,6 @@ type settingsPayload struct {
 		HouseBatteryCapacityAh float64 `json:"house_battery_capacity_ah"`
 	} `json:"boat"`
 	UI struct {
-		VesselStateRefreshSeconds int               `json:"vessel_state_refresh_seconds"`
 		TankLabels                map[string]string `json:"tank_labels"`
 		TideProvider              string            `json:"tide_provider"`
 		TideStationID             string            `json:"tide_station_id"`
@@ -189,7 +187,11 @@ func updateSettingsHandler(c echo.Context) error {
 			uiMap[key] = value
 		}
 	}
-	uiMap["vessel_state_refresh_seconds"] = normalized.UI.VesselStateRefreshSeconds
+	// The boat's settings.yaml may still carry this retired key from before
+	// the setting was removed. readSettings decodes into a plain map, so a
+	// stale key never breaks loading, but every save must still drop it from
+	// the file for good instead of copying it forward via the loop above.
+	delete(uiMap, "vessel_state_refresh_seconds")
 	if normalized.UI.TankLabels != nil {
 		uiMap["tank_labels"] = normalized.UI.TankLabels
 	}
@@ -346,11 +348,6 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 	}
 
 	if uiMap, ok := settings["ui"].(map[string]any); ok {
-		seconds := coercePort(uiMap["vessel_state_refresh_seconds"])
-		if seconds > 0 {
-			payload.UI.VesselStateRefreshSeconds = seconds
-		}
-
 		if labelsMap, ok := uiMap["tank_labels"].(map[string]any); ok {
 			payload.UI.TankLabels = map[string]string{}
 			for key, value := range labelsMap {
@@ -483,11 +480,6 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Boat.HouseBatteryCapacityAh = req.Boat.HouseBatteryCapacityAh
 	if normalized.Boat.HouseBatteryCapacityAh <= 0 {
 		normalized.Boat.HouseBatteryCapacityAh = defaultHouseBatteryCapacityAh
-	}
-
-	normalized.UI.VesselStateRefreshSeconds = req.UI.VesselStateRefreshSeconds
-	if normalized.UI.VesselStateRefreshSeconds <= 0 {
-		normalized.UI.VesselStateRefreshSeconds = defaultVesselStateRefreshSeconds
 	}
 
 	if req.UI.TankLabels != nil {

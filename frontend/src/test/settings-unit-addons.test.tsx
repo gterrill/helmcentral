@@ -2,17 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { useState } from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { AnchorWatchOptionsSection } from '@/components/settings/sections/anchor-watch-options-section'
-import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
 import { BoatUiSection } from '@/components/settings/sections/boat-ui-section'
-import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 import { initialRegularSettingsDraft, type RegularSettingsDraft } from '@/components/settings/settings-draft'
 
-// These three sections gained unit-of-measure addons (an InputGroup wrapping
-// each Input with a trailing "m" / "mm" / "m²" / "s" / "Ah" symbol) so the
-// unit lives next to the value instead of only in the label text. These tests
-// pin: the new aria-labels, the addon symbol rendering as text, that typing
-// still reaches onChange/the draft (InputGroupInput must not swallow events),
-// and that clicking an addon focuses its input (the upstream click-to-focus
+// These sections gained unit-of-measure addons (an InputGroup wrapping each
+// Input with a trailing "m" / "mm" / "m²" / "Ah" symbol) so the unit lives
+// next to the value instead of only in the label text. These tests pin: the
+// new aria-labels, the addon symbol rendering as text, that typing still
+// reaches onChange/the draft (InputGroupInput must not swallow events), and
+// that clicking an addon focuses its input (the upstream click-to-focus
 // behaviour InputGroupAddon provides).
 
 function renderAnchorSection(overrides: Partial<RegularSettingsDraft> = {}) {
@@ -26,26 +24,6 @@ function renderAnchorSection(overrides: Partial<RegularSettingsDraft> = {}) {
         draft={draft}
         onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))}
       />
-    )
-  }
-
-  render(<Harness />)
-  return { latestDraft: () => draftStates[draftStates.length - 1] }
-}
-
-function renderSignalkSection(overrides: Partial<RegularSettingsDraft> = {}) {
-  const draftStates: RegularSettingsDraft[] = []
-
-  function Harness() {
-    const [draft, setDraft] = useState<RegularSettingsDraft>({ ...initialRegularSettingsDraft, ...overrides })
-    draftStates.push(draft)
-    return (
-      <SecretsStatusProvider>
-        <SignalKConnectionSection
-          draft={draft}
-          onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))}
-        />
-      </SecretsStatusProvider>
     )
   }
 
@@ -117,34 +95,6 @@ describe('settings unit addons', () => {
       fireEvent.click(addon)
 
       expect(windage).toHaveFocus()
-    })
-  })
-
-  describe('SignalKConnectionSection', () => {
-    it('exposes the refresh interval field by its new aria-label with its unit addon rendered as text', () => {
-      renderSignalkSection()
-
-      const refresh = screen.getByLabelText('Vessel state refresh interval in seconds')
-      expect(within(refresh.closest('[data-slot="input-group"]') as HTMLElement).getByText('s')).toBeInTheDocument()
-    })
-
-    it('still fires onChange with the raw string value when typing into the refresh input', () => {
-      const { latestDraft } = renderSignalkSection()
-
-      const refresh = screen.getByLabelText('Vessel state refresh interval in seconds')
-      fireEvent.change(refresh, { target: { value: '30' } })
-
-      expect(latestDraft().vesselStateRefreshSeconds).toBe('30')
-    })
-
-    it('focuses the refresh input when its unit addon is clicked', () => {
-      renderSignalkSection()
-
-      const refresh = screen.getByLabelText('Vessel state refresh interval in seconds')
-      const addon = refresh.closest('[data-slot="input-group"]')!.querySelector('[data-slot="input-group-addon"]') as HTMLElement
-      fireEvent.click(addon)
-
-      expect(refresh).toHaveFocus()
     })
   })
 
