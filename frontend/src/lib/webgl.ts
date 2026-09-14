@@ -28,7 +28,16 @@ function probeWebGL2(): boolean {
   if (typeof document === 'undefined') return false
   try {
     const canvas = document.createElement('canvas')
-    return canvas.getContext('webgl2') !== null
+    const ctx = canvas.getContext('webgl2')
+    // The probe context is otherwise never released: it's created on a
+    // throwaway canvas that's immediately discarded, but the GPU-backed
+    // context itself would sit alive for the life of the page (or until GC
+    // gets to it) with nothing ever using it. WEBGL_lose_context is the
+    // standard way to force an unused context to free its resources right
+    // away. Optional chaining throughout: some contexts (and every stub a
+    // test hands back) may not implement getExtension at all.
+    ctx?.getExtension?.('WEBGL_lose_context')?.loseContext?.()
+    return ctx !== null
   } catch {
     return false
   }

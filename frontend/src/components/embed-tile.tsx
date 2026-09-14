@@ -1,10 +1,20 @@
 import { Globe, Settings2 } from 'lucide-react'
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
+import { useInView } from '@/hooks/use-in-view'
 import { isValidEmbedUrl, type EmbedWidgetConfig } from '@/lib/dashboard-widgets'
 import { cn } from '@/lib/utils'
+
+// How long to wait, once the tile has scrolled into view, before actually
+// mounting the iframe. A tile already in view at first render (the common
+// case: dashboard startup) would otherwise have its embed compete with
+// Helmcentral's own script evaluation for the same paint — a measured trace
+// found one Grafana panel alone costing 1.38s of main-thread time, more than
+// the rest of the dashboard's startup script combined. Exported so the test
+// file can advance fake timers past it without duplicating the number.
+export const MOUNT_IDLE_TIMEOUT_MS = 200
 
 interface EmbedTileProps {
   config: EmbedWidgetConfig | undefined
@@ -51,6 +61,39 @@ export const EmbedTile = memo(function EmbedTile({
     [config?.url, isDarkTheme],
   )
 
+  // Loads the iframe only once the tile has actually scrolled near the
+  // viewport, so an off-screen embed doesn't cost anything until it might be
+  // seen. useInView is sticky (see its own doc comment), so scrolling the
+  // tile back out afterwards never tears the iframe down and forces the
+  // embedded app to reload.
+  const [frameContainerRef, inView] = useInView<HTMLDivElement>({ rootMargin: '200px' })
+  const [shouldMount, setShouldMount] = useState(false)
+
+  useEffect(() => {
+    if (!inView) return
+
+    // requestIdleCallback, where it exists, so the mount doesn't steal a
+    // frame from the browser's own first paint. The kiosk's WPE WebKit
+    // (Safari 16-era) has no requestIdleCallback, so a plain setTimeout
+    // fallback is required there — this is a feature check, not a masking
+    // fallback: both paths land on the same mount, just scheduled
+    // differently, and neither is a substitute for the other's failure.
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(() => setShouldMount(true), {
+        timeout: MOUNT_IDLE_TIMEOUT_MS,
+      })
+      return () => window.cancelIdleCallback(id)
+    }
+    const id = window.setTimeout(() => setShouldMount(true), MOUNT_IDLE_TIMEOUT_MS)
+    return () => window.clearTimeout(id)
+    // `src` is included so a pending idle callback scheduled for a since-
+    // replaced embed URL is cancelled rather than left to fire later.
+  }, [inView, src])
+
+  const mountFrame = hasUsableUrl && shouldMount
+  const placeholderClassName =
+    'flex h-full min-h-0 flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-background/60 px-3 py-4 text-center'
+
   // Frameless drops the Tile title bar and padding so the embed fills the
   // widget (a wall-display strip has no use for either). Editing overrides
   // it: the gear icon and title need to stay reachable to reconfigure the
@@ -58,18 +101,30 @@ export const EmbedTile = memo(function EmbedTile({
   // through to the regular Tile-wrapped rendering below.
   if (hasUsableUrl && config?.frameless && !editing) {
     return (
-      <div className="h-full w-full overflow-hidden rounded-md border border-border bg-background">
-        <iframe
-          src={src}
-          title={title}
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-          // allow-same-origin is needed for the embedded app's own session
-          // (Grafana will not render without it). It only defeats the sandbox
-          // for a same-origin frame, which an operator-supplied embed is not.
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-          className="h-full w-full border-0"
-        />
+      <div
+        ref={frameContainerRef}
+        data-testid="embed-frame-container"
+        className="h-full w-full overflow-hidden rounded-md border border-border bg-background"
+      >
+        {mountFrame ? (
+          <iframe
+            src={src}
+            title={title}
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+            // allow-same-origin is needed for the embedded app's own session
+            // (Grafana will not render without it). It only defeats the sandbox
+            // for a same-origin frame, which an operator-supplied embed is not.
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+            className="h-full w-full border-0"
+          />
+        ) : (
+          <div className={placeholderClassName}>
+            <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              Loading {title}...
+            </span>
+          </div>
+        )}
       </div>
     )
   }
@@ -96,25 +151,33 @@ export const EmbedTile = memo(function EmbedTile({
           it. The iframe is `h-full`, and in the narrow CSS grid the enclosing chain is
           auto-height, so without a floor the frame collapses to its ~150px intrinsic
           default rather than the height the tile was given. */}
-      <div className="h-full min-h-[240px]">
+      <div ref={frameContainerRef} data-testid="embed-frame-container" className="h-full min-h-[240px]">
         {hasUsableUrl ? (
-          <iframe
-            src={src}
-            title={title}
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-            // allow-same-origin is needed for the embedded app's own session
-            // (Grafana will not render without it). It only defeats the sandbox
-            // for a same-origin frame, which an operator-supplied embed is not.
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-            className={cn(
-              'h-full w-full rounded-md border-0 bg-background',
-              // Let drag/resize gestures pass through to the grid underneath.
-              editing && 'pointer-events-none',
-            )}
-          />
+          mountFrame ? (
+            <iframe
+              src={src}
+              title={title}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              // allow-same-origin is needed for the embedded app's own session
+              // (Grafana will not render without it). It only defeats the sandbox
+              // for a same-origin frame, which an operator-supplied embed is not.
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              className={cn(
+                'h-full w-full rounded-md border-0 bg-background',
+                // Let drag/resize gestures pass through to the grid underneath.
+                editing && 'pointer-events-none',
+              )}
+            />
+          ) : (
+            <div className={placeholderClassName}>
+              <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                Loading {title}...
+              </span>
+            </div>
+          )
         ) : (
-          <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-background/60 px-3 py-4 text-center">
+          <div className={placeholderClassName}>
             <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
               No URL configured
             </span>

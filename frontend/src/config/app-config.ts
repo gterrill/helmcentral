@@ -31,7 +31,6 @@ export type AssistantVoiceConfig = {
 export type DistanceUnits = 'metric' | 'imperial'
 
 export type UiConfig = {
-  vesselStateRefreshSeconds: number
   distanceUnits: DistanceUnits
   autoCloseAnchorWatchOnEngine: boolean
 }
@@ -44,7 +43,6 @@ export type UiConfig = {
 // from GET /api/settings at runtime instead; see @/hooks/use-app-config.
 export const fallbackUiConfig: UiConfig = {
   distanceUnits: 'metric' as DistanceUnits,
-  vesselStateRefreshSeconds: 10,
   autoCloseAnchorWatchOnEngine: true,
 }
 
@@ -53,8 +51,38 @@ export const fallbackUiConfig: UiConfig = {
 // independently by each plugin's own ttl_seconds() (open-meteo/weatherkit
 // weather 900s, open-meteo-marine waves 3600s, nws warnings 1800s, bom
 // warnings 5400s), so this constant only governs how quickly the UI notices
-// data the backend has already refreshed.
+// data the backend has already refreshed. useWeatherToday/useTideToday also
+// use this: the backend caches weather for 900s (weather_tide.go) and tide
+// predictions change on the order of hours, so both are well inside this
+// 600s ceiling — there is nothing weather- or tide-specific to tune here.
 export const FORECAST_REFRESH_SECONDS = 600
+
+// /api/anchor-watch's own record (position, radius, rode, sea/seabed state)
+// only ever changes through an explicit operator action — dropping,
+// repositioning, or editing it — and every one of those mutations already
+// applies the server's response to local state immediately (use-anchor-watch.ts),
+// so polling exists only to pick up a change made from another session and to
+// notice the place name the backend pins shortly after a drop (place_name.go's
+// resolveAndPinAnchorWatchPlaceName, retried on tracks.go's 5s track-poll tick
+// until it resolves). The live drag alarm itself is computed server-side
+// (backend/alarm_anchor.go) and delivered over the independent alarm channel,
+// not this poll, so neither interval below gates alarm freshness.
+//
+// While a watch is set, poll on the same 5s cadence as that backend tick, so
+// the pinned place name and any edit from another session land here about as
+// fast as the backend itself produces them.
+export const ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS = 5
+// While idle, there is nothing to notice but a watch dropped elsewhere — rare
+// for a single-operator boat — so this only needs to be "eventually", not fast.
+export const ANCHOR_WATCH_IDLE_REFRESH_SECONDS = 60
+
+// /api/place-name resolves a reverse geocode of the vessel's position, cached
+// server-side per ~550m grid cell (backend/place_name.go's
+// placeNameCacheCellDegrees) and refreshed on the same 5s track-poll tick that
+// feeds the anchor watch's pinned name above. A vessel has to cover that whole
+// cell before the name could change at all, which even at 20kt takes the
+// better part of a minute — so there is no benefit to polling faster than this.
+export const PLACE_NAME_REFRESH_SECONDS = 60
 
 export const fallbackAnchorConfig: AnchorConfig = {
   bowRollerHeightM: 1.5,
@@ -83,9 +111,6 @@ export const fallbackAssistantVoiceConfig: AssistantVoiceConfig = {
 
 /** The subset of GET /api/settings this module reads. */
 export type AppConfigSettings = {
-  ui?: {
-    vessel_state_refresh_seconds?: number
-  }
   units?: string
   anchor?: {
     bow_roller_height_m?: number
@@ -105,6 +130,9 @@ export type AppConfigSettings = {
     voice_input?: boolean
     read_aloud?: boolean
     wake_word?: boolean
+  }
+  boat?: {
+    model?: string
   }
 }
 
@@ -143,11 +171,6 @@ export function normalizeUiConfig(settings: AppConfigSettings | null | undefined
       config.distanceUnits = normalized
     }
   }
-
-  config.vesselStateRefreshSeconds = positiveNumber(
-    settings?.ui?.vessel_state_refresh_seconds,
-    fallbackUiConfig.vesselStateRefreshSeconds,
-  )
 
   return config
 }
@@ -203,4 +226,16 @@ export function normalizeAssistantVoiceConfig(settings: AppConfigSettings | null
     readAloud: typeof assistant?.read_aloud === 'boolean' ? assistant.read_aloud : fallbackAssistantVoiceConfig.readAloud,
     wakeWord: typeof assistant?.wake_word === 'boolean' ? assistant.wake_word : fallbackAssistantVoiceConfig.wakeWord,
   }
+}
+
+// Read live by hooks/use-vessel-identity.ts (the "Vessel" header tile and the
+// wall display's vessel identity), which used to poll /api/settings on its
+// own timer just for this one field — folded into the settings this module
+// already single-flights. Null (not '') is "not set", matching the tile's
+// existing "MODEL NOT SET" placeholder check.
+export function normalizeBoatModel(settings: AppConfigSettings | null | undefined): string | null {
+  const model = settings?.boat?.model
+  if (typeof model !== 'string') return null
+  const trimmed = model.trim()
+  return trimmed.length > 0 ? trimmed : null
 }

@@ -134,7 +134,7 @@ vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], 
 
 vi.mock('@/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    ui: { distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
       hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,

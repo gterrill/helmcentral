@@ -7,7 +7,7 @@
  * pieces this suite doesn't touch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { App } from '../App'
 
 vi.mock('@/hooks/use-auth', () => ({
@@ -25,7 +25,7 @@ vi.mock('@/hooks/use-auth', () => ({
 
 vi.mock('@/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    ui: { distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
       hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
@@ -211,7 +211,9 @@ describe('the in-app manual (ADR 0095)', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Open the manual' }))
-    expect(manualFetchCalls(fetchMock)).toContain('/api/manual/features/dashboard')
+    // ManualSheet is lazy-loaded (mounted only on this first open), so the
+    // fetch its mount effect fires isn't necessarily on screen yet.
+    await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/features/dashboard'))
 
     // Close the sheet (Escape) and move to Forecast before asking again -
     // the sheet only re-reads its target when it (re)opens.
@@ -219,7 +221,7 @@ describe('the in-app manual (ADR 0095)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open the manual' }))
 
-    expect(manualFetchCalls(fetchMock)).toContain('/api/manual/features/forecast')
+    await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/features/forecast'))
   })
 
   it('carries the title "Manual for this screen" and the CircleHelp icon', () => {
@@ -238,7 +240,7 @@ describe('the in-app manual (ADR 0095)', () => {
     const manualNavButton = screen.getByRole('button', { name: 'Manual' })
     fireEvent.click(manualNavButton)
 
-    expect(manualFetchCalls(fetchMock)).toContain('/api/manual/index')
+    await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/index'))
     expect(manualNavButton).toHaveAttribute('data-active', 'false')
   })
 

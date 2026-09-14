@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { SeaStateTile } from '@/components/sea-state-tile'
@@ -102,7 +102,12 @@ function waveDay(dayKey: string): WaveForecastDay {
 }
 
 describe('SeaStateTile', () => {
-  test('renders the chart when wave data is available', () => {
+  // SeaStateChart (and the recharts it pulls in) is lazy-loaded behind a
+  // Suspense boundary now (kiosk bundle-split follow-up: recharts used to
+  // load at startup on every route, including /kiosk, purely because this
+  // tile imported it eagerly). The Tile chrome renders synchronously either
+  // way; only the chart itself needs a beat to resolve.
+  test('renders the chart when wave data is available', async () => {
     render(
       <SeaStateTile
         forecast={[day('2026-06-14')]}
@@ -114,7 +119,9 @@ describe('SeaStateTile', () => {
     )
 
     expect(screen.getByText('Sea State')).toBeInTheDocument()
-    expect(document.querySelector('svg.recharts-surface')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(document.querySelector('svg.recharts-surface')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('forecast-wave-error')).not.toBeInTheDocument()
   })
 
@@ -155,7 +162,7 @@ describe('SeaStateTile', () => {
       MockResizeObserver.instances = []
     })
 
-    test('observes a relative, height-constrained container and sizes the chart from a resize entry, not its own content', () => {
+    test('observes a relative, height-constrained container and sizes the chart from a resize entry, not its own content', async () => {
       MockResizeObserver.instances = []
       vi.stubGlobal('ResizeObserver', MockResizeObserver)
 
@@ -182,9 +189,12 @@ describe('SeaStateTile', () => {
 
       // The chart sits in its own absolutely-positioned wrapper inside the
       // measured box, so the SVG's own size has nothing left to push against.
+      // The lazy SeaStateChart chunk needs a beat to resolve before it's there.
       const chartWrapper = measuredBox.querySelector(':scope > .absolute.inset-0')
       expect(chartWrapper).not.toBeNull()
-      expect(chartWrapper?.querySelector('svg.recharts-surface')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(chartWrapper?.querySelector('svg.recharts-surface')).toBeInTheDocument()
+      })
 
       observer.fire({ width: 582, height: 250 })
 

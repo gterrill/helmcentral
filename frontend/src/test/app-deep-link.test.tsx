@@ -199,7 +199,7 @@ vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], 
 
 vi.mock('@/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    ui: { distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
       hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
@@ -287,45 +287,45 @@ describe('App deep links', () => {
     mockPagesState.loading = false
   })
 
-  it('opens the Forecast panel directly, keeps the pathname, and titles the tab', () => {
+  it('opens the Forecast panel directly, keeps the pathname, and titles the tab', async () => {
     window.history.replaceState({}, '', '/forecast')
     render(<App />)
 
     expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
-    expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/tide/i)).length).toBeGreaterThan(0)
     expect(window.location.pathname).toBe('/forecast')
     expect(document.title).toBe('Forecast · Helmcentral')
   })
 
-  it('opens the Mate panel directly', () => {
+  it('opens the Mate panel directly', async () => {
     window.history.replaceState({}, '', '/mate')
     render(<App />)
 
-    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(await screen.findByTestId('assistant-drawer')).toBeInTheDocument()
     expect(window.location.pathname).toBe('/mate')
   })
 
-  it('opens a thread deeplink at /mate/<threadId> and keeps the pathname', () => {
+  it('opens a thread deeplink at /mate/<threadId> and keeps the pathname', async () => {
     window.history.replaceState({}, '', '/mate/12345')
     render(<App />)
 
-    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(await screen.findByTestId('assistant-drawer')).toBeInTheDocument()
     expect(window.location.pathname).toBe('/mate/12345')
   })
 
-  it('treats /assistant as a legacy alias and normalises it to /mate', () => {
+  it('treats /assistant as a legacy alias and normalises it to /mate', async () => {
     window.history.replaceState({}, '', '/assistant')
     render(<App />)
 
-    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument()
+    expect(await screen.findByTestId('assistant-drawer')).toBeInTheDocument()
     expect(window.location.pathname).toBe('/mate')
   })
 
-  it('opens the SignalK settings section directly', () => {
+  it('opens the SignalK settings section directly', async () => {
     window.history.replaceState({}, '', '/settings/signalk')
     render(<App />)
 
-    expect(screen.getByRole('button', { name: 'SignalK' })).toHaveAttribute('aria-current', 'true')
+    expect(await screen.findByRole('button', { name: 'SignalK' })).toHaveAttribute('aria-current', 'true')
   })
 
   it('treats an unrecognised path as the dashboard and normalises the bar to /', () => {

@@ -18,7 +18,13 @@ type CZoneSwitchesResponse = {
   switches?: CZoneSwitchApi[]
 }
 
-export function useCZoneSwitches(refreshInterval: number) {
+/**
+ * `enabled` gates both the initial fetch and the poll interval — with no
+ * CZone widget or view on screen, nothing consumes this data, and polling
+ * `/api/czone/switches` every few seconds anyway is pure noise. Defaults to
+ * true so existing call sites that don't pass it keep polling unconditionally.
+ */
+export function useCZoneSwitches(refreshInterval: number, enabled = true) {
   const [switches, setSwitches] = useState<CZoneSwitch[]>([])
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<Set<string>>(new Set())
@@ -65,10 +71,11 @@ export function useCZoneSwitches(refreshInterval: number) {
   }, [])
 
   useEffect(() => {
+    if (!enabled) return
     void fetchSwitches()
     const timer = window.setInterval(() => void fetchSwitches(), refreshInterval * 1000)
     return () => window.clearInterval(timer)
-  }, [fetchSwitches, refreshInterval])
+  }, [fetchSwitches, refreshInterval, enabled])
 
   const toggleSwitch = useCallback(
     async (id: string, newState: 0 | 1) => {

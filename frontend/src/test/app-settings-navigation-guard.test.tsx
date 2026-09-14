@@ -183,7 +183,7 @@ vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], 
 
 vi.mock('@/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    ui: { distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
       hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
@@ -314,10 +314,15 @@ vi.mock('@/hooks/use-alarm-transports', async (importOriginal) => {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-/** Navigates to Settings and makes it dirty (touching a secret field's status). */
-function navigateToDirtySettings() {
+/**
+ * Navigates to Settings and makes it dirty (touching a secret field's
+ * status). Async because SettingsPage is a lazy chunk (React.lazy) — the
+ * 'Vessel' nav button doesn't exist until that chunk resolves, so it has to
+ * be awaited with findBy* rather than queried synchronously.
+ */
+async function navigateToDirtySettings() {
   fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Vessel' }))
   fireEvent.change(screen.getByLabelText('Vessel prefix'), { target: { value: 'S/V Test' } })
 }
 
@@ -331,7 +336,7 @@ describe('App navigation guard on dirty Settings', () => {
 
   it('opens the confirmation dialog instead of navigating immediately when leaving a dirty Settings page', async () => {
     render(<App />)
-    navigateToDirtySettings()
+    await navigateToDirtySettings()
 
     await waitFor(() => {
       expect(screen.getByLabelText('Vessel prefix')).toHaveValue('S/V Test')
@@ -346,7 +351,7 @@ describe('App navigation guard on dirty Settings', () => {
 
   it('Cancel closes the dialog and stays on Settings', async () => {
     render(<App />)
-    navigateToDirtySettings()
+    await navigateToDirtySettings()
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
 
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
@@ -360,7 +365,7 @@ describe('App navigation guard on dirty Settings', () => {
 
   it('Discard navigates away without saving', async () => {
     render(<App />)
-    navigateToDirtySettings()
+    await navigateToDirtySettings()
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
@@ -373,7 +378,7 @@ describe('App navigation guard on dirty Settings', () => {
 
   it('Save and Continue saves then navigates on success', async () => {
     render(<App />)
-    navigateToDirtySettings()
+    await navigateToDirtySettings()
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
 
     fireEvent.click(screen.getByRole('button', { name: /save and continue/i }))
@@ -390,7 +395,7 @@ describe('App navigation guard on dirty Settings', () => {
   it('Save and Continue does NOT navigate away if the save fails', async () => {
     saveMock.mockRejectedValueOnce(new Error('boom'))
     render(<App />)
-    navigateToDirtySettings()
+    await navigateToDirtySettings()
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
 
     fireEvent.click(screen.getByRole('button', { name: /save and continue/i }))
@@ -412,10 +417,15 @@ describe('App navigation guard on dirty Settings', () => {
   // leave these assertions unable to tell "the guard re-pushed /settings"
   // apart from "the section switch already put us there". Staying on
   // General keeps the bar's before/after states unambiguous.
-  it('Back on a dirty Settings page reached via a deep link opens the confirmation dialog and re-pushes /settings', () => {
+  it('Back on a dirty Settings page reached via a deep link opens the confirmation dialog and re-pushes /settings', async () => {
     mockTouched = { ...emptyTouched(), SIGNALK_USERNAME: true }
     window.history.replaceState({}, '', '/settings')
     render(<App />)
+
+    // Settings is a lazy chunk — wait for it to actually mount and report
+    // dirty before simulating Back, or the popstate handler below would see
+    // settingsDirty still at its initial `false`.
+    await screen.findByText('General')
 
     // Simulate the browser's Back button: it lands the document on the
     // previous URL and fires popstate, but does not itself re-run any React
@@ -438,6 +448,11 @@ describe('App navigation guard on dirty Settings', () => {
     window.history.replaceState({}, '', '/settings')
     render(<App />)
 
+    // Settings is a lazy chunk — wait for it to actually mount and report
+    // dirty before simulating Back, or the popstate handler below would see
+    // settingsDirty still at its initial `false`.
+    await screen.findByText('General')
+
     window.history.replaceState({}, '', '/')
     act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -448,10 +463,15 @@ describe('App navigation guard on dirty Settings', () => {
     expect(window.location.pathname).toBe('/settings')
   })
 
-  it('Discard on that guarded Back navigates to the dashboard and the bar goes to /', () => {
+  it('Discard on that guarded Back navigates to the dashboard and the bar goes to /', async () => {
     mockTouched = { ...emptyTouched(), SIGNALK_USERNAME: true }
     window.history.replaceState({}, '', '/settings')
     render(<App />)
+
+    // Settings is a lazy chunk — wait for it to actually mount and report
+    // dirty before simulating Back, or the popstate handler below would see
+    // settingsDirty still at its initial `false`.
+    await screen.findByText('General')
 
     window.history.replaceState({}, '', '/')
     act(() => { window.dispatchEvent(new PopStateEvent('popstate')) })

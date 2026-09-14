@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 
-import { apiBaseUrl } from '@/config/api'
 import { useAppConfig } from '@/hooks/use-app-config'
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 
 // The vessel's local zone (backend/weather_tide.go's vesselLocalTimezoneName,
 // ADR 0035) can be an IANA name Intl has never heard of only if the backend
@@ -11,18 +11,34 @@ import { useAppConfig } from '@/hooks/use-app-config'
 // on every per-second tick.
 const warnedInvalidTimeZones = new Set<string>()
 
+// Formatters cached per (timeZone, options) at module level rather than
+// rebuilt on every call: this hook feeds `now` through formatClock/formatDate
+// via useMemo once per second per consumer, and clock-tile.tsx calls both
+// directly on top of that — constructing a fresh Intl.DateTimeFormat that
+// often is pure waste.
+const formatterCache = new Map<string, Intl.DateTimeFormat>()
+
 function dateTimeFormat(options: Intl.DateTimeFormatOptions, timeZone?: string): Intl.DateTimeFormat {
+  const key = `${timeZone ?? ''}|${JSON.stringify(options)}`
+  const cached = formatterCache.get(key)
+  if (cached) return cached
+
+  let formatter: Intl.DateTimeFormat
   if (timeZone) {
     try {
-      return new Intl.DateTimeFormat('en-US', { ...options, timeZone })
+      formatter = new Intl.DateTimeFormat('en-US', { ...options, timeZone })
     } catch (error) {
       if (!warnedInvalidTimeZones.has(timeZone)) {
         warnedInvalidTimeZones.add(timeZone)
         console.warn(`use-vessel-identity: unknown timezone "${timeZone}", falling back to the browser zone`, error)
       }
+      formatter = new Intl.DateTimeFormat('en-US', options)
     }
+  } else {
+    formatter = new Intl.DateTimeFormat('en-US', options)
   }
-  return new Intl.DateTimeFormat('en-US', options)
+  formatterCache.set(key, formatter)
+  return formatter
 }
 
 export function formatClock(date: Date, timeZone?: string) {
@@ -52,105 +68,136 @@ export function formatDate(date: Date, options?: { compact?: boolean; timeZone?:
   ).format(date)
 }
 
+// ---- shared store (ADR: same module-singleton shape as use-app-config.ts
+// and use-telemetry-stream.ts) ----------------------------------------------
+//
+// Vessel identity used to be re-fetched and re-ticked independently by every
+// consumer (vessel-status-bar.tsx, marine-header.tsx, clock-tile.tsx): each
+// ran its own 1Hz setInterval and its own poll of /api/vessel-state and
+// /api/settings. GET /api/vessel-state turned out to be entirely redundant
+// with the `vessel-state` SSE event every telemetry hook already shares
+// (backend/main.go's buildVesselStatePayload backs both the REST handler and
+// the stream emitter, so the wire payload is identical) — so this store reads
+// name/vessel_prefix/status/datetime/timezone/source off that stream instead
+// of polling REST on its own timer. boat.model is the one field that only
+// ever came from /api/settings; it's read through the existing
+// use-app-config.ts single-flight source below rather than a separate poll.
+
+interface VesselIdentitySnapshot {
+  now: Date
+  vesselStatus: string
+  boatName: string | null
+  signalkConnected: boolean | null
+  timeZone: string | undefined
+}
+
+const INITIAL_SNAPSHOT: VesselIdentitySnapshot = {
+  now: new Date(),
+  vesselStatus: 'At Anchor',
+  boatName: null,
+  signalkConnected: null,
+  timeZone: undefined,
+}
+
+let snapshot: VesselIdentitySnapshot = INITIAL_SNAPSHOT
+let subscriberCount = 0
+let clockTimer: ReturnType<typeof setInterval> | null = null
+let unsubscribeVesselState: (() => void) | null = null
+const storeListeners = new Set<() => void>()
+
+function publish(next: VesselIdentitySnapshot): void {
+  snapshot = next
+  for (const listener of storeListeners) listener()
+}
+
+function tickClock(): void {
+  publish({ ...snapshot, now: new Date(snapshot.now.getTime() + 1000) })
+}
+
+interface VesselStateStreamPayload {
+  status?: string
+  datetime?: string
+  timezone?: string
+  name?: string
+  vessel_prefix?: string
+  source?: string
+}
+
+function applyVesselStateEvent(raw: string): void {
+  let data: VesselStateStreamPayload
+  try {
+    data = JSON.parse(raw) as VesselStateStreamPayload
+  } catch (err) {
+    console.error('use-vessel-identity: failed to parse vessel-state event:', err)
+    return
+  }
+
+  const next: VesselIdentitySnapshot = { ...snapshot }
+
+  if (data.status) next.vesselStatus = data.status
+
+  if (data.name) {
+    const prefix = data.vessel_prefix?.trim() ?? 'M/V'
+    const vesselName = data.name.trim()
+    next.boatName = vesselName ? `${prefix} ${vesselName}`.trim() : null
+  }
+
+  if (data.datetime) {
+    const backendTime = new Date(data.datetime)
+    if (!Number.isNaN(backendTime.getTime())) next.now = backendTime
+  }
+
+  if (data.timezone) next.timeZone = data.timezone
+
+  // Read every tick, not just once: SignalK can drop out and come back while
+  // the stream itself stays connected (the backend keeps answering, just with
+  // a different `source`), and that has to keep tracking live.
+  next.signalkConnected = data.source === 'signalk'
+
+  publish(next)
+}
+
+function subscribeStore(callback: () => void): () => void {
+  storeListeners.add(callback)
+  subscriberCount += 1
+  if (subscriberCount === 1) {
+    clockTimer = setInterval(tickClock, 1000)
+    unsubscribeVesselState = subscribeTelemetry('vessel-state', applyVesselStateEvent)
+  }
+  return () => {
+    storeListeners.delete(callback)
+    subscriberCount = Math.max(0, subscriberCount - 1)
+    if (subscriberCount === 0) {
+      if (clockTimer !== null) clearInterval(clockTimer)
+      clockTimer = null
+      unsubscribeVesselState?.()
+      unsubscribeVesselState = null
+    }
+  }
+}
+
+function getSnapshot(): VesselIdentitySnapshot {
+  return snapshot
+}
+
 export function useVesselIdentity() {
-  const [now, setNow] = useState(() => new Date())
-  const [vesselStatus, setVesselStatus] = useState('At Anchor')
-  const [boatName, setBoatName] = useState<string | null>(null)
-  const [boatModel, setBoatModel] = useState<string | null>(null)
-  const [signalkConnected, setSignalkConnected] = useState<boolean | null>(null)
-  const [timeZone, setTimeZone] = useState<string | undefined>(undefined)
-  const { ui: uiConfig } = useAppConfig()
-  const refreshSeconds = uiConfig.vesselStateRefreshSeconds
+  const state = useSyncExternalStore(subscribeStore, getSnapshot)
+  const { boatModel } = useAppConfig()
 
-  useEffect(() => {
-    const clockTimer = window.setInterval(() => {
-      setNow((current) => new Date(current.getTime() + 1000))
-    }, 1000)
+  const currentDate = useMemo(
+    () => formatDate(state.now, { timeZone: state.timeZone }).toUpperCase(),
+    [state.now, state.timeZone],
+  )
+  const clock = useMemo(() => formatClock(state.now, state.timeZone), [state.now, state.timeZone])
 
-    const fetchVesselState = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/vessel-state`)
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch vessel state')
-        }
-
-        const data = (await response.json()) as {
-          status?: string
-          datetime?: string
-          timezone?: string
-          depth?: number
-          name?: string
-          vessel_prefix?: string
-          source?: string
-        }
-
-        if (data.status) {
-          setVesselStatus(data.status)
-        }
-
-        if (data.name) {
-          const prefix = data.vessel_prefix?.trim() ?? 'M/V'
-          const vesselName = data.name.trim()
-          setBoatName(vesselName ? `${prefix} ${vesselName}`.trim() : null)
-        }
-
-        if (data.datetime) {
-          const backendTime = new Date(data.datetime)
-          if (!Number.isNaN(backendTime.getTime())) {
-            setNow(backendTime)
-          }
-        }
-
-        if (data.timezone) {
-          setTimeZone(data.timezone)
-        }
-
-        setSignalkConnected(data.source === 'signalk')
-      } catch {
-        setSignalkConnected(false)
-      }
-    }
-
-    const fetchSettings = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/settings`)
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch settings')
-        }
-
-        const data = (await response.json()) as {
-          boat?: {
-            model?: string
-          }
-        }
-
-        const nextModel = data.boat?.model?.trim() ?? ''
-
-        setBoatModel(nextModel.length > 0 ? nextModel : null)
-      } catch {
-        // Show missing settings explicitly instead of falling back to compiled defaults.
-        setBoatModel(null)
-      }
-    }
-
-    void fetchVesselState()
-    void fetchSettings()
-    const syncTimer = window.setInterval(() => {
-      void fetchVesselState()
-      void fetchSettings()
-    }, refreshSeconds * 1000)
-
-    return () => {
-      window.clearInterval(clockTimer)
-      window.clearInterval(syncTimer)
-    }
-    // Re-arms the poll when the operator changes the refresh interval.
-  }, [refreshSeconds])
-
-  const currentDate = useMemo(() => formatDate(now, { timeZone }).toUpperCase(), [now, timeZone])
-  const clock = useMemo(() => formatClock(now, timeZone), [now, timeZone])
-
-  return { now, currentDate, clock, vesselStatus, boatName, boatModel, signalkConnected, timeZone }
+  return {
+    now: state.now,
+    currentDate,
+    clock,
+    vesselStatus: state.vesselStatus,
+    boatName: state.boatName,
+    boatModel,
+    signalkConnected: state.signalkConnected,
+    timeZone: state.timeZone,
+  }
 }

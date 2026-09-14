@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { ClockTile } from '@/components/clock-tile'
+import { ClockTile, type ClockTileProps } from '@/components/clock-tile'
 import { formatClock } from '@/hooks/use-vessel-identity'
 
 // formatClock renders in whatever timezone the test runner's Node process is
@@ -16,31 +16,74 @@ function hhmmFor(date: Date) {
 
 const NOW = new Date('2026-06-14T14:32:07Z')
 
-// use-vessel-identity ticks a local clock every second and fetches
-// /api/vessel-state and /api/settings on mount - stub both so the tile
-// renders a deterministic time with no network noise.
+// use-vessel-identity.ts is the shared module-level store (item C): its
+// `now`/timezone come off the SSE `vessel-state` event, not a poll of its
+// own. Mock the shared telemetry module and drive it directly, the same
+// pattern use-gauge-values.test.ts and use-vessel-identity.test.ts use.
+const subscribeTelemetryMock = vi.fn()
+let capturedListener: ((raw: string) => void) | null = null
+
+vi.mock('@/hooks/use-telemetry-stream', () => ({
+  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
+    capturedListener = cb
+    subscribeTelemetryMock(event, cb)
+    return () => {}
+  },
+}))
+
+vi.mock('@/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ boatModel: null }),
+}))
+
+function emitVesselState(payload: { datetime?: string; timezone?: string; status?: string; name?: string }) {
+  act(() => {
+    capturedListener?.(JSON.stringify(payload))
+  })
+}
+
+const defaultProps: ClockTileProps = {
+  sunriseTime: null,
+  sunsetTime: null,
+  moonPhase: null,
+  placeName: null,
+  nextWaypoint: null,
+}
+
+/**
+ * Renders ClockTile, then immediately syncs the shared vessel clock to the
+ * current (possibly faked) system time — or to an explicit override, for the
+ * timezone-label tests below that need a fixed instant under real timers.
+ * The store is a module-level singleton (item C): its `now`/timezone persist
+ * across tests in this file rather than resetting per mount, so every render
+ * has to re-sync it explicitly rather than relying on a fresh per-instance
+ * clock the way the old one-hook-per-consumer implementation did.
+ */
+function renderClockTile(props: Partial<ClockTileProps> = {}, stream: { datetime?: string; timezone?: string } = {}) {
+  const result = render(<ClockTile {...defaultProps} {...props} />)
+  emitVesselState({ datetime: stream.datetime ?? new Date().toISOString(), timezone: stream.timezone })
+  return result
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(NOW)
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }))
 })
 
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  subscribeTelemetryMock.mockClear()
+  capturedListener = null
 })
 
 describe('ClockTile', () => {
   test('renders the current time and date from the vessel clock', () => {
-    render(
-      <ClockTile
-        sunriseTime="6:02AM"
-        sunsetTime="7:41PM"
-        moonPhase="waxingGibbous"
-        placeName="Airlie Beach"
-        nextWaypoint={null}
-      />,
-    )
+    renderClockTile({
+      sunriseTime: '6:02AM',
+      sunsetTime: '7:41PM',
+      moonPhase: 'waxingGibbous',
+      placeName: 'Airlie Beach',
+    })
 
     // formatClock is 12-hour with seconds; the tile drops the seconds for
     // its hero readout, so only hh:mm and the meridiem are asserted.
@@ -49,15 +92,12 @@ describe('ClockTile', () => {
   })
 
   test('shows sunrise, sunset and moon phase when present', () => {
-    render(
-      <ClockTile
-        sunriseTime="6:02AM"
-        sunsetTime="7:41PM"
-        moonPhase="waxingGibbous"
-        placeName="Airlie Beach"
-        nextWaypoint={null}
-      />,
-    )
+    renderClockTile({
+      sunriseTime: '6:02AM',
+      sunsetTime: '7:41PM',
+      moonPhase: 'waxingGibbous',
+      placeName: 'Airlie Beach',
+    })
 
     expect(screen.getByText('6:02AM')).toBeInTheDocument()
     expect(screen.getByText('7:41PM')).toBeInTheDocument()
@@ -65,28 +105,22 @@ describe('ClockTile', () => {
   })
 
   test('shows structural dashes for sunrise, sunset and moon when absent', () => {
-    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName={null} nextWaypoint={null} />)
+    renderClockTile()
 
     // One dash for sunrise, one for sunset, one for moon, one for place, one for ETA.
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(5)
   })
 
   test('shows the place name in a chip', () => {
-    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName="Airlie Beach" nextWaypoint={null} />)
+    renderClockTile({ placeName: 'Airlie Beach' })
     expect(screen.getByText('Airlie Beach')).toBeInTheDocument()
   })
 
   test('shows an ETA line with the waypoint label and time when a route is active', () => {
     const etaAt = new Date('2026-06-14T18:05:00Z')
-    render(
-      <ClockTile
-        sunriseTime={null}
-        sunsetTime={null}
-        moonPhase={null}
-        placeName={null}
-        nextWaypoint={{ label: 'WP 3', etaAt, basis: 'sog' }}
-      />,
-    )
+    renderClockTile({
+      nextWaypoint: { label: 'WP 3', etaAt, basis: 'sog' },
+    })
 
     const eta = screen.getByTestId('clock-eta')
     expect(eta).toHaveTextContent('ETA')
@@ -96,36 +130,24 @@ describe('ClockTile', () => {
   })
 
   test('marks a planning-speed ETA with a plan suffix', () => {
-    render(
-      <ClockTile
-        sunriseTime={null}
-        sunsetTime={null}
-        moonPhase={null}
-        placeName={null}
-        nextWaypoint={{ label: 'Mooloolaba', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' }}
-      />,
-    )
+    renderClockTile({
+      nextWaypoint: { label: 'Mooloolaba', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' },
+    })
 
     expect(screen.getByTestId('clock-eta')).toHaveTextContent(/plan/i)
   })
 
   test('shows the waypoint label with a dash for the time when no honest ETA exists', () => {
-    render(
-      <ClockTile
-        sunriseTime={null}
-        sunsetTime={null}
-        moonPhase={null}
-        placeName={null}
-        nextWaypoint={{ label: 'WP 1', etaAt: null, basis: 'plan' }}
-      />,
-    )
+    renderClockTile({
+      nextWaypoint: { label: 'WP 1', etaAt: null, basis: 'plan' },
+    })
 
     expect(screen.getByText(/WP 1/)).toBeInTheDocument()
     expect(screen.getByTestId('clock-eta')).toHaveTextContent('—')
   })
 
   test('shows a structural dash for the ETA line when no route is active', () => {
-    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName={null} nextWaypoint={null} />)
+    renderClockTile()
     expect(screen.getByTestId('clock-eta')).toHaveTextContent('—')
   })
 
@@ -135,29 +157,23 @@ describe('ClockTile', () => {
     // timezone. formatDate's long form ("SATURDAY, SEP 12, 2026") wraps at
     // the tile's ~300px minW; the tile-local compact form must not.
     vi.setSystemTime(new Date(2026, 8, 12, 14, 32, 7))
-    render(
-      <ClockTile
-        sunriseTime="6:02AM"
-        sunsetTime="7:41PM"
-        moonPhase="waxingGibbous"
-        placeName="Airlie Beach"
-        nextWaypoint={null}
-      />,
-    )
+    renderClockTile({
+      sunriseTime: '6:02AM',
+      sunsetTime: '7:41PM',
+      moonPhase: 'waxingGibbous',
+      placeName: 'Airlie Beach',
+    })
 
     expect(screen.getByTestId('clock-date')).toHaveTextContent('SAT, SEP 12, 2026')
   })
 
   test('marks the date line non-wrapping as a last line of defence against clipping the place chip', () => {
-    render(
-      <ClockTile
-        sunriseTime="6:02AM"
-        sunsetTime="7:41PM"
-        moonPhase="waxingGibbous"
-        placeName="Airlie Beach"
-        nextWaypoint={null}
-      />,
-    )
+    renderClockTile({
+      sunriseTime: '6:02AM',
+      sunsetTime: '7:41PM',
+      moonPhase: 'waxingGibbous',
+      placeName: 'Airlie Beach',
+    })
 
     expect(screen.getByTestId('clock-date').className).toContain('whitespace-nowrap')
   })
@@ -167,15 +183,13 @@ describe('ClockTile', () => {
     // an active route, the combination most likely to starve the place chip
     // of vertical room if the date line were ever allowed to wrap again.
     vi.setSystemTime(new Date(2026, 8, 16, 14, 32, 7))
-    render(
-      <ClockTile
-        sunriseTime="6:02AM"
-        sunsetTime="7:41PM"
-        moonPhase="waxingGibbous"
-        placeName="Airlie Beach"
-        nextWaypoint={{ label: 'Mooloolaba Marina', etaAt: new Date('2026-09-16T18:05:00Z'), basis: 'plan' }}
-      />,
-    )
+    renderClockTile({
+      sunriseTime: '6:02AM',
+      sunsetTime: '7:41PM',
+      moonPhase: 'waxingGibbous',
+      placeName: 'Airlie Beach',
+      nextWaypoint: { label: 'Mooloolaba Marina', etaAt: new Date('2026-09-16T18:05:00Z'), basis: 'plan' },
+    })
 
     expect(screen.getByText('Airlie Beach')).toBeInTheDocument()
     expect(screen.getByTestId('clock-eta')).toHaveTextContent('Mooloolaba Marina')
@@ -185,39 +199,18 @@ describe('ClockTile', () => {
   // box stays on UTC while the boat sits at UTC+10, so its clock read 08:31
   // PM at 06:31 AM boat time) ────────────────────────────────────────────
 
-  function stubVesselStateWithTimezone(timezone: string) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = typeof input === 'string' ? input : input.toString()
-        if (url.includes('/api/vessel-state')) {
-          return { ok: true, json: async () => ({ datetime: NOW.toISOString(), timezone }) }
-        }
-        return { ok: false, json: async () => ({}) }
-      }),
-    )
-  }
+  test('shows a small UTC label beside the meridiem when the vessel zone is UTC because no position is known', () => {
+    renderClockTile({}, { datetime: NOW.toISOString(), timezone: 'UTC' })
 
-  test('shows a small UTC label beside the meridiem when the vessel zone is UTC because no position is known', async () => {
-    vi.useRealTimers()
-    stubVesselStateWithTimezone('UTC')
-
-    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName={null} nextWaypoint={null} />)
-
-    expect(await screen.findByTestId('clock-timezone-label')).toHaveTextContent('UTC')
+    expect(screen.getByTestId('clock-timezone-label')).toHaveTextContent('UTC')
   })
 
-  test('shows no zone label once a real vessel-local offset is known', async () => {
-    vi.useRealTimers()
-    stubVesselStateWithTimezone('Etc/GMT-10')
+  test('shows no zone label once a real vessel-local offset is known', () => {
+    renderClockTile({}, { datetime: NOW.toISOString(), timezone: 'Etc/GMT-10' })
 
-    render(<ClockTile sunriseTime={null} sunsetTime={null} moonPhase={null} placeName={null} nextWaypoint={null} />)
-
-    // Wait for the vessel-state fetch to actually land (the date jumps from
-    // whatever "today" was at mount to NOW's date) before asserting the
-    // label's absence — otherwise absence would be a false negative from
-    // asserting before the response was even processed.
-    await waitFor(() => expect(screen.getByTestId('clock-date')).toHaveTextContent('MON, JUN 15, 2026'))
+    // The date reflects the vessel-local offset (UTC+10) rather than UTC:
+    // 2026-06-14T14:32:07Z is already Jun 15 local.
+    expect(screen.getByTestId('clock-date')).toHaveTextContent('MON, JUN 15, 2026')
     expect(screen.queryByTestId('clock-timezone-label')).not.toBeInTheDocument()
   })
 })

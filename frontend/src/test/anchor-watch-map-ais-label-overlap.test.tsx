@@ -198,3 +198,62 @@ describe('AnchorWatchMap AIS label suppression wiring', () => {
   // renders every AIS label unsuppressed — that's the "degrades to today's
   // behaviour" case, already covered there rather than duplicated here.
 })
+
+// The suppression effect used to depend on vesselLat/vesselLon, so it
+// re-measured the metrics/controls overlay panels (getBoundingClientRect,
+// forced synchronous layout) on every own-ship position tick even though
+// those panels essentially never move on their own. This proves the fix:
+// the avoid-zone rects are cached and only re-measured on an actual trigger
+// (a container resize, or the metrics panel gaining/losing rows), not on
+// every GPS fix.
+describe('AnchorWatchMap AIS label suppression per-tick cost', () => {
+  it('does not re-measure the overlay panels when only the vessel position ticks, with the same AIS vessels', async () => {
+    lastProject = ([lon]) => ({ x: (lon - 152.9103) * 1_000_000, y: 100 })
+    const vessels: NearbyVessel[] = [
+      { id: 'a', name: 'ALPHA', lat: -25.294, lon: 152.9103, range_m: 50, age_seconds: 1 },
+    ]
+
+    const element = (vesselLat: number, anchorLat: number | null) => (
+      <AnchorWatchMap
+        vesselLat={vesselLat}
+        vesselLon={152.9103}
+        vesselHeadingDeg={265}
+        anchorLat={anchorLat}
+        anchorLon={anchorLat === null ? null : 152.9103}
+        radiusMeters={34}
+        depthMeters={3.2}
+        currentDriftKts={0.1}
+        currentSetDeg={120}
+        distanceMeters={10}
+        bearingDeg={80}
+        scopeRecommendation={scopeRecommendation}
+        isImperial={false}
+        vesselTrail={() => []}
+        aisVessels={vessels}
+        aisTrails={() => new Map()}
+        isDarkTheme={false}
+        onAnchorReposition={() => undefined}
+        onRadiusChange={() => undefined}
+      />
+    )
+
+    const { rerender } = render(element(-25.2939, -25.2939))
+    await screen.findByText('ALPHA')
+
+    const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+
+    // Five simulated GPS fixes: only vesselLat changes, same AIS vessels,
+    // same anchor state.
+    for (let i = 1; i <= 5; i++) {
+      rerender(element(-25.2939 - i * 0.00001, -25.2939))
+    }
+    expect(rectSpy).not.toHaveBeenCalled()
+
+    // A real trigger — the anchor clearing, which changes the metrics
+    // panel's own row count — still re-measures.
+    rerender(element(-25.2939, null))
+    expect(rectSpy).toHaveBeenCalled()
+
+    rectSpy.mockRestore()
+  })
+})

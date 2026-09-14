@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import { ChartUnavailableMessage } from '@/components/chart-tooltip'
-import { SeaStateChart } from '@/components/forecast/sea-state-chart'
 import { buildSeaStateSeries } from '@/lib/sea-state-series'
 import type { WeatherForecastDay } from '@/hooks/use-weather-forecast'
 import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
@@ -28,6 +27,17 @@ export interface SeaStateTileProps {
 // by hand if that constraint ever changes.
 const FALLBACK_WIDTH = 800
 const FALLBACK_HEIGHT = 220
+
+// recharts (~395 KB raw) is otherwise the only thing pulling dashboard-vendor
+// into every route's startup bundle, including /kiosk pages that never
+// render this tile at all. Same lazy-split pattern as
+// assistant-markdown.tsx/manual-markdown.tsx: only the chart itself is
+// behind the boundary — the Tile chrome, the measured box and the "Loading
+// wave data…" text below all stay eager, so the tile's own shape never
+// jumps while the chart chunk loads.
+const SeaStateChart = lazy(() =>
+  import('@/components/forecast/sea-state-chart').then((m) => ({ default: m.SeaStateChart })),
+)
 
 /**
  * Measures its own content box with a ref + ResizeObserver, the same
@@ -93,7 +103,12 @@ export function SeaStateTile({ forecast, waveForecastDays, waveLoading, waveErro
             <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
           ) : (
             <div className="absolute inset-0">
-              <SeaStateChart series={series} width={width} height={height} waveUnit={waveUnit} />
+              {/* Fallback sized to fill the same absolutely-positioned slot
+                  the chart renders into, so the tile's shape doesn't jump
+                  while the recharts chunk loads. */}
+              <Suspense fallback={<div className="h-full w-full" data-testid="sea-state-chart-loading" />}>
+                <SeaStateChart series={series} width={width} height={height} waveUnit={waveUnit} />
+              </Suspense>
             </div>
           )}
         </div>

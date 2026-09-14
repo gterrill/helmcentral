@@ -120,10 +120,18 @@ export function useVesselState() {
       setWindAngleApparentDeg(typeof data.wind_angle_apparent_deg === 'number' && data.wind_angle_apparent_deg >= 0 ? data.wind_angle_apparent_deg : null)
       setWindSide(data.wind_side === 'port' || data.wind_side === 'starboard' ? data.wind_side : null)
       setWindAngleRelativeDeg(typeof data.wind_angle_relative_deg === 'number' && data.wind_angle_relative_deg >= 0 ? data.wind_angle_relative_deg : null)
-      setMaxGustKts(Object.fromEntries(GUST_WINDOWS.map((window) => {
-        const value = data.max_gust_kts?.[window]
-        return [window, typeof value === 'number' && value >= 0 ? value : null]
-      })) as Record<GustWindow, number | null>)
+      // Keeps the previous object when every window's value is unchanged:
+      // this arrives on the same 1Hz vessel-state tick as everything else in
+      // this hook, and a fresh object literal every second defeats WindTile's
+      // own memoization even on a tick where gusts genuinely haven't moved.
+      setMaxGustKts((previous) => {
+        const next = Object.fromEntries(GUST_WINDOWS.map((window) => {
+          const value = data.max_gust_kts?.[window]
+          return [window, typeof value === 'number' && value >= 0 ? value : null]
+        })) as Record<GustWindow, number | null>
+        const unchanged = GUST_WINDOWS.every((window) => previous[window] === next[window])
+        return unchanged ? previous : next
+      })
       setSpeedOverGroundKts(typeof data.speed_over_ground_kts === 'number' && data.speed_over_ground_kts >= 0 ? data.speed_over_ground_kts : null)
 
       setGeneratorState(typeof data.generator_state === 'string' && data.generator_state !== '' ? data.generator_state : null)

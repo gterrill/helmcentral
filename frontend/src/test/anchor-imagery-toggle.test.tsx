@@ -182,7 +182,7 @@ vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], 
 
 vi.mock('@/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    ui: { distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
       hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
@@ -266,10 +266,14 @@ describe('Anchor imagery toggle wiring', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
-  it('toggles imagery state through App -> Tile -> Map path', () => {
+  it('toggles imagery state through App -> Tile -> Map path', async () => {
     render(<App />)
 
-    expect(screen.getByTestId('imagery-state')).toHaveTextContent('off')
+    // AnchorWatchTile now lazy-loads AnchorWatchMap (kiosk bundle-split
+    // follow-up), so the mocked map resolves a beat after the rest of the
+    // tree — vi.mock still intercepts the dynamic import the same way it
+    // does a static one.
+    expect(await screen.findByTestId('imagery-state')).toHaveTextContent('off')
 
     fireEvent.click(screen.getByLabelText('Toggle satellite imagery'))
     expect(screen.getByTestId('imagery-state')).toHaveTextContent('on')

@@ -89,9 +89,9 @@ describe('useKioskRotation', () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages = [page('a'), page('x', { kiosk_when: 'anchored' })]
-    let navigationState: 'anchored' | 'moored' = 'anchored'
+    let navigationState: string | null = 'anchored'
     const { rerender } = renderHook(
-      (props: { navigationState: 'anchored' | 'moored' }) =>
+      (props: { navigationState: string | null }) =>
         useKioskRotation({ enabled: true, pages, navigationState: props.navigationState, pinnedPageId: null, refetch, onShow }),
       { initialProps: { navigationState } },
     )
@@ -117,9 +117,9 @@ describe('useKioskRotation', () => {
     const onShow = vi.fn()
     const refetch = vi.fn().mockResolvedValue(undefined)
     const pages = [page('a'), page('m', { kiosk_when: 'motoring' })]
-    let navigationState: 'moored' | 'motoring' = 'moored'
+    let navigationState: string | null = 'moored'
     const { rerender } = renderHook(
-      (props: { navigationState: 'moored' | 'motoring' }) =>
+      (props: { navigationState: string | null }) =>
         useKioskRotation({ enabled: true, pages, navigationState: props.navigationState, pinnedPageId: null, refetch, onShow }),
       { initialProps: { navigationState } },
     )

@@ -8,6 +8,7 @@ import {
   fallbackUiConfig,
   normalizeAnchorConfig,
   normalizeAssistantVoiceConfig,
+  normalizeBoatModel,
   normalizeMayaraConfig,
   normalizeUiConfig,
   type AnchorConfig,
@@ -24,6 +25,9 @@ export type AppConfig = {
   /** ADR 0093 voice phase: Settings → Mate → Voice, read live by
    * hooks/use-mate-voice.ts and components/mate-sheet.tsx. */
   assistant: AssistantVoiceConfig
+  /** Read live by hooks/use-vessel-identity.ts. Null until settings.boat.model
+   * is known, or when it's unset/blank. */
+  boatModel: string | null
   /** False until the backend's settings have been applied (or have failed). */
   loaded: boolean
 }
@@ -33,6 +37,7 @@ const defaultAppConfig: AppConfig = {
   anchor: fallbackAnchorConfig,
   mayara: fallbackMayaraConfig,
   assistant: fallbackAssistantVoiceConfig,
+  boatModel: null,
   loaded: false,
 }
 
@@ -55,6 +60,7 @@ function toAppConfig(settings: AppConfigSettings | null): AppConfig {
     anchor: normalizeAnchorConfig(settings),
     mayara: normalizeMayaraConfig(settings),
     assistant: normalizeAssistantVoiceConfig(settings),
+    boatModel: normalizeBoatModel(settings),
     loaded: true,
   }
 }

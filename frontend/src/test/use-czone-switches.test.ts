@@ -164,3 +164,68 @@ describe('useCZoneSwitches', () => {
     expect(result.current.switches[0].writable).toBe(true)
   })
 })
+
+// Item B: no CZone widget/view on screen means nothing consumes this data, so
+// polling it is pure noise. `enabled` gates both the initial fetch and the
+// interval, defaulting to true so every existing call site above (which
+// passes no second argument) keeps polling unconditionally.
+describe('useCZoneSwitches enabled gating', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('makes no request at all while disabled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ switches: [] }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderHook(() => useCZoneSwitches(5, false))
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('starts fetching and polling once enabled flips true', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ switches: [{ id: 'bank.0.1', display_name: 'Bank 0.1', state: 0 }] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result, rerender } = renderHook(({ enabled }) => useCZoneSwitches(5, enabled), {
+      initialProps: { enabled: false },
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    rerender({ enabled: true })
+    await act(async () => { await Promise.resolve() })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.current.switches).toHaveLength(1)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops polling once enabled flips back false', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ switches: [] }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { rerender } = renderHook(({ enabled }) => useCZoneSwitches(5, enabled), {
+      initialProps: { enabled: true },
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    rerender({ enabled: false })
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})

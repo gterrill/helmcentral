@@ -37,8 +37,15 @@ export interface ServerTrailsResult {
  * so only new fixes are transferred on subsequent calls.
  *
  * No tracking is done client-side — all sampling happens on the server.
+ *
+ * `enabled` gates the poll: most pages (a kiosk page with no map, a gauge
+ * dashboard) have nothing on screen that reads getSelfTrail/getAisTrails, so
+ * polling every 5s app-wide is wasted. Defaults to true so callers that don't
+ * pass it keep polling unconditionally. `sinceRef` lives across an
+ * enabled->disabled->enabled cycle (it's only cleared on unmount), so resuming
+ * picks up exactly where it left off rather than losing or re-fetching the gap.
  */
-export function useServerTrails(pollIntervalMs = 5000): ServerTrailsResult {
+export function useServerTrails(pollIntervalMs = 5000, enabled = true): ServerTrailsResult {
   const selfRef = useRef<TrailPoint[]>([])
   const aisRef = useRef<Map<string, TrailPoint[]>>(new Map())
   const sinceRef = useRef<string>('')
@@ -101,6 +108,7 @@ export function useServerTrails(pollIntervalMs = 5000): ServerTrailsResult {
   }, [])
 
   useEffect(() => {
+    if (!enabled) return
     const controller = new AbortController()
     void poll(controller.signal)
     const id = setInterval(() => void poll(controller.signal), pollIntervalMs)
@@ -109,7 +117,7 @@ export function useServerTrails(pollIntervalMs = 5000): ServerTrailsResult {
       clearInterval(id)
       inFlightRef.current = false
     }
-  }, [poll, pollIntervalMs])
+  }, [poll, pollIntervalMs, enabled])
 
   return {
     getSelfTrail: useCallback(() => selfRef.current, []),

@@ -208,7 +208,7 @@ vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], 
 
 vi.mock('@/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    ui: { distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
       hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
@@ -313,7 +313,7 @@ describe('App sidebar navigation', () => {
     mockDashboardPages.forEach((page) => { delete page.skin })
   })
 
-  it('shows the dashboard by default, navigates to a panel via the sidebar, and back', () => {
+  it('shows the dashboard by default, navigates to a panel via the sidebar, and back', async () => {
     render(<App />)
 
     // Dashboard grid visible by default — "Depth & Tide" tile is part of the grid.
@@ -335,23 +335,25 @@ describe('App sidebar navigation', () => {
     fireEvent.click(forecastNavButton)
 
     // The dashboard grid tile content should no longer be present; the
-    // forecast panel's Tide card should be.
+    // forecast panel's Tide card should be (Forecast is a lazy chunk, so
+    // wait for it rather than querying synchronously).
     expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
-    expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/tide/i)).length).toBeGreaterThan(0)
 
     // Navigate back to the dashboard via the sidebar nav item.
     fireEvent.click(screen.getAllByRole('button', { name: /dashboard/i })[0])
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
   })
 
-  it('opens the Forecast panel when the "Depth & Tide" dashboard tile is clicked', () => {
+  it('opens the Forecast panel when the "Depth & Tide" dashboard tile is clicked', async () => {
     render(<App />)
 
     fireEvent.click(screen.getByText('Depth & Tide'))
 
-    // DepthTideTile's onOpen now routes to 'forecast', not the removed 'tides' panel.
+    // DepthTideTile's onOpen now routes to 'forecast', not the removed
+    // 'tides' panel. Forecast is a lazy chunk, so wait for it.
     expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
-    expect(screen.getAllByText(/tide/i).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/tide/i)).length).toBeGreaterThan(0)
   })
 
   it('opens the Mate panel from the sidebar', async () => {

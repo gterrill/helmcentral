@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, test, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { EmbedTile } from '@/components/embed-tile'
+import { EmbedTile, MOUNT_IDLE_TIMEOUT_MS } from '@/components/embed-tile'
 
 const config = { title: 'Windrose', url: 'http://boat.local:3000/d-solo/abc?panelId=2' }
 
@@ -11,9 +11,82 @@ function getIframe(): HTMLIFrameElement {
   return frame
 }
 
+// happy-dom's own IntersectionObserver is an inert stub — every method is a
+// documented TODO (node_modules/happy-dom/lib/intersection-observer/
+// IntersectionObserver.js) — so it never actually reports an intersection.
+// This fake stands in for it and exposes a way to fire the callback by hand,
+// the same way FakeWebSocket in use-radar-echo-stream.test.ts stands in for
+// a socket that never really connects.
+class FakeIntersectionObserver {
+  static instances: FakeIntersectionObserver[] = []
+
+  readonly callback: IntersectionObserverCallback
+  readonly options: IntersectionObserverInit | undefined
+  observedElements: Element[] = []
+  disconnected = false
+
+  constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+    this.callback = callback
+    this.options = options
+    FakeIntersectionObserver.instances.push(this)
+  }
+
+  observe(target: Element) {
+    this.observedElements.push(target)
+  }
+
+  unobserve(target: Element) {
+    this.observedElements = this.observedElements.filter((el) => el !== target)
+  }
+
+  disconnect() {
+    this.disconnected = true
+  }
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return []
+  }
+
+  intersect(isIntersecting = true) {
+    const entries = this.observedElements.map(
+      (target) => ({ isIntersecting, target }) as IntersectionObserverEntry,
+    )
+    this.callback(entries, this as unknown as IntersectionObserver)
+  }
+}
+
+beforeEach(() => {
+  FakeIntersectionObserver.instances = []
+  vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
+  vi.useFakeTimers()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+// Drives a freshly-rendered EmbedTile past both lazy-mount gates: reports an
+// intersection on its own container, then advances past the idle-deferral
+// window, matching how a real tile scrolls into view and then gets its
+// idle-scheduled mount. happy-dom has no requestIdleCallback (Node doesn't
+// either), so the component's fallback setTimeout path is what's under test
+// here by default.
+function revealAndMount() {
+  const observer = FakeIntersectionObserver.instances.at(-1)
+  if (!observer) throw new Error('expected an IntersectionObserver to have been created')
+  act(() => {
+    observer.intersect(true)
+  })
+  act(() => {
+    vi.advanceTimersByTime(MOUNT_IDLE_TIMEOUT_MS)
+  })
+}
+
 describe('EmbedTile', () => {
   test('renders the configured URL in an iframe titled by the widget', () => {
     render(<EmbedTile config={config} editing={false} />)
+    revealAndMount()
 
     const frame = getIframe()
     expect(frame).toHaveAttribute('src', config.url)
@@ -27,6 +100,7 @@ describe('EmbedTile', () => {
 
   test('sandboxes the frame without granting it top-level navigation', () => {
     render(<EmbedTile config={config} editing={false} />)
+    revealAndMount()
 
     const sandbox = getIframe().getAttribute('sandbox') ?? ''
     expect(sandbox).toContain('allow-scripts')
@@ -34,10 +108,18 @@ describe('EmbedTile', () => {
     expect(sandbox).not.toContain('allow-top-navigation')
   })
 
+  test('sets loading=lazy on the frame', () => {
+    render(<EmbedTile config={config} editing={false} />)
+    revealAndMount()
+
+    expect(getIframe()).toHaveAttribute('loading', 'lazy')
+  })
+
   // Without this, a drag or resize whose mouse-up lands over the frame is
   // swallowed by the embedded document and the gesture never completes.
   test('makes the frame click-through while the dashboard is in layout mode', () => {
     const { rerender } = render(<EmbedTile config={config} editing={false} />)
+    revealAndMount()
     expect(getIframe().className).not.toContain('pointer-events-none')
 
     rerender(<EmbedTile config={config} editing />)
@@ -81,6 +163,7 @@ describe('EmbedTile', () => {
 describe('EmbedTile frameless mode', () => {
   test('renders just the iframe, with no tile chrome, when frameless and not editing', () => {
     render(<EmbedTile config={{ ...config, frameless: true }} editing={false} />)
+    revealAndMount()
 
     expect(screen.queryByText('Windrose')).not.toBeInTheDocument()
 
@@ -145,6 +228,7 @@ describe('EmbedTile theme sync', () => {
 
   test('rewrites theme=light to theme=dark when isDarkTheme is true', () => {
     render(<EmbedTile config={{ title: 'Weather', url: grafanaUrl }} editing={false} isDarkTheme />)
+    revealAndMount()
 
     const src = getIframe().getAttribute('src') ?? ''
     expect(new URL(src).searchParams.get('theme')).toBe('dark')
@@ -153,6 +237,7 @@ describe('EmbedTile theme sync', () => {
   test('rewrites theme=dark to theme=light when isDarkTheme is false', () => {
     const darkUrl = grafanaUrl.replace('theme=light', 'theme=dark')
     render(<EmbedTile config={{ title: 'Weather', url: darkUrl }} editing={false} isDarkTheme={false} />)
+    revealAndMount()
 
     const src = getIframe().getAttribute('src') ?? ''
     expect(new URL(src).searchParams.get('theme')).toBe('light')
@@ -160,6 +245,7 @@ describe('EmbedTile theme sync', () => {
 
   test('preserves other query params, including valueless ones like kiosk', () => {
     render(<EmbedTile config={{ title: 'Weather', url: grafanaUrl }} editing={false} isDarkTheme />)
+    revealAndMount()
 
     const src = getIframe().getAttribute('src') ?? ''
     const params = new URL(src).searchParams
@@ -170,6 +256,7 @@ describe('EmbedTile theme sync', () => {
 
   test('passes a URL with no theme param through byte-for-byte unchanged', () => {
     render(<EmbedTile config={config} editing={false} isDarkTheme />)
+    revealAndMount()
 
     const src = getIframe().getAttribute('src') ?? ''
     expect(src).toBe(config.url)
@@ -178,8 +265,95 @@ describe('EmbedTile theme sync', () => {
   test('omitting isDarkTheme behaves as light mode', () => {
     const darkUrl = grafanaUrl.replace('theme=light', 'theme=dark')
     render(<EmbedTile config={{ title: 'Weather', url: darkUrl }} editing={false} />)
+    revealAndMount()
 
     const src = getIframe().getAttribute('src') ?? ''
     expect(new URL(src).searchParams.get('theme')).toBe('light')
+  })
+})
+
+describe('EmbedTile lazy loading', () => {
+  test('does not mount an iframe before the tile intersects the viewport', () => {
+    render(<EmbedTile config={config} editing={false} />)
+
+    expect(document.querySelector('iframe')).toBeNull()
+  })
+
+  test('does not mount the iframe on intersection alone — it waits out the idle deferral first', () => {
+    render(<EmbedTile config={config} editing={false} />)
+
+    act(() => {
+      FakeIntersectionObserver.instances.at(-1)!.intersect(true)
+    })
+    expect(document.querySelector('iframe')).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(MOUNT_IDLE_TIMEOUT_MS)
+    })
+    expect(getIframe()).toHaveAttribute('src', config.url)
+  })
+
+  test('sets loading=lazy on the frameless frame too', () => {
+    render(<EmbedTile config={{ ...config, frameless: true }} editing={false} />)
+    revealAndMount()
+
+    expect(getIframe()).toHaveAttribute('loading', 'lazy')
+  })
+
+  test('observes the tile with a 200px rootMargin so loading starts just before it is visible', () => {
+    render(<EmbedTile config={config} editing={false} />)
+
+    expect(FakeIntersectionObserver.instances).toHaveLength(1)
+    expect(FakeIntersectionObserver.instances[0].options?.rootMargin).toBe('200px')
+    expect(FakeIntersectionObserver.instances[0].observedElements).toEqual([
+      screen.getByTestId('embed-frame-container'),
+    ])
+  })
+
+  test('keeps the iframe mounted after the tile scrolls back out of view', () => {
+    render(<EmbedTile config={config} editing={false} />)
+    revealAndMount()
+    const frame = getIframe()
+
+    // Fire a non-intersecting report by hand: useInView disconnects its
+    // observer on first sight, but the underlying object can still be
+    // invoked directly, the same way a real observer could in principle
+    // report `isIntersecting: false` for an element it's about to drop.
+    act(() => {
+      FakeIntersectionObserver.instances.at(-1)!.intersect(false)
+    })
+
+    expect(document.querySelector('iframe')).toBe(frame)
+  })
+
+  test('disconnects the intersection observer on unmount before it ever intersects', () => {
+    const { unmount } = render(<EmbedTile config={config} editing={false} />)
+    const observer = FakeIntersectionObserver.instances.at(-1)!
+
+    unmount()
+
+    expect(observer.disconnected).toBe(true)
+  })
+
+  test('shows a placeholder that keeps the tile structure and names the embed before it mounts', () => {
+    render(<EmbedTile config={config} editing={false} />)
+
+    // Tile chrome (header, title) is unaffected by the mount gate.
+    expect(screen.getByText('Windrose')).toBeInTheDocument()
+    expect(document.querySelector('iframe')).toBeNull()
+
+    // The placeholder fills the same slot the iframe will occupy, sized the
+    // same way, and names the embed the way the "No URL configured" zero
+    // state already names its own condition.
+    const container = screen.getByTestId('embed-frame-container')
+    expect(container.className).toContain('min-h-[240px]')
+    expect(container).toHaveTextContent('Loading Windrose...')
+  })
+
+  test('shows the placeholder in frameless mode too, since there is no header to fall back on', () => {
+    render(<EmbedTile config={{ ...config, frameless: true }} editing={false} />)
+
+    const container = screen.getByTestId('embed-frame-container')
+    expect(container).toHaveTextContent('Loading Windrose...')
   })
 })

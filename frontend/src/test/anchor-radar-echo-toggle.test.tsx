@@ -186,7 +186,7 @@ vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], 
 
 vi.mock('@/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    ui: { distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
       hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
@@ -270,16 +270,20 @@ describe('Radar echo toggle wiring', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
-  it('toggles radar echo state through App -> Tile -> Map path', () => {
+  it('toggles radar echo state through App -> Tile -> Map path', async () => {
     render(<App />)
 
-    expect(screen.getByTestId('radar-echo-state')).toHaveTextContent('off')
+    // AnchorWatchTile now lazy-loads AnchorWatchMap (kiosk bundle-split
+    // follow-up), so the mocked map resolves a beat after the rest of the
+    // tree — vi.mock still intercepts the dynamic import the same way it
+    // does a static one.
+    expect(await screen.findByTestId('radar-echo-state')).toHaveTextContent('off')
 
     fireEvent.click(screen.getByLabelText('Toggle radar echo overlay'))
     expect(screen.getByTestId('radar-echo-state')).toHaveTextContent('on')
   })
 
-  it('shares one state between the tile and the fullscreen drawer, and persists it', () => {
+  it('shares one state between the tile and the fullscreen drawer, and persists it', async () => {
     render(<App />)
 
     fireEvent.click(screen.getByLabelText('Toggle radar echo overlay'))
@@ -288,10 +292,11 @@ describe('Radar echo toggle wiring', () => {
 
     // Navigate from the dashboard tile to the fullscreen anchor-watch panel
     // (the drawer) via the sidebar — a completely different mounted
-    // AnchorWatchMap instance, sharing state only through App.tsx.
+    // AnchorWatchMap instance, sharing state only through App.tsx. The
+    // drawer is a lazy chunk, so its content isn't there synchronously.
     fireEvent.click(screen.getByRole('button', { name: /anchor watch/i }))
 
-    expect(screen.getByTestId('radar-echo-state')).toHaveTextContent('on')
+    expect(await screen.findByTestId('radar-echo-state')).toHaveTextContent('on')
 
     // Toggling off from the drawer's map must flow back through the same
     // App-owned state, not a copy local to the drawer.

@@ -89,6 +89,145 @@ export default defineConfig(({ mode }) => ({
     // downlevelled no further than that floor. It drops Safari below 16.4.
     cssTarget: ['chrome111', 'edge111', 'firefox111', 'safari16.4'],
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        // rolldown's own grouping API (output.codeSplitting.groups), not the
+        // deprecated Rollup-compat `manualChunks(id)` function this replaced.
+        // The two are not equivalent here: manualChunks is shimmed onto a
+        // *single* codeSplitting group with one dynamic `name()`, which by
+        // default (`includeDependenciesRecursively: true`) recursively pulls
+        // a captured module's dependencies into whichever group visited it
+        // first - so @base-ui/react's direct `require('react-dom')` was
+        // dragging the real react-dom implementation into dashboard-vendor
+        // regardless of manualChunks separately saying react-dom's own id
+        // belonged in react-vendor. Explicit `priority` across real groups
+        // fixes that: rolldown resolves groups highest-priority first and
+        // removes whatever a group captures from every lower-priority
+        // group's pool (see the CodeSplittingGroup.priority doc in
+        // node_modules/rolldown/dist/shared/define-config-*.d.mts), so
+        // react-vendor claims react/react-dom/scheduler before
+        // dashboard-vendor is ever evaluated, and dashboard-vendor ends up
+        // importing them from react-vendor like any other cross-chunk
+        // reference instead of re-bundling them.
+        codeSplitting: {
+          groups: [
+            {
+              // Vite's own runtime helper that every React.lazy()/dynamic
+              // import() call gets wrapped in (__vitePreload, module id
+              // "\0vite/preload-helper.js" - the leading \0 marks it a
+              // virtual module, never a real node_modules path). It has no
+              // group of its own to match against, so with no explicit
+              // claim here the "recursively pull a captured module's
+              // dependencies into whichever group visited it first" behaviour
+              // described below swept it into map-vendor - one lazy() call
+              // anywhere in the app (say, sea-state-tile.tsx's) pulls in this
+              // shared helper, and since map-vendor's own maplibre-gl/
+              // react-map-gl modules happened to be the first group to touch
+              // it, the *entire* 1 MB map-vendor chunk became a static,
+              // eagerly-preloaded dependency of the entry chunk purely to
+              // supply this one tiny function - defeating every map
+              // component's own lazy-split. Top priority claims it before
+              // any other group's recursive capture can.
+              name: 'vite-preload-helper',
+              priority: 20,
+              test: (id) => id === '\0vite/preload-helper.js',
+            },
+            {
+              name: 'react-vendor',
+              priority: 10,
+              // Matched on path segments rather than a bare
+              // `id.includes('react')`: react, react-dom and scheduler are
+              // what every other group below actually shares, and a loose
+              // substring would also catch react-markdown, react-map-gl,
+              // react-grid-layout, react-resizable, react-smooth,
+              // react-transition-group, react-draggable and react-is - none
+              // of which belong in this chunk.
+              test: (id) =>
+                id.includes('/node_modules/react/') ||
+                id.includes('/node_modules/react-dom/') ||
+                id.includes('/node_modules/scheduler/'),
+            },
+            {
+              name: 'map-vendor',
+              priority: 8,
+              test: (id) =>
+                id.includes('maplibre-gl') ||
+                id.includes('react-map-gl') ||
+                // Path-segment, not a bare `id.includes('mapbox')`: the
+                // only real "mapbox" dependency this project pulls in is
+                // the @mapbox/* scope (point-geometry, vector-tile, ... -
+                // all maplibre-gl transitive deps). react-map-gl only
+                // imports its own maplibre provider
+                // (`react-map-gl/maplibre`), so its sibling
+                // `@vis.gl/react-mapbox` package never actually reaches the
+                // bundle, but a loose substring match is one dependency
+                // bump away from silently pulling in whatever unrelated
+                // package next happens to spell "mapbox" somewhere in its
+                // path.
+                id.includes('/node_modules/@mapbox/'),
+            },
+            {
+              name: 'dashboard-vendor',
+              priority: 6,
+              test: (id) =>
+                id.includes('react-grid-layout') ||
+                id.includes('react-resizable') ||
+                id.includes('@base-ui') ||
+                id.includes('@floating-ui'),
+            },
+            {
+              // recharts split out of dashboard-vendor on purpose (kiosk
+              // bundle-split follow-up): react-grid-layout is genuinely
+              // eager (the dashboard grid itself), so grouping recharts
+              // alongside it forced the whole ~395 KB library into the
+              // startup bundle even after sea-state-tile.tsx/forecast-
+              // drawer.tsx started reaching it only through a React.lazy()
+              // boundary - manualChunks groups by module id, not by import
+              // graph reachability, so a "vendor" chunk is only as lazy as
+              // its least-lazy member. A dedicated group lets this one be
+              // exactly as lazy as its own (lazy) importers.
+              name: 'chart-vendor',
+              priority: 5,
+              test: (id) => id.includes('recharts'),
+            },
+            {
+              name: 'markdown-vendor',
+              priority: 4,
+              test: (id) =>
+                id.includes('react-markdown') ||
+                id.includes('remark-gfm') ||
+                id.includes('github-slugger') ||
+                // Path-segment, not a bare `id.includes('marked')`: no
+                // "marked" package is actually a dependency here, but that
+                // substring also matches lucide-react's
+                // dist/esm/icons/book-marked.js - the moment anything
+                // imports the BookMarked icon, a loose match would
+                // silently route it into markdown-vendor instead of
+                // ui-vendor.
+                id.includes('/node_modules/marked/'),
+            },
+            {
+              name: 'ui-vendor',
+              priority: 2,
+              test: (id) =>
+                id.includes('lucide-react') ||
+                id.includes('clsx') ||
+                id.includes('tailwind-merge') ||
+                id.includes('class-variance-authority') ||
+                id.includes('sonner'),
+            },
+            // No catch-all group. A `vendor` group matching bare
+            // `node_modules` used to make every unmatched dependency a
+            // candidate for an eagerly loaded chunk even when only a
+            // lazy-loaded drawer imports it - leaving a dependency
+            // unmatched instead lets rolldown's automatic chunking place it
+            // with whatever chunk actually imports it, so a dependency used
+            // only behind a React.lazy() boundary stays out of the startup
+            // bundle.
+          ],
+        },
+      },
+    },
   },
   test: {
     // Migrated from jsdom: Vitest's own breakdown showed per-file environment

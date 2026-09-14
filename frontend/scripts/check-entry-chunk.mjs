@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// Build guard: the entry chunk (the module dist/index.html loads directly,
-// via <script type="module" src="...">) must be parseable by the wall
-// display kiosk's browser, WPE WebKit 2.38.5, a Safari 16.0-era
+// Build guard: every chunk that loads eagerly - the entry chunk
+// dist/index.html loads directly (via <script type="module" src="...">),
+// plus every chunk that entry chunk (or one of its own static imports)
+// pulls in with a static `import`/`export ... from` - must be parseable by
+// the wall display kiosk's browser, WPE WebKit 2.38.5, a Safari 16.0-era
 // JavaScriptCore. That engine throws a SyntaxError - and refuses to run
 // *any* of the script, blanking the kiosk - on regex lookbehind assertions,
 // `(?<=...)` / `(?<!...)`, unsupported before Safari 16.4. Unlike most
 // syntax, an invalid regex literal is an early (parse-time) error per the
-// ECMAScript grammar, so one bad literal anywhere in the file takes down
-// the whole module, not just the call site that used it.
+// ECMAScript grammar, so one bad literal anywhere in an eagerly loaded
+// chunk takes down the whole module graph, not just the call site that used
+// it.
 //
 // This is exactly what shipped once already: react-markdown's dependency
 // tree (mdast-util-gfm-autolink-literal) carried a lookbehind literal into
@@ -16,8 +19,18 @@
 // the entry chunk (see assistant-markdown.tsx / manual-markdown.tsx and
 // docs/adr/0046-frontend-build-toolchain-and-css-browser-floor.md's
 // addendum). This script is the mechanical guard so the next dependency (or
-// hand-written regex) that reintroduces the pattern into the entry chunk
-// fails the build instead of shipping.
+// hand-written regex) that reintroduces the pattern into an eagerly loaded
+// chunk fails the build instead of shipping.
+//
+// manualChunks (vite.config.ts) means the entry chunk is no longer the only
+// thing that loads before the kiosk gets a chance to render anything: it
+// statically imports vendor chunks like dashboard-vendor and map-vendor, and
+// those in turn can statically import further chunks. A React.lazy() panel
+// (AlarmsDrawer, SettingsPage, ...) loads through a *dynamic* `import()`
+// instead, deferred until the panel is actually opened, so a lookbehind
+// sitting only in one of those (e.g. markdown-vendor, pulled in by the
+// lazy-loaded markdown renderers) never reaches the kiosk at startup and is
+// out of scope for this guard on purpose - see the walk below.
 //
 // APPROACH
 // --------
@@ -377,6 +390,134 @@ export function findModuleEntryScriptSrc(html) {
   return srcMatch[1]
 }
 
+// STATIC IMPORT GRAPH
+// --------------------
+// A statically imported chunk parses the moment its importer does - that's
+// the whole reason it needs the same scan as the entry chunk. A dynamically
+// imported one (`import("./x.js")`, and Vite's own
+// `__vitePreload(()=>import("./x.js"),...)` wrapper around a React.lazy()
+// panel) doesn't run at all until something calls it, so it must not be
+// followed here even though the two look almost identical in minified
+// output.
+//
+// extractStaticImportSpecifiers below tells them apart the same way
+// scanForViolations tells a regex literal from a division above: not a real
+// parser, just enough lexical anchoring to be right on actual bundler
+// output. It looks for the `import`/`export` keyword NOT immediately
+// followed by `(` (that's what rules out both plain `import("./x.js")` and
+// the __vitePreload-wrapped form - both always call `import(`), then takes
+// everything up to the next `from "..."` (or, for a bare `import "./x.js"`,
+// the very next quoted string) as the specifier. Two things fall out of that
+// on their own rather than needing special-casing: a dynamic import's
+// specifier is only ever legal as a parenthesised expression - never a bare
+// `from "..."` clause - so `import(` is unambiguous grounds for exclusion;
+// and Vite's own dependency-manifest arrays (`m.f=["assets/a.js","assets/b.js"]`,
+// used to preload a lazy chunk's own dependencies) are just string literals
+// with no `import`/`export` keyword anywhere near them, so they were never
+// going to match in the first place.
+//
+// Known limits, same spirit as scanForViolations' own:
+//   - This is a keyword anchor, not a parser. `export const from = "./x.js"`
+//     would misread as a re-export if real minified output ever produced
+//     it - it doesn't; bundlers do not emit that. The one thing every real
+//     import/export declaration guarantees that this scan leans on is the
+//     quote landing immediately (whitespace aside) after the keyword or
+//     after `from` - an ordinary assignment like `from = "./x.js"` has an
+//     `=` in the way and is correctly skipped.
+//   - The import/export clause between the keyword and `from` is matched
+//     non-greedily against "anything but a quote, backtick, semicolon, or
+//     parenthesis" - no fixed length cap, because a real renamed named-import
+//     clause in this project's own vendor chunk runs past 700 characters.
+//     Excluding `(`/`)` from that clause is what keeps a `export function
+//     foo(){...}` declaration (no `from` involved) from being scanned into
+//     the next unrelated import statement.
+
+const BARE_IMPORT_RE = /\bimport\s*(["'])((?:\\.|(?!\1)[^\\])*)\1/g
+const FROM_CLAUSE_RE = /\b(?:import|export)\b(?!\s*\()[^'"`;()\n]*?\bfrom\b\s*(["'])((?:\\.|(?!\1)[^\\])*)\1/g
+
+/**
+ * Returns the relative (or root-absolute) specifiers of a chunk's STATIC
+ * imports and re-exports only: `import ... from "./a.js"`, `import"./a.js"`
+ * (bare, no clause), `export ... from "./a.js"`, `export*from"./a.js"` -
+ * with or without whitespace, single or double quotes, exactly as minified
+ * bundler output writes them. Dynamic `import(...)` calls are excluded on
+ * purpose - see the STATIC IMPORT GRAPH section above for how and why, and
+ * its documented limits.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function extractStaticImportSpecifiers(source) {
+  const specifiers = []
+  for (const match of source.matchAll(BARE_IMPORT_RE)) {
+    specifiers.push(match[2])
+  }
+  for (const match of source.matchAll(FROM_CLAUSE_RE)) {
+    specifiers.push(match[2])
+  }
+  return specifiers
+}
+
+// Resolves one specifier extracted from `importingChunkPath`'s source to an
+// absolute path on disk. A root-absolute specifier (`/assets/a.js`, the form
+// Vite emits for cross-chunk references) resolves against distDir, the same
+// way the browser would resolve it against the site root; anything else is
+// relative to the importing chunk's own directory, per normal ES module
+// resolution.
+function resolveChunkSpecifier(specifier, importingChunkPath, distDir) {
+  if (specifier.startsWith('/')) {
+    return resolvePath(distDir, specifier.replace(/^\//, ''))
+  }
+  return resolvePath(dirname(importingChunkPath), specifier)
+}
+
+/**
+ * Walks the static-import graph starting at `entryChunkPath` and returns the
+ * absolute path of every chunk reachable through a STATIC import/re-export
+ * (the entry chunk included) - i.e. every chunk that parses eagerly, before
+ * the kiosk gets a chance to render anything. A dynamically imported chunk
+ * (a React.lazy() panel, and anything only that panel pulls in) is never
+ * enqueued, so it never appears in the result even if it happens to exist on
+ * disk.
+ *
+ * De-duplicates and tolerates cycles via a visited set - a static import
+ * cycle isn't expected in practice, but nothing here depends on that.
+ *
+ * A specifier that resolves to a path with no file on disk is a broken
+ * build (or a bug in this scan) and fails loudly rather than being skipped:
+ * silently dropping a chunk from the scan is exactly the failure mode this
+ * guard exists to prevent.
+ *
+ * @param {string} entryChunkPath
+ * @param {string} distDir
+ * @returns {string[]}
+ */
+export function walkStaticImportGraph(entryChunkPath, distDir) {
+  const visited = new Set()
+  const chunkPaths = []
+  const queue = [{ path: resolvePath(entryChunkPath), importedBy: null }]
+
+  while (queue.length > 0) {
+    const { path: chunkPath, importedBy } = queue.shift()
+    if (visited.has(chunkPath)) continue
+    visited.add(chunkPath)
+
+    if (!existsSync(chunkPath)) {
+      const context = importedBy ? ` (statically imported by ${importedBy})` : ''
+      throw new Error(`check-entry-chunk: chunk does not exist on disk: ${chunkPath}${context}`)
+    }
+
+    chunkPaths.push(chunkPath)
+    const source = readFileSync(chunkPath, 'utf8')
+    for (const specifier of extractStaticImportSpecifiers(source)) {
+      const resolved = resolveChunkSpecifier(specifier, chunkPath, distDir)
+      if (!visited.has(resolved)) queue.push({ path: resolved, importedBy: chunkPath })
+    }
+  }
+
+  return chunkPaths
+}
+
 function formatViolation(violation, chunkPath) {
   return (
     `Regex lookbehind assertion "${violation.pattern}" found in ${chunkPath}\n` +
@@ -406,37 +547,49 @@ function main() {
   }
 
   const chunkRelPath = entrySrc.replace(/^\//, '')
-  const chunkPath = join(distDir, chunkRelPath)
-  if (!existsSync(chunkPath)) {
-    console.error(
-      `check-entry-chunk: entry chunk "${entrySrc}" referenced by index.html does not exist at ${chunkPath}.`,
-    )
+  const entryChunkPath = join(distDir, chunkRelPath)
+
+  let chunkPaths
+  try {
+    chunkPaths = walkStaticImportGraph(entryChunkPath, distDir)
+  } catch (err) {
+    console.error(`check-entry-chunk: ${err.message}`)
     process.exit(1)
     return
   }
 
-  const chunkSource = readFileSync(chunkPath, 'utf8')
-  const violations = scanForViolations(chunkSource)
+  const violationsByChunk = []
+  for (const chunkPath of chunkPaths) {
+    const chunkSource = readFileSync(chunkPath, 'utf8')
+    const violations = scanForViolations(chunkSource)
+    if (violations.length > 0) violationsByChunk.push({ chunkPath, violations })
+  }
 
-  if (violations.length === 0) {
-    console.log(`check-entry-chunk: OK - ${entrySrc} has no regex lookbehind syntax.`)
+  if (violationsByChunk.length === 0) {
+    console.log(
+      `check-entry-chunk: OK - scanned ${chunkPaths.length} eagerly loaded chunk(s) (entry: ${entrySrc}), ` +
+        'no regex lookbehind syntax.',
+    )
     process.exit(0)
     return
   }
 
+  const totalViolations = violationsByChunk.reduce((sum, entry) => sum + entry.violations.length, 0)
   console.error(
-    `check-entry-chunk: FAILED - found ${violations.length} occurrence(s) of Safari-16.0-breaking regex ` +
-      'lookbehind syntax in the entry chunk.',
+    `check-entry-chunk: FAILED - found ${totalViolations} occurrence(s) of Safari-16.0-breaking regex ` +
+      `lookbehind syntax across ${violationsByChunk.length} of ${chunkPaths.length} eagerly loaded chunk(s).`,
   )
   console.error('')
-  for (const violation of violations) {
-    console.error(formatViolation(violation, chunkPath))
-    console.error('')
+  for (const { chunkPath, violations } of violationsByChunk) {
+    for (const violation of violations) {
+      console.error(formatViolation(violation, chunkPath))
+      console.error('')
+    }
   }
   console.error(
-    'The entry chunk loads synchronously and must parse on the wall display kiosk\'s browser floor, ' +
-      'WPE WebKit 2.38.5 / Safari 16.0, which cannot parse this pattern. Move whatever introduced this behind a ' +
-      'dynamic import() into a lazily-loaded chunk instead - see ' +
+    'Every chunk above loads eagerly - the entry chunk itself, or one of its own static imports - and must ' +
+      'parse on the wall display kiosk\'s browser floor, WPE WebKit 2.38.5 / Safari 16.0, which cannot parse this ' +
+      'pattern. Move whatever introduced this behind a dynamic import() into a lazily-loaded chunk instead - see ' +
       'docs/adr/0046-frontend-build-toolchain-and-css-browser-floor.md.',
   )
   process.exit(1)

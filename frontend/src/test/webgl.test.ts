@@ -50,4 +50,31 @@ describe('hasWebGL2', () => {
     expect(hasWebGL2()).toBe(true)
     expect(getContextMock).toHaveBeenCalledTimes(1)
   })
+
+  // The probe context was never released: hasWebGL2() created a WebGL2
+  // context on a throwaway canvas and just dropped the reference, leaving
+  // the browser to hold onto that context (and whatever GPU resources back
+  // it) for as long as the page lives. WEBGL_lose_context's loseContext()
+  // is the standard way to force an unused context to free its resources
+  // immediately rather than waiting on GC.
+  it('releases the probed context via WEBGL_lose_context after probing', async () => {
+    const loseContext = vi.fn()
+    const getExtension = vi.fn(() => ({ loseContext }))
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ getExtension })) as unknown as typeof HTMLCanvasElement.prototype.getContext
+
+    const { hasWebGL2 } = await import('@/lib/webgl')
+
+    expect(hasWebGL2()).toBe(true)
+    expect(getExtension).toHaveBeenCalledWith('WEBGL_lose_context')
+    expect(loseContext).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not throw when the probed context has no getExtension (e.g. the other tests\' plain-object stub)', async () => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as unknown as typeof HTMLCanvasElement.prototype.getContext
+
+    const { hasWebGL2 } = await import('@/lib/webgl')
+
+    expect(() => hasWebGL2()).not.toThrow()
+    expect(hasWebGL2()).toBe(true)
+  })
 })

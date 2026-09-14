@@ -195,6 +195,40 @@ function trailToGeoJSON(points: TrailPoint[]): GeoJSON.Feature<GeoJSON.LineStrin
   }
 }
 
+// ── Change detection for the trail GeoJSON refresh tick ────────────────────
+// react-map-gl re-uploads a Source's `data` to maplibre whenever the prop's
+// *identity* changes, even when the GeoJSON it describes is unchanged - and
+// both trail sources below use lineMetrics with line-gradient, one of the
+// more expensive things to re-upload for nothing. vesselTrail()/aisTrails()
+// read ring buffers behind a stable getter (use-server-trails.ts, not owned
+// here), so there's no cheaper signal available than point count plus the
+// last point's own timestamp per trail - enough to tell "actually changed"
+// from "nothing new arrived this tick" without diffing every point.
+function trailSignature(points: TrailPoint[]): string {
+  if (points.length === 0) return '0'
+  return `${points.length}:${points[points.length - 1].timestampMs}`
+}
+
+function aisTrailsSignature(trails: Map<string, TrailPoint[]>): string {
+  let signature = ''
+  for (const [name, points] of trails) {
+    signature += `${name}=${trailSignature(points)};`
+  }
+  return signature
+}
+
+// Two label-suppression sets are equal when their contents match,
+// regardless of identity - used so the AIS-label effect below only calls
+// setState (and forces a second full render of this 1,748-line map) when
+// the result actually changed.
+function suppressedIdsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const id of a) {
+    if (!b.has(id)) return false
+  }
+  return true
+}
+
 // ── Zoom level from radius (show ~4× radius diameter in view) ───────────────
 function zoomForRadius(radiusM: number): number {
   // Approximate: zoom 14 ≈ 300m radius nicely visible.
@@ -287,6 +321,17 @@ export interface AnchorWatchMapProps {
   onPlacemarkCreate?: (lat: number, lon: number) => void
   onPlacemarkRemove?: (id: string) => void
   className?: string
+  // False on the wall kiosk (ADR: kiosk maps are display-only): passes
+  // interactive={false} straight through to the underlying maplibre map,
+  // which detaches every mouse/touch/keyboard handler (no zoom, pan, rotate
+  // or gesture handling), and hides every on-map control (zoom, fullscreen,
+  // satellite, radar echo, recentre) - there is nothing for a display with
+  // no touchscreen to drive them with. The map still swings to a new anchor
+  // session and markers/trails still update, since those are driven
+  // imperatively (easeTo) rather than through one of the handlers this
+  // disables. Defaults to true so every existing host keeps today's
+  // behaviour.
+  interactive?: boolean
 }
 
 export function AnchorWatchMap({
@@ -325,6 +370,7 @@ export function AnchorWatchMap({
   onPlacemarkCreate,
   onPlacemarkRemove,
   className,
+  interactive = true,
 }: AnchorWatchMapProps) {
   const hasAnchor = anchorLat !== null && anchorLon !== null
   // WPE WebKit 2.38 (the wall-display kiosk browser) has no WebGL2, and
@@ -338,6 +384,12 @@ export function AnchorWatchMap({
   const metricsPanelRef = useRef<HTMLDivElement | null>(null)
   const mapControlsRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MapRef | null>(null)
+  // Forward reference to the AIS-label suppression recompute (declared
+  // further down, after the state it closes over) so handleMoveEnd below
+  // can trigger it on pan/zoom without needing to be redeclared every time
+  // aisVessels changes — see the effect that keeps this current, near the
+  // suppression logic itself.
+  const recomputeAisLabelSuppressionRef = useRef<() => void>(() => {})
   const collapseAttribution = useCollapsedMapAttribution(mapRef)
   const [editMode, setEditMode] = useState<EditMode>('none')
   const [ghostAnchor, setGhostAnchor] = useState<{ lat: number; lon: number } | null>(null)
@@ -352,20 +404,27 @@ export function AnchorWatchMap({
   const suppressNextMapClickRef = useRef(false)
   const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
   const [motoringPoints, setMotoringPoints] = useState<TrailPoint[]>([])
-  // Track zoom for marker scaling
+  // Track zoom for marker scaling. No onZoom handler: that used to fire
+  // setCurrentZoom on every animation frame of a zoom gesture, and an effect
+  // below wrote it to localStorage on each of those renders too. Neither
+  // marker scale nor the satellite-imagery fade need that granularity - both
+  // only have to be right once the gesture settles - so currentZoom is
+  // updated from handleMoveEnd below instead, which fires once per gesture
+  // (moveend also fires at the end of a zoom, not just a pan) rather than
+  // once per frame.
   const [currentZoom, setCurrentZoom] = useState(() => readStoredZoom() ?? zoomForRadius(radiusMeters))
-  const handleZoomChange = useCallback(() => {
-    const z = mapRef.current?.getZoom()
-    if (z !== undefined) setCurrentZoom(z)
-  }, [])
   // Scale markers: full size at zoom 14+, shrink linearly down to 0.45× at zoom 10
   const markerScale = markerScaleForZoom(currentZoom)
   const worldImageryOpacity = computeWorldImageryOpacity(currentZoom, showImageryLayer)
 
+  // Kiosk maps are display-only (`interactive` false): no user gesture can
+  // change the zoom, so there is nothing worth persisting, and this stays
+  // off entirely rather than writing the same figure on every render.
   useEffect(() => {
+    if (!interactive) return
     if (typeof window === 'undefined') return
     window.localStorage.setItem(ANCHOR_WATCH_ZOOM_STORAGE_KEY, String(currentZoom))
-  }, [currentZoom])
+  }, [interactive, currentZoom])
 
   // Fail-fast per the repo fallback policy: MapPlaceLabels' <Layer>
   // elements (mounted below, after the alarm-circle Source) attach to a
@@ -446,11 +505,25 @@ export function AnchorWatchMap({
     handleRadarEchoStyleData()
   }, [handleStyleData, handleRadarEchoStyleData])
 
-  // Re-render trails on each poll cycle (trails are stored in refs, not state)
+  // Re-render trails on each poll cycle (trails are stored in refs, not
+  // state) - but only bump renderKey when a trail's signature (point count
+  // plus its last point's own timestamp) actually changed since the last
+  // tick. postAnchorTrailGeoJSON/aisTrailsData below are keyed on renderKey,
+  // so an unconditional bump every 5s used to hand react-map-gl a brand new
+  // GeoJSON object - and force it to re-upload both lineMetrics sources -
+  // even on a tick where not a single point had arrived.
+  const trailSignatureRef = useRef<string>('')
   useEffect(() => {
-    const timer = setInterval(() => setRenderKey((k) => k + 1), 5000)
+    trailSignatureRef.current = `${trailSignature(vesselTrail())}|${aisTrailsSignature(aisTrails())}`
+    const timer = setInterval(() => {
+      const next = `${trailSignature(vesselTrail())}|${aisTrailsSignature(aisTrails())}`
+      if (next !== trailSignatureRef.current) {
+        trailSignatureRef.current = next
+        setRenderKey((k) => k + 1)
+      }
+    }, 5000)
     return () => clearInterval(timer)
-  }, [])
+  }, [vesselTrail, aisTrails])
 
   // Collapse the enlarged marker after 3 seconds. Only the highlight is
   // transient — every marker's range stays on show permanently.
@@ -929,10 +1002,15 @@ export function AnchorWatchMap({
       // it was made in.
       writeStoredCenter(latitude, longitude, viewSessionRef.current)
     }
-    if (Number.isFinite(zoom)) {
+    // Not interactive (kiosk): no user gesture can change the zoom, so
+    // there's nothing to track — see the currentZoom state's own comment.
+    if (interactive && Number.isFinite(zoom)) {
       setCurrentZoom(zoom)
     }
-  }, [])
+    // A pan/zoom changes every AIS vessel's projected screen position, so
+    // the label-declutter result can change even with no new AIS poll.
+    recomputeAisLabelSuppressionRef.current()
+  }, [interactive])
 
   // ── Initial map view ─────────────────────────────────────────────────────
   // mountView, resolved above, has already decided whether the stored centre
@@ -984,24 +1062,52 @@ export function AnchorWatchMap({
   // isn't part of every test double for MapRef (only a live maplibre map
   // provides it), so this degrades to "suppress nothing" — today's
   // behaviour — wherever it's unavailable, rather than throwing.
+  //
+  // This used to recompute on every own-ship position tick (vesselLat/
+  // vesselLon in the trigger deps), which called getBoundingClientRect
+  // three times (a forced synchronous layout) and always handed React a
+  // brand-new Set identity, forcing a second full render of this map on
+  // every GPS fix. Own-ship position does feed `priority` (the tie-break
+  // between two colliding AIS labels), but only changes which of two
+  // already-colliding vessels wins — it does not, on its own, justify
+  // re-measuring the overlay panels or re-rendering on every tick, so it's
+  // read fresh off a ref (kept current every render, no effect needed)
+  // rather than triggering the recompute itself.
+  const vesselPositionRef = useRef({ lat: vesselLat, lon: vesselLon })
+  vesselPositionRef.current = { lat: vesselLat, lon: vesselLon }
+
   const [suppressedAisLabelIds, setSuppressedAisLabelIds] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    const map = mapRef.current
+
+  // Avoid-zone rects (the metrics panel, the control stack), in
+  // wrapper-relative coordinates. Cached here rather than re-measured by
+  // the recompute below: getBoundingClientRect forces a synchronous layout,
+  // and these panels only actually move when the wrapper itself resizes or
+  // the metrics panel's own row count changes (hasAnchor) — not on every
+  // AIS poll or pan/zoom.
+  const avoidZonesRef = useRef<ScreenRect[]>([])
+  const recomputeAvoidZones = useCallback(() => {
     const wrapper = mapWrapperRef.current
-    if (!map || !wrapper || typeof map.project !== 'function') return
+    if (!wrapper) return
     const wrapperRect = wrapper.getBoundingClientRect()
-    const avoidZones: ScreenRect[] = []
+    const zones: ScreenRect[] = []
     for (const ref of [metricsPanelRef, mapControlsRef]) {
       const el = ref.current
       if (!el) continue
       const rect = el.getBoundingClientRect()
-      avoidZones.push({
+      zones.push({
         left: rect.left - wrapperRect.left,
         top: rect.top - wrapperRect.top,
         right: rect.right - wrapperRect.left,
         bottom: rect.bottom - wrapperRect.top,
       })
     }
+    avoidZonesRef.current = zones
+  }, [])
+
+  const recomputeAisLabelSuppression = useCallback(() => {
+    const map = mapRef.current
+    if (!map || typeof map.project !== 'function') return
+    const { lat, lon } = vesselPositionRef.current
     const points: MarkerLabelPoint[] = []
     for (const vessel of aisVessels) {
       if (vessel.lat === undefined || vessel.lon === undefined) continue
@@ -1010,13 +1116,42 @@ export function AnchorWatchMap({
         id: vessel.id,
         x: projected.x,
         y: projected.y,
-        priority: haversineMeters(vesselLat, vesselLon, vessel.lat, vessel.lon),
+        priority: haversineMeters(lat, lon, vessel.lat, vessel.lon),
       })
     }
-    setSuppressedAisLabelIds(resolveMarkerLabelSuppression(points, avoidZones))
-    // renderKey ticks every 5s (vessels move between AIS polls even with no
-    // pan/zoom); hasAnchor covers the metric overlay gaining/losing rows.
-  }, [aisVessels, currentZoom, renderKey, vesselLat, vesselLon, hasAnchor])
+    const next = resolveMarkerLabelSuppression(points, avoidZonesRef.current)
+    setSuppressedAisLabelIds((current) => (suppressedIdsEqual(current, next) ? current : next))
+  }, [aisVessels])
+
+  // recomputeAisLabelSuppression's identity changes with aisVessels, so
+  // handleMoveEnd (declared earlier, well before aisVessels is known to
+  // change) reads it through this ref rather than depending on it directly
+  // — otherwise every AIS poll would also mean re-subscribing onMoveEnd.
+  useEffect(() => {
+    recomputeAisLabelSuppressionRef.current = recomputeAisLabelSuppression
+  }, [recomputeAisLabelSuppression])
+
+  // Mount + whenever the metrics panel's own row count changes (hasAnchor)
+  // + whenever aisVessels changes (a new/departed contact, or ranks
+  // reshuffling): both the avoid zones and the suppression result need a
+  // fresh look. Neither of these fires per GPS tick.
+  useEffect(() => {
+    recomputeAvoidZones()
+    recomputeAisLabelSuppression()
+  }, [hasAnchor, recomputeAvoidZones, recomputeAisLabelSuppression])
+
+  // Container resize (a tile being resized, the browser window changing):
+  // the only other thing that can actually move the overlay panels.
+  useEffect(() => {
+    const wrapper = mapWrapperRef.current
+    if (!wrapper || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      recomputeAvoidZones()
+      recomputeAisLabelSuppressionRef.current()
+    })
+    observer.observe(wrapper)
+    return () => observer.disconnect()
+  }, [recomputeAvoidZones])
 
   return (
     <div ref={mapWrapperRef} className={cn('relative isolate overflow-hidden rounded-lg', className)}>
@@ -1035,8 +1170,8 @@ export function AnchorWatchMap({
         style={{ width: '100%', height: '100%' }}
         mapStyle={mapStyle}
         minZoom={10}
+        interactive={interactive}
         onLoad={handleMapLoad}
-        onZoom={handleZoomChange}
         onMoveEnd={handleMoveEnd}
         onStyleData={handleMapStyleData}
         onClick={handleMapClick}
@@ -1667,7 +1802,13 @@ export function AnchorWatchMap({
           in-tile default (expandedControls unset) keeps only fullscreen and
           zoom; satellite, radar and recentre move into this same stack
           under expandedControls, which the fullscreen drawer opts into —
-          same control, same code, just more room to show all of it. */}
+          same control, same code, just more room to show all of it.
+
+          Kiosk maps are display-only: every button here is an interaction
+          control (zoom, fullscreen, satellite/radar-echo toggle, recentre) —
+          nothing informational — so the whole stack is dropped rather than
+          picked apart one button at a time when `interactive` is false. */}
+      {interactive && (
       <div
         ref={mapControlsRef}
         className="pointer-events-auto absolute right-3 top-3 flex flex-col gap-1"
@@ -1742,6 +1883,7 @@ export function AnchorWatchMap({
             anchor-watch-drawer.tsx); a one-tap unlabeled destructive icon
             next to that would be inconsistent. */}
       </div>
+      )}
 
     </div>
   )

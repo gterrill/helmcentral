@@ -22,15 +22,19 @@ const jumpToMock = vi.fn()
 // Distinct-per-marker projection so two markers can be made to "overlap" on
 // screen for the label-declutter test without touching the real projector.
 let projectImpl: (lngLat: [number, number]) => { x: number; y: number } = ([lng, lat]) => ({ x: lng, y: lat })
+// Captures every prop the last-mounted <Map> received, so the `interactive`
+// tests can assert on exactly what reached the underlying maplibre map.
+let lastMapProps: { interactive?: boolean } | null = null
 
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
   return {
     Map: React.forwardRef(
       (
-        { children, onLoad }: { children?: React.ReactNode; onLoad?: () => void },
+        { children, onLoad, interactive }: { children?: React.ReactNode; onLoad?: () => void; interactive?: boolean },
         ref: React.Ref<unknown>,
       ) => {
+        lastMapProps = { interactive }
         React.useImperativeHandle(ref, () => ({
           getCanvas: () => ({ style: {} }),
           getZoom: () => 12,
@@ -64,6 +68,7 @@ afterEach(() => {
   vi.useRealTimers()
   projectImpl = ([lng, lat]) => ({ x: lng, y: lat })
   mockHasWebGL2 = true
+  lastMapProps = null
 })
 
 function feature(overrides: Partial<PoiFeature>): PoiFeature {
@@ -106,8 +111,16 @@ const aisVessel: NearbyVessel = {
   id: 'urn:mrn:imo:mmsi:100000001', name: 'SPLURGE', lat: -20.281, lon: 148.951, range_m: 100, age_seconds: 2,
 }
 
-function renderTile(props: Partial<React.ComponentProps<typeof PoiMapTile>> = {}) {
-  return render(
+// PoiMapTile is a thin React.lazy wrapper over poi-map-tile-impl.tsx (kiosk
+// bundle-split follow-up: this is the only eager path to map-vendor on
+// every route, including /kiosk pages with no map at all). render() alone
+// only shows the wrapper's own loading fallback; every test needs to wait
+// for the lazy chunk to resolve before asserting on the real content, so
+// this helper does that once, here, rather than in every test below.
+// 'poi-map-container' is present in both the WebGL2 and no-WebGL2 branches
+// of the impl, so it's a stable "the real component is up" signal either way.
+async function renderTile(props: Partial<React.ComponentProps<typeof PoiMapTile>> = {}) {
+  const result = render(
     <PoiMapTile
       config={config()}
       editing={false}
@@ -123,21 +136,23 @@ function renderTile(props: Partial<React.ComponentProps<typeof PoiMapTile>> = {}
       {...props}
     />,
   )
+  await screen.findByTestId('poi-map-container')
+  return result
 }
 
 describe('PoiMapTile', () => {
   // Same guard as the anchor and route maps: the map container owns its
   // own stacking context so nothing drawn over the canvas can escape above
   // a sheet or the mobile sidebar.
-  it('isolates its overlays so they cannot draw above a sheet', () => {
+  it('isolates its overlays so they cannot draw above a sheet', async () => {
     usePoiMock.mockReturnValue(poiResult({}))
 
-    renderTile()
+    await renderTile()
 
     expect(screen.getByTestId('poi-map-container').className.split(/\s+/)).toContain('isolate')
   })
 
-  it('renders one marker per feature and rank badges matching the ranked list rows', () => {
+  it('renders one marker per feature and rank badges matching the ranked list rows', async () => {
     const features = [
       feature({ id: 'a', name: 'A', distanceM: 100 }),
       feature({ id: 'b', name: 'B', distanceM: 200 }),
@@ -145,7 +160,7 @@ describe('PoiMapTile', () => {
     ]
     usePoiMock.mockReturnValue(poiResult({ features }))
 
-    renderTile()
+    await renderTile()
 
     expect(screen.getAllByLabelText(/^Point of interest:/)).toHaveLength(3)
     expect(screen.getAllByTestId('poi-list-row')).toHaveLength(3)
@@ -157,7 +172,7 @@ describe('PoiMapTile', () => {
     expect(screen.getByTestId('poi-marker-rank-c').textContent).toBe('3')
   })
 
-  it('shows only the map in "map" layout, and adds the ranked list in "split"', () => {
+  it('shows only the map in "map" layout, and adds the ranked list in "split"', async () => {
     usePoiMock.mockReturnValue(poiResult({ features: [feature({})] }))
 
     const { rerender } = render(
@@ -175,6 +190,7 @@ describe('PoiMapTile', () => {
         distanceUnits="metric"
       />,
     )
+    await screen.findByTestId('poi-map-container')
     expect(screen.queryAllByTestId('poi-list-row')).toHaveLength(0)
 
     rerender(
@@ -195,16 +211,16 @@ describe('PoiMapTile', () => {
     expect(screen.getAllByTestId('poi-list-row')).toHaveLength(1)
   })
 
-  it('passes the configured range and categories through to usePoi (category filter)', () => {
+  it('passes the configured range and categories through to usePoi (category filter)', async () => {
     usePoiMock.mockReturnValue(poiResult({}))
-    renderTile({ config: config({ rangeNm: 8, categories: ['dive', 'trail'] }) })
+    await renderTile({ config: config({ rangeNm: 8, categories: ['dive', 'trail'] }) })
 
     expect(usePoiMock).toHaveBeenCalledWith(8, ['dive', 'trail'], expect.any(Number))
   })
 
-  it('renders AIS markers only when showAis is on', () => {
+  it('renders AIS markers only when showAis is on', async () => {
     usePoiMock.mockReturnValue(poiResult({}))
-    const { rerender } = renderTile({ config: config({ showAis: false }), nearbyVessels: [aisVessel] })
+    const { rerender } = await renderTile({ config: config({ showAis: false }), nearbyVessels: [aisVessel] })
     expect(screen.queryByLabelText(/^AIS vessel:/)).toBeNull()
 
     rerender(
@@ -225,19 +241,22 @@ describe('PoiMapTile', () => {
     expect(screen.getByLabelText('AIS vessel: SPLURGE')).toBeInTheDocument()
   })
 
-  it('shows the amber GNSS badge and never calls easeTo or jumpTo while gnssCriticalAlert is set', () => {
+  it('shows the amber GNSS badge and never calls easeTo or jumpTo while gnssCriticalAlert is set', async () => {
     usePoiMock.mockReturnValue(poiResult({}))
-    renderTile({ gnssCriticalAlert: true })
+    await renderTile({ gnssCriticalAlert: true })
 
     expect(screen.getByTestId('poi-map-gnss-badge')).toBeInTheDocument()
     expect(easeToMock).not.toHaveBeenCalled()
     expect(jumpToMock).not.toHaveBeenCalled()
   })
 
-  it('jumps to the first fix, then eases at most once per 2-second window', () => {
-    vi.useFakeTimers()
+  it('jumps to the first fix, then eases at most once per 2-second window', async () => {
     usePoiMock.mockReturnValue(poiResult({}))
-    const { rerender } = renderTile({ latitude: -20.27, longitude: 148.94 })
+    // The lazy chunk resolves under real timers - flip to fake ones only
+    // after that await settles, or findByTestId's own internal polling
+    // (which relies on a real setTimeout) would never come back.
+    const { rerender } = await renderTile({ latitude: -20.27, longitude: 148.94 })
+    vi.useFakeTimers()
 
     expect(jumpToMock).toHaveBeenCalledTimes(1)
     expect(easeToMock).not.toHaveBeenCalled()
@@ -273,7 +292,7 @@ describe('PoiMapTile', () => {
     expect(easeToMock).toHaveBeenCalledTimes(2)
   })
 
-  it('suppresses a marker label that collides on screen with a higher-ranked one (project mock)', () => {
+  it('suppresses a marker label that collides on screen with a higher-ranked one (project mock)', async () => {
     // Both features project to almost the same screen point, so the
     // lower-ranked (farther) one should yield its label. "map" layout keeps
     // the assertion unambiguous — no ranked-list row to also match on name.
@@ -284,20 +303,20 @@ describe('PoiMapTile', () => {
     ]
     usePoiMock.mockReturnValue(poiResult({ features }))
 
-    renderTile({ config: config({ layout: 'map' }) })
+    await renderTile({ config: config({ layout: 'map' }) })
 
     expect(screen.getByText('Near')).toBeInTheDocument()
     expect(screen.queryByText('Far')).toBeNull()
   })
 
-  it('keeps showing the last good list and its age/error when the feed is unavailable (no masking fallback)', () => {
+  it('keeps showing the last good list and its age/error when the feed is unavailable (no masking fallback)', async () => {
     usePoiMock.mockReturnValue(poiResult({
       features: [feature({ id: 'stale-1', name: 'Stale Anchorage' })],
       error: 'POI provider unavailable (502)',
       fetchedAt: '2026-09-11T00:00:00Z',
     }))
 
-    renderTile()
+    await renderTile()
 
     // The name appears twice (the marker label and the list row); the point
     // is that it is never zero, i.e. the feature is never dropped on error.
@@ -305,7 +324,7 @@ describe('PoiMapTile', () => {
     expect(screen.getByText('POI provider unavailable (502)')).toBeInTheDocument()
   })
 
-  it('shows "POI feed unavailable" rather than "No points of interest in range" when the feed has never succeeded', () => {
+  it('shows "POI feed unavailable" rather than "No points of interest in range" when the feed has never succeeded', async () => {
     usePoiMock.mockReturnValue(poiResult({
       features: [],
       loading: false,
@@ -313,14 +332,14 @@ describe('PoiMapTile', () => {
       fetchedAt: null,
     }))
 
-    renderTile()
+    await renderTile()
 
     expect(screen.getByText('POI feed unavailable')).toBeInTheDocument()
     expect(screen.queryByText('No points of interest in range')).toBeNull()
     expect(screen.getByText('POI provider unavailable (502)')).toBeInTheDocument()
   })
 
-  it('shows "No points of interest in range" only once the fetch has actually succeeded with zero features', () => {
+  it('shows "No points of interest in range" only once the fetch has actually succeeded with zero features', async () => {
     usePoiMock.mockReturnValue(poiResult({
       features: [],
       loading: false,
@@ -328,18 +347,39 @@ describe('PoiMapTile', () => {
       fetchedAt: '2026-09-11T00:00:00Z',
     }))
 
-    renderTile()
+    await renderTile()
 
     expect(screen.getByText('No points of interest in range')).toBeInTheDocument()
   })
 
+  // Kiosk maps are display-only (the Nearby moving map is the kiosk's own
+  // primary map page): no zoom/pan/rotate/gesture handling, since a wall
+  // display has no touchscreen to drive them with. The map still follows
+  // the vessel and updates markers/trails regardless (covered above) - see
+  // poi-map-tile-impl.tsx's own comment on the prop.
+  describe('interactive', () => {
+    it('defaults to an interactive map', async () => {
+      usePoiMock.mockReturnValue(poiResult({}))
+      await renderTile()
+
+      expect(lastMapProps?.interactive).toBe(true)
+    })
+
+    it('passes interactive={false} straight through to the underlying map when told to', async () => {
+      usePoiMock.mockReturnValue(poiResult({}))
+      await renderTile({ interactive: false })
+
+      expect(lastMapProps?.interactive).toBe(false)
+    })
+  })
+
   describe('without WebGL2', () => {
-    it('does not mount the map, shows the fallback panel, and keeps the ranked list working ("split" layout)', () => {
+    it('does not mount the map, shows the fallback panel, and keeps the ranked list working ("split" layout)', async () => {
       mockHasWebGL2 = false
       const features = [feature({ id: 'a', name: 'A' }), feature({ id: 'b', name: 'B' })]
       usePoiMock.mockReturnValue(poiResult({ features }))
 
-      renderTile({ config: config({ layout: 'split' }) })
+      await renderTile({ config: config({ layout: 'split' }) })
 
       expect(screen.queryByTestId('map-root')).not.toBeInTheDocument()
       expect(screen.getByTestId('poi-map-webgl2-fallback')).toHaveTextContent(
@@ -348,11 +388,11 @@ describe('PoiMapTile', () => {
       expect(screen.getAllByTestId('poi-list-row')).toHaveLength(2)
     })
 
-    it('fills the tile with the fallback panel in "map" layout', () => {
+    it('fills the tile with the fallback panel in "map" layout', async () => {
       mockHasWebGL2 = false
       usePoiMock.mockReturnValue(poiResult({}))
 
-      renderTile({ config: config({ layout: 'map' }) })
+      await renderTile({ config: config({ layout: 'map' }) })
 
       expect(screen.queryByTestId('map-root')).not.toBeInTheDocument()
       const fallback = screen.getByTestId('poi-map-webgl2-fallback')

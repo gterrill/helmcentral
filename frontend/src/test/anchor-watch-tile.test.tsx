@@ -11,16 +11,26 @@ import { catenaryMethod, type RodeMethodResult, type RodePlanInput } from '@/lib
 // is surfaced as data attributes (rather than rendered as the real Scope row —
 // that formatting is the map's job, covered by anchor-watch-map-ui.test.tsx)
 // so these tests can assert on exactly what the tile computed and handed down.
+//
+// anchor-watch-tile.tsx now lazy-loads the real AnchorWatchMap (kiosk
+// bundle-split follow-up), but vi.mock intercepts the module regardless of
+// whether it's reached through a static or a dynamic import, so this mock
+// still takes effect. Only the tests that assert on the mock's own rendered
+// content need to await its (near-instant, but still async) resolution —
+// see the findByTestId calls below; everything else in this tile renders
+// eagerly, outside the map's own Suspense boundary.
 vi.mock('@/components/anchor-watch-map', () => ({
   AnchorWatchMap: (props: {
     vesselLat: number
     vesselLon: number
     scopeRecommendation: RodeMethodResult | null
     aisCollisionAlarms?: ReadonlyMap<string, string>
+    interactive?: boolean
   }) => (
     <div
       data-testid="anchor-watch-map"
       data-collision-vessels={[...(props.aisCollisionAlarms?.keys() ?? [])].join(',')}
+      data-interactive={String(props.interactive)}
     >
       {`${props.vesselLat},${props.vesselLon}`}
       <div
@@ -145,23 +155,41 @@ describe('AnchorWatchTile', () => {
     anchorAlarmMock.unsilence = vi.fn()
   })
 
-  it('renders the map when no anchor is set but a GPS fix is available', () => {
+  it('renders the map when no anchor is set but a GPS fix is available', async () => {
     render(<AnchorWatchTile {...baseProps()} />)
 
-    expect(screen.getByTestId('anchor-watch-map')).toBeInTheDocument()
+    expect(await screen.findByTestId('anchor-watch-map')).toBeInTheDocument()
   })
 
-  it('passes aisCollisionAlarms straight through to the map', () => {
+  it('passes aisCollisionAlarms straight through to the map', async () => {
     render(
       <AnchorWatchTile
         {...baseProps({ aisCollisionAlarms: new Map([['urn:mrn:imo:mmsi:100000001', 'warn']]) })}
       />,
     )
 
-    expect(screen.getByTestId('anchor-watch-map')).toHaveAttribute(
+    expect(await screen.findByTestId('anchor-watch-map')).toHaveAttribute(
       'data-collision-vessels',
       'urn:mrn:imo:mmsi:100000001',
     )
+  })
+
+  // Kiosk maps are display-only (ADR: kiosk maps are display-only) - the
+  // tile's own job here is just to forward the prop, since AnchorWatchMap
+  // is what actually hides controls and drops maplibre's interactive
+  // handlers (covered in anchor-watch-map-ui.test.tsx).
+  describe('interactive', () => {
+    it('defaults to an interactive map', async () => {
+      render(<AnchorWatchTile {...baseProps()} />)
+
+      expect(await screen.findByTestId('anchor-watch-map')).toHaveAttribute('data-interactive', 'true')
+    })
+
+    it('passes interactive={false} straight through when told to', async () => {
+      render(<AnchorWatchTile {...baseProps({ interactive: false })} />)
+
+      expect(await screen.findByTestId('anchor-watch-map')).toHaveAttribute('data-interactive', 'false')
+    })
   })
 
   it('shows a No GPS fix placeholder — never a map — when position and anchor are both unavailable', () => {
@@ -177,7 +205,7 @@ describe('AnchorWatchTile', () => {
     expect(screen.getByRole('button', { name: 'Drop' })).toBeDisabled()
   })
 
-  it('still renders the map from the anchor point alone when the live GPS fix drops after the anchor is set', () => {
+  it('still renders the map from the anchor point alone when the live GPS fix drops after the anchor is set', async () => {
     render(
       <AnchorWatchTile
         {...baseProps({
@@ -188,7 +216,7 @@ describe('AnchorWatchTile', () => {
       />,
     )
 
-    expect(screen.getByTestId('anchor-watch-map')).toHaveTextContent('-25.2,152.8')
+    expect(await screen.findByTestId('anchor-watch-map')).toHaveTextContent('-25.2,152.8')
   })
 
   it('shows Drop when no anchor is set', () => {

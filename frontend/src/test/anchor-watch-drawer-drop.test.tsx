@@ -189,7 +189,7 @@ vi.mock('@/hooks/use-depth-trend', () => ({ useDepthTrend: () => ({ points: [], 
 
 vi.mock('@/hooks/use-app-config', () => ({
   useAppConfig: () => ({
-    ui: { vesselStateRefreshSeconds: 10, distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
+    ui: { distanceUnits: 'metric', autoCloseAnchorWatchOnEngine: true },
     anchor: {
       bowRollerHeightM: 0, chainSizeMm: 10, chainOnboardM: 50,
       hullType: 'power_cat', scopeMethod: 'ratio', windageAreaM2: 10,
@@ -220,11 +220,11 @@ describe('Anchor watch drawer drop button', () => {
   // drop" case (ADR 0063) — setAnchorHere still gets called, now with a
   // third capture argument carrying explicit nulls rather than silently
   // omitting them.
-  it('drops anchor from drawer when no watch is active, capturing null depth/tide when there is no sounder reading', () => {
+  it('drops anchor from drawer when no watch is active, capturing null depth/tide when there is no sounder reading', async () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
-    const dropButtons = screen.getAllByRole('button', { name: 'Drop' })
+    const dropButtons = await screen.findAllByRole('button', { name: 'Drop' })
     fireEvent.click(dropButtons[dropButtons.length - 1])
 
     expect(setAnchorHereMock).toHaveBeenCalledWith(-36.8485, 174.7633, {
@@ -242,12 +242,12 @@ describe('Anchor watch drawer drop button', () => {
     expect(screen.queryByRole('button', { name: 'Drop' })).toBeNull()
   })
 
-  it('raises the anchor from the drawer through the confirm dialog when a watch is active', () => {
+  it('raises the anchor from the drawer through the confirm dialog when a watch is active', async () => {
     anchorStateMock = 'set'
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
-    const raiseButtons = screen.getAllByRole('button', { name: 'Raise' })
+    const raiseButtons = await screen.findAllByRole('button', { name: 'Raise' })
     fireEvent.click(raiseButtons[raiseButtons.length - 1])
 
     const dialog = screen.getByRole('alertdialog')

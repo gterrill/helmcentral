@@ -16,11 +16,10 @@ import {
   Settings,
   Sparkles,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
-import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import { AlternatorTile } from '@/components/alternator-tile'
 import { BatteryPowerTile } from '@/components/battery-power-tile'
 import { HotWaterTile } from '@/components/hot-water-tile'
@@ -35,15 +34,25 @@ import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { AlarmBanner } from '@/components/alarm-banner'
-import { AlarmsDrawer } from '@/components/alarms-drawer'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
-import { RadarDrawer } from '@/components/radar-drawer'
-import { AssistantDrawer } from '@/components/assistant-drawer'
-import { MateSheet } from '@/components/mate-sheet'
-import { ManualSheet } from '@/components/manual-sheet'
-import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
+import type { SettingsPageHandle } from '@/components/settings/settings-page'
 import type { SettingsSectionId } from '@/components/settings/settings-nav'
+
+const AlarmsDrawer = lazy(() => import('@/components/alarms-drawer').then((mod) => ({ default: mod.AlarmsDrawer })))
+const AnchorWatchDrawer = lazy(() => import('@/components/anchor-watch-drawer').then((mod) => ({ default: mod.AnchorWatchDrawer })))
+const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
+const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((mod) => ({ default: mod.ForecastDrawer })))
+const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
+const RoutePlannerDrawer = lazy(() => import('@/components/route-planner-drawer').then((mod) => ({ default: mod.RoutePlannerDrawer })))
+const SatChartsDrawer = lazy(() => import('@/components/sat-charts-drawer').then((mod) => ({ default: mod.SatChartsDrawer })))
+const SettingsPage = lazy(() => import('@/components/settings/settings-page').then((mod) => ({ default: mod.SettingsPage })))
+// MateSheet and ManualSheet (unlike the panels above) fetch nothing and run
+// no effects until they've actually been opened - see the `hasOpened` latches
+// below, next to where each is rendered, for why that makes them safe to
+// lazy-load and mount only on first open rather than always up front.
+const MateSheet = lazy(() => import('@/components/mate-sheet').then((mod) => ({ default: mod.MateSheet })))
+const ManualSheet = lazy(() => import('@/components/manual-sheet').then((mod) => ({ default: mod.ManualSheet })))
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,9 +68,6 @@ import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
-import { ForecastDrawer } from '@/components/forecast-drawer'
-import { RoutePlannerDrawer } from '@/components/route-planner-drawer'
-import { SatChartsDrawer } from '@/components/sat-charts-drawer'
 import { RouteTile } from '@/components/route-tile'
 import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
 import { PageSkinSelect } from '@/components/page-skin-select'
@@ -114,7 +120,7 @@ import { useAutopilot } from '@/hooks/use-autopilot'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
-import { FORECAST_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
+import { FORECAST_REFRESH_SECONDS, PLACE_NAME_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
 import { useAppConfig } from '@/hooks/use-app-config'
 import { useMateVoice } from '@/hooks/use-mate-voice'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
@@ -389,6 +395,11 @@ export function App() {
   const { pages, loading: pagesLoading, error: pagesError, refetch: refetchPages, createPage, updatePage, deletePage, reorderPages, reordering } = useDashboardPages()
   const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId)
   const activePage = pages.find((p) => p.id === activePageId) ?? null
+  // Hoisted ahead of the polling hooks below (item B) that gate themselves on
+  // which widgets the active page (or the kiosk's current page, which drives
+  // activePageId exactly the same way — see useKioskRotation below) actually
+  // holds. Otherwise identical to its previous declaration further down.
+  const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
   // ADR 0089: the wall display at /kiosk. Its query string is its own
   // (rotate, a pinned page for authoring/screenshots) rather than app state,
   // so it's parsed once here the same way initialLocation is, and never
@@ -404,7 +415,7 @@ export function App() {
 
   // The Mate sheet (ADR 0093 voice phase): a quick channel over whatever
   // page is on screen, opened by the header's "Ask Mate" button (and later
-  // by voice) rather than navigating away to the Assistant panel. Mounted
+  // by voice) rather than navigating away to the Assistant panel. Rendered
   // once here, not per-panel, so it keeps its own thread across opens/closes
   // the same way the panel's own conversation does. `mateSheetQuestion` is
   // cleared on close so reopening later with no question never re-sends a
@@ -412,6 +423,18 @@ export function App() {
   const [mateSheetOpen, setMateSheetOpen] = useState(false)
   const [mateSheetQuestion, setMateSheetQuestion] = useState<string | undefined>(undefined)
   const [mateSheetNewConversation, setMateSheetNewConversation] = useState(false)
+  // MateSheet is lazy-loaded and does not mount at all until the sheet is
+  // opened for the first time - it fetches its conversation list and runs
+  // every other effect only while `open`, so there is nothing for it to do
+  // before then. This ref latches true the first time `mateSheetOpen` goes
+  // true and never resets, so the component then stays mounted across later
+  // closes - its thread, active conversation, and speech-output state
+  // survive being closed and reopened the same way they always have. A ref
+  // (mutated during render, not via a separate effect) rather than state:
+  // this needs to be visible the same render `mateSheetOpen` first turns
+  // true, not one render later.
+  const mateSheetHasOpenedRef = useRef(false)
+  if (mateSheetOpen) mateSheetHasOpenedRef.current = true
   // Which conversation the Mate PANEL should open (ADR 0094): set only by
   // the sheet's "Open the Mate page" button, which hands over whatever
   // thread was active there. Null means "whatever the panel already had",
@@ -428,12 +451,18 @@ export function App() {
     [activePanel, settingsSection, activePage],
   )
 
-  // The in-app manual (ADR 0095): a right-hand sheet, mounted once here
+  // The in-app manual (ADR 0095): a right-hand sheet, rendered once here
   // beside the Mate sheet, opened by the header's contextual `?`, the
   // sidebar's Manual item, or Settings' own Manual button - each hands
   // openManual a ManualTarget (or null for the contents page).
   const [manualOpen, setManualOpen] = useState(false)
   const [manualTarget, setManualTarget] = useState<ManualTarget | null>(null)
+  // Same lazy-mount-on-first-open latch as mateSheetHasOpenedRef above:
+  // ManualSheet fetches nothing before it has ever been opened (see
+  // use-manual.ts), so there is nothing lost by not mounting it until then,
+  // and its back-stack history then survives later closes.
+  const manualSheetHasOpenedRef = useRef(false)
+  if (manualOpen) manualSheetHasOpenedRef.current = true
   const openManual = useCallback((target: ManualTarget | null) => {
     setManualTarget(target)
     setManualOpen(true)
@@ -751,8 +780,12 @@ export function App() {
     lastUpdateAgeS: solarLastUpdateAgeS,
     controllers: solarControllers,
   } = useSolarState()
-  const { weather } = useWeatherToday(uiConfig.vesselStateRefreshSeconds)
-  const { tide } = useTideToday(uiConfig.vesselStateRefreshSeconds)
+  // Both poll on the forecast cadence, not the /api/vessel-state SSE stream's
+  // own cadence: the backend caches weather for 900s and tide predictions
+  // move on the order of hours, so FORECAST_REFRESH_SECONDS (600s) is
+  // already well inside both — see config/app-config.ts.
+  const { weather } = useWeatherToday(FORECAST_REFRESH_SECONDS)
+  const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
   const { activeWarning: activeForecastWarning } = useForecastWarnings(FORECAST_REFRESH_SECONDS)
   const {
     forecast,
@@ -787,12 +820,11 @@ export function App() {
     updatedAt: upperAirUpdatedAt,
     ttlSeconds: upperAirTtlSeconds,
   } = useUpperAir()
-  const anchorWatch = useAnchorWatch(
-    latitude,
-    longitude,
-    uiConfig.vesselStateRefreshSeconds,
-    gnssCriticalAlert,
-  )
+  // The anchor-watch record's own poll cadence is chosen inside the hook
+  // itself (config/app-config.ts's ANCHOR_WATCH_ACTIVE/IDLE_REFRESH_SECONDS),
+  // since it depends on whether a watch is currently active — not on this
+  // component's unrelated vessel-state refresh setting.
+  const anchorWatch = useAnchorWatch(latitude, longitude, gnssCriticalAlert)
   // The forecast wind band shared by the Rode Planner, the tile's Scope row,
   // and the drawer's Scope row (frontend/src/lib/rode-plan.ts's
   // resolvePlanningWindBand) — one operator choice, not three independent
@@ -823,8 +855,20 @@ export function App() {
     anchorWatch.anchorState !== 'none',
     autoCloseAnchorWatchEnabled,
   )
-  const { getSelfTrail, getAisTrails } = useServerTrails(5000)
-  const placeName = usePlaceName(latitude, longitude, uiConfig.vesselStateRefreshSeconds)
+  // Item B: only the anchor-watch tile/drawer and the Nearby/POI map tile
+  // read getSelfTrail/getAisTrails (AnchorWatchTile, AnchorWatchDrawer and
+  // PoiMapTile below all take them as props) — every other page, including
+  // most of the kiosk rotation, has nowhere for a trail to go. Gate the poll
+  // on whichever of those is actually on screen, rather than running it
+  // app-wide regardless.
+  const activePageHasTrailConsumerWidget = effectiveWidgets.some(
+    (w) => w.id === 'anchor-watch' || isPoiMapWidgetId(w.id),
+  )
+  const trailsEnabled = activePageHasTrailConsumerWidget || activePanel === 'anchor-watch'
+  const { getSelfTrail, getAisTrails } = useServerTrails(5000, trailsEnabled)
+  // A reverse geocode of a slowly changing position, cached server-side per
+  // ~550m grid cell — see PLACE_NAME_REFRESH_SECONDS (config/app-config.ts).
+  const placeName = usePlaceName(latitude, longitude, PLACE_NAME_REFRESH_SECONDS)
   // The clock wall-display tile's next-waypoint line (ADR 0092): the same
   // pieces any other consumer of routeActivationStatus already has in scope,
   // just combined once here rather than inside the tile itself, which has no
@@ -839,7 +883,10 @@ export function App() {
     return { label: waypoint.label, etaAt: eta.etaAt, basis: eta.basis }
   }, [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts])
   const depthTrend = useDepthTrend('3h', 60)
-  const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5)
+  // Item B: only the czone-switches widget reads this; poll it only while
+  // the active page (or the kiosk's current page) actually has one placed.
+  const activePageHasCZoneWidget = effectiveWidgets.some((w) => w.id === 'czone-switches')
+  const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5, activePageHasCZoneWidget)
   const autopilot = useAutopilot()
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
   const isAlternatorTileVisible = (engine0Rpm !== null && engine0Rpm > 0) || (engine1Rpm !== null && engine1Rpm > 0)
@@ -899,7 +946,6 @@ export function App() {
   // separate top-level Secrets entry to hide independently.
   const visiblePanelNavItems = canAdmin ? PANEL_NAV_ITEMS : PANEL_NAV_ITEMS.filter((item) => item.id !== 'settings')
 
-  const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
   const unplacedWidgetIds = DASHBOARD_WIDGET_IDS.filter((id) => !effectiveWidgets.some((w) => w.id === id))
 
   const handleLayoutSettle = useCallback((next: DashboardLayoutItem[]) => {
@@ -1131,6 +1177,42 @@ export function App() {
     }
   }, [activePage, effectiveWidgets, poiMapDraft, updatePage])
 
+  // Item D: every SSE tick re-renders App, and renderWidget below runs fresh
+  // on every one of those renders (it is deliberately not memoized itself —
+  // see its own comment), so an inline `onConfigure={() => setXDraft(widget)}`
+  // handed a memoized tile (EngineClusterTile, LampStripTile, GaugeGroupTile,
+  // GaugeTile) a new function identity every second even when nothing about
+  // that widget changed, defeating the tile's own React.memo. One stable
+  // handler per widget id, cached here and reused across renders, fixes that
+  // without changing any tile's onConfigure signature. effectiveWidgetsRef
+  // mirrors the current widget list (latest-ref idiom, matching
+  // use-telemetry-stream.ts's useTelemetryEvent) so a handler built once
+  // still resolves to the current widget when it's eventually called.
+  const effectiveWidgetsRef = useRef(effectiveWidgets)
+  useEffect(() => { effectiveWidgetsRef.current = effectiveWidgets }, [effectiveWidgets])
+  // globalThis.Map, not the lucide-react `Map` icon this file imports above.
+  const configureHandlersRef = useRef(new globalThis.Map<DashboardWidgetId, () => void>())
+  const configureHandlerFor = useCallback((id: DashboardWidgetId, apply: (widget: DashboardLayoutItem) => void): () => void => {
+    let handler = configureHandlersRef.current.get(id)
+    if (!handler) {
+      handler = () => {
+        const widget = effectiveWidgetsRef.current.find((w) => w.id === id)
+        if (widget) apply(widget)
+      }
+      configureHandlersRef.current.set(id, handler)
+    }
+    return handler
+  }, [])
+
+  // Same reasoning as configureHandlerFor above, for the tiles/banner whose
+  // onOpen just navigates — these take no widget-specific argument, so a
+  // single stable callback per destination covers every call site.
+  const openForecastPanel = useCallback(() => setActivePanel('forecast'), [])
+  const openRoutesPanel = useCallback(() => setActivePanel('routes'), [])
+  const openAlarmsPanel = useCallback(() => requestNavigate('alarms', () => setActivePanel('alarms')), [requestNavigate])
+  const openAnchorWatchPanel = useCallback(() => setActivePanel('anchor-watch'), [])
+  const openRibbonDialog = useCallback(() => setRibbonDialogOpen(true), [])
+
   // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
   // (essentially the entire polled-data surface of the component — vessel,
   // electrical, tanks, nearby-vessels, anchor watch, wind, etc.), several of
@@ -1148,7 +1230,7 @@ export function App() {
           values={gaugeValues}
           ages={gaugeAges}
           editing={layoutEditing}
-          onConfigure={() => setClusterDraft(widget)}
+          onConfigure={configureHandlerFor(id, setClusterDraft)}
         />
       )
     }
@@ -1162,8 +1244,8 @@ export function App() {
           ages={gaugeAges}
           worstAlarmState={worstAlarmState}
           editing={layoutEditing}
-          onConfigure={() => setLampStripDraft(widget)}
-          onOpenAlarms={() => requestNavigate('alarms', () => setActivePanel('alarms'))}
+          onConfigure={configureHandlerFor(id, setLampStripDraft)}
+          onOpenAlarms={openAlarmsPanel}
         />
       )
     }
@@ -1176,7 +1258,7 @@ export function App() {
           values={gaugeValues}
           ages={gaugeAges}
           editing={layoutEditing}
-          onConfigure={() => setGaugeGroupDraft(widget)}
+          onConfigure={configureHandlerFor(id, setGaugeGroupDraft)}
         />
       )
     }
@@ -1189,7 +1271,7 @@ export function App() {
           value={gaugeValues[widget.gauge.path] ?? null}
           ages={gaugeAges}
           editing={layoutEditing}
-          onConfigure={() => setGaugeDraft(widget)}
+          onConfigure={configureHandlerFor(id, setGaugeDraft)}
         />
       )
     }
@@ -1199,7 +1281,7 @@ export function App() {
         <EmbedTile
           config={widget.embed}
           editing={layoutEditing}
-          onConfigure={() => setEmbedDraft(widget)}
+          onConfigure={configureHandlerFor(id, setEmbedDraft)}
           isDarkTheme={isDarkTheme}
         />
       )
@@ -1211,7 +1293,7 @@ export function App() {
         <PoiMapTile
           config={widget.poiMap}
           editing={layoutEditing}
-          onConfigure={() => setPoiMapDraft(widget)}
+          onConfigure={configureHandlerFor(id, setPoiMapDraft)}
           latitude={latitude}
           longitude={longitude}
           headingTrue={headingTrue}
@@ -1223,6 +1305,7 @@ export function App() {
           isDarkTheme={isDarkTheme}
           forceDark={activePage?.skin === 'instrument'}
           distanceUnits={uiConfig.distanceUnits}
+          interactive={!isKiosk}
         />
       )
     }
@@ -1254,7 +1337,7 @@ export function App() {
             navigationState={navigationState}
             depthTrend={depthTrend}
             tide={tide}
-            onOpen={layoutEditing ? undefined : () => setActivePanel('forecast')}
+            onOpen={layoutEditing ? undefined : openForecastPanel}
           />
         )
       case 'position':
@@ -1280,7 +1363,7 @@ export function App() {
             lowTempF={forecast[0]?.low ?? -1}
             seaTemperatureF={waveSeaTemperatureF ?? null}
             distanceUnits={uiConfig.distanceUnits}
-            onOpen={layoutEditing ? undefined : () => setActivePanel('forecast')}
+            onOpen={layoutEditing ? undefined : openForecastPanel}
           />
         )
       case 'clock':
@@ -1342,7 +1425,7 @@ export function App() {
             onImageryToggle={setShowAnchorImagery}
             showRadarEcho={showRadarEcho}
             onRadarEchoToggle={setShowRadarEcho}
-            onFullscreen={() => setActivePanel('anchor-watch')}
+            onFullscreen={openAnchorWatchPanel}
             placemarks={placemarks}
             onPlacemarkCreate={createPlacemark}
             onPlacemarkRemove={removePlacemark}
@@ -1353,6 +1436,7 @@ export function App() {
             selectedWindBandId={windBandId}
             planningDepthM={resolvedPlanningDepthM}
             planningTideHeightFt={resolvedPlanningTideHeightFt}
+            interactive={!isKiosk}
           />
         )
       case 'tanks':
@@ -1374,7 +1458,7 @@ export function App() {
             speedKts={speedOverGroundKts ?? 0}
             routes={routes}
             dashboardRouteId={dashboardRouteId}
-            onOpen={() => setActivePanel('routes')}
+            onOpen={openRoutesPanel}
           />
         )
       case 'nearby-vessels':
@@ -1505,8 +1589,8 @@ export function App() {
             ages={gaugeAges}
             worstAlarmState={worstAlarmState}
             editing={layoutEditing}
-            onConfigure={() => setRibbonDialogOpen(true)}
-            onOpenAlarms={() => requestNavigate('alarms', () => setActivePanel('alarms'))}
+            onConfigure={openRibbonDialog}
+            onOpenAlarms={openAlarmsPanel}
           />
         </div>
       )}
@@ -1684,6 +1768,31 @@ export function App() {
     </div>
   )
 
+  const renderPanelFallback = (label: string) => (
+    <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-muted-foreground">
+      Loading {label}…
+    </div>
+  )
+
+  // Labels for the single Suspense fallback wrapped around
+  // activePanelContent below - kept as its own lookup, rather than folded
+  // into the switch that builds the content itself, so the fallback text is
+  // available synchronously (before the lazy panel it describes has
+  // resolved) without duplicating each case's JSX.
+  const panelFallbackLabel = (panel: PanelId): string => {
+    switch (panel) {
+      case 'forecast': return 'forecast'
+      case 'alarms': return 'alarms'
+      case 'routes': return 'routes'
+      case 'charts': return 'charts'
+      case 'radar': return 'radar'
+      case 'assistant': return 'Mate'
+      case 'settings': return 'settings'
+      case 'anchor-watch': return 'anchor watch'
+      default: return panel
+    }
+  }
+
   const activePanelContent = (() => {
     switch (activePanel) {
       case 'forecast':
@@ -1795,67 +1904,69 @@ export function App() {
         )
       case 'anchor-watch':
         return (
-          // vesselLat/vesselLon fall back from the live fix to the anchor
-          // point (e.g. GPS lost after the anchor was already set), and stay
-          // null only when neither is available — the drawer renders an
-          // explicit "No GPS fix" placeholder in the map slot for that case
-          // rather than being handed a fabricated 0,0.
-          <AnchorWatchDrawer
-            placemarks={placemarks}
-            onPlacemarkCreate={createPlacemark}
-            onPlacemarkRemove={removePlacemark}
-            vesselLat={latitude ?? anchorWatch.anchorLat}
-            vesselLon={longitude ?? anchorWatch.anchorLon}
-            vesselHeadingDeg={headingTrue}
-            anchorLat={anchorWatch.anchorLat}
-            anchorLon={anchorWatch.anchorLon}
-            radiusMeters={anchorWatch.radiusMeters}
-            depthMeters={depth}
-            currentDriftKts={currentDriftKts}
-            currentSetDeg={currentSetDeg}
-            currentDriftImpactKts={currentDriftImpactKts}
-            distanceMeters={anchorWatch.distanceMeters}
-            bearingDeg={anchorWatch.bearingDeg}
-            bowOffsetM={anchorWatch.bowOffsetM}
-            bowOffsetApplied={anchorWatch.bowOffsetApplied}
-            bowOffsetReason={anchorWatch.bowOffsetReason}
-            anchorSetAt={anchorWatch.setAt}
-            vesselTrail={getSelfTrail}
-            aisVessels={nearbyVessels}
-            aisTrails={getAisTrails}
-            aisCollisionAlarms={aisCollisionAlarms}
-            radarTargets={radarTargets}
-            radars={radarInfos}
-            radarSource={radarSource}
-            isDarkTheme={isDarkTheme}
-            showImageryLayer={showAnchorImagery}
-            onImageryToggle={setShowAnchorImagery}
-            showRadarEcho={showRadarEcho}
-            onRadarEchoToggle={setShowRadarEcho}
-            onAnchorReposition={anchorWatch.updatePosition}
-            onRadiusChange={anchorWatch.updateRadius}
-            onClearAnchor={anchorWatch.clearAnchor}
-            isImperial={isImperialDistance}
-            isAutoCloseArmed={isAutoCloseArmed}
-            motoringSecondsElapsed={motoringSecondsElapsed}
-            onDropAnchor={handleDropAnchorHere}
-            canDrop={latitude !== null && longitude !== null}
-            anchorState={anchorWatch.anchorState}
-            rodeDeployedM={anchorWatch.rodeDeployedM}
-            seaState={anchorWatch.seaState}
-            seabedType={anchorWatch.seabedType}
-            windSpeedApparentKts={windSpeedApparentKts}
-            maxGustKts={maxGustKts}
-            tide={tide}
-            anchorConfig={anchorConfig}
-            vesselLengthOverallM={vesselLengthOverallM}
-            windBandId={windBandId}
-            onWindBandChange={setWindBandId}
-            onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
-            planningDepthM={resolvedPlanningDepthM}
-            planningTideHeightFt={resolvedPlanningTideHeightFt}
-            onPlanningDepthChange={handlePlanningDepthChange}
-          />
+          <>
+            {/* vesselLat/vesselLon fall back from the live fix to the anchor
+                point (e.g. GPS lost after the anchor was already set), and stay
+                null only when neither is available: the drawer renders an
+                explicit "No GPS fix" placeholder in the map slot for that case
+                rather than being handed a fabricated 0,0. */}
+            <AnchorWatchDrawer
+              placemarks={placemarks}
+              onPlacemarkCreate={createPlacemark}
+              onPlacemarkRemove={removePlacemark}
+              vesselLat={latitude ?? anchorWatch.anchorLat}
+              vesselLon={longitude ?? anchorWatch.anchorLon}
+              vesselHeadingDeg={headingTrue}
+              anchorLat={anchorWatch.anchorLat}
+              anchorLon={anchorWatch.anchorLon}
+              radiusMeters={anchorWatch.radiusMeters}
+              depthMeters={depth}
+              currentDriftKts={currentDriftKts}
+              currentSetDeg={currentSetDeg}
+              currentDriftImpactKts={currentDriftImpactKts}
+              distanceMeters={anchorWatch.distanceMeters}
+              bearingDeg={anchorWatch.bearingDeg}
+              bowOffsetM={anchorWatch.bowOffsetM}
+              bowOffsetApplied={anchorWatch.bowOffsetApplied}
+              bowOffsetReason={anchorWatch.bowOffsetReason}
+              anchorSetAt={anchorWatch.setAt}
+              vesselTrail={getSelfTrail}
+              aisVessels={nearbyVessels}
+              aisTrails={getAisTrails}
+              aisCollisionAlarms={aisCollisionAlarms}
+              radarTargets={radarTargets}
+              radars={radarInfos}
+              radarSource={radarSource}
+              isDarkTheme={isDarkTheme}
+              showImageryLayer={showAnchorImagery}
+              onImageryToggle={setShowAnchorImagery}
+              showRadarEcho={showRadarEcho}
+              onRadarEchoToggle={setShowRadarEcho}
+              onAnchorReposition={anchorWatch.updatePosition}
+              onRadiusChange={anchorWatch.updateRadius}
+              onClearAnchor={anchorWatch.clearAnchor}
+              isImperial={isImperialDistance}
+              isAutoCloseArmed={isAutoCloseArmed}
+              motoringSecondsElapsed={motoringSecondsElapsed}
+              onDropAnchor={handleDropAnchorHere}
+              canDrop={latitude !== null && longitude !== null}
+              anchorState={anchorWatch.anchorState}
+              rodeDeployedM={anchorWatch.rodeDeployedM}
+              seaState={anchorWatch.seaState}
+              seabedType={anchorWatch.seabedType}
+              windSpeedApparentKts={windSpeedApparentKts}
+              maxGustKts={maxGustKts}
+              tide={tide}
+              anchorConfig={anchorConfig}
+              vesselLengthOverallM={vesselLengthOverallM}
+              windBandId={windBandId}
+              onWindBandChange={setWindBandId}
+              onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
+              planningDepthM={resolvedPlanningDepthM}
+              planningTideHeightFt={resolvedPlanningTideHeightFt}
+              onPlanningDepthChange={handlePlanningDepthChange}
+            />
+          </>
         )
       default:
         return null
@@ -2165,7 +2276,7 @@ export function App() {
                 document flow otherwise, so it doesn't cover the sheet's own
                 header when the two don't actually overlap on screen. */}
             <div className="relative z-[60]" data-testid="alarm-banner-stack">
-              <AlarmBanner alarms={alarms} onOpen={() => requestNavigate('alarms', () => setActivePanel('alarms'))} />
+              <AlarmBanner alarms={alarms} onOpen={openAlarmsPanel} />
             </div>
 
             <div className="min-h-0 flex-1">
@@ -2173,7 +2284,14 @@ export function App() {
                 dashboardGrid
               ) : (
                 <div className="h-full min-h-0 overflow-y-auto rounded-lg border bg-card p-4">
-                  {activePanelContent}
+                  {/* One boundary for every panel, not eight. `key={activePanel}`
+                      forces a fresh Suspense instance on every panel switch, so
+                      it never keeps a previous panel's boundary state - each
+                      panel always gets its own fallback while its own chunk
+                      loads, not whatever state the boundary was last left in. */}
+                  <Suspense key={activePanel} fallback={renderPanelFallback(panelFallbackLabel(activePanel))}>
+                    {activePanelContent}
+                  </Suspense>
                 </div>
               )}
             </div>
@@ -2234,36 +2352,50 @@ export function App() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <MateSheet
-        open={mateSheetOpen}
-        onOpenChange={(open) => {
-          setMateSheetOpen(open)
-          if (!open) {
-            setMateSheetQuestion(undefined)
-            setMateSheetNewConversation(false)
-          }
-        }}
-        initialQuestion={mateSheetQuestion}
-        newConversation={mateSheetNewConversation}
-        screen={mateScreen}
-        canWrite={canWrite}
-        readAloud={assistantVoiceConfig.readAloud}
-        onOpenPanel={(id) => {
-          setMatePanelConversationId(id)
-          setMateSheetOpen(false)
-          requestNavigate('assistant', () => setActivePanel('assistant'))
-        }}
-      />
+      {/* Lazy-loaded, and not mounted at all until first opened - see
+          mateSheetHasOpenedRef above. `fallback={null}` is fine here: the
+          sheet itself is a Sheet primitive that renders nothing (no overlay,
+          no panel) until `open` is true, so there is nothing that should be
+          showing while its chunk loads on this very first open. */}
+      {mateSheetHasOpenedRef.current && (
+        <Suspense fallback={null}>
+          <MateSheet
+            open={mateSheetOpen}
+            onOpenChange={(open) => {
+              setMateSheetOpen(open)
+              if (!open) {
+                setMateSheetQuestion(undefined)
+                setMateSheetNewConversation(false)
+              }
+            }}
+            initialQuestion={mateSheetQuestion}
+            newConversation={mateSheetNewConversation}
+            screen={mateScreen}
+            canWrite={canWrite}
+            readAloud={assistantVoiceConfig.readAloud}
+            onOpenPanel={(id) => {
+              setMatePanelConversationId(id)
+              setMateSheetOpen(false)
+              requestNavigate('assistant', () => setActivePanel('assistant'))
+            }}
+          />
+        </Suspense>
+      )}
 
-      <ManualSheet
-        open={manualOpen}
-        onOpenChange={setManualOpen}
-        target={manualTarget}
-        onAskMate={(question) => {
-          setManualOpen(false)
-          openMate(question)
-        }}
-      />
+      {/* Same reasoning as the Mate sheet above - see manualSheetHasOpenedRef. */}
+      {manualSheetHasOpenedRef.current && (
+        <Suspense fallback={null}>
+          <ManualSheet
+            open={manualOpen}
+            onOpenChange={setManualOpen}
+            target={manualTarget}
+            onAskMate={(question) => {
+              setManualOpen(false)
+              openMate(question)
+            }}
+          />
+        </Suspense>
+      )}
 
       <Toaster isDarkTheme={isDarkTheme} />
     </SidebarProvider>

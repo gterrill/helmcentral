@@ -68,9 +68,8 @@ describe('useAppConfig', () => {
     expect(result.current.mayara.port).toBe(6502)
   })
 
-  it('applies the anchor block and refresh interval from the settings endpoint', async () => {
+  it('applies the anchor block from the settings endpoint', async () => {
     vi.stubGlobal('fetch', settingsResponse({
-      ui: { vessel_state_refresh_seconds: 30 },
       anchor: {
         bow_roller_height_m: 2.4,
         chain_size_mm: 10,
@@ -90,7 +89,6 @@ describe('useAppConfig', () => {
     expect(result.current.anchor.chainOnboardM).toBe(80)
     expect(result.current.anchor.windageAreaM2).toBe(22)
     expect(result.current.anchor.scopeMethod).toBe('catenary')
-    expect(result.current.ui.vesselStateRefreshSeconds).toBe(30)
   })
 
   // anchor.scope_method selects which rode-calculation method the Anchor
@@ -160,7 +158,6 @@ describe('useAppConfig', () => {
   it('ignores malformed values rather than rendering nonsense', async () => {
     vi.stubGlobal('fetch', settingsResponse({
       units: 'furlongs',
-      ui: { vessel_state_refresh_seconds: -5 },
       anchor: { hull_type: 'hovercraft', chain_onboard_m: 0 },
     }))
     const { useAppConfig } = await loadModule()
@@ -169,8 +166,10 @@ describe('useAppConfig', () => {
     await act(async () => { await Promise.resolve() })
 
     expect(result.current.ui.distanceUnits).toBe('metric')
-    expect(result.current.ui.vesselStateRefreshSeconds).toBe(10)
     expect(result.current.anchor.hullType).toBe('power_cat')
+    // chain_onboard_m: 0 exercises the same positiveNumber() fallback
+    // mechanism the retired vessel_state_refresh_seconds field used to
+    // (a non-positive value falls back to the field's own default).
     expect(result.current.anchor.chainOnboardM).toBe(150)
   })
 
@@ -253,5 +252,29 @@ describe('useAppConfig', () => {
     await act(async () => { await Promise.resolve() })
 
     expect(result.current.assistant).toEqual({ voiceInput: false, readAloud: false, wakeWord: false })
+  })
+
+  // Item C: use-vessel-identity.ts used to poll /api/settings on its own
+  // timer just for boat.model — this is the same single-flight GET every
+  // other operator setting already goes through.
+  it('applies the boat model from the settings endpoint', async () => {
+    vi.stubGlobal('fetch', settingsResponse({
+      boat: { model: '2025 Granocean W-60' },
+    }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+
+    await waitFor(() => expect(result.current.boatModel).toBe('2025 Granocean W-60'))
+  })
+
+  it('defaults the boat model to null when absent or blank', async () => {
+    vi.stubGlobal('fetch', settingsResponse({ boat: { model: '   ' } }))
+    const { useAppConfig } = await loadModule()
+
+    const { result } = renderHook(() => useAppConfig())
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.boatModel).toBeNull()
   })
 })

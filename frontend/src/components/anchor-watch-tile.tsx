@@ -1,8 +1,7 @@
 import { Anchor, Volume2 } from 'lucide-react'
-import { memo, useCallback, useMemo } from 'react'
+import { lazy, memo, Suspense, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
-import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
 import { findAnchorDragAlarm, useAlarms, type AlarmState } from '@/hooks/use-alarms'
 import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
@@ -16,6 +15,19 @@ import type { GustWindow } from '@/lib/gust-windows'
 import type { AnchorConfig } from '@/config/app-config'
 import { computeScopeRecommendation, tideHeightFtOrNull } from '@/lib/rode-plan'
 import { formatDataAge, isStale } from '@/lib/staleness'
+
+// anchor-watch-map.tsx imports maplibre-gl and react-map-gl at module scope
+// (map-vendor: 1048 KB raw / 280 KB gzip), and this tile is mounted eagerly
+// by App.tsx (it's the dashboard's 'anchor-watch' case, not behind any
+// React.lazy panel) - so that whole chunk used to load at startup on every
+// route, including /kiosk pages with no anchor-watch tile on them. Same lazy
+// -split pattern as assistant-markdown.tsx/manual-markdown.tsx, just with
+// the boundary drawn inside this component instead of a matching *-impl
+// file: the tile's own chrome (alarm strips, distance KPI, Drop/Raise) stays
+// eager, and only the map slot below waits on the dynamic import.
+const AnchorWatchMap = lazy(() =>
+  import('@/components/anchor-watch-map').then((m) => ({ default: m.AnchorWatchMap })),
+)
 
 /** A distance in the host's chosen unit, rounded for display. */
 function formatDistanceValue(meters: number, isImperial: boolean): { value: string; unit: string } {
@@ -91,6 +103,13 @@ interface AnchorWatchTileProps {
   planningDepthM: number | null
   planningTideHeightFt: number | null
   /**
+   * False on the wall kiosk (ADR: kiosk maps are display-only) - passed
+   * straight through to AnchorWatchMap, which then hides its own on-map
+   * controls and drops maplibre's interactive handlers. Defaults to true so
+   * every existing host keeps today's behaviour.
+   */
+  interactive?: boolean
+  /**
    * Seconds since the position/anchor-watch feed last updated, or null when
    * the host has no age to report. There is currently no upstream source
    * for this — the anchor-watch API (backend/anchor.go) carries no
@@ -136,6 +155,7 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   selectedWindBandId,
   planningDepthM,
   planningTideHeightFt,
+  interactive = true,
   lastUpdateAgeS,
 }: AnchorWatchTileProps) {
   const {
@@ -314,42 +334,55 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
 
       <div className="mt-2 rounded-xl border bg-background/70 lg:min-h-0 lg:flex-1">
         {vesselLat !== null && vesselLon !== null ? (
-          <AnchorWatchMap
-            vesselLat={vesselLat}
-            vesselLon={vesselLon}
-            vesselHeadingDeg={vesselHeadingDeg}
-            anchorLat={anchorLat}
-            anchorLon={anchorLon}
-            anchorSetAt={setAt}
-            radiusMeters={radiusMeters}
-            depthMeters={depthMeters}
-            currentDriftKts={currentDriftKts}
-            currentSetDeg={currentSetDeg}
-            currentDriftImpactKts={currentDriftImpactKts}
-            distanceMeters={distanceMeters}
-            bearingDeg={bearingDeg}
-            scopeRecommendation={rodeResult}
-            isImperial={isImperial}
-            vesselTrail={vesselTrail}
-            aisVessels={aisVessels}
-            aisTrails={aisTrails}
-            aisCollisionAlarms={aisCollisionAlarms}
-            radarTargets={radarTargets}
-            radars={radars}
-            radarSource={radarSource}
-            isDarkTheme={isDarkTheme}
-            showImageryLayer={showImageryLayer}
-            onImageryToggle={onImageryToggle}
-            showRadarEcho={showRadarEcho}
-            onRadarEchoToggle={onRadarEchoToggle}
-            onAnchorReposition={updatePosition}
-            onRadiusChange={updateRadius}
-            onFullscreen={onFullscreen}
-            placemarks={placemarks}
-            onPlacemarkCreate={onPlacemarkCreate}
-            onPlacemarkRemove={onPlacemarkRemove}
-            className="h-64 w-full rounded-lg lg:h-full"
-          />
+          // Fallback matches AnchorWatchMap's own className exactly, so the
+          // map slot holds its size while the map-vendor chunk loads and the
+          // layout never jumps once it resolves.
+          <Suspense
+            fallback={
+              <div
+                className="h-64 w-full animate-pulse rounded-lg bg-muted/40 lg:h-full"
+                data-testid="anchor-watch-map-loading"
+              />
+            }
+          >
+            <AnchorWatchMap
+              vesselLat={vesselLat}
+              vesselLon={vesselLon}
+              vesselHeadingDeg={vesselHeadingDeg}
+              anchorLat={anchorLat}
+              anchorLon={anchorLon}
+              anchorSetAt={setAt}
+              radiusMeters={radiusMeters}
+              depthMeters={depthMeters}
+              currentDriftKts={currentDriftKts}
+              currentSetDeg={currentSetDeg}
+              currentDriftImpactKts={currentDriftImpactKts}
+              distanceMeters={distanceMeters}
+              bearingDeg={bearingDeg}
+              scopeRecommendation={rodeResult}
+              isImperial={isImperial}
+              vesselTrail={vesselTrail}
+              aisVessels={aisVessels}
+              aisTrails={aisTrails}
+              aisCollisionAlarms={aisCollisionAlarms}
+              radarTargets={radarTargets}
+              radars={radars}
+              radarSource={radarSource}
+              isDarkTheme={isDarkTheme}
+              showImageryLayer={showImageryLayer}
+              onImageryToggle={onImageryToggle}
+              showRadarEcho={showRadarEcho}
+              onRadarEchoToggle={onRadarEchoToggle}
+              onAnchorReposition={updatePosition}
+              onRadiusChange={updateRadius}
+              onFullscreen={onFullscreen}
+              placemarks={placemarks}
+              onPlacemarkCreate={onPlacemarkCreate}
+              onPlacemarkRemove={onPlacemarkRemove}
+              interactive={interactive}
+              className="h-64 w-full rounded-lg lg:h-full"
+            />
+          </Suspense>
         ) : (
           <div className="flex h-64 items-center justify-center text-sm text-muted-foreground lg:h-full">
             No GPS fix

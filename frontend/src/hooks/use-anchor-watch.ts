@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
 import { anchorRequest } from '@/lib/anchor-request'
+import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 
 export type AnchorWatchState = 'none' | 'set' | 'dragging'
 
@@ -72,11 +73,9 @@ function isSeabedType(value: string | undefined): value is SeabedType {
 export function useAnchorWatch(
   currentLat: number | null,
   currentLon: number | null,
-  refreshInterval: number,
   gnssCritical = false,
 ): AnchorWatchResult {
   const [serverState, setServerState] = useState<AnchorWatchServerState>({ active: false })
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchState = useCallback(async () => {
     try {
@@ -89,13 +88,21 @@ export function useAnchorWatch(
     }
   }, [])
 
+  // Fetched once on mount, independent of the interval below, so a cadence
+  // change (idle -> active or back) never doubles up on an extra immediate
+  // fetch — see ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS/ANCHOR_WATCH_IDLE_REFRESH_SECONDS
+  // (config/app-config.ts) for why the two cadences differ.
   useEffect(() => {
     void fetchState()
-    timerRef.current = setInterval(() => { void fetchState() }, refreshInterval * 1000)
-    return () => {
-      if (timerRef.current !== null) clearInterval(timerRef.current)
-    }
-  }, [fetchState, refreshInterval])
+  }, [fetchState])
+
+  useEffect(() => {
+    const intervalSeconds = serverState.active
+      ? ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS
+      : ANCHOR_WATCH_IDLE_REFRESH_SECONDS
+    const timer = setInterval(() => { void fetchState() }, intervalSeconds * 1000)
+    return () => clearInterval(timer)
+  }, [fetchState, serverState.active])
 
   const setAnchorHere = useCallback(async (
     lat: number,
@@ -271,7 +278,16 @@ export function useAnchorWatch(
     ? serverState.planning_tide_height_ft
     : null
 
-  return {
+  // Memoized: latitude/longitude arrive over the 1Hz vessel-state SSE stream
+  // and every tick re-renders App and therefore re-runs this hook, so without
+  // this every consumer (the anchor-watch tile, its fullscreen drawer) would
+  // see a new object identity every second even while every field below is
+  // unchanged — defeating their own React.memo. The dependency list is the
+  // output values themselves, not the raw inputs, so a tick that leaves every
+  // one of them the same (e.g. a fix arriving with the same coordinates, or
+  // one that moves the vessel by less than distanceMeters/bearingDeg's own
+  // rounding) still returns the previous reference.
+  return useMemo(() => ({
     anchorState,
     gnssCritical,
     anchorLat,
@@ -294,5 +310,11 @@ export function useAnchorWatch(
     updateRodeAndConditions,
     updatePlanningDepth,
     clearAnchor,
-  }
+  }), [
+    anchorState, gnssCritical, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
+    seaState, seabedType, distanceMeters, bearingDeg, setAt, bowOffsetM,
+    bowOffsetApplied, bowOffsetReason, planningDepthM, planningTideHeightFt,
+    setAnchorHere, updatePosition, updateRadius, updateRodeAndConditions,
+    updatePlanningDepth, clearAnchor,
+  ])
 }
