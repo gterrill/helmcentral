@@ -2137,7 +2137,7 @@ export function App() {
             gets pushed off a phone screen (AGENTS.md — prevent viewport overflows).
             The breadcrumb is the designated slack absorber, so it truncates while the
             clock and controls keep their size. */}
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16">
+        <header className="relative z-[60] flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="mr-2 hidden h-4 sm:block" />
@@ -2268,14 +2268,12 @@ export function App() {
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
             <ConnectionBanner />
-            {/* z-[60] lifts a live alarm above the Mate sheet's own stacking
-                context (overlay and popup both z-50) so it reads at full
-                strength - not through the sheet's scrim - while the sheet is
-                open (impeccable critique 2026-09-12, P1). `relative` gives
-                the z-index something to apply against; this sits in normal
-                document flow otherwise, so it doesn't cover the sheet's own
-                header when the two don't actually overlap on screen. */}
-            <div className="relative z-[60]" data-testid="alarm-banner-stack">
+            {/* z-[55] keeps a live alarm above the Mate sheet's backdrop and
+                popup (z-50) while staying under the dashboard header controls.
+                The page selector and other header actions sit at z-[60], so the
+                banner can remain visible without covering the top-level controls.
+                (impeccable critique 2026-09-12, P1) */}
+            <div className="relative z-[55]" data-testid="alarm-banner-stack">
               <AlarmBanner alarms={alarms} onOpen={openAlarmsPanel} />
             </div>
 

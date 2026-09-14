@@ -377,12 +377,14 @@ describe('App-wide voice (ADR 0093)', () => {
   // rather than through a haze. jsdom can't measure actual paint order, so
   // this checks the one thing that determines it: the banner's own z-index
   // class has to be numerically higher than the overlay's (z-50).
-  it('keeps the alarm banner above the Mate sheet overlay in stacking order', async () => {
+  it('keeps the alarm banner above the Mate sheet overlay but below the header controls', async () => {
     vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
     render(<App />)
 
     const bannerStack = await screen.findByTestId('alarm-banner-stack')
+    const header = document.querySelector('header')
     expect(screen.getByText(/Test alarm firing/)).toBeInTheDocument()
+    expect(header).not.toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Ask Mate' }))
     await screen.findByRole('heading', { name: 'Mate' })
@@ -392,10 +394,10 @@ describe('App-wide voice (ADR 0093)', () => {
 
     const zIndexOf = (className: string): number => {
       const match = className.match(/z-\[(\d+)\]|(?:^|\s)z-(\d+)(?:\s|$)/)
-      if (!match) throw new Error(`no z-index class found in: ${className}`)
-      return Number(match[1] ?? match[2])
+      return match ? Number(match[1] ?? match[2]) : 0
     }
 
     expect(zIndexOf(bannerStack.className)).toBeGreaterThan(zIndexOf(overlay!.className))
+    expect(zIndexOf(header!.className)).toBeGreaterThan(zIndexOf(bannerStack.className))
   })
 })
