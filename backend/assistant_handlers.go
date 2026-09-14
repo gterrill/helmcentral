@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/labstack/echo/v4"
 )
@@ -247,6 +248,7 @@ func assistantStatusHandler(c echo.Context) error {
 func assistantModelsHandler(c echo.Context) error {
 	upstreamURL := openRouterModelsListURL + "?" + (url.Values{"supported_parameters": {"tools"}}).Encode()
 	sortBy, sortDesc := assistantModelSortQuery(c.QueryParam("sort"), c.QueryParam("order"))
+	searchQuery := c.QueryParam("q")
 	page := intQueryParamWithDefault(c.QueryParam("page"), 1)
 	pageSize := intQueryParamWithDefault(c.QueryParam("page_size"), 20)
 	if page < 1 {
@@ -333,6 +335,15 @@ func assistantModelsHandler(c echo.Context) error {
 			Popularity: model.Popularity,
 		})
 	}
+	if strings.TrimSpace(searchQuery) != "" {
+		filtered := make([]assistantModelOption, 0, len(models))
+		for _, model := range models {
+			if assistantModelMatchesQuery(model, searchQuery) {
+				filtered = append(filtered, model)
+			}
+		}
+		models = filtered
+	}
 	sort.SliceStable(models, func(i, j int) bool {
 		return assistantModelLess(models[i], models[j], sortBy, sortDesc)
 	})
@@ -370,6 +381,37 @@ func containsString(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeAssistantSearchText(value string) string {
+	lower := strings.ToLower(value)
+	return strings.Join(strings.FieldsFunc(lower, func(r rune) bool {
+		return !(unicode.IsLetter(r) || unicode.IsDigit(r))
+	}), " ")
+}
+
+func assistantModelMatchesQuery(model assistantModelOption, query string) bool {
+	trimmedQuery := strings.TrimSpace(strings.ToLower(query))
+	if trimmedQuery == "" {
+		return true
+	}
+	idLower := strings.ToLower(model.ID)
+	nameLower := strings.ToLower(model.Name)
+	if strings.Contains(idLower, trimmedQuery) || strings.Contains(nameLower, trimmedQuery) {
+		return true
+	}
+
+	normalizedHaystack := normalizeAssistantSearchText(model.ID + " " + model.Name)
+	tokens := strings.Fields(normalizeAssistantSearchText(trimmedQuery))
+	if len(tokens) == 0 {
+		return false
+	}
+	for _, token := range tokens {
+		if !strings.Contains(normalizedHaystack, token) {
+			return false
+		}
+	}
+	return true
 }
 
 func assistantModelPrice(prompt, completion string) float64 {

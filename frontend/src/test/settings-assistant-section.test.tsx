@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AssistantSection } from '@/components/settings/sections/assistant-section'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 import {
@@ -113,6 +113,54 @@ describe('AssistantSection', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Exclude' }))
     expect(latestDraft().assistantAllowedModels).toEqual([])
     expect(latestDraft().assistantExcludedModels).toEqual(['anthropic/claude-sonnet-4.5'])
+
+    vi.unstubAllGlobals()
+  })
+
+  it('filters model catalog rows by name or id in the dialog', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          models: [
+            { id: 'z-ai/glm-5.3', name: 'Z.ai: GLM 5.3', price: 0.001, created_at: '2026-01-01T00:00:00Z' },
+            { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', price: 0.002, created_at: '2026-01-01T00:00:00Z' },
+          ],
+          page: { total_pages: 1 },
+        }),
+      }),
+    )
+
+    renderSection({ assistantModel: 'openrouter/auto' })
+
+    fireEvent.click(screen.getByLabelText('Manage Auto model filters'))
+    await screen.findByText('Manage Auto model filters')
+
+    fireEvent.change(screen.getByLabelText('Search model catalog'), {
+      target: { value: 'glm 5.3' },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Z.ai: GLM 5.3')).toBeInTheDocument()
+      expect(screen.queryByText('Claude Sonnet 4.5')).not.toBeInTheDocument()
+    })
+
+    fireEvent.change(screen.getByLabelText('Search model catalog'), {
+      target: { value: 'anthropic/claude-sonnet-4.5' },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Claude Sonnet 4.5')).toBeInTheDocument()
+      expect(screen.queryByText('Z.ai: GLM 5.3')).not.toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByLabelText('Clear model catalog search'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Z.ai: GLM 5.3')).toBeInTheDocument()
+      expect(screen.getByText('Claude Sonnet 4.5')).toBeInTheDocument()
+    })
 
     vi.unstubAllGlobals()
   })

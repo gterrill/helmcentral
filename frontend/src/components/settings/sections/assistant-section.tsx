@@ -23,6 +23,7 @@ interface AssistantSectionProps {
 const noCostTierValue = '__none__'
 const chooseNewModelValue = '__choose_new_model__'
 const recentModelStorageKey = 'assistant.recent-models'
+const modelSearchDebounceMs = 300
 
 type AssistantModelsSortKey = 'popular' | 'newest' | 'throughput' | 'latency' | 'price'
 
@@ -31,6 +32,28 @@ type AssistantModelOption = {
   name: string
   price: number
   created_at: string
+}
+
+function normalizeModelSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function modelMatchesSearch(model: AssistantModelOption, query: string): boolean {
+  const trimmedQuery = query.trim().toLowerCase()
+  if (!trimmedQuery) return true
+
+  const idLower = model.id.toLowerCase()
+  const nameLower = model.name.toLowerCase()
+  if (idLower.includes(trimmedQuery) || nameLower.includes(trimmedQuery)) {
+    return true
+  }
+
+  const normalizedHaystack = normalizeModelSearchText(`${model.id} ${model.name}`)
+  const tokens = normalizeModelSearchText(trimmedQuery).split(' ').filter(Boolean)
+  return tokens.length > 0 && tokens.every((token) => normalizedHaystack.includes(token))
 }
 
 function parseSortSelection(value: string): { sort: AssistantModelsSortKey; order: 'asc' | 'desc' } {
@@ -83,6 +106,25 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
   const [tableTotalPages, setTableTotalPages] = useState(1)
   const [tableSort, setTableSort] = useState<AssistantModelsSortKey>('popular')
   const [tableOrder, setTableOrder] = useState<'asc' | 'desc'>('desc')
+  const [tableQueryInput, setTableQueryInput] = useState('')
+  const [tableQuery, setTableQuery] = useState('')
+
+  useEffect(() => {
+    const timeoutID = window.setTimeout(() => {
+      const normalized = tableQueryInput.trim()
+      setTableQuery((previous) => (previous === normalized ? previous : normalized))
+    }, modelSearchDebounceMs)
+    return () => window.clearTimeout(timeoutID)
+  }, [tableQueryInput])
+
+  useEffect(() => {
+    setTablePage(1)
+  }, [tableQuery])
+
+  const visibleTableModels = useMemo(
+    () => tableModels.filter((model) => modelMatchesSearch(model, tableQuery)),
+    [tableModels, tableQuery],
+  )
 
   const isAutoModel = draft.assistantModel.trim().toLowerCase() === 'openrouter/auto'
   const modelOptions = useMemo(() => {
@@ -137,6 +179,10 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
       page: String(tablePage),
       page_size: '10',
     })
+    const trimmedQuery = tableQuery.trim()
+    if (trimmedQuery !== '') {
+      params.set('q', trimmedQuery)
+    }
 
     async function loadModelsPage() {
       setTableLoading(true)
@@ -170,7 +216,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
     return () => {
       cancelled = true
     }
-  }, [dialogOpen, tableSort, tableOrder, tablePage])
+  }, [dialogOpen, tableSort, tableOrder, tablePage, tableQuery])
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 rounded-lg border bg-background/60 p-4">
@@ -418,8 +464,36 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             </DialogDescription>
           </DialogHeader>
 
-          <FieldGroup>
-            <Field>
+          <FieldGroup className="grid grid-cols-4 items-end gap-3">
+            <Field className="col-span-3 min-w-0">
+              <FieldLabel htmlFor="assistant-model-search">Search</FieldLabel>
+              <div className="flex w-full items-center gap-2">
+                <Input
+                  id="assistant-model-search"
+                  aria-label="Search model catalog"
+                  placeholder="Search by model name or id"
+                  value={tableQueryInput}
+                  onChange={(e) => {
+                    setTableQueryInput(e.target.value)
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label="Clear model catalog search"
+                  disabled={tableQueryInput.trim() === ''}
+                  onClick={() => {
+                    setTableQueryInput('')
+                    setTableQuery('')
+                  }}
+                >
+                  Clear
+                </Button>
+              </div>
+            </Field>
+
+            <Field className="col-span-1 min-w-0">
               <FieldLabel htmlFor="assistant-model-sort">Sort</FieldLabel>
               <Select
                 value={formatSortSelection(tableSort, tableOrder)}
@@ -430,7 +504,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                   setTablePage(1)
                 }}
               >
-                <SelectTrigger id="assistant-model-sort" aria-label="Model catalog sort">
+                <SelectTrigger id="assistant-model-sort" aria-label="Model catalog sort" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup>
@@ -445,7 +519,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             </Field>
           </FieldGroup>
 
-          <div className="max-h-[50vh] overflow-auto rounded-md border">
+          <div className="h-[50vh] overflow-auto rounded-md border">
             <table className="w-full border-collapse text-sm">
               <thead className="bg-muted/50 text-left text-muted-foreground">
                 <tr>
@@ -470,7 +544,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                     </td>
                   </tr>
                 ) : null}
-                {!tableLoading && !tableError && tableModels.length === 0 ? (
+                {!tableLoading && !tableError && visibleTableModels.length === 0 ? (
                   <tr>
                     <td className="px-3 py-3 text-muted-foreground" colSpan={4}>
                       No models found.
@@ -478,7 +552,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                   </tr>
                 ) : null}
                 {!tableLoading && !tableError
-                  ? tableModels.map((model) => (
+                  ? visibleTableModels.map((model) => (
                       <tr key={model.id} className="border-t">
                         <td className="px-3 py-2">
                           <div className="font-medium">{model.name}</div>

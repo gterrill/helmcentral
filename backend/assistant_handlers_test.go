@@ -353,6 +353,46 @@ func TestAssistantModelsHandler_SortsAndPaginatesServerSide(t *testing.T) {
 	}
 }
 
+func TestAssistantModelsHandler_FiltersByQueryBeforePagination(t *testing.T) {
+	fake := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(http.StatusOK, `{
+		"data": [
+			{"id": "z-ai/glm-5.3", "name": "Z.ai: GLM 5.3", "supported_parameters": ["tools"]},
+			{"id": "z-ai/glm-5.2", "name": "Z.ai: GLM 5.2", "supported_parameters": ["tools"]},
+			{"id": "anthropic/claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "supported_parameters": ["tools"]}
+		]
+	}`)}}
+	prev := assistantOpenRouterDoer
+	assistantOpenRouterDoer = fake
+	t.Cleanup(func() { assistantOpenRouterDoer = prev })
+
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/models?q=glm+5.3&page=1&page_size=1", "", "")
+	if err := assistantModelsHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+		Page struct {
+			Total      int `json:"total_models"`
+			TotalPages int `json:"total_pages"`
+		} `json:"page"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.Models) != 1 || resp.Models[0].ID != "z-ai/glm-5.3" {
+		t.Fatalf("expected only z-ai/glm-5.3, got %+v", resp.Models)
+	}
+	if resp.Page.Total != 1 || resp.Page.TotalPages != 1 {
+		t.Fatalf("expected filtered totals of 1, got %+v", resp.Page)
+	}
+}
+
 // ── conversation CRUD ───────────────────────────────────────────────────
 
 func TestCreateAssistantConversationHandler_BlankTitleDefaults(t *testing.T) {
