@@ -84,9 +84,11 @@ func parseGNSSPositionValidation(payload map[string]any) gnssPositionValidation 
 // reconnect still needs a stable run of trusted samples before the alarm
 // clears, rather than clearing instantly on the first good packet back.
 func criticalGNSSValidation(reason string, now time.Time) gnssPositionValidation {
+	gnssValidationMu.Lock()
 	gnssHeuristic.criticalLatched = true
 	gnssHeuristic.criticalSince = now
 	gnssHeuristic.recoveryCount = 0
+	gnssValidationMu.Unlock()
 
 	return gnssPositionValidation{
 		QualityIndicator: -1,
@@ -99,10 +101,21 @@ func criticalGNSSValidation(reason string, now time.Time) gnssPositionValidation
 	}
 }
 
+// applyGNSSHeuristics reads and mutates the package-level gnssHeuristic
+// state (lastSample plus the recovery-hysteresis counters), so it takes
+// gnssValidationMu for its whole body. This is safe against
+// resolveGNSSPosition/resetGNSSPositionValidationState's own use of the same
+// mutex because fetchSignalKVesselState and criticalVesselState (signalk.go)
+// always call this function and resolveGNSSPosition one after another, never
+// with one nested inside the other -- nesting would deadlock, since Go's
+// sync.Mutex is not reentrant.
 func applyGNSSHeuristics(validation gnssPositionValidation, sample gnssObservedSample, now time.Time) gnssPositionValidation {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+
+	gnssValidationMu.Lock()
+	defer gnssValidationMu.Unlock()
 
 	if !sample.HasObservedAt {
 		validation = escalateValidation(validation, "critical", "gnss timestamp unavailable")
@@ -174,6 +187,9 @@ func escalateValidation(current gnssPositionValidation, target string, reason st
 	return current
 }
 
+// applyGNSSRecoveryHysteresis mutates gnssHeuristic's latch/counter fields
+// and must only be called with gnssValidationMu already held -- its one
+// caller, applyGNSSHeuristics above, holds it for its whole body.
 func applyGNSSRecoveryHysteresis(validation gnssPositionValidation, now time.Time) gnssPositionValidation {
 	if validation.Status == "critical" {
 		gnssHeuristic.criticalLatched = true

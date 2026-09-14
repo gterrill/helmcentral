@@ -456,6 +456,11 @@ func main() {
 	go startHeartbeat(streamCtx, heartbeatCheckInterval)
 	go startAnchorDragWatcher(streamCtx, anchorDragCheckInterval)
 	go startForecastWarningsFetcher(streamCtx, forecastWarningsFetchInterval)
+	// Gust ladder + solar Influx queries (Tier 1 #1): buildVesselStatePayload
+	// and buildSolarStatePayload used to run these live on every call, up to
+	// several times a second per stream client. This refreshes them once on
+	// a shared 30s ticker instead; the builders just read the cache.
+	go startTelemetryInfluxTicker(streamCtx)
 
 	go startTrackPoller(trackPollInterval)
 	go startTideAutoUpdater(30 * time.Minute)
@@ -769,14 +774,15 @@ func depthTrend(c echo.Context) error {
 }
 
 // computeMaxGustKtsFor picks exactly one source for the gust ladder per
-// request: Influx when configured (queryInfluxMaxWindGustKtsFor), otherwise
-// the in-memory ring buffer (inMemoryMaxWindGustKtsFor). Previously both were
+// request: Influx when configured, read from the background ticker's cache
+// (telemetry_influx_cache.go) rather than queried live, otherwise the
+// in-memory ring buffer (inMemoryMaxWindGustKtsFor). Previously both were
 // computed unconditionally and the in-memory result discarded whenever Influx
 // was configured - wasted CPU/allocations on every /api/vessel-state request
 // on Influx-backed deployments.
 func computeMaxGustKtsFor(windows []string) map[string]float64 {
 	if influxTelemetryConfigured() {
-		return queryInfluxMaxWindGustKtsFor(windows)
+		return cachedMaxGustKtsFor(windows, time.Now())
 	}
 	return inMemoryMaxWindGustKtsFor(windows)
 }
@@ -1074,22 +1080,14 @@ func applyInMemorySolarDefaults(state solarStateData) solarStateData {
 }
 
 // applyInfluxSolarOverride wholesale-replaces the four Influx-backed fields,
-// matching queryInfluxMaxWindGustKtsFor/queryInfluxDepthTrend's override
-// pattern in vesselState()/depthTrend() — called only when
-// influxTelemetryConfigured(), and does not fall back to the in-memory
-// value if the Influx query itself fails (same Fallback Policy reasoning as
+// read from the background ticker's cache (telemetry_influx_cache.go)
+// rather than queried live — called only when influxTelemetryConfigured(),
+// and does not fall back to the in-memory value if the cached result is
+// stale or the query behind it failed (same Fallback Policy reasoning as
 // ADR-0020: once Influx is enabled, its failures should be visible, not
 // silently patched over).
 func applyInfluxSolarOverride(state solarStateData) solarStateData {
-	now := state.Datetime
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	state.TodayKWh = queryInfluxSolarTodayKWh(now)
-	state.YesterdayKWh = queryInfluxSolarYesterdayKWh(now)
-	state.PeakTodayW = queryInfluxSolarPeakTodayW(now)
-	state.Trend24hTotal = queryInfluxSolarTrend24h(now)
-	return state
+	return cachedInfluxSolarOverride(state, time.Now().UTC())
 }
 
 // buildTanksStatePayload produces the /api response body. Split from the handler so

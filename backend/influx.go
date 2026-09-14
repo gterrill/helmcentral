@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -52,22 +53,76 @@ func influxTelemetryConfigured() bool {
 	return ok
 }
 
+// sharedInfluxClient holds the one long-lived influxdb2 client every query
+// function shares, rebuilt only when the configured url/org/bucket/token
+// change. Building a client opens a fresh http.Transport and TCP connection
+// (influxdb2.NewClient), which used to happen on every single query -- four
+// times per gust-ladder build, four more per solar-state build, per stream
+// client, per second -- so this is the one long-lived Influx client the
+// audit calls for. Callers must never Close() what newInfluxClient returns;
+// it is shared, not owned by whichever caller happened to ask for it last.
+type sharedInfluxClient struct {
+	mu     sync.Mutex
+	url    string
+	org    string
+	bucket string
+	token  string
+	client influxdb2.Client
+}
+
+var globalInfluxClient sharedInfluxClient
+
+// clientFor returns the cached client if url/org/bucket/token are unchanged
+// since it was built, otherwise closes the stale one (if any) and builds a
+// fresh one. Close() on this client only closes idle connections and tears
+// down write APIs this backend never uses (queries only), so swapping it out
+// from under an in-flight query does not abort that query.
+func (c *sharedInfluxClient) clientFor(url, org, bucket, token string) influxdb2.Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.client != nil && c.url == url && c.org == org && c.bucket == bucket && c.token == token {
+		return c.client
+	}
+
+	if c.client != nil {
+		c.client.Close()
+	}
+
+	c.client = influxdb2.NewClient(url, token)
+	c.url, c.org, c.bucket, c.token = url, org, bucket, token
+	return c.client
+}
+
+// reset closes and forgets the cached client, called when Influx settings
+// report not-configured so a client built against a since-abandoned config
+// does not sit open forever.
+func (c *sharedInfluxClient) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.client != nil {
+		c.client.Close()
+		c.client = nil
+	}
+	c.url, c.org, c.bucket, c.token = "", "", "", ""
+}
+
 func newInfluxClient() (influxdb2.Client, string, string, bool) {
 	influxURL, org, bucket, token, ok := loadInfluxSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if !ok {
+		globalInfluxClient.reset()
 		return nil, org, bucket, false
 	}
 
-	client := influxdb2.NewClient(influxURL, token)
-	return client, org, bucket, true
+	return globalInfluxClient.clientFor(influxURL, org, bucket, token), org, bucket, true
 }
 
 // queryInfluxMaxWindGustKtsFor returns the max wind gust (in knots) for each
-// requested window, opening a single Influx client and reusing it across all
-// queries in windows - callers (e.g. vesselState, which needs the full
-// gustWindowLadder every poll) would otherwise pay the cost of a fresh
-// client per window. Each window still gets its own -1 sentinel on error/no
-// data, mirroring the single-window contract this replaces.
+// requested window, reusing newInfluxClient's shared client across all
+// queries in windows rather than one client per window. Each window still
+// gets its own -1 sentinel on error/no data, mirroring the single-window
+// contract this replaces.
 func queryInfluxMaxWindGustKtsFor(windows []string) map[string]float64 {
 	results := make(map[string]float64, len(windows))
 
@@ -78,7 +133,6 @@ func queryInfluxMaxWindGustKtsFor(windows []string) map[string]float64 {
 		}
 		return results
 	}
-	defer client.Close()
 
 	measurement := trimEnvValue(getEnv("INFLUX_WIND_MEASUREMENT", "environment.wind.speedApparent"))
 	field := trimEnvValue(getEnv("INFLUX_WIND_FIELD", "value"))
@@ -130,7 +184,6 @@ func queryInfluxPathTrend(path, window string) ([]telemetryPoint, error) {
 	if !ok {
 		return nil, fmt.Errorf("influxdb is not configured")
 	}
-	defer client.Close()
 
 	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
 
@@ -187,7 +240,6 @@ func queryInfluxPathRange(path string, start, stop time.Time, every string) ([]t
 	if !ok {
 		return nil, fmt.Errorf("influxdb is not configured")
 	}
-	defer client.Close()
 
 	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
 
@@ -240,7 +292,6 @@ func queryInfluxDepthTrend(window string) []depthTrendPoint {
 	if !ok {
 		return nil
 	}
-	defer client.Close()
 
 	measurement := trimEnvValue(getEnv("INFLUX_DEPTH_MEASUREMENT", "environment.depth.belowTransducer"))
 	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
@@ -294,7 +345,6 @@ func queryInfluxSolarPeakTodayW(now time.Time) float64 {
 	if !ok {
 		return -1
 	}
-	defer client.Close()
 
 	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
@@ -333,7 +383,6 @@ func queryInfluxSolarEnergyKWhRange(start time.Time, stop time.Time) float64 {
 	if !ok {
 		return -1
 	}
-	defer client.Close()
 
 	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
@@ -371,7 +420,6 @@ func queryInfluxSolarTrend24h(now time.Time) []solarTrendPoint {
 	if !ok {
 		return nil
 	}
-	defer client.Close()
 
 	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))

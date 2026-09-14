@@ -11,10 +11,28 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// freshTelemetryHubForTest swaps globalTelemetryHub for a brand new instance
+// (no subscribers, no cached frames, no nextDue schedule carried over),
+// mirroring withGlobalSnapshot's swap-and-restore pattern. Without this,
+// tests in this file would share one hub for the lifetime of the test
+// binary: a subscriber left over from a previous test (still tearing down
+// asynchronously) would make Subscribe() think the hub is already running
+// and seed the new test's client with the previous test's cached frames
+// instead of a guaranteed-fresh build, and per-emitter-interval assertions
+// like "tanks-state fires exactly once in this 4s window" would see whatever
+// the previous test's hub happened to be mid-cycle on.
+func freshTelemetryHubForTest(t *testing.T) {
+	t.Helper()
+	original := globalTelemetryHub
+	globalTelemetryHub = newTelemetryHub()
+	t.Cleanup(func() { globalTelemetryHub = original })
+}
+
 // streamTestServer serves only the SSE route, against an empty snapshot so
 // buildVesselStatePayload resolves immediately.
 func streamTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	freshTelemetryHubForTest(t)
 	withGlobalSnapshot(t, newSignalKSnapshot())
 	// An empty snapshot drives GNSS validation critical, and that state latches
 	// in module-level globals until several good samples clear it.
@@ -55,6 +73,12 @@ func TestTelemetryStreamSetsServerSentEventHeaders(t *testing.T) {
 	}
 }
 
+// The hub builds every due event of a tick concurrently (one goroutine per
+// event, deliberately — see streamEmitter.buildMu's doc comment) so a slow
+// build cannot delay the others, which means events no longer necessarily
+// arrive in telemetryEmitters' list order the way a single connection's own
+// serial pump() used to guarantee. This reads frames until vessel-state
+// turns up rather than assuming it is first.
 func TestTelemetryStreamEmitsNamedVesselStateEvent(t *testing.T) {
 	server := streamTestServer(t)
 
@@ -68,7 +92,7 @@ func TestTelemetryStreamEmitsNamedVesselStateEvent(t *testing.T) {
 		event string
 		data  string
 	}
-	frames := make(chan frame, 1)
+	frames := make(chan frame, 16)
 
 	go func() {
 		scanner := bufio.NewScanner(response.Body)
@@ -80,24 +104,27 @@ func TestTelemetryStreamEmitsNamedVesselStateEvent(t *testing.T) {
 				event = strings.TrimPrefix(line, "event: ")
 			case strings.HasPrefix(line, "data: "):
 				frames <- frame{event: event, data: strings.TrimPrefix(line, "data: ")}
-				return
 			}
 		}
 	}()
 
-	select {
-	case got := <-frames:
-		if got.event != "vessel-state" {
-			t.Fatalf("event name: got %q, want %q", got.event, "vessel-state")
-		}
-		// The stream must carry the same shape as GET /api/vessel-state.
-		for _, key := range []string{`"depth"`, `"latitude"`, `"source"`, `"gnss_validation_state"`} {
-			if !strings.Contains(got.data, key) {
-				t.Fatalf("event payload missing %s: %s", key, got.data)
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-frames:
+			if got.event != "vessel-state" {
+				continue
 			}
+			// The stream must carry the same shape as GET /api/vessel-state.
+			for _, key := range []string{`"depth"`, `"latitude"`, `"source"`, `"gnss_validation_state"`} {
+				if !strings.Contains(got.data, key) {
+					t.Fatalf("event payload missing %s: %s", key, got.data)
+				}
+			}
+			return
+		case <-deadline:
+			t.Fatalf("no vessel-state event within 5s")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatalf("no vessel-state event within 5s")
 	}
 }
 

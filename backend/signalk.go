@@ -2291,10 +2291,37 @@ func writeSettings(settingsPath string, settings map[string]any) error {
 		return err
 	}
 
-	return os.WriteFile(settingsPath, content, 0o644)
+	if err := os.WriteFile(settingsPath, content, 0o644); err != nil {
+		return err
+	}
+
+	// Cached bytes-and-mtime alone would not reliably catch a rewrite that
+	// lands on the same size within the filesystem's mtime resolution, so
+	// the write path forces a miss explicitly rather than trusting that.
+	invalidateSettingsCache(settingsPath)
+	return nil
 }
 
+// readSettings reads and YAML-parses settingsPath, serving a deep copy of a
+// cached parse (settings_cache.go) when the file's mtime and size have not
+// changed since it was last parsed. Stat/read errors surface exactly as
+// they did before caching existed: a missing file returns an empty map with
+// no error (a fresh install's normal state), any other stat or read error
+// returns nil and that error.
 func readSettings(settingsPath string) (map[string]any, error) {
+	info, err := os.Stat(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			invalidateSettingsCache(settingsPath)
+			return map[string]any{}, nil
+		}
+		return nil, err
+	}
+
+	if cached, ok := cachedSettingsFor(settingsPath, info); ok {
+		return cached, nil
+	}
+
 	content, err := os.ReadFile(settingsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -2304,16 +2331,18 @@ func readSettings(settingsPath string) (map[string]any, error) {
 		return nil, err
 	}
 
-	if len(content) == 0 {
-		return map[string]any{}, nil
-	}
-
 	settings := map[string]any{}
-	if err := yaml.Unmarshal(content, &settings); err != nil {
-		return nil, err
+	if len(content) > 0 {
+		if err := yaml.Unmarshal(content, &settings); err != nil {
+			return nil, err
+		}
 	}
 
-	return settings, nil
+	// Cache against the Stat result taken before the read, not a fresh
+	// stat after: if the file changed in between, the next call's own Stat
+	// will simply miss this entry and re-parse, which is correct either way.
+	storeSettingsCache(settingsPath, info, settings)
+	return deepCopyMap(settings), nil
 }
 
 func coercePort(value any) int {

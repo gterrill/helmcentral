@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -352,4 +353,48 @@ func TestApplyGNSSHeuristicsHysteresisRequiresRecoverySamples(t *testing.T) {
 	if final.Status != "trusted" {
 		t.Fatalf("expected hysteresis recovery to trusted, got %q", final.Status)
 	}
+}
+
+// TestApplyGNSSHeuristics_ConcurrentCallsAreRaceFree guards the data race the
+// audit flagged: applyGNSSHeuristics (and criticalGNSSValidation, which
+// engages the same recovery-hysteresis latch) used to mutate the
+// package-level gnssHeuristic state without holding gnssValidationMu, while
+// resolveGNSSPosition and resetGNSSPositionValidationState did. In
+// production this is reached from every fetchSignalKVesselState call --
+// concurrently from /api/vessel-state requests and each stream client's own
+// build -- so concurrent callers could make the recovery-hysteresis sample
+// count advance faster than real samples arrived. Run with -race: this must
+// fail on the unguarded code and pass once applyGNSSHeuristics/
+// criticalGNSSValidation take gnssValidationMu for their mutations.
+func TestApplyGNSSHeuristics_ConcurrentCallsAreRaceFree(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	trusted := gnssPositionValidation{QualityIndicator: 1, HDOP: 0.9, Status: "trusted", Trusted: true}
+	base := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			now := base.Add(time.Duration(n) * time.Millisecond)
+			sample := gnssObservedSample{
+				Latitude:      -25.2939,
+				Longitude:     152.9103,
+				Navigation:    "anchored",
+				ObservedAt:    now,
+				HasObservedAt: true,
+			}
+			applyGNSSHeuristics(trusted, sample, now)
+		}(i)
+	}
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			criticalGNSSValidation("concurrent probe", base.Add(time.Duration(n)*time.Millisecond))
+		}(i)
+	}
+	wg.Wait()
 }
