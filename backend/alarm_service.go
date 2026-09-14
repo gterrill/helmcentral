@@ -141,8 +141,16 @@ func recordAlarmEvent(event alarmEvent, now time.Time) {
 		}
 	}
 
+	// Handed to the dispatcher's own queue and worker (alarm_dispatch.go)
+	// rather than dispatched inline: dispatch's transports run serially under
+	// a 15s context, and a burst of transitions on a half-open uplink used to
+	// freeze this function's caller -- the alarm evaluator tick, the anchor-
+	// drag watcher and the stream watchdog all call recordAlarmEvent directly
+	// -- for as long as delivery took. The vessel name is still resolved here,
+	// at record time, so a later change to it never rewrites history for an
+	// event already queued.
 	if globalAlarmDispatcher != nil {
-		globalAlarmDispatcher.dispatch(event, vesselNameForNotifications())
+		globalAlarmDispatcher.enqueue(event, vesselNameForNotifications())
 	}
 }
 

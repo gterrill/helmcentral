@@ -36,6 +36,17 @@ const radarSpokeReadLimit = 4 << 20
 // rather than blocking or growing the buffer, is the deliberate choice here.
 const radarSpokeClientBufferFrames = 4
 
+// radarSpokeWriteTimeout bounds each frame write to a browser client. Without
+// it a client that goes silent -- asleep, backgrounded, a dead radio -- but
+// never closes its socket holds this handler's goroutine, its slot in
+// relay.clients, and therefore the shared upstream mayara connection open
+// until the OS's own TCP retransmission timeout gives up, which can be
+// minutes. Named per the perf audit rather than inlined so the budget is
+// visible at a glance; serveSpokeClient takes it as a parameter (rather than
+// reading the const directly) so a test can shrink it without waiting out
+// the real 5s.
+const radarSpokeWriteTimeout = 5 * time.Second
+
 // radarSpokeClient is one connected browser's fan-out channel. frames is
 // buffered rather than unbounded so a client that stops reading costs this
 // process a small, fixed amount of memory rather than an unbounded amount;
@@ -62,10 +73,21 @@ type radarSpokeRelay struct {
 	mu      sync.Mutex
 	clients map[*radarSpokeClient]struct{}
 
+	// refs counts callers between acquire and release -- handler
+	// invocations, not connected clients. A handler that has acquired the
+	// relay but not yet reached addClient (still inside websocket.Accept's
+	// handshake) must keep it alive even though it holds no entry in clients
+	// yet. Sizing teardown off len(clients) instead let a second handler's
+	// failed Accept for the same radar id tear down a relay the first
+	// handler had already acquired but not yet joined, orphaning it on a
+	// dead upstream until its browser reconnected. Touched only under
+	// radarSpokeRelayRegistry.mu, same discipline as cancel below.
+	refs int
+
 	// cancel and done are set by radarSpokeRelayRegistry.acquire when the
-	// first client arrives, and used by release to tear the upstream
-	// connection down synchronously once the last client leaves: release
-	// waits on done before returning, so a client that reconnects
+	// first reference arrives, and used by release to tear the upstream
+	// connection down synchronously once the last reference drops: release
+	// waits on done before returning, so a caller that reconnects
 	// immediately after always gets a fresh upstream rather than racing the
 	// old one's teardown.
 	cancel context.CancelFunc
@@ -233,8 +255,9 @@ func newRadarSpokeRelayRegistry() *radarSpokeRelayRegistry {
 var globalRadarSpokeRelays = newRadarSpokeRelayRegistry()
 
 // acquire returns the shared relay for radarID, starting its upstream
-// connection if this is the first caller. Must be paired with exactly one
-// release call.
+// connection if this is the first caller, and counts one reference against
+// it. Must be paired with exactly one release call, however the caller's own
+// handling of the relay (Accept, addClient, the serve loop) turns out.
 func (reg *radarSpokeRelayRegistry) acquire(radarID, settingsPath string) *radarSpokeRelay {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
@@ -244,10 +267,11 @@ func (reg *radarSpokeRelayRegistry) acquire(radarID, settingsPath string) *radar
 		relay = newRadarSpokeRelay(radarID, settingsPath)
 		reg.relays[radarID] = relay
 	}
+	relay.refs++
 
 	// cancel is nil only for a relay that has never had its upstream started
 	// — a freshly created one, since release always deletes a relay from the
-	// map before its refcount can return to zero a second time. Gating on
+	// map once refs returns to zero, before it can be reused. Gating on
 	// cancel alone (rather than also inspecting relay.clients, which
 	// addClient/removeClient mutate under relay.mu instead of reg.mu) keeps
 	// this whole decision serialized by reg.mu without a second lock.
@@ -261,11 +285,17 @@ func (reg *radarSpokeRelayRegistry) acquire(radarID, settingsPath string) *radar
 }
 
 // release drops one reference to radarID's relay. When the caller releasing
-// is the last client, the upstream connection is torn down synchronously —
-// bounded by the same context-cancel-closes-the-read behaviour
+// is the last reference, the upstream connection is torn down synchronously
+// — bounded by the same context-cancel-closes-the-read behaviour
 // signalk_stream.go already relies on — and the relay is removed from the
-// registry so a later client builds a fresh one rather than reusing a
+// registry so a later caller builds a fresh one rather than reusing a
 // half-torn-down instance.
+//
+// Reference counted rather than sized off len(relay.clients): a handler
+// acquires before it ever calls addClient (websocket.Accept can still fail,
+// or simply take a while, in between), so a concurrent handler for the same
+// radar id releasing in that window must not tear down a relay this one is
+// still holding.
 func (reg *radarSpokeRelayRegistry) release(radarID string) {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
@@ -275,10 +305,8 @@ func (reg *radarSpokeRelayRegistry) release(radarID string) {
 		return
 	}
 
-	relay.mu.Lock()
-	remaining := len(relay.clients)
-	relay.mu.Unlock()
-	if remaining > 0 {
+	relay.refs--
+	if relay.refs > 0 {
 		return
 	}
 
@@ -374,7 +402,20 @@ func radarSpokeRelayHandler(c echo.Context) error {
 	relay := globalRadarSpokeRelays.acquire(radarID, settingsPath)
 	defer globalRadarSpokeRelays.release(radarID)
 
-	conn, err := websocket.Accept(c.Response().Writer, c.Request(), nil)
+	// CompressionContextTakeover is only negotiated if the browser's own
+	// handshake offers permessage-deflate (selectDeflate, coder/websocket's
+	// accept.go) -- a client that doesn't gets exactly today's uncompressed
+	// behaviour. Spoke frames gzip roughly 45:1 (testdata/mayara's capture
+	// notes), against a fixed cost of a 32KB sliding window plus a 1.2MB
+	// flate.Writer per connection, which at the handful of concurrent radar
+	// viewers this relay ever serves is a good trade for cutting 2-6GB/h on
+	// a phone's LTE link down by over an order of magnitude. Every other
+	// Accept behaviour (origin checking, in particular) is unchanged: a zero
+	// AcceptOptions with only CompressionMode set behaves identically to nil
+	// otherwise.
+	conn, err := websocket.Accept(c.Response().Writer, c.Request(), &websocket.AcceptOptions{
+		CompressionMode: websocket.CompressionContextTakeover,
+	})
 	if err != nil {
 		return err
 	}
@@ -390,16 +431,32 @@ func radarSpokeRelayHandler(c echo.Context) error {
 	client := relay.addClient()
 	defer relay.removeClient(client)
 
+	serveSpokeClient(ctx, conn, client, radarSpokeWriteTimeout)
+	return nil
+}
+
+// serveSpokeClient pumps frames from client.frames to conn until ctx is
+// cancelled (the browser disconnected), the channel closes, or a single
+// write exceeds writeTimeout. That last case is what radarSpokeWriteTimeout
+// exists for: a client that goes silent without closing must not hold this
+// goroutine, and so the relay's reference on it and mayara's upstream
+// connection, open indefinitely. writeTimeout is a parameter rather than the
+// const read directly so a test can shrink it instead of waiting out the
+// real budget.
+func serveSpokeClient(ctx context.Context, conn *websocket.Conn, client *radarSpokeClient, writeTimeout time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		case frame, ok := <-client.frames:
 			if !ok {
-				return nil
+				return
 			}
-			if err := conn.Write(ctx, websocket.MessageBinary, frame); err != nil {
-				return nil
+			writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+			err := conn.Write(writeCtx, websocket.MessageBinary, frame)
+			cancel()
+			if err != nil {
+				return
 			}
 		}
 	}

@@ -430,6 +430,173 @@ func TestRadarSpokeRelayHandlerRefusesWhenMayaraAddressUnset(t *testing.T) {
 	}
 }
 
+// TestRadarSpokeRelayNegotiatesCompressionWhenClientOffersItAndFramesStayIdentical
+// is the compression half of backend perf audit #5. websocket.Dial with nil
+// options (every other test in this file) offers no permessage-deflate
+// extension at all, so the default DialOptions{} zero value -- and every
+// existing test above -- stays exactly as uncompressed as before this fix;
+// only a client that explicitly asks, as this one does, exercises the new
+// path.
+func TestRadarSpokeRelayNegotiatesCompressionWhenClientOffersItAndFramesStayIdentical(t *testing.T) {
+	frame := loadFirstSpokeFrame(t)
+
+	stub := newMayaraSpokeStub(func(ctx context.Context, c *websocket.Conn, _ int) {
+		_ = c.Write(ctx, websocket.MessageBinary, frame)
+		<-ctx.Done()
+	})
+	defer stub.close()
+	t.Setenv("SETTINGS_FILE", mayaraSettingsFileForServer(t, stub.url()))
+	wsURL := newSpokeRelayTestServer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, resp, err := websocket.Dial(ctx, wsURL+"/api/radar/spokes?radar=compressed", &websocket.DialOptions{
+		CompressionMode: websocket.CompressionContextTakeover,
+	})
+	if err != nil {
+		t.Fatalf("dialing radar compressed: %v", err)
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(radarSpokeReadLimit)
+
+	if ext := resp.Header.Get("Sec-WebSocket-Extensions"); !strings.Contains(ext, "permessage-deflate") {
+		t.Fatalf("expected the relay to negotiate permessage-deflate when the client offers it, got Sec-WebSocket-Extensions=%q", ext)
+	}
+
+	_, got, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("reading relayed frame: %v", err)
+	}
+	if !bytes.Equal(got, frame) {
+		t.Fatalf("relayed frame diverged under compression: got %d bytes, want %d bytes", len(got), len(frame))
+	}
+}
+
+// TestServeSpokeClientEndsAWriteThatExceedsTheTimeout is the write-timeout
+// half of #5: a client that stops reading without closing must not hold the
+// write, and therefore this goroutine, open past writeTimeout. Exercised
+// directly against serveSpokeClient (bypassing the relay/registry) with a
+// short timeout, since forcing an OS socket buffer to actually stall on a
+// real 5s budget would make this test as slow as the bug it guards against.
+// The frame is large and the peer never reads at all, so the write is
+// guaranteed to still be in flight when writeTimeout fires.
+func TestServeSpokeClientEndsAWriteThatExceedsTheTimeout(t *testing.T) {
+	e := echo.New()
+	var serverConn *websocket.Conn
+	accepted := make(chan struct{})
+	e.GET("/spoke", func(c echo.Context) error {
+		conn, err := websocket.Accept(c.Response().Writer, c.Request(), nil)
+		if err != nil {
+			return err
+		}
+		serverConn = conn
+		close(accepted)
+		<-c.Request().Context().Done()
+		return nil
+	})
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer dialCancel()
+	clientConn, _, err := websocket.Dial(dialCtx, "ws://"+strings.TrimPrefix(srv.URL, "http://")+"/spoke", nil)
+	if err != nil {
+		t.Fatalf("dialing test server: %v", err)
+	}
+	defer clientConn.CloseNow()
+	// The client deliberately never calls Read again from here on.
+
+	select {
+	case <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server never accepted the connection")
+	}
+
+	client := &radarSpokeClient{frames: make(chan []byte, 1)}
+	// Large and entirely undrained: with nothing reading the socket, this
+	// write cannot complete within the short timeout below regardless of the
+	// platform's default buffer sizes.
+	client.frames <- bytes.Repeat([]byte{0xAA}, 16<<20)
+
+	done := make(chan struct{})
+	go func() {
+		serveSpokeClient(context.Background(), serverConn, client, 100*time.Millisecond)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("serveSpokeClient did not return after its write exceeded the timeout; the client, and the upstream it holds open, would be stuck")
+	}
+}
+
+// TestRadarSpokeRelayRegistry_AcquireReleaseInterleavingDoesNotOrphanARelay
+// is the failing-test-first regression guard for the refcount bug (backend
+// perf audit #5): handler A acquires, then handler B acquires the same
+// relay and releases before ever calling addClient (its Accept failed).
+// Sizing teardown off len(relay.clients) tore the relay down here even
+// though handler A, still mid-handshake, had not joined yet and was still
+// holding it -- A's eventual client would then be attached to a relay whose
+// run() had already exited, receiving nothing until its browser reconnected.
+func TestRadarSpokeRelayRegistry_AcquireReleaseInterleavingDoesNotOrphanARelay(t *testing.T) {
+	frame := []byte("interleave-frame")
+	stub := newMayaraSpokeStub(func(ctx context.Context, c *websocket.Conn, _ int) {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := c.Write(ctx, websocket.MessageBinary, frame); err != nil {
+					return
+				}
+			}
+		}
+	})
+	defer stub.close()
+	settingsPath := mayaraSettingsFileForServer(t, stub.url())
+
+	const radarID = "interleave-radar"
+
+	// Handler A acquires and is still mid-handshake (has not called
+	// addClient yet).
+	relayA := globalRadarSpokeRelays.acquire(radarID, settingsPath)
+	t.Cleanup(func() { globalRadarSpokeRelays.release(radarID) })
+
+	// Handler B acquires the same relay, then its Accept fails and it
+	// releases immediately -- also without ever calling addClient.
+	relayB := globalRadarSpokeRelays.acquire(radarID, settingsPath)
+	if relayB != relayA {
+		t.Fatalf("acquire for the same radar id must return the same relay instance")
+	}
+	globalRadarSpokeRelays.release(radarID)
+
+	if n := spokeRelayCount(); n != 1 {
+		t.Fatalf("relay count = %d, want 1: handler A's acquire is still outstanding and must keep the relay alive", n)
+	}
+
+	waitFor(t, 2*time.Second, "the upstream to stay connected while A still holds a reference", func() bool {
+		return stub.connections() == 1
+	})
+
+	// Handler A now finishes its handshake and joins as a client. On the
+	// buggy len(clients)==0 teardown this relay would already be gone from
+	// the registry (and its run() exited), so this client would receive
+	// nothing until it reconnected.
+	client := relayA.addClient()
+	defer relayA.removeClient(client)
+
+	select {
+	case frame := <-client.frames:
+		_ = frame
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler A's client never received a frame from the relay it had acquired before B's premature release")
+	}
+}
+
 func TestRadarSpokeRelayRelaysCapturedFrameVerbatim(t *testing.T) {
 	frame := loadFirstSpokeFrame(t)
 

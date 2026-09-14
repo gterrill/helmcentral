@@ -1,16 +1,28 @@
 package main
 
 import (
+	"context"
 	"log"
 	"time"
 )
 
-func startTideAutoUpdater(interval time.Duration) {
+func startTideAutoUpdater(ctx context.Context, interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
-			updateNearestTideStation()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// See startTrackPoller (tracks.go) for why this recheck
+				// matters: select does not prefer ctx.Done() over a tick
+				// ready at the same instant.
+				if ctx.Err() != nil {
+					return
+				}
+				updateNearestTideStation()
+			}
 		}
 	}()
 }

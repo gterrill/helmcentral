@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -171,6 +173,167 @@ func TestFetchSignalKAISTrails_EmptyOnNonOKStatus(t *testing.T) {
 	}
 }
 
+// TestFetchSignalKAISTrailsResult_404IsALegitimateAbsentEndpointNotAnError
+// pins the boat's actual current state (backend perf audit #10): the
+// SignalK tracks plugin is not installed there, so every fetch gets a 404.
+// That is a configuration fact, not a failure -- the same idiom
+// fetchSignalKNotificationsTree already uses for a 404'd sub-resource
+// (notification_sync.go) -- so it must not be reported as an error, only
+// return empty trails.
+func TestFetchSignalKAISTrailsResult_404IsALegitimateAbsentEndpointNotAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
+
+	trails, err := fetchSignalKAISTrailsResult(settingsPath)
+	if err != nil {
+		t.Fatalf("a 404 tracks endpoint must not surface as an error, got %v", err)
+	}
+	if len(trails) != 0 {
+		t.Fatalf("expected empty trails for a 404, got %d", len(trails))
+	}
+}
+
+// TestFetchSignalKAISTrailsResult_404LogsOncePerStateChange: /api/tracks
+// refreshes on demand every 15 s while a map is open, so a line per 404 would
+// flood the log buffer on a boat without the tracks plugin.
+func TestFetchSignalKAISTrailsResult_404LogsOncePerStateChange(t *testing.T) {
+	var found atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !found.Load() {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
+	tracksEndpointMissing.Store(false)
+	t.Cleanup(func() { tracksEndpointMissing.Store(false) })
+
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	for i := 0; i < 3; i++ {
+		if _, err := fetchSignalKAISTrailsResult(settingsPath); err != nil {
+			t.Fatalf("fetch %d: %v", i, err)
+		}
+	}
+	if got := strings.Count(buf.String(), "(404)"); got != 1 {
+		t.Fatalf("expected one 404 log line across three fetches, got %d:\n%s", got, buf.String())
+	}
+
+	found.Store(true)
+	for i := 0; i < 2; i++ {
+		if _, err := fetchSignalKAISTrailsResult(settingsPath); err != nil {
+			t.Fatalf("fetch after recovery %d: %v", i, err)
+		}
+	}
+	if got := strings.Count(buf.String(), "answered again"); got != 1 {
+		t.Fatalf("expected one recovery log line, got %d:\n%s", got, buf.String())
+	}
+}
+
+// TestFetchSignalKAISTrailsResult_OtherNonOKStatusReturnsAnError guards the
+// fallback policy (AGENTS.md): unlike 404 (an absent, optional endpoint), a
+// 5xx or other unexpected status is a real failure and must surface as an
+// error rather than silently becoming an empty success -- the distinction
+// TestTracksAISTrailsCache_PreservesLastGoodTrailsOnTransientUpstreamError
+// below depends on below the cache layer.
+func TestFetchSignalKAISTrailsResult_OtherNonOKStatusReturnsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
+
+	if _, err := fetchSignalKAISTrailsResult(settingsPath); err == nil {
+		t.Fatalf("expected a real error for a non-404 non-OK status")
+	}
+}
+
+// TestTracksAISTrailsCache_PreservesLastGoodTrailsOnTransientUpstreamError is
+// the end-to-end reason fetchSignalKAISTrailsResult must distinguish a real
+// error from the 404-as-absent-feature case above: finishRefresh keeps the
+// last-good snapshot on an error rather than overwriting it with empty, so a
+// plugin restart or a blip does not blank the map until the next successful
+// poll. Before this fix every non-OK status (the 503 here included) returned
+// a nil error, so this clobbered good data with empty on the very first
+// blip.
+func TestTracksAISTrailsCache_PreservesLastGoodTrailsOnTransientUpstreamError(t *testing.T) {
+	resetTracksStateForTest(t)
+
+	tracksBody := map[string]any{
+		"vessels.urn:mrn:imo:mmsi:123456789": map[string]any{
+			"type":        "MultiLineString",
+			"coordinates": [][][]float64{{{152.91, -25.29}}},
+		},
+	}
+	vesselsBody := map[string]any{
+		"urn:mrn:imo:mmsi:123456789": map[string]any{"name": "PEGASUS"},
+	}
+	tracksJSON, _ := json.Marshal(tracksBody)
+	vesselsJSON, _ := json.Marshal(vesselsBody)
+
+	var failNext atomic.Bool
+
+	snapshot := newSignalKSnapshot()
+	for id, tree := range vesselsBody {
+		if asMap, ok := tree.(map[string]any); ok {
+			snapshot.contexts[vesselContextPrefix+id] = asMap
+		}
+	}
+	snapshot.contexts["vessels.self"] = map[string]any{"name": "TESTSELF"}
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "v1/api/tracks"):
+			if failNext.Load() {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			w.Write(tracksJSON)
+		case strings.Contains(r.URL.Path, "/vessels/self"):
+			w.Write([]byte(`{"name":"TESTSELF"}`))
+		case strings.HasSuffix(r.URL.Path, "/vessels"):
+			w.Write(vesselsJSON)
+		}
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+	t.Setenv("SIGNALK_TRACKS_PATH", "/v1/api/tracks")
+	t.Setenv("SIGNALK_VESSELS_PATH", "/vessels")
+	t.Setenv("SIGNALK_VESSEL_PATH", "/vessels/self")
+
+	good := tracksAISTrails.get(settingsPath)
+	if len(good) != 1 {
+		t.Fatalf("expected the initial fetch to warm the cache with 1 trail, got %d", len(good))
+	}
+
+	// Force the next fetch to fail and expire the cache so get() re-fetches.
+	failNext.Store(true)
+	tracksAISTrails.snapshot.fetchedAt = time.Now().Add(-1 * time.Minute)
+
+	stillGood := tracksAISTrails.get(settingsPath)
+	if len(stillGood) != 1 {
+		t.Fatalf("a transient upstream error must not clobber the last-good trails, got %d", len(stillGood))
+	}
+}
+
 func TestFetchSignalKAISTrails_SkipsInvalidCoordinates(t *testing.T) {
 	tracksBody := map[string]any{
 		"vessels.urn:mrn:imo:mmsi:111": map[string]any{
@@ -314,6 +477,109 @@ func TestSampleTracks_RecordsWindAndDepthHistoryEvenWithoutValidPosition(t *test
 	depthPts := depthHistory.since(time.Time{})
 	if len(depthPts) != 1 {
 		t.Fatalf("expected 1 depth sample recorded despite missing position, got %d", len(depthPts))
+	}
+}
+
+// TestSampleTracks_DoesNotRefreshAISTrailsCache guards the removal of the
+// poller's direct tracksAISTrails.refresh call (backend perf audit #10):
+// getTracksHandler's own get() already refreshes on demand within the
+// cache's 15s freshness window, so the poller hitting the same upstream
+// endpoint on every 5s tick regardless of whether a client had the map open
+// just doubled the load for nothing. The position here defaults to the
+// -1,-1 sentinel (no navigation.position in the body), which is exactly what
+// the two tests above use to reach this same block without tripping
+// hasUsableVesselPosition's Overpass lookup -- the loose range check a few
+// lines up in sampleTracks treats it as "in range" regardless.
+func TestSampleTracks_DoesNotRefreshAISTrailsCache(t *testing.T) {
+	resetTracksStateForTest(t)
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	body := []byte(`{
+		"navigation": {
+			"datetime": {"value": "` + time.Now().UTC().Format(time.RFC3339) + `"},
+			"state": {"value": "anchored"}
+		}
+	}`)
+	seedSelfTree(t, string(body))
+
+	var tracksCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "tracks") {
+			tracksCalls.Add(1)
+			w.Write([]byte(`{}`))
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	settingsPath := settingsFileForServer(t, srv.URL)
+
+	sampleTracks(settingsPath)
+
+	if got := tracksCalls.Load(); got != 0 {
+		t.Fatalf("sampleTracks must not hit the tracks endpoint directly, got %d call(s)", got)
+	}
+
+	// The cache is still cold; a handler's own get() must still warm it on
+	// demand -- this is the "handler refreshes on demand" half of the fix,
+	// confirming the removal above didn't leave the cache permanently cold.
+	tracksAISTrails.get(settingsPath)
+	if got := tracksCalls.Load(); got != 1 {
+		t.Fatalf("expected get() to warm the cold cache exactly once, got %d", got)
+	}
+}
+
+// TestStartTrackPoller_StopsOnContextCancellation pins the shutdown wiring
+// (backend perf audit #10): the poller used to run forever regardless of
+// streamCtx, so main.go's shutdown never stopped it. Now that
+// tracksAISTrails.refresh is gone (the test above), sampleTracks makes no
+// HTTP call at all for a self vessel with no usable position -- every field
+// it reads comes off the in-memory snapshot -- so ticking is observed
+// through windGustHistory (a plain, position-independent per-tick side
+// effect) rather than an upstream request count.
+func TestStartTrackPoller_StopsOnContextCancellation(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+
+	windGustHistory = newTelemetryRingBuffer(telemetryHistoryCapacity)
+
+	body := []byte(`{
+		"navigation": {
+			"datetime": {"value": "` + time.Now().UTC().Format(time.RFC3339) + `"},
+			"state": {"value": "anchored"}
+		},
+		"environment": {
+			"wind": {"speedApparent": {"value": 5.0}}
+		}
+	}`)
+	seedSelfTree(t, string(body))
+	t.Setenv("SETTINGS_FILE", settingsFileForServer(t, "http://127.0.0.1:1"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startTrackPoller(ctx, 5*time.Millisecond)
+
+	waitFor(t, 2*time.Second, "at least one poll tick to land", func() bool {
+		return len(windGustHistory.since(time.Time{})) > 0
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startTrackPoller did not stop after context cancellation")
+	}
+
+	// done closing is the synchronization point: everything the poller
+	// goroutine ever did, including its last read of globalSignalKSnapshot,
+	// happened-before this. A plain sleep here would give no such guarantee
+	// against seedSelfTree's own cleanup swapping that global back out.
+	afterCancel := len(windGustHistory.since(time.Time{}))
+	time.Sleep(20 * time.Millisecond)
+	if got := len(windGustHistory.since(time.Time{})); got != afterCancel {
+		t.Fatalf("expected no further polls after context cancellation, had %d then %d", afterCancel, got)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -354,6 +355,48 @@ func TestRecordAlarmEventDefaultsEmptySourceToRule(t *testing.T) {
 	if len(entries) != 1 || entries[0].Source != alarmSourceRule {
 		t.Fatalf("expected an empty source to default to rule, got %+v", entries)
 	}
+}
+
+// TestRecordAlarmEventDoesNotBlockOnASlowTransport is the regression guard
+// for backend perf audit #9: recordAlarmEvent runs on the same goroutine as
+// the 1s alarm evaluator tick, the anchor-drag watcher and the stream
+// watchdog (alarm_watchdog.go), all of which call it directly, so a
+// transport that is slow to answer -- or, as observed on the boat, a burst
+// of transitions after a stream reconnect -- must never hold that tick
+// hostage. blockingUntilReleasedTransport (alarm_notify_test.go) blocks its
+// Send until released, which the old synchronous dispatch would have made
+// recordAlarmEvent block on too.
+func TestRecordAlarmEventDoesNotBlockOnASlowTransport(t *testing.T) {
+	store := newTestAlarmLog(t)
+	originalStore := globalAlarmLogStore
+	globalAlarmLogStore = store
+	t.Cleanup(func() { globalAlarmLogStore = originalStore })
+
+	release := make(chan struct{})
+	transport := &blockingUntilReleasedTransport{id: transportWebhook, release: release}
+
+	dispatcher := newAlarmDispatcher()
+	dispatcher.store = store
+	dispatcher.transports = func() []notificationTransport { return []notificationTransport{transport} }
+
+	originalDispatcher := globalAlarmDispatcher
+	globalAlarmDispatcher = dispatcher
+	t.Cleanup(func() { globalAlarmDispatcher = originalDispatcher })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go dispatcher.run(ctx)
+
+	started := time.Now()
+	recordAlarmEvent(raisedEvent(), alarmNow)
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("recordAlarmEvent took %s; a slow transport must not block it", elapsed)
+	}
+
+	close(release)
+	waitFor(t, 2*time.Second, "the queued delivery to reach the slow transport", func() bool {
+		return transport.count() > 0
+	})
 }
 
 // Rule alarms advertise the one action the engine has, so the drawer renders

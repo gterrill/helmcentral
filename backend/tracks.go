@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -35,6 +38,11 @@ type tracksAISTrailsCache struct {
 }
 
 var tracksAISTrails = newTracksAISTrailsCache()
+
+// tracksEndpointMissing remembers whether the last AIS trails fetch got a 404,
+// so the missing-plugin log line is written when that changes rather than on
+// every refresh.
+var tracksEndpointMissing atomic.Bool
 
 func newTracksAISTrailsCache() *tracksAISTrailsCache {
 	c := &tracksAISTrailsCache{}
@@ -73,18 +81,6 @@ func (c *tracksAISTrailsCache) get(settingsPath string) map[string][]trackPoint 
 		trails := cloneTrackPointMap(c.snapshot.trails)
 		c.mu.Unlock()
 		return trails
-	}
-	c.refreshing = true
-	c.mu.Unlock()
-
-	trails, err := fetchSignalKAISTrailsResult(settingsPath)
-	return c.finishRefresh(trails, err)
-}
-
-func (c *tracksAISTrailsCache) refresh(settingsPath string) map[string][]trackPoint {
-	c.mu.Lock()
-	for c.refreshing {
-		c.cond.Wait()
 	}
 	c.refreshing = true
 	c.mu.Unlock()
@@ -134,18 +130,46 @@ func recordMotoringPoint(lat, lon float64) {
 // ── Server-side poller ────────────────────────────────────────────────────────
 
 // startTrackPoller launches a background goroutine that samples both the
-// self-vessel and all nearby AIS vessels every pollInterval. The client never
-// needs to touch SignalK for trail data — it only calls /api/tracks.
-func startTrackPoller(pollInterval time.Duration) {
+// self-vessel and all nearby AIS vessels every pollInterval, until ctx is
+// cancelled. The client never needs to touch SignalK for trail data — it
+// only calls /api/tracks.
+//
+// The returned channel closes once the goroutine has actually returned.
+// main.go has no need for it (a fire-and-forget "go startTrackPoller(...)"
+// simply discards it), but it gives a test a properly synchronized way to
+// know shutdown is complete, mirroring radarSpokeRelay.done
+// (radar_spoke_relay.go) for the same reason: a plain sleep-and-hope after
+// cancel gives no happens-before guarantee that this goroutine's last read
+// of a package-level global (globalSignalKSnapshot, mutated by other tests)
+// has actually finished.
+func startTrackPoller(ctx context.Context, pollInterval time.Duration) <-chan struct{} {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	done := make(chan struct{})
 
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			sampleTracks(settingsPath)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// select does not prefer ctx.Done() over a ticker tick that
+				// becomes ready at the same instant, so without this a
+				// cancellation racing a tick could keep losing that draw and
+				// sample once more (in principle repeatedly) after shutdown
+				// was requested. Re-checking here bounds that to at most one
+				// tick already in flight when cancellation lands.
+				if ctx.Err() != nil {
+					return
+				}
+				sampleTracks(settingsPath)
+			}
 		}
 	}()
+
+	return done
 }
 
 func sampleTracks(settingsPath string) {
@@ -214,7 +238,12 @@ func sampleTracks(settingsPath string) {
 		// Also record post-anchor ring-buffer and motoring trail
 		recordSelfTrailPoint(state.Latitude, state.Longitude)
 
-		tracksAISTrails.refresh(settingsPath)
+		// AIS trails are no longer refreshed on this tick: getTracksHandler's
+		// own tracksAISTrails.get() already refreshes on demand within its
+		// 15s freshness window (backend perf audit #10), so refreshing here
+		// too just doubled the upstream GET to /signalk/v1/api/tracks -- every
+		// 5s from the poller regardless of whether any client had the map
+		// open, on top of whatever the handler already did.
 		if isMotoring(state.Status) {
 			recordMotoringPoint(state.Latitude, state.Longitude)
 		}
@@ -326,8 +355,36 @@ func fetchSignalKAISTrailsResult(settingsPath string) (map[string][]trackPoint, 
 		return map[string][]trackPoint{}, err
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
+
+	if response.StatusCode == http.StatusNotFound {
+		// Drain so the connection can be reused rather than left half-read,
+		// same as the error branch just below. A 404 here is a fact about the
+		// boat's configuration, not a failure: the tracks plugin simply is not
+		// installed, the same idiom fetchSignalKNotificationsTree already
+		// uses for a 404'd sub-resource (notification_sync.go). It must still
+		// surface rather than vanish silently, so it is logged; the trails
+		// stay empty rather than becoming an error, since "the plugin is not
+		// there" is not something a retry or a stale cache fixes.
+		// Logged once per change of state: /api/tracks refreshes this on
+		// demand every 15 s while a map is open, and a line per refresh
+		// would bury everything else in the log buffer.
+		io.Copy(io.Discard, response.Body)
+		if tracksEndpointMissing.CompareAndSwap(false, true) {
+			log.Printf("tracks: signalk has no %s endpoint (404); AIS trails will stay empty until it appears", tracksPath)
+		}
 		return map[string][]trackPoint{}, nil
+	}
+	if tracksEndpointMissing.CompareAndSwap(true, false) {
+		log.Printf("tracks: signalk %s endpoint answered again", tracksPath)
+	}
+	if response.StatusCode != http.StatusOK {
+		// An unexpected status (5xx, a proxy timeout page, ...) is a real
+		// failure, unlike the 404 above -- returning it as an error rather
+		// than a silent empty success lets tracksAISTrailsCache.finishRefresh
+		// keep serving the last-good trails instead of blanking them on a
+		// blip (AGENTS.md fallback policy).
+		body, _ := io.ReadAll(response.Body)
+		return map[string][]trackPoint{}, fmt.Errorf("signalk returned status %d fetching AIS trails: %s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	body, err := io.ReadAll(response.Body)

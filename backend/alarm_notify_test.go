@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -378,6 +379,11 @@ func testDispatcher(t *testing.T, transport notificationTransport) (*alarmDispat
 		transports: func() []notificationTransport { return []notificationTransport{transport} },
 		store:      store,
 		now:        func() time.Time { return alarmNow },
+		// Matches newAlarmDispatcher's own construction: dispatch and drain
+		// (exercised by most tests below) never touch this, but enqueue/run
+		// (the queue tests further down) do, and a nil channel there would
+		// make run wait forever rather than see a newly queued item.
+		wake: make(chan struct{}, 1),
 	}, store
 }
 
@@ -603,5 +609,210 @@ func TestDispatcherLeavesQueuedTransitionsForOtherRulesAlone(t *testing.T) {
 
 	if depth, _ := store.QueueDepth(); depth != 2 {
 		t.Fatalf("two rules must hold two queued deliveries, depth %d", depth)
+	}
+}
+
+// ── in-memory dispatch queue + worker (backend perf audit #9) ──────────────
+
+// orderRecordingTransport records the Kind of each message it receives, in
+// delivery order, so a test can pin the order multiple enqueued transitions
+// actually reach the transport in.
+type orderRecordingTransport struct {
+	id string
+
+	mu    sync.Mutex
+	order []string
+}
+
+func (o *orderRecordingTransport) ID() string { return o.id }
+
+func (o *orderRecordingTransport) Send(_ context.Context, msg notificationMessage) error {
+	if msg.Kind == alarmEventRaised {
+		// The raise is deliberately the slower delivery. With one worker
+		// draining one FIFO, the clear (enqueued second) cannot reach the
+		// transport before the raise no matter how long the raise's own Send
+		// takes -- there is nothing else running concurrently that could
+		// reorder them.
+		time.Sleep(20 * time.Millisecond)
+	}
+	o.mu.Lock()
+	o.order = append(o.order, msg.Kind)
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *orderRecordingTransport) received() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.order...)
+}
+
+// TestAlarmDispatcherRunDeliversQueuedTransitionsInFIFOOrder is the ordering
+// half of #9's requirements: a raise and its clear for the same rule must
+// reach the transport in the order they were recorded, even when the first
+// of the two is the slower delivery.
+func TestAlarmDispatcherRunDeliversQueuedTransitionsInFIFOOrder(t *testing.T) {
+	transport := &orderRecordingTransport{id: transportWebhook}
+	dispatcher, _ := testDispatcher(t, transport)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go dispatcher.run(ctx)
+
+	dispatcher.enqueue(raisedEvent(), "Pikorua")
+	dispatcher.enqueue(clearedEvent(), "Pikorua")
+
+	waitFor(t, 2*time.Second, "both queued deliveries to reach the transport", func() bool {
+		return len(transport.received()) == 2
+	})
+
+	got := transport.received()
+	if got[0] != alarmEventRaised || got[1] != alarmEventCleared {
+		t.Fatalf("delivery order = %v, want [%s %s]", got, alarmEventRaised, alarmEventCleared)
+	}
+}
+
+// TestAlarmDispatcherEnqueueDoesNotBlockOnASlowTransport is the non-blocking
+// half of #9: enqueue must return immediately regardless of how long
+// delivery for an item already in the queue takes.
+func TestAlarmDispatcherEnqueueDoesNotBlockOnASlowTransport(t *testing.T) {
+	release := make(chan struct{})
+	transport := &blockingUntilReleasedTransport{id: transportWebhook, release: release}
+	dispatcher, _ := testDispatcher(t, transport)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go dispatcher.run(ctx)
+
+	// Occupy the worker with an item whose delivery will not complete until
+	// this test releases it below.
+	dispatcher.enqueue(raisedEvent(), "Pikorua")
+	waitFor(t, time.Second, "the worker to start delivering the first item", func() bool {
+		return transport.started()
+	})
+
+	started := time.Now()
+	other := raisedEvent()
+	other.Rule.ID = "rule-2"
+	dispatcher.enqueue(other, "Pikorua")
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("enqueue took %s while the worker was busy; it must never block", elapsed)
+	}
+
+	close(release)
+	waitFor(t, 2*time.Second, "both deliveries to complete once released", func() bool {
+		return transport.count() >= 2
+	})
+}
+
+// blockingUntilReleasedTransport blocks every Send until release is closed,
+// recording that at least one Send has begun so a test can wait for the
+// worker to be busy rather than guessing with a sleep.
+type blockingUntilReleasedTransport struct {
+	id      string
+	release chan struct{}
+
+	mu      sync.Mutex
+	begun   bool
+	sentN   int
+}
+
+func (b *blockingUntilReleasedTransport) ID() string { return b.id }
+
+func (b *blockingUntilReleasedTransport) Send(ctx context.Context, _ notificationMessage) error {
+	b.mu.Lock()
+	b.begun = true
+	b.mu.Unlock()
+
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	b.mu.Lock()
+	b.sentN++
+	b.mu.Unlock()
+	return nil
+}
+
+func (b *blockingUntilReleasedTransport) started() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.begun
+}
+
+func (b *blockingUntilReleasedTransport) count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.sentN
+}
+
+// slowFixedDelayTransport sleeps a fixed duration on every Send and counts
+// completed deliveries, so a test can bound how much of a backlog run drains
+// before it notices ctx cancellation.
+type slowFixedDelayTransport struct {
+	id    string
+	delay time.Duration
+
+	mu   sync.Mutex
+	sent int
+}
+
+func (s *slowFixedDelayTransport) ID() string { return s.id }
+
+func (s *slowFixedDelayTransport) Send(_ context.Context, _ notificationMessage) error {
+	time.Sleep(s.delay)
+	s.mu.Lock()
+	s.sent++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *slowFixedDelayTransport) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sent
+}
+
+// TestAlarmDispatcherRunStopsWithoutDrainingTheEntireBacklog pins the
+// shutdown contract: run checks ctx between items, not only before or after
+// a full drain, so a long backlog does not hold up shutdown -- it is
+// expected to leave items undelivered and log how many, rather than forcing
+// every queued item through first.
+func TestAlarmDispatcherRunStopsWithoutDrainingTheEntireBacklog(t *testing.T) {
+	transport := &slowFixedDelayTransport{id: transportWebhook, delay: 20 * time.Millisecond}
+	dispatcher, _ := testDispatcher(t, transport)
+
+	const backlog = 50 // 50 * 20ms = 1s to fully drain
+	for i := 0; i < backlog; i++ {
+		event := raisedEvent()
+		event.Rule.ID = fmt.Sprintf("rule-%d", i)
+		event.Status.RuleID = event.Rule.ID
+		dispatcher.enqueue(event, "Pikorua")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		dispatcher.run(ctx)
+		close(done)
+	}()
+
+	time.Sleep(60 * time.Millisecond) // let a handful of items through, nowhere near all 50
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not stop after ctx cancellation")
+	}
+
+	sent := transport.count()
+	if sent >= backlog {
+		t.Fatalf("run drained the entire %d-item backlog instead of stopping early after cancellation, sent %d", backlog, sent)
+	}
+	if remaining := dispatcher.queueDepth(); remaining == 0 {
+		t.Fatalf("expected items to remain queued after an early cancellation, got 0")
 	}
 }

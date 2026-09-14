@@ -455,6 +455,7 @@ func main() {
 	// a little slower every week it runs (backend-perf-audit.md Tier 1 #3).
 	go startVesselContextSweeper(streamCtx, vesselContextSweepInterval)
 	go startAlarmEvaluator(streamCtx, alarmEvaluationInterval)
+	go globalAlarmDispatcher.run(streamCtx)
 	go startNotificationDrainer(streamCtx, notifyDrainInterval)
 	go startStreamWatchdog(streamCtx, watchdogCheckInterval)
 	go startHeartbeat(streamCtx, heartbeatCheckInterval)
@@ -466,8 +467,8 @@ func main() {
 	// a shared 30s ticker instead; the builders just read the cache.
 	go startTelemetryInfluxTicker(streamCtx)
 
-	go startTrackPoller(trackPollInterval)
-	go startTideAutoUpdater(30 * time.Minute)
+	go startTrackPoller(streamCtx, trackPollInterval)
+	go startTideAutoUpdater(streamCtx, 30*time.Minute)
 	// Sweeps expired sessions once at startup and hourly thereafter
 	// (docs/adr/0040). Runs regardless of auth.mode — a mode:none boat can
 	// still have leftover session rows from a previous mode:signalk run, and
