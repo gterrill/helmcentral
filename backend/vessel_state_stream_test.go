@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -131,8 +132,25 @@ func TestTelemetryStreamEmitsNamedVesselStateEvent(t *testing.T) {
 // Each emitter has its own interval so slow-moving payloads are not rebuilt and
 // resent at the cadence depth and wind need. A slow event appearing once per
 // tick would mean the per-emitter schedule is being ignored.
+// TestTelemetryStreamHonoursPerEmitterIntervals proves interval-honouring
+// end-to-end through the real handler and hub. It cannot use vessel-state's
+// own 1s cadence to do that any more: this test's bare snapshot gives
+// buildVesselStatePayload nothing to actually change, so once gated
+// (Tier 1 #4) it correctly stops rebroadcasting after its first frame — the
+// same thing it now does on a quiet boat, which is the whole point of the
+// fix. A synthetic ungated event with a value that genuinely changes every
+// build stands in for "a 1s emitter that should keep flowing" instead.
 func TestTelemetryStreamHonoursPerEmitterIntervals(t *testing.T) {
 	server := streamTestServer(t)
+
+	var fastCalls int32
+	globalTelemetryHub.events = append(globalTelemetryHub.events, &streamEmitter{
+		event:    "test-fast",
+		interval: 1 * time.Second,
+		build: func() map[string]any {
+			return map[string]any{"n": atomic.AddInt32(&fastCalls, 1)}
+		},
+	})
 
 	response, err := http.Get(server.URL + "/api/stream")
 	if err != nil {
@@ -161,9 +179,15 @@ func TestTelemetryStreamHonoursPerEmitterIntervals(t *testing.T) {
 		if seen["tanks-state"] != 1 {
 			t.Fatalf("tanks-state (10s interval) in a 4s window: got %d, want 1", seen["tanks-state"])
 		}
-		// vessel-state carries a per-second datetime, so it should keep flowing.
-		if seen["vessel-state"] < 2 {
-			t.Fatalf("vessel-state (1s interval) in a 4s window: got %d, want at least 2", seen["vessel-state"])
+		// The synthetic event's value genuinely changes every build, so
+		// nothing gates it and it should keep flowing at its 1s cadence.
+		if seen["test-fast"] < 2 {
+			t.Fatalf("test-fast (1s interval, ungated, always changing) in a 4s window: got %d, want at least 2", seen["test-fast"])
+		}
+		// vessel-state's own content is static here, so past its first
+		// frame the gate should now correctly hold it back.
+		if seen["vessel-state"] > 1 {
+			t.Fatalf("vessel-state in a 4s window with nothing real changing: got %d, want at most 1 (the gate should suppress the rest)", seen["vessel-state"])
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("reader did not finish")

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,15 +122,17 @@ func TestCompression_SmallResponseStaysUncompressed(t *testing.T) {
 	}
 }
 
-// TestCompression_SSEStreamNotGzippedAndStreamsBeforeHandlerReturns proves
-// two things about /api/stream at once: the response never carries
-// Content-Encoding (so a proxy or client that buffers on decode can't stall
-// it), and an event reaches the client while telemetryStream is still
-// running. telemetryStream loops until the request context is cancelled -
-// it never returns of its own accord - so receiving a frame at all is only
-// possible if it was flushed to the wire immediately, not withheld until
-// some later completion that in this handler literally never happens.
-func TestCompression_SSEStreamNotGzippedAndStreamsBeforeHandlerReturns(t *testing.T) {
+// TestCompression_SSEStreamIsGzippedAndStreamsBeforeHandlerReturns is the
+// regression guard for Tier 1 #4 taking /api/stream off the gzip skip list:
+// a client that offers gzip gets Content-Encoding: gzip, and — the actual
+// risk the audit called out — a single small SSE frame can still be read
+// and decoded while telemetryStream is still running. telemetryStream loops
+// until the request context is cancelled and never returns on its own, so
+// decoding a frame at all is only possible if gzip forwarded it immediately
+// rather than withholding it behind MinLength until enough frames piled up
+// to cross that threshold (see compression.go's noCompressRoutePatterns
+// comment for what reading the vendored middleware found).
+func TestCompression_SSEStreamIsGzippedAndStreamsBeforeHandlerReturns(t *testing.T) {
 	withGlobalSnapshot(t, newSignalKSnapshot())
 	// An empty snapshot drives GNSS validation critical, and that state
 	// latches in module-level globals until several good samples clear it.
@@ -153,26 +156,88 @@ func TestCompression_SSEStreamNotGzippedAndStreamsBeforeHandlerReturns(t *testin
 	}
 	defer resp.Body.Close()
 
-	if got := resp.Header.Get("Content-Encoding"); got != "" {
-		t.Fatalf("Content-Encoding = %q, want empty (SSE must never be gzip-wrapped)", got)
+	if got := resp.Header.Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
 	}
 
-	frames := make(chan string, 1)
+	if err := waitForDecodedSSEDataLine(resp.Body); err != nil {
+		t.Fatalf("reading/decoding a gzip SSE frame: %v", err)
+	}
+}
+
+// TestCompression_LogsStreamIsGzippedAndStreamsBeforeHandlerReturns is the
+// same regression guard as the test above, for /api/logs/stream — the other
+// route Tier 1 #4 took off the skip list. logsStreamHandler flushes its
+// backlog replay in one batch before entering its event loop
+// (log_handlers.go), so the pre-seeded log entry below is what this test
+// waits to see decoded.
+func TestCompression_LogsStreamIsGzippedAndStreamsBeforeHandlerReturns(t *testing.T) {
+	orig := globalLogBuffer
+	t.Cleanup(func() { globalLogBuffer = orig })
+	buf := newLogBuffer(10)
+	buf.write("compression test log")
+	globalLogBuffer = buf
+
+	e := newCompressedTestEcho()
+	e.GET("/api/logs/stream", logsStreamHandler)
+	server := httptest.NewServer(e)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/api/logs/stream", nil)
+	if err != nil {
+		t.Fatalf("building request: %v", err)
+	}
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/logs/stream: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+
+	if err := waitForDecodedSSEDataLine(resp.Body); err != nil {
+		t.Fatalf("reading/decoding a gzip SSE frame: %v", err)
+	}
+}
+
+// waitForDecodedSSEDataLine reads a gzip-encoded SSE body until it can
+// decode one "data: " line, or times out. A timeout, rather than the gzip
+// reader simply erroring, is what an actual stall looks like: the
+// goroutine below blocks inside gzip.NewReader/scanner.Scan waiting on
+// bytes that gzip's own buffering never released, so the select is the
+// part of this helper that is actually load-bearing.
+func waitForDecodedSSEDataLine(body io.Reader) error {
+	result := make(chan error, 1)
 	go func() {
-		scanner := bufio.NewScanner(resp.Body)
+		gz, err := gzip.NewReader(body)
+		if err != nil {
+			result <- fmt.Errorf("gzip.NewReader: %w", err)
+			return
+		}
+		defer gz.Close()
+		scanner := bufio.NewScanner(gz)
 		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data: ") {
-				frames <- line
+			if strings.HasPrefix(scanner.Text(), "data: ") {
+				result <- nil
 				return
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			result <- fmt.Errorf("scanning decoded body: %w", err)
+			return
+		}
+		result <- fmt.Errorf("stream ended with no data line decoded")
 	}()
 
 	select {
-	case <-frames:
+	case err := <-result:
+		return err
 	case <-time.After(5 * time.Second):
-		t.Fatal("no SSE frame received within 5s; compression may be buffering the stream")
+		return fmt.Errorf("no decodable SSE frame within 5s; gzip's MinLength buffering may be stalling the stream")
 	}
 }
 
@@ -241,8 +306,11 @@ func TestCompression_SkipperExcludesStreamingAndBinaryRoutes(t *testing.T) {
 		path string
 		want bool
 	}{
-		{"/api/stream", true},
-		{"/api/logs/stream", true},
+		// Off the skip list since Tier 1 #4: both flush after every write,
+		// so gzip's MinLength buffering never withholds a frame (see
+		// noCompressRoutePatterns' comment in compression.go).
+		{"/api/stream", false},
+		{"/api/logs/stream", false},
 		{"/api/assistant/conversations/:id/messages", true},
 		{"/api/radar/spokes", true},
 		{"/api/world-imagery/:z/:x/:y", true},

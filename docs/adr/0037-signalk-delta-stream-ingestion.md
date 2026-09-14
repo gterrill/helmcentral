@@ -63,6 +63,8 @@ See also ADR 0042 (nearby-vessel staleness filtering), which works around a cons
   2. **Surface the outage instead of masking it**, per the Fallback Policy. `subscribeTelemetryStatus` / `useTelemetryStatus()` broadcast `'connected' | 'reconnecting' | 'disconnected'`. `VesselStatusBar` (`frontend/src/components/vessel-status-bar.tsx`) now reads it alongside the existing SignalK-unreachable check (`source === 'signalk-unreachable'`, surfaced through `useVesselIdentity`'s `signalkConnected`) and drops the "Live" badge to "Reconnecting" or "No Signal" - the same red/badge visual language the SignalK-unreachable case already used, not a new one.
 - Weather, tide and place-name still poll, correctly — they are external API data behind long TTL caches, not vessel telemetry.
 - Each SSE connection holds a goroutine rebuilding payloads on a timer, and every builder re-reads `settings.yaml` from disk. Fine for a helm browser or two; the settings read wants caching before it serves more.
+
+  **Correction (2026-09-15):** no longer true. ADR 0097 replaced the per-connection goroutines with one shared hub building each payload once per interval regardless of subscriber count, cached settings by mtime/size, and added change-gating that can tell a real change from a repeating clock or an age nobody would see move.
 - The `fetchSignalK*` telemetry functions take no URL or path arguments: they read the snapshot, so passing a server address was meaningless. Callers that existed only to compute one lost their `loadSignalKSettings`/`buildSignalKURL` preamble with it. The write and control paths (`generator.go`, `czone.go`, `route_activation.go`) still take a URL, because they PUT to a real endpoint.
 
 ## Verification

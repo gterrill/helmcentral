@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -278,4 +279,132 @@ func TestStreamEmitterDueAt_DoesNotDriftUnderJitter(t *testing.T) {
 			t.Fatalf("tick %d (t=%v): expected dueAt to fire, but it did not (nextDue=%v) — this is the drift bug", i, now.Sub(start), e.nextDue.Sub(start))
 		}
 	}
+}
+
+// TestTelemetryHub_GateSkipsVolatileOnlyChangesAndSendsOnRealChange is the
+// hub-level counterpart to telemetry_gate_test.go's pure gate-key tests: it
+// exercises vesselStateGateKey wired onto a real event through
+// buildAndBroadcast, not just as a standalone function, so it also proves
+// that a build outside the fresh band still updates the cache used to seed
+// new subscribers (frames) even on ticks that do not broadcast — the
+// "seeding must not go stale" requirement — and that the frame actually
+// delivered on a real send carries the real, un-normalised payload rather
+// than the banded comparison key.
+func TestTelemetryHub_GateSkipsVolatileOnlyChangesAndSendsOnRealChange(t *testing.T) {
+	shrinkTelemetryStreamTickForTest(t, 5*time.Millisecond)
+
+	hub := newTelemetryHub()
+	var calls int32
+	var changeDepth int32 // flipped by the test itself, not by tick count, so the real change happens exactly when the test expects it rather than racing the background ticks
+	build := func() map[string]any {
+		atomic.AddInt32(&calls, 1)
+		depth := 4.0
+		if atomic.LoadInt32(&changeDepth) != 0 {
+			depth = 4.2
+		}
+		return map[string]any{
+			// time.Now() guarantees datetime differs on literally every
+			// build, which is exactly the churn the audit measured and
+			// this gate must see through.
+			"datetime":                   time.Now().UTC().Format(time.RFC3339),
+			"depth":                      depth,
+			"depth_last_update_age_s":    1.0,
+			"position_last_update_age_s": 1.0,
+			"wind_last_update_age_s":     1.0,
+		}
+	}
+	hub.events = []*streamEmitter{
+		{event: "vessel-state", interval: 5 * time.Millisecond, build: build, gateKey: vesselStateGateKey},
+	}
+
+	sub := hub.Subscribe()
+	defer hub.Unsubscribe(sub)
+
+	first := waitForFrame(t, sub, "vessel-state", 2*time.Second)
+	if !strings.Contains(first.payload, `"depth":4,`) {
+		t.Fatalf("expected the first frame to carry the real depth, got %q", first.payload)
+	}
+
+	// Several more ticks land here (5ms interval, waited out for 20x that),
+	// every one of them differing from the first build only in datetime.
+	// None of them should produce a second frame.
+	select {
+	case frame := <-sub.frames:
+		t.Fatalf("unexpected frame %q before depth actually changed — the gate should have skipped every datetime-only rebuild", frame.payload)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := atomic.LoadInt32(&calls); got < 5 {
+		t.Fatalf("test did not actually exercise enough skipped ticks (only %d builds ran); widen the wait", got)
+	}
+
+	// Now let the next build see the real change.
+	atomic.StoreInt32(&changeDepth, 1)
+
+	second := waitForFrame(t, sub, "vessel-state", 2*time.Second)
+	if !strings.Contains(second.payload, `"depth":4.2`) {
+		t.Fatalf("expected the sent frame to carry the real changed depth, got %q", second.payload)
+	}
+
+	// The cache used to seed a new subscriber must hold this latest real
+	// build, not a frame from several skipped ticks ago.
+	hub.framesMu.RLock()
+	cached := hub.frames["vessel-state"]
+	hub.framesMu.RUnlock()
+	if !strings.Contains(cached, `"depth":4.2`) {
+		t.Fatalf("expected the seeding cache to hold the latest real build, got %q", cached)
+	}
+}
+
+// TestTelemetryHub_GaugeValuesGateSendsNothingWhenValuesAndBandsAreUnchanged
+// covers the other event the audit measured directly (55 KB/min from the
+// ages map alone): with every bound value and every age's band unchanged
+// across several ticks, no frame beyond the first (unconditional) one should
+// ever reach the subscriber.
+func TestTelemetryHub_GaugeValuesGateSendsNothingWhenValuesAndBandsAreUnchanged(t *testing.T) {
+	shrinkTelemetryStreamTickForTest(t, 5*time.Millisecond)
+
+	hub := newTelemetryHub()
+	var calls int32
+	build := func() map[string]any {
+		n := atomic.AddInt32(&calls, 1)
+		return map[string]any{
+			"values": map[string]any{"electrical.batteries.0.voltage": 12.6},
+			"ages":   map[string]float64{"electrical.batteries.0.voltage": float64(n)}, // ticks up every build, stays fresh throughout
+		}
+	}
+	hub.events = []*streamEmitter{
+		{event: "gauge-values", interval: 5 * time.Millisecond, build: build, gateKey: gaugeValuesGateKey},
+	}
+
+	sub := hub.Subscribe()
+	defer hub.Unsubscribe(sub)
+
+	waitForFrame(t, sub, "gauge-values", 2*time.Second) // the first build always broadcasts
+
+	select {
+	case frame := <-sub.frames:
+		t.Fatalf("unexpected frame %q; every value and every age band was unchanged", frame.payload)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if got := atomic.LoadInt32(&calls); got < 10 {
+		t.Fatalf("test did not actually exercise enough skipped ticks (only %d builds ran); widen the wait", got)
+	}
+}
+
+// TestTelemetryEmitters_HeartbeatHasNoGateKey guards the one deliberate
+// exception: heartbeat exists purely to prove liveness to EventSource
+// JavaScript on a quiet boat, so it must always send regardless of any
+// payload comparison, gated or not.
+func TestTelemetryEmitters_HeartbeatHasNoGateKey(t *testing.T) {
+	for _, e := range telemetryEmitters() {
+		if e.event != "heartbeat" {
+			continue
+		}
+		if e.gateKey != nil {
+			t.Fatalf("heartbeat must have no gate key so it always sends, but one is wired up")
+		}
+		return
+	}
+	t.Fatalf("no heartbeat event found in telemetryEmitters()")
 }

@@ -39,6 +39,17 @@ type streamEmitter struct {
 	interval time.Duration
 	build    func() map[string]any
 
+	// gateKey optionally normalises this event's already-marshalled payload
+	// into a comparison key used only to decide whether to broadcast — the
+	// hub still sends the real, un-normalised payload every time it does
+	// broadcast. nil means the gate compares the raw encoded payload itself,
+	// unchanged from before this field existed: correct for heartbeat, which
+	// must always send regardless of any comparison, and for events the
+	// audit did not find carrying a volatile clock or age field (autopilot,
+	// alarms). See telemetry_gate.go for what the real gate keys drop and
+	// band, and why.
+	gateKey func(encoded []byte) string
+
 	// nextDue is owned by the hub's single driving goroutine (tick) only —
 	// nothing else reads or writes it, so it needs no lock of its own.
 	nextDue time.Time
@@ -89,15 +100,15 @@ func (e *streamEmitter) dueAt(now time.Time) bool {
 // cadence would burn work to resend identical cached payloads.
 func telemetryEmitters() []*streamEmitter {
 	return []*streamEmitter{
-		{event: "vessel-state", interval: 1 * time.Second, build: buildVesselStatePayload},
+		{event: "vessel-state", interval: 1 * time.Second, build: buildVesselStatePayload, gateKey: vesselStateGateKey},
 		{event: "autopilot", interval: 1 * time.Second, build: buildAutopilotPayload},
 		{event: "alarms", interval: 2 * time.Second, build: buildAlarmsPayload},
-		{event: "gauge-values", interval: 1 * time.Second, build: buildGaugeValuesPayload},
-		{event: "electrical-state", interval: 5 * time.Second, build: buildElectricalStatePayload},
-		{event: "nearby-vessels", interval: 5 * time.Second, build: buildNearbyVesselsPayload},
-		{event: "radar-targets", interval: 2 * time.Second, build: buildRadarTargetsPayload},
-		{event: "solar-state", interval: 10 * time.Second, build: buildSolarStatePayload},
-		{event: "tanks-state", interval: 10 * time.Second, build: buildTanksStatePayload},
+		{event: "gauge-values", interval: 1 * time.Second, build: buildGaugeValuesPayload, gateKey: gaugeValuesGateKey},
+		{event: "electrical-state", interval: 5 * time.Second, build: buildElectricalStatePayload, gateKey: electricalStateGateKey},
+		{event: "nearby-vessels", interval: 5 * time.Second, build: buildNearbyVesselsPayload, gateKey: nearbyVesselsGateKey},
+		{event: "radar-targets", interval: 2 * time.Second, build: buildRadarTargetsPayload, gateKey: radarTargetsGateKey},
+		{event: "solar-state", interval: 10 * time.Second, build: buildSolarStatePayload, gateKey: solarStateGateKey},
+		{event: "tanks-state", interval: 10 * time.Second, build: buildTanksStatePayload, gateKey: tanksStateGateKey},
 		// Unlike SSE comment keepalives, this is observable in EventSource
 		// JavaScript. Always changes so a quiet boat still proves liveness.
 		{event: "heartbeat", interval: telemetryStreamKeepalive, build: func() map[string]any {
@@ -148,14 +159,28 @@ type telemetryHub struct {
 	// globals like globalSignalKSnapshot the moment a test ends.
 	stopped chan struct{}
 
-	// framesMu guards frames, the latest successfully-built-and-sent
-	// payload per event. Written by the driving goroutine's per-event build
-	// dispatches (one at a time per event, serialised by that event's own
-	// buildMu) and read by Subscribe to seed a new subscriber; kept across
-	// stop/start cycles so a subscriber arriving into an already-running hub
-	// always gets something immediately rather than racing the next tick.
+	// framesMu guards frames and gateKeys. Written by the driving goroutine's
+	// per-event build dispatches (one at a time per event, serialised by
+	// that event's own buildMu) and read by Subscribe to seed a new
+	// subscriber; kept across stop/start cycles so a subscriber arriving
+	// into an already-running hub always gets something immediately rather
+	// than racing the next tick.
+	//
+	// frames holds the latest built payload per event, updated on every
+	// build regardless of whether that build's gate key changed — it seeds
+	// new subscribers, and a new subscriber must see this build's real
+	// ages, not whatever a build several intervals ago last broadcast
+	// (which is all a "only update on change" cache would hold once the
+	// gate is doing its job and most builds go unbroadcast).
+	//
+	// gateKeys holds the last gate key each event broadcast on, which is
+	// what buildAndBroadcast actually compares against to decide whether to
+	// broadcast — a separate value from the frame itself specifically so
+	// that comparison can be normalised (telemetry_gate.go) while frames
+	// keeps carrying the real, un-normalised payload.
 	framesMu sync.RWMutex
 	frames   map[string]string
+	gateKeys map[string]string
 }
 
 func newTelemetryHub() *telemetryHub {
@@ -163,6 +188,7 @@ func newTelemetryHub() *telemetryHub {
 		events:      telemetryEmitters(),
 		subscribers: make(map[*telemetryHubSubscriber]struct{}),
 		frames:      make(map[string]string),
+		gateKeys:    make(map[string]string),
 	}
 }
 
@@ -242,6 +268,7 @@ func (h *telemetryHub) startFreshRun(pendingStop chan struct{}) {
 	}
 	h.framesMu.Lock()
 	h.frames = make(map[string]string)
+	h.gateKeys = make(map[string]string)
 	h.framesMu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -450,11 +477,20 @@ func (h *telemetryHub) buildAndBroadcast(e *streamEmitter) {
 	}
 	payload := string(encoded)
 
+	key := payload
+	if e.gateKey != nil {
+		key = e.gateKey(encoded)
+	}
+
 	h.framesMu.Lock()
-	previous, had := h.frames[e.event]
-	changed := !had || previous != payload
+	// frames always takes this build's real payload, whether or not the
+	// gate below decides to broadcast it — see the field's doc comment on
+	// why a "changed" cache would go stale under gating.
+	h.frames[e.event] = payload
+	previousKey, had := h.gateKeys[e.event]
+	changed := !had || previousKey != key
 	if changed {
-		h.frames[e.event] = payload
+		h.gateKeys[e.event] = key
 	}
 	h.framesMu.Unlock()
 

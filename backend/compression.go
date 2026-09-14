@@ -26,19 +26,30 @@ const compressionMinLength = 1024
 // route rename shows up as a test failure instead of a silently stale skip
 // list.
 var noCompressRoutePatterns = map[string]bool{
-	// Server-Sent Events (grep for "text/event-stream" turned up exactly
-	// these three handlers). Each one writes with an explicit
-	// response.Flush() after every event and exists specifically so that
-	// flush reaches the client immediately - gzip's own Flush() does forward
-	// bytes right away too (see the vendored
-	// echo/middleware/compress.go), but there is no requirement here to
-	// prove a streaming+compression interaction out, and leaving the wire
-	// format alone is the simpler, lower-risk choice for a stream that is
-	// mostly small, already-terse JSON frames anyway.
-	"/api/stream":      true, // vessel_state_stream.go: telemetryStream
-	"/api/logs/stream": true, // log_handlers.go: logsStreamHandler
+	// /api/stream and /api/logs/stream used to sit here too, on the theory
+	// that gzip's own MinLength buffering (1KB, below) might withhold a
+	// small SSE frame until enough of them piled up to cross that
+	// threshold, stalling a stream whose whole point is low latency.
+	// Reading the vendored gzip middleware (echo/middleware/compress.go)
+	// settled that: its gzipResponseWriter.Flush() unconditionally forces
+	// minLengthExceeded, writes whatever is buffered so far, and flushes
+	// the underlying connection, regardless of MinLength — so a handler
+	// that already calls response.Flush() after every write, as both of
+	// these do, never sits behind that threshold. Only a handler that
+	// wrote without ever flushing would need MinLength bypassed for it;
+	// neither does.
+	// TestCompression_SSEStreamIsGzippedAndStreamsBeforeHandlerReturns and
+	// TestCompression_LogsStreamIsGzippedAndStreamsBeforeHandlerReturns
+	// (compression_test.go) exercise both through the real middleware
+	// stack: a client offering gzip gets Content-Encoding: gzip, and a
+	// single small event decodes before the handler ever returns.
+	//
 	// assistant_handlers.go: postAssistantMessageHandler streams its reply
-	// over SSE on the same connection that accepted the POST.
+	// as SSE too, over the same connection that accepted the POST, but
+	// stays skipped here — it was not part of this pass, and unlike the
+	// two above its per-token chunks are small enough, and frequent enough,
+	// that the same MinLength/Flush interaction has not been checked for
+	// it.
 	"/api/assistant/conversations/:id/messages": true,
 
 	// WebSocket upgrade (grep for "websocket.Accept" turned up exactly this
