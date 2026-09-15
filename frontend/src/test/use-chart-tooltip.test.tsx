@@ -18,6 +18,7 @@ const VIEW_BOX_WIDTH = 800
 const CHART_LEFT = 40
 const CHART_RIGHT = 760
 const RENDERED_WIDTH = 400
+const BUBBLE_EDGE_INSET = 58
 
 function Harness({ count }: { count: number }) {
   const tooltip = useChartTooltip(count, 'fixed-key', CHART_LEFT, CHART_RIGHT)
@@ -55,9 +56,12 @@ const activeIndex = () => screen.getByTestId('active-index').textContent
 const pixelX = () => Number(screen.getByTestId('pixel-x').textContent)
 
 // The inverse of the hook's pointer path: index -> fraction -> viewBox x -> px.
+// The tooltip bubble is clamped to stay clear of the chart edge, matching the
+// recent fix that keeps it readable rather than letting it overrun the plot.
 function expectedPixelX(index: number, count: number) {
   const fraction = count <= 1 ? 0 : index / (count - 1)
-  return ((CHART_LEFT + fraction * (CHART_RIGHT - CHART_LEFT)) / VIEW_BOX_WIDTH) * RENDERED_WIDTH
+  const raw = ((CHART_LEFT + fraction * (CHART_RIGHT - CHART_LEFT)) / VIEW_BOX_WIDTH) * RENDERED_WIDTH
+  return Math.max(BUBBLE_EDGE_INSET, Math.min(RENDERED_WIDTH - BUBBLE_EDGE_INSET, raw))
 }
 
 describe('useChartTooltip keyboard reading', () => {
