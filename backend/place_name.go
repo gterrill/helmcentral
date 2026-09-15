@@ -1,352 +1,51 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"net/http"
-	"net/url"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
-// ── Overpass query ladder ────────────────────────────────────────────────
-
-// placeNameRadiiMeters is the widening ladder, tightest ring first.
-// Overpass's around: filter measures distance to an element's linework, not
-// containment, so a point well inside a wide bay can miss a tight ring -
-// widening is mandatory, not optional (confirmed live: the 400m ring at
-// Lindeman Island is empty even though the point sits on the island). The
-// ladder stops at the first non-empty ring: ranking a set of one is sound,
-// ranking a set of thirteen (the 5000m ring at Lindeman) is guesswork. See
-// docs/adr/0056.
+// ── Place-name resolution ladder (ADR 0056, ADR 0101) ───────────────────────
+//
+// placeNameRadiiMeters is the widening ladder, tightest ring first. A
+// provider's own place_name_at typically measures distance to a feature's
+// linework, not containment, so a point well inside a wide bay can miss a
+// tight ring - widening is mandatory, not optional (confirmed live: the
+// 400m ring at Lindeman Island is empty even though the point sits on the
+// island). The ladder stops at the first ring with a name: ranking a set of
+// one is sound, ranking a set of thirteen (the 5000m ring at Lindeman) is
+// guesswork better left to the provider's own place_name_at, which does
+// exactly that ranking itself (see docs/adr/0056, docs/adr/0101).
 var placeNameRadiiMeters = []int{400, 1500, 5000}
 
-const defaultOverpassAPIURL = "https://overpass-api.de/api/interpreter"
-
-// overpassQueryTimeoutSeconds is embedded directly in the Overpass QL
-// [timeout:N] clause built below - the server-side budget Overpass itself
-// is told it has to answer within.
-const overpassQueryTimeoutSeconds = 25
-
-// overpassClientTimeoutBuffer is how much longer the HTTP client waits than
-// the budget it just told Overpass to use. Without a buffer, the client's
-// own deadline can fire while Overpass is still legitimately working right
-// up to the budget it was given - confirmed as this code's actual prior
-// behavior (a 20s client timeout against a 25s query timeout).
-const overpassClientTimeoutBuffer = 5 * time.Second
-
-// overpassTimeout is the HTTP client timeout, derived from
-// overpassQueryTimeoutSeconds so the two can never drift back out of order.
-const overpassTimeout = time.Duration(overpassQueryTimeoutSeconds)*time.Second + overpassClientTimeoutBuffer
-
-// osmOverpassPOIProviderID is the registered id of the shipped osm-overpass
-// POI plugin (poi_providers.go's defaultPOIProviderID) - the plugin whose
-// own stored "overpass_url" config value (wasm_plugin.go's
-// plugin_config_values store, POST /api/plugins/poi/osm-overpass/config)
-// place-name resolution and the assistant's find_places tool piggyback on
-// via currentOverpassAPIURL below.
-const osmOverpassPOIProviderID = "osm-overpass"
-
-// currentOverpassAPIURL resolves the Overpass endpoint from the osm-overpass
-// POI plugin's own "overpass_url" config value (ADR 0100 rewrite: the
-// mirror is a setting the plugin declares for itself, not a global app
-// setting), read fresh from the plugin overrides store on every call rather
-// than once at startup, so a Settings save takes effect on the very next
-// lookup with no restart needed.
-//
-// PHASE B NOTE: this function is a stopgap, not the long-term home of this
-// lookup. Place-name resolution (this file) and the assistant's
-// find_places tool (assistant_tools.go) need an Overpass endpoint but are
-// not themselves the osm-overpass plugin, so today they reach into that
-// plugin's stored config directly. A later phase moves both call sites into
-// the plugin itself (find_places becoming a plugin-backed tool, place-name
-// resolution going through the POI provider interface), at which point this
-// function is deleted rather than generalized further.
-func currentOverpassAPIURL() (string, error) {
-	provider, ok := getPOIProvider(osmOverpassPOIProviderID)
-	if !ok {
-		// The osm-overpass plugin isn't installed/registered - there is no
-		// plugin-owned override to read, so this is exactly the "unconfigured"
-		// case: use the same public default the plugin itself falls back to.
-		return defaultOverpassAPIURL, nil
-	}
-	pp, ok := provider.(pluginPathProvider)
-	if !ok {
-		return "", fmt.Errorf("osm-overpass POI provider %T does not implement pluginPathProvider; every registered provider must be WASM-backed", provider)
-	}
-	if globalPluginOverridesStore == nil {
-		return defaultOverpassAPIURL, nil
-	}
-	values, err := globalPluginOverridesStore.GetConfigValues(pp.Path())
-	if err != nil {
-		return "", fmt.Errorf("reading osm-overpass plugin's overpass_url setting: %w", err)
-	}
-	return resolveOverpassPluginURL(values["overpass_url"])
-}
-
-// resolveOverpassPluginURL mirrors the POI plugin's own resolveOverpassURL
-// (docs/examples/poi-plugins/osm-overpass/osm-overpass.go) validation
-// exactly: a blank value (the normal, unconfigured case) yields
-// defaultOverpassAPIURL. A non-blank value must parse as an absolute https
-// URL with a host, or resolution fails naming the osm-overpass plugin's
-// overpass_url setting rather than silently falling back to the default - a
-// saved-but-broken value (most plausibly a hand-edited plugin_overrides
-// database row, since POST /api/plugins/poi/osm-overpass/config already
-// rejects a malformed one at save time) almost certainly did not mean "use
-// overpass-api.de", per AGENTS.md's fail-fast / no-masking-fallback policy.
-func resolveOverpassPluginURL(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return defaultOverpassAPIURL, nil
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return "", fmt.Errorf("osm-overpass plugin's overpass_url setting: must be an absolute https URL, got %q", raw)
-	}
-	return trimmed, nil
-}
-
-// overpassFetcher is the minimal interface place name resolution needs from
-// an HTTP client, mirroring tileFetcher (tile_cache.go:60) so tests can
-// inject a fake upstream. *http.Client already satisfies this interface.
-type overpassFetcher interface {
-	Do(req *http.Request) (*http.Response, error)
-}
-
-// overpassHTTPClient is the production overpassFetcher used by the server
-// poll tick (tracks.go) and the anchor-watch resolver (anchor.go). Tests
-// swap it for a fake and restore it afterward.
-var overpassHTTPClient overpassFetcher = &http.Client{Timeout: overpassTimeout}
-
-// featureRank orders candidate kinds within a winning ring: anchorage first
-// (a human already decided this is where you anchor), then bay, then
-// island/islet/rock by descending size-implication. A tagged element whose
-// kind isn't one of these five is discarded before ranking, as is any
-// element with no name tag.
-var featureRank = map[string]int{
-	"anchorage": 0,
-	"bay":       1,
-	"island":    2,
-	"islet":     3,
-	"rock":      4,
-}
-
-// overpassLatLon is the {lat,lon} shape Overpass emits for a way/relation's
-// "out center" point.
-type overpassLatLon struct {
-	Lat float64 `json:"lat"`
-	Lon float64 `json:"lon"`
-}
-
-// overpassElement is one member of an Overpass "out tags center" response.
-// Node elements carry lat/lon directly; way/relation elements carry it
-// under center instead (see elementLatLon). "out tags center" is used
-// deliberately, not "out geom": geometry for a mainland coastline relation
-// is enormous, and around: has already done the geometric filtering
-// server-side, so only the tags and a representative point are needed.
-type overpassElement struct {
-	Type   string            `json:"type"`
-	ID     int64             `json:"id"`
-	Lat    *float64          `json:"lat,omitempty"`
-	Lon    *float64          `json:"lon,omitempty"`
-	Center *overpassLatLon   `json:"center,omitempty"`
-	Tags   map[string]string `json:"tags"`
-}
-
-type overpassResponse struct {
-	Elements []overpassElement `json:"elements"`
-}
-
-// elementLatLon resolves a queried element's representative point.
-func elementLatLon(el overpassElement) (lat, lon float64, ok bool) {
-	if el.Lat != nil && el.Lon != nil {
-		return *el.Lat, *el.Lon, true
-	}
-	if el.Center != nil {
-		return el.Center.Lat, el.Center.Lon, true
-	}
-	return 0, 0, false
-}
-
-// featureKind classifies a tagged element into one of featureRank's keys, or
-// "" if it matches none of the query's three clauses.
-func featureKind(tags map[string]string) string {
-	if tags["seamark:type"] == "anchorage" {
-		return "anchorage"
-	}
-	if tags["natural"] == "bay" {
-		return "bay"
-	}
-	switch tags["place"] {
-	case "island", "islet", "rock":
-		return tags["place"]
-	}
-	return ""
-}
-
-// buildOverpassQuery builds the Overpass QL for one ring at radiusMeters
-// around (lat, lon). See docs/adr/0056 for why this exact tag set.
-func buildOverpassQuery(radiusMeters int, lat, lon float64) string {
-	around := fmt.Sprintf("%d,%.6f,%.6f", radiusMeters, lat, lon)
-	return fmt.Sprintf(
-		`[out:json][timeout:%d];(nwr["seamark:type"="anchorage"](around:%s);nwr["natural"="bay"](around:%s);nwr["place"~"^(island|islet|rock)$"](around:%s););out tags center 20;`,
-		overpassQueryTimeoutSeconds, around, around, around,
-	)
-}
-
-// looksLikeOverpassRateLimit reports whether a non-JSON 200 response is the
-// documented Overpass rate-limit signature: an HTML body (rather than the
-// JSON a normal query returns), typically containing
-// Dispatcher_Client::request_read_and_idx::rate_limited. Confirmed against
-// the live API while capturing this feature's test fixtures - checking
-// resp.StatusCode alone is not sufficient, since Overpass signals rate
-// limiting with HTTP 200.
-func looksLikeOverpassRateLimit(contentType string, body []byte) bool {
-	if strings.Contains(strings.ToLower(contentType), "text/html") {
-		return true
-	}
-	return bytes.Contains(body, []byte("rate_limited"))
-}
-
-// postOverpassQuery performs one POST to the Overpass API for an
-// already-built query string. A transport error, non-200 status, or
-// unparseable body are all reported as an error - the rate-limited case
-// gets its own explicit log line so it's never confused with a legitimate
-// empty result set or a generic parse failure.
-//
-// Split out of fetchOverpassRing (ADR 0056) so the assistant's find_places
-// tool (ADR 0093, assistant_tools.go) can post its own name-search query
-// through the same request-building, header and rate-limit handling without
-// duplicating it - fetchOverpassRing's ring-widening ladder is specific to
-// place-name resolution and has no bearing on a name search.
-//
-// The endpoint is resolved via currentOverpassAPIURL on every call (ADR
-// 0100), not read from a package-level var, so a Settings save changes
-// where the very next query goes.
-func postOverpassQuery(fetcher overpassFetcher, query string) ([]overpassElement, error) {
-	apiURL, err := currentOverpassAPIURL()
-	if err != nil {
-		return nil, err
-	}
-
-	form := url.Values{"data": {query}}
-
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, apiURL, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("build overpass request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "helmcentral/1.0 (+https://github.com/gterrill/helmcentral; place-name lookup)")
-
-	resp, err := fetcher.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("overpass request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read overpass response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("overpass returned status %d", resp.StatusCode)
-	}
-
-	var parsed overpassResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		if looksLikeOverpassRateLimit(resp.Header.Get("Content-Type"), body) {
-			// The radius that made fetchOverpassRing's version of this log
-			// line meaningful doesn't exist here - a name search has no
-			// ring - so the query's length stands in as the short label
-			// distinguishing one rate-limited call from another in the log.
-			log.Printf("place name: overpass rate-limited (HTTP 200 with a non-JSON body), query length %d bytes", len(query))
-			return nil, fmt.Errorf("overpass rate limited")
-		}
-		return nil, fmt.Errorf("parse overpass response: %w", err)
-	}
-
-	return parsed.Elements, nil
-}
-
-// fetchOverpassRing performs one POST to the Overpass API for a single
-// widening ring, delegating the request/response handling to
-// postOverpassQuery (ADR 0056).
-func fetchOverpassRing(fetcher overpassFetcher, radiusMeters int, lat, lon float64) ([]overpassElement, error) {
-	return postOverpassQuery(fetcher, buildOverpassQuery(radiusMeters, lat, lon))
-}
-
-// bestNamedFeature ranks the named, tag-matched elements in a ring and
-// returns the winner: lowest featureRank first, ties broken by great-circle
-// distance to the query point via the existing haversineMeters
-// (signalk.go:2113). Elements with no name tag are discarded before
-// ranking, so an unnamed feature can never win.
-func bestNamedFeature(elements []overpassElement, lat, lon float64) (string, bool) {
-	type candidate struct {
-		name string
-		rank int
-		dist float64
-	}
-
-	var candidates []candidate
-	for _, el := range elements {
-		name := strings.TrimSpace(el.Tags["name"])
-		if name == "" {
-			continue
-		}
-		kind := featureKind(el.Tags)
-		rank, known := featureRank[kind]
-		if !known {
-			continue
-		}
-		elLat, elLon, ok := elementLatLon(el)
-		if !ok {
-			continue
-		}
-		candidates = append(candidates, candidate{
-			name: name,
-			rank: rank,
-			dist: haversineMeters(lat, lon, elLat, elLon),
-		})
-	}
-	if len(candidates) == 0 {
-		return "", false
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].rank != candidates[j].rank {
-			return candidates[i].rank < candidates[j].rank
-		}
-		return candidates[i].dist < candidates[j].dist
-	})
-	return candidates[0].name, true
-}
-
-// resolvePlaceName walks placeNameRadiiMeters, tightest first, and returns
-// the winning named feature from the first ring with a named match. It
-// never falls back to a different upstream source on failure - a transport
-// error, bad status, or unparseable body all surface as an error so the
-// caller can log and retry on the next tick, per AGENTS.md's fail-fast / no
-// masking-fallback policy. A ladder that reaches the end with no named
+// resolvePlaceName resolves the currently configured place-names provider
+// (resolve) once, then walks placeNameRadiiMeters, tightest first, calling
+// its PlaceNameAt for each ring and returning the first ring's named
+// answer. It never falls back to a different provider on failure - a
+// provider-resolution error or a PlaceNameAt error both surface as an error
+// so the caller can log and retry on the next tick (AGENTS.md's fail-fast /
+// no-masking-fallback policy). A ladder that reaches the end with no named
 // match anywhere returns ("", nil): that's a legitimate negative, not a
 // failure.
-func resolvePlaceName(fetcher overpassFetcher, lat, lon float64) (string, error) {
+func resolvePlaceName(resolve placeNameProviderResolver, lat, lon float64) (string, error) {
+	provider, id, err := resolve()
+	if err != nil {
+		return "", fmt.Errorf("place-names provider: %w", err)
+	}
+
 	for _, radius := range placeNameRadiiMeters {
-		elements, err := fetchOverpassRing(fetcher, radius, lat, lon)
+		result, err := provider.PlaceNameAt(lat, lon, radius)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("place-names provider %q: %w", id, err)
 		}
-		if name, ok := bestNamedFeature(elements, lat, lon); ok {
-			return name, nil
+		if result.Name != "" {
+			return result.Name, nil
 		}
 	}
 	return "", nil
@@ -422,7 +121,7 @@ func (s *placeNameCacheStore) get(key string) (string, bool) {
 // put caches a genuinely completed resolution, named or empty - see
 // placeNameEmptyCacheTTL's doc comment for why an empty result is cached at
 // all (it's a real "no named feature here" answer, not a masking
-// fallback). An Overpass hiccup must still never pin a blank name: callers
+// fallback). A provider hiccup must still never pin a blank name: callers
 // only reach put after resolvePlaceName returns with no error at all; a
 // failure never calls put and retries (subject to backoff) on the next
 // tick instead.
@@ -442,18 +141,18 @@ func (s *placeNameCacheStore) put(key, name string) {
 
 // placeNameBackoffInitial/placeNameBackoffMax bound the backoff ladder a
 // resolution failure engages: 1 minute, doubling each further failure, up
-// to 15 minutes. Offshore, this is the difference between a dead Overpass
-// endpoint being retried every 5s poll tick forever and being retried on a
-// schedule that actually gives the link a chance to recover.
+// to 15 minutes. Offshore, this is the difference between a dead
+// place-names provider being retried every 5s poll tick forever and being
+// retried on a schedule that actually gives the link a chance to recover.
 const (
 	placeNameBackoffInitial = 1 * time.Minute
 	placeNameBackoffMax     = 15 * time.Minute
 )
 
-// placeNameBackoffState tracks the Overpass failure backoff window. active
-// gates resolveAndCachePlaceName from even attempting a live call while
-// backed off, so at most one real attempt (and therefore at most one
-// recordFailure/recordSuccess call) happens per window - which is what
+// placeNameBackoffState tracks the place-names provider failure backoff
+// window. active gates resolveAndCachePlaceName from even attempting a live
+// call while backed off, so at most one real attempt (and therefore at most
+// one recordFailure/recordSuccess call) happens per window - which is what
 // keeps the "log once per state change" requirement true without any
 // separate rate-limiting on the logging itself.
 type placeNameBackoffState struct {
@@ -487,7 +186,7 @@ func (b *placeNameBackoffState) recordFailure() {
 	delay := b.nextDelay
 	b.until = time.Now().Add(delay)
 	b.mu.Unlock()
-	log.Printf("place name: Overpass lookup failed, backing off for %s", delay)
+	log.Printf("place name: lookup failed, backing off for %s", delay)
 }
 
 // recordSuccess clears the backoff window and resets the ladder, logging
@@ -500,7 +199,7 @@ func (b *placeNameBackoffState) recordSuccess() {
 	b.nextDelay = 0
 	b.mu.Unlock()
 	if wasEngaged {
-		log.Printf("place name: Overpass lookups recovered, backoff cleared")
+		log.Printf("place name: lookups recovered, backoff cleared")
 	}
 }
 
@@ -508,11 +207,12 @@ func (b *placeNameBackoffState) recordSuccess() {
 // (named or a still-fresh empty result, see placeNameEmptyCacheTTL) returns
 // immediately with no upstream call. A miss resolves live UNLESS a prior
 // failure's backoff window is still open, in which case it returns ""
-// without touching Overpass at all. A resolution failure logs explicitly,
+// without touching the provider at all. A resolution failure (provider
+// resolution itself, or the provider's own PlaceNameAt) logs explicitly,
 // engages/extends the backoff window, and returns "" without caching
 // anything; a genuine completion - named or empty - clears backoff and
 // caches the result either way.
-func resolveAndCachePlaceName(fetcher overpassFetcher, lat, lon float64) string {
+func resolveAndCachePlaceName(resolve placeNameProviderResolver, lat, lon float64) string {
 	key := placeNameCacheKey(lat, lon)
 	if name, ok := placeNameCache.get(key); ok {
 		return name
@@ -522,7 +222,7 @@ func resolveAndCachePlaceName(fetcher overpassFetcher, lat, lon float64) string 
 		return ""
 	}
 
-	name, err := resolvePlaceName(fetcher, lat, lon)
+	name, err := resolvePlaceName(resolve, lat, lon)
 	if err != nil {
 		log.Printf("place name: resolve failed for %.4f,%.4f: %v", lat, lon, err)
 		placeNameBackoff.recordFailure()
@@ -532,6 +232,17 @@ func resolveAndCachePlaceName(fetcher overpassFetcher, lat, lon float64) string 
 
 	placeNameCache.put(key, name)
 	return name
+}
+
+// ── Provider resolution for the tick/anchor paths ──────────────────────────
+
+// placeNameProviderResolve is the production placeNameProviderResolver:
+// resolvePlaceNameProvider against the settings file, read fresh on every
+// call so a Settings change takes effect on the very next lookup with no
+// restart. A package var (like the old overpassHTTPClient) so tests can
+// swap in a fake resolver and restore it afterward.
+var placeNameProviderResolve placeNameProviderResolver = func() (placeNameProvider, string, error) {
+	return resolvePlaceNameProvider(getEnv("SETTINGS_FILE", "../settings.yaml"))
 }
 
 // ── Server-tick integration (ADR 0001: the server owns sampling) ──────────
@@ -592,13 +303,13 @@ func publishPlaceNameForCell(cellKey, name string) bool {
 // goroutine, and Go drops ticks while that receiver is busy, so anything
 // blocking in the tick stalls wind/depth/solar history, track points, the
 // motoring trail and nearby-vessel contact recording behind it.
-// resolvePlaceName walks up to three rings at overpassTimeout each, so a
-// synchronous resolve could hold the whole poller for a minute whenever the
-// tight rings come back empty (the measured Lindeman case). Resolution
-// therefore runs in the background, and this guard stops a 5s tick stacking
-// goroutines against a resolution that slow. A plain mutex and flag: there
-// is no golang.org/x/sync dependency in go.mod and this does not warrant
-// adding one.
+// resolvePlaceName walks up to three rings, so a synchronous resolve could
+// hold the whole poller for a while whenever the tight rings come back
+// empty (the measured Lindeman case). Resolution therefore runs in the
+// background, and this guard stops a 5s tick stacking goroutines against a
+// resolution that slow. A plain mutex and flag: there is no
+// golang.org/x/sync dependency in go.mod and this does not warrant adding
+// one.
 var placeNameResolve = struct {
 	mu     sync.Mutex
 	active bool
@@ -634,11 +345,11 @@ func startPlaceNameResolve(resolve func()) bool {
 // must not have its state overwritten by a stale lookup for the previous
 // position. Used both by setAnchorWatch's fire-and-forget goroutine and by
 // the regular tick's retry-until-resolved path (updateTickPlaceName), so a
-// failed initial resolution still gets filled in once Overpass is
+// failed initial resolution still gets filled in once the provider is
 // reachable again. A failure is logged inside resolveAndCachePlaceName;
 // the field is simply left empty for the next tick to retry.
 func resolveAndPinAnchorWatchPlaceName(original *anchorWatchData, lat, lon float64) string {
-	name := resolveAndCachePlaceName(overpassHTTPClient, lat, lon)
+	name := resolveAndCachePlaceName(placeNameProviderResolve, lat, lon)
 	if name == "" {
 		return ""
 	}
@@ -664,8 +375,8 @@ func resolveAndPinAnchorWatchPlaceName(original *anchorWatchData, lat, lon float
 // sampleTracks) with the current vessel position. It never blocks: it
 // answers from what is already known and starts any needed resolution in
 // the background (see placeNameResolve), because the poller is a single
-// sequential goroutine and Overpass can take up to three rings x
-// overpassTimeout to answer.
+// sequential goroutine and the provider's ladder can take a while to
+// answer.
 //
 // While an anchor watch is active and already has a pinned name, live
 // resolution is skipped entirely and the pinned name is served as-is, so it
@@ -699,7 +410,7 @@ func updateTickPlaceName(lat, lon float64) string {
 
 	enterPlaceNameCell(key, "")
 	startPlaceNameResolve(func() {
-		if name := resolveAndCachePlaceName(overpassHTTPClient, lat, lon); name != "" {
+		if name := resolveAndCachePlaceName(placeNameProviderResolve, lat, lon); name != "" {
 			publishPlaceNameForCell(key, name)
 		}
 	})
@@ -709,9 +420,9 @@ func updateTickPlaceName(lat, lon float64) string {
 // ── HTTP handler ────────────────────────────────────────────────────────
 
 // placeName is the GET /api/place-name handler. It is a pure cache read:
-// no HTTP call happens here. Resolution runs on the server's own 5s poll
-// tick (tracks.go's sampleTracks -> updateTickPlaceName) so the cache is
-// always warm regardless of whether or how often the frontend polls this
+// no upstream call happens here. Resolution runs on the server's own 5s
+// poll tick (tracks.go's sampleTracks -> updateTickPlaceName) so the cache
+// is always warm regardless of whether or how often the frontend polls this
 // endpoint - see docs/adr/0056. While an anchor watch is active, the
 // pinned anchorWatchState.PlaceName is served instead of the tick's
 // roaming value.

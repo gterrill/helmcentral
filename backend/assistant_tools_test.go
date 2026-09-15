@@ -1,15 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"math"
-	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -43,93 +38,77 @@ func (c *capturingWeatherProvider) FetchForecast(lat, lon float64, days int, tim
 	return c.bundle, nil
 }
 
-// ── two-rung Overpass ladder fake ───────────────────────────────────────
+// ── fake place-names provider for find_places ──────────────────────────────
 
-// fakeOverpassResponse is one canned answer for sequentialOverpassFetcher.
-type fakeOverpassResponse struct {
-	body        []byte
-	contentType string
-	status      int
-	err         error
+// fakeSearchPlacesProvider is an injectable placeNameProvider for
+// find_places tests (ADR 0101: find_places calls whatever place-names
+// provider is configured, never a backend Overpass client of its own).
+// executeFindPlaces never calls PlaceNameAt itself (that's place_name.go's
+// concern), so it errors if exercised; SearchPlaces returns one canned
+// placeSearchResult (or error) and records every call's input, so a test
+// can assert exactly what executeFindPlaces asked for - in particular the
+// Broad flag, which is how the host tells the provider whether a saved
+// route waypoint already answered the query.
+type fakeSearchPlacesProvider struct {
+	id string
+
+	mu     sync.Mutex
+	calls  []placeSearchInput
+	result placeSearchResult
+	err    error
 }
 
-// sequentialOverpassFetcher is an injectable overpassFetcher for find_places'
-// two-rung ladder. Unlike fakeOverpassFetcher (place_name_test.go), which
-// keys a canned response off the query's around: radius, find_places' rungs
-// are bbox-based and carry no around: clause to key off at all - so
-// responses here are instead consumed one per call, in the order the ladder
-// actually posts them (rung 1 first, rung 2 only if rung 1 came back
-// empty). queryAt lets a test assert what each call actually asked for.
-type sequentialOverpassFetcher struct {
-	mu        sync.Mutex
-	queries   []string
-	responses []fakeOverpassResponse
+func (f *fakeSearchPlacesProvider) ID() string   { return f.id }
+func (f *fakeSearchPlacesProvider) Name() string { return f.id }
+
+func (f *fakeSearchPlacesProvider) PlaceNameAt(lat, lon float64, radiusM int) (placeNameResult, error) {
+	return placeNameResult{}, fmt.Errorf("fakeSearchPlacesProvider %q: PlaceNameAt not exercised by find_places", f.id)
 }
 
-func (f *sequentialOverpassFetcher) Do(req *http.Request) (*http.Response, error) {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, fmt.Errorf("sequentialOverpassFetcher: read request body: %w", err)
-	}
-	values, err := url.ParseQuery(string(body))
-	if err != nil {
-		return nil, fmt.Errorf("sequentialOverpassFetcher: parse form body: %w", err)
-	}
-
+func (f *fakeSearchPlacesProvider) SearchPlaces(input placeSearchInput) (placeSearchResult, error) {
 	f.mu.Lock()
-	idx := len(f.queries)
-	f.queries = append(f.queries, values.Get("data"))
-	var resp fakeOverpassResponse
-	if idx < len(f.responses) {
-		resp = f.responses[idx]
-	}
+	f.calls = append(f.calls, input)
 	f.mu.Unlock()
-
-	if resp.err != nil {
-		return nil, resp.err
+	if f.err != nil {
+		return placeSearchResult{}, f.err
 	}
-	status := resp.status
-	if status == 0 {
-		status = http.StatusOK
-	}
-	contentType := resp.contentType
-	if contentType == "" {
-		contentType = "application/json"
-	}
-	respBody := resp.body
-	if respBody == nil {
-		respBody = []byte(`{"elements":[]}`)
-	}
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{contentType}},
-		Body:       io.NopCloser(bytes.NewReader(respBody)),
-	}, nil
+	return f.result, nil
 }
 
-func (f *sequentialOverpassFetcher) callCount() int {
+func (f *fakeSearchPlacesProvider) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return len(f.queries)
+	return len(f.calls)
 }
 
-func (f *sequentialOverpassFetcher) queryAt(i int) string {
+func (f *fakeSearchPlacesProvider) lastCall() placeSearchInput {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if i < 0 || i >= len(f.queries) {
-		return ""
+	return f.calls[len(f.calls)-1]
+}
+
+// findPlacesDeps builds the minimal assistantToolDeps find_places needs: a
+// fixed vessel position, the given fake provider wired as the configured
+// place-names provider, and the given routes.
+func findPlacesDeps(vesselLat, vesselLon float64, provider placeNameProvider, routes func() []routeData) assistantToolDeps {
+	return assistantToolDeps{
+		vesselState: func() (vesselStateData, error) {
+			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
+		},
+		placeNames: func() (placeNameProvider, string, error) { return provider, provider.ID(), nil },
+		routes:     routes,
 	}
-	return f.queries[i]
 }
 
 // ── find_places ─────────────────────────────────────────────────────────
 
-func TestExecuteFindPlaces_MergesRouteWaypointAndExactRungDedupesAndSorts(t *testing.T) {
+func TestExecuteFindPlaces_MergesRouteWaypointDedupesAndSorts(t *testing.T) {
 	vesselLat, vesselLon := -20.10, 149.10
 
-	// OSM's own copy of the same Tongue Bay, ~110m from the waypoint - well
-	// inside the 500m dedupe radius, so it must collapse into the waypoint
-	// entry (added first) rather than appearing a second time.
+	// The provider's own copy of the same Tongue Bay, ~110m from the
+	// waypoint - well inside the 500m dedupe radius, so it must collapse
+	// into the waypoint entry (added first) rather than appearing a second
+	// time.
 	nearDupLat, nearDupLon := vesselLat+0.001, vesselLon
 
 	// A second, distinct real-world place that happens to share the exact
@@ -137,36 +116,36 @@ func TestExecuteFindPlaces_MergesRouteWaypointAndExactRungDedupesAndSorts(t *tes
 	// (~6nm) away, so sort-by-distance has something to prove.
 	farLat, farLon := vesselLat+0.1, vesselLon
 
-	overpassBody := fmt.Sprintf(`{"elements":[
-		{"type":"node","id":1,"lat":%.6f,"lon":%.6f,"tags":{"name":"Tongue Bay","natural":"bay"}},
-		{"type":"node","id":2,"lat":%.6f,"lon":%.6f,"tags":{"name":"Tongue Bay","seamark:type":"anchorage"}}
-	]}`, nearDupLat, nearDupLon, farLat, farLon)
-
-	fetcher := &sequentialOverpassFetcher{responses: []fakeOverpassResponse{{body: []byte(overpassBody)}}}
-
-	deps := assistantToolDeps{
-		vesselState: func() (vesselStateData, error) {
-			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{
+		Search:   "exact",
+		RadiusNm: 100,
+		Results: []placeSearchMatch{
+			{Name: "Tongue Bay", Kind: "bay", Lat: nearDupLat, Lon: nearDupLon},
+			{Name: "Tongue Bay", Kind: "anchorage", Lat: farLat, Lon: farLon},
 		},
-		overpass: fetcher,
-		routes: func() []routeData {
-			return []routeData{{
-				Name: "Whitsundays Loop",
-				Waypoints: []routeWaypoint{
-					{Name: "Tongue Bay", Lat: vesselLat, Lon: vesselLon},
-				},
-			}}
-		},
+	}}
+	routes := func() []routeData {
+		return []routeData{{
+			Name: "Whitsundays Loop",
+			Waypoints: []routeWaypoint{
+				{Name: "Tongue Bay", Lat: vesselLat, Lon: vesselLon},
+			},
+		}}
 	}
+	deps := findPlacesDeps(vesselLat, vesselLon, provider, routes)
 
-	// Query exactly matches the waypoint name, so it's both a waypoint hit
-	// (suppressing rung 2) and rung 1's single exact-name variant.
+	// Query exactly matches the waypoint name, so it's a waypoint hit -
+	// suppressing the provider's own broader rung (broad=false) - but the
+	// provider's cheap exact-name search still always runs.
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue Bay"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
-	if fetcher.callCount() != 1 {
-		t.Fatalf("expected only rung 1 to run (waypoint hit suppresses rung 2), got %d overpass calls", fetcher.callCount())
+	if provider.callCount() != 1 {
+		t.Fatalf("expected exactly one search_places call, got %d", provider.callCount())
+	}
+	if provider.lastCall().Broad {
+		t.Errorf("expected broad=false: the query already matched a saved waypoint")
 	}
 
 	var result assistantFindPlacesResult
@@ -192,47 +171,38 @@ func TestExecuteFindPlaces_MergesRouteWaypointAndExactRungDedupesAndSorts(t *tes
 	if result.Results[1].BearingDeg < 0 || result.Results[1].BearingDeg > 360 {
 		t.Errorf("expected a valid compass bearing, got %d", result.Results[1].BearingDeg)
 	}
-	if result.Results[1].Source != "osm" {
-		t.Errorf("expected the far OSM-only result's source to be osm, got %q", result.Results[1].Source)
+	if result.Results[1].Source != "fake-places" {
+		t.Errorf("expected the far, non-waypoint result's source to be the provider id, got %q", result.Results[1].Source)
 	}
 	if result.Results[1].Kind != "anchorage" {
-		t.Errorf("expected kind=anchorage (seamark:type wins), got %q", result.Results[1].Kind)
+		t.Errorf("expected kind=anchorage as returned by the provider, got %q", result.Results[1].Kind)
 	}
 	if result.Search != "waypoints" {
 		t.Errorf("expected search=waypoints, got %q", result.Search)
 	}
-	if result.RadiusNm != assistantFindPlacesRadiusNm {
-		t.Errorf("expected radius_nm=%g (rung 1, the only rung that ran), got %v", assistantFindPlacesRadiusNm, result.RadiusNm)
+	if result.RadiusNm != 100 {
+		t.Errorf("expected radius_nm=100 (as returned by the provider), got %v", result.RadiusNm)
 	}
 }
 
-func TestExecuteFindPlaces_Rung1ExactHitSkipsRung2(t *testing.T) {
+func TestExecuteFindPlaces_NoWaypointHitRunsBroadSearch(t *testing.T) {
 	vesselLat, vesselLon := -20.1, 149.1
-	fetcher := &sequentialOverpassFetcher{
-		responses: []fakeOverpassResponse{
-			{body: []byte(`{"elements":[{"type":"node","id":1,"lat":-20.11,"lon":149.1,"tags":{"name":"Shag Cove","natural":"bay"}}]}`)},
-		},
-	}
-	deps := assistantToolDeps{
-		vesselState: func() (vesselStateData, error) {
-			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
-		},
-		overpass: fetcher,
-		routes:   func() []routeData { return nil },
-	}
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{
+		Search:   "exact",
+		RadiusNm: 100,
+		Results:  []placeSearchMatch{{Name: "Shag Cove", Kind: "bay", Lat: -20.11, Lon: 149.1}},
+	}}
+	deps := findPlacesDeps(vesselLat, vesselLon, provider, func() []routeData { return nil })
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
-	if fetcher.callCount() != 1 {
-		t.Fatalf("expected rung 2 to be skipped once rung 1 already found a match, got %d overpass calls", fetcher.callCount())
+	if provider.callCount() != 1 {
+		t.Fatalf("expected exactly one search_places call, got %d", provider.callCount())
 	}
-	if !strings.Contains(fetcher.queryAt(0), `["name"="Shag Cove"]`) {
-		t.Errorf("expected rung 1's query to search the exact name, got: %s", fetcher.queryAt(0))
-	}
-	if strings.Contains(fetcher.queryAt(0), "around:") {
-		t.Errorf("expected rung 1's query to use a bbox, not around:, got: %s", fetcher.queryAt(0))
+	if !provider.lastCall().Broad {
+		t.Errorf("expected broad=true: no saved waypoint matched the query")
 	}
 
 	var result assistantFindPlacesResult
@@ -240,98 +210,38 @@ func TestExecuteFindPlaces_Rung1ExactHitSkipsRung2(t *testing.T) {
 		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
 	}
 	if len(result.Results) != 1 || result.Results[0].Name != "Shag Cove" {
-		t.Fatalf("expected the rung 1 exact hit, got %+v", result.Results)
+		t.Fatalf("expected the provider's hit, got %+v", result.Results)
 	}
 	if result.Results[0].Kind != "bay" {
-		t.Errorf("expected kind=bay from natural=bay, got %q", result.Results[0].Kind)
+		t.Errorf("expected kind=bay as returned by the provider, got %q", result.Results[0].Kind)
 	}
 	if result.Search != "exact" {
 		t.Errorf("expected search=exact, got %q", result.Search)
 	}
-	if result.RadiusNm != assistantFindPlacesRadiusNm {
-		t.Errorf("expected radius_nm=%g (rung 1), got %v", assistantFindPlacesRadiusNm, result.RadiusNm)
-	}
 }
 
-func TestExecuteFindPlaces_Rung2RunsOnlyWhenRung1Empty(t *testing.T) {
+func TestExecuteFindPlaces_WaypointHitStillIncludesProviderResults(t *testing.T) {
 	vesselLat, vesselLon := -20.1, 149.1
-	fetcher := &sequentialOverpassFetcher{
-		responses: []fakeOverpassResponse{
-			{body: []byte(`{"elements":[]}`)}, // rung 1: exact match, nothing
-			{body: []byte(`{"elements":[{"type":"node","id":2,"lat":-20.15,"lon":149.12,"tags":{"name":"Tongue Point","natural":"cape"}}]}`)}, // rung 2: partial match hit
-		},
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "none", RadiusNm: 100}}
+	routes := func() []routeData {
+		return []routeData{{
+			Name: "Whitsundays Loop",
+			Waypoints: []routeWaypoint{
+				{Name: "Tongue Bay", Lat: vesselLat, Lon: vesselLon},
+			},
+		}}
 	}
-	deps := assistantToolDeps{
-		vesselState: func() (vesselStateData, error) {
-			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
-		},
-		overpass: fetcher,
-		routes:   func() []routeData { return nil },
-	}
+	deps := findPlacesDeps(vesselLat, vesselLon, provider, routes)
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
-	if fetcher.callCount() != 2 {
-		t.Fatalf("expected both rungs queried when rung 1 comes back empty, got %d calls", fetcher.callCount())
+	if provider.callCount() != 1 {
+		t.Fatalf("expected the provider's exact-name rung to still run even after a waypoint hit, got %d calls", provider.callCount())
 	}
-	if !strings.Contains(fetcher.queryAt(0), `["name"="Tongue"]`) {
-		t.Errorf("expected rung 1's query to be the exact-name search, got: %s", fetcher.queryAt(0))
-	}
-	if strings.Contains(fetcher.queryAt(0), "around:") || strings.Contains(fetcher.queryAt(0), `"natural"~`) {
-		t.Errorf("expected rung 1's query to carry neither around: nor a tag filter, got: %s", fetcher.queryAt(0))
-	}
-	if !strings.Contains(fetcher.queryAt(1), `"name"~"Tongue"`) {
-		t.Errorf("expected rung 2's query to be the partial-name regex search, got: %s", fetcher.queryAt(1))
-	}
-	if strings.Contains(fetcher.queryAt(1), "around:") {
-		t.Errorf("expected rung 2 to search a bbox, not around:, got: %s", fetcher.queryAt(1))
-	}
-
-	var result assistantFindPlacesResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
-	}
-	if len(result.Results) != 1 || result.Results[0].Name != "Tongue Point" {
-		t.Fatalf("expected the rung 2 hit, got %+v", result.Results)
-	}
-	if result.Search != "regex" {
-		t.Errorf("expected search=regex, got %q", result.Search)
-	}
-	if result.RadiusNm != assistantFindPlacesRegexRadiusNm {
-		t.Errorf("expected radius_nm=%g (rung 2), got %v", assistantFindPlacesRegexRadiusNm, result.RadiusNm)
-	}
-}
-
-func TestExecuteFindPlaces_WaypointHitSuppressesRung2(t *testing.T) {
-	vesselLat, vesselLon := -20.1, 149.1
-	fetcher := &sequentialOverpassFetcher{
-		responses: []fakeOverpassResponse{
-			{body: []byte(`{"elements":[]}`)}, // rung 1: no exact OSM match for the query text
-		},
-	}
-	deps := assistantToolDeps{
-		vesselState: func() (vesselStateData, error) {
-			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
-		},
-		overpass: fetcher,
-		routes: func() []routeData {
-			return []routeData{{
-				Name: "Whitsundays Loop",
-				Waypoints: []routeWaypoint{
-					{Name: "Tongue Bay", Lat: vesselLat, Lon: vesselLon},
-				},
-			}}
-		},
-	}
-
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue"}`))
-	if err != nil {
-		t.Fatalf("execute find_places: %v", err)
-	}
-	if fetcher.callCount() != 1 {
-		t.Fatalf("expected a waypoint hit to suppress rung 2, got %d overpass calls", fetcher.callCount())
+	if provider.lastCall().Broad {
+		t.Errorf("expected broad=false: the query already matched a saved waypoint")
 	}
 
 	var result assistantFindPlacesResult
@@ -344,23 +254,11 @@ func TestExecuteFindPlaces_WaypointHitSuppressesRung2(t *testing.T) {
 	if result.Search != "waypoints" {
 		t.Errorf("expected search=waypoints, got %q", result.Search)
 	}
-	if result.RadiusNm != assistantFindPlacesRadiusNm {
-		t.Errorf("expected radius_nm=%g (rung 1, the only rung that ran), got %v", assistantFindPlacesRadiusNm, result.RadiusNm)
-	}
 }
 
-func TestExecuteFindPlaces_NoteMentionsBothRungsWhenNothingFound(t *testing.T) {
-	fetcher := &sequentialOverpassFetcher{
-		responses: []fakeOverpassResponse{
-			{body: []byte(`{"elements":[]}`)},
-			{body: []byte(`{"elements":[]}`)},
-		},
-	}
-	deps := assistantToolDeps{
-		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -20.1, Longitude: 149.1}, nil },
-		overpass:    fetcher,
-		routes:      func() []routeData { return nil },
-	}
+func TestExecuteFindPlaces_NoteMentionsRadiusWhenNothingFound(t *testing.T) {
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "none", RadiusNm: 20}}
+	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
 	if err != nil {
@@ -370,178 +268,84 @@ func TestExecuteFindPlaces_NoteMentionsBothRungsWhenNothingFound(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
 	}
-	want := `no named feature matching "Shag Cove" within 100 nm by exact name or within 20 nm by partial name`
+	want := `no named feature matching "Shag Cove" found within 20 nm of the search centre`
 	if result.Note != want {
 		t.Errorf("note = %q, want %q", result.Note, want)
 	}
 	if result.Search != "none" {
 		t.Errorf("expected search=none, got %q", result.Search)
 	}
-	if result.RadiusNm != assistantFindPlacesRegexRadiusNm {
-		t.Errorf("expected radius_nm=%g (rung 2, the deepest rung attempted), got %v", assistantFindPlacesRegexRadiusNm, result.RadiusNm)
+}
+
+func TestExecuteFindPlaces_ProviderNoteIsPreservedEvenWithResults(t *testing.T) {
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{
+		Search:   "regex",
+		RadiusNm: 20,
+		Results:  []placeSearchMatch{{Name: "Tongue Point", Kind: "cape", Lat: -20.15, Lon: 149.12}},
+		Note:     "widened past the usual radius",
+	}}
+	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+
+	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue"}`))
+	if err != nil {
+		t.Fatalf("execute find_places: %v", err)
 	}
-	if fetcher.callCount() != 2 {
-		t.Fatalf("expected both rungs to be attempted, got %d calls", fetcher.callCount())
+	var result assistantFindPlacesResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
+	}
+	if result.Note != "widened past the usual radius" {
+		t.Errorf("expected the provider's own note to pass through untouched, got %q", result.Note)
 	}
 }
 
-func TestExecuteFindPlaces_Rung2TransportErrorIsNeverSwallowed(t *testing.T) {
-	fetcher := &sequentialOverpassFetcher{
-		responses: []fakeOverpassResponse{
-			{body: []byte(`{"elements":[]}`)},
-			{err: fmt.Errorf("network unreachable")},
-		},
+func TestExecuteFindPlaces_ProviderErrorIsNeverSwallowed(t *testing.T) {
+	provider := &fakeSearchPlacesProvider{id: "fake-places", err: fmt.Errorf("network unreachable")}
+	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+
+	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
+	if err == nil {
+		t.Fatalf("expected the provider's search_places error to surface as an error, not be swallowed")
 	}
+}
+
+// A resolver failure - the configured place-names provider isn't
+// installed, or doesn't support place names - must surface as a
+// find_places error naming the problem, never silently return an empty
+// result (AGENTS.md's fail-fast / no-masking-fallback policy).
+func TestExecuteFindPlaces_ProviderResolutionErrorSurfaces(t *testing.T) {
 	deps := assistantToolDeps{
 		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -20.1, Longitude: 149.1}, nil },
-		overpass:    fetcher,
-		routes:      func() []routeData { return nil },
+		placeNames: func() (placeNameProvider, string, error) {
+			return nil, "", fmt.Errorf("unknown place-names provider configured: %q", "no-such-plugin")
+		},
+		routes: func() []routeData { return nil },
 	}
 
 	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
 	if err == nil {
-		t.Fatalf("expected rung 2's transport error to surface as an error, not be swallowed")
+		t.Fatalf("expected a provider-resolution failure to surface as an error")
+	}
+	if !strings.Contains(err.Error(), "no-such-plugin") {
+		t.Fatalf("expected the error to name the misconfigured provider, got: %v", err)
 	}
 }
 
-func TestAssistantBoundingBox_100NmAtWhitsundayLatitude(t *testing.T) {
-	south, west, north, east := assistantBoundingBox(-20.03, 148.45, 100)
-
-	round2 := func(v float64) float64 { return math.Round(v*100) / 100 }
-	if got := round2(south); got != -21.70 {
-		t.Errorf("south = %v, want -21.70", got)
-	}
-	if got := round2(west); got != 146.68 {
-		t.Errorf("west = %v, want 146.68", got)
-	}
-	if got := round2(north); got != -18.36 {
-		t.Errorf("north = %v, want -18.36", got)
-	}
-	if got := round2(east); got != 150.22 {
-		t.Errorf("east = %v, want 150.22", got)
-	}
-}
-
-func TestBuildOverpassExactNameQuery_VariantsNoAroundNoTagFilter(t *testing.T) {
-	south, west, north, east := assistantBoundingBox(-20.1, 149.1, assistantFindPlacesRadiusNm)
-	got := buildOverpassExactNameQuery("bona bay", south, west, north, east)
-
-	for _, want := range []string{`["name"="Bona Bay"]`, `["name"="bona bay"]`} {
-		if !strings.Contains(got, want) {
-			t.Errorf("expected the query to contain %q, got: %s", want, got)
-		}
-	}
-	if strings.Contains(got, "around:") {
-		t.Errorf("expected a bbox filter, not around:, got: %s", got)
-	}
-	for _, tag := range []string{`"natural"`, `"seamark:type"`, `"place"`, `"leisure"`} {
-		if strings.Contains(got, tag) {
-			t.Errorf("expected no tag filter (kind is derived host-side), found %q in: %s", tag, got)
-		}
-	}
-}
-
-func TestBuildOverpassNameSearchQuery_EscapesRegexMetacharacters(t *testing.T) {
-	south, west, north, east := assistantBoundingBox(-20.1, 149.1, assistantFindPlacesRegexRadiusNm)
-	got := buildOverpassNameSearchQuery("Hook Reef (outer)", south, west, north, east)
-
-	want := `Hook Reef \\(outer\\)`
-	if !strings.Contains(got, want) {
-		t.Fatalf("expected the query to contain the escaped literal %q, got: %s", want, got)
-	}
-	if strings.Contains(got, `"Hook Reef (outer)"`) {
-		t.Fatalf("expected the parentheses to be escaped rather than passed through raw: %s", got)
-	}
-	if strings.Contains(got, "around:") {
-		t.Fatalf("expected a bbox filter, not around:, got: %s", got)
-	}
-}
-
-func TestOverpassFindPlacesKind(t *testing.T) {
-	cases := []struct {
-		name string
-		tags map[string]string
-		want string
-	}{
-		{"natural only", map[string]string{"natural": "bay"}, "bay"},
-		{"seamark:type wins over natural", map[string]string{"seamark:type": "anchorage", "natural": "bay"}, "anchorage"},
-		{"no recognised tag falls back to feature", map[string]string{"building": "yes"}, "feature"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := overpassFindPlacesKind(tc.tags); got != tc.want {
-				t.Errorf("overpassFindPlacesKind(%v) = %q, want %q", tc.tags, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestAssistantTitleCase(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"st helens", "St Helens"},
-		{"BONA BAY", "Bona Bay"},
-		{"bell's beach", "Bell's Beach"},
-		{"port-side bay", "Port-side Bay"},
-		{"  tongue   bay  ", "Tongue Bay"},
-	}
-	for _, tc := range cases {
-		if got := assistantTitleCase(tc.in); got != tc.want {
-			t.Errorf("assistantTitleCase(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestAssistantExactNameVariants_CommaQualifierIncludesBareHead(t *testing.T) {
-	variants := assistantExactNameVariants("Bona Bay, Gloucester Island")
-	want := "Bona Bay"
-	found := false
-	for _, v := range variants {
-		if v == want {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected variants for %q to include the bare head %q, got %v", "Bona Bay, Gloucester Island", want, variants)
-	}
-}
-
-func TestExecuteFindPlaces_QualifierResolvesCentresRung2AndReportsCentredOn(t *testing.T) {
+func TestExecuteFindPlaces_CentredOnEchoesProviderQualifierHit(t *testing.T) {
 	vesselLat, vesselLon := -20.1, 149.1
-	qualifierLat, qualifierLon := -19.8, 148.5 // "Gloucester Island", well outside rung 2's 20nm radius from the vessel
-
-	fetcher := &sequentialOverpassFetcher{
-		responses: []fakeOverpassResponse{
-			{body: []byte(`{"elements":[]}`)}, // rung 1: exact match for the full query, nothing
-			{body: []byte(fmt.Sprintf(`{"elements":[{"type":"node","id":1,"lat":%.6f,"lon":%.6f,"tags":{"name":"Gloucester Island","place":"island"}}]}`, qualifierLat, qualifierLon))}, // qualifier exact lookup: one hit
-			{body: []byte(`{"elements":[]}`)}, // rung 2: partial match, nothing (not the point of this test)
-		},
-	}
-	deps := assistantToolDeps{
-		vesselState: func() (vesselStateData, error) {
-			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
-		},
-		overpass: fetcher,
-		routes:   func() []routeData { return nil },
-	}
+	qualifierLat, qualifierLon := -19.8, 148.5 // "Gloucester Island", well outside the vessel's own vicinity
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{
+		Search:    "regex",
+		RadiusNm:  20,
+		CentredOn: &placeSearchCentre{Name: "Gloucester Island", Lat: qualifierLat, Lon: qualifierLon},
+		Results:   []placeSearchMatch{{Name: "Bona Bay", Kind: "bay", Lat: qualifierLat, Lon: qualifierLon}},
+	}}
+	deps := findPlacesDeps(vesselLat, vesselLon, provider, func() []routeData { return nil })
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
-	if fetcher.callCount() != 3 {
-		t.Fatalf("expected 3 overpass calls (rung 1, qualifier lookup, rung 2), got %d", fetcher.callCount())
-	}
-	if !strings.Contains(fetcher.queryAt(1), `["name"="Gloucester Island"]`) {
-		t.Errorf("expected the qualifier lookup to search the exact qualifier name, got: %s", fetcher.queryAt(1))
-	}
-
-	wantSouth, wantWest, wantNorth, wantEast := assistantBoundingBox(qualifierLat, qualifierLon, assistantFindPlacesRegexRadiusNm)
-	wantBbox := overpassBoundingBoxClause(wantSouth, wantWest, wantNorth, wantEast)
-	if !strings.Contains(fetcher.queryAt(2), wantBbox) {
-		t.Errorf("expected rung 2's bbox to be centred on the qualifier hit (%s), got: %s", wantBbox, fetcher.queryAt(2))
-	}
-
 	var result assistantFindPlacesResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
@@ -550,47 +354,25 @@ func TestExecuteFindPlaces_QualifierResolvesCentresRung2AndReportsCentredOn(t *t
 		t.Errorf("expected centred_on=%q, got %q", "Gloucester Island", result.CentredOn)
 	}
 	if result.Centre == nil || result.Centre.Lat != qualifierLat || result.Centre.Lon != qualifierLon {
-		t.Errorf("expected centre to be the qualifier hit's coordinates (%v,%v), got %+v", qualifierLat, qualifierLon, result.Centre)
+		t.Errorf("expected centre to be the provider's qualifier hit (%v,%v), got %+v", qualifierLat, qualifierLon, result.Centre)
 	}
 }
 
-func TestExecuteFindPlaces_QualifierDoesNotResolveFallsBackToVesselCentre(t *testing.T) {
+func TestExecuteFindPlaces_NoCentredOnKeepsVesselCentre(t *testing.T) {
 	vesselLat, vesselLon := -20.1, 149.1
-	fetcher := &sequentialOverpassFetcher{
-		responses: []fakeOverpassResponse{
-			{body: []byte(`{"elements":[]}`)}, // rung 1: nothing
-			{body: []byte(`{"elements":[]}`)}, // qualifier lookup: nothing resolves
-			{body: []byte(`{"elements":[]}`)}, // rung 2: nothing
-		},
-	}
-	deps := assistantToolDeps{
-		vesselState: func() (vesselStateData, error) {
-			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
-		},
-		overpass: fetcher,
-		routes:   func() []routeData { return nil },
-	}
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "none", RadiusNm: 20}}
+	deps := findPlacesDeps(vesselLat, vesselLon, provider, func() []routeData { return nil })
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
-	if fetcher.callCount() != 3 {
-		t.Fatalf("expected 3 overpass calls even when the qualifier does not resolve, got %d", fetcher.callCount())
-	}
-
-	wantSouth, wantWest, wantNorth, wantEast := assistantBoundingBox(vesselLat, vesselLon, assistantFindPlacesRegexRadiusNm)
-	wantBbox := overpassBoundingBoxClause(wantSouth, wantWest, wantNorth, wantEast)
-	if !strings.Contains(fetcher.queryAt(2), wantBbox) {
-		t.Errorf("expected rung 2's bbox to fall back to the vessel centre (%s), got: %s", wantBbox, fetcher.queryAt(2))
-	}
-
 	var result assistantFindPlacesResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
 	}
 	if result.CentredOn != "" {
-		t.Errorf("expected no centred_on when the qualifier does not resolve, got %q", result.CentredOn)
+		t.Errorf("expected no centred_on when the provider doesn't report one, got %q", result.CentredOn)
 	}
 	if result.Centre == nil || result.Centre.Lat != vesselLat || result.Centre.Lon != vesselLon {
 		t.Errorf("expected centre to remain the vessel position, got %+v", result.Centre)
@@ -598,10 +380,10 @@ func TestExecuteFindPlaces_QualifierDoesNotResolveFallsBackToVesselCentre(t *tes
 }
 
 func TestExecuteFindPlaces_NoFixAndNoNearArgsReturnsNoteNotError(t *testing.T) {
-	fetcher := &fakeOverpassFetcher{}
+	provider := &fakeSearchPlacesProvider{id: "fake-places"}
 	deps := assistantToolDeps{
 		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -1, Longitude: -1}, nil },
-		overpass:    fetcher,
+		placeNames:  func() (placeNameProvider, string, error) { return provider, provider.ID(), nil },
 		routes:      func() []routeData { return nil },
 	}
 
@@ -620,29 +402,8 @@ func TestExecuteFindPlaces_NoFixAndNoNearArgsReturnsNoteNotError(t *testing.T) {
 	if !strings.Contains(result.Note, "vessel position unknown") {
 		t.Fatalf("expected a note about unknown vessel position, got %q", result.Note)
 	}
-	if fetcher.callCount() != 0 {
-		t.Fatalf("expected no overpass call when there is no usable fix, got %d", fetcher.callCount())
-	}
-}
-
-func TestExecuteFindPlaces_OverpassRateLimitIsError(t *testing.T) {
-	fetcher := &sequentialOverpassFetcher{
-		responses: []fakeOverpassResponse{
-			{body: []byte(`<html><body>Dispatcher_Client::request_read_and_idx::rate_limited</body></html>`), contentType: "text/html"},
-		},
-	}
-	deps := assistantToolDeps{
-		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -20.1, Longitude: 149.1}, nil },
-		overpass:    fetcher,
-		routes:      func() []routeData { return nil },
-	}
-
-	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
-	if err == nil {
-		t.Fatalf("expected an error for a rate-limited overpass response")
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "rate limit") {
-		t.Fatalf("expected the error to mention rate limiting, got %q", err.Error())
+	if provider.callCount() != 0 {
+		t.Fatalf("expected no provider call when there is no usable fix, got %d", provider.callCount())
 	}
 }
 

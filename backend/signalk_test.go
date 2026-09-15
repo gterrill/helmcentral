@@ -120,6 +120,39 @@ func TestBuildSettingsPayload_SurfacesUnregisteredPOIProviderFromDisk(t *testing
 	}
 }
 
+// TestNormalizeSettingsPayload_PersistsUnregisteredPlaceNameProviderAsSubmitted
+// mirrors the poi-provider round-trip test above for place_name_provider
+// (docs/adr/0101): the operator's choice of place-names plugin is a
+// separate setting from ui.poi_provider and must round-trip the same way,
+// even when the named plugin isn't currently registered.
+func TestNormalizeSettingsPayload_PersistsUnregisteredPlaceNameProviderAsSubmitted(t *testing.T) {
+	req := settingsPayload{}
+	req.UI.PlaceNameProvider = "not-a-real-provider"
+
+	normalized := normalizeSettingsPayload(req)
+
+	if normalized.UI.PlaceNameProvider != "not-a-real-provider" {
+		t.Fatalf("expected place_name_provider to be persisted as submitted, got %q", normalized.UI.PlaceNameProvider)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesUnregisteredPlaceNameProviderFromDisk is
+// the read-side counterpart, mirroring
+// TestBuildSettingsPayload_SurfacesUnregisteredPOIProviderFromDisk.
+func TestBuildSettingsPayload_SurfacesUnregisteredPlaceNameProviderFromDisk(t *testing.T) {
+	settings := map[string]any{
+		"ui": map[string]any{
+			"place_name_provider": "not-a-real-provider",
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+
+	if payload.UI.PlaceNameProvider != "not-a-real-provider" {
+		t.Fatalf("expected place_name_provider to surface the stored value, got %q", payload.UI.PlaceNameProvider)
+	}
+}
+
 // TestNormalizeSettingsPayload_RoundTripsInfluxdbSection mirrors the
 // tide-provider round-trip test above: the influxdb section (enabled/url/
 // org/bucket) must be persisted as submitted, trimmed of whitespace, with no

@@ -42,7 +42,7 @@ var openRouterResponseHeaderTimeout = 60 * time.Second
 var openRouterCompletionTimeout = 180 * time.Second
 
 // openRouterDoer is the minimal interface the client needs from an HTTP
-// client, mirroring overpassFetcher (place_name.go) so tests can inject a
+// client, mirroring tileFetcher (tile_cache.go) so tests can inject a
 // fake upstream. *http.Client already satisfies this interface.
 type openRouterDoer interface {
 	Do(req *http.Request) (*http.Response, error)

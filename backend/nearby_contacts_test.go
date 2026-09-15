@@ -539,7 +539,7 @@ func TestNewNearbyContactStore_CreatesVesselKeySeenAtIndex(t *testing.T) {
 // tests that only care how many times summaries() is called - the N+1
 // regression backend perf audit Tier 3 flagged (main.go used to call
 // summary() once per nearby vessel, each call reading every row for that
-// vessel_key). Mirrors this package's existing fakeOverpassFetcher/
+// vessel_key). Mirrors this package's existing fakePlaceNameProvider/
 // fakeTileFetcher callCount() convention.
 type fakeNearbyContactSummarizer struct {
 	calls   int

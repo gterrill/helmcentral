@@ -1,0 +1,43 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.7 375dc00a",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-15T20:38:49Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 5181434524,
+  "lat": -20.2957516,
+  "lon": 149.0561815,
+  "tags": {
+    "name": "Whitehaven Beach",
+    "name:en": "Whitehaven Beach",
+    "tourism": "camp_site"
+  }
+},
+{
+  "type": "way",
+  "id": 138684320,
+  "center": {
+    "lat": -20.2754053,
+    "lon": 149.0417376
+  },
+  "tags": {
+    "access": "yes",
+    "description": "Whitehaven Beach is located on the eastern shore of Whitsunday Island on the Queensland Coast in Australia, this beach is made of 97 % pure silica white sands and crystal clear tropical waters.",
+    "image": "https://whitehaven-beach.com/wp-content/uploads/2022/07/Whitehaven-Beach-Whitsunday-Island-Queensland-Australia.jpg",
+    "lifeguard": "no",
+    "name": "Whitehaven Beach",
+    "name:ru": "пляж Белая Гавань",
+    "natural": "beach",
+    "supervised": "no",
+    "surface": "sand",
+    "website": "https://whitehaven-beach.com/"
+  }
+}
+
+  ]
+}

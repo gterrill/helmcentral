@@ -321,19 +321,20 @@ func TestAnchorSwing_BowCorrectionRemovesTheOscillation(t *testing.T) {
 func deg2rad(deg float64) float64 { return deg * math.Pi / 180 }
 
 // Test 7: setAnchorWatch resolves the anchorage's place name once in the
-// background (docs/adr/0056) - the immediate response must not block on an
-// Overpass round trip, and the resolved name must round-trip through
-// persistence (saveAnchorWatch/loadAnchorWatch) and both GET and PATCH.
+// background (docs/adr/0056) - the immediate response must not block on a
+// place-names provider round trip, and the resolved name must round-trip
+// through persistence (saveAnchorWatch/loadAnchorWatch) and both GET and
+// PATCH.
 func TestSetAnchorWatch_ResolvesAndPinsPlaceNameAsync(t *testing.T) {
 	anchorTestEnv(t, 0)
 	seedNoHeading(t)
 	resetPlaceNameCache(t)
 	resetPlaceNameTickState(t) // the resolve guard is process-wide; don't inherit another test's in-flight flag
 
-	fetcher := &fakeOverpassFetcher{fixtures: map[int][]byte{
-		400: loadOverpassFixture(t, "overpass_goldsmith_400.json"),
+	provider := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
+		400: {Name: "Goldsmith Island", Kind: "island"},
 	}}
-	withFakeOverpassFetcher(t, fetcher)
+	withFakePlaceNameProviderResolver(t, provider)
 
 	code, resp := postAnchorWatch(t, map[string]any{
 		"lat": goldsmithLat,
@@ -403,20 +404,20 @@ func TestSetAnchorWatch_ResolvesAndPinsPlaceNameAsync(t *testing.T) {
 	}
 }
 
-// Test 8: a resolution failure (Overpass unreachable) must log explicitly
-// and leave PlaceName empty rather than caching or fabricating a blank
-// name - the regular poll tick is what retries, per AGENTS.md's fail-fast
-// policy.
+// Test 8: a resolution failure (the place-names provider is unreachable)
+// must log explicitly and leave PlaceName empty rather than caching or
+// fabricating a blank name - the regular poll tick is what retries, per
+// AGENTS.md's fail-fast policy.
 func TestSetAnchorWatch_PlaceNameResolutionFailureLeavesFieldEmpty(t *testing.T) {
 	anchorTestEnv(t, 0)
 	seedNoHeading(t)
 	resetPlaceNameCache(t)
 	resetPlaceNameTickState(t) // the resolve guard is process-wide; don't inherit another test's in-flight flag
 
-	fetcher := &fakeOverpassFetcher{errs: map[int]error{
+	provider := &fakePlaceNameProvider{id: "fake-place-names", errs: map[int]error{
 		400: fmt.Errorf("simulated transport failure"),
 	}}
-	withFakeOverpassFetcher(t, fetcher)
+	withFakePlaceNameProviderResolver(t, provider)
 
 	code, resp := postAnchorWatch(t, map[string]any{
 		"lat": goldsmithLat,
@@ -426,7 +427,7 @@ func TestSetAnchorWatch_PlaceNameResolutionFailureLeavesFieldEmpty(t *testing.T)
 		t.Fatalf("expected 200, got %d: %+v", code, resp)
 	}
 
-	waitForCondition(t, 2*time.Second, func() bool { return fetcher.callCount() >= 1 })
+	waitForCondition(t, 2*time.Second, func() bool { return provider.callCount() >= 1 })
 
 	anchorWatchMu.RLock()
 	got := anchorWatchState.PlaceName

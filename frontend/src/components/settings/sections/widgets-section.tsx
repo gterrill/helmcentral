@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProviderGroup } from '@/components/settings/provider-group'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useForecastWarningsProviders } from '@/hooks/use-forecast-warnings-providers'
+import { usePlaceNameProviders } from '@/hooks/use-place-name-providers'
 import { usePOIProviders } from '@/hooks/use-poi-providers'
 import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useWaveProviders } from '@/hooks/use-wave-providers'
@@ -21,6 +22,7 @@ export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
   const { providers: waveProviders } = useWaveProviders()
   const { providers: poiProviders } = usePOIProviders()
   const { providers: forecastWarningsProviders } = useForecastWarningsProviders()
+  const { providers: placeNameProviders } = usePlaceNameProviders()
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
@@ -33,6 +35,7 @@ export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
             <TabsTrigger value="weather">Weather</TabsTrigger>
             <TabsTrigger value="wave">Wave</TabsTrigger>
             <TabsTrigger value="poi">Nearby</TabsTrigger>
+            <TabsTrigger value="place-names">Place names</TabsTrigger>
             <TabsTrigger value="forecast-warnings">Forecast Warnings</TabsTrigger>
           </TabsList>
 
@@ -80,6 +83,10 @@ export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
 
           <TabsContent value="poi">
             <ProviderGroup type="poi" providers={poiProviders} />
+          </TabsContent>
+
+          <TabsContent value="place-names">
+            <ProviderGroup type="place-names" providers={placeNameProviders} />
           </TabsContent>
 
           <TabsContent value="forecast-warnings">

@@ -81,20 +81,23 @@ section, set from the Settings UI.
 ### Overpass
 
 The Overpass server is the `osm-overpass` POI plugin's own setting, not an
-app-level one: **Settings → Widgets → Nearby → osm-overpass's gear icon**
-shows an **Overpass server** field, declared by that plugin's own
+app-level one. The gear icon on osm-overpass's card, under either **Settings →
+Widgets → Nearby** or **Settings → Widgets → Place names**, opens the same
+**Overpass server** field, declared by that plugin's own
 `osm-overpass.config_fields.json` sidecar. There is no environment-variable
 override and no `settings.yaml` entry. A save (`POST
-/api/plugins/poi/osm-overpass/config`) takes effect on the very next
-`fetch_poi` call with no restart. Blank (the default) uses the public
-`https://overpass-api.de/api/interpreter`; a non-blank value must be an
-absolute `https://` URL, checked at save time and again on every lookup.
+/api/plugins/poi/osm-overpass/config`) takes effect on the plugin's next call
+with no restart. Blank (the default) uses the public
+`https://overpass-api.de/api/interpreter`. The save rejects anything that is not
+an absolute URL, and the plugin itself refuses anything but `https://` on
+every call.
 
-This one setting feeds three consumers: the `osm-overpass` POI plugin
-itself, place-name resolution (the position tile), and Mate's `find_places`
-tool - the latter two read the plugin's stored value directly until a later
-phase moves them into the plugin (see
-[ADR 0100](../adr/0100-plugins-declare-their-own-settings.md)). Point it at
+This one setting feeds every use this plugin is put to: Nearby, place-name
+resolution (the position tile, the anchor pin), and Mate's `find_places`
+tool all call into the plugin itself now, rather than any of them keeping
+their own copy of the Overpass endpoint (see
+[ADR 0100](../adr/0100-plugins-declare-their-own-settings.md) and
+[ADR 0101](../adr/0101-place-names-come-from-a-plugin.md)). Point it at
 a mirror such as `https://overpass.openstreetmap.fr/api/interpreter` when
 your network refuses `overpass-api.de`. See
 [poi-categories.md](poi-categories.md#the-default-provider-openstreetmap-via-overpass)

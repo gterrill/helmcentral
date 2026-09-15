@@ -46,6 +46,13 @@ const configEchoFixtureWasm = "testdata/wasm_plugins/configecho.wasm"
 const describedValidFixtureWasm = "testdata/wasm_plugins/describedvalid.wasm"
 const describedErrorFixtureWasm = "testdata/wasm_plugins/describederror.wasm"
 
+// osmOverpassRealPluginWasm is the actual, built osm-overpass POI plugin
+// (docs/examples/poi-plugins/osm-overpass), not a committed testdata
+// fixture - plugins/* is gitignored and only exists once the plugins-builder
+// has run, so TestNewWasmPluginBase_SupportsPlaceNamesTrueWhenBothExportsPresent
+// below skips rather than fails when it is absent (a fresh checkout, or CI).
+const osmOverpassRealPluginWasm = "../plugins/poi/osm-overpass.wasm"
+
 // wasmPluginCacheTestValue is a small local struct used to prove
 // wasmPluginCache[T] is generic, rather than reusing tideChartResult for
 // every test.
@@ -634,6 +641,45 @@ func TestConfigEchoPlugin_ConfigReachesGuest(t *testing.T) {
 // optional description() export, when present and successful, is captured
 // on the resulting wasmPluginBase - mirroring ttl_seconds()'s existing
 // present-and-successful behavior.
+// ── SupportsPlaceNames: the optional place_name_at + search_places pair
+// (ADR 0101, POI plugins declaring place-name support) ──────────────────────
+
+// TestNewWasmPluginBase_SupportsPlaceNamesTrueWhenBothExportsPresent proves
+// detection against the real osm-overpass plugin build, not a synthetic
+// fixture - skipped when that build is absent (plugins/* is gitignored; see
+// osmOverpassRealPluginWasm's doc comment) rather than failing a fresh
+// checkout or CI.
+func TestNewWasmPluginBase_SupportsPlaceNamesTrueWhenBothExportsPresent(t *testing.T) {
+	if _, err := os.Stat(osmOverpassRealPluginWasm); err != nil {
+		t.Skipf("osm-overpass.wasm not built (run the plugins-builder first): %v", err)
+	}
+	manifest := extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: osmOverpassRealPluginWasm}}}
+
+	base, err := newWasmPluginBase(manifest, "plugins/test")
+	if err != nil {
+		t.Fatalf("newWasmPluginBase failed: %v", err)
+	}
+	if !base.SupportsPlaceNames() {
+		t.Fatalf("expected the osm-overpass plugin (exports both place_name_at and search_places) to support place names")
+	}
+}
+
+// TestNewWasmPluginBase_SupportsPlaceNamesFalseWhenExportsAbsent uses the
+// existing configecho fixture (no place_name_at/search_places at all) - the
+// normal/default state every other plugin kind (tide, weather, wave, POI
+// without place-name support) already represents.
+func TestNewWasmPluginBase_SupportsPlaceNamesFalseWhenExportsAbsent(t *testing.T) {
+	manifest := extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: configEchoFixtureWasm}}}
+
+	base, err := newWasmPluginBase(manifest, "plugins/test")
+	if err != nil {
+		t.Fatalf("newWasmPluginBase failed: %v", err)
+	}
+	if base.SupportsPlaceNames() {
+		t.Fatalf("expected a plugin exporting neither place_name_at nor search_places to not support place names")
+	}
+}
+
 func TestNewWasmPluginBase_DescriptionPresentIsCaptured(t *testing.T) {
 	manifest := extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: describedValidFixtureWasm}}}
 

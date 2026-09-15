@@ -50,3 +50,16 @@ instance is unreachable from your network, point it at a mirror such as
 with no restart. See
 [configuration.md](../reference/configuration.md#overpass) for the allowlist
 a mirror other than that one also needs.
+
+## Place names is a separate picker
+
+The name shown on the position tile, the anchor pin, and what Mate resolves
+when you ask it about a place by name all come from a different setting:
+**Settings → Widgets → Place names**. It defaults to the same OpenStreetMap
+plugin as Nearby, but you can point it at a different installed plugin
+without changing what Nearby uses, or vice versa. Only a plugin that
+supports place-name lookups appears in that list; not every `poi` plugin
+does (Google Places, for instance, is Nearby-only). Its gear icon opens the
+same settings as the matching Nearby card, since it's the same plugin
+either way - the **Overpass server** field above is one and the same
+setting from both tabs.

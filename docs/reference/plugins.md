@@ -207,6 +207,39 @@ third provider would have to match whichever of the two it copied from. See
 reasoning, including why POI's cache cell (0.02 degrees, about 2km) is much
 tighter than weather's.
 
+### Optional: a `poi` plugin can also answer place names
+
+A `poi` plugin can additionally export `place_name_at` and `search_places`
+to serve as a place-names provider - the position tile, the anchor pin, and
+Mate's `find_places` tool. Both exports are optional and both are required
+together: a plugin exporting only one is treated as supporting neither.
+There is no separate plugin kind or directory for this; the operator picks
+which installed, supporting `poi` plugin answers place-name questions via
+`ui.place_name_provider` (Settings -> Widgets -> Place names),
+independently of `ui.poi_provider` (Settings -> Widgets -> Nearby) - the two
+commonly name the same plugin but need not.
+
+| Export | Input | Returns |
+| --- | --- | --- |
+| `place_name_at` | `{lat, lon, radius_m}` | The single best-named feature within `radius_m`, or the legitimate negative `{"name": ""}` |
+| `search_places` | `{query, lat, lon, max_results, broad}` | `{search: "exact"\|"regex"\|"none", radius_nm, centred_on, results, note}` - the plugin owns the search ladder, the host owns distance/bearing/dedupe/sort exactly as it does for `fetch_poi` |
+
+`place_name_at` is called on a widening ladder (400m, 1500m, 5000m,
+stopping at the first named answer) by the host, not the plugin - the
+plugin only ever answers one radius per call. `search_places`' `broad` flag
+tells the plugin whether the host already has a saved-route-waypoint match
+for this query: when true, a plugin is free to run a more expensive
+broadened search if its cheap exact-name search comes back empty; when
+false, the plugin should still run its cheap search (it is the only way the
+plugin's own copy of a feature's position reaches the model) but can skip
+straight to reporting no broader match. An upstream failure - a bad status,
+an unparseable body, a rate limit, or (Overpass specifically) a `remark`
+field reporting a runtime error - must be returned as a call error, never
+masked as an empty result. See
+`docs/examples/poi-plugins/osm-overpass/main.go`'s `placeNameAt`/
+`searchPlaces` exports for a full worked implementation, and
+`docs/adr/0101-place-names-come-from-a-plugin.md` for the full reasoning.
+
 ### The FTP host function
 
 BOM warnings are only reliably available over anonymous FTP (`ftp.bom.gov.au`),

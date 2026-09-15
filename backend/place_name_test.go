@@ -1,19 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
-	"path/filepath"
-	"regexp"
-	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -35,35 +27,6 @@ const (
 	lindemanLon  = 149.0353
 )
 
-// lindeman5000NamedFeatures is every name actually present in
-// overpass_lindeman_5000.json (12 named elements; a 13th, tags
-// {"place":"islet"}, carries no name tag at all). Used to assert a resolved
-// name is a real candidate from the fixture, never the unnamed islet (which
-// by construction cannot appear here since it has no name to produce).
-var lindeman5000NamedFeatures = map[string]bool{
-	"Gaibirra Island":        true,
-	"Kennedy Sound":          true,
-	"Plantation Bay":         true,
-	"Turtle Bay":             true,
-	"Brush Island":           true,
-	"Shaw Island":            true,
-	"Pentecost Island":       true,
-	"Little Lindeman Island": true,
-	"Lindeman Island":        true,
-	"Cole Island":            true,
-	"Ann Island":             true,
-	"Sidney Island":          true,
-}
-
-func loadOverpassFixture(t *testing.T, name string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatalf("load fixture %s: %v", name, err)
-	}
-	return data
-}
-
 // resetPlaceNameCache swaps in a fresh, empty placeNameCache for the
 // duration of the test so cache state never leaks between tests, and
 // restores the original afterward.
@@ -74,11 +37,11 @@ func resetPlaceNameCache(t *testing.T) {
 	t.Cleanup(func() { placeNameCache = orig })
 }
 
-// resetPlaceNameBackoff clears the package-level Overpass backoff window for
-// the duration of the test, restoring the original afterward - mirrors
-// resetPlaceNameCache so a failure induced by one test's fake fetcher can
-// never leak a backoff window into another test (or into a later call
-// within the same test that expects a real retry).
+// resetPlaceNameBackoff clears the package-level place-names provider
+// backoff window for the duration of the test, restoring the original
+// afterward - mirrors resetPlaceNameCache so a failure induced by one
+// test's fake provider can never leak a backoff window into another test
+// (or into a later call within the same test that expects a real retry).
 func resetPlaceNameBackoff(t *testing.T) {
 	t.Helper()
 	placeNameBackoff.mu.Lock()
@@ -93,26 +56,27 @@ func resetPlaceNameBackoff(t *testing.T) {
 	})
 }
 
-// withFakeOverpassFetcher swaps the package-level overpassHTTPClient (used
-// by both the tick and setAnchorWatch's async resolve) for fetcher, and
-// restores the original afterward. It also resets the Overpass backoff
-// window (resetPlaceNameBackoff): that state is process-wide and keyed on
-// real wall-clock time (up to placeNameBackoffMax, 15 minutes), so a
-// failure induced by one test's fake fetcher would otherwise silently
-// suppress every other test's resolution attempts - including successful
-// ones - for however much of that window the rest of the run takes.
-func withFakeOverpassFetcher(t *testing.T, fetcher overpassFetcher) {
+// withFakePlaceNameProviderResolver swaps the package-level
+// placeNameProviderResolve (used by both the tick and setAnchorWatch's
+// async resolve) for a resolver that always returns provider, and restores
+// the original afterward. It also resets the backoff window
+// (resetPlaceNameBackoff): that state is process-wide and keyed on real
+// wall-clock time (up to placeNameBackoffMax, 15 minutes), so a failure
+// induced by one test's fake provider would otherwise silently suppress
+// every other test's resolution attempts - including successful ones - for
+// however much of that window the rest of the run takes.
+func withFakePlaceNameProviderResolver(t *testing.T, provider placeNameProvider) {
 	t.Helper()
-	orig := overpassHTTPClient
-	overpassHTTPClient = fetcher
-	t.Cleanup(func() { overpassHTTPClient = orig })
+	orig := placeNameProviderResolve
+	placeNameProviderResolve = func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
+	t.Cleanup(func() { placeNameProviderResolve = orig })
 	resetPlaceNameBackoff(t)
 }
 
 // waitForCondition polls cond until it returns true or timeout elapses,
 // failing the test on timeout. Used for the goroutine-based anchor-watch
 // resolve path (setAnchorWatch deliberately doesn't block its HTTP response
-// on the Overpass round trip).
+// on the provider round trip).
 func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -125,51 +89,38 @@ func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Fatalf("timed out after %s waiting for condition", timeout)
 }
 
-// ── fake overpassFetcher ─────────────────────────────────────────────────────
+// ── fake placeNameProvider ───────────────────────────────────────────────
 
-// fakeOverpassFetcher is an injectable overpassFetcher for tests, mirroring
-// fakeTileFetcher (tile_cache_test.go). Responses are keyed by the widening
-// ring the request actually asked for, extracted from the posted Overpass
-// QL "around:R,lat,lon" clause — so a table test can assert both *which*
-// fixture wins and *how many* (and which) rings were actually queried.
-type fakeOverpassFetcher struct {
-	mu       sync.Mutex
-	calls    []int
-	fixtures map[int][]byte // radius (metres) -> canned response body
-	statuses map[int]int    // radius -> HTTP status (default 200)
-	types    map[int]string // radius -> Content-Type (default application/json)
-	errs     map[int]error  // radius -> transport error instead of a response
+// fakePlaceNameProvider is an injectable placeNameProvider for tests
+// exercising place_name.go's ladder/cache/backoff/tick logic, independent
+// of the POI provider registry (place_name_provider_test.go's
+// stubPlaceNameProvider exercises resolution against that registry
+// instead). Results/errors are keyed by the ring radius actually asked
+// for, so a table test can assert both *which* radius wins and *how many*
+// (and which) rings were actually queried - mirroring the deleted
+// fakeOverpassFetcher's shape, minus everything that was really Overpass
+// wire-format concern (now the plugin's problem, not the host's).
+type fakePlaceNameProvider struct {
+	id string
 
-	// gate, when non-nil, blocks every Do until the channel is closed, so a
-	// test can hold a resolution "in flight" and assert what the caller does
-	// while it is outstanding. A channel rather than a sleep: nothing races a
-	// wall clock.
+	mu      sync.Mutex
+	calls   []int
+	results map[int]placeNameResult
+	errs    map[int]error
+
+	// gate, when non-nil, blocks every PlaceNameAt call until the channel is
+	// closed, so a test can hold a resolution "in flight" and assert what
+	// the caller does while it is outstanding. A channel rather than a
+	// sleep: nothing races a wall clock.
 	gate chan struct{}
 }
 
-var overpassAroundRadiusPattern = regexp.MustCompile(`around:(\d+),`)
+func (f *fakePlaceNameProvider) ID() string   { return f.id }
+func (f *fakePlaceNameProvider) Name() string { return f.id }
 
-func (f *fakeOverpassFetcher) Do(req *http.Request) (*http.Response, error) {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, fmt.Errorf("fakeOverpassFetcher: read request body: %w", err)
-	}
-	values, err := url.ParseQuery(string(body))
-	if err != nil {
-		return nil, fmt.Errorf("fakeOverpassFetcher: parse form body: %w", err)
-	}
-	query := values.Get("data")
-	m := overpassAroundRadiusPattern.FindStringSubmatch(query)
-	if m == nil {
-		return nil, fmt.Errorf("fakeOverpassFetcher: no around: radius found in query: %s", query)
-	}
-	radius, err := strconv.Atoi(m[1])
-	if err != nil {
-		return nil, fmt.Errorf("fakeOverpassFetcher: parse radius: %w", err)
-	}
-
+func (f *fakePlaceNameProvider) PlaceNameAt(lat, lon float64, radiusM int) (placeNameResult, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, radius)
+	f.calls = append(f.calls, radiusM)
 	gate := f.gate
 	f.mu.Unlock()
 
@@ -177,34 +128,41 @@ func (f *fakeOverpassFetcher) Do(req *http.Request) (*http.Response, error) {
 		<-gate
 	}
 
-	if simulated, ok := f.errs[radius]; ok {
-		return nil, simulated
+	if err, ok := f.errs[radiusM]; ok {
+		return placeNameResult{}, err
 	}
-
-	status := http.StatusOK
-	if s, ok := f.statuses[radius]; ok {
-		status = s
-	}
-	contentType := "application/json"
-	if ct, ok := f.types[radius]; ok {
-		contentType = ct
-	}
-	respBody, ok := f.fixtures[radius]
-	if !ok {
-		respBody = []byte(`{"elements":[]}`)
-	}
-
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{contentType}},
-		Body:       io.NopCloser(bytes.NewReader(respBody)),
-	}, nil
+	return f.results[radiusM], nil
 }
 
-func (f *fakeOverpassFetcher) callCount() int {
+func (f *fakePlaceNameProvider) SearchPlaces(placeSearchInput) (placeSearchResult, error) {
+	return placeSearchResult{}, fmt.Errorf("fakePlaceNameProvider %q: SearchPlaces not implemented", f.id)
+}
+
+func (f *fakePlaceNameProvider) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.calls)
+}
+
+func (f *fakePlaceNameProvider) callsSnapshot() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]int, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
+// gatedPlaceNameProvider returns a fakePlaceNameProvider whose every
+// PlaceNameAt call blocks until the returned release func is called, so a
+// test can hold a resolution in flight.
+func gatedPlaceNameProvider(t *testing.T, results map[int]placeNameResult) (*fakePlaceNameProvider, func()) {
+	t.Helper()
+	gate := make(chan struct{})
+	provider := &fakePlaceNameProvider{id: "fake-place-names", results: results, gate: gate}
+	var once sync.Once
+	release := func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	return provider, release
 }
 
 // ── Test 1: the direct regression test for the reported bug ────────────────
@@ -221,31 +179,27 @@ func TestPlaceNameCacheKeysDistinguishAnchorages(t *testing.T) {
 	}
 }
 
-// ── Test 2: the ladder stops at the tightest non-empty ring ────────────────
+// ── Test 2: the ladder stops at the tightest ring with a named answer ──────
 
 func TestResolvePlaceNameStopsAtTightestRing(t *testing.T) {
 	tests := []struct {
 		name      string
-		lat, lon  float64
-		fixtures  map[int][]byte
+		results   map[int]placeNameResult
 		wantName  string
 		wantCalls []int
 	}{
 		{
-			name: "goldsmith resolves on the first 400m ring, never widens",
-			lat:  goldsmithLat, lon: goldsmithLon,
-			fixtures: map[int][]byte{
-				400: loadOverpassFixture(t, "overpass_goldsmith_400.json"),
+			name: "resolves on the first 400m ring, never widens",
+			results: map[int]placeNameResult{
+				400: {Name: "Goldsmith Island", Kind: "island"},
 			},
 			wantName:  "Goldsmith Island",
 			wantCalls: []int{400},
 		},
 		{
-			name: "lindeman's empty 400m ring forces widening to 1500m, and stops there",
-			lat:  lindemanLat, lon: lindemanLon,
-			fixtures: map[int][]byte{
-				400:  loadOverpassFixture(t, "overpass_lindeman_400.json"),
-				1500: loadOverpassFixture(t, "overpass_lindeman_1500.json"),
+			name: "an empty 400m ring forces widening to 1500m, and stops there",
+			results: map[int]placeNameResult{
+				1500: {Name: "Lindeman Island", Kind: "island"},
 			},
 			wantName:  "Lindeman Island",
 			wantCalls: []int{400, 1500},
@@ -254,78 +208,65 @@ func TestResolvePlaceNameStopsAtTightestRing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fetcher := &fakeOverpassFetcher{fixtures: tt.fixtures}
+			provider := &fakePlaceNameProvider{id: "fake-place-names", results: tt.results}
+			resolve := func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
 
-			got, err := resolvePlaceName(fetcher, tt.lat, tt.lon)
+			got, err := resolvePlaceName(resolve, goldsmithLat, goldsmithLon)
 			if err != nil {
 				t.Fatalf("resolvePlaceName: %v", err)
 			}
 			if got != tt.wantName {
 				t.Fatalf("expected name %q, got %q", tt.wantName, got)
 			}
-			if !slices.Equal(fetcher.calls, tt.wantCalls) {
+			if calls := provider.callsSnapshot(); !equalInts(calls, tt.wantCalls) {
 				t.Fatalf(
-					"expected rings queried %v, got %v (the 5000m fixture must never be requested once a tighter ring hits)",
-					tt.wantCalls, fetcher.calls,
+					"expected rings queried %v, got %v (the 5000m ring must never be requested once a tighter ring hits)",
+					tt.wantCalls, calls,
 				)
 			}
 		})
 	}
 }
 
-// ── Test 3: an unnamed feature must never win, even after widening ─────────
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
 
-func TestResolvePlaceNameSkipsUnnamedFeatures(t *testing.T) {
-	fetcher := &fakeOverpassFetcher{fixtures: map[int][]byte{
-		400:  []byte(`{"elements":[]}`),
-		1500: []byte(`{"elements":[]}`),
-		5000: loadOverpassFixture(t, "overpass_lindeman_5000.json"),
-	}}
+// A ladder that exhausts every ring with no named answer is a legitimate
+// negative, not a failure - resolvePlaceName must walk all three rings and
+// return "" with no error.
+func TestResolvePlaceNameExhaustsLadderWithNoNamedAnswer(t *testing.T) {
+	provider := &fakePlaceNameProvider{id: "fake-place-names"}
+	resolve := func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
 
-	got, err := resolvePlaceName(fetcher, lindemanLat, lindemanLon)
+	got, err := resolvePlaceName(resolve, lindemanLat, lindemanLon)
 	if err != nil {
 		t.Fatalf("resolvePlaceName: %v", err)
 	}
-	if !slices.Equal(fetcher.calls, []int{400, 1500, 5000}) {
-		t.Fatalf("expected all three rings queried in order, got %v", fetcher.calls)
+	if got != "" {
+		t.Fatalf("expected an empty name when no ring resolves, got %q", got)
 	}
-	if got == "" {
-		t.Fatalf("expected a resolved name from the 5000m ring (12 of its 13 elements are named), got empty")
-	}
-	if !lindeman5000NamedFeatures[got] {
-		t.Fatalf("winner %q is not one of the fixture's named features — the unnamed islet (tags: {\"place\":\"islet\"}, no name) must never win", got)
+	if want := placeNameRadiiMeters; !equalInts(provider.callsSnapshot(), want) {
+		t.Fatalf("expected all rings queried in order %v, got %v", want, provider.callsSnapshot())
 	}
 }
 
-// TestBestNamedFeatureSkipsTheUnnamedIslet is a tighter, ranking-only unit
-// test for the same fixture: it fails fast (with a clear message) if the
-// fixture itself ever drifts from the captured shape this feature's tests
-// depend on (exactly 13 elements, exactly 1 unnamed).
-func TestBestNamedFeatureSkipsTheUnnamedIslet(t *testing.T) {
-	raw := loadOverpassFixture(t, "overpass_lindeman_5000.json")
-	var parsed overpassResponse
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		t.Fatalf("unmarshal fixture: %v", err)
-	}
-	if len(parsed.Elements) != 13 {
-		t.Fatalf("fixture drift: expected 13 elements in overpass_lindeman_5000.json, got %d", len(parsed.Elements))
-	}
-	unnamed := 0
-	for _, el := range parsed.Elements {
-		if strings.TrimSpace(el.Tags["name"]) == "" {
-			unnamed++
-		}
-	}
-	if unnamed != 1 {
-		t.Fatalf("fixture drift: expected exactly 1 unnamed element, got %d", unnamed)
-	}
+// A provider-resolution failure (e.g. the configured plugin isn't
+// installed) must surface as an error, not silently return "".
+func TestResolvePlaceName_ProviderResolutionErrorSurfaces(t *testing.T) {
+	resolve := func() (placeNameProvider, string, error) { return nil, "", fmt.Errorf("simulated resolution failure") }
 
-	name, ok := bestNamedFeature(parsed.Elements, lindemanLat, lindemanLon)
-	if !ok {
-		t.Fatalf("expected a named winner among the 12 named candidates")
-	}
-	if !lindeman5000NamedFeatures[name] {
-		t.Fatalf("winner %q must be one of the fixture's actual named features", name)
+	_, err := resolvePlaceName(resolve, goldsmithLat, goldsmithLon)
+	if err == nil {
+		t.Fatalf("expected an error when the place-names provider fails to resolve")
 	}
 }
 
@@ -335,23 +276,19 @@ func TestPlaceNameFailureIsNotCached(t *testing.T) {
 	resetPlaceNameCache(t)
 	resetPlaceNameBackoff(t)
 
-	// Overpass's real rate-limit signature: HTTP 200, text/html body
-	// containing this exact marker string (captured while fetching this
-	// feature's fixtures). Must be treated as a failure, not zero results.
-	rateLimitedBody := []byte(`<html><body>Dispatcher_Client::request_read_and_idx::rate_limited</body></html>`)
-	fetcher := &fakeOverpassFetcher{
-		fixtures: map[int][]byte{400: rateLimitedBody},
-		types:    map[int]string{400: "text/html"},
-	}
+	provider := &fakePlaceNameProvider{id: "fake-place-names", errs: map[int]error{
+		400: fmt.Errorf("simulated upstream failure"),
+	}}
+	resolve := func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
 
 	key := placeNameCacheKey(goldsmithLat, goldsmithLon)
 
-	got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon)
+	got := resolveAndCachePlaceName(resolve, goldsmithLat, goldsmithLon)
 	if got != "" {
-		t.Fatalf("expected empty name on a rate-limited response, got %q", got)
+		t.Fatalf("expected empty name on a failed response, got %q", got)
 	}
-	if fetcher.callCount() != 1 {
-		t.Fatalf("expected exactly 1 upstream call, got %d", fetcher.callCount())
+	if provider.callCount() != 1 {
+		t.Fatalf("expected exactly 1 upstream call, got %d", provider.callCount())
 	}
 	if _, ok := placeNameCache.get(key); ok {
 		t.Fatalf("a failed lookup must not be cached")
@@ -364,11 +301,13 @@ func TestPlaceNameFailureIsNotCached(t *testing.T) {
 	resetPlaceNameBackoff(t)
 
 	// A second call must retry the upstream rather than serving a cached
-	// blank, and once Overpass succeeds, the resolved name is what's cached.
-	fetcher2 := &fakeOverpassFetcher{fixtures: map[int][]byte{
-		400: loadOverpassFixture(t, "overpass_goldsmith_400.json"),
+	// blank, and once the provider succeeds, the resolved name is what's
+	// cached.
+	provider2 := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
+		400: {Name: "Goldsmith Island", Kind: "island"},
 	}}
-	got2 := resolveAndCachePlaceName(fetcher2, goldsmithLat, goldsmithLon)
+	resolve2 := func() (placeNameProvider, string, error) { return provider2, provider2.ID(), nil }
+	got2 := resolveAndCachePlaceName(resolve2, goldsmithLat, goldsmithLon)
 	if got2 != "Goldsmith Island" {
 		t.Fatalf("expected the retry to resolve Goldsmith Island, got %q", got2)
 	}
@@ -379,29 +318,19 @@ func TestPlaceNameFailureIsNotCached(t *testing.T) {
 
 // ── Empty results: cached with a shorter TTL, refetched after it ──────────
 
-// allRingsEmptyFixtures makes every one of placeNameRadiiMeters's rings
-// return zero elements, so resolvePlaceName genuinely exhausts the ladder
-// with no error - the real "no named feature here" case, not a failure.
-func allRingsEmptyFixtures() map[int][]byte {
-	fixtures := map[int][]byte{}
-	for _, radius := range placeNameRadiiMeters {
-		fixtures[radius] = []byte(`{"elements":[]}`)
-	}
-	return fixtures
-}
-
 func TestResolveAndCachePlaceName_EmptyResultIsCachedAndNotRefetchedWithinTTL(t *testing.T) {
 	resetPlaceNameCache(t)
 	resetPlaceNameBackoff(t)
 
-	fetcher := &fakeOverpassFetcher{fixtures: allRingsEmptyFixtures()}
+	provider := &fakePlaceNameProvider{id: "fake-place-names"}
+	resolve := func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
 
-	got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon)
+	got := resolveAndCachePlaceName(resolve, goldsmithLat, goldsmithLon)
 	if got != "" {
 		t.Fatalf("expected an empty name when every ring is genuinely empty, got %q", got)
 	}
-	if want := len(placeNameRadiiMeters); fetcher.callCount() != want {
-		t.Fatalf("expected the ladder to walk all %d rings, got %d calls", want, fetcher.callCount())
+	if want := len(placeNameRadiiMeters); provider.callCount() != want {
+		t.Fatalf("expected the ladder to walk all %d rings, got %d calls", want, provider.callCount())
 	}
 
 	key := placeNameCacheKey(goldsmithLat, goldsmithLon)
@@ -411,12 +340,12 @@ func TestResolveAndCachePlaceName_EmptyResultIsCachedAndNotRefetchedWithinTTL(t 
 
 	// A second call within the TTL must be served from the cache: no
 	// further upstream calls at all.
-	got2 := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon)
+	got2 := resolveAndCachePlaceName(resolve, goldsmithLat, goldsmithLon)
 	if got2 != "" {
 		t.Fatalf("expected the cached empty result, got %q", got2)
 	}
-	if fetcher.callCount() != len(placeNameRadiiMeters) {
-		t.Fatalf("expected no additional upstream calls while the empty result is within its TTL, got %d total calls", fetcher.callCount())
+	if provider.callCount() != len(placeNameRadiiMeters) {
+		t.Fatalf("expected no additional upstream calls while the empty result is within its TTL, got %d total calls", provider.callCount())
 	}
 }
 
@@ -424,8 +353,10 @@ func TestResolveAndCachePlaceName_EmptyResultRefetchedAfterItsTTL(t *testing.T) 
 	resetPlaceNameCache(t)
 	resetPlaceNameBackoff(t)
 
-	fetcher := &fakeOverpassFetcher{fixtures: allRingsEmptyFixtures()}
-	if got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon); got != "" {
+	provider := &fakePlaceNameProvider{id: "fake-place-names"}
+	resolve := func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
+
+	if got := resolveAndCachePlaceName(resolve, goldsmithLat, goldsmithLon); got != "" {
 		t.Fatalf("expected an empty result, got %q", got)
 	}
 
@@ -443,12 +374,12 @@ func TestResolveAndCachePlaceName_EmptyResultRefetchedAfterItsTTL(t *testing.T) 
 		t.Fatalf("expected the backdated empty entry to have expired")
 	}
 
-	// A resolve past the empty-result TTL must walk Overpass again.
-	if got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon); got != "" {
+	// A resolve past the empty-result TTL must walk the provider again.
+	if got := resolveAndCachePlaceName(resolve, goldsmithLat, goldsmithLon); got != "" {
 		t.Fatalf("expected an empty result again, got %q", got)
 	}
-	if want := 2 * len(placeNameRadiiMeters); fetcher.callCount() != want {
-		t.Fatalf("expected a full second ladder walk after TTL expiry, got %d total calls (want %d)", fetcher.callCount(), want)
+	if want := 2 * len(placeNameRadiiMeters); provider.callCount() != want {
+		t.Fatalf("expected a full second ladder walk after TTL expiry, got %d total calls (want %d)", provider.callCount(), want)
 	}
 }
 
@@ -479,28 +410,27 @@ func TestResolveAndCachePlaceName_BackoffSkipsUpstreamAfterAFailure(t *testing.T
 	resetPlaceNameCache(t)
 	resetPlaceNameBackoff(t)
 
-	rateLimitedBody := []byte(`<html><body>Dispatcher_Client::request_read_and_idx::rate_limited</body></html>`)
-	fetcher := &fakeOverpassFetcher{
-		fixtures: map[int][]byte{400: rateLimitedBody},
-		types:    map[int]string{400: "text/html"},
-	}
+	provider := &fakePlaceNameProvider{id: "fake-place-names", errs: map[int]error{
+		400: fmt.Errorf("simulated upstream failure"),
+	}}
+	resolve := func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
 
-	if got := resolveAndCachePlaceName(fetcher, goldsmithLat, goldsmithLon); got != "" {
+	if got := resolveAndCachePlaceName(resolve, goldsmithLat, goldsmithLon); got != "" {
 		t.Fatalf("expected an empty result on the failing first call, got %q", got)
 	}
-	if fetcher.callCount() != 1 {
-		t.Fatalf("expected exactly 1 upstream call for the first (failing) attempt, got %d", fetcher.callCount())
+	if provider.callCount() != 1 {
+		t.Fatalf("expected exactly 1 upstream call for the first (failing) attempt, got %d", provider.callCount())
 	}
 
 	// A different position (so the cache can't be the reason for the
 	// no-op) must still be skipped entirely while backoff is active - the
-	// whole point being that Overpass itself, not just this one cell, is
-	// assumed unreachable for the window.
-	if got := resolveAndCachePlaceName(fetcher, lindemanLat, lindemanLon); got != "" {
+	// whole point being that the provider itself, not just this one cell,
+	// is assumed unreachable for the window.
+	if got := resolveAndCachePlaceName(resolve, lindemanLat, lindemanLon); got != "" {
 		t.Fatalf("expected an empty result while backed off, got %q", got)
 	}
-	if fetcher.callCount() != 1 {
-		t.Fatalf("expected no additional upstream call while backoff is active, got %d total calls", fetcher.callCount())
+	if provider.callCount() != 1 {
+		t.Fatalf("expected no additional upstream call while backoff is active, got %d total calls", provider.callCount())
 	}
 }
 
@@ -551,47 +481,6 @@ func TestPlaceNameBackoff_RecordSuccessClearsTheLadder(t *testing.T) {
 	}
 }
 
-// ── HTTP client timeout vs. the query's own [timeout:N] ────────────────────
-
-func TestOverpassTimeouts_ClientTimeoutExceedsQueryTimeout(t *testing.T) {
-	if overpassTimeout <= time.Duration(overpassQueryTimeoutSeconds)*time.Second {
-		t.Fatalf("expected the HTTP client timeout (%s) to exceed the query's own [timeout:%ds], it must not give up while Overpass is still working within its stated budget", overpassTimeout, overpassQueryTimeoutSeconds)
-	}
-}
-
-func TestBuildOverpassQuery_EmbeddedTimeoutMatchesTheConstant(t *testing.T) {
-	query := buildOverpassQuery(400, goldsmithLat, goldsmithLon)
-	want := fmt.Sprintf("[timeout:%d]", overpassQueryTimeoutSeconds)
-	if !strings.Contains(query, want) {
-		t.Fatalf("expected the built query to embed %q, got: %s", want, query)
-	}
-}
-
-// TestFetchOverpassRingTreatsHTMLRateLimitBodyAsFailure isolates the
-// rate-limit detection itself: a 200 with an HTML body must surface as an
-// explicit, distinctly-logged failure, never silently parsed as "zero
-// elements" (which would read identically to a legitimate empty ring).
-func TestFetchOverpassRingTreatsHTMLRateLimitBodyAsFailure(t *testing.T) {
-	var logBuf bytes.Buffer
-	origOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	t.Cleanup(func() { log.SetOutput(origOutput) })
-
-	rateLimitedBody := []byte(`<html><body>Dispatcher_Client::request_read_and_idx::rate_limited</body></html>`)
-	fetcher := &fakeOverpassFetcher{
-		fixtures: map[int][]byte{400: rateLimitedBody},
-		types:    map[int]string{400: "text/html"},
-	}
-
-	_, err := fetchOverpassRing(fetcher, 400, goldsmithLat, goldsmithLon)
-	if err == nil {
-		t.Fatalf("expected an explicit error for a rate-limited (HTTP 200, HTML body) response")
-	}
-	if !strings.Contains(strings.ToLower(logBuf.String()), "rate") {
-		t.Fatalf("expected an explicit rate-limit log line distinct from a generic parse failure, got: %q", logBuf.String())
-	}
-}
-
 // ── updateTickPlaceName: anchor-bound pin/skip and retry-fill ──────────────
 
 func withAnchorWatchState(t *testing.T, state *anchorWatchData) {
@@ -610,15 +499,15 @@ func withAnchorWatchState(t *testing.T, state *anchorWatchData) {
 func TestUpdateTickPlaceName_SkipsLiveResolutionWhilePinned(t *testing.T) {
 	withAnchorWatchState(t, &anchorWatchData{Lat: goldsmithLat, Lon: goldsmithLon, PlaceName: "Goldsmith Island"})
 
-	fetcher := &fakeOverpassFetcher{}
-	withFakeOverpassFetcher(t, fetcher)
+	provider := &fakePlaceNameProvider{id: "fake-place-names"}
+	withFakePlaceNameProviderResolver(t, provider)
 
 	got := updateTickPlaceName(goldsmithLat, goldsmithLon)
 	if got != "Goldsmith Island" {
 		t.Fatalf("expected the pinned anchor place name, got %q", got)
 	}
-	if fetcher.callCount() != 0 {
-		t.Fatalf("expected no live resolution while a named anchor watch is pinned, got %d calls", fetcher.callCount())
+	if provider.callCount() != 0 {
+		t.Fatalf("expected no live resolution while a named anchor watch is pinned, got %d calls", provider.callCount())
 	}
 }
 
@@ -628,13 +517,13 @@ func TestUpdateTickPlaceName_FillsUnresolvedAnchorPlaceNameOnRetry(t *testing.T)
 	resetPlaceNameTickState(t)
 	withAnchorWatchState(t, &anchorWatchData{Lat: goldsmithLat, Lon: goldsmithLon, PlaceName: ""})
 
-	fetcher := &fakeOverpassFetcher{fixtures: map[int][]byte{
-		400: loadOverpassFixture(t, "overpass_goldsmith_400.json"),
+	provider := &fakePlaceNameProvider{id: "fake-place-names", results: map[int]placeNameResult{
+		400: {Name: "Goldsmith Island", Kind: "island"},
 	}}
-	withFakeOverpassFetcher(t, fetcher)
+	withFakePlaceNameProviderResolver(t, provider)
 
 	// The tick starts the retry in the background and returns straight away;
-	// the pinned name lands once Overpass answers.
+	// the pinned name lands once the provider answers.
 	tickOrFail(t, goldsmithLat, goldsmithLon)
 
 	waitForCondition(t, 2*time.Second, func() bool {
@@ -644,13 +533,17 @@ func TestUpdateTickPlaceName_FillsUnresolvedAnchorPlaceNameOnRetry(t *testing.T)
 	})
 
 	// resolveAndPinAnchorWatchPlaceName's background goroutine updates the
-	// in-memory state above and THEN calls saveAnchorWatch (a real file
-	// write, now fsync'd) before it returns and clears placeNameResolve's
-	// in-flight flag. Without waiting for that flag to clear too, the test
-	// can return - and t.TempDir() can start tearing down its directory -
-	// while that write is still in flight, intermittently racing the
-	// temp-dir cleanup (observed: ENOENT/EINVAL from writeJSONFileAtomic,
-	// and "directory not empty" from TempDir's own cleanup).
+	// in-memory state and THEN calls saveAnchorWatch (writeJSONFileAtomic,
+	// which now fsyncs) - both on the same background goroutine, but with
+	// no signal back to this goroutine for "the save has landed too".
+	// Checking the file's own content directly here (rather than racing
+	// straight into the memory-wipe-and-reload below the moment the
+	// in-memory flag flips) is what makes this wait actually wait for the
+	// persisted write, not just the update that precedes it.
+	waitForCondition(t, 2*time.Second, func() bool {
+		raw, err := os.ReadFile(anchorWatchFilePath())
+		return err == nil && strings.Contains(string(raw), "Goldsmith Island")
+	})
 	waitForPlaceNameResolveIdle(t)
 }
 
@@ -696,19 +589,7 @@ func TestPlaceNameHandler_ServesAnchorBoundNameWhenActive(t *testing.T) {
 	}
 }
 
-// ── The poll tick must never block on Overpass ─────────────────────────────
-
-// gatedFetcher returns a fetcher whose every Do blocks until the returned
-// release func is called, so a test can hold a resolution in flight.
-func gatedFetcher(t *testing.T, fixtures map[int][]byte) (*fakeOverpassFetcher, func()) {
-	t.Helper()
-	gate := make(chan struct{})
-	fetcher := &fakeOverpassFetcher{fixtures: fixtures, gate: gate}
-	var once sync.Once
-	release := func() { once.Do(func() { close(gate) }) }
-	t.Cleanup(release)
-	return fetcher, release
-}
+// ── The poll tick must never block on the place-names provider ────────────
 
 // resetPlaceNameTickState clears the tick's published cell/name and the
 // single-flight guard so a background resolve from an earlier test cannot
@@ -733,7 +614,7 @@ func resetPlaceNameTickState(t *testing.T) {
 
 // tickOrFail calls updateTickPlaceName and fails the test if it does not
 // return promptly, instead of hanging the suite. A regression that puts the
-// Overpass round trip back on the tick must fail fast and say why.
+// provider round trip back on the tick must fail fast and say why.
 func tickOrFail(t *testing.T, lat, lon float64) string {
 	t.Helper()
 	var name string
@@ -746,7 +627,7 @@ func tickOrFail(t *testing.T, lat, lon float64) string {
 	case <-returned:
 		return name
 	case <-time.After(2 * time.Second):
-		t.Fatal("updateTickPlaceName blocked on the Overpass round trip; the poll tick is sequential, so this stalls depth/wind/solar history, track points and contact recording behind it")
+		t.Fatal("updateTickPlaceName blocked on the place-names provider round trip; the poll tick is sequential, so this stalls depth/wind/solar history, track points and contact recording behind it")
 		return ""
 	}
 }
@@ -763,16 +644,16 @@ func waitForPlaceNameResolveIdle(t *testing.T) {
 // startTrackPoller runs sampleTracks sequentially on a single goroutine
 // (`for range ticker.C`), and Go drops ticks while that receiver is busy. A
 // synchronous resolve there stalls every other thing the tick samples, for
-// up to three rings x overpassTimeout.
+// as long as the provider's ladder takes to answer.
 func TestUpdateTickPlaceName_DoesNotBlockTheTick(t *testing.T) {
 	resetPlaceNameCache(t)
 	withAnchorWatchState(t, nil)
 	resetPlaceNameTickState(t)
 
-	fetcher, release := gatedFetcher(t, map[int][]byte{
-		400: loadOverpassFixture(t, "overpass_goldsmith_400.json"),
+	provider, release := gatedPlaceNameProvider(t, map[int]placeNameResult{
+		400: {Name: "Goldsmith Island", Kind: "island"},
 	})
-	withFakeOverpassFetcher(t, fetcher)
+	withFakePlaceNameProviderResolver(t, provider)
 
 	tickOrFail(t, goldsmithLat, goldsmithLon)
 
@@ -786,20 +667,20 @@ func TestUpdateTickPlaceName_SingleFlightPreventsGoroutinePileUp(t *testing.T) {
 	withAnchorWatchState(t, nil)
 	resetPlaceNameTickState(t)
 
-	fetcher, release := gatedFetcher(t, map[int][]byte{
-		400: loadOverpassFixture(t, "overpass_goldsmith_400.json"),
+	provider, release := gatedPlaceNameProvider(t, map[int]placeNameResult{
+		400: {Name: "Goldsmith Island", Kind: "island"},
 	})
-	withFakeOverpassFetcher(t, fetcher)
+	withFakePlaceNameProviderResolver(t, provider)
 
 	tickOrFail(t, goldsmithLat, goldsmithLon)
-	waitForCondition(t, 2*time.Second, func() bool { return fetcher.callCount() == 1 })
+	waitForCondition(t, 2*time.Second, func() bool { return provider.callCount() == 1 })
 
 	for range 5 {
 		tickOrFail(t, goldsmithLat, goldsmithLon)
 	}
 
-	if got := fetcher.callCount(); got != 1 {
-		t.Fatalf("expected the single-flight guard to hold at one in-flight resolution, got %d upstream calls; a 5s tick against a 60s worst case stacks goroutines without it", got)
+	if got := provider.callCount(); got != 1 {
+		t.Fatalf("expected the single-flight guard to hold at one in-flight resolution, got %d upstream calls; a 5s tick against a much slower worst case stacks goroutines without it", got)
 	}
 
 	release()
@@ -814,13 +695,13 @@ func TestUpdateTickPlaceName_StaleResolveDoesNotPublishAfterMovingCell(t *testin
 	withAnchorWatchState(t, nil)
 	resetPlaceNameTickState(t)
 
-	fetcher, release := gatedFetcher(t, map[int][]byte{
-		400: loadOverpassFixture(t, "overpass_goldsmith_400.json"),
+	provider, release := gatedPlaceNameProvider(t, map[int]placeNameResult{
+		400: {Name: "Goldsmith Island", Kind: "island"},
 	})
-	withFakeOverpassFetcher(t, fetcher)
+	withFakePlaceNameProviderResolver(t, provider)
 
 	tickOrFail(t, goldsmithLat, goldsmithLon)
-	waitForCondition(t, 2*time.Second, func() bool { return fetcher.callCount() == 1 })
+	waitForCondition(t, 2*time.Second, func() bool { return provider.callCount() == 1 })
 
 	// The vessel moves to a different cell before that resolve comes back.
 	tickOrFail(t, lindemanLat, lindemanLon)

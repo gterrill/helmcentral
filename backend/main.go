@@ -183,11 +183,13 @@ func main() {
 	e := echo.New()
 	port := getEnv("PORT", "8080")
 
-	// The Overpass endpoint for place-name resolution (place_name.go), the
-	// assistant's find_places tool (assistant_tools.go) and the osm-overpass
-	// POI plugin is that plugin's own operator-editable config value, not an
-	// env var or a settings.yaml field (ADR 0100) - resolved fresh on every
-	// lookup via currentOverpassAPIURL, not once here at startup.
+	// Place-name resolution (place_name.go) and the assistant's find_places
+	// tool (assistant_tools.go) both go through whichever installed POI
+	// plugin ui.place_name_provider names (ADR 0101) - resolved fresh on
+	// every lookup via resolvePlaceNameProvider, not once here at startup.
+	// There is no backend Overpass client: a plugin that wants to use
+	// Overpass (osm-overpass, by default) owns its own endpoint as a
+	// plugin config value (ADR 0100).
 
 	// Capture logs to in-memory ring buffer for Settings -> Logs viewer
 	logWriter := initLogCapture()
@@ -566,6 +568,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/tide-chart", tierRead, tideChartHandler},
 		{http.MethodGet, "/api/tide-nearest", tierRead, tideNearestHandler},
 		{http.MethodGet, "/api/place-name", tierRead, placeName},
+		{http.MethodGet, "/api/place-name-providers", tierRead, placeNameProvidersHandler},
 		{http.MethodGet, "/api/anchor-watch", tierRead, getAnchorWatch},
 		{http.MethodGet, "/api/anchor-watch/placemarks", tierRead, listPlacemarksHandler},
 		{http.MethodGet, "/api/anchor-watch/trails/self", tierRead, getSelfTrailHandler},

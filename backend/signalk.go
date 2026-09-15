@@ -21,13 +21,13 @@ import (
 )
 
 const (
-	defaultDistanceUnits             = "metric"
-	defaultBowRollerHeightM          = 1.5
-	defaultChainSizeMM               = 12
-	defaultChainOnboardM             = 150
-	defaultHullType                  = "power_cat"
-	defaultScopeMethod               = "ratio"
-	defaultWindageAreaM2             = 35
+	defaultDistanceUnits    = "metric"
+	defaultBowRollerHeightM = 1.5
+	defaultChainSizeMM      = 12
+	defaultChainOnboardM    = 150
+	defaultHullType         = "power_cat"
+	defaultScopeMethod      = "ratio"
+	defaultWindageAreaM2    = 35
 	// defaultMayaraPort is mayara-server's own default REST/WebSocket port.
 	// Used only to clamp an out-of-range settings.mayara.port; unlike
 	// defaultSignalKAddress there is no equivalent default *address* — see
@@ -82,15 +82,20 @@ type settingsPayload struct {
 		HouseBatteryCapacityAh float64 `json:"house_battery_capacity_ah"`
 	} `json:"boat"`
 	UI struct {
-		TankLabels                map[string]string `json:"tank_labels"`
-		TideProvider              string            `json:"tide_provider"`
-		TideStationID             string            `json:"tide_station_id"`
-		TideStationName           string            `json:"tide_station_name"`
-		TideAutoStation           bool              `json:"tide_auto_station"`
-		WeatherProvider           string            `json:"weather_provider"`
-		WaveProvider              string            `json:"wave_provider"`
-		POIProvider               string            `json:"poi_provider"`
-		ForecastWarningsProvider  string            `json:"forecast_warnings_provider"`
+		TankLabels      map[string]string `json:"tank_labels"`
+		TideProvider    string            `json:"tide_provider"`
+		TideStationID   string            `json:"tide_station_id"`
+		TideStationName string            `json:"tide_station_name"`
+		TideAutoStation bool              `json:"tide_auto_station"`
+		WeatherProvider string            `json:"weather_provider"`
+		WaveProvider    string            `json:"wave_provider"`
+		POIProvider     string            `json:"poi_provider"`
+		// PlaceNameProvider (ADR 0101) selects which installed POI plugin
+		// answers place-name questions (the position tile, the anchor pin,
+		// find_places) - independent of POIProvider (the Nearby widget),
+		// though the two commonly name the same plugin.
+		PlaceNameProvider        string `json:"place_name_provider"`
+		ForecastWarningsProvider string `json:"forecast_warnings_provider"`
 	} `json:"ui"`
 	Anchor struct {
 		BowRollerHeightM float64 `json:"bow_roller_height_m"`
@@ -213,6 +218,7 @@ func updateSettingsHandler(c echo.Context) error {
 	uiMap["weather_provider"] = normalized.UI.WeatherProvider
 	uiMap["wave_provider"] = normalized.UI.WaveProvider
 	uiMap["poi_provider"] = normalized.UI.POIProvider
+	uiMap["place_name_provider"] = normalized.UI.PlaceNameProvider
 	uiMap["forecast_warnings_provider"] = normalized.UI.ForecastWarningsProvider
 	settings["ui"] = uiMap
 
@@ -387,6 +393,7 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		payload.UI.WeatherProvider = strings.TrimSpace(coerceString(uiMap["weather_provider"]))
 		payload.UI.WaveProvider = strings.TrimSpace(coerceString(uiMap["wave_provider"]))
 		payload.UI.POIProvider = strings.TrimSpace(coerceString(uiMap["poi_provider"]))
+		payload.UI.PlaceNameProvider = strings.TrimSpace(coerceString(uiMap["place_name_provider"]))
 		payload.UI.ForecastWarningsProvider = strings.TrimSpace(coerceString(uiMap["forecast_warnings_provider"]))
 	}
 
@@ -527,6 +534,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.UI.WeatherProvider = strings.TrimSpace(req.UI.WeatherProvider)
 	normalized.UI.WaveProvider = strings.TrimSpace(req.UI.WaveProvider)
 	normalized.UI.POIProvider = strings.TrimSpace(req.UI.POIProvider)
+	normalized.UI.PlaceNameProvider = strings.TrimSpace(req.UI.PlaceNameProvider)
 	normalized.UI.ForecastWarningsProvider = strings.TrimSpace(req.UI.ForecastWarningsProvider)
 
 	normalized.Anchor.BowRollerHeightM = req.Anchor.BowRollerHeightM

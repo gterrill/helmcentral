@@ -5,40 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 )
 
 // This file implements the three read-only tools the onboard assistant's
 // agentic loop (assistant_run.go) can call (ADR 0093): find_places,
 // get_wind_forecast and get_tides. Every dependency is injected via
 // assistantToolDeps so tests never need a live SignalK connection, a
-// registered WASM plugin, or a real Overpass round trip - the same
+// registered WASM plugin, or a real place-names provider round trip - the same
 // injectable-func idiom forecastWarningsFetcher (forecast_warnings_fetcher.go)
 // already uses.
-
-// assistantFindPlacesRadiusNm is find_places' rung 1 (exact name match)
-// search radius. 100nm is generous enough to cover a multi-day passage's
-// worth of candidate anchorages without the operator ever having to think
-// about a radius parameter - there is deliberately no way for the model to
-// widen or narrow it. Measured live against overpass.openstreetmap.fr (the
-// mirror the boat actually reaches) on 2026-09-11: an untagged exact-name
-// match answers in about 1s even at this radius, because Overpass can use
-// its name index directly instead of scanning every element in the box
-// against a regex - see ADR 0093 section 8.
-const assistantFindPlacesRadiusNm = 100.0
-
-// assistantFindPlacesRegexRadiusNm is find_places' rung 2 (partial name,
-// regex) search radius - far tighter than rung 1's, because a name regex is
-// not indexable and costs Overpass a full scan of every element in the box.
-// The same 2026-09-11 measurement against overpass.openstreetmap.fr: the
-// four-clause regex union answers in 2 to 5s at 20nm, and times out
-// server-side (55 to 65s, "Query timed out") somewhere past about 20nm - see
-// ADR 0093 section 8.
-const assistantFindPlacesRegexRadiusNm = 20.0
 
 // assistantMaxForecastDays bounds get_wind_forecast.days. Ten days matches
 // weatherForecast's own cap (weather_providers.go).
@@ -59,15 +37,19 @@ const assistantMaxToolResultChars = 12000
 
 // assistantToolDeps are every real-world dependency the four tools need,
 // injected so tests supply fakes/stubs instead of a live SignalK, WASM
-// plugin registry, Overpass endpoint or InfluxDB connection.
+// plugin registry, place-names provider or InfluxDB connection.
 type assistantToolDeps struct {
 	now         func() time.Time
 	vesselState func() (vesselStateData, error)
 	weather     func() (weatherProvider, string, error)
 	waves       func() (waveProvider, string, error)
 	tides       func() (tideProvider, string, error)
-	overpass    overpassFetcher
-	routes      func() []routeData
+	// placeNames resolves the currently configured place-names provider
+	// (ui.place_name_provider) for find_places, the same
+	// placeNameProviderResolver shape place_name.go uses - read fresh on
+	// every call so a Settings change takes effect on the very next lookup.
+	placeNames placeNameProviderResolver
+	routes     func() []routeData
 	// influxRange is estimate_passage's only I/O dependency: any SignalK
 	// path's history over an explicit range, aggregated to fixed-size
 	// buckets. Production wires queryInfluxPathRange (influx.go); tests
@@ -95,8 +77,8 @@ type assistantToolDeps struct {
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
-// state, the settings-configured weather/wave/tide providers, the shared
-// Overpass HTTP client (place_name.go) and a snapshot of the saved routes.
+// state, the settings-configured weather/wave/tide/place-names providers,
+// and a snapshot of the saved routes.
 func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 	return assistantToolDeps{
 		now:         time.Now,
@@ -110,7 +92,9 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		tides: func() (tideProvider, string, error) {
 			return resolveTideProvider(settingsPath)
 		},
-		overpass:          overpassHTTPClient,
+		placeNames: func() (placeNameProvider, string, error) {
+			return resolvePlaceNameProvider(settingsPath)
+		},
 		routes:            assistantRouteSnapshot,
 		influxRange:       queryInfluxPathRange,
 		fuelRateInstances: fuelRateInstancesFromSnapshot,
@@ -156,8 +140,9 @@ func fuelRateInstancesFromSnapshot() []string {
 }
 
 // assistantRouteSnapshot copies the saved routes under routesMu's read lock
-// (routes.go) so find_places never holds that lock while it does Overpass
-// I/O or JSON work - the same "copy under the lock, work outside it"
+// (routes.go) so find_places never holds that lock while it does
+// place-names provider I/O or JSON work - the same "copy under the lock,
+// work outside it"
 // discipline resolveAndPinAnchorWatchPlaceName (place_name.go) already
 // follows for anchorWatchMu.
 func assistantRouteSnapshot() []routeData {
@@ -181,11 +166,11 @@ func assistantToolDefinitions() []openRouterTool {
 				Name: "find_places",
 				Description: "Resolve a place name (a bay, anchorage, island, reef, marina, harbour or similar) " +
 					"to one or more candidate positions with distance and bearing, searching the vessel's saved " +
-					"route waypoints first and then OpenStreetMap. Centres on the vessel's current position unless " +
-					"near_lat/near_lon are given. Call this before any forecast or tide tool for a place you only " +
-					"know by name. Pass the bare feature name (e.g. \"Bona Bay\", not \"Bona Bay, Gloucester " +
-					"Island\"). For a place more than about 20 nm from the vessel, or when a lookup returns " +
-					"nothing, pass near_lat/near_lon of a resolved nearby feature and retry.",
+					"route waypoints first and then the configured place-names plugin. Centres on the vessel's " +
+					"current position unless near_lat/near_lon are given. Call this before any forecast or tide " +
+					"tool for a place you only know by name. Pass the bare feature name (e.g. \"Bona Bay\", not " +
+					"\"Bona Bay, Gloucester Island\"). For a place well away from the vessel, or when a lookup " +
+					"returns nothing, pass near_lat/near_lon of a resolved nearby feature and retry.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -315,10 +300,11 @@ func assistantToolDefinitions() []openRouterTool {
 // round's calls concurrently, one goroutine per call, all sharing this same
 // ctx, so a cancelled run (the operator closes the tab, or the run's own
 // timeout fires) is visible to every executeXxx below before it starts, and
-// between its outbound calls where it makes more than one. None of
-// Overpass (postOverpassQuery), InfluxDB (queryInfluxPathRange) or the
-// weather/wave/tide provider interfaces (weatherProvider.FetchForecast and
-// friends) take a context today, so a request already in flight when ctx
+// between its outbound calls where it makes more than one. None of the
+// place-names provider (placeNameProvider.SearchPlaces), InfluxDB
+// (queryInfluxPathRange) or the weather/wave/tide provider interfaces
+// (weatherProvider.FetchForecast and friends) take a context today, so a
+// request already in flight when ctx
 // is cancelled still runs to completion - threading a context through those
 // layers is out of scope here (backend performance audit, Tier 3).
 func (d assistantToolDeps) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
@@ -479,7 +465,8 @@ type assistantLatLon struct {
 // assistantPlaceCandidate is one find_places result: a named feature with
 // host-computed distance and bearing from the search centre (ADR 0091's
 // rule that a provider returns raw features and the host alone computes
-// distance/bearing, applied here to Overpass and to route waypoints alike).
+// distance/bearing, applied here to the place-names provider and to route
+// waypoints alike).
 type assistantPlaceCandidate struct {
 	Name       string  `json:"name"`
 	Kind       string  `json:"kind"`
@@ -506,240 +493,14 @@ type assistantFindPlacesResult struct {
 	Truncated bool                      `json:"truncated,omitempty"`
 }
 
-// assistantBoundingBox returns a bounding box radiusNm around (lat, lon), in
-// the (south, west, north, east) order Overpass's bbox filter expects.
-// dLat=radiusNm/60 because a nautical mile is defined as one minute of
-// latitude; dLon widens by 1/cos(lat) so that the box holds radiusNm of
-// longitude constant at this latitude (a degree of longitude shrinks toward
-// the poles). lat is clamped to [-90,90] since nothing north of the pole or
-// south of it makes sense; lon is deliberately left unwrapped across ±180 -
-// this project's home waters (the Whitsundays) are nowhere near the
-// antimeridian, so date-line wraparound is simply not a case worth handling.
-func assistantBoundingBox(lat, lon, radiusNm float64) (south, west, north, east float64) {
-	dLat := radiusNm / 60.0
-	dLon := radiusNm / (60.0 * math.Cos(lat*math.Pi/180))
-
-	south = lat - dLat
-	north = lat + dLat
-	if south < -90 {
-		south = -90
-	}
-	if north > 90 {
-		north = 90
-	}
-	west = lon - dLon
-	east = lon + dLon
-	return south, west, north, east
-}
-
-// overpassBoundingBoxClause formats a (south, west, north, east) box as the
-// Overpass QL bbox filter argument, e.g. "(south,west,north,east)".
-func overpassBoundingBoxClause(south, west, north, east float64) string {
-	return fmt.Sprintf("%.4f,%.4f,%.4f,%.4f", south, west, north, east)
-}
-
-// assistantTitleCase title-cases every space-separated word: its first
-// letter upper-cased, the rest lower-cased. Deliberately not modelled on the
-// deprecated strings.Title, which title-cases after every non-letter
-// character rather than just at whitespace, so an apostrophe or hyphen
-// mid-word wrongly starts a new "word" (e.g. turning "bell's beach" into
-// "Bell'S Beach", or "port-side" into "Port-Side"); this only ever
-// upper-cases the very first rune of each Fields-delimited word, so a
-// name's internal punctuation is left exactly as typed.
-func assistantTitleCase(s string) string {
-	words := strings.Fields(s)
-	for i, w := range words {
-		r := []rune(strings.ToLower(w))
-		if len(r) > 0 {
-			r[0] = unicode.ToUpper(r[0])
-		}
-		words[i] = string(r)
-	}
-	return strings.Join(words, " ")
-}
-
-// assistantFirstLetterUpperCase upper-cases only s's first rune, leaving
-// everything else exactly as typed - a query typed as "bona bay" becomes
-// "Bona bay", covering an OSM name tag capitalised on just its first word.
-func assistantFirstLetterUpperCase(s string) string {
-	r := []rune(s)
-	if len(r) == 0 {
-		return s
-	}
-	r[0] = unicode.ToUpper(r[0])
-	return string(r)
-}
-
-// assistantExactNameVariants returns the de-duplicated set of capitalisation
-// variants rung 1 searches for: the query as typed (trimmed, internal
-// whitespace collapsed), title case of every word, and the query with only
-// its first letter upper-cased. This covers the common capitalisation
-// conventions a real OSM name tag actually uses without paying an
-// unindexed regex's server cost for it - see ADR 0093 section 8.
-//
-// A query that carries a qualifier after a comma ("Bona Bay, Gloucester
-// Island") also gets the same three variants of just the head before the
-// comma ("Bona Bay") - an operator or a model asking about a named feature
-// tends to keep the qualifier for clarity, but OSM's own name tag almost
-// never does, so searching only the qualified string would miss the exact
-// tag that is actually there.
-func assistantExactNameVariants(query string) []string {
-	normalized := strings.Join(strings.Fields(query), " ")
-	if normalized == "" {
-		return nil
-	}
-
-	candidates := []string{
-		normalized,
-		assistantTitleCase(normalized),
-		assistantFirstLetterUpperCase(normalized),
-	}
-
-	if head, _, ok := strings.Cut(normalized, ","); ok {
-		if headNormalized := strings.Join(strings.Fields(head), " "); headNormalized != "" {
-			candidates = append(candidates,
-				headNormalized,
-				assistantTitleCase(headNormalized),
-				assistantFirstLetterUpperCase(headNormalized),
-			)
-		}
-	}
-
-	seen := make(map[string]bool, len(candidates))
-	out := make([]string, 0, len(candidates))
-	for _, v := range candidates {
-		if seen[v] {
-			continue
-		}
-		seen[v] = true
-		out = append(out, v)
-	}
-	return out
-}
-
-// assistantFindPlacesQualifier returns the trimmed text after a query's
-// first comma ("Bona Bay, Gloucester Island" -> "Gloucester Island"), or ""
-// when the query carries no comma or the qualifier is blank. This is the
-// feature find_places tries to resolve on its own, centring rung 2 on it,
-// when the bare query (assistantExactNameVariants' head variants) does not
-// resolve within rung 1's full radius - see executeFindPlaces.
-func assistantFindPlacesQualifier(query string) string {
-	_, tail, ok := strings.Cut(query, ",")
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(tail)
-}
-
-// nearestAssistantPlaceCandidate returns the candidate with the smallest
-// DistanceNm, or false when candidates is empty. Used to pick which
-// resolved qualifier hit find_places should centre rung 2's search on, when
-// the qualifier query returns more than one candidate.
-func nearestAssistantPlaceCandidate(candidates []assistantPlaceCandidate) (assistantPlaceCandidate, bool) {
-	if len(candidates) == 0 {
-		return assistantPlaceCandidate{}, false
-	}
-	nearest := candidates[0]
-	for _, c := range candidates[1:] {
-		if c.DistanceNm < nearest.DistanceNm {
-			nearest = c
-		}
-	}
-	return nearest, true
-}
-
-// buildOverpassExactNameQuery builds rung 1's Overpass QL: an untagged,
-// exact nwr["name"="<variant>"] clause per assistantExactNameVariants
-// result, unioned together and evaluated over a bbox rather than around: -
-// an exact match lets Overpass use its name index directly, which is what
-// makes this rung answer in about 1s even at find_places' full 100nm radius
-// (ADR 0093 section 8). There is deliberately no tag filter here: adding one
-// to an exact-match query turned the same live 1s answer into 20s (measured
-// 2026-09-11 against overpass.openstreetmap.fr), so kind is instead derived
-// host-side from whatever tag happens to be present (see
-// overpassFindPlacesKind) and nothing named is discarded for want of a
-// recognised kind. Each variant is escaped for the Overpass QL string
-// literal syntax (escapeOverpassStringLiteral) so a query containing a
-// literal quote or backslash can never break out of the generated query.
-func buildOverpassExactNameQuery(query string, south, west, north, east float64) string {
-	bbox := overpassBoundingBoxClause(south, west, north, east)
-
-	var b strings.Builder
-	b.WriteString("[out:json][timeout:25];(")
-	for _, variant := range assistantExactNameVariants(query) {
-		fmt.Fprintf(&b, `nwr["name"="%s"](%s);`, escapeOverpassStringLiteral(variant), bbox)
-	}
-	b.WriteString(");out tags center 30;")
-	return b.String()
-}
-
-// buildOverpassNameSearchQuery builds rung 2's Overpass QL: a partial,
-// case-insensitive name search over a bbox, matching any of the four tag
-// clauses find_places understands: natural coastal features, place types,
-// seamark facilities, and OSM's separate leisure=marina tagging (which is
-// not part of the seamark vocabulary but is how most real-world marinas are
-// tagged). query is regexp.QuoteMeta-escaped and then escaped again for the
-// Overpass QL string literal syntax (backslash and double quote) - see
-// escapeOverpassStringLiteral - so a query containing e.g. parentheses or a
-// literal quote can never break out of the generated query. This rung only
-// ever runs at assistantFindPlacesRegexRadiusNm (20nm): a name regex is not
-// indexable, so Overpass must scan every element in the box against it, and
-// that scan times out server-side well before 100nm - see ADR 0093 section
-// 8 for the live measurement.
-func buildOverpassNameSearchQuery(query string, south, west, north, east float64) string {
-	q := escapeOverpassStringLiteral(regexp.QuoteMeta(query))
-	bbox := overpassBoundingBoxClause(south, west, north, east)
-	return fmt.Sprintf(
-		`[out:json][timeout:25];(nwr["name"~"%s",i]["natural"~"^(bay|reef|beach|cape|strait|peninsula|shoal|inlet)$"](%s);nwr["name"~"%s",i]["place"~"^(island|islet|locality|hamlet|village|town|archipelago)$"](%s);nwr["name"~"%s",i]["seamark:type"~"^(anchorage|harbour|mooring|marina|small_craft_facility)$"](%s);nwr["name"~"%s",i]["leisure"="marina"](%s););out tags center 30;`,
-		q, bbox, q, bbox, q, bbox, q, bbox,
-	)
-}
-
-// escapeOverpassStringLiteral escapes a string for embedding inside an
-// Overpass QL double-quoted string literal (e.g. a ["name"~"<value>",i]
-// regex filter): backslash and double quote are the two characters QL's
-// own string syntax reserves, and regexp.QuoteMeta's escaping (which uses
-// backslashes) would otherwise land unescaped in the generated query.
-func escapeOverpassStringLiteral(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return s
-}
-
-// overpassFindPlacesKind classifies a find_places Overpass element by tag
-// priority: seamark:type (a human already decided this is a marine
-// facility), then natural, then place, then leisure. Unlike
-// place_name.go's featureKind (a fixed rank for a different, narrower tag
-// set), any one of the four clauses' tags is accepted verbatim as the kind
-// label - find_places is a broader search, not a winner-take-all ranking.
-// Rung 1's exact-name query carries no tag filter (buildOverpassExactNameQuery),
-// so an element can genuinely have none of these four tags; that falls back
-// to "feature" rather than being discarded; find_places' whole point is
-// surfacing every named match and letting the model judge relevance, not
-// silently dropping anything whose kind it doesn't recognise.
-func overpassFindPlacesKind(tags map[string]string) string {
-	if v := strings.TrimSpace(tags["seamark:type"]); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(tags["natural"]); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(tags["place"]); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(tags["leisure"]); v != "" {
-		return v
-	}
-	return "feature"
-}
-
 // dedupeAssistantPlaceCandidates drops a later candidate that shares a
 // case-insensitive name with, and sits within 500m of, an earlier one
 // already kept - the same real-world feature returned twice (a saved
-// waypoint and Overpass's own copy of it, most often) rather than two
-// distinct features that happen to share a name. Earlier candidates win,
-// which in practice means a route waypoint (added before Overpass results)
-// is preferred over Overpass's guess at the same place.
+// waypoint and the place-names provider's own copy of it, most often)
+// rather than two distinct features that happen to share a name. Earlier
+// candidates win, which in practice means a route waypoint (added before
+// the provider's results) is preferred over the provider's guess at the
+// same place.
 func dedupeAssistantPlaceCandidates(candidates []assistantPlaceCandidate) []assistantPlaceCandidate {
 	const dedupeDistanceM = 500.0
 
@@ -763,35 +524,12 @@ func dedupeAssistantPlaceCandidates(candidates []assistantPlaceCandidate) []assi
 	return out
 }
 
-// assistantOverpassElementsToCandidates converts a rung's raw Overpass
-// elements into find_places candidates, discarding any element with no
-// resolvable point or no name tag. Shared by both rungs (buildOverpassExactNameQuery's
-// and buildOverpassNameSearchQuery's results alike) since the conversion -
-// distance, bearing, kind, source label - is identical either way.
-func assistantOverpassElementsToCandidates(elements []overpassElement, lat, lon float64) []assistantPlaceCandidate {
-	var out []assistantPlaceCandidate
-	for _, el := range elements {
-		elLat, elLon, ok := elementLatLon(el)
-		if !ok {
-			continue
-		}
-		name := strings.TrimSpace(el.Tags["name"])
-		if name == "" {
-			continue
-		}
-		out = append(out, assistantPlaceCandidate{
-			Name:       name,
-			Kind:       overpassFindPlacesKind(el.Tags),
-			Lat:        elLat,
-			Lon:        elLon,
-			DistanceNm: roundTo1(haversineMeters(lat, lon, elLat, elLon) / metersPerNauticalMile),
-			BearingDeg: int(math.Round(bearingDeg(lat, lon, elLat, elLon))),
-			Source:     "osm",
-		})
-	}
-	return out
-}
-
+// executeFindPlaces searches the vessel's saved route waypoints first, then
+// hands the query to the configured place-names provider's search_places
+// (ADR 0101) - the provider owns the actual search ladder (an exact-name
+// rung, and a broader rung it runs only when told to); this host only ever
+// does what it always has for every provider: compute distance/bearing,
+// dedupe against waypoints, sort, and trim to maxResults.
 func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -855,84 +593,43 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		}
 	}
 
-	// Rung 1: an exact-name match, full radius. Always run, even when a
-	// waypoint already matched - it's cheap (ADR 0093 section 8 measured
-	// ~1s), and it's the only way OSM's own position for the same place
-	// ever reaches the model.
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	exactSouth, exactWest, exactNorth, exactEast := assistantBoundingBox(lat, lon, assistantFindPlacesRadiusNm)
-	exactElements, err := postOverpassQuery(d.overpass, buildOverpassExactNameQuery(query, exactSouth, exactWest, exactNorth, exactEast))
+
+	provider, providerID, err := d.placeNames()
 	if err != nil {
 		return "", fmt.Errorf("find_places: %w", err)
 	}
-	exactCandidates := assistantOverpassElementsToCandidates(exactElements, lat, lon)
 
-	// Rung 2: a partial-name regex, tight radius, only when rung 1 came back
-	// empty and no waypoint already matched - a waypoint hit means the
-	// operator's own answer is already in hand, and rung 2's regex union is
-	// the expensive query (ADR 0093 section 8: 2 to 5s at 20nm, and it times
-	// out server-side well before 100nm).
-	//
-	// A query carrying a comma-qualifier ("Bona Bay, Gloucester Island")
-	// gets one extra exact-name lookup for the qualifier alone, at rung 1's
-	// full radius, before rung 2 runs: when it resolves, rung 2's tight box
-	// is centred on the nearest such hit rather than the vessel/near_*
-	// centre, since the named feature can sit well outside rung 2's 20nm
-	// radius from the vessel (a bay named for the island it is on, tens of
-	// miles away). When the qualifier does not resolve, rung 2 falls back to
-	// centring on the vessel/near_* position exactly as before. This is at
-	// most one extra Overpass call, and only on this path.
-	var regexCandidates []assistantPlaceCandidate
-	var centredOn string
-	regexCentreLat, regexCentreLon := lat, lon
-	ranRung2 := len(exactCandidates) == 0 && !waypointHit
-	if ranRung2 {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		if qualifier := assistantFindPlacesQualifier(query); qualifier != "" {
-			qSouth, qWest, qNorth, qEast := assistantBoundingBox(lat, lon, assistantFindPlacesRadiusNm)
-			qElements, qerr := postOverpassQuery(d.overpass, buildOverpassExactNameQuery(qualifier, qSouth, qWest, qNorth, qEast))
-			if qerr != nil {
-				return "", fmt.Errorf("find_places: %w", qerr)
-			}
-			if nearest, ok := nearestAssistantPlaceCandidate(assistantOverpassElementsToCandidates(qElements, lat, lon)); ok {
-				regexCentreLat, regexCentreLon = nearest.Lat, nearest.Lon
-				centredOn = nearest.Name
-			}
-		}
-
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		regexSouth, regexWest, regexNorth, regexEast := assistantBoundingBox(regexCentreLat, regexCentreLon, assistantFindPlacesRegexRadiusNm)
-		regexElements, err := postOverpassQuery(d.overpass, buildOverpassNameSearchQuery(query, regexSouth, regexWest, regexNorth, regexEast))
-		if err != nil {
-			return "", fmt.Errorf("find_places: %w", err)
-		}
-		regexCandidates = assistantOverpassElementsToCandidates(regexElements, lat, lon)
+	// Broad tells the provider whether its broader (and more expensive)
+	// search rung is worth running at all: a waypoint hit means the
+	// operator's own answer is already in hand, so only the provider's
+	// cheap exact-name search runs - it's still always run, even after a
+	// waypoint hit, since it's the only way the provider's own position for
+	// the same place ever reaches the model.
+	searchResult, err := provider.SearchPlaces(placeSearchInput{
+		Query:      query,
+		Lat:        lat,
+		Lon:        lon,
+		MaxResults: maxResults,
+		Broad:      !waypointHit,
+	})
+	if err != nil {
+		return "", fmt.Errorf("find_places: %w", err)
 	}
 
-	osmSearch := "none"
-	radiusUsed := assistantFindPlacesRadiusNm
-	switch {
-	case len(exactCandidates) > 0:
-		osmSearch = "exact"
-	case len(regexCandidates) > 0:
-		osmSearch = "regex"
-		radiusUsed = assistantFindPlacesRegexRadiusNm
-	case ranRung2:
-		radiusUsed = assistantFindPlacesRegexRadiusNm
+	for _, m := range searchResult.Results {
+		candidates = append(candidates, assistantPlaceCandidate{
+			Name:       m.Name,
+			Kind:       m.Kind,
+			Lat:        m.Lat,
+			Lon:        m.Lon,
+			DistanceNm: roundTo1(haversineMeters(lat, lon, m.Lat, m.Lon) / metersPerNauticalMile),
+			BearingDeg: int(math.Round(bearingDeg(lat, lon, m.Lat, m.Lon))),
+			Source:     providerID,
+		})
 	}
-	search := osmSearch
-	if waypointHit {
-		search = "waypoints"
-	}
-
-	candidates = append(candidates, exactCandidates...)
-	candidates = append(candidates, regexCandidates...)
 
 	candidates = dedupeAssistantPlaceCandidates(candidates)
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].DistanceNm < candidates[j].DistanceNm })
@@ -940,22 +637,28 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		candidates = candidates[:maxResults]
 	}
 
-	centre := assistantLatLon{Lat: lat, Lon: lon}
-	if centredOn != "" {
-		centre = assistantLatLon{Lat: regexCentreLat, Lon: regexCentreLon}
+	search := searchResult.Search
+	if waypointHit {
+		search = "waypoints"
 	}
+
+	centre := assistantLatLon{Lat: lat, Lon: lon}
+	centredOn := ""
+	if searchResult.CentredOn != nil {
+		centre = assistantLatLon{Lat: searchResult.CentredOn.Lat, Lon: searchResult.CentredOn.Lon}
+		centredOn = searchResult.CentredOn.Name
+	}
+
 	result := assistantFindPlacesResult{
 		Centre:    &centre,
 		CentredOn: centredOn,
-		RadiusNm:  radiusUsed,
+		RadiusNm:  searchResult.RadiusNm,
 		Search:    search,
 		Results:   candidates,
+		Note:      searchResult.Note,
 	}
-	if len(candidates) == 0 {
-		result.Note = fmt.Sprintf(
-			"no named feature matching %q within %g nm by exact name or within %g nm by partial name",
-			query, assistantFindPlacesRadiusNm, assistantFindPlacesRegexRadiusNm,
-		)
+	if len(candidates) == 0 && result.Note == "" {
+		result.Note = fmt.Sprintf("no named feature matching %q found within %g nm of the search centre", query, searchResult.RadiusNm)
 	}
 
 	shrink := func() bool {

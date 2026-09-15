@@ -545,3 +545,67 @@ func TestLiveFixture_AirlieBeachReturnsFeatures(t *testing.T) {
 }
 
 func ptr(v float64) *float64 { return &v }
+
+// ── Overpass response error handling ─────────────────────────────────────
+
+func TestParseOverpassBody_RuntimeErrorRemarkReturnsError(t *testing.T) {
+	body := []byte(`{
+		"version": 0.6,
+		"elements": [],
+		"remark": "runtime error: Query timed out in \"query\" at line 8 after 22 seconds."
+	}`)
+	_, err := parseOverpassBody("application/json", body)
+	if err == nil {
+		t.Fatalf("expected an error for a runtime error remark")
+	}
+	if !strings.Contains(err.Error(), "Query timed out") {
+		t.Fatalf("expected error message to include the remark text, got: %v", err)
+	}
+}
+
+func TestParseOverpassBody_NormalResponseWithElementsParsesSuccessfully(t *testing.T) {
+	body := []byte(`{
+		"version": 0.6,
+		"elements": [
+			{"type": "node", "id": 1, "lat": -20.44, "lon": 149.03, "tags": {"seamark:type": "anchorage"}}
+		]
+	}`)
+	elements, err := parseOverpassBody("application/json", body)
+	if err != nil {
+		t.Fatalf("expected no error for a normal response, got: %v", err)
+	}
+	if len(elements) != 1 {
+		t.Fatalf("expected 1 element, got %d", len(elements))
+	}
+	if elements[0].ID != 1 {
+		t.Fatalf("expected element id 1, got %d", elements[0].ID)
+	}
+}
+
+func TestParseOverpassBody_InformationalRemarkWithElementsParsesSuccessfully(t *testing.T) {
+	body := []byte(`{
+		"version": 0.6,
+		"elements": [
+			{"type": "node", "id": 1, "lat": -20.44, "lon": 149.03, "tags": {"seamark:type": "anchorage"}}
+		],
+		"remark": "this is just an informational note, not a runtime error"
+	}`)
+	elements, err := parseOverpassBody("application/json", body)
+	if err != nil {
+		t.Fatalf("expected no error for a remark that is not a runtime error, got: %v", err)
+	}
+	if len(elements) != 1 {
+		t.Fatalf("expected 1 element, got %d", len(elements))
+	}
+}
+
+func TestParseOverpassBody_RateLimitHTMLReturnsError(t *testing.T) {
+	body := []byte(`<html><body>Dispatcher_Client::request_read_and_idx::rate_limited</body></html>`)
+	_, err := parseOverpassBody("text/html", body)
+	if err == nil {
+		t.Fatalf("expected an error for a rate limit HTML response")
+	}
+	if !strings.Contains(err.Error(), "rate") {
+		t.Fatalf("expected error message to mention rate limit, got: %v", err)
+	}
+}

@@ -22,6 +22,10 @@ export type SettingsPayload = {
     weather_provider?: string
     wave_provider?: string
     poi_provider?: string
+    // ADR 0101: which installed POI plugin resolves place names - separate
+    // from poi_provider (the Nearby widget), though the two commonly name
+    // the same plugin.
+    place_name_provider?: string
     forecast_warnings_provider?: string
   }
   anchor?: {

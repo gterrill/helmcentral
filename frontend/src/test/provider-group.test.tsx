@@ -99,4 +99,86 @@ describe('ProviderGroup tide provider default', () => {
     const osmSwitch = screen.getByRole('switch', { name: /activate openstreetmap/i })
     expect(osmSwitch).toHaveAttribute('aria-disabled', 'true')
   })
+
+  // ADR 0101: ui.place_name_provider is its own setting, independent of
+  // ui.poi_provider, but defaults to the same plugin (osm-overpass) so a
+  // fresh install needs no configuration either.
+  it('defaults place-names to osm-overpass active when unconfigured', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ ui: {} }) })),
+    )
+
+    render(
+      <SettingsFormProvider>
+        <SecretsStatusProvider>
+          <ProviderGroup
+            type="place-names"
+            providers={[
+              { id: 'osm-overpass', name: 'OpenStreetMap (Overpass)', description: 'Free, keyless place names from OpenStreetMap' },
+            ]}
+          />
+        </SecretsStatusProvider>
+      </SettingsFormProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Active')).toBeTruthy()
+    })
+
+    const osmSwitch = screen.getByRole('switch', { name: /activate openstreetmap/i })
+    expect(osmSwitch).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  // The place-names picker and the Nearby picker can name the same
+  // installed POI plugin, but there is no "place-names" plugin kind on the
+  // backend - the gear on a place-names card must open the same "poi"
+  // settings modal a Nearby card would (same GET/POST /api/plugins/poi/...
+  // endpoints), not a nonexistent /api/plugins/place-names/... one.
+  it('opens the poi settings modal (not a place-names one) from a place-names card', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url === '/api/plugins/poi/osm-overpass') {
+        return {
+          ok: true,
+          json: async () => ({
+            type: 'poi',
+            id: 'osm-overpass',
+            name: 'OpenStreetMap (Overpass)',
+            description: 'Free, keyless place names from OpenStreetMap',
+            sandboxed: true,
+            allowed_hosts: [],
+            allowed_hosts_overridden: false,
+            allowed_secrets: [],
+            allowed_secrets_overridden: false,
+            config_fields: [],
+          }),
+        }
+      }
+      return { ok: true, json: async () => ({ ui: {} }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <SettingsFormProvider>
+        <SecretsStatusProvider>
+          <ProviderGroup
+            type="place-names"
+            providers={[
+              { id: 'osm-overpass', name: 'OpenStreetMap (Overpass)', description: 'Free, keyless place names from OpenStreetMap' },
+            ]}
+          />
+        </SecretsStatusProvider>
+      </SettingsFormProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('OpenStreetMap (Overpass)')).toBeTruthy()
+    })
+    screen.getByRole('button', { name: 'Settings' }).click()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/plugins/poi/osm-overpass')
+    })
+  })
 })

@@ -208,6 +208,169 @@ func (p *wasmPOIProvider) fetchFromPlugin(lat, lon float64, radiusM int, categor
 	return mapWasmFetchPOIOutput(parsed), nil
 }
 
+// ── place_name_at / search_places (ADR 0101, optional exports) ────────────
+//
+// A wasmPOIProvider is only ever handed out as a placeNameProvider
+// (place_name_provider.go's asPlaceNameProvider) once SupportsPlaceNames()
+// is true, but PlaceNameAt/SearchPlaces below still guard themselves the
+// same way FetchPOI would guard a required export - defence in depth against
+// any future caller that skips that check.
+
+// wasmPlaceNameAtInput mirrors the guest's place_name_at input contract.
+type wasmPlaceNameAtInput struct {
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	RadiusM int     `json:"radius_m"`
+}
+
+// wasmPlaceNameAtOutput mirrors the guest's place_name_at output contract:
+// {"name": string, "kind": string, "lat": number, "lon": number} for a
+// winner, or {"name": ""} for "nothing named here". Lat/Lon are pointers so
+// a winner sitting at exactly 0 latitude/longitude still round-trips as a
+// real coordinate.
+type wasmPlaceNameAtOutput struct {
+	Name string   `json:"name"`
+	Kind string   `json:"kind"`
+	Lat  *float64 `json:"lat"`
+	Lon  *float64 `json:"lon"`
+}
+
+// PlaceNameAt calls the guest's place_name_at export through p.call, so the
+// plugin's own stored config values (e.g. osm-overpass's overpass_url)
+// apply exactly as they do for fetch_poi. Decoding is strict: a winner
+// (non-empty Name) MUST carry both Lat and Lon, or the response is rejected
+// as malformed rather than silently returned as a zero coordinate.
+func (p *wasmPOIProvider) PlaceNameAt(lat, lon float64, radiusM int) (result placeNameResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("plugin %q panicked in place_name_at: %v", p.id, r)
+			result = placeNameResult{}
+		}
+	}()
+
+	if !p.SupportsPlaceNames() {
+		return placeNameResult{}, fmt.Errorf("plugin %q does not support place names (missing place_name_at/search_places export)", p.id)
+	}
+
+	input, err := json.Marshal(wasmPlaceNameAtInput{Lat: lat, Lon: lon, RadiusM: radiusM})
+	if err != nil {
+		return placeNameResult{}, fmt.Errorf("plugin %q: failed to marshal place_name_at input: %w", p.id, err)
+	}
+
+	out, err := p.call("place_name_at", input)
+	if err != nil {
+		return placeNameResult{}, err
+	}
+
+	var parsed wasmPlaceNameAtOutput
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		return placeNameResult{}, fmt.Errorf("plugin %q: unparseable place_name_at JSON: %w", p.id, err)
+	}
+	if strings.TrimSpace(parsed.Name) == "" {
+		return placeNameResult{}, nil
+	}
+	if parsed.Lat == nil || parsed.Lon == nil {
+		return placeNameResult{}, fmt.Errorf("plugin %q: place_name_at returned name %q with no lat/lon", p.id, parsed.Name)
+	}
+	return placeNameResult{Name: parsed.Name, Kind: parsed.Kind, Lat: *parsed.Lat, Lon: *parsed.Lon}, nil
+}
+
+// wasmSearchPlacesInput mirrors the guest's search_places input contract.
+type wasmSearchPlacesInput struct {
+	Query      string  `json:"query"`
+	Lat        float64 `json:"lat"`
+	Lon        float64 `json:"lon"`
+	MaxResults int     `json:"max_results"`
+	Broad      bool    `json:"broad"`
+}
+
+// wasmSearchPlaceMatch/wasmSearchPlacesCentre/wasmSearchPlacesOutput mirror
+// the guest's search_places output contract exactly - see
+// docs/examples/poi-plugins/osm-overpass's package doc comment for the
+// two-rung ladder this executes on the plugin side.
+type wasmSearchPlaceMatch struct {
+	Name string  `json:"name"`
+	Kind string  `json:"kind"`
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+}
+
+type wasmSearchPlacesCentre struct {
+	Name string  `json:"name"`
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+}
+
+type wasmSearchPlacesOutput struct {
+	Search    string                  `json:"search"`
+	RadiusNm  float64                 `json:"radius_nm"`
+	CentredOn *wasmSearchPlacesCentre `json:"centred_on"`
+	Results   []wasmSearchPlaceMatch  `json:"results"`
+	Note      string                  `json:"note"`
+}
+
+// validSearchPlacesValues is search_places' closed set of "search" values -
+// decoding is strict, so anything else is a malformed response, not a
+// fourth silently-accepted state.
+var validSearchPlacesValues = map[string]bool{"exact": true, "regex": true, "none": true}
+
+// SearchPlaces calls the guest's search_places export through p.call, same
+// config-overlay and panic-recovery treatment as PlaceNameAt.
+func (p *wasmPOIProvider) SearchPlaces(input placeSearchInput) (result placeSearchResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("plugin %q panicked in search_places: %v", p.id, r)
+			result = placeSearchResult{}
+		}
+	}()
+
+	if !p.SupportsPlaceNames() {
+		return placeSearchResult{}, fmt.Errorf("plugin %q does not support place names (missing place_name_at/search_places export)", p.id)
+	}
+
+	marshalled, err := json.Marshal(wasmSearchPlacesInput{
+		Query:      input.Query,
+		Lat:        input.Lat,
+		Lon:        input.Lon,
+		MaxResults: input.MaxResults,
+		Broad:      input.Broad,
+	})
+	if err != nil {
+		return placeSearchResult{}, fmt.Errorf("plugin %q: failed to marshal search_places input: %w", p.id, err)
+	}
+
+	out, err := p.call("search_places", marshalled)
+	if err != nil {
+		return placeSearchResult{}, err
+	}
+
+	var parsed wasmSearchPlacesOutput
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		return placeSearchResult{}, fmt.Errorf("plugin %q: unparseable search_places JSON: %w", p.id, err)
+	}
+	if !validSearchPlacesValues[parsed.Search] {
+		return placeSearchResult{}, fmt.Errorf("plugin %q: search_places returned unrecognised search value %q", p.id, parsed.Search)
+	}
+
+	matches := make([]placeSearchMatch, 0, len(parsed.Results))
+	for _, m := range parsed.Results {
+		matches = append(matches, placeSearchMatch{Name: m.Name, Kind: m.Kind, Lat: m.Lat, Lon: m.Lon})
+	}
+
+	var centredOn *placeSearchCentre
+	if parsed.CentredOn != nil {
+		centredOn = &placeSearchCentre{Name: parsed.CentredOn.Name, Lat: parsed.CentredOn.Lat, Lon: parsed.CentredOn.Lon}
+	}
+
+	return placeSearchResult{
+		Search:    parsed.Search,
+		RadiusNm:  parsed.RadiusNm,
+		CentredOn: centredOn,
+		Results:   matches,
+		Note:      parsed.Note,
+	}, nil
+}
+
 // loadWasmPOIProviders scans dir once at startup for .wasm plugins, via the
 // shared loadWasmPluginsFromDir. Mirrors loadWasmWaveProviders - a file that
 // fails to load as a valid plugin is logged and skipped, discovery

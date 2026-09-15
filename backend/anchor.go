@@ -387,7 +387,7 @@ func setAnchorWatch(c echo.Context) error {
 	}
 
 	// Resolve the anchorage's place name once, in the background, so the
-	// response above isn't held up by an Overpass round trip. A failure
+	// response above isn't held up by a place-names provider round trip. A failure
 	// logs explicitly (inside resolveAndCachePlaceName) and leaves
 	// PlaceName empty; the regular poll tick (updateTickPlaceName) retries
 	// on every subsequent tick until it succeeds, then the name is pinned

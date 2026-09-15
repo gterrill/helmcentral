@@ -197,6 +197,24 @@ func TestWasmPOIProvider_FetchPOI_StaleOnErrorFallback(t *testing.T) {
 	}
 }
 
+// ── PlaceNameAt / SearchPlaces: the only network-free assertion possible
+// without the real osm-overpass build is "a plugin that doesn't export
+// either one errors clearly" - live JSON-mapping checks against the real
+// plugin (network required) live in wasm_poi_provider_live_test.go instead,
+// gated by testing.Short() like every other live-network test in this
+// package (assistant_tools_live_test.go, wasm_ftp_fetch_test.go).
+
+func TestWasmPOIProvider_PlaceNameAtAndSearchPlaces_UnsupportedPluginErrors(t *testing.T) {
+	provider := mustNewWasmPOIProvider(t, poiValidFixtureWasm)
+
+	if _, err := provider.PlaceNameAt(-20.4467, 149.0353, 400); err == nil {
+		t.Fatalf("expected PlaceNameAt to error on a plugin that does not export place_name_at/search_places")
+	}
+	if _, err := provider.SearchPlaces(placeSearchInput{Query: "Hill Inlet", Lat: -20.4467, Lon: 149.0353, MaxResults: 5}); err == nil {
+		t.Fatalf("expected SearchPlaces to error on a plugin that does not export place_name_at/search_places")
+	}
+}
+
 func TestLoadWasmPOIProviders_RegistersValidPlugin(t *testing.T) {
 	withCleanPOIProviderRegistry(t)
 

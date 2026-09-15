@@ -110,13 +110,22 @@ type wasmPluginBase struct {
 	// restart. Populated by newWasmPluginBase from pluginConfigFieldsForWasmPlugin;
 	// nil for the common case of a plugin with no declared fields.
 	configFieldKeys []string
+	// supportsPlaceNames is true only when a POI plugin exports BOTH
+	// place_name_at and search_places (ADR 0101: a plugin declares
+	// place-name support by exporting the pair, not by any separate
+	// manifest flag). Neither export is part of the universal plugin
+	// contract every type validates below, so this is detected the same
+	// optional way ttl_seconds()/description() are, against the same
+	// throwaway instance, and never causes plugin load to fail.
+	supportsPlaceNames bool
 }
 
-func (b *wasmPluginBase) ID() string          { return b.id }
-func (b *wasmPluginBase) Name() string        { return b.name }
-func (b *wasmPluginBase) Description() string { return b.description }
-func (b *wasmPluginBase) TTLSeconds() int64   { return b.ttlSeconds }
-func (b *wasmPluginBase) Path() string        { return b.path }
+func (b *wasmPluginBase) ID() string               { return b.id }
+func (b *wasmPluginBase) Name() string             { return b.name }
+func (b *wasmPluginBase) Description() string      { return b.description }
+func (b *wasmPluginBase) TTLSeconds() int64        { return b.ttlSeconds }
+func (b *wasmPluginBase) Path() string             { return b.path }
+func (b *wasmPluginBase) SupportsPlaceNames() bool { return b.supportsPlaceNames }
 
 func (b *wasmPluginBase) ttlDuration() time.Duration {
 	return time.Duration(b.ttlSeconds) * time.Second
@@ -622,14 +631,24 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 		}
 	}
 
+	// place_name_at and search_places (ADR 0101) are POI-only exports, but
+	// detected here on the shared throwaway instance like every other
+	// optional export above rather than in the POI-specific adapter -
+	// wasmPOIProvider's PlaceNameAt/SearchPlaces (wasm_poi_provider.go) just
+	// read the resulting flag. Both must be present; a plugin exporting only
+	// one (an authoring mistake) is treated as supporting neither rather than
+	// guessed at.
+	supportsPlaceNames := instance.FunctionExists("place_name_at") && instance.FunctionExists("search_places")
+
 	return &wasmPluginBase{
-		id:              id,
-		name:            name,
-		description:     description,
-		ttlSeconds:      ttlSeconds,
-		path:            path,
-		compiled:        compiled,
-		configFieldKeys: configFieldKeys,
+		id:                 id,
+		name:               name,
+		description:        description,
+		ttlSeconds:         ttlSeconds,
+		path:               path,
+		compiled:           compiled,
+		configFieldKeys:    configFieldKeys,
+		supportsPlaceNames: supportsPlaceNames,
 	}, nil
 }
 

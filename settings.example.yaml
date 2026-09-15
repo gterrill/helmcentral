@@ -63,6 +63,11 @@ ui:
   # Nearby widget. osm-overpass needs no API key; google-places needs
   # GOOGLE_PLACES_API_KEY set via the secrets store.
   poi_provider: osm-overpass
+  # Which installed POI plugin resolves place names (position tile, anchor
+  # pin, Mate's find_places) - separate from poi_provider above, though it's
+  # usually the same plugin. Only a plugin exporting both place_name_at and
+  # search_places can be used here; osm-overpass does.
+  place_name_provider: osm-overpass
   forecast_warnings_provider: nws
   # Optional. Unlike the others this one may be left out entirely: with no
   # upper-air plugin installed the forecast page simply shows no 500mb

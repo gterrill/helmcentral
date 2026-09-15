@@ -48,6 +48,105 @@ for that clause. Historic is the one exception with a per-clause split: the
 not, since a lighthouse is identifiable by its light characteristic even
 unnamed.
 
+## Two further exports: place_name_at and search_places
+
+`fetch_poi` is not this plugin's only export. Two more are OPTIONAL - a POI
+provider plugin without them still works and is simply not offered as a
+place-names source - but when both are present, the Helmcentral backend
+calls them directly for place-name resolution (the position tile, the
+anchor pin) and Mate's `find_places` tool, exactly the way `fetch_poi`
+already works for Nearby. There is no backend Overpass client of its own
+any more: this plugin is the only place that speaks Overpass QL, HTTP and
+response parsing for either job (see
+[ADR 0101](../../../adr/0101-place-names-come-from-a-plugin.md)).
+`place_name_at` carries forward the ring query and ranking place-name
+resolution always used, and `search_places` carries forward `find_places`'
+two-rung name-search ladder. See `osm-overpass.go`'s
+`place_name_at` and `search_places` sections for the implementation; both
+are exercised directly by `go test` via an injected `overpassQueryFunc`, the
+same host-testable/pdk-only split `fetch_poi` already uses (see "Why this
+plugin is two files" below).
+
+### place_name_at
+
+Input `{"lat": <number>, "lon": <number>, "radius_m": <integer>}`, output
+`{"name": <string>, "kind": <string>, "lat": <number>, "lon": <number>}`, or
+exactly `{"name": ""}` when nothing named is in range - a real, negative
+answer, never an error.
+
+One Overpass ring query at the given radius, matching the same three tag
+clauses `backend/place_name.go`'s `buildOverpassQuery` uses -
+`seamark:type=anchorage`, `natural=bay`, `place` in
+`island`/`islet`/`rock` - with this plugin's own global `[bbox:...]` setting
+(`overpassBoundingBox`) added when the ring doesn't cross the antimeridian
+or a pole, and a 12s server-side timeout (the same budget
+`buildOverpassPOIQuery` uses, since this is likewise a single Overpass round
+trip per call). Unlike `place_name.go`, this export does not itself walk a
+widening ladder of rings: the host passes one radius per call and calls
+again with a wider one if this one comes back unnamed, exactly as
+`place_name.go`'s own `resolvePlaceName` does today against its three-rung
+ladder (400m, 1500m, 5000m).
+
+The winner is ranked exactly as `backend/place_name.go`'s
+`bestNamedFeature` does: anchorage first (a human already decided this is
+where you anchor), then bay, then island/islet/rock by descending
+size-implication, ties broken by great-circle distance to the query point.
+An element with no name tag, or whose tags match none of the five
+recognised kinds, is discarded before ranking.
+
+### search_places
+
+Input
+`{"query": <string>, "lat": <number>, "lon": <number>, "max_results": <integer>, "broad": <boolean>}`,
+output
+`{"search": "exact"|"regex"|"none", "radius_nm": <number>, "centred_on": {"name": <string>, "lat": <number>, "lon": <number>} | null, "results": [{"name": <string>, "kind": <string>, "lat": <number>, "lon": <number>}], "note": <string>}`.
+`max_results` is accepted but deliberately unused: like `fetch_poi`'s
+features, `search_places` returns raw matches (capped at 50) and leaves
+distance, bearing, dedupe, sort order and the final trim to `max_results` to
+the host (ADR 0091's "provider returns raw features, host computes
+distance/bearing" rule) - trimming here, before the host's own distance
+sort, could silently drop the actual nearest match.
+
+Rung 1 always runs: an untagged, exact `nwr["name"="<variant>"]` match over
+a 100nm box, tried against the query as typed, Title Case, first-letter-only
+capitalised, and - for a query carrying a comma-qualifier ("Bona Bay,
+Gloucester Island") - the same three variants of just the head before the
+comma too, since OSM's own name tag almost never carries the qualifier
+(`findPlacesExactNameVariants`, mirroring
+`backend/assistant_tools.go`'s `assistantExactNameVariants`).
+
+Rung 2 - a case-insensitive partial-name regex over a tighter 20nm box,
+matching natural coastal features, place types, seamark facilities, and
+OSM's separate `leisure=marina` tagging - only runs when rung 1 found
+nothing **and** the caller's `broad` is true. The host decides `broad`, not
+this plugin: it knows about local data this plugin cannot see (a saved
+route waypoint, most importantly) and folds that into whether a broader OSM
+search is worth running at all, mirroring
+`backend/assistant_tools.go`'s `executeFindPlaces` skipping rung 2 whenever
+a waypoint already answered the query. A comma-qualifier gets one extra
+exact-name lookup for the qualifier before rung 2 runs, re-centring rung 2's
+box on the qualifier's resolved position (`centred_on` in the output) when
+it sits well outside the ordinary centre - a bay named for the island it is
+on, tens of miles away. When the qualifier is present but does not resolve,
+`centred_on` stays `null` and `note` says so; `note` is otherwise empty.
+
+Kind is derived host-side (`findPlacesKind`) from tag priority -
+`seamark:type`, then `natural`, then `place`, then `leisure` - falling back
+to `"feature"` rather than discarding the match, since an exact-name hit
+carries no tag filter and can genuinely have none of the four.
+
+Three separate Overpass round trips can happen in one call (rung 1, the
+qualifier lookup, rung 2), so each gets its own tight server-side timeout
+rather than one shared budget: 4s, 3s and 6s respectively, summing to 13s -
+comfortably under the host's 15s WASM plugin call budget
+(`backend/wasm_plugin.go`'s `WASM_PLUGIN_TIMEOUT_MS`), leaving margin for
+three separate HTTP connections and JSON parsing on top of whatever
+Overpass itself takes. Measured live against `overpass.openstreetmap.fr` on
+2026-09-11 (`backend/assistant_tools.go`, ADR 0093 section 8): an exact-name
+match answers in about 1s even at the full 100nm rung 1 radius (Overpass
+uses its name index directly), and the rung 2 regex union answers in 2 to
+5s at 20nm (not indexable, a full scan of the box).
+
 ## Truncation is a heuristic, not an exact count
 
 Overpass's `out ... <cap>` statement silently drops anything past the cap -
@@ -70,6 +169,13 @@ this from the response's Content-Type header and, as a fallback, the
 returned as an explicit error from `fetch_poi` - never as an empty feature
 list, which the host would otherwise be unable to tell apart from a
 genuinely quiet patch of water.
+
+Overpass also sometimes returns an HTTP 200 with valid JSON but a top-level
+`remark` field signaling a server-side query failure (e.g., "runtime error:
+Query timed out in \"query\" at line 8 after 22 seconds."). Runtime error
+remarks are detected and returned as explicit errors; informational remarks
+(those not starting with "runtime error") are ignored and the response
+elements are parsed normally.
 
 If the public `overpass-api.de` instance is unreachable or persistently rate
 limiting your boat's connection, point this plugin at a different Overpass
@@ -131,10 +237,15 @@ Point the Overpass server field at any other mirror and its host still needs
 adding to the allowlist (this file, or the Settings allowlist override), or
 the request fails at the sandbox boundary instead.
 
-Place-name resolution (the position tile) and Mate's `find_places` tool read
-this same stored value today, via a backend shim in `place_name.go` - see
-[ADR 0100](../../../adr/0100-plugins-declare-their-own-settings.md). A later
-phase moves those lookups into this plugin directly.
+Place-name resolution (the position tile, the anchor pin) and Mate's
+`find_places` tool read this same stored value too, when
+`ui.place_name_provider` names this plugin - there is no separate backend
+shim or setting for it any more. See
+[ADR 0100](../../../adr/0100-plugins-declare-their-own-settings.md) for how
+the setting itself works and
+[ADR 0101](../../../adr/0101-place-names-come-from-a-plugin.md) for how
+place names ended up calling into this plugin directly via
+`place_name_at`/`search_places` (see above).
 
 ## Wikipedia enrichment
 
@@ -208,7 +319,12 @@ because it contains operator runtime files.
 
 `main_test.go` unit-tests the query building, classification, truncation
 detection, rate-limit detection and Wikipedia enrichment logic directly, on
-the plain host Go toolchain, with no TinyGo or WASM runtime needed:
+the plain host Go toolchain, with no TinyGo or WASM runtime needed.
+`place_search_test.go` covers `place_name_at` and `search_places` the same
+way - query building, ranking, variants, kind labels and the two-rung
+orchestration, each exercised through a fake `overpassQueryFunc` rather than
+a real HTTP call. `place_search_fixtures_test.go` runs that same parsing and
+ranking logic against the live captures listed below:
 
 ```sh
 cd docs/examples/poi-plugins/osm-overpass && go mod tidy && go vet ./... && go test ./...
@@ -244,11 +360,42 @@ not route to `overpass-api.de`'s IP addresses. The plugin itself, and its
 `allowed_hosts.json`, still target `overpass-api.de`; the mirror was a
 capture-environment workaround only, not a design decision.
 
+`place_name_at`'s and `search_places`' fixtures were all captured live
+against `overpass.openstreetmap.fr` on 2026-09-16, requests spaced about 4s
+apart (the mirror returns 503 on a tighter burst):
+
+- `testdata/overpass_place_name_lindeman_1500m.json` -
+  `place_name_at`'s 1500m ring at Lindeman Island (`-20.4467, 149.0353`).
+  200 OK in 1.3s, 1 element (Lindeman Island itself, `place=island`).
+- `testdata/overpass_place_name_lindeman_5000m.json` -
+  the same position's 5000m ring. 200 OK in 0.66s, 13 elements (12 named, 1
+  unnamed islet) - the same count `backend/place_name_test.go`'s own
+  Lindeman fixture carries, real OSM data captured independently. Turtle Bay
+  wins the ranking here (nearest of three bays in range).
+- `testdata/overpass_search_places_exact_hill_inlet.json` -
+  `search_places` rung 1, exact name "Hill Inlet", centred on Lindeman
+  Island. 200 OK in 0.45s, 1 element.
+- `testdata/overpass_search_places_exact_whitehaven_beach.json` -
+  rung 1, exact name "Whitehaven Beach", same centre. 200 OK in 0.45s, 2
+  elements (a node tagged only `tourism=camp_site` - exercising the
+  `findPlacesKind` "feature" fallback - and a way tagged `natural=beach`).
+- `testdata/overpass_search_places_exact_whitehaven_partial.json` and
+  `testdata/overpass_search_places_regex_whitehaven_partial.json` - the
+  rung 2 exercise: rung 1's exact-name variants of the lowercase partial
+  "whitehaven" (200 OK in 0.41s, genuinely 0 elements live, since the real
+  tag is "Whitehaven Beach"), then rung 2's case-insensitive regex for the
+  same query (200 OK in 1.2s, 3 elements: "Whitehaven Bay", "South
+  Whitehaven Beach", and "Whitehaven Beach" again).
+
 ## Endpoints this plugin uses
 
 1. POI data: `POST https://overpass-api.de/api/interpreter` (or the
    `overpass_url` override - see "Pointing at an Overpass mirror" above) with
-   the query Overpass QL body built by `buildOverpassPOIQuery`.
+   the query Overpass QL body built by `buildOverpassPOIQuery`
+   (`fetch_poi`), `buildPlaceNameQuery` (`place_name_at`), or
+   `buildFindPlacesExactQuery`/`buildFindPlacesRegexQuery` (`search_places`)
+   - all three exports share the same endpoint resolution and POST handling
+   (`doOverpassQuery` in `main.go`).
 2. Wikipedia enrichment: `GET https://en.wikipedia.org/api/rest_v1/page/summary/<Title>`.
 
 See [Overpass QL's documentation](https://wiki.openstreetmap.org/wiki/Overpass_API/Overpass_QL)

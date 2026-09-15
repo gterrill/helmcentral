@@ -39,17 +39,22 @@ reads as "unknown", not as a number that happens to be wrong.
 
 Beyond that, on request, it can look up wind, wave and tide forecasts for
 any named place, not just where you are now. It resolves a place name to a
-position first, searching your saved route waypoints and then OpenStreetMap
-within about a hundred nautical miles of the boat, then fetches wind and
-waves through the same providers the forecast panel uses, and tides through
-the same tide provider and station catalog. If the name doesn't resolve, or
-a provider is down, or no tide provider is configured, it says which one
-failed. It never invents a forecast for a place it couldn't find, or a tide
-time from a provider that returned nothing.
+position first, searching your saved route waypoints and then whichever
+place-names plugin is configured (**Settings → Widgets → Place names**,
+OpenStreetMap by default) within about a hundred nautical miles of the
+boat, then fetches wind and waves through the same providers the forecast
+panel uses, and tides through the same tide provider and station catalog.
+If the name doesn't resolve, or a provider is down, or no tide provider is
+configured, it says which one failed. It never invents a forecast for a
+place it couldn't find, or a tide time from a provider that returned
+nothing.
 
-Place search queries the same Overpass server as the place name shown on
-the position tile. The configuration reference explains how to point that
-at a mirror if your boat's connection can't reach the default one.
+Place search uses the same plugin, and the same Overpass server setting
+when that plugin is OpenStreetMap, as the place name shown on the position
+tile - a separate choice from whichever plugin the Nearby widget uses, even
+though both default to the same one. The configuration reference explains
+how to point OpenStreetMap at a mirror if your boat's connection can't
+reach the default one.
 
 When it plans a passage leg, it works out the wind and sea angle against
 your planned course itself, rather than leaving a language model to
