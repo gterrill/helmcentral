@@ -78,47 +78,63 @@ mirror instead - see "Pointing at an Overpass mirror" below.
 ## Pointing at an Overpass mirror
 
 By default this plugin queries the public `overpass-api.de` instance
-(`defaultOverpassAPIURL` in `osm-overpass.go`). This plugin ships with a
-companion `osm-overpass.config.json` that maps its `overpass_url` key to the
-host's `OVERPASS_API_URL` environment variable:
+(`defaultOverpassAPIURL` in `osm-overpass.go`). The mirror is this plugin's
+own setting, not a Helmcentral-wide one: it ships a companion
+`osm-overpass.config_fields.json` sidecar declaring one operator-editable
+field,
 
 ```jsonc
-// osm-overpass.config.json
-{
-  "overpass_url": "${OVERPASS_API_URL}"
-}
+// osm-overpass.config_fields.json
+[
+  {
+    "key": "overpass_url",
+    "label": "Overpass server",
+    "type": "url",
+    "placeholder": "https://overpass-api.de/api/interpreter",
+    "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it. Any mirror other than those two must also be added to this plugin's allowed hosts."
+  }
+]
 ```
 
-That means setting `OVERPASS_API_URL` on the Helmcentral backend (see
-[docs/reference/configuration.md](../../../reference/configuration.md)) moves
-both the backend's own place-name lookups and this plugin's POI queries to
-the same mirror in one step. Leaving `OVERPASS_API_URL` unset drops the
-`overpass_url` key entirely (`configForWasmPlugin`'s documented behaviour for
-an unset referenced env var), and the plugin falls back to its
-`overpass-api.de` default. A blank `OVERPASS_API_URL` behaves like unset and
-also uses the default.
+which the Settings UI reads to render an **Overpass server** field in this
+plugin's own settings modal (**Settings -> Widgets -> Nearby**, the gear icon
+on the OpenStreetMap provider card). Saving that field posts to
+`POST /api/plugins/poi/osm-overpass/config`; the host resolves the stored
+value fresh on every `fetch_poi` call (`wasm_plugin.go`'s
+`applyConfigValues`), so the change takes effect on the very next call with
+no plugin reload or Helmcentral restart. Leaving it blank stores nothing,
+and the plugin falls back to its `overpass-api.de` default.
 
-`resolveOverpassURL` (`osm-overpass.go`) requires the value to parse as an
-absolute `https://` URL. A present-but-malformed value fails the `fetch_poi`
-call outright, naming the `overpass_url` key in the error - it never falls
-back to the default silently, since a broken `OVERPASS_API_URL` almost
-certainly wasn't meant to keep querying overpass-api.de.
+`resolveOverpassURL` (`osm-overpass.go`) requires the stored value to parse
+as an absolute `https://` URL. A present-but-malformed value fails the
+`fetch_poi` call outright, naming the `overpass_url` key in the error - it
+never falls back to the default silently, since a broken setting almost
+certainly wasn't meant to keep querying overpass-api.de. The Settings API
+already rejects a non-URL at save time (`postPluginConfigHandler` validates
+any `"url"`-typed field generically); a plugin-side malformed value is only
+reachable by editing the plugin overrides database directly.
 
 **Setting this does not by itself grant network access to the new host.**
 The Extism sandbox's network allowlist is enforced from
 `osm-overpass.allowed_hosts.json` (or the Settings allowlist override,
 [ADR 0024](../../../adr/0024-plugin-descriptions-and-allowlist-overrides.md)),
-independently of this config value. `overpass.openstreetmap.fr` is
-pre-allowlisted alongside `overpass-api.de`:
+independently of this config value - and unlike the Overpass server field,
+an allowlist override only takes effect after a restart (ADR 0024).
+`overpass.openstreetmap.fr` is pre-allowlisted alongside `overpass-api.de`:
 
 ```jsonc
 // osm-overpass.allowed_hosts.json
 ["overpass-api.de", "overpass.openstreetmap.fr", "en.wikipedia.org"]
 ```
 
-Point `OVERPASS_API_URL` at any other mirror and its host still needs adding
-to the allowlist (this file, or the Settings allowlist override), or the
-request fails at the sandbox boundary instead.
+Point the Overpass server field at any other mirror and its host still needs
+adding to the allowlist (this file, or the Settings allowlist override), or
+the request fails at the sandbox boundary instead.
+
+Place-name resolution (the position tile) and Mate's `find_places` tool read
+this same stored value today, via a backend shim in `place_name.go` - see
+[ADR 0100](../../../adr/0100-plugins-declare-their-own-settings.md). A later
+phase moves those lookups into this plugin directly.
 
 ## Wikipedia enrichment
 

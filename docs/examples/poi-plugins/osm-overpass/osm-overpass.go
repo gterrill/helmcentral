@@ -534,9 +534,13 @@ func resolveDetailLimit(raw string, present bool) int {
 // resolveOverpassURL reads the optional "overpass_url" plugin config value,
 // defaulting to defaultOverpassAPIURL when config.json carries no such key.
 // A present value that is empty or contains only whitespace is treated like
-// an absent key and returns the default - this matches the host's
-// OVERPASS_API_URL handling because config.json maps the key to that env var
-// and docker-compose passes it through empty when unset.
+// an absent key and returns the default - this matches the host's own
+// blank-value handling for a declared config field, since "overpass_url" is
+// this plugin's own operator-editable setting (its
+// osm-overpass.config_fields.json sidecar - see this plugin's README and
+// docs/adr/0100), resolved fresh by the host on every fetch_poi call
+// (wasm_plugin.go's applyConfigValues) and dropped entirely when the
+// operator hasn't set it.
 // Unlike resolveDetailLimit above, a present-but-malformed value does NOT
 // fall back to the default - a config.json edit that failed to produce a
 // usable URL almost certainly did not mean "use overpass-api.de", so this

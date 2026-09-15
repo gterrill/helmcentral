@@ -138,3 +138,128 @@ func TestPluginOverridesStore_KeyedByFullWasmPathNotID(t *testing.T) {
 		t.Errorf("forecast-warnings/bom hosts = %v, want [ftp.bom.gov.au]", warningsHosts)
 	}
 }
+
+// ── plugin_config_values (plugin-declared settings) ─────────────────────────
+
+func TestPluginOverridesStore_GetConfigValuesOnMissingRowsReturnsEmptyNoError(t *testing.T) {
+	store := newTestPluginOverridesStore(t)
+
+	values, err := store.GetConfigValues("plugins/poi/osm-overpass.wasm")
+	if err != nil {
+		t.Fatalf("GetConfigValues: %v", err)
+	}
+	if len(values) != 0 {
+		t.Fatalf("expected no stored config values, got %+v", values)
+	}
+}
+
+func TestPluginOverridesStore_SetConfigValuesThenGetRoundTrips(t *testing.T) {
+	store := newTestPluginOverridesStore(t)
+	path := "plugins/poi/osm-overpass.wasm"
+
+	if err := store.SetConfigValues(path, map[string]string{"overpass_url": "https://overpass.openstreetmap.fr/api/interpreter"}); err != nil {
+		t.Fatalf("SetConfigValues: %v", err)
+	}
+
+	values, err := store.GetConfigValues(path)
+	if err != nil {
+		t.Fatalf("GetConfigValues: %v", err)
+	}
+	if values["overpass_url"] != "https://overpass.openstreetmap.fr/api/interpreter" {
+		t.Errorf("values = %+v, want overpass_url set to the mirror", values)
+	}
+}
+
+// A blank value deletes the row rather than storing an empty string, so the
+// field reverts to config.json's own default (or the plugin's built-in
+// default) - the same "blank means unset" contract every other
+// settings-shaped value in this app follows.
+func TestPluginOverridesStore_SetConfigValuesBlankValueDeletesRow(t *testing.T) {
+	store := newTestPluginOverridesStore(t)
+	path := "plugins/poi/osm-overpass.wasm"
+
+	if err := store.SetConfigValues(path, map[string]string{"overpass_url": "https://overpass.openstreetmap.fr/api/interpreter"}); err != nil {
+		t.Fatalf("first SetConfigValues: %v", err)
+	}
+	if err := store.SetConfigValues(path, map[string]string{"overpass_url": ""}); err != nil {
+		t.Fatalf("second SetConfigValues (blank): %v", err)
+	}
+
+	values, err := store.GetConfigValues(path)
+	if err != nil {
+		t.Fatalf("GetConfigValues: %v", err)
+	}
+	if _, ok := values["overpass_url"]; ok {
+		t.Errorf("expected overpass_url row to be deleted by a blank value, got %+v", values)
+	}
+}
+
+func TestPluginOverridesStore_SetConfigValuesOverwritesOnlyGivenKeys(t *testing.T) {
+	store := newTestPluginOverridesStore(t)
+	path := "plugins/poi/osm-overpass.wasm"
+
+	if err := store.SetConfigValues(path, map[string]string{"overpass_url": "https://overpass.kumi.systems/api/interpreter", "other_key": "keep-me"}); err != nil {
+		t.Fatalf("first SetConfigValues: %v", err)
+	}
+	if err := store.SetConfigValues(path, map[string]string{"overpass_url": "https://overpass.openstreetmap.fr/api/interpreter"}); err != nil {
+		t.Fatalf("second SetConfigValues: %v", err)
+	}
+
+	values, err := store.GetConfigValues(path)
+	if err != nil {
+		t.Fatalf("GetConfigValues: %v", err)
+	}
+	if values["overpass_url"] != "https://overpass.openstreetmap.fr/api/interpreter" {
+		t.Errorf("overpass_url = %q, want the updated mirror", values["overpass_url"])
+	}
+	if values["other_key"] != "keep-me" {
+		t.Errorf("other_key = %q, want it left untouched by a save that didn't mention it", values["other_key"])
+	}
+}
+
+func TestPluginOverridesStore_ConfigValuesKeyedByFullWasmPathNotID(t *testing.T) {
+	store := newTestPluginOverridesStore(t)
+
+	if err := store.SetConfigValues("plugins/poi/osm-overpass.wasm", map[string]string{"overpass_url": "https://overpass.kumi.systems/api/interpreter"}); err != nil {
+		t.Fatalf("SetConfigValues poi/osm-overpass: %v", err)
+	}
+	if err := store.SetConfigValues("plugins/other/osm-overpass.wasm", map[string]string{"overpass_url": "https://overpass.openstreetmap.fr/api/interpreter"}); err != nil {
+		t.Fatalf("SetConfigValues other/osm-overpass: %v", err)
+	}
+
+	poiValues, err := store.GetConfigValues("plugins/poi/osm-overpass.wasm")
+	if err != nil {
+		t.Fatalf("GetConfigValues poi: %v", err)
+	}
+	if poiValues["overpass_url"] != "https://overpass.kumi.systems/api/interpreter" {
+		t.Errorf("poi overpass_url = %q, want the poi mirror", poiValues["overpass_url"])
+	}
+}
+
+func TestPluginOverridesStore_DeleteConfigValuesClearsAllKeys(t *testing.T) {
+	store := newTestPluginOverridesStore(t)
+	path := "plugins/poi/osm-overpass.wasm"
+
+	if err := store.SetConfigValues(path, map[string]string{"overpass_url": "https://overpass.kumi.systems/api/interpreter", "other_key": "value"}); err != nil {
+		t.Fatalf("SetConfigValues: %v", err)
+	}
+	if err := store.DeleteConfigValues(path); err != nil {
+		t.Fatalf("DeleteConfigValues: %v", err)
+	}
+
+	values, err := store.GetConfigValues(path)
+	if err != nil {
+		t.Fatalf("GetConfigValues: %v", err)
+	}
+	if len(values) != 0 {
+		t.Errorf("expected no config values after DeleteConfigValues, got %+v", values)
+	}
+}
+
+func TestPluginOverridesStore_DeleteConfigValuesOnMissingRowsIsNotAnError(t *testing.T) {
+	store := newTestPluginOverridesStore(t)
+
+	if err := store.DeleteConfigValues("plugins/poi/never-set.wasm"); err != nil {
+		t.Fatalf("DeleteConfigValues on a never-set path should be a no-op, got error: %v", err)
+	}
+}

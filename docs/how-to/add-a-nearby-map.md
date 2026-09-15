@@ -42,3 +42,11 @@ an answer for them. See [POI categories](../reference/poi-categories.md) for
 which categories each provider actually covers, and
 [Plugins](../reference/plugins.md) for installing a different `poi` provider
 plugin.
+
+OpenStreetMap's own gear icon in that same provider list opens its settings,
+including an **Overpass server** field: if the public `overpass-api.de`
+instance is unreachable from your network, point it at a mirror such as
+`overpass.openstreetmap.fr` instead. This applies on the next Nearby lookup
+with no restart. See
+[configuration.md](../reference/configuration.md#overpass) for the allowlist
+a mirror other than that one also needs.

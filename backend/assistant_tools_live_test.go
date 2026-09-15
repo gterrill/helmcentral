@@ -10,10 +10,16 @@ import (
 
 // TestFindPlacesLive_BonaBay runs find_places against a real Overpass server.
 // It is skipped under -short (like the live BOM FTP tests) and unless
-// OVERPASS_API_URL names the mirror to use, so CI never depends on a third
-// party. Run it by hand after changing the query shape:
+// OVERPASS_LIVE_TEST_MIRROR names the mirror to use, so CI never depends on
+// a third party. This is a TEST-ONLY knob: it exists purely to point this
+// one test at a mirror without touching the operator's real osm-overpass
+// plugin config, and it does so by registering a throwaway "osm-overpass"
+// POI provider and a temp plugin overrides store, feeding the mirror
+// through the same stored config value production code reads
+// (currentOverpassAPIURL, place_name.go) - never by poking a package var
+// directly. Run it by hand after changing the query shape:
 //
-//	OVERPASS_API_URL=https://overpass.openstreetmap.fr/api/interpreter go test -run TestFindPlacesLive -v .
+//	OVERPASS_LIVE_TEST_MIRROR=https://overpass.openstreetmap.fr/api/interpreter go test -run TestFindPlacesLive -v .
 //
 // The two-rung ladder in executeFindPlaces exists because of what this
 // query costs on a public mirror (ADR 0093 §8); this test is the check that
@@ -22,17 +28,18 @@ func TestFindPlacesLive_BonaBay(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live Overpass query; skipped under -short")
 	}
-	mirror := os.Getenv("OVERPASS_API_URL")
+	mirror := os.Getenv("OVERPASS_LIVE_TEST_MIRROR")
 	if mirror == "" {
-		t.Skip("set OVERPASS_API_URL to run the live Overpass query")
+		t.Skip("set OVERPASS_LIVE_TEST_MIRROR to run the live Overpass query")
 	}
-	resolved, err := resolveOverpassAPIURL(mirror)
-	if err != nil {
-		t.Fatalf("OVERPASS_API_URL: %v", err)
+	if _, err := resolveOverpassPluginURL(mirror); err != nil {
+		t.Fatalf("OVERPASS_LIVE_TEST_MIRROR: %v", err)
 	}
-	previous := overpassAPIURL
-	overpassAPIURL = resolved
-	t.Cleanup(func() { overpassAPIURL = previous })
+
+	wasmPath, store := withOsmOverpassPOIProvider(t)
+	if err := store.SetConfigValues(wasmPath, map[string]string{"overpass_url": mirror}); err != nil {
+		t.Fatalf("SetConfigValues: %v", err)
+	}
 
 	deps := assistantToolDeps{
 		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -1, Longitude: -1}, nil },

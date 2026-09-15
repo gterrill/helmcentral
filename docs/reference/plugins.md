@@ -16,7 +16,7 @@ The six registries (`backend/tide_providers.go`,
 | Tides | `plugins/tides/` | `PLUGINS_TIDES_DIR` | `bom` (Australia), `noaa` (US) |
 | Weather | `plugins/weather/` | `PLUGINS_WEATHER_DIR` | `open-meteo` (worldwide, keyless, **default**), `weatherkit` (Apple, needs keys) |
 | Waves | `plugins/waves/` | `PLUGINS_WAVES_DIR` | `open-meteo-marine` (**default**) |
-| Points of interest | `plugins/poi/` | `PLUGINS_POI_DIR` | `osm-overpass` (worldwide, keyless, **default**; mirror set via `OVERPASS_API_URL`), `google-places` (needs a key, partial category coverage) |
+| Points of interest | `plugins/poi/` | `PLUGINS_POI_DIR` | `osm-overpass` (worldwide, keyless, **default**; mirror set via the plugin's own settings, see below), `google-places` (needs a key, partial category coverage) |
 | Forecast warnings | `plugins/forecast-warnings/` | `PLUGINS_FORECAST_WARNINGS_DIR` | `bom` (Australia, **default**), `nws` (US) |
 | Upper air | `plugins/upper-air/` | `PLUGINS_UPPER_AIR_DIR` | `open-meteo-upper` (worldwide, keyless) |
 
@@ -42,6 +42,10 @@ If a plugin requires operator-supplied secrets (WeatherKit's signing key is
 currently the only example in this codebase), it reads them from a companion
 `<name>.config.json` file. The host expands `${ENV_VAR}` references in this file
 using the backend environment at load time.
+
+A plugin can also declare its own operator-EDITABLE settings, changeable from
+the Settings UI without an env var or a rebuild - see "Plugin-declared config
+fields" below.
 
 **The host owns all derived data.** Unit conversion, interpolation, caching,
 day-bucketing into the vessel's local timezone, spring/neap classification,
@@ -72,14 +76,15 @@ than relying on written summaries that might diverge from the code.
 
 ### Companion files
 
-A plugin consists of a `.wasm` file and up to three optional companion files
-sharing its base name. An omitted companion file means that no hosts, configs,
-or secrets are granted.
+A plugin consists of a `.wasm` file and up to four optional companion files
+sharing its base name. An omitted companion file means that no hosts,
+configs, config fields, or secrets are granted.
 
 | File | Shape | Purpose |
 | --- | --- | --- |
 | `<name>.allowed_hosts.json` | JSON array of hostnames | The only hosts this plugin may reach, over HTTP or FTP. Absent means no network at all. |
-| `<name>.config.json` | JSON object of string values | Plugin configuration. A `${VAR}` value is expanded by the host before the plugin sees it. |
+| `<name>.config.json` | JSON object of string values | Plugin configuration, resolved once when the plugin loads. A `${VAR}` value is expanded by the host before the plugin sees it. |
+| `<name>.config_fields.json` | JSON array of field declarations | Which `config.json` keys are operator-editable from the Settings UI, resolved fresh on every call. See "Plugin-declared config fields" below. |
 | `<name>.allowed_secrets.json` | JSON array of secret names | Which stored secrets this plugin's `${VAR}` references may resolve. A secret not listed here is denied and the denial is logged. |
 
 ```jsonc
@@ -108,6 +113,51 @@ or secrets are granted.
   "api_key": "${GOOGLE_PLACES_API_KEY}"
 }
 ```
+
+### Plugin-declared config fields
+
+A plugin can expose one or more of its own settings for an operator to edit
+from the Settings UI, without an env var, a `.env` file, or a rebuild -
+`osm-overpass`'s Overpass mirror is the first example. Declare each field in
+a `<name>.config_fields.json` sidecar:
+
+```jsonc
+// osm-overpass.config_fields.json
+[
+  {
+    "key": "overpass_url",
+    "label": "Overpass server",
+    "type": "url",
+    "placeholder": "https://overpass-api.de/api/interpreter",
+    "help": "Blank uses the public overpass-api.de."
+  }
+]
+```
+
+Each entry needs a unique, non-empty `key` (matching a name your plugin
+reads via its PDK's config accessor, e.g. `pdk.GetConfig("overpass_url")`
+in TinyGo) and a `type` of `"url"` or `"text"`. A malformed sidecar - bad
+JSON, an empty or duplicate key, or an unrecognised type - fails plugin load
+outright, the same as a malformed `allowed_hosts.json`.
+
+The Settings UI reads this sidecar via `GET /api/plugins/:type/:id`, which
+returns a `config_fields` array with each field's declared metadata plus its
+currently stored value (blank if never set), and renders one input per
+field in that provider's own settings modal. Saving posts
+`POST /api/plugins/:type/:id/config` with `{"values": {"<key>": "<value>"}}`;
+the backend rejects an unknown key or a non-blank `"url"`-typed value that
+isn't an absolute `http(s)` URL (400), otherwise stores it and returns the
+updated info. Every stored value is read fresh on the very next call to that
+export (`wasm_plugin.go`'s `applyConfigValues`) - no plugin reload or
+backend restart needed, unlike an `allowed_hosts.json` /
+`allowed_secrets.json` override (ADR 0024). A blank saved value reverts to
+whatever `config.json` provides for that key, or the plugin's own built-in
+default if `config.json` has no entry for it either.
+
+This is deliberately separate from the allowlist overrides: a config field's
+value is plugin-interpreted data (a URL, a limit, a label), not a security
+boundary, so it needs no restart and no separate review step the way
+widening network access does.
 
 Both allowlists are enforced by the host rather than the WASM sandbox. They
 prevent a plugin from receiving unapproved secrets or contacting unlisted hosts.

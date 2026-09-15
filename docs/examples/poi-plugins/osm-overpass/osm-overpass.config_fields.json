@@ -1,0 +1,9 @@
+[
+  {
+    "key": "overpass_url",
+    "label": "Overpass server",
+    "type": "url",
+    "placeholder": "https://overpass-api.de/api/interpreter",
+    "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it. Any mirror other than those two must also be added to this plugin's allowed hosts."
+  }
+]

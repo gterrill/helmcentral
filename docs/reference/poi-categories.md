@@ -77,6 +77,14 @@ first sentence of the linked article, for features that carry an OSM
 `wikipedia` tag) adds useful context to the subset of features that have it,
 but does not fill in a category with no OSM tagging in a given area at all.
 
+This plugin queries the public `overpass-api.de` by default. If your
+network refuses it, open its settings (**Settings → Widgets → Nearby →
+osm-overpass's gear icon**) and point **Overpass server** at a mirror
+instead - see [configuration.md](configuration.md#overpass) and the
+[plugin's own README](../examples/poi-plugins/osm-overpass/README.md#pointing-at-an-overpass-mirror)
+for the allowlist a mirror other than `overpass.openstreetmap.fr` also
+needs.
+
 ## Google Places
 
 `google-places` (`docs/examples/poi-plugins/google-places`) trades free/

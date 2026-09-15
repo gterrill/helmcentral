@@ -26,6 +26,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -819,5 +820,296 @@ func TestAllowedSecretsForWasmPlugin_MalformedJSONIsError(t *testing.T) {
 
 	if _, err := allowedSecretsForWasmPlugin(wasmPath); err == nil {
 		t.Fatalf("expected an error for malformed allowed_secrets.json, got nil")
+	}
+}
+
+// ── plugin-declared config fields (config_fields.json sidecar) ────────────
+//
+// A plugin's <name>.config_fields.json sidecar declares which config.json
+// keys are operator-editable from the Settings provider modal ("plugins
+// declare their own settings" - see docs/adr/0100). Unlike config.json's
+// env/secret substitution (resolved once at plugin load), a declared
+// field's operator-saved value (plugin_overrides_store.go's
+// plugin_config_values table) is overlaid on every call
+// (wasmPluginBase.call) via applyConfigValues, so a Settings save takes
+// effect on the very next call with no restart. These tests cover sidecar
+// parsing/validation at load time and the full compiled-plugin round trip
+// proving a stored value actually reaches the guest and changes live
+// between calls.
+
+func TestPluginConfigFieldsForWasmPlugin_NoCompanionFileReturnsNilNoError(t *testing.T) {
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+
+	fields, err := pluginConfigFieldsForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 0 {
+		t.Errorf("expected no config fields, got %+v", fields)
+	}
+}
+
+func TestPluginConfigFieldsForWasmPlugin_ValidSidecarParsed(t *testing.T) {
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	companion := filepath.Join(dir, "plugin.config_fields.json")
+	body := `[{"key":"overpass_url","label":"Overpass server","type":"url","placeholder":"https://overpass-api.de/api/interpreter","help":"Blank uses the public overpass-api.de."}]`
+	if err := os.WriteFile(companion, []byte(body), 0o644); err != nil {
+		t.Fatalf("write companion file: %v", err)
+	}
+
+	fields, err := pluginConfigFieldsForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 1 {
+		t.Fatalf("expected 1 field, got %+v", fields)
+	}
+	f := fields[0]
+	if f.Key != "overpass_url" || f.Label != "Overpass server" || f.Type != "url" {
+		t.Errorf("unexpected field: %+v", f)
+	}
+	if f.Placeholder != "https://overpass-api.de/api/interpreter" || f.Help != "Blank uses the public overpass-api.de." {
+		t.Errorf("unexpected placeholder/help: %+v", f)
+	}
+}
+
+func TestPluginConfigFieldsForWasmPlugin_MalformedJSONIsError(t *testing.T) {
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.config_fields.json"), []byte(`{not valid json`), 0o644); err != nil {
+		t.Fatalf("write companion file: %v", err)
+	}
+
+	if _, err := pluginConfigFieldsForWasmPlugin(wasmPath); err == nil {
+		t.Fatalf("expected an error for malformed config_fields.json")
+	}
+}
+
+func TestPluginConfigFieldsForWasmPlugin_DuplicateKeyIsError(t *testing.T) {
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	body := `[{"key":"overpass_url","label":"A","type":"url"},{"key":"overpass_url","label":"B","type":"text"}]`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.config_fields.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write companion file: %v", err)
+	}
+
+	_, err := pluginConfigFieldsForWasmPlugin(wasmPath)
+	if err == nil {
+		t.Fatalf("expected an error for a duplicate key")
+	}
+	if !strings.Contains(err.Error(), "overpass_url") {
+		t.Errorf("expected error to name the duplicate key, got: %v", err)
+	}
+}
+
+func TestPluginConfigFieldsForWasmPlugin_EmptyKeyIsError(t *testing.T) {
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	body := `[{"key":"","label":"A","type":"text"}]`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.config_fields.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write companion file: %v", err)
+	}
+
+	if _, err := pluginConfigFieldsForWasmPlugin(wasmPath); err == nil {
+		t.Fatalf("expected an error for an empty key")
+	}
+}
+
+func TestPluginConfigFieldsForWasmPlugin_UnknownTypeIsError(t *testing.T) {
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	body := `[{"key":"overpass_url","label":"A","type":"number"}]`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.config_fields.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write companion file: %v", err)
+	}
+
+	_, err := pluginConfigFieldsForWasmPlugin(wasmPath)
+	if err == nil {
+		t.Fatalf("expected an error for an unknown type")
+	}
+	if !strings.Contains(err.Error(), "number") {
+		t.Errorf("expected error to name the unknown type, got: %v", err)
+	}
+}
+
+// A malformed config_fields.json must fail plugin load outright, the same
+// "fail loudly on an author mistake" treatment every other malformed
+// sidecar file gets in this package (allowed_hosts.json, config.json,
+// allowed_secrets.json).
+func TestNewWasmPluginBase_MalformedConfigFieldsFailsLoad(t *testing.T) {
+	dir := t.TempDir()
+	wasmBytes, err := os.ReadFile(configEchoFixtureWasm)
+	if err != nil {
+		t.Fatalf("read configecho fixture: %v", err)
+	}
+	wasmPath := filepath.Join(dir, "configecho.wasm")
+	if err := os.WriteFile(wasmPath, wasmBytes, 0o644); err != nil {
+		t.Fatalf("write configecho copy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "configecho.config_fields.json"), []byte(`{not valid json`), 0o644); err != nil {
+		t.Fatalf("write config_fields.json: %v", err)
+	}
+
+	manifest, err := manifestForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("manifestForWasmPlugin: %v", err)
+	}
+	if _, err := newWasmPluginBase(manifest, "plugins/test"); err == nil {
+		t.Fatalf("expected newWasmPluginBase to fail loading a malformed config_fields.json")
+	}
+}
+
+// withTestPluginConfigValuesStore points globalPluginOverridesStore at a
+// fresh temp-dir-backed store for the duration of the test, restoring the
+// previous value (typically nil) afterward, and returns it so the test can
+// seed plugin_config_values rows directly.
+func withTestPluginConfigValuesStore(t *testing.T) *pluginOverridesStore {
+	t.Helper()
+	store := newTestPluginOverridesStore(t)
+	prev := globalPluginOverridesStore
+	globalPluginOverridesStore = store
+	t.Cleanup(func() { globalPluginOverridesStore = prev })
+	return store
+}
+
+// newConfigEchoBaseWithDeclaredField copies the prebuilt configecho.wasm
+// fixture into a fresh temp dir alongside a config_fields.json declaring
+// "some_key" as an operator-editable field, and (when non-empty) a
+// config.json giving it a load-time default, then constructs a real
+// *wasmPluginBase through the normal manifestForWasmPlugin +
+// newWasmPluginBase path (not a hand-built extism.Manifest), so
+// newWasmPluginBase's own sidecar-validation call is exercised too.
+func newConfigEchoBaseWithDeclaredField(t *testing.T, configJSONDefault string) *wasmPluginBase {
+	t.Helper()
+	dir := t.TempDir()
+	wasmBytes, err := os.ReadFile(configEchoFixtureWasm)
+	if err != nil {
+		t.Fatalf("read configecho fixture: %v", err)
+	}
+	wasmPath := filepath.Join(dir, "configecho.wasm")
+	if err := os.WriteFile(wasmPath, wasmBytes, 0o644); err != nil {
+		t.Fatalf("write configecho copy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "configecho.config_fields.json"), []byte(`[{"key":"some_key","label":"Some Key","type":"text"}]`), 0o644); err != nil {
+		t.Fatalf("write config_fields.json: %v", err)
+	}
+	if configJSONDefault != "" {
+		if err := os.WriteFile(filepath.Join(dir, "configecho.config.json"), []byte(configJSONDefault), 0o644); err != nil {
+			t.Fatalf("write config.json: %v", err)
+		}
+	}
+
+	manifest, err := manifestForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("manifestForWasmPlugin: %v", err)
+	}
+	base, err := newWasmPluginBase(manifest, "plugins/test")
+	if err != nil {
+		t.Fatalf("newWasmPluginBase: %v", err)
+	}
+	return base
+}
+
+func dumpConfigViaCall(t *testing.T, base *wasmPluginBase) map[string]string {
+	t.Helper()
+	out, err := base.call("dump_config", nil)
+	if err != nil {
+		t.Fatalf("dump_config call failed: %v", err)
+	}
+	var result map[string]string
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("unmarshal dump_config output: %v (raw: %s)", err, out)
+	}
+	return result
+}
+
+// TestWasmPluginBase_StoredConfigValueReachesGuest proves the end-to-end
+// path: an operator-saved plugin_config_values row for a declared field
+// reaches the guest on the very next call.
+func TestWasmPluginBase_StoredConfigValueReachesGuest(t *testing.T) {
+	store := withTestPluginConfigValuesStore(t)
+	base := newConfigEchoBaseWithDeclaredField(t, "")
+	if err := store.SetConfigValues(base.Path(), map[string]string{"some_key": "stored-value"}); err != nil {
+		t.Fatalf("SetConfigValues: %v", err)
+	}
+
+	result := dumpConfigViaCall(t, base)
+	if got := result["some_key"]; got != "stored-value" {
+		t.Errorf("expected some_key to carry the stored value, got %+v", result)
+	}
+}
+
+// TestWasmPluginBase_StoredConfigValueChangesBetweenCallsWithNoReload proves
+// a Settings save takes effect on the very next call to an ALREADY-LOADED
+// plugin - the entire point of resolving at call time instead of at load
+// time.
+func TestWasmPluginBase_StoredConfigValueChangesBetweenCallsWithNoReload(t *testing.T) {
+	store := withTestPluginConfigValuesStore(t)
+	base := newConfigEchoBaseWithDeclaredField(t, "")
+	if err := store.SetConfigValues(base.Path(), map[string]string{"some_key": "first-value"}); err != nil {
+		t.Fatalf("SetConfigValues: %v", err)
+	}
+
+	first := dumpConfigViaCall(t, base)
+	if got := first["some_key"]; got != "first-value" {
+		t.Fatalf("expected first call to carry the first value, got %+v", first)
+	}
+
+	if err := store.SetConfigValues(base.Path(), map[string]string{"some_key": "second-value"}); err != nil {
+		t.Fatalf("SetConfigValues (update): %v", err)
+	}
+
+	updated := dumpConfigViaCall(t, base)
+	if got := updated["some_key"]; got != "second-value" {
+		t.Errorf("expected the SAME base's next call to pick up the new value with no reload, got %+v", updated)
+	}
+}
+
+// TestWasmPluginBase_ConfigJSONValueUsedWhenNothingStored proves the normal,
+// unconfigured case: with no plugin_config_values row at all, the guest
+// still sees whatever config.json's own default provided.
+func TestWasmPluginBase_ConfigJSONValueUsedWhenNothingStored(t *testing.T) {
+	withTestPluginConfigValuesStore(t)
+	base := newConfigEchoBaseWithDeclaredField(t, `{"some_key":"config-json-default"}`)
+
+	result := dumpConfigViaCall(t, base)
+	if got := result["some_key"]; got != "config-json-default" {
+		t.Errorf("expected some_key to carry config.json's default, got %+v", result)
+	}
+}
+
+// TestWasmPluginBase_StoredConfigValueDoesNotMutateSharedManifestConfig
+// guards the specific bug applyConfigValues' doc comment warns about:
+// overlaying a stored value for one call must not leak into the compiled
+// plugin's shared manifest.Config, which every future instance's Config
+// starts from (go-sdk's Instance() aliases it directly). Proven by driving
+// two separate instances from the same *wasmPluginBase.compiled and
+// checking a fresh, untouched instance never picks up the resolved value as
+// a static baseline.
+func TestWasmPluginBase_StoredConfigValueDoesNotMutateSharedManifestConfig(t *testing.T) {
+	store := withTestPluginConfigValuesStore(t)
+	base := newConfigEchoBaseWithDeclaredField(t, "")
+	if err := store.SetConfigValues(base.Path(), map[string]string{"some_key": "stored-value"}); err != nil {
+		t.Fatalf("SetConfigValues: %v", err)
+	}
+
+	_ = dumpConfigViaCall(t, base)
+
+	// A fresh instance off the SAME compiled plugin, with no per-call
+	// resolution applied (bypassing base.call), must not see the previous
+	// call's resolved value baked into instance.Config - if applyConfigValues
+	// had mutated the shared manifest map instead of a clone, this second,
+	// untouched instance would.
+	ctx := context.Background()
+	instance, err := base.compiled.Instance(ctx, extism.PluginInstanceConfig{ModuleConfig: wasmModuleConfig()})
+	if err != nil {
+		t.Fatalf("Instance: %v", err)
+	}
+	defer instance.Close(ctx)
+
+	if v, ok := instance.Config["some_key"]; ok {
+		t.Errorf("expected the compiled plugin's own manifest Config to carry no baked-in some_key, got %q", v)
 	}
 }

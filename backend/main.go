@@ -183,19 +183,11 @@ func main() {
 	e := echo.New()
 	port := getEnv("PORT", "8080")
 
-	// Overpass endpoint for place-name resolution (place_name.go) and the
-	// assistant's find_places tool (assistant_tools.go). Resolved early,
-	// before either of those code paths can run, and fails fast on a
-	// present-but-malformed OVERPASS_API_URL rather than silently keeping
-	// the default (AGENTS.md's fail-fast / no-masking-fallback policy).
-	var err error
-	overpassAPIURL, err = resolveOverpassAPIURL(os.Getenv("OVERPASS_API_URL"))
-	if err != nil {
-		log.Fatalf("overpass: %v", err)
-	}
-	if overpassAPIURL != defaultOverpassAPIURL {
-		log.Printf("overpass: using %s", overpassAPIURL)
-	}
+	// The Overpass endpoint for place-name resolution (place_name.go), the
+	// assistant's find_places tool (assistant_tools.go) and the osm-overpass
+	// POI plugin is that plugin's own operator-editable config value, not an
+	// env var or a settings.yaml field (ADR 0100) - resolved fresh on every
+	// lookup via currentOverpassAPIURL, not once here at startup.
 
 	// Capture logs to in-memory ring buffer for Settings -> Logs viewer
 	logWriter := initLogCapture()
@@ -688,6 +680,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/plugins/:type/:id", tierAdmin, getPluginInfoHandler},
 		{http.MethodPost, "/api/plugins/:type/:id/overrides", tierAdmin, postPluginOverridesHandler},
 		{http.MethodDelete, "/api/plugins/:type/:id/overrides", tierAdmin, deletePluginOverridesHandler},
+		{http.MethodPost, "/api/plugins/:type/:id/config", tierAdmin, postPluginConfigHandler},
 		{http.MethodGet, "/api/alarm-transports", tierAdmin, getAlarmTransportsHandler},
 		{http.MethodPost, "/api/alarm-transports", tierAdmin, setAlarmTransportsHandler},
 		{http.MethodPost, "/api/alarm-transports/test", tierAdmin, testAlarmTransportsHandler},

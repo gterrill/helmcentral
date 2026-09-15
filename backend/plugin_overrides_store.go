@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -63,6 +64,26 @@ func newPluginOverridesStore(dbPath string) (*pluginOverridesStore, error) {
 	)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create plugin_overrides table: %w", err)
+	}
+
+	// plugin_config_values holds one row per (plugin, declared config field)
+	// - the values a plugin author's <name>.config_fields.json sidecar
+	// exposes as operator-editable in the Settings provider modal (the
+	// "plugins declare their own settings" rewrite of ADR 0100), applied on
+	// the very next plugin call with no restart. Unlike plugin_overrides
+	// above (one row per plugin, both allowlists together), this is one row
+	// per field so a partial save (or the absence of any saved value at all,
+	// the normal default) is a natural, ungrouped state - most plugins have
+	// zero rows here forever.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS plugin_config_values (
+		wasm_path  TEXT NOT NULL,
+		key        TEXT NOT NULL,
+		value      TEXT NOT NULL,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (wasm_path, key)
+	)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create plugin_config_values table: %w", err)
 	}
 
 	return &pluginOverridesStore{db: db}, nil
@@ -139,6 +160,78 @@ func (s *pluginOverridesStore) Set(wasmPath string, allowedHosts, allowedSecrets
 func (s *pluginOverridesStore) Delete(wasmPath string) error {
 	if _, err := s.db.Exec(`DELETE FROM plugin_overrides WHERE wasm_path = ?`, wasmPath); err != nil {
 		return fmt.Errorf("plugin overrides store: delete %s: %w", wasmPath, err)
+	}
+	return nil
+}
+
+// GetConfigValues returns every stored plugin-declared config value for
+// wasmPath, keyed by config field key. No stored rows is the normal default
+// state (an empty, non-nil map, no error) - most plugins declare no
+// config_fields at all, or an operator hasn't touched the ones they do
+// declare, and wasmPluginBase.call's overlay treats a key's absence here as
+// "use whatever config.json (or the plugin's own built-in default)
+// already provides."
+func (s *pluginOverridesStore) GetConfigValues(wasmPath string) (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT key, value FROM plugin_config_values WHERE wasm_path = ?`, wasmPath)
+	if err != nil {
+		return nil, fmt.Errorf("plugin overrides store: read config values for %s: %w", wasmPath, err)
+	}
+	defer rows.Close()
+
+	values := map[string]string{}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("plugin overrides store: scan config value for %s: %w", wasmPath, err)
+		}
+		values[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("plugin overrides store: read config values for %s: %w", wasmPath, err)
+	}
+	return values, nil
+}
+
+// SetConfigValues upserts each key/value pair in values for wasmPath. A
+// blank (or all-whitespace) value DELETES that key's row instead of storing
+// an empty string, so the field reverts to whatever config.json provides
+// (or the plugin's own built-in default when config.json has no entry for
+// it either) - the same "blank means unset, not literally empty" contract
+// every other settings-shaped value in this app follows. All writes for
+// this call happen in one transaction, so a failure partway through never
+// leaves some keys saved and others not.
+func (s *pluginOverridesStore) SetConfigValues(wasmPath string, values map[string]string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("plugin overrides store: begin config values tx for %s: %w", wasmPath, err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Unix()
+	for key, value := range values {
+		if strings.TrimSpace(value) == "" {
+			if _, err := tx.Exec(`DELETE FROM plugin_config_values WHERE wasm_path = ? AND key = ?`, wasmPath, key); err != nil {
+				return fmt.Errorf("plugin overrides store: delete config value %s/%s: %w", wasmPath, key, err)
+			}
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO plugin_config_values (wasm_path, key, value, updated_at) VALUES (?, ?, ?, ?)
+			 ON CONFLICT(wasm_path, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+			wasmPath, key, value, now,
+		); err != nil {
+			return fmt.Errorf("plugin overrides store: upsert config value %s/%s: %w", wasmPath, key, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// DeleteConfigValues removes every stored config value for wasmPath.
+// Deleting a path with no stored rows is a no-op, not an error - mirrors
+// Delete's own no-op-on-missing-row contract above.
+func (s *pluginOverridesStore) DeleteConfigValues(wasmPath string) error {
+	if _, err := s.db.Exec(`DELETE FROM plugin_config_values WHERE wasm_path = ?`, wasmPath); err != nil {
+		return fmt.Errorf("plugin overrides store: delete config values for %s: %w", wasmPath, err)
 	}
 	return nil
 }

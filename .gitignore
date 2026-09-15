@@ -60,5 +60,5 @@ settings.yaml
 # (backend/testdata/**/*.wasm are committed test fixtures and stay tracked.)
 /docs/examples/**/*.wasm
 
-# Local docker compose overrides (OVERPASS_API_URL and the like); never committed.
+# Local docker compose overrides (CORS_ALLOWED_ORIGINS and the like); never committed.
 .env

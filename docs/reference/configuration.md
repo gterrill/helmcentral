@@ -45,7 +45,6 @@ block, or your shell.
 | `VESSEL_STATUS` | `At Anchor` | Fallback status when SignalK reports none |
 | `HELMCENTRAL_MASTER_KEY` | *(auto-generated)* | Base64, exactly 32 bytes. Overrides the generated `data/secrets.key`. |
 | `CORS_ALLOWED_ORIGINS` | *(unset)* | Comma-separated extra origins allowed to call the API with credentials, on top of the server's own origin (always allowed). Only needed for a frontend hosted somewhere other than this binary. |
-| `OVERPASS_API_URL` | `https://overpass-api.de/api/interpreter` | Overpass server used for place-name resolution (the position tile) and Mate's place search. Must be an absolute `https://` URL. Also drives the `osm-overpass` POI plugin's `overpass_url` config value via its `osm-overpass.config.json` sidecar, so setting this one variable moves both; see [its README](../examples/poi-plugins/osm-overpass/README.md#pointing-at-an-overpass-mirror) for the allowlist a non-default mirror also needs. |
 | `INFLUX_SOC_MEASUREMENT` | `electrical.batteries.0.capacity.stateOfCharge` | The state-of-charge measurement the Battery & Power tile's overnight (dawn) projection reads, and the path its state-of-charge bands look for a matching alarm rule on. |
 | `DAWN_LINEAR_FALLBACK` | `true` | When overnight state-of-charge history is unavailable (InfluxDB not configured, unreachable, or too few usable nights), extrapolate the live rate to sunrise and label the result as such. Set `false` to show a dash with the reason instead. |
 | `INFLUX_SHORE_MEASUREMENT` | `electrical.chargers.0.acin.1.current` | The charger's AC input current. A night with a reading above 0.5 A is excluded from the overnight model as shore-powered. |
@@ -78,6 +77,29 @@ onto matching Helmcentral permissions. An unrecognised role fails closed.
 
 The server address and port themselves come from `settings.yaml`'s `signalk:`
 section, set from the Settings UI.
+
+### Overpass
+
+The Overpass server is the `osm-overpass` POI plugin's own setting, not an
+app-level one: **Settings → Widgets → Nearby → osm-overpass's gear icon**
+shows an **Overpass server** field, declared by that plugin's own
+`osm-overpass.config_fields.json` sidecar. There is no environment-variable
+override and no `settings.yaml` entry. A save (`POST
+/api/plugins/poi/osm-overpass/config`) takes effect on the very next
+`fetch_poi` call with no restart. Blank (the default) uses the public
+`https://overpass-api.de/api/interpreter`; a non-blank value must be an
+absolute `https://` URL, checked at save time and again on every lookup.
+
+This one setting feeds three consumers: the `osm-overpass` POI plugin
+itself, place-name resolution (the position tile), and Mate's `find_places`
+tool - the latter two read the plugin's stored value directly until a later
+phase moves them into the plugin (see
+[ADR 0100](../adr/0100-plugins-declare-their-own-settings.md)). Point it at
+a mirror such as `https://overpass.openstreetmap.fr/api/interpreter` when
+your network refuses `overpass-api.de`. See
+[poi-categories.md](poi-categories.md#the-default-provider-openstreetmap-via-overpass)
+and the [osm-overpass plugin's README](../examples/poi-plugins/osm-overpass/README.md#pointing-at-an-overpass-mirror)
+for the allowlist a mirror other than those two also needs.
 
 ### State paths
 

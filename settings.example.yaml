@@ -98,6 +98,12 @@ mayara:
   address: ""
   port: 6502
 
+# The Overpass server used for place names (the position tile), Mate's place
+# search, and the Nearby tile's osm-overpass plugin is that plugin's own
+# setting now (Settings -> Widgets -> Nearby -> osm-overpass's gear icon),
+# not a settings.yaml value - see docs/reference/configuration.md and
+# docs/adr/0100-plugins-declare-their-own-settings.md.
+
 # Onboard assistant: an OpenRouter-backed chat that can look up places, wind
 # forecasts and tides for the boat's own crew (ADR 0093). Off by default and
 # BYOK - the key lives in the secrets store (OPENROUTER_API_KEY via

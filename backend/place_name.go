@@ -48,32 +48,69 @@ const overpassClientTimeoutBuffer = 5 * time.Second
 // overpassQueryTimeoutSeconds so the two can never drift back out of order.
 const overpassTimeout = time.Duration(overpassQueryTimeoutSeconds)*time.Second + overpassClientTimeoutBuffer
 
-// overpassAPIURL is the Overpass endpoint used by both place-name
-// resolution (this file) and the assistant's find_places tool
-// (assistant_tools.go), via the shared postOverpassQuery below. It is
-// resolved once at startup by resolveOverpassAPIURL from OVERPASS_API_URL
-// (main.go's main), and initialised to the default here so tests that never
-// run main() still get it.
-var overpassAPIURL = defaultOverpassAPIURL
+// osmOverpassPOIProviderID is the registered id of the shipped osm-overpass
+// POI plugin (poi_providers.go's defaultPOIProviderID) - the plugin whose
+// own stored "overpass_url" config value (wasm_plugin.go's
+// plugin_config_values store, POST /api/plugins/poi/osm-overpass/config)
+// place-name resolution and the assistant's find_places tool piggyback on
+// via currentOverpassAPIURL below.
+const osmOverpassPOIProviderID = "osm-overpass"
 
-// resolveOverpassAPIURL reads the optional OVERPASS_API_URL environment
-// variable, defaulting to defaultOverpassAPIURL when raw is blank or
-// whitespace-only - an unset OVERPASS_API_URL is the normal case, not a
-// mistake. A non-blank value must parse as an absolute https URL with a
-// host; this mirrors the POI plugin's resolveOverpassURL
+// currentOverpassAPIURL resolves the Overpass endpoint from the osm-overpass
+// POI plugin's own "overpass_url" config value (ADR 0100 rewrite: the
+// mirror is a setting the plugin declares for itself, not a global app
+// setting), read fresh from the plugin overrides store on every call rather
+// than once at startup, so a Settings save takes effect on the very next
+// lookup with no restart needed.
+//
+// PHASE B NOTE: this function is a stopgap, not the long-term home of this
+// lookup. Place-name resolution (this file) and the assistant's
+// find_places tool (assistant_tools.go) need an Overpass endpoint but are
+// not themselves the osm-overpass plugin, so today they reach into that
+// plugin's stored config directly. A later phase moves both call sites into
+// the plugin itself (find_places becoming a plugin-backed tool, place-name
+// resolution going through the POI provider interface), at which point this
+// function is deleted rather than generalized further.
+func currentOverpassAPIURL() (string, error) {
+	provider, ok := getPOIProvider(osmOverpassPOIProviderID)
+	if !ok {
+		// The osm-overpass plugin isn't installed/registered - there is no
+		// plugin-owned override to read, so this is exactly the "unconfigured"
+		// case: use the same public default the plugin itself falls back to.
+		return defaultOverpassAPIURL, nil
+	}
+	pp, ok := provider.(pluginPathProvider)
+	if !ok {
+		return "", fmt.Errorf("osm-overpass POI provider %T does not implement pluginPathProvider; every registered provider must be WASM-backed", provider)
+	}
+	if globalPluginOverridesStore == nil {
+		return defaultOverpassAPIURL, nil
+	}
+	values, err := globalPluginOverridesStore.GetConfigValues(pp.Path())
+	if err != nil {
+		return "", fmt.Errorf("reading osm-overpass plugin's overpass_url setting: %w", err)
+	}
+	return resolveOverpassPluginURL(values["overpass_url"])
+}
+
+// resolveOverpassPluginURL mirrors the POI plugin's own resolveOverpassURL
 // (docs/examples/poi-plugins/osm-overpass/osm-overpass.go) validation
-// exactly, including never falling back to the default silently on a
-// malformed value - a set-but-broken OVERPASS_API_URL almost certainly did
-// not mean "use overpass-api.de", so it surfaces as an error instead, per
-// AGENTS.md's fail-fast / no-masking-fallback policy.
-func resolveOverpassAPIURL(raw string) (string, error) {
+// exactly: a blank value (the normal, unconfigured case) yields
+// defaultOverpassAPIURL. A non-blank value must parse as an absolute https
+// URL with a host, or resolution fails naming the osm-overpass plugin's
+// overpass_url setting rather than silently falling back to the default - a
+// saved-but-broken value (most plausibly a hand-edited plugin_overrides
+// database row, since POST /api/plugins/poi/osm-overpass/config already
+// rejects a malformed one at save time) almost certainly did not mean "use
+// overpass-api.de", per AGENTS.md's fail-fast / no-masking-fallback policy.
+func resolveOverpassPluginURL(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return defaultOverpassAPIURL, nil
 	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return "", fmt.Errorf("OVERPASS_API_URL: must be an absolute https URL, got %q", raw)
+		return "", fmt.Errorf("osm-overpass plugin's overpass_url setting: must be an absolute https URL, got %q", raw)
 	}
 	return trimmed, nil
 }
@@ -191,10 +228,19 @@ func looksLikeOverpassRateLimit(contentType string, body []byte) bool {
 // through the same request-building, header and rate-limit handling without
 // duplicating it - fetchOverpassRing's ring-widening ladder is specific to
 // place-name resolution and has no bearing on a name search.
+//
+// The endpoint is resolved via currentOverpassAPIURL on every call (ADR
+// 0100), not read from a package-level var, so a Settings save changes
+// where the very next query goes.
 func postOverpassQuery(fetcher overpassFetcher, query string) ([]overpassElement, error) {
+	apiURL, err := currentOverpassAPIURL()
+	if err != nil {
+		return nil, err
+	}
+
 	form := url.Values{"data": {query}}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, overpassAPIURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, apiURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("build overpass request: %w", err)
 	}

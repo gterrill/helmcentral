@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { ProviderSettingsModal } from '@/components/settings/provider-settings-modal'
+import { ProviderSettingsModal, type ProviderDomain } from '@/components/settings/provider-settings-modal'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 
 const secretsGetResponse = {
@@ -13,7 +13,7 @@ const secretsGetResponse = {
   WEATHERKIT_PRIVATE_KEY: false,
 }
 
-function renderModal(type: 'tide' | 'weather', providerId: string) {
+function renderModal(type: ProviderDomain, providerId: string) {
   return render(
     <SecretsStatusProvider>
       <ProviderSettingsModal type={type} providerId={providerId} open onOpenChange={() => {}} />
@@ -200,5 +200,143 @@ describe('ProviderSettingsModal', () => {
     expect(screen.getByLabelText('WeatherKit Service ID')).toBeTruthy()
     expect(screen.getByLabelText('WeatherKit Private Key')).toBeTruthy()
     expect(screen.getByText(/Allowlist changes require a backend restart/i)).toBeTruthy()
+  })
+})
+
+// ── plugin-declared config fields (ADR 0100 rewrite: "plugins declare
+// their own settings") ─────────────────────────────────────────────────────
+//
+// osm-overpass declares one field, "overpass_url" (label "Overpass
+// server"), used here as the representative example throughout - the same
+// shape any future plugin's config_fields.json produces.
+
+const osmOverpassInfo = (storedMirrorURL: string) => ({
+  type: 'poi',
+  id: 'osm-overpass',
+  name: 'OpenStreetMap via Overpass',
+  description: 'Free, keyless POI data from OpenStreetMap',
+  sandboxed: true,
+  allowed_hosts: ['overpass-api.de', 'overpass.openstreetmap.fr'],
+  allowed_hosts_overridden: false,
+  allowed_secrets: [],
+  allowed_secrets_overridden: false,
+  config_fields: [
+    {
+      key: 'overpass_url',
+      label: 'Overpass server',
+      type: 'url',
+      help: 'Blank uses the public overpass-api.de.',
+      placeholder: 'https://overpass-api.de/api/interpreter',
+      value: storedMirrorURL,
+    },
+  ],
+})
+
+describe('ProviderSettingsModal config fields', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('renders a declared config field with its stored value and help text', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/plugins/poi/osm-overpass')) {
+          return { ok: true, json: async () => osmOverpassInfo('https://overpass.openstreetmap.fr/api/interpreter') }
+        }
+        if (url.includes('/api/settings/secrets')) {
+          return { ok: true, json: async () => secretsGetResponse }
+        }
+        return { ok: false, json: async () => ({}) }
+      }),
+    )
+
+    renderModal('poi', 'osm-overpass')
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Overpass server')).toBeTruthy()
+    })
+
+    expect((screen.getByLabelText('Overpass server') as HTMLInputElement).value).toBe(
+      'https://overpass.openstreetmap.fr/api/interpreter',
+    )
+    expect(screen.getByText('Blank uses the public overpass-api.de.')).toBeTruthy()
+    expect(screen.getByText(/Applies on the next call/i)).toBeTruthy()
+  })
+
+  it('Save posts the edited config field values to /config', async () => {
+    const fetchMock = vi.fn(async (url: string, options?: { method?: string; body?: string }) => {
+      if (url.includes('/api/plugins/poi/osm-overpass/config') && options?.method === 'POST') {
+        const body = JSON.parse(options.body!)
+        expect(body.values).toEqual({ overpass_url: 'https://overpass.kumi.systems/api/interpreter' })
+        return { ok: true, json: async () => osmOverpassInfo('https://overpass.kumi.systems/api/interpreter') }
+      }
+      if (url.includes('/api/plugins/poi/osm-overpass/overrides') && options?.method === 'POST') {
+        return { ok: true, json: async () => osmOverpassInfo('https://overpass.kumi.systems/api/interpreter') }
+      }
+      if (url.includes('/api/plugins/poi/osm-overpass')) {
+        return { ok: true, json: async () => osmOverpassInfo('') }
+      }
+      if (url.includes('/api/settings/secrets')) {
+        return { ok: true, json: async () => secretsGetResponse }
+      }
+      return { ok: false, json: async () => ({}) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderModal('poi', 'osm-overpass')
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Overpass server')).toBeTruthy()
+    })
+
+    fireEvent.change(screen.getByLabelText('Overpass server'), {
+      target: { value: 'https://overpass.kumi.systems/api/interpreter' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/plugins/poi/osm-overpass/config',
+        expect.objectContaining({ method: 'POST' }),
+      )
+    })
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Overpass server') as HTMLInputElement).value).toBe(
+        'https://overpass.kumi.systems/api/interpreter',
+      )
+    })
+  })
+
+  it('shows the 400 error message from a rejected config save inline', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options?: { method?: string }) => {
+        if (url.includes('/api/plugins/poi/osm-overpass/config') && options?.method === 'POST') {
+          return { ok: false, status: 400, json: async () => ({ error: 'Overpass server must be an absolute http(s) URL' }) }
+        }
+        if (url.includes('/api/plugins/poi/osm-overpass')) {
+          return { ok: true, json: async () => osmOverpassInfo('') }
+        }
+        if (url.includes('/api/settings/secrets')) {
+          return { ok: true, json: async () => secretsGetResponse }
+        }
+        return { ok: false, json: async () => ({}) }
+      }),
+    )
+
+    renderModal('poi', 'osm-overpass')
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Overpass server')).toBeTruthy()
+    })
+
+    fireEvent.change(screen.getByLabelText('Overpass server'), { target: { value: 'not-a-url' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Overpass server must be an absolute http(s) URL')).toBeTruthy()
+    })
   })
 })

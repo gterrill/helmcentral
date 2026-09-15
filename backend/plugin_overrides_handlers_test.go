@@ -47,6 +47,34 @@ func newTestWasmTideProviderWithCompanionFiles(t *testing.T, hosts, secrets []st
 	return provider
 }
 
+// newTestWasmTideProviderWithConfigFields mirrors
+// newTestWasmTideProviderWithCompanionFiles but also drops a
+// <name>.config_fields.json sidecar next to the fixture wasm, giving tests a
+// WASM-backed provider that declares operator-editable config fields (ADR
+// 0100 rewrite: "plugins declare their own settings").
+func newTestWasmTideProviderWithConfigFields(t *testing.T, configFieldsJSON string) *wasmTideProvider {
+	t.Helper()
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+
+	raw, err := os.ReadFile(validFixtureWasm)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if err := os.WriteFile(wasmPath, raw, 0o644); err != nil {
+		t.Fatalf("write fixture copy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.config_fields.json"), []byte(configFieldsJSON), 0o644); err != nil {
+		t.Fatalf("write config_fields.json: %v", err)
+	}
+
+	provider, err := newWasmTideProvider(wasmPath)
+	if err != nil {
+		t.Fatalf("newWasmTideProvider: %v", err)
+	}
+	return provider
+}
+
 // nonWasmTideProviderFake is a test-only tideProvider that deliberately does
 // NOT implement pluginPathProvider (no Path() method), used to exercise the
 // invariant-violation error path in buildPluginInfoResponse/
@@ -302,6 +330,230 @@ func TestDeletePluginOverridesHandler_NonWasmProviderReturnsInternalServerError(
 func TestPostPluginOverridesHandler_UnknownTypeReturns400(t *testing.T) {
 	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/not-a-type/foo/overrides", `{}`, "not-a-type", "foo")
 	if err := postPluginOverridesHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ── config_fields (ADR 0100 rewrite: plugins declare their own settings) ──
+
+func TestGetPluginInfoHandler_ConfigFieldsEmptyWhenNoneDeclared(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithCompanionFiles(t, nil, nil)
+	registerTideProvider(provider)
+
+	c, rec := newPluginTestEchoContext(http.MethodGet, "/api/plugins/tide/valid-fixture", "", "tide", "valid-fixture")
+	if err := getPluginInfoHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp pluginInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.ConfigFields == nil || len(resp.ConfigFields) != 0 {
+		t.Errorf("expected config_fields to be an empty (non-null) array, got %+v", resp.ConfigFields)
+	}
+}
+
+func TestGetPluginInfoHandler_ConfigFieldsIncludesDeclaredFieldWithStoredValue(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	store := withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithConfigFields(t, `[{"key":"some_key","label":"Some Key","type":"url","help":"help text","placeholder":"https://example.com"}]`)
+	registerTideProvider(provider)
+	if err := store.SetConfigValues(provider.Path(), map[string]string{"some_key": "https://mirror.example.com"}); err != nil {
+		t.Fatalf("SetConfigValues: %v", err)
+	}
+
+	c, rec := newPluginTestEchoContext(http.MethodGet, "/api/plugins/tide/valid-fixture", "", "tide", "valid-fixture")
+	if err := getPluginInfoHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	var resp pluginInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.ConfigFields) != 1 {
+		t.Fatalf("expected 1 config field, got %+v", resp.ConfigFields)
+	}
+	f := resp.ConfigFields[0]
+	if f.Key != "some_key" || f.Label != "Some Key" || f.Type != "url" || f.Help != "help text" || f.Placeholder != "https://example.com" {
+		t.Errorf("unexpected field metadata: %+v", f)
+	}
+	if f.Value != "https://mirror.example.com" {
+		t.Errorf("expected stored value to be reflected, got %q", f.Value)
+	}
+}
+
+func TestGetPluginInfoHandler_ConfigFieldsValueBlankWhenNothingStored(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithConfigFields(t, `[{"key":"some_key","label":"Some Key","type":"text"}]`)
+	registerTideProvider(provider)
+
+	c, rec := newPluginTestEchoContext(http.MethodGet, "/api/plugins/tide/valid-fixture", "", "tide", "valid-fixture")
+	if err := getPluginInfoHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	var resp pluginInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.ConfigFields) != 1 || resp.ConfigFields[0].Value != "" {
+		t.Errorf("expected a blank value with nothing stored, got %+v", resp.ConfigFields)
+	}
+}
+
+func TestPostPluginConfigHandler_UnknownKeyReturns400(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithConfigFields(t, `[{"key":"some_key","label":"Some Key","type":"text"}]`)
+	registerTideProvider(provider)
+
+	body := `{"values":{"not_a_declared_key":"value"}}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/config", body, "tide", "valid-fixture")
+	if err := postPluginConfigHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if !strings.Contains(errResp["error"], "not_a_declared_key") {
+		t.Errorf("expected error to name the unknown key, got %+v", errResp)
+	}
+}
+
+func TestPostPluginConfigHandler_BadURLReturns400(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithConfigFields(t, `[{"key":"some_key","label":"Some Key","type":"url"}]`)
+	registerTideProvider(provider)
+
+	body := `{"values":{"some_key":"not-a-url"}}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/config", body, "tide", "valid-fixture")
+	if err := postPluginConfigHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if !strings.Contains(errResp["error"], "Some Key") {
+		t.Errorf("expected error to name the field, got %+v", errResp)
+	}
+}
+
+func TestPostPluginConfigHandler_SavesAndGetReflectsValue(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithConfigFields(t, `[{"key":"some_key","label":"Some Key","type":"url"}]`)
+	registerTideProvider(provider)
+
+	body := `{"values":{"some_key":"https://mirror.example.com/api"}}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/config", body, "tide", "valid-fixture")
+	if err := postPluginConfigHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp pluginInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.ConfigFields) != 1 || resp.ConfigFields[0].Value != "https://mirror.example.com/api" {
+		t.Errorf("expected the saved value reflected in the POST response, got %+v", resp.ConfigFields)
+	}
+
+	c2, rec2 := newPluginTestEchoContext(http.MethodGet, "/api/plugins/tide/valid-fixture", "", "tide", "valid-fixture")
+	if err := getPluginInfoHandler(c2); err != nil {
+		t.Fatalf("GET handler returned error: %v", err)
+	}
+	var resp2 pluginInfoResponse
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("unmarshal GET response: %v", err)
+	}
+	if len(resp2.ConfigFields) != 1 || resp2.ConfigFields[0].Value != "https://mirror.example.com/api" {
+		t.Errorf("expected a fresh GET to reflect the saved value, got %+v", resp2.ConfigFields)
+	}
+}
+
+func TestPostPluginConfigHandler_BlankValueClearsStoredValue(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	store := withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithConfigFields(t, `[{"key":"some_key","label":"Some Key","type":"text"}]`)
+	registerTideProvider(provider)
+	if err := store.SetConfigValues(provider.Path(), map[string]string{"some_key": "previous-value"}); err != nil {
+		t.Fatalf("SetConfigValues: %v", err)
+	}
+
+	body := `{"values":{"some_key":""}}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/config", body, "tide", "valid-fixture")
+	if err := postPluginConfigHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp pluginInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.ConfigFields) != 1 || resp.ConfigFields[0].Value != "" {
+		t.Errorf("expected the value to be cleared, got %+v", resp.ConfigFields)
+	}
+}
+
+func TestPostPluginConfigHandler_NonWasmProviderReturnsInternalServerError(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	registerTideProvider(nonWasmTideProviderFake{})
+
+	body := `{"values":{}}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/fake-non-wasm/config", body, "tide", "fake-non-wasm")
+	if err := postPluginConfigHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if !strings.Contains(errResp["error"], "fake-non-wasm") || !strings.Contains(errResp["error"], "pluginPathProvider") {
+		t.Errorf("expected error naming the provider and the violated invariant, got %+v", errResp)
+	}
+}
+
+func TestPostPluginConfigHandler_UnknownTypeReturns400(t *testing.T) {
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/not-a-type/foo/config", `{"values":{}}`, "not-a-type", "foo")
+	if err := postPluginConfigHandler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
 	if rec.Code != http.StatusBadRequest {

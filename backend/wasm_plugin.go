@@ -100,6 +100,16 @@ type wasmPluginBase struct {
 	ttlSeconds  int64
 	path        string
 	compiled    *extism.CompiledPlugin
+	// configFieldKeys lists the config.json keys this plugin's own
+	// <name>.config_fields.json sidecar declares as operator-editable (ADR
+	// 0100 rewrite: "plugins declare their own settings"). On every call
+	// (call, below), an operator-saved value for one of these keys
+	// (plugin_overrides_store.go's plugin_config_values table, set via POST
+	// /api/plugins/:type/:id/config) is overlaid onto a clone of
+	// instance.Config, so a save takes effect on the very next call with no
+	// restart. Populated by newWasmPluginBase from pluginConfigFieldsForWasmPlugin;
+	// nil for the common case of a plugin with no declared fields.
+	configFieldKeys []string
 }
 
 func (b *wasmPluginBase) ID() string          { return b.id }
@@ -131,11 +141,62 @@ func (b *wasmPluginBase) call(name string, input []byte) (out []byte, err error)
 	}
 	defer instance.Close(ctx)
 
+	if len(b.configFieldKeys) > 0 {
+		if rerr := b.applyConfigValues(instance); rerr != nil {
+			return nil, fmt.Errorf("plugin %q: %w", b.id, rerr)
+		}
+	}
+
 	_, out, err = instance.Call(name, input)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %q: %s call failed: %w", b.id, name, err)
 	}
 	return out, nil
+}
+
+// applyConfigValues overlays this plugin's operator-saved config values
+// (plugin_overrides_store.go's plugin_config_values table, set via POST
+// /api/plugins/:type/:id/config) onto a CLONE of instance.Config, read
+// fresh from the store on every call rather than cached, so a save takes
+// effect on the very next call with no restart. It must be a clone, never
+// the map extism handed back directly: go-sdk's Instance() sets
+// instance.Config to the exact same map as the compiled plugin's
+// manifest.Config (by reference, not copied), which is shared by every
+// instance this compiled plugin will ever create. Mutating it in place
+// would leak one call's resolved value into the manifest, and therefore
+// into every other instance's Config too - a bug that would look like a
+// stale value that never updates, not a momentary one.
+//
+// A missing store (nil - no plugin ever saved a config value in this
+// process, e.g. most tests) leaves config.json's own value, if any, in
+// place; a store read error fails the call outright rather than silently
+// falling back to that same default, since a broken store here is a real
+// operational problem, not "operator hasn't configured this yet". Only
+// declared keys (b.configFieldKeys) are ever overlaid - a stored row for a
+// key this plugin no longer declares (or never did) is simply ignored.
+func (b *wasmPluginBase) applyConfigValues(instance *extism.Plugin) error {
+	if globalPluginOverridesStore == nil {
+		return nil
+	}
+	values, err := globalPluginOverridesStore.GetConfigValues(b.path)
+	if err != nil {
+		return fmt.Errorf("reading stored config values: %w", err)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(instance.Config))
+	for k, v := range instance.Config {
+		cloned[k] = v
+	}
+	for _, key := range b.configFieldKeys {
+		if v, ok := values[key]; ok {
+			cloned[key] = v
+		}
+	}
+	instance.Config = cloned
+	return nil
 }
 
 // firstErrorLine returns only the first line of err's message. A
@@ -251,29 +312,14 @@ func allowedSecretsForWasmPlugin(wasmPath string) ([]string, error) {
 	return keys, nil
 }
 
-// configForWasmPlugin reads the companion <name>.config.json file next to a
-// .wasm plugin: a flat JSON object of string values. Each value is expanded
-// against the process environment via os.Expand (so a plugin author writes
-// "${WEATHERKIT_KEY_ID}" and the operator sets that env var on the backend
-// container). If ANY env var referenced inside a value is unset, that whole
-// key is dropped from the returned map - never substituted with an empty
-// string - so a plugin's own "is this config key present?" check behaves
-// correctly for operators who haven't set the optional keys a given plugin
-// doesn't need. A missing companion file is the normal default (nil map, no
-// error) - most plugins (e.g. Open-Meteo) need no config at all. A file that
-// exists but is malformed JSON IS an error - same "fail loudly" reasoning as
-// allowedHostsForWasmPlugin.
-//
-// Secrets gate: a referenced name that is one of knownSecretKeys (see
-// secrets_store.go) is resolved from globalSecretsStore instead of the raw
-// process environment, and ONLY if the plugin's companion
-// <name>.allowed_secrets.json explicitly lists it - this is the actual
-// security boundary that keeps secrets like WEATHERKIT_PRIVATE_KEY from
-// being globally visible to every plugin via os.Setenv (LoadIntoEnv
-// deliberately never sets WEATHERKIT_* into the process env at all).
-// Non-secret names are entirely unaffected and keep today's raw
-// os.LookupEnv behavior.
-func configForWasmPlugin(wasmPath string) (map[string]string, error) {
+// wasmPluginConfigFields reads and JSON-parses the companion
+// <name>.config.json file next to wasmPath into a flat map of raw,
+// un-expanded string values. A missing file is the normal default (nil map,
+// no error) - most plugins (e.g. Open-Meteo) need no config at all. A file
+// that exists but is malformed JSON IS an error - same "fail loudly"
+// reasoning as allowedHostsForWasmPlugin. Used by configForWasmPlugin
+// (env/secret expansion, resolved once at plugin load).
+func wasmPluginConfigFields(wasmPath string) (map[string]string, error) {
 	companion := strings.TrimSuffix(wasmPath, ".wasm") + ".config.json"
 	raw, err := os.ReadFile(companion)
 	if err != nil {
@@ -286,6 +332,107 @@ func configForWasmPlugin(wasmPath string) (map[string]string, error) {
 	var fields map[string]string
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", companion, err)
+	}
+	return fields, nil
+}
+
+// pluginConfigFieldSpec is one entry in a plugin's companion
+// <name>.config_fields.json sidecar: a config.json key the plugin author
+// declares as operator-editable from the Settings provider modal (ADR 0100
+// rewrite: the Overpass mirror moved from a global settings.yaml value to a
+// setting the osm-overpass plugin declares for itself, and this is the
+// general mechanism any plugin can use for the same purpose). Type is
+// either "url" (validated as an absolute http(s) URL by
+// postPluginConfigHandler, plugin_overrides_handlers.go) or "text" (no
+// format validation beyond non-blank-ness). Help and Placeholder are purely
+// cosmetic, shown by the frontend's provider settings modal.
+type pluginConfigFieldSpec struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Type        string `json:"type"`
+	Help        string `json:"help"`
+	Placeholder string `json:"placeholder"`
+}
+
+// validPluginConfigFieldTypes is the closed set of config_fields.json "type"
+// values. An unrecognized type is an authoring mistake, not a forward-compat
+// signal to ignore - see pluginConfigFieldsForWasmPlugin.
+var validPluginConfigFieldTypes = map[string]bool{"url": true, "text": true}
+
+// pluginConfigFieldsForWasmPlugin reads and validates the companion
+// <name>.config_fields.json file next to wasmPath: a JSON array of
+// pluginConfigFieldSpec. A missing file is the normal default (nil slice,
+// no error) - most plugins declare no operator-editable config at all. A
+// file that exists but is malformed JSON, has an empty or duplicate key, or
+// names an unrecognized type IS an error - same "fail loudly on an author
+// mistake" treatment every other malformed sidecar file gets in this
+// package (allowedHostsForWasmPlugin, wasmPluginConfigFields). Called from
+// newWasmPluginBase, so any of these failures fails plugin load outright.
+func pluginConfigFieldsForWasmPlugin(wasmPath string) ([]pluginConfigFieldSpec, error) {
+	companion := strings.TrimSuffix(wasmPath, ".wasm") + ".config_fields.json"
+	raw, err := os.ReadFile(companion)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read config fields file %s: %w", companion, err)
+	}
+
+	var fields []pluginConfigFieldSpec
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("failed to parse config fields file %s: %w", companion, err)
+	}
+
+	seen := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		key := strings.TrimSpace(f.Key)
+		if key == "" {
+			return nil, fmt.Errorf("config fields file %s: entry has an empty key", companion)
+		}
+		if seen[key] {
+			return nil, fmt.Errorf("config fields file %s: duplicate key %q", companion, key)
+		}
+		seen[key] = true
+		if !validPluginConfigFieldTypes[f.Type] {
+			return nil, fmt.Errorf("config fields file %s: key %q has unknown type %q", companion, key, f.Type)
+		}
+	}
+	return fields, nil
+}
+
+// configForWasmPlugin reads the companion <name>.config.json file next to a
+// .wasm plugin (via wasmPluginConfigFields): a flat JSON object of string
+// values. Each value is expanded against the process environment via
+// os.Expand (so a plugin author writes "${WEATHERKIT_KEY_ID}" and the
+// operator sets that env var on the backend container). If ANY env var
+// referenced inside a value is unset, that whole key is dropped from the
+// returned map - never substituted with an empty string - so a plugin's own
+// "is this config key present?" check behaves correctly for operators who
+// haven't set the optional keys a given plugin doesn't need.
+//
+// A key this plugin's own <name>.config_fields.json sidecar declares
+// (pluginConfigFieldsForWasmPlugin) as operator-editable is NOT excluded
+// here - whatever value.json provides (if any) still becomes that key's
+// load-time default. What changes per call is applied later, by
+// wasmPluginBase.call's applyConfigValues overlay: an operator-saved value
+// for a declared key replaces this default on a CLONE of instance.Config,
+// on every call, so a Settings save takes effect on the very next call with
+// no restart - baking it in once here, at load time, would mean a save
+// never takes effect without one.
+//
+// Secrets gate: a referenced name that is one of knownSecretKeys (see
+// secrets_store.go) is resolved from globalSecretsStore instead of the raw
+// process environment, and ONLY if the plugin's companion
+// <name>.allowed_secrets.json explicitly lists it - this is the actual
+// security boundary that keeps secrets like WEATHERKIT_PRIVATE_KEY from
+// being globally visible to every plugin via os.Setenv (LoadIntoEnv
+// deliberately never sets WEATHERKIT_* into the process env at all).
+// Non-secret names are entirely unaffected and keep today's raw
+// os.LookupEnv behavior.
+func configForWasmPlugin(wasmPath string) (map[string]string, error) {
+	fields, err := wasmPluginConfigFields(wasmPath)
+	if err != nil {
+		return nil, err
 	}
 
 	allowedSecrets, err := allowedSecretsForWasmPlugin(wasmPath)
@@ -392,6 +539,19 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 		}
 	}()
 
+	// Validated before the (much more expensive) compile step below: a
+	// malformed companion config_fields.json is an authoring mistake that
+	// must fail plugin load outright, the same "fail loudly" treatment
+	// every other malformed sidecar file gets in this package.
+	configFields, cferr := pluginConfigFieldsForWasmPlugin(path)
+	if cferr != nil {
+		return nil, fmt.Errorf("plugin %s: %w", path, cferr)
+	}
+	configFieldKeys := make([]string, 0, len(configFields))
+	for _, f := range configFields {
+		configFieldKeys = append(configFieldKeys, f.Key)
+	}
+
 	ctx := context.Background()
 	compiled, cerr := extism.NewCompiledPlugin(ctx, manifest, extism.PluginConfig{EnableWasi: true, RuntimeConfig: wasmRuntimeConfig()}, []extism.HostFunction{newFTPFetchHostFunction(manifest.AllowedHosts)})
 	if cerr != nil {
@@ -463,12 +623,13 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 	}
 
 	return &wasmPluginBase{
-		id:          id,
-		name:        name,
-		description: description,
-		ttlSeconds:  ttlSeconds,
-		path:        path,
-		compiled:    compiled,
+		id:              id,
+		name:            name,
+		description:     description,
+		ttlSeconds:      ttlSeconds,
+		path:            path,
+		compiled:        compiled,
+		configFieldKeys: configFieldKeys,
 	}, nil
 }
 

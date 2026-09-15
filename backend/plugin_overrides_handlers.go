@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -33,8 +35,9 @@ type namedProvider interface {
 type pluginPathProvider interface{ Path() string }
 
 // pluginInfoResponse is the exact, fixed HTTP contract for
-// GET/POST/DELETE /api/plugins/:type/:id(/overrides) - a separate frontend
-// team builds against this shape, do not change it without updating them.
+// GET/POST/DELETE /api/plugins/:type/:id(/overrides) and
+// GET/POST /api/plugins/:type/:id/config - a separate frontend team builds
+// against this shape, do not change it without updating them.
 type pluginInfoResponse struct {
 	Type                     string   `json:"type"`
 	ID                       string   `json:"id"`
@@ -45,6 +48,23 @@ type pluginInfoResponse struct {
 	AllowedHostsOverridden   bool     `json:"allowed_hosts_overridden"`
 	AllowedSecrets           []string `json:"allowed_secrets"`
 	AllowedSecretsOverridden bool     `json:"allowed_secrets_overridden"`
+	// ConfigFields lists this plugin's own operator-editable config fields
+	// (its <name>.config_fields.json sidecar, ADR 0100 rewrite: "plugins
+	// declare their own settings"), each carrying its currently stored
+	// Value (blank when nothing has been saved). Always a non-nil, possibly
+	// empty array - most plugins declare none.
+	ConfigFields []pluginConfigFieldResponse `json:"config_fields"`
+}
+
+// pluginConfigFieldResponse is one entry of pluginInfoResponse.ConfigFields:
+// a pluginConfigFieldSpec (wasm_plugin.go) plus its currently stored value.
+type pluginConfigFieldResponse struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Type        string `json:"type"`
+	Help        string `json:"help"`
+	Placeholder string `json:"placeholder"`
+	Value       string `json:"value"`
 }
 
 // providerByTypeAndID dispatches providerType to the matching registry and
@@ -119,6 +139,7 @@ func buildPluginInfoResponse(providerType string, provider namedProvider) (plugi
 		Description:    provider.Description(),
 		AllowedHosts:   []string{},
 		AllowedSecrets: []string{},
+		ConfigFields:   []pluginConfigFieldResponse{},
 	}
 
 	pp, ok := provider.(pluginPathProvider)
@@ -150,6 +171,30 @@ func buildPluginInfoResponse(providerType string, provider namedProvider) (plugi
 		}
 		resp.AllowedHostsOverridden = overridden
 		resp.AllowedSecretsOverridden = overridden
+	}
+
+	fieldSpecs, err := pluginConfigFieldsForWasmPlugin(pp.Path())
+	if err != nil {
+		return pluginInfoResponse{}, err
+	}
+	if len(fieldSpecs) > 0 {
+		var storedValues map[string]string
+		if globalPluginOverridesStore != nil {
+			storedValues, err = globalPluginOverridesStore.GetConfigValues(pp.Path())
+			if err != nil {
+				return pluginInfoResponse{}, err
+			}
+		}
+		for _, f := range fieldSpecs {
+			resp.ConfigFields = append(resp.ConfigFields, pluginConfigFieldResponse{
+				Key:         f.Key,
+				Label:       f.Label,
+				Type:        f.Type,
+				Help:        f.Help,
+				Placeholder: f.Placeholder,
+				Value:       storedValues[f.Key],
+			})
+		}
 	}
 
 	return resp, nil
@@ -253,6 +298,94 @@ func deletePluginOverridesHandler(c echo.Context) error {
 
 	if err := globalPluginOverridesStore.Delete(pp.Path()); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to clear plugin overrides"})
+	}
+
+	resp, err := buildPluginInfoResponse(providerType, provider)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read plugin allowlist state"})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+// pluginConfigRequest is the POST /api/plugins/:type/:id/config request
+// body: a map of declared config field key to the new value an operator
+// typed into the Settings provider modal. A key not present in the
+// request's Values is simply left untouched (unlike pluginOverridesRequest,
+// this is a partial update, not a full-state replace) - the modal only
+// sends the fields it actually rendered/edited.
+type pluginConfigRequest struct {
+	Values map[string]string `json:"values"`
+}
+
+// isAbsoluteHTTPURL reports whether raw parses as an absolute http or https
+// URL with a host. Used to validate a "url"-typed config field generically,
+// at the host level - a plugin's own domain-specific constraints (e.g. the
+// osm-overpass plugin's https-only Overpass mirror requirement) are enforced
+// by the plugin itself when the value is actually used, not duplicated here.
+func isAbsoluteHTTPURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+}
+
+// postPluginConfigHandler is POST /api/plugins/:type/:id/config: saves
+// operator-edited values for this plugin's own declared config fields (its
+// <name>.config_fields.json sidecar, ADR 0100 rewrite), applied on the very
+// next plugin call with no restart (wasmPluginBase.call's applyConfigValues
+// overlay). Rejects a key that isn't one of this plugin's declared fields
+// (400, naming the key) and a "url"-typed field whose non-blank value isn't
+// an absolute http(s) URL (400, naming the field's label) before saving
+// anything - a partially-invalid request saves nothing, not just the valid
+// keys.
+//
+// A resolved provider that isn't WASM-backed is an invariant violation (see
+// pluginPathProvider doc comment), not a client-triggerable condition -
+// reported as a 500 like postPluginOverridesHandler's identical check.
+func postPluginConfigHandler(c echo.Context) error {
+	providerType := c.Param("type")
+	id := c.Param("id")
+
+	provider, validType, found := providerByTypeAndID(providerType, id)
+	if !validType {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown provider type: " + providerType})
+	}
+	if !found {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "provider not found: " + id})
+	}
+
+	pp, ok := provider.(pluginPathProvider)
+	if !ok {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("provider %q (type %s) does not implement pluginPathProvider; every registered provider must be WASM-backed", id, providerType)})
+	}
+
+	var req pluginConfigRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+	}
+
+	fieldSpecs, err := pluginConfigFieldsForWasmPlugin(pp.Path())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read plugin config fields"})
+	}
+	fieldsByKey := make(map[string]pluginConfigFieldSpec, len(fieldSpecs))
+	for _, f := range fieldSpecs {
+		fieldsByKey[f.Key] = f
+	}
+
+	for key, value := range req.Values {
+		field, known := fieldsByKey[key]
+		if !known {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unknown config field %q", key)})
+		}
+		if field.Type == "url" && strings.TrimSpace(value) != "" && !isAbsoluteHTTPURL(value) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("%s must be an absolute http(s) URL", field.Label)})
+		}
+	}
+
+	if err := globalPluginOverridesStore.SetConfigValues(pp.Path(), req.Values); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save plugin config"})
 	}
 
 	resp, err := buildPluginInfoResponse(providerType, provider)

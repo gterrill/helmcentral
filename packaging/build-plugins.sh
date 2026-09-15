@@ -40,10 +40,11 @@ build() {
   go mod download
   tinygo build -o "$OUT/$category/$name.wasm" -target wasip1 -buildmode c-shared .
 
-  # Sidecars declare each plugin's network and secret allowances; the backend
+  # Sidecars declare each plugin's network and secret allowances, load-time
+  # config defaults, and operator-editable config fields; the backend
   # refuses hosts and secrets that aren't listed, so they must travel with the
   # .wasm rather than being optional extras.
-  for sidecar in allowed_hosts config allowed_secrets; do
+  for sidecar in allowed_hosts config config_fields allowed_secrets; do
     if [ -f "$name.$sidecar.json" ]; then
       cp "$name.$sidecar.json" "$OUT/$category/$name.$sidecar.json"
     fi
