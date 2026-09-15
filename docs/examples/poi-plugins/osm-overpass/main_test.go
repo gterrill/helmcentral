@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -63,6 +66,118 @@ func TestBuildOverpassPOIQuery_ServerSideTimeoutStaysUnderHostBudget(t *testing.
 	}
 	if strings.Contains(q, "[timeout:60]") {
 		t.Fatalf("expected the query to no longer request a 60s Overpass timeout, got:\n%s", q)
+	}
+}
+
+// ── bounding box ─────────────────────────────────────────────────────────
+//
+// overpass.openstreetmap.fr's planner scans by tag before applying a
+// clause's own around: filter, which pushes the full 11-category query past
+// the host's 15s WASM plugin budget (measured: 23s wall time, 0 elements,
+// "Query timed out" at Lindeman Island). A global [bbox:...] setting on the
+// query header gives the planner a spatial index to start from - measured
+// 2.4s for the identical 23-element result at the same position. These
+// tests pin the box's geometry, not its exact decimal text, since the box
+// only needs to enclose the around: circle, not match it exactly.
+
+var bboxPattern = regexp.MustCompile(`\[bbox:(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)\]`)
+
+// extractBBox parses the [bbox:S,W,N,E] setting out of a built query,
+// failing the test if the query carries no such setting.
+func extractBBox(t *testing.T, q string) (south, west, north, east float64) {
+	t.Helper()
+	m := bboxPattern.FindStringSubmatch(q)
+	if m == nil {
+		t.Fatalf("expected a [bbox:S,W,N,E] setting in the query, got:\n%s", q)
+	}
+	vals := make([]float64, 4)
+	for i, s := range m[1:] {
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			t.Fatalf("bad bbox number %q: %v", s, err)
+		}
+		vals[i] = v
+	}
+	return vals[0], vals[1], vals[2], vals[3]
+}
+
+func TestBuildOverpassPOIQuery_BBoxEnclosesTheAroundCircle(t *testing.T) {
+	lat, lon, radiusM := -20.4467, 149.0353, 9260
+	q := buildOverpassPOIQuery(lat, lon, radiusM, []string{"anchorage"})
+	south, west, north, east := extractBBox(t, q)
+
+	dlat := float64(radiusM) / 111320.0
+	if !(south < lat-dlat) {
+		t.Fatalf("expected south (%f) < lat-dlat (%f)", south, lat-dlat)
+	}
+	if !(north > lat+dlat) {
+		t.Fatalf("expected north (%f) > lat+dlat (%f)", north, lat+dlat)
+	}
+	dlon := float64(radiusM) / (111320.0 * math.Cos(lat*math.Pi/180))
+	if !(lon-west >= dlon) {
+		t.Fatalf("expected west to extend at least %f deg from lon, got west=%f (lon-west=%f)", dlon, west, lon-west)
+	}
+	if !(east-lon >= dlon) {
+		t.Fatalf("expected east to extend at least %f deg from lon, got east=%f (east-lon=%f)", dlon, east, east-lon)
+	}
+}
+
+func TestBuildOverpassPOIQuery_BBoxAtHighLatitudeCoversPolewardEdge(t *testing.T) {
+	// At 60N the circle's own poleward edge (its north side, closer to the
+	// pole than the center latitude) needs more longitude span per meter
+	// than the center latitude does, because cos shrinks moving poleward. A
+	// box sized from cos(lat) alone would fall short of covering that edge.
+	lat, lon, radiusM := 60.0, 150.0, 9260
+	q := buildOverpassPOIQuery(lat, lon, radiusM, []string{"anchorage"})
+	south, west, north, east := extractBBox(t, q)
+
+	dlat := float64(radiusM) / 111320.0
+	if !(south < lat-dlat) || !(north > lat+dlat) {
+		t.Fatalf("expected the box to enclose the latitude span, got south=%f north=%f (want < %f, > %f)", south, north, lat-dlat, lat+dlat)
+	}
+
+	polewardLat := lat + dlat
+	dlonPoleward := float64(radiusM) / (111320.0 * math.Cos(polewardLat*math.Pi/180))
+	if !(lon-west >= dlonPoleward) {
+		t.Fatalf("expected west to extend at least %f deg (poleward-adjusted) from lon, got west=%f (lon-west=%f)", dlonPoleward, west, lon-west)
+	}
+	if !(east-lon >= dlonPoleward) {
+		t.Fatalf("expected east to extend at least %f deg (poleward-adjusted) from lon, got east=%f (east-lon=%f)", dlonPoleward, east, east-lon)
+	}
+
+	// Confirm the naive cos(lat)-only span really would have been
+	// insufficient, so this test would catch a regression to that formula.
+	dlonCenter := float64(radiusM) / (111320.0 * math.Cos(lat*math.Pi/180))
+	if dlonPoleward <= dlonCenter {
+		t.Fatalf("expected the poleward-adjusted longitude delta (%f) to exceed the naive center-latitude one (%f)", dlonPoleward, dlonCenter)
+	}
+}
+
+func TestBuildOverpassPOIQuery_EveryClauseStillCarriesItsOwnAroundFilter(t *testing.T) {
+	categories := []string{"anchorage", "bay", "trail"}
+	q := buildOverpassPOIQuery(-20.4467, 149.0353, 9260, categories)
+
+	wantAround := "(around:9260,-20.446700,149.035300)"
+	wantCount := 0
+	for _, id := range categories {
+		wantCount += len(poiCategoryByID[id].Clauses)
+	}
+	if got := strings.Count(q, wantAround); got != wantCount {
+		t.Fatalf("expected %d occurrences of %q (one per clause), got %d in:\n%s", wantCount, wantAround, got, q)
+	}
+}
+
+func TestBuildOverpassPOIQuery_OmitsBBoxAtAntimeridian(t *testing.T) {
+	q := buildOverpassPOIQuery(-20.4467, 179.99, 9260, []string{"anchorage"})
+	if strings.Contains(q, "[bbox:") {
+		t.Fatalf("expected no [bbox:...] setting when the box would cross the antimeridian, got:\n%s", q)
+	}
+}
+
+func TestBuildOverpassPOIQuery_OmitsBBoxNearPole(t *testing.T) {
+	q := buildOverpassPOIQuery(89.99, 149.0353, 9260, []string{"anchorage"})
+	if strings.Contains(q, "[bbox:") {
+		t.Fatalf("expected no [bbox:...] setting when the box would cross a pole, got:\n%s", q)
 	}
 }
 
@@ -361,6 +476,26 @@ func TestResolveOverpassURL_RejectsMalformedValueRatherThanFallingBack(t *testin
 		if got != "" {
 			t.Fatalf("expected no fallback to the default on a malformed value, got %q", got)
 		}
+	}
+}
+
+func TestResolveOverpassURL_TreatsEmptyPresentValueLikeAbsent(t *testing.T) {
+	got, err := resolveOverpassURL("", true)
+	if err != nil {
+		t.Fatalf("expected no error for empty present value, got %v", err)
+	}
+	if got != defaultOverpassAPIURL {
+		t.Fatalf("expected default %q, got %q", defaultOverpassAPIURL, got)
+	}
+}
+
+func TestResolveOverpassURL_TreatsWhitespacePresentValueLikeAbsent(t *testing.T) {
+	got, err := resolveOverpassURL("   ", true)
+	if err != nil {
+		t.Fatalf("expected no error for whitespace-only present value, got %v", err)
+	}
+	if got != defaultOverpassAPIURL {
+		t.Fatalf("expected default %q, got %q", defaultOverpassAPIURL, got)
 	}
 }
 

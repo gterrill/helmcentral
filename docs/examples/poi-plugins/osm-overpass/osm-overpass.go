@@ -213,6 +213,71 @@ func orderRequestedCategories(requested []string) []string {
 	return ordered
 }
 
+// metersPerDegreeLat approximates how many meters correspond to one degree
+// of latitude. This varies slightly with actual latitude (Earth is not a
+// perfect sphere), but overpassBoundingBox only needs a box that is
+// generously large enough to enclose a circle, not an exact one, and
+// bboxPadFraction absorbs the resulting slack.
+const metersPerDegreeLat = 111320.0
+
+// bboxPadFraction pads overpassBoundingBox's computed box on every side, so
+// the flat-earth approximation in metersPerDegreeLat (and ordinary
+// float64 rounding) can never leave the box just short of enclosing the
+// around: circle it was built to bound.
+const bboxPadFraction = 0.01
+
+// overpassBoundingBox computes a [south, west, north, east] box in degrees
+// that encloses the around: circle at (lat, lon, radiusM), for use as
+// Overpass QL's global [bbox:...] query setting alongside (not instead of)
+// the per-clause around: filters.
+//
+// Why this exists: on overpass.openstreetmap.fr, this plugin's slower
+// clauses are key-only or regex tag filters (nwr["historic"]["name"],
+// nwr["sport"~"^(scuba_diving|snorkelling)$"], and similar) which that
+// mirror's planner scans by tag across the whole database before applying
+// each clause's own around: filter - there is no spatial index to start
+// from. Measured against this plugin's real 11-category query at Lindeman
+// Island (-20.4467, 149.0353, 9260m) on 2026-09-15: without a bbox setting,
+// the query hit the mirror's own server-side timeout after 23s wall time
+// with 0 elements returned - past the host's 15s WASM plugin budget
+// (backend/wasm_plugin.go, WASM_PLUGIN_TIMEOUT_MS). Adding a global
+// [bbox:...] setting to the query header gives the planner a spatial index
+// to start from instead: the identical query, same position, returned in
+// 2.4s with the exact same 23 elements. Because every point inside an
+// around: circle is by construction also inside a box built to enclose that
+// circle, adding this bbox can never drop or change a result - the
+// per-clause around: filters remain the actual, unchanged filter.
+//
+// ok is false when the box would have to cross the antimeridian or a pole
+// to enclose the circle. Clamping or wrapping such a box would silently
+// drop real results on the other side of that seam, so the caller omits
+// the [bbox:...] setting entirely and falls back to the (still correct,
+// just slower without a spatial index) around: filters alone.
+func overpassBoundingBox(lat, lon float64, radiusM int) (south, west, north, east float64, ok bool) {
+	dlat := float64(radiusM) / metersPerDegreeLat
+
+	// The circle's widest point in longitude is bounded using the cosine of
+	// the box's poleward-most latitude - whichever of its two edges has the
+	// larger absolute value. Cosine only shrinks moving away from the
+	// equator, so that edge has the smallest cosine, and therefore needs
+	// the largest longitude delta, of any latitude in the box. Using that
+	// one delta for the whole box is deliberately generous rather than
+	// exact: it guarantees the circle fits, at the cost of some extra width
+	// away from that edge.
+	polewardLat := math.Max(math.Abs(lat-dlat), math.Abs(lat+dlat))
+	dlon := float64(radiusM) / (metersPerDegreeLat * math.Cos(polewardLat*math.Pi/180))
+
+	dlat *= 1 + bboxPadFraction
+	dlon *= 1 + bboxPadFraction
+
+	south, north = lat-dlat, lat+dlat
+	west, east = lon-dlon, lon+dlon
+	if south < -90 || north > 90 || west < -180 || east > 180 {
+		return 0, 0, 0, 0, false
+	}
+	return south, west, north, east, true
+}
+
 // buildOverpassPOIQuery builds one Overpass QL query covering every
 // requested category, each in its own named set so each gets its own
 // `out tags center <cap>` - see the package doc comment for why this needs
@@ -227,7 +292,15 @@ func buildOverpassPOIQuery(lat, lon float64, radiusM int, categories []string) s
 	// backend/wasm_plugin.go), so the server-side budget must stay under
 	// that ceiling or Overpass just keeps working a query the host has
 	// already abandoned.
-	b.WriteString("[out:json][timeout:12];\n")
+	b.WriteString("[out:json][timeout:12]")
+	if south, west, north, east, ok := overpassBoundingBox(lat, lon, radiusM); ok {
+		// See overpassBoundingBox's doc comment for why this is here: it
+		// gives overpass.openstreetmap.fr's planner a spatial index to
+		// start from, without changing which elements the per-clause
+		// around: filters below select.
+		fmt.Fprintf(&b, "[bbox:%.6f,%.6f,%.6f,%.6f]", south, west, north, east)
+	}
+	b.WriteString(";\n")
 	for i, id := range orderRequestedCategories(categories) {
 		cat := poiCategoryByID[id]
 		setName := fmt.Sprintf("c%d", i)
@@ -460,13 +533,17 @@ func resolveDetailLimit(raw string, present bool) int {
 
 // resolveOverpassURL reads the optional "overpass_url" plugin config value,
 // defaulting to defaultOverpassAPIURL when config.json carries no such key.
+// A present value that is empty or contains only whitespace is treated like
+// an absent key and returns the default - this matches the host's
+// OVERPASS_API_URL handling because config.json maps the key to that env var
+// and docker-compose passes it through empty when unset.
 // Unlike resolveDetailLimit above, a present-but-malformed value does NOT
 // fall back to the default - a config.json edit that failed to produce a
 // usable URL almost certainly did not mean "use overpass-api.de", so this
 // returns an error naming the "overpass_url" key rather than masking the
 // mistake. The value must parse as an absolute https URL.
 //
-// Pointing this at a mirror (e.g. https://overpass.kumi.systems/api/interpreter)
+// Pointing this at a mirror (e.g. https://overpass.openstreetmap.fr/api/interpreter)
 // does not by itself grant network access to it: the mirror's host still has
 // to be added to this plugin's osm-overpass.allowed_hosts.json (or the
 // Settings allowlist override, docs/adr/0024-plugin-descriptions-and-allowlist-overrides.md),
@@ -477,6 +554,9 @@ func resolveOverpassURL(raw string, present bool) (string, error) {
 		return defaultOverpassAPIURL, nil
 	}
 	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultOverpassAPIURL, nil
+	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return "", fmt.Errorf("overpass_url: must be an absolute https URL, got %q", raw)

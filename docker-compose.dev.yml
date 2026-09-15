@@ -171,8 +171,8 @@ services:
   # open-meteo-upper) from
   # docs/examples/{tide,weather,wave,poi,forecast-warnings,upper-air}-plugins/
   # with TinyGo and drops each <name>.wasm + <name>.allowed_hosts.json (+
-  # <name>.config.json and <name>.allowed_secrets.json, for weatherkit and
-  # google-places) into
+  # <name>.config.json, for weatherkit, google-places and osm-overpass, and
+  # <name>.allowed_secrets.json, for weatherkit and google-places) into
   # ./plugins/{tides,weather,waves,poi,forecast-warnings,upper-air}, the same
   # host directory bind-mounted into backend/backend-dev above. No
   # `profiles:` key here on purpose: a profile-less service is always part
@@ -192,7 +192,7 @@ services:
         cd /src/weather-plugins/open-meteo && go mod download && tinygo build -o /out/weather/open-meteo.wasm -target wasip1 -buildmode c-shared . && cp open-meteo.allowed_hosts.json /out/weather/open-meteo.allowed_hosts.json &&
         cd /src/weather-plugins/weatherkit && go mod download && tinygo build -o /out/weather/weatherkit.wasm -target wasip1 -buildmode c-shared . && cp weatherkit.allowed_hosts.json /out/weather/weatherkit.allowed_hosts.json && cp weatherkit.config.json /out/weather/weatherkit.config.json && cp weatherkit.allowed_secrets.json /out/weather/weatherkit.allowed_secrets.json &&
         cd /src/wave-plugins/open-meteo-marine && go mod download && tinygo build -o /out/waves/open-meteo-marine.wasm -target wasip1 -buildmode c-shared . && cp open-meteo-marine.allowed_hosts.json /out/waves/open-meteo-marine.allowed_hosts.json &&
-        cd /src/poi-plugins/osm-overpass && go mod download && tinygo build -o /out/poi/osm-overpass.wasm -target wasip1 -buildmode c-shared . && cp osm-overpass.allowed_hosts.json /out/poi/osm-overpass.allowed_hosts.json &&
+        cd /src/poi-plugins/osm-overpass && go mod download && tinygo build -o /out/poi/osm-overpass.wasm -target wasip1 -buildmode c-shared . && cp osm-overpass.allowed_hosts.json /out/poi/osm-overpass.allowed_hosts.json && cp osm-overpass.config.json /out/poi/osm-overpass.config.json &&
         cd /src/poi-plugins/google-places && go mod download && tinygo build -o /out/poi/google-places.wasm -target wasip1 -buildmode c-shared . && cp google-places.allowed_hosts.json /out/poi/google-places.allowed_hosts.json && cp google-places.config.json /out/poi/google-places.config.json && cp google-places.allowed_secrets.json /out/poi/google-places.allowed_secrets.json &&
         cd /src/forecast-warnings-plugins/bom && go mod download && tinygo build -o /out/forecast-warnings/bom.wasm -target wasip1 -buildmode c-shared . && cp bom.allowed_hosts.json /out/forecast-warnings/bom.allowed_hosts.json &&
         cd /src/forecast-warnings-plugins/nws && go mod download && tinygo build -o /out/forecast-warnings/nws.wasm -target wasip1 -buildmode c-shared . && cp nws.allowed_hosts.json /out/forecast-warnings/nws.allowed_hosts.json &&

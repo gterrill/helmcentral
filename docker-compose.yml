@@ -12,6 +12,11 @@ services:
       # inside the writable data volume rather than being bind-mounted
       # read-only from the host.
       SETTINGS_FILE: /app/data/settings.yaml
+      # The Overpass server used for place names and the Nearby tile's POI
+      # plugin. Unset (the default) uses overpass-api.de. Set this to a
+      # mirror such as https://overpass.openstreetmap.fr/api/interpreter
+      # when the network refuses overpass-api.de.
+      # OVERPASS_API_URL: https://overpass.openstreetmap.fr/api/interpreter
     volumes:
       # All persistent state: settings.yaml, the four SQLite stores, routes,
       # dashboard pages, plugin caches and uploaded charts. Created on first

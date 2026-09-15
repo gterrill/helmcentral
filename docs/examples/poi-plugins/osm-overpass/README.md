@@ -25,6 +25,15 @@ POST per `fetch_poi` call regardless of how many categories were requested -
 see `buildOverpassPOIQuery` in `osm-overpass.go`. Each category's cap comes
 straight from the table in `docs/reference/poi-categories.md`.
 
+The query header also carries a global `[bbox:...]` setting sized to enclose
+every category's `around:` circle (`overpassBoundingBox` in
+`osm-overpass.go`), omitted only when that box would have to cross the
+antimeridian or a pole. Some mirrors, including `overpass.openstreetmap.fr`,
+plan the key-only and regex tag clauses (historic, dive) by scanning the
+whole database before applying their own `around:` filter; the bbox gives
+the planner a spatial index to start from and cut that scan down to size,
+without changing which elements the `around:` filters actually select.
+
 Overpass's plain JSON output doesn't record which named set produced a given
 element, so every returned element is reclassified from its own tags
 afterwards (`classifyElement`), walking the categories in a fixed precedence
@@ -69,36 +78,47 @@ mirror instead - see "Pointing at an Overpass mirror" below.
 ## Pointing at an Overpass mirror
 
 By default this plugin queries the public `overpass-api.de` instance
-(`defaultOverpassAPIURL` in `osm-overpass.go`). An operator can override this
-with the optional `overpass_url` key in a companion `osm-overpass.config.json`
-file:
+(`defaultOverpassAPIURL` in `osm-overpass.go`). This plugin ships with a
+companion `osm-overpass.config.json` that maps its `overpass_url` key to the
+host's `OVERPASS_API_URL` environment variable:
 
 ```jsonc
 // osm-overpass.config.json
 {
-  "overpass_url": "https://overpass.kumi.systems/api/interpreter"
+  "overpass_url": "${OVERPASS_API_URL}"
 }
 ```
+
+That means setting `OVERPASS_API_URL` on the Helmcentral backend (see
+[docs/reference/configuration.md](../../../reference/configuration.md)) moves
+both the backend's own place-name lookups and this plugin's POI queries to
+the same mirror in one step. Leaving `OVERPASS_API_URL` unset drops the
+`overpass_url` key entirely (`configForWasmPlugin`'s documented behaviour for
+an unset referenced env var), and the plugin falls back to its
+`overpass-api.de` default. A blank `OVERPASS_API_URL` behaves like unset and
+also uses the default.
 
 `resolveOverpassURL` (`osm-overpass.go`) requires the value to parse as an
 absolute `https://` URL. A present-but-malformed value fails the `fetch_poi`
 call outright, naming the `overpass_url` key in the error - it never falls
-back to the default silently, since a config.json edit that didn't produce a
-usable URL almost certainly wasn't meant to keep querying overpass-api.de.
-Leaving the key out of config.json entirely keeps the default.
+back to the default silently, since a broken `OVERPASS_API_URL` almost
+certainly wasn't meant to keep querying overpass-api.de.
 
-**Changing this value does not by itself grant network access to the new
-host.** The Extism sandbox's network allowlist is enforced from
+**Setting this does not by itself grant network access to the new host.**
+The Extism sandbox's network allowlist is enforced from
 `osm-overpass.allowed_hosts.json` (or the Settings allowlist override,
 [ADR 0024](../../../adr/0024-plugin-descriptions-and-allowlist-overrides.md)),
-independently of this config value. Point `overpass_url` at a mirror and
-forget to add its host to the allowlist, and the request fails at the
-sandbox boundary instead - update both together:
+independently of this config value. `overpass.openstreetmap.fr` is
+pre-allowlisted alongside `overpass-api.de`:
 
 ```jsonc
 // osm-overpass.allowed_hosts.json
-["overpass-api.de", "overpass.kumi.systems", "en.wikipedia.org"]
+["overpass-api.de", "overpass.openstreetmap.fr", "en.wikipedia.org"]
 ```
+
+Point `OVERPASS_API_URL` at any other mirror and its host still needs adding
+to the allowlist (this file, or the Settings allowlist override), or the
+request fails at the sandbox boundary instead.
 
 ## Wikipedia enrichment
 
