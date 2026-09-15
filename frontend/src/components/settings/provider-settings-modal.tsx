@@ -306,7 +306,6 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                 id="allowed-secrets"
                 value={secretsInput}
                 onChange={(e) => setSecretsInput(e.target.value)}
-                placeholder="WEATHERKIT_KEY_ID"
                 aria-label="Allowed secrets"
               />
             </Field>

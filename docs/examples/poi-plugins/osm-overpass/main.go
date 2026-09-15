@@ -25,6 +25,17 @@
 // no wikipedia tag, or whose summary fetch fails, simply carries no detail
 // - never a placeholder string.
 //
+// Two further exports are OPTIONAL and independent of fetch_poi:
+// place_name_at (one ring's worth of backend/place_name.go's anchorage/bay/
+// island ranking) and search_places (backend/assistant_tools.go's
+// find_places two-rung name-search ladder). Both are plain ports of that
+// backend logic onto this plugin's own Overpass endpoint - see
+// osm-overpass.go's "place_name_at" and "search_places" sections for the
+// query building/ranking/orchestration logic (runPlaceNameAt,
+// runSearchPlaces), which is exercised directly by `go test` via the
+// injectable overpassQueryFunc; this file supplies doOverpassQuery, the one
+// place both wasmexports below actually call the pdk HTTP client.
+//
 // This file (main.go) holds only the thin //go:wasmexport wrapper layer;
 // all the actual query-building/parsing logic lives in osm-overpass.go,
 // which has no dependency on "github.com/extism/go-pdk" specifically so it
@@ -36,7 +47,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 
@@ -129,17 +139,13 @@ func fetchPOI() int32 {
 		return -1
 	}
 
-	var parsed overpassResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		if looksLikeOverpassRateLimit(contentType, body) {
-			pdk.SetErrorString("overpass rate limited (HTTP 200 with a non-JSON body)")
-			return -1
-		}
-		pdk.SetErrorString(fmt.Sprintf("failed to parse overpass response: %v", err))
+	elements, err := parseOverpassBody(contentType, body)
+	if err != nil {
+		pdk.SetError(err)
 		return -1
 	}
 
-	features, truncated := classifyAndCountFeatures(input.Categories, parsed.Elements)
+	features, truncated := classifyAndCountFeatures(input.Categories, elements)
 
 	detailLimit := resolveDetailLimit(pdk.GetConfig("detail_limit"))
 	for _, idx := range nearestWikipediaFeatures(features, input.Lat, input.Lon, detailLimit) {
@@ -187,6 +193,84 @@ func enrichWithWikipediaSummary(f *poiFeatureOut, title string) {
 	}
 	f.Detail = detail
 	f.SourceURL = sourceURL
+}
+
+// doOverpassQuery posts one already-built Overpass QL query to the
+// configured Overpass endpoint (resolveOverpassURL) and returns its parsed
+// elements, or an error naming the failure - a transport error, a non-200
+// status, a detected rate limit, a runtime error remark, or a JSON parse
+// failure - never an empty success. Shared by the place_name_at and
+// search_places wasmexports below so their osm-overpass.go orchestration
+// (runPlaceNameAt, runSearchPlaces) stays plain-Go-testable via a fake
+// overpassQueryFunc while this is the one place that actually performs the
+// HTTP call for both. fetch_poi above keeps its own inline version since it
+// also needs the response's Content-Type for its own rate-limit check at a
+// second call site (Wikipedia enrichment uses a different endpoint entirely).
+func doOverpassQuery(query string) ([]overpassElement, error) {
+	overpassURL, err := resolveOverpassURL(pdk.GetConfig("overpass_url"))
+	if err != nil {
+		return nil, err
+	}
+
+	req := pdk.NewHTTPRequest(pdk.MethodPost, overpassURL)
+	req.SetHeader("Content-Type", "application/x-www-form-urlencoded")
+	req.SetHeader("User-Agent", "helmcentral-osm-overpass-plugin/1.0")
+	req.SetBody([]byte("data=" + url.QueryEscape(query)))
+	resp := req.Send()
+
+	body := resp.Body()
+	contentType := headerCaseInsensitive(resp.Headers(), "Content-Type")
+
+	if resp.Status() != 200 {
+		if looksLikeOverpassRateLimit(contentType, body) {
+			return nil, fmt.Errorf("overpass rate limited (HTTP %d with a non-JSON body)", resp.Status())
+		}
+		return nil, fmt.Errorf("overpass returned status %d", resp.Status())
+	}
+
+	return parseOverpassBody(contentType, body)
+}
+
+//go:wasmexport place_name_at
+func placeNameAt() int32 {
+	var input placeNameAtInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	output, err := runPlaceNameAt(doOverpassQuery, input.Lat, input.Lon, input.RadiusM)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	if err := pdk.OutputJSON(output); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
+}
+
+//go:wasmexport search_places
+func searchPlaces() int32 {
+	var input searchPlacesInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	output, err := runSearchPlaces(doOverpassQuery, input)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	if err := pdk.OutputJSON(output); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
 }
 
 func main() {}
