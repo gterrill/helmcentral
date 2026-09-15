@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -117,6 +118,39 @@ func TestAnchorPersistFailureDoesNotPublish(t *testing.T) {
 	}
 	if len(stub.captured()) != 0 {
 		t.Fatal("published despite persist failure")
+	}
+}
+
+// TestAnchorRaiseFileRemovalFailureReportsExplicitly pins deleteAnchorWatch's
+// second, less common failure mode through the refactored raiseAnchorWatch
+// (anchor_raise.go): SignalK confirms the null publish, but the local
+// record can't be removed from disk. This must still be its own distinct
+// 500 with its own message - not folded into the 502 "SignalK didn't
+// confirm" path the publish failure above uses - since the operator's next
+// step differs (retry Raise either way, but nothing is wrong upstream here).
+func TestAnchorRaiseFileRemovalFailureReportsExplicitly(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses the directory permission this test relies on")
+	}
+
+	stub := anchorPublishEnv(t)
+	_ = stub
+	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
+		t.Fatalf("drop: %d %v", code, resp)
+	}
+
+	dir := filepath.Dir(anchorWatchFilePath())
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	rec := raiseAnchor(t)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when local watch removal fails, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "could not be removed") {
+		t.Fatalf("expected the removal-failure message, got %s", rec.Body.String())
 	}
 }
 

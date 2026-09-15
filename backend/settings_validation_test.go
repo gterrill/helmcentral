@@ -382,6 +382,49 @@ func TestSettingsPayload_NormalizesUnknownScopeMethodToRatio(t *testing.T) {
 	}
 }
 
+// anchor.auto_raise_on_motoring (ADR 0099) gates the server-side anchor
+// auto-raise watcher. Round-tripped THROUGH the handler, same reasoning as
+// TestUpdateSettings_RoundTripsAnchorScopeMethod above: updateSettingsHandler
+// rebuilds the anchor map wholesale on every save, so a key left out of that
+// rebuild is silently dropped from every future save even though
+// normalizeSettingsPayload alone would look fine.
+func TestUpdateSettings_RoundTripsAutoRaiseOnMotoring(t *testing.T) {
+	srv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer srv.Close()
+	host, port := hostPort(t, srv.URL)
+	settingsPath := writeTestSettings(t, host, port)
+
+	code, _ := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Anchor.AutoRaiseOnMotoring = false
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if got := buildSettingsPayload(saved).Anchor.AutoRaiseOnMotoring; got {
+		t.Fatalf("expected anchor.auto_raise_on_motoring to round-trip as false, got %v", got)
+	}
+
+	// And back on, so the round trip is pinned in both directions.
+	code, _ = postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Anchor.AutoRaiseOnMotoring = true
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	saved, err = readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if got := buildSettingsPayload(saved).Anchor.AutoRaiseOnMotoring; !got {
+		t.Fatalf("expected anchor.auto_raise_on_motoring to round-trip as true, got %v", got)
+	}
+}
+
 // The boat's existing settings.yaml may still carry the retired
 // ui.vessel_state_refresh_seconds key from before that setting was removed.
 // readSettings decodes into a plain map, not the strict settingsPayload

@@ -42,27 +42,37 @@ A failed Raise publication retains the local watch; retry Raise. If SignalK
 accepted Raise but removing the local watch failed, the error says so and Raise
 can be retried. Restarting Helmcentral does not republish or clear anchor state.
 
-## Automatic closure
+## Automatic raise
 
-When enabled, automatic closure requires all of the following for five
-continuous seconds:
+The server raises the watch for you when you motor away. It runs whether or
+not a screen is open. The switch is **Auto-raise anchor watch when under
+way** under Settings → Anchor Watch. It is on by default, and one setting
+covers every screen.
 
-- At least one main engine reports a finite RPM above zero.
-- A valid, non-critical GNSS position puts the vessel outside the watch radius
-	plus 4.572 metres (15 feet).
-- The anchor watch is active.
+The watch comes up when all of these have held for 15 seconds straight:
 
-It does **not** wait for SignalK's navigation-state label to become `motoring`.
-The RPM and position readings still arrive through SignalK. Missing engine or
-position evidence does not trigger closure. A running engine suppresses only
-the GNSS validator's stationary-only movement/depth heuristics; fix quality,
-data-age and recovery checks still apply.
+- At least one main engine shows rpm above zero, from a reading less than
+	30 seconds old.
+- The GNSS fix is usable and puts the boat more than the watch radius plus
+	4.572 metres (15 feet) from the anchor.
+- Speed over ground is at least 3 knots.
 
-Automatic closure uses the same Raise operation and SignalK confirmation.
-Failure shows an error rather than repeatedly sending requests; retry Raise
-manually, or let the departure conditions reset before another automatic attempt.
-Automatic closure requires an open dashboard. Server-side drag detection does
-not, and remains active until the watch is successfully removed.
+If any of them drops out, the 15 seconds start again. A missing reading
+counts as not met, so no rpm, no fix or no speed means the watch stays up.
+
+The speed test lets you back down on the hook without losing the watch. You
+will be outside the circle with an engine running, but the boat stops once
+the rode comes tight. When you leave, you pass 3 knots within seconds. If
+you idle out of the anchorage slower than that, raise the watch by hand.
+
+Every screen shows a toast when it happens: *"Anchor watch raised
+automatically: engines running, under way outside the zone."* The server log
+records the rpm, distance, radius and speed it acted on.
+
+If the raise fails, for example because SignalK doesn't confirm it, the
+server logs it and won't try again until the conditions break and re-form.
+The watch is still up and the boat is outside the circle, so the drag alarm
+sounds. Raise by hand.
 
 ## The rode planner
 

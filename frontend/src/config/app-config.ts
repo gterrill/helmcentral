@@ -32,7 +32,6 @@ export type DistanceUnits = 'metric' | 'imperial'
 
 export type UiConfig = {
   distanceUnits: DistanceUnits
-  autoCloseAnchorWatchOnEngine: boolean
 }
 
 // Defaults, used until the backend's settings arrive and whenever it can't be
@@ -43,7 +42,6 @@ export type UiConfig = {
 // from GET /api/settings at runtime instead; see @/hooks/use-app-config.
 export const fallbackUiConfig: UiConfig = {
   distanceUnits: 'metric' as DistanceUnits,
-  autoCloseAnchorWatchOnEngine: true,
 }
 
 // How often the browser polls the backend for a fresh forecast. This is not

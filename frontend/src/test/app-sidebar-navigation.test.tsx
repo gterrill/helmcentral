@@ -29,7 +29,6 @@ vi.mock('@/hooks/use-auth', () => ({
   }),
 }))
 
-
 // ── stub fetch so components that call it don't throw ─────────────────────────
 // /api/health is answered for real: the sidebar footer's version stamp is the
 // one thing in this file that reads it, and a failed probe would render the
@@ -284,10 +283,6 @@ vi.mock('@/hooks/use-dashboard-route', () => ({
 
 vi.mock('@/hooks/use-route-activation', () => ({
   useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
-}))
-
-vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
-  useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
 }))
 
 vi.mock('@/hooks/use-forecast-warnings', () => ({

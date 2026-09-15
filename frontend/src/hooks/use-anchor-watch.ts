@@ -21,6 +21,10 @@ interface AnchorWatchServerState {
   bow_offset_reason?: string
   planning_depth_m?: number
   planning_tide_height_ft?: number
+  // ADR 0099: present whenever the server has ever auto-raised a watch
+  // (in this process's lifetime), regardless of whether one is active now -
+  // a successful auto-raise is exactly what makes `active` false again.
+  last_auto_raise?: { at: string; reason: string }
 }
 
 export interface AnchorWatchResult {
@@ -45,6 +49,11 @@ export interface AnchorWatchResult {
    * (legacy record, or no reading was available at the moment of drop). */
   planningDepthM: number | null
   planningTideHeightFt: number | null
+  /** The server's most recent automatic raise (ADR 0099), if it has ever
+   * raised one in this process's lifetime - independent of `active`/
+   * `anchorState`, since a successful auto-raise is what makes the watch
+   * inactive. App.tsx watches this for a change to show a one-time toast. */
+  lastAutoRaise: { at: string; reason: string } | null
   setAnchorHere: (
     lat: number,
     lon: number,
@@ -278,6 +287,11 @@ export function useAnchorWatch(
     ? serverState.planning_tide_height_ft
     : null
 
+  // Not gated on serverState.active, unlike every field above: a successful
+  // auto-raise is exactly what flips active to false, so gating this the
+  // same way would make the one case it exists for unreachable.
+  const lastAutoRaise = serverState.last_auto_raise ?? null
+
   // Memoized: latitude/longitude arrive over the 1Hz vessel-state SSE stream
   // and every tick re-renders App and therefore re-runs this hook, so without
   // this every consumer (the anchor-watch tile, its fullscreen drawer) would
@@ -304,6 +318,7 @@ export function useAnchorWatch(
     bowOffsetReason,
     planningDepthM,
     planningTideHeightFt,
+    lastAutoRaise,
     setAnchorHere,
     updatePosition,
     updateRadius,
@@ -312,7 +327,7 @@ export function useAnchorWatch(
     clearAnchor,
   }), [
     anchorState, gnssCritical, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
-    seaState, seabedType, distanceMeters, bearingDeg, setAt, bowOffsetM,
+    seaState, seabedType, distanceMeters, bearingDeg, setAt, bowOffsetM, lastAutoRaise,
     bowOffsetApplied, bowOffsetReason, planningDepthM, planningTideHeightFt,
     setAnchorHere, updatePosition, updateRadius, updateRodeAndConditions,
     updatePlanningDepth, clearAnchor,

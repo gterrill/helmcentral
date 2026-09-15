@@ -101,6 +101,17 @@ type settingsPayload struct {
 		WindageAreaM2    float64 `json:"windage_area_m2"`
 		GPSFromBowM      float64 `json:"gps_from_bow_m"`
 		LOAM             float64 `json:"loa_m"`
+		// AutoRaiseOnMotoring gates the server-side anchor auto-raise
+		// watcher (anchor_auto_raise.go, ADR 0099): true unless the
+		// operator has explicitly turned it off. Unlike every other field
+		// on this struct, its zero value is NOT its default - a plain bool
+		// can't tell "the operator saved false" from "this key predates the
+		// feature and was never in the request at all." So the true
+		// default lives only in buildSettingsPayload (applied before the
+		// settings.yaml overlay, below); this field, and
+		// normalizeSettingsPayload's handling of it, both pass the
+		// submitted value straight through with no override.
+		AutoRaiseOnMotoring bool `json:"auto_raise_on_motoring"`
 	} `json:"anchor"`
 	Influxdb struct {
 		Enabled bool   `json:"enabled"`
@@ -206,14 +217,15 @@ func updateSettingsHandler(c echo.Context) error {
 	settings["ui"] = uiMap
 
 	settings["anchor"] = map[string]any{
-		"bow_roller_height_m": normalized.Anchor.BowRollerHeightM,
-		"chain_size_mm":       normalized.Anchor.ChainSizeMM,
-		"chain_onboard_m":     normalized.Anchor.ChainOnboardM,
-		"hull_type":           normalized.Anchor.HullType,
-		"scope_method":        normalized.Anchor.ScopeMethod,
-		"windage_area_m2":     normalized.Anchor.WindageAreaM2,
-		"gps_from_bow_m":      normalized.Anchor.GPSFromBowM,
-		"loa_m":               normalized.Anchor.LOAM,
+		"bow_roller_height_m":    normalized.Anchor.BowRollerHeightM,
+		"chain_size_mm":          normalized.Anchor.ChainSizeMM,
+		"chain_onboard_m":        normalized.Anchor.ChainOnboardM,
+		"hull_type":              normalized.Anchor.HullType,
+		"scope_method":           normalized.Anchor.ScopeMethod,
+		"windage_area_m2":        normalized.Anchor.WindageAreaM2,
+		"gps_from_bow_m":         normalized.Anchor.GPSFromBowM,
+		"loa_m":                  normalized.Anchor.LOAM,
+		"auto_raise_on_motoring": normalized.Anchor.AutoRaiseOnMotoring,
 	}
 	settings["auth"] = map[string]any{
 		"mode": normalized.Auth.Mode,
@@ -322,6 +334,13 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 
 func buildSettingsPayload(settings map[string]any) settingsPayload {
 	payload := normalizeSettingsPayload(settingsPayload{})
+	// The true default lives here, not in normalizeSettingsPayload's
+	// baseline call above: that function also normalizes genuine save
+	// requests, where a bare bool can't tell "the operator submitted false"
+	// from "the zero-value baseline." Set explicitly here, before the disk
+	// overlay below, so an absent key on disk surfaces as true and only an
+	// explicit stored value (true or false) overrides it.
+	payload.Anchor.AutoRaiseOnMotoring = true
 
 	if signalkMap, ok := settings["signalk"].(map[string]any); ok {
 		address := coerceString(signalkMap["address"])
@@ -399,6 +418,14 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		}
 		if value := coerceFloat(anchorMap["loa_m"]); value > 0 {
 			payload.Anchor.LOAM = value
+		}
+		// Presence, not truthiness, is what distinguishes "the operator
+		// explicitly turned this off" from "this settings.yaml predates the
+		// feature" - the type assertion's ok is the only signal available
+		// for a bool, so an absent key leaves the true default set above
+		// untouched, and only a present key (true or false) overrides it.
+		if v, ok := anchorMap["auto_raise_on_motoring"].(bool); ok {
+			payload.Anchor.AutoRaiseOnMotoring = v
 		}
 	}
 
@@ -538,6 +565,11 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	if normalized.Anchor.LOAM < 0 {
 		normalized.Anchor.LOAM = 0
 	}
+	// Straight passthrough, deliberately with no override in either
+	// direction - see the comment on the field itself for why this one
+	// field can't use the "default when invalid/absent" pattern every other
+	// field in this function does.
+	normalized.Anchor.AutoRaiseOnMotoring = req.Anchor.AutoRaiseOnMotoring
 
 	normalized.Influxdb.Enabled = req.Influxdb.Enabled
 	normalized.Influxdb.URL = strings.TrimSpace(req.Influxdb.URL)

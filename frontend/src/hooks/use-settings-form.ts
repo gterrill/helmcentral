@@ -33,6 +33,8 @@ export type SettingsPayload = {
     hull_type?: string
     scope_method?: string
     windage_area_m2?: number
+    // ADR 0099: gates the server-side anchor auto-raise watcher.
+    auto_raise_on_motoring?: boolean
   }
   influxdb?: {
     enabled?: boolean

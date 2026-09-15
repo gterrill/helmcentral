@@ -7,20 +7,17 @@ import type { HullType, RegularSettingsDraft, ScopeMethod } from '@/components/s
 interface AnchorWatchOptionsSectionProps {
   draft: RegularSettingsDraft
   onChange: (patch: Partial<RegularSettingsDraft>) => void
-  autoCloseAnchorWatchEnabled?: boolean
-  onAutoCloseAnchorWatchToggle?: (enabled: boolean) => void
 }
 
 /**
- * Combines Anchor configuration (regular settings) and Anchor Watch options
- * (local-storage-backed toggle owned by App.tsx). The anchor fields go through
- * useSettingsForm/the settings API, while the auto-close toggle does not.
+ * Combines Anchor configuration and Anchor Watch options. Both go through
+ * useSettingsForm/the settings API now (ADR 0099 moved auto-raise off the
+ * browser's localStorage-backed toggle and onto a server setting, the same
+ * anchor.auto_raise_on_motoring the auto-raise watcher itself reads).
  */
 export function AnchorWatchOptionsSection({
   draft,
   onChange,
-  autoCloseAnchorWatchEnabled = true,
-  onAutoCloseAnchorWatchToggle,
 }: AnchorWatchOptionsSectionProps) {
   return (
     <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
@@ -161,11 +158,12 @@ export function AnchorWatchOptionsSection({
         <div className="mt-3 space-y-3">
           <Field orientation="horizontal">
             <Switch
-              checked={autoCloseAnchorWatchEnabled}
-              onCheckedChange={(checked) => onAutoCloseAnchorWatchToggle?.(checked)}
+              checked={draft.autoRaiseOnMotoring}
+              onCheckedChange={(checked) => onChange({ autoRaiseOnMotoring: checked })}
             />
             <FieldLabel>
-              Auto-close anchor watch when engines start (if outside circle for 5+ seconds)
+              Auto-raise anchor watch when under way (engines running, outside the circle,
+              3+ knots SOG for 15 seconds)
             </FieldLabel>
           </Field>
         </div>

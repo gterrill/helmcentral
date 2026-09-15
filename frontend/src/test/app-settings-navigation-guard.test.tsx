@@ -28,7 +28,6 @@ vi.mock('@/hooks/use-auth', () => ({
   }),
 }))
 
-
 // ── stub fetch so components that call it don't throw ─────────────────────────
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -228,10 +227,6 @@ vi.mock('@/hooks/use-dashboard-route', () => ({
 
 vi.mock('@/hooks/use-route-activation', () => ({
   useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
-}))
-
-vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
-  useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
 }))
 
 vi.mock('@/hooks/use-forecast-warnings', () => ({

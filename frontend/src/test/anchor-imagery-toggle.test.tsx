@@ -18,7 +18,6 @@ vi.mock('@/hooks/use-auth', () => ({
   }),
 }))
 
-
 vi.mock('@/components/anchor-watch-map', () => ({
   AnchorWatchMap: (props: {
     showImageryLayer?: boolean
@@ -244,10 +243,6 @@ vi.mock('@/hooks/use-dashboard-route', () => ({
 
 vi.mock('@/hooks/use-route-activation', () => ({
   useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
-}))
-
-vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
-  useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
 }))
 
 vi.mock('@/hooks/use-forecast-warnings', () => ({

@@ -252,10 +252,6 @@ vi.mock('@/hooks/use-route-activation', () => ({
   useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
 }))
 
-vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
-  useAnchorWatchAutoClose: () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
-}))
-
 vi.mock('@/hooks/use-forecast-warnings', () => ({
   useForecastWarnings: () => ({ activeWarning: null }),
   findActiveWindBulletin: () => null,

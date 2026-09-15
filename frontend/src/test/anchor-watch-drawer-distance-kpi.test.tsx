@@ -53,8 +53,6 @@ const baseProps = {
   onRadiusChange: () => undefined,
   onClearAnchor: () => undefined,
   isImperial: false,
-  isAutoCloseArmed: false,
-  motoringSecondsElapsed: 0,
   onDropAnchor: () => undefined,
   canDrop: true,
   anchorState: 'set' as const,

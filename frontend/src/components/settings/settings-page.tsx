@@ -29,8 +29,6 @@ import {
 import { SETTINGS_MANUAL_TARGETS, type ManualTarget } from '@/lib/manual-links'
 
 interface SettingsPageProps {
-  autoCloseAnchorWatchEnabled: boolean
-  onAutoCloseAnchorWatchToggle?: (enabled: boolean) => void
   onDirtyChange?: (dirty: boolean) => void
   /**
    * Controlled active section (ADR 0074): App.tsx owns this so it can mirror
@@ -69,8 +67,6 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
 
 const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(function SettingsPageContent(
   {
-    autoCloseAnchorWatchEnabled,
-    onAutoCloseAnchorWatchToggle,
     onDirtyChange,
     activeSectionId: controlledSectionId,
     onSectionChange,
@@ -225,8 +221,6 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
           <AnchorWatchOptionsSection
             draft={draft}
             onChange={handleDraftChange}
-            autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
-            onAutoCloseAnchorWatchToggle={onAutoCloseAnchorWatchToggle}
           />
         )
       case 'logs':

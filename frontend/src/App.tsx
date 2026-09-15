@@ -94,7 +94,6 @@ import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useRadarTargets } from '@/hooks/use-radar-targets'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
-import { useAnchorWatchAutoClose } from '@/hooks/use-anchor-watch-auto-close'
 import { ConnectionBanner } from '@/components/connection-banner'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
@@ -217,7 +216,6 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const ANCHOR_RADAR_ECHO_ENABLED_KEY = 'anchorWatch.radarEcho.enabled'
-const AUTO_CLOSE_ANCHOR_WATCH_KEY = 'anchorWatch.autoClose.enabled'
 
 export function App() {
   // Called before every other hook, and unconditionally on every render
@@ -256,11 +254,6 @@ export function App() {
   const [showRadarEcho, setShowRadarEcho] = useState(() => {
     const raw = globalThis.localStorage?.getItem(ANCHOR_RADAR_ECHO_ENABLED_KEY)
     return raw === 'true'
-  })
-  const [autoCloseAnchorWatchEnabled, setAutoCloseAnchorWatchEnabled] = useState(() => {
-    const raw = globalThis.localStorage?.getItem(AUTO_CLOSE_ANCHOR_WATCH_KEY)
-    // Default to true if not set
-    return raw !== 'false'
   })
   const [layoutEditingRequested, setLayoutEditing] = useState(false)
   const canEditLayout = useMinWidth(BREAKPOINTS.lg)
@@ -349,10 +342,6 @@ export function App() {
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_RADAR_ECHO_ENABLED_KEY, String(showRadarEcho))
   }, [showRadarEcho])
-
-  useEffect(() => {
-    globalThis.localStorage?.setItem(AUTO_CLOSE_ANCHOR_WATCH_KEY, String(autoCloseAnchorWatchEnabled))
-  }, [autoCloseAnchorWatchEnabled])
 
   // Hoisted ahead of useDarkMode (rather than left beside kioskOptions below,
   // where it used to live) so the kiosk dark-theme override just below has
@@ -649,17 +638,13 @@ export function App() {
     document.title = label ? `${label} · Helmcentral` : 'Helmcentral Dashboard'
   }, [activePanel])
 
-  // Handle anchor watch auto-close notifications
+  // Anchor watch auto-raise notifications (ADR 0099). The decision itself is
+  // now server-side (backend/anchor_auto_raise.go) - this state just drives
+  // the toast once a client's own poll of GET /api/anchor-watch notices a
+  // new last_auto_raise. See the effect below useAnchorWatch, which is where
+  // that value actually arrives.
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const toastRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const handleAutoClose = () => {
-      setToastMessage('Anchor watch cleared — engines running, position outside zone')
-    }
-
-    window.addEventListener('anchor-watch-auto-closed', handleAutoClose)
-    return () => window.removeEventListener('anchor-watch-auto-closed', handleAutoClose)
-  }, [])
 
   // Drives the toast's top-layer visibility from state, and owns its
   // auto-dismiss timer so the timer is reliably cleared (previously this
@@ -825,6 +810,27 @@ export function App() {
   // since it depends on whether a watch is currently active — not on this
   // component's unrelated vessel-state refresh setting.
   const anchorWatch = useAnchorWatch(latitude, longitude, gnssCriticalAlert)
+  // Surfaces the server's auto-raise decision (ADR 0099, anchor_auto_raise.go)
+  // as the same toast the old browser-side auto-close used to fire directly.
+  // lastSeenAutoRaiseAtRef starts uninitialized (undefined) so the first
+  // observation this session — which may already carry a last_auto_raise
+  // from before this page loaded — only establishes a baseline rather than
+  // toasting for a raise that happened who-knows-how-long ago. Every open
+  // browser runs this same effect independently off its own poll of GET
+  // /api/anchor-watch (useAnchorWatch), which is what makes this "once per
+  // event per client" without any of them having decided the raise itself.
+  const lastSeenAutoRaiseAtRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    const at = anchorWatch.lastAutoRaise?.at ?? null
+    if (lastSeenAutoRaiseAtRef.current === undefined) {
+      lastSeenAutoRaiseAtRef.current = at
+      return
+    }
+    if (at !== null && at !== lastSeenAutoRaiseAtRef.current) {
+      lastSeenAutoRaiseAtRef.current = at
+      setToastMessage('Anchor watch raised automatically: engines running, under way outside the zone')
+    }
+  }, [anchorWatch.lastAutoRaise])
   // The forecast wind band shared by the Rode Planner, the tile's Scope row,
   // and the drawer's Scope row (frontend/src/lib/rode-plan.ts's
   // resolvePlanningWindBand) — one operator choice, not three independent
@@ -844,17 +850,6 @@ export function App() {
   // transition below — without that, a pre-drop what-if would reappear once
   // the anchor comes up and is raised again.
   const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tideHeightFt: number | null } | null>(null)
-  const { isAutoCloseArmed, motoringSecondsElapsed } = useAnchorWatchAutoClose(
-    engine0Rpm,
-    engine1Rpm,
-    !gnssCriticalAlert && latitude !== null && longitude !== null
-      && Number.isFinite(latitude) && Number.isFinite(longitude)
-      && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180
-      ? anchorWatch.distanceMeters : null,
-    anchorWatch.radiusMeters,
-    anchorWatch.anchorState !== 'none',
-    autoCloseAnchorWatchEnabled,
-  )
   // Item B: only the anchor-watch tile/drawer and the Nearby/POI map tile
   // read getSelfTrail/getAisTrails (AnchorWatchTile, AnchorWatchDrawer and
   // PoiMapTile below all take them as props) — every other page, including
@@ -1893,8 +1888,6 @@ export function App() {
         return (
           <SettingsPage
             ref={settingsPageRef}
-            autoCloseAnchorWatchEnabled={autoCloseAnchorWatchEnabled}
-            onAutoCloseAnchorWatchToggle={setAutoCloseAnchorWatchEnabled}
             onDirtyChange={setSettingsDirty}
             activeSectionId={settingsSection}
             onSectionChange={setSettingsSection}
@@ -1946,8 +1939,6 @@ export function App() {
               onRadiusChange={anchorWatch.updateRadius}
               onClearAnchor={anchorWatch.clearAnchor}
               isImperial={isImperialDistance}
-              isAutoCloseArmed={isAutoCloseArmed}
-              motoringSecondsElapsed={motoringSecondsElapsed}
               onDropAnchor={handleDropAnchorHere}
               canDrop={latitude !== null && longitude !== null}
               anchorState={anchorWatch.anchorState}

@@ -4,6 +4,14 @@
 
 Accepted
 
+**Superseded in part by ADR 0099**, which moves automatic Raise off the
+browser and onto the server. The "Auto-close uses finite positive
+main-engine RPM..." and "Preserve browser scope and the existing feature
+toggle" bullets below no longer describe the running system; see ADR 0099
+for the current rule, its SOG condition, and the single server setting.
+Everything else in this ADR (the publish/confirm/persist lifecycle for
+Drop/reposition/Raise itself) still holds.
+
 ## Context
 
 Helmcentral's anchor watch was local-only. Auto-state 0.6.3 latches `anchored`

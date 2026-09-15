@@ -193,16 +193,21 @@ func saveAnchorWatch(aw *anchorWatchData) error {
 }
 
 // GET /api/anchor-watch
+//
+// Also carries last_auto_raise (anchor_auto_raise.go, ADR 0099) when the
+// server has ever auto-raised a watch: every client already polls this
+// endpoint, so it is the least invasive way for each of them to learn a
+// raise happened without them having decided it themselves.
 func getAnchorWatch(c echo.Context) error {
 	anchorWatchMu.RLock()
 	state := anchorWatchState
 	anchorWatchMu.RUnlock()
 
 	if state == nil {
-		return c.JSON(http.StatusOK, map[string]any{"active": false})
+		return c.JSON(http.StatusOK, withLastAutoRaise(map[string]any{"active": false}))
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return c.JSON(http.StatusOK, withLastAutoRaise(map[string]any{
 		"active":                  true,
 		"lat":                     state.Lat,
 		"lon":                     state.Lon,
@@ -218,7 +223,7 @@ func getAnchorWatch(c echo.Context) error {
 		"planning_depth_m":        state.PlanningDepthM,
 		"planning_tide_height_ft": state.PlanningTideHeightFt,
 		"place_name":              state.PlaceName,
-	})
+	}))
 }
 
 // POST /api/anchor-watch
@@ -573,28 +578,24 @@ func patchAnchorWatch(c echo.Context) error {
 }
 
 // DELETE /api/anchor-watch
+//
+// The actual raise (publish, remove, clear state/trail/placemarks) lives in
+// raiseAnchorWatch (anchor_raise.go), shared with the server-side auto-raise
+// watcher (anchor_auto_raise.go, ADR 0099) so a human Raise and an automatic
+// one go through exactly the same steps. This handler's job is just to pick
+// the right HTTP response for whichever of the two ways that can fail.
 func deleteAnchorWatch(c echo.Context) error {
 	anchorLifecycleMu.Lock()
 	defer anchorLifecycleMu.Unlock()
-	// Also publish when already inactive: retrying Raise must repair an
-	// upstream latch, not silently skip the explicit null event.
-	if err := publishSignalKAnchorPosition(nil); err != nil {
+
+	if err := raiseAnchorWatch(); err != nil {
+		if anchorRaiseFailureStage(err) == anchorRaiseStageRemoveFile {
+			c.Logger().Errorf("anchor raise: local watch removal failed: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK anchor raised, but local watch could not be removed. Retry Raise."})
+		}
 		c.Logger().Errorf("anchor raise publish failed: %v", err)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "SignalK did not confirm anchor raised. Local watch retained; retry Raise."})
 	}
-	if err := os.Remove(anchorWatchFilePath()); err != nil && !os.IsNotExist(err) {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK anchor raised, but local watch could not be removed. Retry Raise."})
-	}
-	anchorWatchMu.Lock()
-	anchorWatchState = nil
-	anchorWatchMu.Unlock()
-
-	trailMu.Lock()
-	selfTrail = nil
-	trailMu.Unlock()
-
-	// Placemarks are bound to the anchoring session, so they end with it.
-	clearPlacemarks()
 
 	return c.JSON(http.StatusOK, map[string]any{"active": false})
 }

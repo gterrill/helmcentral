@@ -469,6 +469,7 @@ func main() {
 	go startStreamWatchdog(streamCtx, watchdogCheckInterval)
 	go startHeartbeat(streamCtx, heartbeatCheckInterval)
 	go startAnchorDragWatcher(streamCtx, anchorDragCheckInterval)
+	go startAnchorAutoRaiseWatcher(streamCtx, autoRaiseCheckInterval)
 	go startForecastWarningsFetcher(streamCtx, forecastWarningsFetchInterval)
 	// Gust ladder + solar Influx queries (Tier 1 #1): buildVesselStatePayload
 	// and buildSolarStatePayload used to run these live on every call, up to

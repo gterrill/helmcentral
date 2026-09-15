@@ -549,6 +549,59 @@ func TestBuildSettingsPayload_SurfacesGPSFromBowMFromDisk(t *testing.T) {
 	}
 }
 
+// TestBuildSettingsPayload_DefaultsAutoRaiseOnMotoringTrueWhenAbsent guards
+// the auto-raise watcher's setting (anchor_auto_raise.go, ADR 0099). Unlike
+// gps_from_bow_m (whose meaningful default is 0), this field's default is
+// true — the feature ships on for every existing installation — so a
+// settings.yaml written before it existed, or with an anchor block that
+// simply omits the key, must surface true, never a guessed false.
+func TestBuildSettingsPayload_DefaultsAutoRaiseOnMotoringTrueWhenAbsent(t *testing.T) {
+	if got := buildSettingsPayload(map[string]any{}).Anchor.AutoRaiseOnMotoring; !got {
+		t.Fatalf("expected auto_raise_on_motoring to default true with no anchor block at all, got %v", got)
+	}
+
+	settings := map[string]any{"anchor": map[string]any{"gps_from_bow_m": 8.0}}
+	if got := buildSettingsPayload(settings).Anchor.AutoRaiseOnMotoring; !got {
+		t.Fatalf("expected auto_raise_on_motoring to default true when the anchor block omits it, got %v", got)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesAutoRaiseOnMotoringExplicitValue is the
+// counterpart: an operator's explicit choice, in either direction, must
+// survive — a false must not be defaulted back to true, and a true must not
+// be mistaken for "unset."
+func TestBuildSettingsPayload_SurfacesAutoRaiseOnMotoringExplicitValue(t *testing.T) {
+	off := map[string]any{"anchor": map[string]any{"auto_raise_on_motoring": false}}
+	if got := buildSettingsPayload(off).Anchor.AutoRaiseOnMotoring; got {
+		t.Fatalf("expected an explicit false on disk to surface as false, got %v", got)
+	}
+
+	on := map[string]any{"anchor": map[string]any{"auto_raise_on_motoring": true}}
+	if got := buildSettingsPayload(on).Anchor.AutoRaiseOnMotoring; !got {
+		t.Fatalf("expected an explicit true on disk to surface as true, got %v", got)
+	}
+}
+
+// TestNormalizeSettingsPayload_RoundTripsAutoRaiseOnMotoring pins that
+// normalizeSettingsPayload passes the submitted value straight through with
+// no override in either direction. The default-true behaviour lives only in
+// buildSettingsPayload's disk-read step above — a plain bool can't tell "the
+// operator submitted false" from "this field is absent from the request," so
+// normalizeSettingsPayload (which also produces buildSettingsPayload's
+// from-empty baseline) must not try to default it itself.
+func TestNormalizeSettingsPayload_RoundTripsAutoRaiseOnMotoring(t *testing.T) {
+	req := settingsPayload{}
+	req.Anchor.AutoRaiseOnMotoring = true
+	if got := normalizeSettingsPayload(req).Anchor.AutoRaiseOnMotoring; !got {
+		t.Fatalf("expected true to round-trip as true, got %v", got)
+	}
+
+	req.Anchor.AutoRaiseOnMotoring = false
+	if got := normalizeSettingsPayload(req).Anchor.AutoRaiseOnMotoring; got {
+		t.Fatalf("expected false to round-trip as false, got %v", got)
+	}
+}
+
 func TestParseSignalKCurrent_ReadsSetTrueAndDrift(t *testing.T) {
 	payload := map[string]any{
 		"environment": map[string]any{

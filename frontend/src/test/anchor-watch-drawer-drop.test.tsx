@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App } from '../App'
 
 // The drawer now mounts a map at every anchor state (Phase F), including
@@ -34,17 +34,14 @@ let anchorStateMock: 'none' | 'set' = 'none'
 let positionMock: { latitude: number | null; longitude: number | null; gnssCriticalAlert: boolean } = {
   latitude: -36.8485, longitude: 174.7633, gnssCriticalAlert: false,
 }
-const autoCloseMock = vi.fn<(...args: unknown[]) => { isAutoCloseArmed: boolean; motoringSecondsElapsed: number }>(
-  () => ({ isAutoCloseArmed: false, motoringSecondsElapsed: 0 }),
-)
-vi.mock('@/hooks/use-anchor-watch-auto-close', () => ({
-  useAnchorWatchAutoClose: (...args: unknown[]) => autoCloseMock(...args),
-}))
-
+// ADR 0099: the server-side auto-raise watcher's evidence, surfaced through
+// GET /api/anchor-watch and this hook. null until a test sets it.
+let lastAutoRaiseMock: { at: string; reason: string } | null = null
 beforeEach(() => {
   vi.clearAllMocks()
   anchorStateMock = 'none'
   positionMock = { latitude: -36.8485, longitude: 174.7633, gnssCriticalAlert: false }
+  lastAutoRaiseMock = null
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: false,
     json: async () => ({}),
@@ -134,6 +131,7 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     setAt: null,
     planningDepthM: null,
     planningTideHeightFt: null,
+    lastAutoRaise: lastAutoRaiseMock,
     setAnchorHere: setAnchorHereMock,
     updatePosition: vi.fn(),
     updateRadius: vi.fn(),
@@ -201,21 +199,6 @@ vi.mock('@/hooks/use-app-config', () => ({
 }))
 
 describe('Anchor watch drawer drop button', () => {
-  it('feeds main engine RPM, not the navigation label, to auto-close', () => {
-    anchorStateMock = 'set'
-    render(<App />)
-    expect(autoCloseMock).toHaveBeenLastCalledWith(-1, 850, 30, 20, true, true)
-  })
-
-  it.each([
-    { gnssCriticalAlert: true }, { latitude: null }, { longitude: null },
-    { latitude: NaN }, { longitude: Infinity }, { latitude: 91 }, { longitude: -181 },
-  ])('withholds auto-close distance for an invalid/critical fix: %j', (position) => {
-    anchorStateMock = 'set'
-    positionMock = { ...positionMock, ...position }
-    render(<App />)
-    expect(autoCloseMock).toHaveBeenLastCalledWith(-1, 850, null, 20, true, true)
-  })
   // useVesselState mock above has depth: null, so this is the "no sounder at
   // drop" case (ADR 0063) — setAnchorHere still gets called, now with a
   // third capture argument carrying explicit nulls rather than silently
@@ -254,5 +237,32 @@ describe('Anchor watch drawer drop button', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Raise' }))
 
     expect(clearAnchorMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ADR 0099: the auto-raise decision moved server-side. Clients learn about
+// it through last_auto_raise on the same GET /api/anchor-watch poll every
+// client already makes (useAnchorWatch), and each shows the toast once per
+// event per client by comparing against what it last saw.
+describe('Anchor watch auto-raise toast', () => {
+  it('shows the toast once a new last_auto_raise arrives after mount', async () => {
+    const { rerender } = render(<App />)
+
+    expect(screen.queryByText(/raised automatically/i)).not.toBeInTheDocument()
+
+    lastAutoRaiseMock = { at: '2026-09-15T00:00:00Z', reason: 'engines_running' }
+    rerender(<App />)
+
+    await waitFor(() => expect(screen.getByText(/raised automatically/i)).toBeInTheDocument())
+  })
+
+  it('does not toast for a last_auto_raise already present at mount', async () => {
+    lastAutoRaiseMock = { at: '2026-09-15T00:00:00Z', reason: 'engines_running' }
+    render(<App />)
+
+    // Give the establishing effect a tick, then confirm no toast fired for
+    // an event that predates this page load.
+    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument())
+    expect(screen.queryByText(/raised automatically/i)).not.toBeInTheDocument()
   })
 })

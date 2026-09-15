@@ -93,7 +93,7 @@ beforeEach(() => {
 
 function renderSettings(props: Partial<{ onDirtyChange: (d: boolean) => void }> = {}) {
   return render(
-    <SettingsPage autoCloseAnchorWatchEnabled onAutoCloseAnchorWatchToggle={vi.fn()} {...props} />,
+    <SettingsPage {...props} />,
   )
 }
 
@@ -174,7 +174,7 @@ describe('Settings Alarms section saving', () => {
 
   it('persists transports through the imperative handle App.tsx uses for "Save and Continue"', async () => {
     const ref = createRef<SettingsPageHandle>()
-    render(<SettingsPage ref={ref} autoCloseAnchorWatchEnabled onAutoCloseAnchorWatchToggle={vi.fn()} />)
+    render(<SettingsPage ref={ref} />)
 
     openAlarms()
     fireEvent.click(screen.getByLabelText(/webhook/i))

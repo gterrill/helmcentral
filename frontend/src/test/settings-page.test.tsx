@@ -90,8 +90,6 @@ describe('SettingsPage dirty tracking', () => {
     const onDirtyChange = vi.fn()
     render(
       <SettingsPage
-        autoCloseAnchorWatchEnabled
-        onAutoCloseAnchorWatchToggle={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -119,8 +117,6 @@ describe('SettingsPage dirty tracking', () => {
     const onDirtyChange = vi.fn()
     render(
       <SettingsPage
-        autoCloseAnchorWatchEnabled
-        onAutoCloseAnchorWatchToggle={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -136,8 +132,6 @@ describe('SettingsPage dirty tracking', () => {
     const onDirtyChange = vi.fn()
     render(
       <SettingsPage
-        autoCloseAnchorWatchEnabled
-        onAutoCloseAnchorWatchToggle={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -173,8 +167,6 @@ describe('SettingsPage Anchor scope method', () => {
     const onDirtyChange = vi.fn()
     render(
       <SettingsPage
-        autoCloseAnchorWatchEnabled
-        onAutoCloseAnchorWatchToggle={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -203,11 +195,43 @@ describe('SettingsPage Anchor scope method', () => {
   })
 })
 
+// ADR 0099: the auto-raise watcher's setting moved off a per-browser
+// localStorage toggle and onto this same Anchor Watch panel's settings form,
+// following gps_from_bow_m's own path exactly (draft -> patch -> save()).
+describe('SettingsPage Anchor auto-raise setting', () => {
+  it('defaults the switch on, and saving after turning it off patches auto_raise_on_motoring:false', async () => {
+    const onDirtyChange = vi.fn()
+    render(
+      <SettingsPage
+        onDirtyChange={onDirtyChange}
+      />,
+    )
+
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+    onDirtyChange.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
+
+    const toggle = screen.getByRole('switch')
+    expect(toggle).toHaveAttribute('data-checked')
+
+    fireEvent.click(toggle)
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+    expect(toggle).toHaveAttribute('data-unchecked')
+
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    const patch = saveMock.mock.calls[0][0] as { anchor?: { auto_raise_on_motoring?: boolean } }
+    expect(patch.anchor?.auto_raise_on_motoring).toBe(false)
+  })
+})
+
 describe('SettingsPage imperative save handle', () => {
   it('saves the settings patch and ALL touched secrets (the full SECRET_KEYS set, not just the inline-section subset)', async () => {
     const ref = createRef<SettingsPageHandle>()
     render(
-      <SettingsPage ref={ref} autoCloseAnchorWatchEnabled onAutoCloseAnchorWatchToggle={vi.fn()} />,
+      <SettingsPage ref={ref} />,
     )
 
     await ref.current!.save()
@@ -221,7 +245,7 @@ describe('SettingsPage imperative save handle', () => {
     saveMock.mockRejectedValueOnce(new Error('boom'))
     const ref = createRef<SettingsPageHandle>()
     render(
-      <SettingsPage ref={ref} autoCloseAnchorWatchEnabled onAutoCloseAnchorWatchToggle={vi.fn()} />,
+      <SettingsPage ref={ref} />,
     )
 
     await expect(ref.current!.save()).rejects.toThrow('boom')
@@ -235,8 +259,6 @@ describe('SettingsPage Manual button', () => {
     const onOpenManual = vi.fn()
     render(
       <SettingsPage
-        autoCloseAnchorWatchEnabled
-        onAutoCloseAnchorWatchToggle={vi.fn()}
         onOpenManual={onOpenManual}
       />,
     )
@@ -248,7 +270,7 @@ describe('SettingsPage Manual button', () => {
   })
 
   it('renders no Manual button when onOpenManual is not passed - existing callers are untouched', () => {
-    render(<SettingsPage autoCloseAnchorWatchEnabled onAutoCloseAnchorWatchToggle={vi.fn()} />)
+    render(<SettingsPage />)
 
     expect(screen.queryByRole('button', { name: 'Open the manual for this section' })).not.toBeInTheDocument()
   })

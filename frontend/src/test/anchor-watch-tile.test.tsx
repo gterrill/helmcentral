@@ -93,6 +93,7 @@ function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResul
     bowOffsetReason: '',
     planningDepthM: null,
     planningTideHeightFt: null,
+    lastAutoRaise: null,
     setAnchorHere: vi.fn(),
     updatePosition: vi.fn(),
     updateRadius: vi.fn(),

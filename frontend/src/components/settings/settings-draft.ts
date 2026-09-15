@@ -46,6 +46,10 @@ export interface RegularSettingsDraft {
   hullType: HullType
   scopeMethod: ScopeMethod
   windageAreaM2: string
+  // ADR 0099: gates the server-side anchor auto-raise watcher. A plain
+  // boolean, not a string, unlike the numeric anchor fields above - there is
+  // no partial-typing UX to preserve for a switch.
+  autoRaiseOnMotoring: boolean
   influxdbEnabled: boolean
   influxdbUrl: string
   influxdbOrg: string
@@ -83,6 +87,9 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   hullType: 'power_cat',
   scopeMethod: 'ratio',
   windageAreaM2: '35',
+  // Matches the server's own default (buildSettingsPayload, ADR 0099): the
+  // feature ships on until the operator explicitly turns it off.
+  autoRaiseOnMotoring: true,
   influxdbEnabled: false,
   authMode: 'none',
   influxdbUrl: '',
@@ -162,6 +169,12 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
     draft.scopeMethod = settings.anchor.scope_method
   }
   if (typeof settings.anchor?.windage_area_m2 === 'number') draft.windageAreaM2 = String(settings.anchor.windage_area_m2)
+  // typeof, not truthy: an explicit false must hydrate as false, not be
+  // mistaken for "absent" and fall through to the true default above -
+  // same reasoning as tideAutoStation's hydration above.
+  if (typeof settings.anchor?.auto_raise_on_motoring === 'boolean') {
+    draft.autoRaiseOnMotoring = settings.anchor.auto_raise_on_motoring
+  }
 
   if (typeof settings.influxdb?.enabled === 'boolean') draft.influxdbEnabled = settings.influxdb.enabled
   if (settings.auth?.mode === 'signalk' || settings.auth?.mode === 'none') draft.authMode = settings.auth.mode
@@ -231,6 +244,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.hullType !== b.hullType) return false
   if (a.scopeMethod !== b.scopeMethod) return false
   if (a.windageAreaM2 !== b.windageAreaM2) return false
+  if (a.autoRaiseOnMotoring !== b.autoRaiseOnMotoring) return false
   if (a.influxdbEnabled !== b.influxdbEnabled) return false
   if (a.authMode !== b.authMode) return false
   if (a.influxdbUrl !== b.influxdbUrl) return false
@@ -306,6 +320,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       hull_type: draft.hullType,
       scope_method: draft.scopeMethod,
       windage_area_m2: parseNumber(draft.windageAreaM2, 35),
+      auto_raise_on_motoring: draft.autoRaiseOnMotoring,
     },
     influxdb: {
       enabled: draft.influxdbEnabled,

@@ -73,8 +73,6 @@ interface AnchorWatchDrawerProps {
   onPlacemarkCreate?: (lat: number, lon: number) => void
   onPlacemarkRemove?: (id: string) => void
   isImperial: boolean
-  isAutoCloseArmed: boolean
-  motoringSecondsElapsed: number
   onDropAnchor: () => void
   canDrop: boolean
   anchorState: AnchorWatchState
@@ -137,8 +135,6 @@ export function AnchorWatchDrawer({
   onPlacemarkCreate,
   onPlacemarkRemove,
   isImperial,
-  isAutoCloseArmed,
-  motoringSecondsElapsed,
   onDropAnchor,
   canDrop,
   anchorState,
@@ -195,15 +191,6 @@ export function AnchorWatchDrawer({
 
   return (
     <div className="flex h-full flex-col gap-3">
-      {isAutoCloseArmed && (
-        <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-600">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold">Auto-close armed</span>
-            <span className="font-mono">{5 - motoringSecondsElapsed}s</span>
-          </div>
-          <p className="mt-1 text-yellow-600/80">Engines running • Outside circle • Will clear shortly</p>
-        </div>
-      )}
       {bowOffsetApplied && (
         <div className="rounded-md border border-border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
           Anchor point corrected {Math.round(bowOffsetM)}m forward of GPS — radius should cover rode + {Math.round(bowOffsetM)}m.

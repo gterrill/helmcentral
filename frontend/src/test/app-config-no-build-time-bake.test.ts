@@ -26,7 +26,6 @@ describe('app-config', () => {
   it('resolves to documented defaults with no bundled config', () => {
     expect(normalizeUiConfig(null)).toEqual({
       distanceUnits: 'metric',
-      autoCloseAnchorWatchOnEngine: true,
     })
     expect(normalizeAnchorConfig(null)).toEqual({
       bowRollerHeightM: 1.5,
