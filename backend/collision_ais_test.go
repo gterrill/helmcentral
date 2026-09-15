@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -487,5 +488,154 @@ func TestCollisionFiguresAreEmptyWithoutThePlugin(t *testing.T) {
 
 	if figures.CpaM != nil || figures.TcpaSeconds != nil || figures.BearingRad != nil {
 		t.Fatalf("no plugin means no figures, got %+v", figures)
+	}
+}
+
+// ── COLREGS encounter line (ADR 0098) ──────────────────────────────────────
+//
+// snapshotWithEncounterFixture seeds a snapshot from the real captured
+// motion fixtures (testdata/signalk_notifications/self_motion.json and
+// other_vessel_motion.json, README.md there) rather than a hand-built tree,
+// per the plan's own instruction to verify against live data before trusting
+// a shape. loadNotificationFixture (signalk_snapshot_test.go) is reused
+// as-is: it just decodes a testdata file into map[string]any, and that is
+// all a motion fixture needs too.
+//
+// The Path: "" delta merges each fixture's top-level keys ("navigation",
+// "design", "environment") straight into the context's tree, unwrapped --
+// the same top-level merge applyDelta already gives a bare scalar like
+// "name" -- so every leaf keeps the exact REST shape signalKSnapshot.
+// reconcileNotifications merges against, and nodeAt/nodeAtContext read the
+// same "value" key off it either way.
+func snapshotWithEncounterFixture(t *testing.T) (snapshot *signalKSnapshot, targetContext string) {
+	t.Helper()
+
+	snapshot = newSignalKSnapshot()
+	selfCtx := "vessels.self"
+	snapshot.setSelfContext(selfCtx)
+	snapshot.applyDelta(signalKDelta{
+		Context: selfCtx,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "",
+			Value: loadNotificationFixture(t, "self_motion.json"),
+		}}}},
+	}, alarmNow)
+
+	targetContext = "vessels.urn:mrn:imo:mmsi:352006488"
+	snapshot.applyDelta(signalKDelta{
+		Context: targetContext,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "",
+			Value: loadNotificationFixture(t, "other_vessel_motion.json"),
+		}}}},
+	}, alarmNow)
+	// aisTargetPositionFresh reads pathSeen directly, which the Path: ""
+	// merge above never touches (it stamps pathSeen for the empty path, not
+	// for navigation.position) -- without this the target is dropped before
+	// signalKCollisionNotifications ever gets to the encounter line, the
+	// same setup snapshotWithTargetsAged already needs for the same reason.
+	snapshot.pathSeen[targetContext+"|navigation.position"] = alarmNow
+
+	snapshot.applyDelta(signalKDelta{
+		Context: targetContext,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "notifications.navigation.closestApproach",
+			Value: collisionNotification("warn", "ULTRA DETERMINATION - CPA WARNING"),
+		}}}},
+	}, alarmNow)
+	// The motion fixture captured design/navigation/environment, not the
+	// plugin's own closestApproach figures (that's ADR 0057's capture, a
+	// different concern) -- TCPA is supplied directly here since the
+	// classifier's TCPA<0 gate needs one.
+	snapshot.applyDelta(signalKDelta{
+		Context: targetContext,
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "navigation.closestApproach",
+			Value: map[string]any{"distance": 400.0, "timeTo": 180.0},
+		}}}},
+	}, alarmNow)
+
+	return snapshot, targetContext
+}
+
+func TestSignalKCollisionNotificationsCarryTheEncounterLine(t *testing.T) {
+	snapshot, _ := snapshotWithEncounterFixture(t)
+
+	statuses := signalKCollisionNotifications(snapshot, alarmNow)
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 collision notification, got %d (%+v)", len(statuses), statuses)
+	}
+	if statuses[0].Encounter == "" {
+		t.Fatal("expected an Encounter line built from the live fixture")
+	}
+}
+
+// A vessel this alarm's snapshot readers must never touch: signalKCollisionNotifications
+// reads only the leaves it needs off the alarming target's own context, not
+// vesselsTree(), which would pull in everything AIS publishes about every
+// vessel this box has ever heard from (backend-perf-audit.md Tier 1 #2).
+// snapshotWholeTreeCopies counts every whole-tree copy across the package, so
+// this pins the count rather than the mechanism -- it would catch a future
+// change wiring the encounter line through vesselsTree() or treeFor just as
+// well as one wiring it through this test's own helper wrongly.
+func TestSignalKCollisionNotificationsEncounterLineCostsNoWholeTreeCopy(t *testing.T) {
+	snapshot, _ := snapshotWithEncounterFixture(t)
+
+	before := snapshotWholeTreeCopies
+	if statuses := signalKCollisionNotifications(snapshot, alarmNow); len(statuses) != 1 || statuses[0].Encounter == "" {
+		t.Fatalf("setup: expected 1 status carrying an Encounter line, got %+v", statuses)
+	}
+	if after := snapshotWholeTreeCopies; after != before {
+		t.Fatalf("signalKCollisionNotifications must not deep-copy a whole vessel tree to build the encounter line: copies went %d -> %d", before, after)
+	}
+}
+
+// The bus watcher's raise/clear keys on RuleID alone (alarm_bus_watch.go),
+// so a live status whose Encounter line changes between ticks -- the target
+// alters, or our own state changes -- must never look like a second raise.
+// This is the plan's own worry: the line is computed live rather than
+// frozen at the raise (unlike ADR 0090 §4's evidence figures) specifically
+// so it keeps following the target, and that only works if a changing
+// Encounter is safe to emit on every tick.
+func TestBusNotificationWatcherDoesNotReRaiseWhenOnlyTheEncounterChanges(t *testing.T) {
+	snapshot, _ := snapshotWithEncounterFixture(t)
+	watcher := newBusNotificationWatcher(snapshot)
+	watcher.dwell = 5 * time.Second
+
+	if events := watcher.check(alarmNow); len(events) != 0 {
+		t.Fatalf("must not raise on first sight, got %+v", events)
+	}
+	events := watcher.check(alarmNow.Add(6 * time.Second))
+	if len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("expected a single raise once the dwell elapses, got %+v", events)
+	}
+	firstEncounter := events[0].Status.Encounter
+	if firstEncounter == "" {
+		t.Fatal("expected the raise to carry an Encounter line")
+	}
+
+	// We alter course hard: our own navigation.headingTrue moves far enough
+	// that her relative bearing swings out of the fixture's captured
+	// overtaking geometry into a crossing one. The notification itself --
+	// state, id, message -- is untouched, so RuleID and severity are
+	// identical.
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{
+			Path:  "navigation.headingTrue",
+			Value: 40.0 * math.Pi / 180, // radians, SignalK's convention
+		}}}},
+	}, alarmNow.Add(6*time.Second))
+
+	statuses := signalKCollisionNotifications(snapshot, alarmNow.Add(7*time.Second))
+	if len(statuses) != 1 {
+		t.Fatalf("expected the target still live, got %d (%+v)", len(statuses), statuses)
+	}
+	if statuses[0].Encounter == firstEncounter {
+		t.Fatalf("expected the course change to change the Encounter line -- it's computed live, not frozen at raise\nfirst:  %q\nsecond: %q", firstEncounter, statuses[0].Encounter)
+	}
+
+	if events := watcher.check(alarmNow.Add(7 * time.Second)); len(events) != 0 {
+		t.Fatalf("a changed Encounter alone must not produce a second raise, got %+v", events)
 	}
 }

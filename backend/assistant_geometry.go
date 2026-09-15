@@ -28,6 +28,20 @@ func relativeAngleDeg(courseDeg, fromDeg float64) int {
 	return int(math.Round(diff))
 }
 
+// relativeBearingDeg is relativeAngleDeg's signed counterpart: the bearing,
+// expressed relative to heading, in the full 0-360 clockwise range rather
+// than folded to 0-180. relativeAngleDeg answers "how many degrees off the
+// bow"; this answers "which side" too, which the COLREGS encounter
+// classifier needs and wind/wave relative angles never did (port and
+// starboard are the same folded magnitude, collision_colregs.go, ADR 0098).
+func relativeBearingDeg(headingDeg, bearingDeg float64) int {
+	diff := math.Mod(bearingDeg-headingDeg, 360)
+	if diff < 0 {
+		diff += 360
+	}
+	return int(math.Round(diff)) % 360
+}
+
 // relativeAngleLabel names a relativeAngleDeg result on the standard
 // five-band helm scale a delivery skipper actually uses: head (dead ahead),
 // bow, beam, quarter, following (dead astern). Boundaries are inclusive on

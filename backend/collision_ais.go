@@ -66,6 +66,11 @@ func signalKCollisionNotifications(snapshot *signalKSnapshot, now time.Time) []a
 
 	self := strings.TrimPrefix(snapshot.selfContext(), vesselContextPrefix)
 
+	// Our own heading, SOG, state, apparent wind and position, read once for
+	// this call rather than once per alarming vessel: every target's
+	// encounter line (ADR 0098) needs the same set of our own facts.
+	own := readOwnEncounterFacts(snapshot)
+
 	var out []alarmStatus
 	for vesselID, tree := range vessels {
 		// "self" is checked alongside the resolved context because some
@@ -97,6 +102,16 @@ func signalKCollisionNotifications(snapshot *signalKSnapshot, now time.Time) []a
 		// Two boats can be in alarm at once. Without the vessel in the rule id
 		// they collide in the watcher's live set and one alarm disappears.
 		status.RuleID += notificationVesselSeparator + vesselID
+
+		// The COLREGS line (ADR 0098) is computed live on every call, not
+		// frozen once at raise: it exists to guide what happens next, so it
+		// should keep following the target if she alters. That's safe
+		// because the raise/clear the bus watcher does below keys on RuleID
+		// alone, never on Encounter (TestBusNotificationWatcherDoesNotReRaiseWhenOnlyTheEncounterChanges).
+		if enc, ok := classifyEncounter(encounterInputsForAISTarget(snapshot, own, vesselContextPrefix+vesselID)); ok {
+			status.Encounter = enc.Text
+		}
+
 		out = append(out, status)
 	}
 
@@ -198,4 +213,147 @@ func collisionFiguresFor(vesselMap map[string]any) collisionFigures {
 	figures.AlarmType = strings.TrimSpace(lookupString(vesselMap, "navigation", "closestApproach", "value", "collisionAlarmType"))
 	figures.AlarmState = strings.TrimSpace(lookupString(vesselMap, "navigation", "closestApproach", "value", "collisionAlarmState"))
 	return figures
+}
+
+// ── COLREGS encounter line (ADR 0098) ───────────────────────────────────────
+//
+// The functions below assemble classifyEncounter's inputs (collision_colregs.go)
+// from the snapshot, reading only the leaves needed for one alarming vessel
+// rather than the whole-tree copy vesselsTree()/collisionFiguresFor's
+// vesselMap would cost -- the same discipline vesselNotificationBranches
+// already applies above (backend-perf-audit.md Tier 1 #2).
+
+// ownEncounterFacts holds everything classifyEncounter needs from our own
+// vessel, read once per signalKCollisionNotifications call and reused for
+// every alarming target rather than re-read per target.
+type ownEncounterFacts struct {
+	inputs     encounterInputs // Own* fields only; Target* fields are the zero value
+	lat, lon   float64
+	positionOK bool
+}
+
+// positionFromNode reads a navigation.position node's lat/lon by type
+// assertion, present or absent, rather than lookupNumber's -1 sentinel: -1
+// is a real latitude and a real longitude, and treating "missing" and
+// "exactly -1" as the same thing is the gate that flaps at anchor.
+func positionFromNode(node map[string]any) (lat, lon float64, ok bool) {
+	value, hasValue := node["value"].(map[string]any)
+	if !hasValue {
+		return 0, 0, false
+	}
+	lat, latOK := value["latitude"].(float64)
+	lon, lonOK := value["longitude"].(float64)
+	if !latOK || !lonOK {
+		return 0, 0, false
+	}
+	return lat, lon, true
+}
+
+// readOwnEncounterFacts reads our own heading, SOG, navigation state,
+// apparent wind and position off the self tree, through the same nodeAt leaf
+// reader every other alarm path in this package uses.
+func readOwnEncounterFacts(snapshot *signalKSnapshot) ownEncounterFacts {
+	var facts ownEncounterFacts
+
+	if node := snapshot.nodeAt("navigation.headingTrue"); node != nil {
+		if v, ok := node["value"].(float64); ok {
+			facts.inputs.OwnHeadingDeg = v * 180 / math.Pi
+			facts.inputs.OwnHeadingOK = true
+		}
+	}
+	if node := snapshot.nodeAt("navigation.speedOverGround"); node != nil {
+		if v, ok := node["value"].(float64); ok {
+			facts.inputs.OwnSOGKn = v * metersPerSecondToKnots
+			facts.inputs.OwnSOGOK = true
+		}
+	}
+	// Not vesselNavigationState (collision_profile.go): that helper reads
+	// selfTree(), a whole-tree deep copy, which is fine for the collision
+	// profile syncer's own slow-timer/transition cadence but not for a path
+	// evaluated on every activeAlarms() call
+	// (TestSignalKCollisionNotificationsEncounterLineCostsNoWholeTreeCopy).
+	if node := snapshot.nodeAt("navigation.state"); node != nil {
+		if v, ok := node["value"].(string); ok {
+			facts.inputs.OwnState = v
+		}
+	}
+	if node := snapshot.nodeAt("environment.wind.angleApparent"); node != nil {
+		if v, ok := node["value"].(float64); ok {
+			facts.inputs.OwnApparentWindAngleDeg = normalizeSignedDegrees(v * 180 / math.Pi)
+			facts.inputs.OwnApparentWindAngleOK = true
+		}
+	}
+	if node := snapshot.nodeAt("navigation.position"); node != nil {
+		facts.lat, facts.lon, facts.positionOK = positionFromNode(node)
+	}
+
+	return facts
+}
+
+// encounterInputsForAISTarget builds classifyEncounter's full inputs for one
+// alarming AIS target: own's already-read facts plus this target's own COG,
+// SOG, nav status, ship type and position, each read as a single leaf off
+// the target's own context via nodeAtContext -- never vesselsTree(), which
+// would deep-copy everything AIS publishes about every vessel this box has
+// ever heard from just to read five fields off one of them.
+func encounterInputsForAISTarget(snapshot *signalKSnapshot, own ownEncounterFacts, vesselContext string) encounterInputs {
+	in := own.inputs
+	in.Kind = encounterKindAIS
+
+	var targetLat, targetLon float64
+	var targetPositionOK bool
+	if node := snapshot.nodeAtContext(vesselContext, "navigation.position"); node != nil {
+		targetLat, targetLon, targetPositionOK = positionFromNode(node)
+	}
+	// Both bearings are computed from the two vessels' own positions via
+	// bearingDeg (poi_providers.go), never trusted from the plugin's own
+	// bearing figure, whose direction has never been verified (ADR 0057).
+	// The reciprocal is its own bearingDeg call rather than the forward
+	// bearing plus 180: a great-circle reciprocal isn't that, except by
+	// coincidence.
+	if own.positionOK && targetPositionOK {
+		in.BearingToTargetDeg = bearingDeg(own.lat, own.lon, targetLat, targetLon)
+		in.BearingToSelfDeg = bearingDeg(targetLat, targetLon, own.lat, own.lon)
+		in.BearingOK = true
+	}
+
+	if node := snapshot.nodeAtContext(vesselContext, "navigation.courseOverGroundTrue"); node != nil {
+		if v, ok := node["value"].(float64); ok {
+			in.TargetCOGDeg = v * 180 / math.Pi
+			in.TargetCOGOK = true
+		}
+	}
+	if node := snapshot.nodeAtContext(vesselContext, "navigation.speedOverGround"); node != nil {
+		if v, ok := node["value"].(float64); ok {
+			in.TargetSOGKn = v * metersPerSecondToKnots
+			in.TargetSOGOK = true
+		}
+	}
+	if node := snapshot.nodeAtContext(vesselContext, "navigation.state"); node != nil {
+		if v, ok := node["value"].(string); ok {
+			in.TargetNavState = v
+		}
+	}
+	if node := snapshot.nodeAtContext(vesselContext, "design.aisShipType"); node != nil {
+		if value, ok := node["value"].(map[string]any); ok {
+			if id, ok := value["id"].(float64); ok {
+				in.TargetShipTypeID = int(id)
+				in.TargetShipTypeIDOK = true
+			}
+		}
+	}
+
+	// TCPA is the plugin's own figure (ADR 0057 decision 2), read here
+	// through collisionNumber -- the same helper collisionFiguresFor uses --
+	// rather than re-parsed, by wrapping the one leaf this needs in the
+	// map shape that helper expects.
+	if node := snapshot.nodeAtContext(vesselContext, "navigation.closestApproach"); node != nil {
+		wrapped := map[string]any{"navigation": map[string]any{"closestApproach": node}}
+		if tcpa, ok := collisionNumber(wrapped, "timeTo"); ok {
+			in.TCPASeconds = tcpa
+			in.TCPAOK = true
+		}
+	}
+
+	return in
 }

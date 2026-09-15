@@ -35,6 +35,8 @@ ADR 0058 decided the thresholds are the operator's, informed by their own waters
 
 The harbor reasoning from the context above goes where ADR 0058 already keeps its anchor-profile starting point, as an amendment to that ADR's consequences, not into the UI.
 
+> **Amended 2026-09-15 by ADR 0098.** This section's target was threshold advice, a recommendation to change a number the operator owns. That conclusion still holds. A description of the COLREGS rule already governing the geometry on screen, naming a give-way or stand-on role rather than recommending a tuning change, is a different kind of fact and is not what this section rejected. See ADR 0098.
+
 ### 3. The card names the profile in force and the tier that tripped
 
 A collision card gains one line of fact, of the form:

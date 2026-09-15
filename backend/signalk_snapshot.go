@@ -268,6 +268,20 @@ func (s *signalKSnapshot) nodeAt(path string) map[string]any {
 	return s.nodeAtLocked(s.selfCtx, path)
 }
 
+// nodeAtContext is nodeAt's counterpart for an arbitrary context, not just
+// self -- the leaf reader signalKCollisionNotifications uses to read one AIS
+// target's COG, SOG, nav status, ship type and position for the COLREGS
+// encounter line (collision_colregs.go, ADR 0098), each read costing one
+// small node copy rather than treeFor's whole-context deep copy of
+// everything else AIS publishes about that target (backend-perf-audit.md
+// Tier 1 #2, the same lesson vesselNotificationBranches already applied to
+// this file).
+func (s *signalKSnapshot) nodeAtContext(context, path string) map[string]any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.nodeAtLocked(context, path)
+}
+
 // nodeAtLocked is nodeAt's walk, callable only while s.mu is already held.
 // It reaches into s.contexts directly rather than through a locking
 // accessor: nothing here may call a method that itself takes s.mu, since a

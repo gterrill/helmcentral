@@ -34,6 +34,17 @@ export interface ActiveAlarm {
   unit?: string
 
   /**
+   * The COLREGS "situation + role" line for a collision alarm -- what kind
+   * of encounter this is and what the rules ask of us, e.g. "Crossing, she
+   * is on our starboard bow (040° rel). We give way (Rule 15): alter to
+   * starboard, pass astern." Built server-side (collision_colregs.go, ADR
+   * 0098); absent for every non-collision alarm, and for a collision alarm
+   * whose geometry the classifier can't yet vouch for (stopped, opening, or
+   * missing an input).
+   */
+  encounter?: string
+
+  /**
    * SignalK's own alert status and capabilities (ADR 0038). Silencing stops the
    * sound; acknowledging also stops the visual alert and moves the alarm out of
    * the active phase. What a given alarm supports is the server's answer — an

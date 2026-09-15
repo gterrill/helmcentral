@@ -192,6 +192,19 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                         {alarm.label}
                       </p>
                       <p className="mt-1.5 text-sm text-foreground/90">{alarmConditionSentence(alarm)}</p>
+                      {/*
+                        The COLREGS "situation + role" line (ADR 0098):
+                        what kind of encounter this is and what the rules
+                        ask of us. Collision-only, computed live server-side
+                        (collision_colregs.go) so the frontend has nothing
+                        left to derive -- absent whenever the classifier
+                        can't vouch for the geometry (stopped, opening, a
+                        missing input), in which case nothing renders here
+                        rather than a guess.
+                      */}
+                      {alarm.encounter && (
+                        <p className="mt-1.5 text-sm text-foreground/90">{alarm.encounter}</p>
+                      )}
                       {hasMeta && (
                         <p className="mt-1 truncate text-[11px] text-muted-foreground">
                           {timeParts.length > 0 && timeParts.join(' · ')}

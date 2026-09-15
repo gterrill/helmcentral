@@ -36,6 +36,33 @@ func TestRelativeAngleDeg(t *testing.T) {
 	}
 }
 
+// relativeBearingDeg is relativeAngleDeg's signed counterpart, added for the
+// COLREGS encounter classifier (collision_colregs.go, ADR 0098): port and
+// starboard are the same folded magnitude and only the signed 0-360 form
+// keeps them apart.
+func TestRelativeBearingDeg(t *testing.T) {
+	cases := []struct {
+		name       string
+		headingDeg float64
+		bearingDeg float64
+		want       int
+	}{
+		{"dead ahead", 90, 90, 0},
+		{"40 to starboard", 0, 40, 40},
+		{"40 to port", 40, 0, 320},
+		{"wraps past 360", 350, 10, 20},
+		{"wraps past 0 the other way", 10, 350, 340},
+		{"dead astern", 0, 180, 180},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := relativeBearingDeg(tc.headingDeg, tc.bearingDeg); got != tc.want {
+				t.Errorf("relativeBearingDeg(%g, %g) = %d, want %d", tc.headingDeg, tc.bearingDeg, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRelativeAngleLabel(t *testing.T) {
 	cases := []struct {
 		deg  int

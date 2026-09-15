@@ -109,6 +109,17 @@ type alarmStatus struct {
 	// "-0.03" needs to know it is pascals per second whichever raised it.
 	Unit string `json:"unit,omitempty"`
 
+	// Encounter is the COLREGS "situation + role" line for a collision
+	// alarm -- collision-only, set by signalKCollisionNotifications and left
+	// empty for every other alarm source (ADR 0098). It is computed live on
+	// every read rather than frozen at raise: unlike ADR 0090 §4's evidence
+	// figures, this line exists to guide what happens next, so it should
+	// keep following the target if she alters. That is safe because the bus
+	// watcher's raise/clear keys on RuleID alone (alarm_bus_watch.go), so a
+	// changing Encounter on an already-raised alarm never produces a second
+	// raise event.
+	Encounter string `json:"encounter,omitempty"`
+
 	// Silenced and the two capability flags mirror the SignalK Notifications
 	// API's own status object. Silencing is not acknowledging — a silenced
 	// alarm has stopped sounding but is still demanding attention — so it is a

@@ -108,6 +108,28 @@ to the plugin's own page, which is where the thresholds live. Raising the
 warning tier's speed floor to a couple of knots quietens a marina without
 losing a boat actually moving down the fairway.
 
+When both vessels are moving and the picture is clear enough to read, the card
+adds a second line naming the encounter and what the rules ask of you, for
+example:
+
+> Crossing, she is on our starboard bow (040° rel). We give way (Rule 15):
+> alter to starboard, pass astern.
+
+It names the rule and the role: overtaking, head-on, or crossing, who gives
+way and who stands on, and for a stand-on power-driven vessel the reminder not
+to turn to port for a target on your own port side. Vessel type comes from
+whatever each of you is actually doing right now, motoring or sailing, not
+from AIS ship type, which says nothing about whether an engine is running.
+When the other vessel's type isn't being transmitted, or when either of you is
+stopped, at anchor, or already opening, the line is left off rather than
+guessed at: a wrong role on the card is worse than a missing one. This is a
+read of the rule in force, not a course to steer, and it doesn't replace
+keeping a proper lookout or working out risk of collision by every means you
+have. A future release will add the same line to a radar-only contact once
+that alarm exists; for now the classifier behind it flags a radar contact for
+what it is, no vessel type known, and gives only the restricted-visibility
+caution about which way not to turn.
+
 ## The rules list
 
 Rules are grouped by what they watch, using the first part of the SignalK path:
