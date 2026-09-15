@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -780,5 +781,52 @@ func TestSampleTracks_SkipsSolarRecordingWhenCurrentWMissing(t *testing.T) {
 	}
 	if got := inMemorySolarTodayKWh(); got != -1 {
 		t.Fatalf("expected today_kwh sentinel -1 when nothing was recorded, got %v", got)
+	}
+}
+
+// TestRecordNearbyVesselContacts_LogsOncePerVesselIDWithNoMMSI is item 6's
+// other required test: recordNearbyVesselContacts runs on the server's own
+// 5s poll tick (unlike buildNearbyVesselsPayload, which only runs per
+// client request), so without a dedup a vessel with no MMSI - genuinely
+// visible, but with nothing this store can key a contact on - would log a
+// fresh line every 5s for as long as it stayed in range.
+func TestRecordNearbyVesselContacts_LogsOncePerVesselIDWithNoMMSI(t *testing.T) {
+	dir := t.TempDir()
+	store, err := newNearbyContactStore(filepath.Join(dir, "test.sqlite"))
+	if err != nil {
+		t.Fatalf("newNearbyContactStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.close() })
+	original := globalNearbyContactStore
+	globalNearbyContactStore = store
+	t.Cleanup(func() { globalNearbyContactStore = original })
+
+	// The AIS target below carries no "mmsi" field at all - the shape
+	// vesselContactKey rejects - while self does, so fetchSignalKNearbyVessels
+	// still resolves a nearby-vessel list of exactly one, unkeyable, contact.
+	body := []byte(`{
+		"self": {
+			"mmsi": "518999323",
+			"name": "Pikorua",
+			"navigation": {"position": {"value": {"latitude": -21.595297, "longitude": 149.796444}}}
+		},
+		"urn:mrn:imo:mmsi:unknown": {
+			"name": "NO MMSI BOAT",
+			"navigation": {"position": {"value": {"latitude": -21.592353, "longitude": 149.780485}}}
+		}
+	}`)
+	seedVesselTrees(t, string(body))
+
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	state := vesselStateData{Latitude: -21.595297, Longitude: 149.796444, Status: "anchored"}
+	for i := 0; i < 3; i++ {
+		recordNearbyVesselContacts("", "", "", state, "")
+	}
+
+	if got := strings.Count(buf.String(), "NO MMSI BOAT"); got != 1 {
+		t.Fatalf("expected exactly 1 log line for a vessel with no MMSI across 3 poll ticks, got %d:\n%s", got, buf.String())
 	}
 }

@@ -212,6 +212,24 @@ func TestTelemetryEmittersIncludeRadarTargets(t *testing.T) {
 	t.Fatal("telemetryEmitters() does not include a radar-targets emitter")
 }
 
+// TestTelemetryHeartbeatIsObservableAndPeriodic guards the SSE browser
+// watchdog's only defense against a silently-stalled stream: heartbeat must
+// broadcast every interval, full stop, never gated on whether its payload
+// looks different from the last one.
+//
+// This used to assert that two calls to emitter.build() returned different
+// RFC3339Nano timestamps, on the theory that a changing payload was what got
+// heartbeat past the hub's change gate. That is the wrong invariant to rely
+// on: two builds can format to the identical nanosecond string (a coarser
+// system clock, or two builds landing back to back under load), and when
+// they do, the old gate - which compared heartbeat's raw payload the same
+// as any other ungated event - would wrongly suppress it. That was this
+// test's intermittent failure (backend perf audit Tier 3). The fix is
+// structural, not timing-based: heartbeat now sets streamEmitter's
+// alwaysSend flag, which the hub's gate always honours regardless of
+// payload content - proven end to end, with a payload that never changes
+// at all, by TestTelemetryHub_AlwaysSendEmitterBroadcastsDespiteIdenticalPayload
+// below.
 func TestTelemetryHeartbeatIsObservableAndPeriodic(t *testing.T) {
 	for _, emitter := range telemetryEmitters() {
 		if emitter.event != "heartbeat" {
@@ -220,13 +238,62 @@ func TestTelemetryHeartbeatIsObservableAndPeriodic(t *testing.T) {
 		if emitter.interval != 15*time.Second {
 			t.Fatalf("heartbeat cadence: %v", emitter.interval)
 		}
-		first := emitter.build()["timestamp"]
-		if first == nil || emitter.build()["timestamp"] == first {
-			t.Fatal("heartbeat must carry fresh data so change gating cannot suppress it")
+		if !emitter.alwaysSend {
+			t.Fatal("heartbeat must set alwaysSend so the hub's change gate can never suppress it, regardless of whether its timestamp happens to format identically between two builds")
 		}
 		return
 	}
 	t.Fatal("missing observable heartbeat (SSE comments cannot drive the browser watchdog)")
+}
+
+// TestTelemetryHub_AlwaysSendEmitterBroadcastsDespiteIdenticalPayload is the
+// deterministic reproduction of heartbeat's old intermittent failure: an
+// emitter whose build() always returns byte-identical output must still
+// broadcast every interval when alwaysSend is set. Without alwaysSend,
+// buildAndBroadcast's gate would compare this build's payload (nil
+// gateKey, so the raw encoded payload is the comparison key) against the
+// previous one, find them equal, and silently skip every broadcast after
+// the first - exactly what happened to heartbeat whenever two real
+// timestamps happened to format to the same string.
+func TestTelemetryHub_AlwaysSendEmitterBroadcastsDespiteIdenticalPayload(t *testing.T) {
+	server := streamTestServer(t)
+
+	globalTelemetryHub.events = append(globalTelemetryHub.events, &streamEmitter{
+		event:      "test-constant",
+		interval:   1 * time.Second,
+		alwaysSend: true,
+		build: func() map[string]any {
+			return map[string]any{"n": 1} // identical on every single build, on purpose
+		},
+	})
+
+	response, err := http.Get(server.URL + "/api/stream")
+	if err != nil {
+		t.Fatalf("GET /api/stream: %v", err)
+	}
+	defer response.Body.Close()
+
+	counts := make(chan int, 1)
+	go func() {
+		scanner := bufio.NewScanner(response.Body)
+		seen := 0
+		deadline := time.Now().Add(4 * time.Second)
+		for scanner.Scan() && time.Now().Before(deadline) {
+			if strings.TrimPrefix(scanner.Text(), "event: ") == "test-constant" && strings.HasPrefix(scanner.Text(), "event: ") {
+				seen++
+			}
+		}
+		counts <- seen
+	}()
+
+	select {
+	case seen := <-counts:
+		if seen < 2 {
+			t.Fatalf("alwaysSend emitter (1s interval, byte-identical payload every build) in a 4s window: got %d broadcasts, want at least 2", seen)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("reader did not finish")
+	}
 }
 
 // ── buildAutopilotPayload ───────────────────────────────────────────────────

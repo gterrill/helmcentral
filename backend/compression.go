@@ -60,18 +60,40 @@ var noCompressRoutePatterns = map[string]bool{
 	// hijack/upgrade path coder/websocket relies on.
 	"/api/radar/spokes": true, // radar_spoke_relay.go: radarSpokeRelayHandler
 
-	// Already-compressed tile/image/font proxy endpoints (tile_proxy.go,
-	// basemap_proxy.go, and the tile half of sat_charts.go): PNG/JPEG/WebP
-	// map tiles and protobuf vector tiles/glyphs gain nothing from a second
-	// compression pass, and it would spend CPU on every proxied fetch for
-	// no smaller a response.
-	"/api/world-imagery/:z/:x/:y":          true, // tile_proxy.go
-	"/api/sat-charts/:id/:z/:x/:y":         true, // sat_charts.go
-	"/api/basemap/style/:name":             true, // basemap_proxy.go
-	"/api/basemap/tilejson":                true, // basemap_proxy.go
-	"/api/basemap/tiles/:z/:x/:y":          true, // basemap_proxy.go
-	"/api/basemap/fonts/:fontstack/:range": true, // basemap_proxy.go
-	"/api/basemap/sprite/:name":            true, // basemap_proxy.go
+	// Already-compressed raster tile proxy endpoints (tile_proxy.go and the
+	// tile half of sat_charts.go): PNG/JPEG/WebP map tiles gain nothing from
+	// a second compression pass, and it would spend CPU on every proxied
+	// fetch for no smaller a response.
+	//
+	// basemap_proxy.go's style/tilejson/vector-tile/glyph routes used to
+	// sit here too, on the same "already compressed" assumption - but they
+	// aren't (backend perf audit Tier 3). fetchBasemapUpstream
+	// (basemap_proxy.go) fetches through newWorldImageryHTTPClient's plain
+	// *http.Client with a nil Transport, which defaults to http.
+	// DefaultTransport: since fetchBasemapUpstream never sets its own
+	// Accept-Encoding, that transport requests gzip and transparently
+	// decompresses the response itself, stripping Content-Encoding before
+	// this code ever sees it - confirmed against the real upstream, not
+	// just read from the Go docs. fetchBasemapUpstream also never reads or
+	// forwards a Content-Encoding header at all, so even the JSON/PBF
+	// bytes this cached and served were genuinely plain, uncompressed, and
+	// silently skipped by this exact skip list. Only basemap_proxy.go's
+	// sprite route stayed off this list on purpose: it serves both
+	// sprite.json (now compressed, like every other JSON/PBF route here)
+	// and sprite.png (still skipped, but by the noCompressExtensions
+	// ".png" check below, on the resolved request path - one route
+	// pattern can't otherwise tell the two apart).
+	"/api/world-imagery/:z/:x/:y":  true, // tile_proxy.go
+	"/api/sat-charts/:id/:z/:x/:y": true, // sat_charts.go
+
+	// gshhg.go: gshhgCoastlineHandler gzips its own response once at
+	// startup (gshhgCoastlineGzipped) and negotiates Content-Encoding
+	// itself against the request's Accept-Encoding, exactly like the
+	// gzip middleware this route is skipping would have. Recompressing an
+	// already-gzipped body here would be wasted CPU on every request for a
+	// payload that never changes (backend perf audit Tier 3: measured
+	// +90-110ms on the boat before this fix).
+	"/api/gshhg-coastline": true,
 }
 
 // noCompressExtensions covers static files served from the embedded SPA

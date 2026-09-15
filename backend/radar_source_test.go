@@ -292,7 +292,12 @@ func TestRadarPollOnceOnlyPollsTheFirstRadar(t *testing.T) {
 	store := newRadarTargetStore()
 	poller := testRadarPoller(store)
 	poller.radars = func() []radarInfo {
-		return []radarInfo{{ID: "fur6424A"}, {ID: "fur6424B"}}
+		// Both transmitting: a standby radar now skips the fetch entirely
+		// (TestPollDoesNotFetchWhileRadarIsInStandby below), which would
+		// make "fetchTargets called exactly once" trivially true for the
+		// wrong reason. Transmitting keeps this test about dual-range
+		// dedup specifically.
+		return []radarInfo{{ID: "fur6424A", Transmitting: true}, {ID: "fur6424B", Transmitting: true}}
 	}
 
 	calls := 0
@@ -503,6 +508,42 @@ func TestOwnShipFixRejectsTheNoFixSentinel(t *testing.T) {
 // never looks stale from where we stand. That is ADR 0057 section 6 a third
 // time, after the prioritizer writing once on state change and mayara's
 // sixty-second bursts.
+// TestPollDoesNotFetchWhileRadarIsInStandby is the regression guard for
+// backend perf audit Tier 3: pollOnce used to fetch mayara's REST endpoint
+// every 2s even while the radar was in standby, then throw the result away
+// in observedTargets' rule 1 (see TestPollDropsEverythingWhileTheRadarIsInStandby
+// above). There is nothing to observe in standby, so the fetch itself
+// should never happen - not just have its result discarded.
+func TestPollDoesNotFetchWhileRadarIsInStandby(t *testing.T) {
+	store := newRadarTargetStore()
+	seedNow := time.Now().UTC()
+	store.replace("fur6424A", []radarTarget{newTestRadarTarget("fur6424A", 1, "tracking", 500, seedNow)}, seedNow)
+	store.setConnected(true)
+
+	calls := 0
+	poller := testRadarPollerWith(store,
+		[]radarInfo{{ID: "fur6424A", Name: "DRS4D-NXT 6424", Transmitting: false}},
+		func(string) ([]mayaraArpaTarget, error) {
+			calls++
+			return nil, fmt.Errorf("fetchTargets must not be called while the radar is in standby")
+		},
+	)
+
+	now := time.Now().UTC()
+	if err := poller.pollOnce(now); err != nil {
+		t.Fatalf("pollOnce: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("fetchTargets called %d times while in standby, want 0", calls)
+	}
+	if got := len(store.list(now)); got != 0 {
+		t.Fatalf("expected standby to clear whatever the store held, got %d targets", got)
+	}
+	if connected, _ := store.status(); !connected {
+		t.Fatalf("standby is not the same as unreachable: status should still report connected")
+	}
+}
+
 func TestPollDropsEverythingWhileTheRadarIsInStandby(t *testing.T) {
 	arpa := capturedStandbyTargets(t)
 	if len(arpa) == 0 {

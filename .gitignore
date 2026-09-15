@@ -24,6 +24,12 @@ backend/data/alarm-log.sqlite
 backend/data/assistant.sqlite
 backend/data/webpush-subscriptions.sqlite
 backend/data/alarm-transports.json
+# WAL mode (tile-cache.sqlite, and nearby-contacts.sqlite as of the backend
+# perf audit) leaves a -wal and -shm file next to the main one between
+# checkpoints; cover every sqlite file in backend/data with one pattern pair
+# rather than listing each store's WAL siblings individually above.
+backend/data/*.sqlite-wal
+backend/data/*.sqlite-shm
 # Allow the embed placeholder while ignoring real build output. backend/dist is
 # where the built frontend is staged for //go:embed (by the Dockerfile and the
 # GoReleaser hooks), so its contents must never be committed — but .gitkeep has

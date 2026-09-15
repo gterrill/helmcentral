@@ -55,12 +55,14 @@ COPY docs/index.md ./manual/index.md
 # it is meaningless on amd64 and arm64, so it stays unset there.
 RUN set -eu; \
 	if [ "$TARGETARCH" = "arm" ]; then export GOARM="${TARGETVARIANT#v}"; fi; \
-	CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" go build -a -installsuffix cgo \
-		-ldflags "-X main.buildVersion=${APP_VERSION} -X main.buildRevision=${APP_REVISION}" \
+	CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" go build -a -installsuffix cgo -trimpath \
+		-ldflags "-s -w -X main.buildVersion=${APP_VERSION} -X main.buildRevision=${APP_REVISION}" \
 		-o helmcentral .
 
 # ── Stage 3: minimal runtime image ───────────────────────────────────────────
-FROM alpine:latest
+# Pinned rather than :latest, so a rebuild months from now doesn't silently
+# pick up a different Alpine major/minor with no record of which.
+FROM alpine:3.24
 
 RUN apk --no-cache add ca-certificates
 

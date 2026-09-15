@@ -50,6 +50,7 @@ block, or your shell.
 | `DAWN_LINEAR_FALLBACK` | `true` | When overnight state-of-charge history is unavailable (InfluxDB not configured, unreachable, or too few usable nights), extrapolate the live rate to sunrise and label the result as such. Set `false` to show a dash with the reason instead. |
 | `INFLUX_SHORE_MEASUREMENT` | `electrical.chargers.0.acin.1.current` | The charger's AC input current. A night with a reading above 0.5 A is excluded from the overnight model as shore-powered. |
 | `INFLUX_GENERATOR_MEASUREMENT` | `electrical.generator.0.stateNumber` | The generator's state. A night with a reading above zero is excluded from the overnight model as a generator night. |
+| `HELMCENTRAL_PPROF` | *(unset)* | Set to `1` to register Go's `net/http/pprof` handlers under `/debug/pprof/`, for pulling a CPU, heap or goroutine profile from a running instance. Off by default: `auth.mode` is often `none` on a boat LAN, and profiling endpoints are not something to expose to anyone who can reach the port. Helmcentral logs a warning at startup when this is on. |
 
 ### Authentication
 

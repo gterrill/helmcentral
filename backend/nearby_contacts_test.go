@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,10 +37,10 @@ func newTestNearbyContactStoreWithDwell(t *testing.T, dwell time.Duration) *near
 	return store
 }
 
-// countRows returns the raw row count for vesselKey, bypassing summary()'s
+// countRows returns the raw row count for vesselKey, bypassing summaries()'s
 // "exclude the current ongoing encounter" contract - used by tests that
 // want to assert how many rows recordContactIfNew actually inserted, as
-// opposed to summary()'s prior-encounters count.
+// opposed to summaries()'s prior-encounters count.
 func countRows(t *testing.T, store *nearbyContactStore, vesselKey string) int {
 	t.Helper()
 	var count int
@@ -84,17 +87,18 @@ func TestRecordContactIfNew_AfterGapElapsedInsertsSecondRow(t *testing.T) {
 	if got := countRows(t, store, "316042555"); got != 2 {
 		t.Fatalf("expected 2 rows for two distinct encounters, got %d", got)
 	}
-	// summary() reports the prior encounter (the first one), not the
+	// summaries() reports the prior encounter (the first one), not the
 	// current ongoing one (the second), per its "exclude current" contract.
-	seenCount, lastSeenAt, err := store.summary("316042555")
+	got, err := store.summaries([]string{"316042555"})
 	if err != nil {
-		t.Fatalf("summary: %v", err)
+		t.Fatalf("summaries: %v", err)
 	}
-	if seenCount != 1 {
-		t.Fatalf("expected seenCount 1 (the first encounter, prior to the current ongoing one), got %d", seenCount)
+	summary := got["316042555"]
+	if summary.seenCount != 1 {
+		t.Fatalf("expected seenCount 1 (the first encounter, prior to the current ongoing one), got %d", summary.seenCount)
 	}
-	if !lastSeenAt.Equal(base) {
-		t.Fatalf("expected last seen at %s (the first, prior encounter), got %s", base, lastSeenAt)
+	if !summary.lastSeenAt.Equal(base) {
+		t.Fatalf("expected last seen at %s (the first, prior encounter), got %s", base, summary.lastSeenAt)
 	}
 }
 
@@ -119,8 +123,8 @@ func TestRecordContactIfNew_FortyFiveMinuteGapStaysSameEncounter(t *testing.T) {
 	}
 }
 
-// TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount is the
-// regression test for Bug 2: summary() must report encounters *prior to*
+// TestSummaries_ExcludesCurrentOngoingEncounterFromPriorCount is the
+// regression test for Bug 2: summaries() must report encounters *prior to*
 // the current, still-ongoing one, not the raw total row count. With 3
 // distinct encounters recorded, the most recent one is the "current"
 // encounter and must be excluded, leaving 2 prior encounters with
@@ -369,7 +373,7 @@ func TestRecordContactIfNew_SurvivesProcessRestartWithPositionOverride(t *testin
 	}
 }
 
-func TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount(t *testing.T) {
+func TestSummaries_ExcludesCurrentOngoingEncounterFromPriorCount(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
 
@@ -398,25 +402,26 @@ func TestSummary_ExcludesCurrentOngoingEncounterFromPriorCount(t *testing.T) {
 		}
 	}
 
-	seenCount, lastSeenAt, err := store.summary("316042555")
+	got, err := store.summaries([]string{"316042555"})
 	if err != nil {
-		t.Fatalf("summary: %v", err)
+		t.Fatalf("summaries: %v", err)
 	}
-	if seenCount != 2 {
-		t.Fatalf("expected seenCount 2 (3 total rows minus the current ongoing encounter), got %d", seenCount)
+	summary := got["316042555"]
+	if summary.seenCount != 2 {
+		t.Fatalf("expected seenCount 2 (3 total rows minus the current ongoing encounter), got %d", summary.seenCount)
 	}
 	want := times[1] // second-most-recent row, i.e. the most recent *prior* encounter
-	if !lastSeenAt.Equal(want) {
-		t.Fatalf("expected lastSeenAt %s, got %s", want, lastSeenAt)
+	if !summary.lastSeenAt.Equal(want) {
+		t.Fatalf("expected lastSeenAt %s, got %s", want, summary.lastSeenAt)
 	}
 }
 
-// TestSummary_SingleRowReturnsZeroPriorSightings is the regression test for
+// TestSummaries_SingleRowReturnsZeroPriorSightings is the regression test for
 // Bug 2's core symptom: a vessel's very first-ever sighting has exactly one
 // recorded row (its own current, ongoing encounter, inserted by the poller
-// moments ago) and no priors, so summary() must report 0/zero-time rather
+// moments ago) and no priors, so summaries() must report 0/zero-time rather
 // than counting that row as a sighting of itself.
-func TestSummary_SingleRowReturnsZeroPriorSightings(t *testing.T) {
+func TestSummaries_SingleRowReturnsZeroPriorSightings(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 	base := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
 
@@ -424,30 +429,186 @@ func TestSummary_SingleRowReturnsZeroPriorSightings(t *testing.T) {
 		t.Fatalf("recordContactIfNew: %v", err)
 	}
 
-	seenCount, lastSeenAt, err := store.summary("316042555")
+	got, err := store.summaries([]string{"316042555"})
 	if err != nil {
-		t.Fatalf("summary: %v", err)
+		t.Fatalf("summaries: %v", err)
 	}
-	if seenCount != 0 {
-		t.Fatalf("expected seenCount 0 for a vessel's first-ever (and only) sighting, got %d", seenCount)
+	summary := got["316042555"]
+	if summary.seenCount != 0 {
+		t.Fatalf("expected seenCount 0 for a vessel's first-ever (and only) sighting, got %d", summary.seenCount)
 	}
-	if !lastSeenAt.IsZero() {
-		t.Fatalf("expected zero-value lastSeenAt for a vessel's first-ever sighting, got %s", lastSeenAt)
+	if !summary.lastSeenAt.IsZero() {
+		t.Fatalf("expected zero-value lastSeenAt for a vessel's first-ever sighting, got %s", summary.lastSeenAt)
 	}
 }
 
-func TestSummary_UnknownVesselReturnsZeroValue(t *testing.T) {
+func TestSummaries_UnknownVesselReturnsZeroValue(t *testing.T) {
 	store := newTestNearbyContactStore(t)
 
-	seenCount, lastSeenAt, err := store.summary("no-such-vessel")
+	got, err := store.summaries([]string{"no-such-vessel"})
 	if err != nil {
-		t.Fatalf("summary: %v", err)
+		t.Fatalf("summaries: %v", err)
 	}
-	if seenCount != 0 {
-		t.Fatalf("expected seenCount 0 for unknown vessel, got %d", seenCount)
+	summary := got["no-such-vessel"] // absent from the map: zero value
+	if summary.seenCount != 0 {
+		t.Fatalf("expected seenCount 0 for unknown vessel, got %d", summary.seenCount)
 	}
-	if !lastSeenAt.IsZero() {
-		t.Fatalf("expected zero lastSeenAt for unknown vessel, got %s", lastSeenAt)
+	if !summary.lastSeenAt.IsZero() {
+		t.Fatalf("expected zero lastSeenAt for unknown vessel, got %s", summary.lastSeenAt)
+	}
+}
+
+// TestSummaries_MultipleVesselsInOneQuery is item 1's "same results as
+// before for several vessels" requirement: three vessels with different
+// encounter histories (no priors, one prior, two priors), read back in a
+// single summaries() call, must each get their own correct answer - not
+// one vessel's row history leaking into another's count via the shared
+// GROUP BY.
+func TestSummaries_MultipleVesselsInOneQuery(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	base := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
+
+	// "111111111": one encounter only, no priors.
+	if err := store.recordContactIfNew("111111111", "ONE PRIOR", -21.50, 149.70, "Nara Inlet", "anchored", base, base); err != nil {
+		t.Fatalf("recordContactIfNew 111111111: %v", err)
+	}
+
+	// "222222222": two encounters, 4h apart and 1.5km apart so each is a
+	// genuinely distinct row (see the position-override reasoning in the
+	// test above).
+	if err := store.recordContactIfNew("222222222", "TWO PRIOR", -21.59, 149.79, "Airlie Beach", "anchored", base, base); err != nil {
+		t.Fatalf("recordContactIfNew 222222222 (1st): %v", err)
+	}
+	secondVisit := base.Add(4 * time.Hour)
+	if err := store.recordContactIfNew("222222222", "TWO PRIOR", -21.61, 149.81, "Nara Inlet", "motoring", secondVisit, secondVisit); err != nil {
+		t.Fatalf("recordContactIfNew 222222222 (2nd): %v", err)
+	}
+
+	// "333333333": never recorded at all.
+
+	got, err := store.summaries([]string{"111111111", "222222222", "333333333"})
+	if err != nil {
+		t.Fatalf("summaries: %v", err)
+	}
+
+	if s := got["111111111"]; s.seenCount != 0 || !s.lastSeenAt.IsZero() {
+		t.Fatalf("111111111: got %+v, want seenCount 0 and zero lastSeenAt", s)
+	}
+	if s := got["222222222"]; s.seenCount != 1 || !s.lastSeenAt.Equal(base) {
+		t.Fatalf("222222222: got %+v, want seenCount 1 and lastSeenAt %s", s, base)
+	}
+	if _, ok := got["333333333"]; ok {
+		t.Fatalf("333333333 was never recorded and should be absent from the result, got %+v", got["333333333"])
+	}
+}
+
+// TestSummaries_EmptyKeysReturnsEmptyMapWithoutQuerying guards the
+// zero-vessel edge case (buildNearbyVesselsPayload with nothing currently in
+// range): no keys means no SQL round trip and no error, just an empty map.
+func TestSummaries_EmptyKeysReturnsEmptyMapWithoutQuerying(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+	got, err := store.summaries(nil)
+	if err != nil {
+		t.Fatalf("summaries(nil): %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected an empty map, got %+v", got)
+	}
+}
+
+// TestNewNearbyContactStore_CreatesVesselKeySeenAtIndex guards the compound
+// index item 1 adds so summaries()'s per-vessel scan (previously the only
+// index was on vessel_key alone, forcing a full per-vessel row scan for
+// every nearby vessel on every build) has (vessel_key, seen_at) to use.
+func TestNewNearbyContactStore_CreatesVesselKeySeenAtIndex(t *testing.T) {
+	store := newTestNearbyContactStore(t)
+
+	var name string
+	err := store.db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'nearby_vessel_contacts' AND sql LIKE '%vessel_key%seen_at%'`,
+	).Scan(&name)
+	if err != nil {
+		t.Fatalf("expected a (vessel_key, seen_at) index on nearby_vessel_contacts, query failed: %v", err)
+	}
+	if name == "" {
+		t.Fatal("expected a named (vessel_key, seen_at) index on nearby_vessel_contacts")
+	}
+}
+
+// fakeNearbyContactSummarizer stands in for a real *nearbyContactStore in
+// tests that only care how many times summaries() is called - the N+1
+// regression backend perf audit Tier 3 flagged (main.go used to call
+// summary() once per nearby vessel, each call reading every row for that
+// vessel_key). Mirrors this package's existing fakeOverpassFetcher/
+// fakeTileFetcher callCount() convention.
+type fakeNearbyContactSummarizer struct {
+	calls   int
+	results map[string]contactSummary
+}
+
+func (f *fakeNearbyContactSummarizer) summaries(vesselKeys []string) (map[string]contactSummary, error) {
+	f.calls++
+	out := make(map[string]contactSummary, len(vesselKeys))
+	for _, k := range vesselKeys {
+		if s, ok := f.results[k]; ok {
+			out[k] = s
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeNearbyContactSummarizer) callCount() int { return f.calls }
+
+// TestEnrichNearbyVesselsWithContactHistory_IssuesOneQueryRegardlessOfVesselCount
+// is item 1's other required test: whatever number of vessels
+// buildNearbyVesselsPayload is enriching this build, it must cost exactly
+// one summaries() call, not one per vessel.
+func TestEnrichNearbyVesselsWithContactHistory_IssuesOneQueryRegardlessOfVesselCount(t *testing.T) {
+	priorSeenAt := time.Date(2026, time.July, 10, 9, 0, 0, 0, time.UTC)
+	fake := &fakeNearbyContactSummarizer{results: map[string]contactSummary{
+		"111111111": {seenCount: 3, lastSeenAt: priorSeenAt},
+		"222222222": {seenCount: 0},
+	}}
+
+	nearby := []nearbyVessel{
+		{ID: "urn:mrn:imo:mmsi:111111111", Name: "TAKU X", Mmsi: "111111111"},
+		{ID: "urn:mrn:imo:mmsi:222222222", Name: "SECOND BOAT", Mmsi: "222222222"},
+		{ID: "urn:mrn:imo:mmsi:333333333", Name: "THIRD BOAT", Mmsi: "333333333"}, // no summary recorded
+	}
+
+	enrichNearbyVesselsWithContactHistory(fake, nearby)
+
+	if fake.callCount() != 1 {
+		t.Fatalf("expected exactly 1 summaries() call for %d vessels, got %d", len(nearby), fake.callCount())
+	}
+	if nearby[0].SeenCount != 3 || nearby[0].LastSeenAt != priorSeenAt.Format(time.RFC3339) {
+		t.Fatalf("vessel 0: got SeenCount=%d LastSeenAt=%q", nearby[0].SeenCount, nearby[0].LastSeenAt)
+	}
+	if nearby[1].SeenCount != 0 || nearby[1].LastSeenAt != "" {
+		t.Fatalf("vessel 1: got SeenCount=%d LastSeenAt=%q, want 0/empty", nearby[1].SeenCount, nearby[1].LastSeenAt)
+	}
+	if nearby[2].SeenCount != 0 || nearby[2].LastSeenAt != "" {
+		t.Fatalf("vessel 2 (never recorded): got SeenCount=%d LastSeenAt=%q, want 0/empty", nearby[2].SeenCount, nearby[2].LastSeenAt)
+	}
+}
+
+// TestEnrichNearbyVesselsWithContactHistory_LogsOncePerVesselIDWithNoMMSI is
+// the "log once per vessel id" half of item 6: a vessel with no MMSI must
+// not grow a fresh log line every time this runs for it.
+func TestEnrichNearbyVesselsWithContactHistory_LogsOncePerVesselIDWithNoMMSI(t *testing.T) {
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	fake := &fakeNearbyContactSummarizer{results: map[string]contactSummary{}}
+	nearby := []nearbyVessel{{ID: "urn:mrn:imo:mmsi:000000000", Name: "NO MMSI BOAT", Mmsi: ""}}
+
+	for i := 0; i < 3; i++ {
+		enrichNearbyVesselsWithContactHistory(fake, nearby)
+	}
+
+	if got := strings.Count(buf.String(), "NO MMSI BOAT"); got != 1 {
+		t.Fatalf("expected exactly 1 log line for a vessel with no MMSI across 3 builds, got %d:\n%s", got, buf.String())
 	}
 }
 

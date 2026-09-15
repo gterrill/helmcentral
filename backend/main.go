@@ -202,8 +202,13 @@ func main() {
 	e.Logger.SetOutput(logWriter)
 
 	// Middleware
+	// accessLogSkipWriter (access_log.go) drops successful GET/HEAD lines
+	// after the fact - Echo's LoggerConfig.Skipper runs before next(c) and
+	// so cannot see the response status, which is what a "skip 2xx GETs"
+	// decision needs (backend perf audit Tier 3: two thirds of the logs
+	// stream's bytes were exactly these lines).
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Output: logWriter,
+		Output: accessLogSkipWriter{underlying: logWriter},
 	}))
 	e.Use(middleware.Recover())
 	// corsMiddleware (cors.go) replaces AllowOrigins: []string{"*"}: that
@@ -425,6 +430,10 @@ func main() {
 	// registerAPIRoutes — the one place a route reaches Echo at all. See
 	// buildAPIRoutes below for the full table and its tier assignments.
 	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, tileFetchClient))
+
+	// Off unless HELMCENTRAL_PPROF=1 (pprof.go); see registerPprofRoutes's
+	// doc comment for why it defaults off.
+	registerPprofRoutes(e)
 
 	registerStaticHandler(e)
 
@@ -1221,22 +1230,7 @@ func buildNearbyVesselsPayload() map[string]any {
 			nearby, nearbyErr := fetchSignalKNearbyVessels(state.Latitude, state.Longitude, now, excludedNames)
 			if nearbyErr == nil {
 				if globalNearbyContactStore != nil {
-					for i := range nearby {
-						key, ok := vesselContactKey(nearby[i].Mmsi)
-						if !ok {
-							log.Printf("Skipping sighting-history enrichment for %q: no MMSI reported", nearby[i].Name)
-							continue
-						}
-						seenCount, lastSeenAt, summaryErr := globalNearbyContactStore.summary(key)
-						if summaryErr != nil {
-							log.Printf("Failed to read nearby vessel contact summary for %s: %v", key, summaryErr)
-							continue
-						}
-						nearby[i].SeenCount = seenCount
-						if !lastSeenAt.IsZero() {
-							nearby[i].LastSeenAt = lastSeenAt.Format(time.RFC3339)
-						}
-					}
+					enrichNearbyVesselsWithContactHistory(globalNearbyContactStore, nearby)
 				}
 
 				vessels = nearby

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -315,14 +316,23 @@ func TestCompression_SkipperExcludesStreamingAndBinaryRoutes(t *testing.T) {
 		{"/api/radar/spokes", true},
 		{"/api/world-imagery/:z/:x/:y", true},
 		{"/api/sat-charts/:id/:z/:x/:y", true},
-		{"/api/basemap/style/:name", true},
-		{"/api/basemap/tilejson", true},
-		{"/api/basemap/tiles/:z/:x/:y", true},
-		{"/api/basemap/fonts/:fontstack/:range", true},
-		{"/api/basemap/sprite/:name", true},
+		// Off the skip list since Tier 3: fetchBasemapUpstream's plain
+		// http.Client transparently decompresses upstream, so the JSON/PBF
+		// bytes cached and served here are genuinely plain and benefit from
+		// compression the same as any other JSON/PBF route (compression.go's
+		// noCompressRoutePatterns comment has the full story). The sprite
+		// route pattern itself is no longer skipped either; its PNG variant
+		// is still caught separately, by path suffix, below.
+		{"/api/basemap/style/:name", false},
+		{"/api/basemap/tilejson", false},
+		{"/api/basemap/tiles/:z/:x/:y", false},
+		{"/api/basemap/fonts/:fontstack/:range", false},
+		{"/api/basemap/sprite/:name", false},
 		{"/api/weather-forecast", false},
 		{"/api/wave-forecast", false},
-		{"/api/gshhg-coastline", false},
+		// gshhg.go now gzips itself once at startup and is on the skip list
+		// so the middleware never wraps it a second time (Tier 3).
+		{"/api/gshhg-coastline", true},
 		{"/api/vessel-state", false},
 		{"/api/assistant/conversations/:id", false},
 	}
@@ -353,6 +363,101 @@ func TestCompression_SkipListMatchesRegisteredRoutes(t *testing.T) {
 		if !registered[pattern] {
 			t.Errorf("noCompressRoutePatterns contains %q, which is not a currently registered API route", pattern)
 		}
+	}
+}
+
+// TestCompression_SpritePNGStaysSkippedButSpriteJSONDoesNot is item 4's
+// sprite-specific case: one route pattern, "/api/basemap/sprite/:name",
+// serves both sprite.png (an already-compressed image, still skipped) and
+// sprite.json (metadata text, now compressed like every other JSON/PBF
+// basemap route). The pattern itself is no longer on noCompressRoutePatterns
+// (TestCompression_SkipperExcludesStreamingAndBinaryRoutes above), so this
+// checks the two content types resolve differently via the real request
+// path each actually carries.
+func TestCompression_SpritePNGStaysSkippedButSpriteJSONDoesNot(t *testing.T) {
+	e := echo.New()
+	cases := []struct {
+		reqPath string
+		want    bool
+	}{
+		{"/api/basemap/sprite/positron.png", true},
+		{"/api/basemap/sprite/positron@2x.png", true},
+		{"/api/basemap/sprite/dark-matter.png", true},
+		{"/api/basemap/sprite/positron.json", false},
+		{"/api/basemap/sprite/positron@2x.json", false},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, tc.reqPath, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetPath("/api/basemap/sprite/:name")
+		if got := compressionSkipper(c); got != tc.want {
+			t.Errorf("compressionSkipper(request path=%q) = %v, want %v", tc.reqPath, got, tc.want)
+		}
+	}
+}
+
+// fakeCartoStylePadding pads a style document past compressionMinLength
+// (1024 bytes) with an inert extra field, purely so this test exercises the
+// real gzip-or-not decision instead of MinLength suppressing it - the real
+// upstream style document is comfortably over 1024 bytes; the package's own
+// fakeCartoStyleJSON fixture (basemap_proxy_test.go) is trimmed down to
+// ~800 for readability and would not.
+var fakeCartoStylePadding = `,"metadata":"` + strings.Repeat("x", 512) + `"`
+
+// TestCompression_BasemapStyleJSONIsGzippedToAGzipClientAndDecodesCorrectly
+// is item 4's required end-to-end test: through the real compression
+// middleware and the real basemapStyleHandler (not just the Skipper table
+// above), a client offering gzip must get Content-Encoding: gzip, and the
+// decompressed body must still be the correctly-rewritten style document -
+// proving the basemap route coming off the skip list didn't also break the
+// rewrite that happens on top of it.
+func TestCompression_BasemapStyleJSONIsGzippedToAGzipClientAndDecodesCorrectly(t *testing.T) {
+	cache := newTestTileCache(t)
+	padded := strings.TrimSuffix(fakeCartoStyleJSON, "}") + fakeCartoStylePadding + "}"
+	if len(padded) <= compressionMinLength {
+		t.Fatalf("test fixture (%d bytes) must exceed compressionMinLength (%d) to exercise gzip at all", len(padded), compressionMinLength)
+	}
+	fetcher := respondingFetcher("positron-gl-style/style.json", "application/json", padded)
+
+	e := newCompressedTestEcho()
+	e.GET("/api/basemap/style/:name", basemapStyleHandler(cache, fetcher))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/basemap/style/positron", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+
+	gz, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	defer gz.Close()
+	decoded, err := io.ReadAll(gz)
+	if err != nil {
+		t.Fatalf("reading gzip body: %v", err)
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(decoded, &doc); err != nil {
+		t.Fatalf("decompressed body is not valid JSON: %v\nbody: %s", err, decoded)
+	}
+	// basemapStyleHandler absolutises same-origin URLs against the request
+	// (absolutiseStyleURLs) after the rewrite this is really checking for,
+	// so the served value carries http://example.com (httptest's default
+	// request host), not the bare "/api/basemap/tilejson" the cache itself
+	// holds.
+	sources, _ := doc["sources"].(map[string]any)
+	carto, _ := sources["carto"].(map[string]any)
+	if url, _ := carto["url"].(string); url != "http://example.com/api/basemap/tilejson" {
+		t.Fatalf("rewritten sources.carto.url = %q, want http://example.com/api/basemap/tilejson - the gzip round trip lost the rewrite", url)
 	}
 }
 

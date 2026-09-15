@@ -50,6 +50,20 @@ type streamEmitter struct {
 	// band, and why.
 	gateKey func(encoded []byte) string
 
+	// alwaysSend bypasses the change gate entirely: this event broadcasts
+	// on every build it's due for, regardless of what gateKey/payload
+	// comparison would otherwise say. Only heartbeat sets it. gateKey's own
+	// doc comment used to claim a nil gateKey was enough for heartbeat,
+	// reasoning that its RFC3339Nano timestamp always differs between
+	// builds - but two builds can format to the identical nanosecond
+	// string (a coarser system clock, or two builds landing in the same
+	// tick under load), and when they do, comparing the raw payload like
+	// any other ungated event wrongly suppresses that heartbeat. This is
+	// what made TestTelemetryHeartbeatIsObservableAndPeriodic intermittent
+	// (backend perf audit Tier 3): a must-always-send guarantee should not
+	// depend on incidental uniqueness of a formatted string.
+	alwaysSend bool
+
 	// nextDue is owned by the hub's single driving goroutine (tick) only —
 	// nothing else reads or writes it, so it needs no lock of its own.
 	nextDue time.Time
@@ -110,8 +124,12 @@ func telemetryEmitters() []*streamEmitter {
 		{event: "solar-state", interval: 10 * time.Second, build: buildSolarStatePayload, gateKey: solarStateGateKey},
 		{event: "tanks-state", interval: 10 * time.Second, build: buildTanksStatePayload, gateKey: tanksStateGateKey},
 		// Unlike SSE comment keepalives, this is observable in EventSource
-		// JavaScript. Always changes so a quiet boat still proves liveness.
-		{event: "heartbeat", interval: telemetryStreamKeepalive, build: func() map[string]any {
+		// JavaScript, and must prove liveness on a quiet boat where nothing
+		// else is changing - alwaysSend is what actually guarantees that
+		// (see its doc comment on streamEmitter above); the timestamp is
+		// just payload content for the client to look at, not what gets it
+		// past the gate.
+		{event: "heartbeat", interval: telemetryStreamKeepalive, alwaysSend: true, build: func() map[string]any {
 			return map[string]any{"timestamp": time.Now().UTC().Format(time.RFC3339Nano)}
 		}},
 	}
@@ -488,7 +506,7 @@ func (h *telemetryHub) buildAndBroadcast(e *streamEmitter) {
 	// why a "changed" cache would go stale under gating.
 	h.frames[e.event] = payload
 	previousKey, had := h.gateKeys[e.event]
-	changed := !had || previousKey != key
+	changed := e.alwaysSend || !had || previousKey != key
 	if changed {
 		h.gateKeys[e.event] = key
 	}

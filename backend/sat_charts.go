@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -251,7 +252,109 @@ func deleteSatChartHandler(c echo.Context) error {
 	if err := os.Remove(path); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to delete chart"})
 	}
+	globalSatChartHandles.invalidate(id)
 	return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// satChartHandle is one chart's cached read-only MBTiles connection plus its
+// format string, read once when the handle is opened rather than on every
+// tile request.
+type satChartHandle struct {
+	db     *sql.DB
+	format string
+}
+
+// satChartHandleCache caches one open satChartHandle per chart file path, so
+// satChartTileHandler doesn't os.Stat, sql.Open, run the tile query, run a
+// second query just for the format string, then close, for every single
+// tile request (backend perf audit Tier 3). Keyed by satChartFilePath(id) -
+// the resolved absolute path - rather than the bare id: SAT_CHARTS_DIR can
+// change (a test's own t.TempDir() per test function; in production,
+// HELMCENTRAL_STATE_DIR being repointed), and two charts that happen to
+// share an id string but live under different directories must not serve
+// each other's tiles from a stale cached handle. Charts are installed by
+// uploadSatChartHandler renaming a freshly-written temp file into place
+// under a freshly generated uuid id (satChartTileHandler above) - never
+// rewritten in place at an existing path - so mode=ro plus immutable=1 is
+// safe: nothing this process does, or any other process should be doing,
+// changes a chart's bytes once it exists at that path. deleteSatChartHandler
+// invalidates (closes and drops) the entry for a path that's removed, so a
+// deleted chart never keeps serving from a stale handle.
+type satChartHandleCache struct {
+	mu      sync.Mutex
+	handles map[string]*satChartHandle
+}
+
+var globalSatChartHandles = &satChartHandleCache{handles: make(map[string]*satChartHandle)}
+
+// get returns the cached handle for id, opening and caching one on a miss.
+// A missing underlying file is reported the same way it always was: a plain
+// os.Stat failure, before ever trying to open it as SQLite.
+func (c *satChartHandleCache) get(id string) (*satChartHandle, error) {
+	path := satChartFilePath(id)
+
+	c.mu.Lock()
+	if h, ok := c.handles[path]; ok {
+		c.mu.Unlock()
+		return h, nil
+	}
+	c.mu.Unlock()
+
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+
+	// "file:" + mode=ro + immutable=1: without the "file:" prefix,
+	// modernc.org/sqlite's DSN parser strips everything from the first "?"
+	// onward before handing the string to sqlite3_open_v2, so these two
+	// native SQLite URI parameters would otherwise be silently dropped (see
+	// modernc.org/sqlite's newConn). mode=ro opens read-only regardless of
+	// the Go-level open flags; immutable=1 additionally tells SQLite the
+	// file will never change out from under this handle, letting it skip
+	// locking calls and change detection it would otherwise do on every
+	// query - safe here per this type's doc comment above.
+	dsn := "file:" + path + "?mode=ro&immutable=1"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	// Concurrent tile requests for the same chart share this one handle;
+	// bounding the pool keeps that from opening an unbounded number of OS
+	// file descriptors against one chart file under a burst of requests,
+	// same reasoning as tileCacheMaxOpenConns (tile_cache.go).
+	db.SetMaxOpenConns(4)
+
+	var format string
+	_ = db.QueryRow("SELECT value FROM metadata WHERE name = 'format'").Scan(&format)
+
+	h := &satChartHandle{db: db, format: format}
+
+	c.mu.Lock()
+	// Another request may have opened and cached this same path while this
+	// one was doing the work above; keep whichever handle won the race and
+	// close the other rather than leaking it.
+	if existing, ok := c.handles[path]; ok {
+		c.mu.Unlock()
+		db.Close()
+		return existing, nil
+	}
+	c.handles[path] = h
+	c.mu.Unlock()
+	return h, nil
+}
+
+// invalidate closes and drops the cached handle for id's chart file, if
+// any. Called by deleteSatChartHandler so a removed chart never keeps
+// serving tiles from a handle opened before the delete.
+func (c *satChartHandleCache) invalidate(id string) {
+	path := satChartFilePath(id)
+	c.mu.Lock()
+	h, ok := c.handles[path]
+	delete(c.handles, path)
+	c.mu.Unlock()
+	if ok {
+		h.db.Close()
+	}
 }
 
 // GET /api/sat-charts/:id/:z/:x/:y
@@ -268,21 +371,15 @@ func satChartTileHandler(c echo.Context) error {
 		return c.NoContent(http.StatusBadRequest)
 	}
 
-	path := satChartFilePath(id)
-	if _, err := os.Stat(path); err != nil {
-		return c.NoContent(http.StatusNotFound)
-	}
-
-	db, err := sql.Open("sqlite", path)
+	handle, err := globalSatChartHandles.get(id)
 	if err != nil {
 		return c.NoContent(http.StatusNotFound)
 	}
-	defer db.Close()
 
 	tmsRow := xyzRowToTMSRow(z, y)
 
 	var tileData []byte
-	err = db.QueryRow(
+	err = handle.db.QueryRow(
 		"SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
 		z, x, tmsRow,
 	).Scan(&tileData)
@@ -290,9 +387,6 @@ func satChartTileHandler(c echo.Context) error {
 		return c.NoContent(http.StatusNotFound)
 	}
 
-	var format string
-	_ = db.QueryRow("SELECT value FROM metadata WHERE name = 'format'").Scan(&format)
-
 	c.Response().Header().Set("Cache-Control", "public, max-age=604800, immutable")
-	return c.Blob(http.StatusOK, tileContentType(format), tileData)
+	return c.Blob(http.StatusOK, tileContentType(handle.format), tileData)
 }

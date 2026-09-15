@@ -280,6 +280,21 @@ func (p *radarPoller) pollOnce(now time.Time) error {
 
 	radarID := radars[0].ID
 
+	if !radars[0].Transmitting {
+		// Standby: rule 1 of observedTargets' doc comment already discards
+		// everything mayara would report here, so fetching it every 2s just
+		// to throw the result away pays the REST round trip for nothing
+		// (backend perf audit Tier 3). Clear whatever the store still holds
+		// from the last transmitting poll and report connected: standby is
+		// a real, working answer from mayara, not the same thing as
+		// buildRadarTargetsPayload's "mayara-unreachable".
+		resetRadarProjectionMismatchLog()
+		p.store.replace(radarID, nil, now)
+		p.store.setConnected(true)
+		p.notePollRecovered()
+		return nil
+	}
+
 	arpaTargets, err := p.fetchTargets(radarID)
 	if err != nil {
 		p.store.setConnected(false)

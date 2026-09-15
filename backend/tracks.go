@@ -289,7 +289,9 @@ func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, stat
 	for _, v := range nearby {
 		key, ok := vesselContactKey(v.Mmsi)
 		if !ok {
-			log.Printf("Skipping nearby vessel contact for %q: no MMSI reported", v.Name)
+			if _, already := missingMMSILoggedForContactRecording.LoadOrStore(v.ID, struct{}{}); !already {
+				log.Printf("Skipping nearby vessel contact for %q: no MMSI reported", v.Name)
+			}
 			continue
 		}
 		if err := globalNearbyContactStore.recordContactIfNew(key, v.Name, v.Lat, v.Lon, geoname, state.Status, v.PositionSeen, now); err != nil {
@@ -297,6 +299,15 @@ func recordNearbyVesselContacts(signalkURL, vesselsPath, vesselPath string, stat
 		}
 	}
 }
+
+// missingMMSILoggedForContactRecording is recordNearbyVesselContacts' own
+// copy of nearby_contacts.go's missingMMSILoggedForContactHistory dedup:
+// same "log once per vessel id, not once per 5s poll tick" fix (backend
+// perf audit Tier 3), kept as a separate set because this is a different
+// fact about the vessel (contact recording, not sighting-history
+// enrichment) and the two call sites should not suppress each other's
+// first line.
+var missingMMSILoggedForContactRecording sync.Map // key: vessel id (string)
 
 func isMotoring(status string) bool {
 	s := trimEnvValue(status)

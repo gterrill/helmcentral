@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -163,7 +164,13 @@ func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// WAL + synchronous(NORMAL) + busy_timeout(5000), same DSN form and
+	// reasoning as tile_cache.go's newTileCache: the default rollback-
+	// journal mode blocks every reader behind the poller's writes
+	// (recordContactIfNew, tracks.go, every 5s), and summaries() now needs
+	// to read while a write may be in flight rather than queuing behind it.
+	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open nearby contacts database: %w", err)
 	}
@@ -191,6 +198,15 @@ func newNearbyContactStore(dbPath string) (*nearbyContactStore, error) {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_nearby_vessel_contacts_vessel_key ON nearby_vessel_contacts(vessel_key)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create nearby_vessel_contacts vessel_key index: %w", err)
+	}
+
+	// summaries() scans per vessel_key ordered by seen_at (backend perf audit
+	// Tier 3): the vessel_key-only index above still requires a sort step
+	// for that, and every row for a busy vessel_key. This compound index
+	// lets it walk seen_at order directly within each vessel_key.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_nearby_vessel_contacts_vessel_key_seen_at ON nearby_vessel_contacts(vessel_key, seen_at)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create nearby_vessel_contacts vessel_key/seen_at index: %w", err)
 	}
 
 	return &nearbyContactStore{
@@ -346,21 +362,38 @@ func (s *nearbyContactStore) lastRecordedContact(vesselKey string) (lastContact,
 	return lastContact{seenAt: time.Unix(seenAtUnix, 0).UTC(), lat: lat, lon: lon}, true, nil
 }
 
-// summary returns the number of encounters recorded for vesselKey prior to
-// the current, still-ongoing one, and the most recent seen_at among those
-// prior encounters (zero value if there are none).
+// contactSummary is the (seenCount, lastSeenAt) pair summaries returns for
+// one vessel key: the number of encounters recorded prior to the current,
+// still-ongoing one, and the most recent seen_at among those prior
+// encounters (zero value if there are none). See summaries' doc comment for
+// the full contract; this struct only exists to carry that pair through a
+// map without naming every caller's local variables the same way.
+type contactSummary struct {
+	seenCount  int
+	lastSeenAt time.Time
+}
+
+// summaries answers, for every vesselKey in vesselKeys, the same question
+// summary() used to answer one vessel at a time: encounters recorded prior
+// to the current, still-ongoing one, and the most recent seen_at among
+// those prior encounters. Replaced the per-vessel version (backend perf
+// audit Tier 3): buildNearbyVesselsPayload called it once per nearby
+// vessel, and each call read every row for that vessel_key with no way to
+// stop early, on top of an index that only covered vessel_key and still
+// needed a sort for seen_at order.
 //
-// Contract: this assumes vesselKey is currently visible, i.e. the caller
-// already knows the vessel is present right now (today, the only caller is
-// the /api/nearby-vessels handler, iterating vessels it just received from
-// SignalK). Under that assumption, the single most-recently-recorded row
-// for this vessel is always the current, ongoing encounter - either
-// recordContactIfNew inserted it moments ago, or it's an older encounter
-// being silently continued (lastSeen resets but no new row is written) - so
-// it's excluded from both the count and lastSeenAt. A still-ongoing
-// encounter must never count as a sighting "before itself"; without this
-// exclusion, a vessel's very first-ever sighting would report seenCount=1
-// (its own just-inserted row) instead of 0.
+// Contract: this assumes every key in vesselKeys is currently visible, i.e.
+// the caller already knows each vessel is present right now (today, the
+// only caller is enrichNearbyVesselsWithContactHistory, iterating vessels
+// it just received from SignalK). Under that assumption, the single
+// most-recently-recorded row for a given vessel is always its current,
+// ongoing encounter - either recordContactIfNew inserted it moments ago, or
+// it's an older encounter being silently continued (lastSeen resets but no
+// new row is written) - so it's excluded from both the count and
+// lastSeenAt. A still-ongoing encounter must never count as a sighting
+// "before itself"; without this exclusion, a vessel's very first-ever
+// sighting would report seenCount=1 (its own just-inserted row) instead of
+// 0.
 //
 // Deliberately NOT time-based (e.g. "is the latest row within some recent
 // window of now"): a boat docked continuously at a marina for 28 days has a
@@ -383,36 +416,134 @@ func (s *nearbyContactStore) lastRecordedContact(vesselKey string) (lastContact,
 // inserted. This is accepted rather than special-cased here: it is a
 // narrow, self-healing window, and this function has no way to know a
 // pending candidate exists without new plumbing between the two files.
-func (s *nearbyContactStore) summary(vesselKey string) (seenCount int, lastSeenAt time.Time, err error) {
-	rows, err := s.db.Query(
-		`SELECT seen_at FROM nearby_vessel_contacts WHERE vessel_key = ? ORDER BY seen_at DESC`,
-		vesselKey,
-	)
+//
+// A vesselKey with no rows at all, or not in vesselKeys, is simply absent
+// from the returned map rather than present with a zero-value entry: the
+// zero value of contactSummary already reads as "no priors" for a caller
+// that just does result[key], so there is nothing back-filling would add.
+func (s *nearbyContactStore) summaries(vesselKeys []string) (map[string]contactSummary, error) {
+	result := make(map[string]contactSummary, len(vesselKeys))
+	if len(vesselKeys) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(vesselKeys))
+	args := make([]any, len(vesselKeys))
+	for i, key := range vesselKeys {
+		placeholders[i] = "?"
+		args[i] = key
+	}
+
+	// ROW_NUMBER, partitioned per vessel_key and ordered seen_at DESC (id
+	// DESC breaks an exact-timestamp tie in favor of whichever row was
+	// inserted last, since two contacts can't otherwise both be "the
+	// current encounter"), numbers each vessel_key's own current encounter
+	// rn=1 and its most recent prior encounter rn=2. COUNT(*)-1 per
+	// vessel_key is every row except that current one; the CASE/MAX pulls
+	// out rn=2's seen_at specifically (NULL, so absent from the result
+	// entirely, when there is no second row).
+	query := `
+		WITH ranked AS (
+			SELECT vessel_key, seen_at,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY vessel_key ORDER BY seen_at DESC, id DESC
+			       ) AS rn
+			FROM nearby_vessel_contacts
+			WHERE vessel_key IN (` + strings.Join(placeholders, ",") + `)
+		)
+		SELECT vessel_key,
+		       COUNT(*) - 1 AS seen_count,
+		       MAX(CASE WHEN rn = 2 THEN seen_at END) AS prior_seen_at
+		FROM ranked
+		GROUP BY vessel_key`
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return 0, time.Time{}, fmt.Errorf("read nearby vessel contact summary: %w", err)
+		return nil, fmt.Errorf("read nearby vessel contact summaries: %w", err)
 	}
 	defer rows.Close()
 
-	var seenAts []int64
 	for rows.Next() {
-		var seenAtUnix int64
-		if err := rows.Scan(&seenAtUnix); err != nil {
-			return 0, time.Time{}, fmt.Errorf("scan nearby vessel contact summary row: %w", err)
+		var key string
+		var seenCount int
+		var priorSeenAt sql.NullInt64
+		if err := rows.Scan(&key, &seenCount, &priorSeenAt); err != nil {
+			return nil, fmt.Errorf("scan nearby vessel contact summary row: %w", err)
 		}
-		seenAts = append(seenAts, seenAtUnix)
+		summary := contactSummary{seenCount: seenCount}
+		if priorSeenAt.Valid {
+			summary.lastSeenAt = time.Unix(priorSeenAt.Int64, 0).UTC()
+		}
+		result[key] = summary
 	}
 	if err := rows.Err(); err != nil {
-		return 0, time.Time{}, fmt.Errorf("iterate nearby vessel contact summary rows: %w", err)
+		return nil, fmt.Errorf("iterate nearby vessel contact summaries: %w", err)
+	}
+	return result, nil
+}
+
+// nearbyContactSummarizer is the subset of *nearbyContactStore
+// enrichNearbyVesselsWithContactHistory needs, so a test can substitute a
+// call-counting fake instead of a real SQLite-backed store when all it
+// wants to check is how many summaries() calls one build costs.
+type nearbyContactSummarizer interface {
+	summaries(vesselKeys []string) (map[string]contactSummary, error)
+}
+
+// missingMMSILoggedForContactHistory tracks which vessel ids
+// enrichNearbyVesselsWithContactHistory has already logged a "no MMSI
+// reported" line for, so a vessel that never reports one - typically an AIS
+// target whose static report Helmcentral hasn't decoded, which can be
+// permanent for that vessel - logs about it once rather than on every
+// buildNearbyVesselsPayload call for as long as it stays in range (backend
+// perf audit Tier 3).
+var missingMMSILoggedForContactHistory sync.Map // key: vessel id (string)
+
+// enrichNearbyVesselsWithContactHistory fills in each vessel's SeenCount and
+// LastSeenAt by reading sighting history for every reported vessel in one
+// batched summaries() call, rather than one call per vessel
+// (buildNearbyVesselsPayload, main.go - backend perf audit Tier 3). Split
+// out of that function so this exact query-count contract can be tested
+// directly against a fake summarizer without needing a live SignalK fetch.
+func enrichNearbyVesselsWithContactHistory(store nearbyContactSummarizer, nearby []nearbyVessel) {
+	if store == nil || len(nearby) == 0 {
+		return
 	}
 
-	if len(seenAts) == 0 {
-		return 0, time.Time{}, nil
+	keys := make([]string, 0, len(nearby))
+	indicesByKey := make(map[string][]int, len(nearby))
+	for i := range nearby {
+		key, ok := vesselContactKey(nearby[i].Mmsi)
+		if !ok {
+			if _, already := missingMMSILoggedForContactHistory.LoadOrStore(nearby[i].ID, struct{}{}); !already {
+				log.Printf("Skipping sighting-history enrichment for %q: no MMSI reported", nearby[i].Name)
+			}
+			continue
+		}
+		if _, seen := indicesByKey[key]; !seen {
+			keys = append(keys, key)
+		}
+		indicesByKey[key] = append(indicesByKey[key], i)
 	}
-	prior := seenAts[1:]
-	if len(prior) == 0 {
-		return 0, time.Time{}, nil
+	if len(keys) == 0 {
+		return
 	}
-	return len(prior), time.Unix(prior[0], 0).UTC(), nil
+
+	summaries, err := store.summaries(keys)
+	if err != nil {
+		log.Printf("Failed to read nearby vessel contact summaries: %v", err)
+		return
+	}
+
+	for key, indices := range indicesByKey {
+		summary := summaries[key] // zero value (0/zero-time) when absent
+		for _, i := range indices {
+			nearby[i].SeenCount = summary.seenCount
+			if !summary.lastSeenAt.IsZero() {
+				nearby[i].LastSeenAt = summary.lastSeenAt.Format(time.RFC3339)
+			}
+		}
+	}
 }
 
 // listSightings returns every recorded contact for vesselKey, newest first,

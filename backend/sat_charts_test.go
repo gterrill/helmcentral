@@ -266,6 +266,153 @@ func TestSatChartTileHandler_Returns404ForMissingTile(t *testing.T) {
 	}
 }
 
+// TestSatChartTileHandler_ReusesHandleAcrossRequests is item 2's core
+// regression test: sat_charts.go used to os.Stat, sql.Open, run the tile
+// query, run a second query for the format, then close, for every single
+// tile request. This proves a second request no longer repeats any of that
+// open/stat sequence by removing the underlying file directly (bypassing
+// deleteSatChartHandler, which is the only thing that should ever
+// invalidate the cache) between two requests: a naive per-request
+// re-open would 404 on the second request since os.Stat would fail, but a
+// cached, already-open handle keeps serving from its open file descriptor
+// regardless of what happens to the path on disk afterwards.
+func TestSatChartTileHandler_ReusesHandleAcrossRequests(t *testing.T) {
+	dir := setupSatChartsTest(t)
+	id := "reuse-test-chart"
+	path := filepath.Join(dir, id+".mbtiles")
+	buildTestMBTiles(t, path, 5, 10, 12, "Reuse Test", "150,-25,151,-24")
+
+	requestTile := func() *httptest.ResponseRecorder {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, "/api/sat-charts/"+id+"/5/10/12", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id", "z", "x", "y")
+		c.SetParamValues(id, "5", "10", "12")
+		if err := satChartTileHandler(c); err != nil {
+			t.Fatalf("handler returned error: %v", err)
+		}
+		return rec
+	}
+
+	first := requestTile()
+	if first.Code != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d", first.Code)
+	}
+
+	// Remove the file out from under the cache, without going through
+	// deleteSatChartHandler. A handler that still stats/opens per request
+	// would 404 here; a cached handle keeps its already-open file
+	// descriptor and keeps serving.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove chart file: %v", err)
+	}
+
+	second := requestTile()
+	if second.Code != http.StatusOK {
+		t.Fatalf("second request (file removed on disk, handle should be cached): expected 200, got %d", second.Code)
+	}
+	if !bytes.Equal(second.Body.Bytes(), buildTestPNGTile()) {
+		t.Fatalf("second request served different tile bytes than the first")
+	}
+	if ct := second.Header().Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("second request: expected cached image/png content type, got %q", ct)
+	}
+}
+
+// TestSatChartTileHandler_RemovedChartDoesNotServeFromStaleHandleAfterDelete
+// is item 2's other required test: deleting a chart through the real
+// handler must invalidate its cached handle, not leave it servable forever
+// from a stale open file descriptor.
+func TestSatChartTileHandler_RemovedChartDoesNotServeFromStaleHandleAfterDelete(t *testing.T) {
+	dir := setupSatChartsTest(t)
+	id := "delete-invalidates-cache"
+	buildTestMBTiles(t, filepath.Join(dir, id+".mbtiles"), 5, 10, 12, "Delete Test", "150,-25,151,-24")
+
+	tileReq := func() (echo.Context, *httptest.ResponseRecorder) {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, "/api/sat-charts/"+id+"/5/10/12", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id", "z", "x", "y")
+		c.SetParamValues(id, "5", "10", "12")
+		return c, rec
+	}
+
+	c, rec := tileReq()
+	if err := satChartTileHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 before delete, got %d", rec.Code)
+	}
+
+	e := echo.New()
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/sat-charts/"+id, nil)
+	delRec := httptest.NewRecorder()
+	dc := e.NewContext(delReq, delRec)
+	dc.SetParamNames("id")
+	dc.SetParamValues(id)
+	if err := deleteSatChartHandler(dc); err != nil {
+		t.Fatalf("delete handler returned error: %v", err)
+	}
+	if delRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from delete, got %d: %s", delRec.Code, delRec.Body.String())
+	}
+
+	c2, rec2 := tileReq()
+	if err := satChartTileHandler(c2); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 after delete (no stale handle), got %d", rec2.Code)
+	}
+}
+
+// TestSatChartTileHandler_CacheKeyIncludesDirectorySoSameIDInDifferentDirsDoesNotLeak
+// guards against a handle cache keyed on the bare chart id alone:
+// SAT_CHARTS_DIR differs per test (each gets its own t.TempDir(), and in
+// production it can be repointed via HELMCENTRAL_STATE_DIR too), so two
+// charts that happen to share an id string but live under different
+// directories must never serve each other's tiles from a stale cached
+// handle.
+func TestSatChartTileHandler_CacheKeyIncludesDirectorySoSameIDInDifferentDirsDoesNotLeak(t *testing.T) {
+	id := "shared-id"
+
+	dirA := t.TempDir()
+	t.Setenv("SAT_CHARTS_DIR", dirA)
+	buildTestMBTiles(t, filepath.Join(dirA, id+".mbtiles"), 5, 10, 12, "Chart A", "150,-25,151,-24")
+
+	requestTile := func() *httptest.ResponseRecorder {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, "/api/sat-charts/"+id+"/5/10/12", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id", "z", "x", "y")
+		c.SetParamValues(id, "5", "10", "12")
+		if err := satChartTileHandler(c); err != nil {
+			t.Fatalf("handler returned error: %v", err)
+		}
+		return rec
+	}
+
+	first := requestTile()
+	if first.Code != http.StatusOK {
+		t.Fatalf("chart A: expected 200, got %d", first.Code)
+	}
+
+	dirB := t.TempDir()
+	t.Setenv("SAT_CHARTS_DIR", dirB)
+	// Chart B has no tile at z=5,x=10,y=12 at all - a different chart file
+	// entirely, sharing only the id string with chart A.
+	buildTestMBTiles(t, filepath.Join(dirB, id+".mbtiles"), 5, 20, 20, "Chart B", "150,-25,151,-24")
+
+	second := requestTile()
+	if second.Code != http.StatusNotFound {
+		t.Fatalf("chart B (same id, different directory, no tile at this z/x/y): expected 404, got %d - served from chart A's cached handle instead of chart B's own file", second.Code)
+	}
+}
+
 func TestSatChartTileHandler_Returns404ForUnknownChartID(t *testing.T) {
 	setupSatChartsTest(t)
 
