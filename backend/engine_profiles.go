@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -261,6 +263,41 @@ func engineProfiles() ([]engineProfile, []engineProfileProblem) {
 	return engineProfilesState, engineProfileProblems
 }
 
+func engineProfileFileForID(id string) (string, error) {
+	dir := engineProfilesDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", os.ErrNotExist
+		}
+		return "", err
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		var profile engineProfile
+		if err := json.Unmarshal(data, &profile); err != nil {
+			continue
+		}
+
+		if strings.TrimSpace(profile.ID) == id {
+			return path, nil
+		}
+	}
+
+	return "", os.ErrNotExist
+}
+
 // GET /api/engine-profiles
 func engineProfilesHandler(c echo.Context) error {
 	profiles, problems := engineProfiles()
@@ -271,4 +308,42 @@ func engineProfilesHandler(c echo.Context) error {
 		problems = []engineProfileProblem{}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"profiles": profiles, "problems": problems})
+}
+
+// PUT /api/engine-profiles/:id
+func updateEngineProfileHandler(c echo.Context) error {
+	id, err := url.PathUnescape(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "malformed profile id"})
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "profile id is required"})
+	}
+
+	var profile engineProfile
+	if err := c.Bind(&profile); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+	}
+	if strings.TrimSpace(profile.ID) != id {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "payload id must match path id"})
+	}
+	if err := validateEngineProfile(profile); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	path, err := engineProfileFileForID(id)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to locate profile"})
+	}
+
+	if err := writeJSONFileAtomic(path, profile); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save profile"})
+	}
+
+	loadEngineProfiles()
+	return c.JSON(http.StatusOK, map[string]any{"profile": profile})
 }

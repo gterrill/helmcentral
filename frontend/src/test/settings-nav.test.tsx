@@ -24,6 +24,12 @@ describe('SettingsNav', () => {
     expect(screen.getByRole('button', { name: 'Mate' })).toBeInTheDocument()
   })
 
+  it('renders an Equipment profiles nav button', () => {
+    render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: 'Equipment' })).toBeInTheDocument()
+  })
+
   it('marks only the active section as current', () => {
     const { rerender } = render(<SettingsNav activeSectionId="signalk" onSelect={vi.fn()} />)
 

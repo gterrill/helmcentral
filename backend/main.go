@@ -638,6 +638,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/routes", tierWrite, createRouteHandler},
 		{http.MethodPatch, "/api/routes/:id", tierWrite, patchRouteHandler},
 		{http.MethodDelete, "/api/routes/:id", tierWrite, deleteRouteHandler},
+		{http.MethodPut, "/api/engine-profiles/:id", tierWrite, updateEngineProfileHandler},
 		{http.MethodPost, "/api/routes/:id/activate", tierWrite, activateRouteHandler},
 		{http.MethodPost, "/api/routes/deactivate", tierWrite, deactivateRouteHandler},
 		{http.MethodPut, "/api/czone/switches/:id/state", tierWrite, putCZoneSwitchStateHandler},

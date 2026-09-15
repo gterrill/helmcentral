@@ -11,6 +11,7 @@ export type SettingsSectionId =
   | 'mayara'
   | 'alarms'
   | 'assistant'
+  | 'equipment'
   | 'security'
   | 'logs'
 
@@ -23,6 +24,7 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> 
   { id: 'mayara', label: 'Mayara' },
   { id: 'alarms', label: 'Alarms' },
   { id: 'assistant', label: 'Mate' },
+  { id: 'equipment', label: 'Equipment' },
   { id: 'widgets', label: 'Widgets' },
   { id: 'security', label: 'Security' },
   { id: 'logs', label: 'Logs' },

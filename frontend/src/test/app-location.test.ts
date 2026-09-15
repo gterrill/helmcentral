@@ -60,6 +60,7 @@ describe('parseAppLocation', () => {
 
   it('parses /settings/<sectionId> as that section', () => {
     expect(parseAppLocation('/settings/signalk')).toEqual({ panel: 'settings', section: 'signalk' })
+    expect(parseAppLocation('/settings/equipment')).toEqual({ panel: 'settings', section: 'equipment' })
   })
 
   // ADR 0093: the onboard assistant's settings section.
@@ -120,6 +121,7 @@ describe('formatAppLocation', () => {
 
   it('formats settings, another section as /settings/<sectionId>', () => {
     expect(formatAppLocation({ panel: 'settings', section: 'signalk' }, ctx)).toBe('/settings/signalk')
+    expect(formatAppLocation({ panel: 'settings', section: 'equipment' }, ctx)).toBe('/settings/equipment')
   })
 
   it('formats settings, Assistant section as /settings/mate', () => {

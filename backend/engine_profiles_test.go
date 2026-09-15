@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -176,6 +177,91 @@ func TestEngineProfilesHandler(t *testing.T) {
 	}
 	if len(body.Profiles) != 1 || len(body.Problems) != 1 {
 		t.Fatalf("expected one profile and one problem, got %+v", body)
+	}
+}
+
+func TestUpdateEngineProfileHandler(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	body := `{
+		"id": "test-engine",
+		"name": "Updated Engine",
+		"manufacturer": "Acme",
+		"gauges": [
+			{
+				"path_suffix": "oilPressure",
+				"label": "Oil Press",
+				"display": "radial",
+				"quantity": "pressure",
+				"unit": "psi",
+				"min": 0,
+				"max": 100
+			}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/api/engine-profiles/test-engine", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/engine-profiles/:id")
+	c.SetParamNames("id")
+	c.SetParamValues("test-engine")
+
+	if err := updateEngineProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	profiles, problems := engineProfiles()
+	if len(problems) != 0 {
+		t.Fatalf("expected no profile load problems after update, got %+v", problems)
+	}
+	if len(profiles) != 1 || profiles[0].Name != "Updated Engine" {
+		t.Fatalf("expected updated profile in memory, got %+v", profiles)
+	}
+}
+
+func TestUpdateEngineProfileHandlerRejectsInvalidBody(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPut, "/api/engine-profiles/test-engine", bytes.NewBufferString(`{"id":`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/engine-profiles/:id")
+	c.SetParamNames("id")
+	c.SetParamValues("test-engine")
+
+	if err := updateEngineProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateEngineProfileHandlerRejectsIDMismatch(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	body := `{"id":"other-engine","name":"Updated","gauges":[{"path_suffix":"oilPressure","label":"Oil Press","display":"radial","quantity":"pressure","unit":"psi","min":0,"max":100}]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/engine-profiles/test-engine", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/engine-profiles/:id")
+	c.SetParamNames("id")
+	c.SetParamValues("test-engine")
+
+	if err := updateEngineProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", rec.Code, rec.Body.String())
 	}
 }
 
