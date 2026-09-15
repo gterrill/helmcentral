@@ -16,8 +16,8 @@ export function ChartTooltipMarker({ x, y, color }: { x: number; y: number; colo
 export function ChartTooltipBubble({ pixelX, time, primary, secondary, tertiary }: { pixelX: number; time: string; primary: string; secondary: string; tertiary?: string }) {
   return (
     <div
-      className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-border/60 bg-card px-2.5 py-1.5 shadow-md"
-      style={{ left: `clamp(58px, ${pixelX}px, calc(100% - 58px))` }}
+      className="pointer-events-none absolute top-1 z-10 whitespace-nowrap rounded-md border border-border/60 bg-card px-2.5 py-1.5 shadow-md"
+      style={{ left: `${pixelX}px`, transform: 'translateX(-50%)' }}
     >
       <p className="text-[9px] font-medium uppercase tracking-wide tabular-nums text-muted-foreground">{time}</p>
       <p className="font-display text-base leading-tight tabular-nums text-foreground">{primary}</p>

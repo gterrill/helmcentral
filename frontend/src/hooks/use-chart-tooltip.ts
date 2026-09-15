@@ -28,7 +28,12 @@ export function useChartTooltip(count: number, resetKey: string | number, chartL
     if (!svg || count <= 0) return
     const rect = svg.getBoundingClientRect()
     if (rect.width <= 0) return
-    const pixelX = Math.max(0, Math.min(rect.width, clientX - rect.left))
+    const rawPixelX = Math.max(0, Math.min(rect.width, clientX - rect.left))
+    // Keep the bubble centered on the pointer while preventing it from being
+    // pushed past the chart edge. The bubble itself is translated by 50% of its
+    // own width in ChartTooltipBubble, so the clamp here should be a small inset,
+    // not the CSS clamp that was mixing different coordinate systems.
+    const pixelX = Math.max(58, Math.min(rect.width - 58, rawPixelX))
     const viewBoxWidth = svg.viewBox.baseVal.width || chartRight
     const xInViewBox = (pixelX / rect.width) * viewBoxWidth
     const fraction = count <= 1 ? 0 : (xInViewBox - chartLeft) / (chartRight - chartLeft)
@@ -49,7 +54,8 @@ export function useChartTooltip(count: number, resetKey: string | number, chartL
     const viewBoxWidth = svg.viewBox.baseVal.width || chartRight
     const fraction = count <= 1 ? 0 : idx / (count - 1)
     const xInViewBox = chartLeft + fraction * (chartRight - chartLeft)
-    setPoint({ index: idx, pixelX: (xInViewBox / viewBoxWidth) * rect.width })
+    const pixelX = (xInViewBox / viewBoxWidth) * rect.width
+    setPoint({ index: idx, pixelX: Math.max(58, Math.min(rect.width - 58, pixelX)) })
   }
 
   // The only non-pointer read path. Every chart's summary sentence gives a

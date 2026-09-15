@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 
+import { ChartTooltipBubble } from '@/components/chart-tooltip'
 import { TideChart } from '@/components/tide-chart'
 import type { TideChart as TideChartData } from '@/hooks/use-tide-chart'
 
@@ -42,6 +43,17 @@ function tomorrowWindow() {
 }
 
 describe('TideChart', () => {
+  it('centers the tooltip bubble on the pointer instead of clamping it into a skewed offset', () => {
+    const { container } = render(
+      <ChartTooltipBubble pixelX={240} time="Jun 14" primary="1.8 m" secondary="5:00 PM" />,
+    )
+
+    const bubble = container.firstElementChild as HTMLElement
+    expect(bubble).toHaveStyle({ left: '240px' })
+    expect(bubble).toHaveStyle({ transform: 'translateX(-50%)' })
+    expect(bubble.style.left).not.toContain('clamp(')
+  })
+
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 5, 14, 12, 0, 0))
