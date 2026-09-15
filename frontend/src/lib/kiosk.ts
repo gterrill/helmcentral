@@ -72,7 +72,7 @@ export interface KioskFeedContext {
 
 function normalizeKioskState(state: string | null): string | null {
   if (typeof state !== 'string') return null
-  const normalized = state.trim().toLowerCase().replaceAll('_', ' ')
+  const normalized = state.trim().toLowerCase().replace(/_/g, ' ')
   if (normalized === 'under way using engine') return 'motoring'
   return normalized || null
 }

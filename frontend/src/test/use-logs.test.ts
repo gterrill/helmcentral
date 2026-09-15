@@ -2,45 +2,49 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useLogs } from '@/hooks/use-logs'
 
-describe('useLogs', () => {
-  let mockEventSources: any[] = []
+type MockEventListener = (event: { data: string }) => void
 
+let mockEventSources: MockEventSource[] = []
+
+class MockEventSource {
+  url: string
+  onopen: ((event: Event) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  onmessage: ((event: MessageEvent) => void) | null = null
+  listeners: Record<string, MockEventListener[]> = {}
+  readyState = 1
+
+  constructor(url: string) {
+    this.url = url
+    mockEventSources.push(this)
+  }
+
+  addEventListener(event: string, cb: MockEventListener) {
+    this.listeners[event] = this.listeners[event] || []
+    this.listeners[event].push(cb)
+  }
+
+  removeEventListener(event: string, cb: MockEventListener) {
+    if (this.listeners[event]) {
+      this.listeners[event] = this.listeners[event].filter((f) => f !== cb)
+    }
+  }
+
+  close() {
+    this.readyState = 2
+  }
+
+  emit(event: string, data: unknown) {
+    if (this.listeners[event]) {
+      this.listeners[event].forEach((cb) => cb({ data: JSON.stringify(data) }))
+    }
+  }
+}
+
+describe('useLogs', () => {
   beforeEach(() => {
     mockEventSources = []
-    vi.stubGlobal('EventSource', class {
-      url: string
-      onopen: any = null
-      onerror: any = null
-      onmessage: any = null
-      listeners: Record<string, Function[]> = {}
-      readyState = 1
-
-      constructor(url: string) {
-        this.url = url
-        mockEventSources.push(this)
-      }
-
-      addEventListener(event: string, cb: Function) {
-        this.listeners[event] = this.listeners[event] || []
-        this.listeners[event].push(cb)
-      }
-
-      removeEventListener(event: string, cb: Function) {
-        if (this.listeners[event]) {
-          this.listeners[event] = this.listeners[event].filter((f) => f !== cb)
-        }
-      }
-
-      close() {
-        this.readyState = 2
-      }
-
-      emit(event: string, data: any) {
-        if (this.listeners[event]) {
-          this.listeners[event].forEach((cb) => cb({ data: JSON.stringify(data) }))
-        }
-      }
-    })
+    vi.stubGlobal('EventSource', MockEventSource)
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
