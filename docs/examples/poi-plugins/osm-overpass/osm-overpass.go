@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -546,13 +547,19 @@ func wikipediaSummaryURL(title string) string {
 
 // resolveDetailLimit reads the "detail_limit" plugin config value (a plain
 // string, per the shared config.json convention), defaulting to
-// defaultDetailLimit on an absent, empty or unparseable value.
+// defaultDetailLimit on an absent, blank or unparseable value. An explicit
+// "0" is honored as-is rather than folded into that fallback: it is the
+// operator's way of disabling Wikipedia enrichment entirely (see
+// enrichNearestFeatures below and this plugin's osm-overpass.config_fields.json
+// "detail_limit" field), not "no limit" and not a typo. A negative value
+// makes no sense as a count and falls back to the default like any other
+// malformed input.
 func resolveDetailLimit(raw string, present bool) int {
 	if !present {
 		return defaultDetailLimit
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || n <= 0 {
+	if err != nil || n < 0 {
 		return defaultDetailLimit
 	}
 	return n
@@ -623,6 +630,94 @@ func nearestWikipediaFeatures(features []poiFeatureOut, lat, lon float64, limit 
 		indexes[i] = c.index
 	}
 	return indexes
+}
+
+// enrichmentBudget bounds how much of fetchPOI's total run time - measured
+// from the very start of the call, before the Overpass query itself even
+// runs - may pass before enrichNearestFeatures stops starting new Wikipedia
+// fetches. It exists because the host aborts the *whole* fetch_poi call at
+// WASM_PLUGIN_TIMEOUT_MS (backend/wasm_plugin.go, 15s default) if it runs
+// long, throwing away Overpass results that were already in hand along with
+// the enrichment that was still in flight - worse than returning the same
+// POI data promptly with some (or all) Detail/SourceURL fields left empty.
+//
+// Chosen as 15s minus one worst-case Wikipedia summary (~5s, measured from
+// the boat over a slow satellite link) minus 1s of headroom for JSON
+// marshaling and the host round trip: 9s. That means a fetch started right
+// at the deadline still finishes with about a second to spare before the
+// host's own kill switch fires. On a bad link the Overpass query alone can
+// take ~6s (measured; buildOverpassPOIQuery's own server-side [timeout:12]
+// permits worse still), which already consumes two-thirds of this budget
+// before enrichment gets a turn - by design, since the Overpass query's
+// result is the actual POI data and always gets to run to completion
+// (doOverpassQuery/runFetchPOI below never time it out), while enrichment is
+// optional description text layered on top of data that already arrived.
+const enrichmentBudget = 9 * time.Second
+
+// enrichNearestFeatures enriches the nearest limit wikipedia-tagged features
+// (nearestWikipediaFeatures picks which, nearest-first) with a Wikipedia
+// summary each, fetched via fetchSummary. Before starting each fetch it
+// checks now() against start.Add(enrichmentBudget) and stops - leaving every
+// remaining feature's Detail/SourceURL untouched - once that deadline has
+// passed. A feature enrichNearestFeatures never reaches this way carries
+// exactly the same "no detail" result as a feature with no wikipedia tag, or
+// one whose fetch failed (fetchSummary reports ok=false for any failure -
+// network error, non-2xx, unparseable body, no extract - never a
+// placeholder string): this is not a masking fallback, since the POI data
+// itself (ID/Category/Name/Lat/Lon) is already complete for every feature
+// either way, and only this optional descriptive text is ever skipped.
+func enrichNearestFeatures(
+	features []poiFeatureOut,
+	lat, lon float64,
+	limit int,
+	start time.Time,
+	now func() time.Time,
+	fetchSummary func(title string) (detail, sourceURL string, ok bool),
+) {
+	deadline := start.Add(enrichmentBudget)
+	for _, idx := range nearestWikipediaFeatures(features, lat, lon, limit) {
+		title := wikipediaTitle(features[idx].tags["wikipedia"])
+		if title == "" {
+			continue
+		}
+		if !now().Before(deadline) {
+			return
+		}
+		if detail, sourceURL, ok := fetchSummary(title); ok {
+			features[idx].Detail = detail
+			features[idx].SourceURL = sourceURL
+		}
+	}
+}
+
+// runFetchPOI is fetch_poi's host-testable orchestration: build the query,
+// run it through the injected overpassQueryFunc, classify the results, and
+// enrich the nearest detailLimit wikipedia-tagged features within
+// enrichmentBudget of start (enrichNearestFeatures above). This mirrors
+// runPlaceNameAt/runSearchPlaces's own split below: main.go's fetch_poi
+// wasmexport supplies doOverpassQuery, fetchWikipediaSummary and time.Now
+// for both start and now, while go test exercises this function directly
+// with a fake query function (an Overpass error must surface here, before
+// enrichment ever runs - never masked as an empty success) and a fake
+// clock/fetchSummary (the enrichment time budget) - no network or WASM
+// runtime needed for either.
+func runFetchPOI(
+	query overpassQueryFunc,
+	lat, lon float64,
+	radiusM int,
+	categories []string,
+	detailLimit int,
+	start time.Time,
+	now func() time.Time,
+	fetchSummary func(title string) (detail, sourceURL string, ok bool),
+) (features []poiFeatureOut, truncated []string, err error) {
+	elements, err := query(buildOverpassPOIQuery(lat, lon, radiusM, categories))
+	if err != nil {
+		return nil, nil, err
+	}
+	features, truncated = classifyAndCountFeatures(categories, elements)
+	enrichNearestFeatures(features, lat, lon, detailLimit, start, now, fetchSummary)
+	return features, truncated, nil
 }
 
 // haversineMeters is the standard great-circle distance formula, duplicated

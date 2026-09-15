@@ -186,8 +186,9 @@ mirror instead - see "Pointing at an Overpass mirror" below.
 By default this plugin queries the public `overpass-api.de` instance
 (`defaultOverpassAPIURL` in `osm-overpass.go`). The mirror is this plugin's
 own setting, not a Helmcentral-wide one: it ships a companion
-`osm-overpass.config_fields.json` sidecar declaring one operator-editable
-field,
+`osm-overpass.config_fields.json` sidecar declaring this and one other
+operator-editable field (`detail_limit`, covered under "Wikipedia
+enrichment" below),
 
 ```jsonc
 // osm-overpass.config_fields.json
@@ -198,18 +199,26 @@ field,
     "type": "url",
     "placeholder": "https://overpass-api.de/api/interpreter",
     "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it. Any mirror other than those two must also be added to this plugin's allowed hosts."
+  },
+  {
+    "key": "detail_limit",
+    "label": "Wikipedia detail lookups",
+    "type": "text",
+    "placeholder": "5",
+    "help": "How many of the nearest results get an extra Wikipedia summary fetched. Blank or invalid uses the default of 5. Each lookup is its own round trip on top of the Overpass query, so on a slow link it costs several seconds - set to 0 to skip Wikipedia lookups entirely and only get plain OpenStreetMap names."
   }
 ]
 ```
 
-which the Settings UI reads to render an **Overpass server** field in this
-plugin's own settings modal (**Settings -> Widgets -> Nearby**, the gear icon
-on the OpenStreetMap provider card). Saving that field posts to
-`POST /api/plugins/poi/osm-overpass/config`; the host resolves the stored
-value fresh on every `fetch_poi` call (`wasm_plugin.go`'s
-`applyConfigValues`), so the change takes effect on the very next call with
-no plugin reload or Helmcentral restart. Leaving it blank stores nothing,
-and the plugin falls back to its `overpass-api.de` default.
+which the Settings UI reads to render **Overpass server** and **Wikipedia
+detail lookups** fields in this plugin's own settings modal (**Settings ->
+Widgets -> Nearby**, the gear icon on the OpenStreetMap provider card).
+Saving either field posts to `POST /api/plugins/poi/osm-overpass/config`; the
+host resolves the stored values fresh on every `fetch_poi` call
+(`wasm_plugin.go`'s `applyConfigValues`), so a change takes effect on the
+very next call with no plugin reload or Helmcentral restart. Leaving
+`overpass_url` blank stores nothing, and the plugin falls back to its
+`overpass-api.de` default.
 
 `resolveOverpassURL` (`osm-overpass.go`) requires the stored value to parse
 as an absolute `https://` URL. A present-but-malformed value fails the
@@ -250,12 +259,50 @@ place names ended up calling into this plugin directly via
 ## Wikipedia enrichment
 
 After classification, the nearest `detail_limit` features (config, default
-5) carrying an OSM `wikipedia` tag are enriched with the first sentence of
-the [English Wikipedia REST API](https://en.wikipedia.org/api/rest_v1/)'s
-page summary. `detail_limit` bounds this deliberately: five extra HTTP round
-trips inside the plugin's 15-second timeout budget is comfortable, and most
-POI requests only carry a couple of Wikipedia-tagged features regardless (see
-`docs/reference/poi-categories.md`'s coverage notes).
+5, operator-editable - see below) carrying an OSM `wikipedia` tag are
+enriched with the first sentence of the
+[English Wikipedia REST API](https://en.wikipedia.org/api/rest_v1/)'s page
+summary. Most POI requests only carry a couple of Wikipedia-tagged features
+regardless (see `docs/reference/poi-categories.md`'s coverage notes), so on
+a decent connection all of them typically get enriched.
+
+`detail_limit` is this plugin's own **Wikipedia detail lookups** field
+(`osm-overpass.config_fields.json`, alongside the Overpass server field
+covered above) - a plain `"text"`-typed field, since the host only validates
+`"url"`-typed fields at save time (`postPluginConfigHandler`); a bad
+`detail_limit` value never fails the save, it just falls back at read time.
+`resolveDetailLimit` (`osm-overpass.go`) treats an absent, blank or
+unparseable value as the default of 5, and a negative value the same way,
+but honors an explicit `"0"` as-is: that turns Wikipedia enrichment off
+entirely and returns plain OpenStreetMap names with no `detail` or
+`source_url` on any feature, useful on a link too slow to spend on it at
+all.
+
+### The enrichment time budget
+
+Each Wikipedia round trip costs real time on a slow connection, and the host
+kills the entire `fetch_poi` call - discarding the Overpass results along
+with it - if the call runs past its own `WASM_PLUGIN_TIMEOUT_MS`
+(`backend/wasm_plugin.go`, 15s default). Measured from a boat on a slow
+satellite link: a trivial Overpass query took about 5.5s and one Wikipedia
+summary about 5.1s. Five of those sequentially, on top of the query, is well
+past 15s - the host aborted the call outright and the operator saw a 502
+with an empty POI list, even though the Overpass data had already come back
+fine.
+
+`enrichNearestFeatures` (`osm-overpass.go`) now stops asking for more
+summaries once too much of the call's own run time has already gone by, and
+returns whatever it already has - the features it did enrich keep their
+`detail`/`source_url`, the rest carry none, exactly like a feature with no
+`wikipedia` tag at all. This is not a fallback that hides a real failure:
+the POI data itself (name, position, category) is complete either way: only
+the optional descriptive text gets cut short. `enrichmentBudget` is set to
+9s, measured from the very start of `fetch_poi` (so it already includes
+whatever the Overpass query itself took) - 15s minus one worst-case summary
+(~5s) minus 1s of headroom for JSON output and the host's own overhead. On a
+bad link that already spent 6s on the Overpass query, that still leaves
+enough of the 9s for one summary attempt before the budget runs out; on a
+good link, all `detail_limit` summaries usually complete well inside it.
 
 Only English Wikipedia is ever queried, regardless of the tag's language
 prefix (`en:Lindeman Island`, `fr:...`, or no prefix at all) - many article

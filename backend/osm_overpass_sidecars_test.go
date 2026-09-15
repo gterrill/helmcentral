@@ -50,19 +50,54 @@ func TestOsmOverpassSidecars_ConfigFieldsDeclaresOverpassURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pluginConfigFieldsForWasmPlugin: %v", err)
 	}
-	if len(fields) != 1 {
-		t.Fatalf("expected exactly 1 declared config field, got %+v", fields)
+	if len(fields) != 2 {
+		t.Fatalf("expected exactly 2 declared config fields (overpass_url, detail_limit), got %+v", fields)
 	}
-	f := fields[0]
-	if f.Key != "overpass_url" {
-		t.Errorf("expected key overpass_url, got %q", f.Key)
-	}
+	f := fieldByKey(t, fields, "overpass_url")
 	if f.Type != "url" {
 		t.Errorf("expected type url, got %q", f.Type)
 	}
 	if f.Label == "" {
 		t.Errorf("expected a non-empty label")
 	}
+}
+
+// TestOsmOverpassSidecars_ConfigFieldsDeclaresDetailLimit proves the shipped
+// config_fields.json also declares "detail_limit" - how many nearest
+// results get an extra Wikipedia summary fetched (osm-overpass.go's
+// resolveDetailLimit) - as an operator-editable field. Its type is "text",
+// not "url": the host only format-validates "url"-typed fields at save time
+// (postPluginConfigHandler), so a bad detail_limit value is caught instead
+// at read time by resolveDetailLimit itself (falls back to the default of
+// 5), never at save time.
+func TestOsmOverpassSidecars_ConfigFieldsDeclaresDetailLimit(t *testing.T) {
+	withNilPluginOverridesStore(t)
+
+	fields, err := pluginConfigFieldsForWasmPlugin(osmOverpassWasmPath)
+	if err != nil {
+		t.Fatalf("pluginConfigFieldsForWasmPlugin: %v", err)
+	}
+	f := fieldByKey(t, fields, "detail_limit")
+	if f.Type != "text" {
+		t.Errorf("expected type text, got %q", f.Type)
+	}
+	if f.Label == "" {
+		t.Errorf("expected a non-empty label")
+	}
+}
+
+// fieldByKey finds the declared config field with the given key, failing
+// the test outright if it isn't present - every test in this file expects
+// its field to exist, never merely tolerates its absence.
+func fieldByKey(t *testing.T, fields []pluginConfigFieldSpec, key string) pluginConfigFieldSpec {
+	t.Helper()
+	for _, f := range fields {
+		if f.Key == key {
+			return f
+		}
+	}
+	t.Fatalf("expected a declared config field with key %q, got %+v", key, fields)
+	return pluginConfigFieldSpec{}
 }
 
 // TestOsmOverpassSidecars_NoConfigJSONShipped confirms the plugin no longer

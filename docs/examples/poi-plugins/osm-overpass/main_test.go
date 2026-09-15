@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func loadFixture(t *testing.T, name string) []byte {
@@ -418,6 +420,104 @@ func TestNearestWikipediaFeatures_SortsByDistanceAndCaps(t *testing.T) {
 	}
 }
 
+func TestNearestWikipediaFeatures_ZeroLimitReturnsNone(t *testing.T) {
+	features := []poiFeatureOut{
+		{Name: "Near", Lat: -20.45, Lon: 149.04, tags: map[string]string{"wikipedia": "en:Near"}},
+	}
+	got := nearestWikipediaFeatures(features, -20.4467, 149.0353, 0)
+	if len(got) != 0 {
+		t.Fatalf("expected a detail_limit of 0 to select no features, got indexes %v", got)
+	}
+}
+
+// ── enrichment time budget ───────────────────────────────────────────────
+//
+// enrichNearestFeatures is what fetchPOI (main.go) actually calls, with
+// time.Now for both the clock and the wasmexport's own real
+// fetchWikipediaSummary. These tests inject a fake clock and a fake fetch
+// function instead, so the budget logic is exercised with no real elapsed
+// time and no network call.
+
+func TestEnrichNearestFeatures_StopsWhenBudgetSpent(t *testing.T) {
+	features := []poiFeatureOut{
+		{Name: "First", Lat: -20.45, Lon: 149.04, tags: map[string]string{"wikipedia": "en:First"}},
+		{Name: "Second", Lat: -20.46, Lon: 149.05, tags: map[string]string{"wikipedia": "en:Second"}},
+		{Name: "Third", Lat: -20.47, Lon: 149.06, tags: map[string]string{"wikipedia": "en:Third"}},
+	}
+	start := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+
+	// The first check (before the first fetch) lands right at start, well
+	// inside the budget. The first fetch then "takes" the whole budget - by
+	// the second check the deadline has already passed, so the loop must
+	// stop without attempting a second or third fetch.
+	nowCalls := 0
+	fakeNow := func() time.Time {
+		nowCalls++
+		if nowCalls == 1 {
+			return start
+		}
+		return start.Add(enrichmentBudget)
+	}
+
+	fetchCalls := 0
+	fakeFetch := func(title string) (string, string, bool) {
+		fetchCalls++
+		return "detail for " + title, "https://example.invalid/" + title, true
+	}
+
+	enrichNearestFeatures(features, -20.4467, 149.0353, 3, start, fakeNow, fakeFetch)
+
+	if fetchCalls != 1 {
+		t.Fatalf("expected exactly one fetch before the budget ran out, got %d", fetchCalls)
+	}
+	if features[0].Detail == "" || features[0].SourceURL == "" {
+		t.Fatalf("expected the first (nearest) feature to be enriched, got %+v", features[0])
+	}
+	if features[1].Detail != "" || features[1].SourceURL != "" {
+		t.Fatalf("expected the second feature to be left un-enriched once the budget was spent, got %+v", features[1])
+	}
+	if features[2].Detail != "" || features[2].SourceURL != "" {
+		t.Fatalf("expected the third feature to be left un-enriched once the budget was spent, got %+v", features[2])
+	}
+}
+
+func TestEnrichNearestFeatures_FailedFetchLeavesDetailEmpty(t *testing.T) {
+	features := []poiFeatureOut{
+		{Name: "Only", Lat: -20.45, Lon: 149.04, tags: map[string]string{"wikipedia": "en:Only"}},
+	}
+	start := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+	fakeNow := func() time.Time { return start } // never anywhere near the deadline
+	fakeFetch := func(title string) (string, string, bool) { return "", "", false }
+
+	enrichNearestFeatures(features, -20.4467, 149.0353, 1, start, fakeNow, fakeFetch)
+
+	if features[0].Detail != "" || features[0].SourceURL != "" {
+		t.Fatalf("expected a failed fetch to leave Detail/SourceURL empty, not a placeholder, got %+v", features[0])
+	}
+}
+
+func TestEnrichNearestFeatures_DetailLimitZeroNeverCallsFetch(t *testing.T) {
+	features := []poiFeatureOut{
+		{Name: "Only", Lat: -20.45, Lon: 149.04, tags: map[string]string{"wikipedia": "en:Only"}},
+	}
+	start := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+	fakeNow := func() time.Time { return start }
+	fetchCalls := 0
+	fakeFetch := func(title string) (string, string, bool) {
+		fetchCalls++
+		return "should not happen", "https://example.invalid/", true
+	}
+
+	enrichNearestFeatures(features, -20.4467, 149.0353, 0, start, fakeNow, fakeFetch)
+
+	if fetchCalls != 0 {
+		t.Fatalf("expected detail_limit 0 to skip enrichment entirely, got %d fetch calls", fetchCalls)
+	}
+	if features[0].Detail != "" {
+		t.Fatalf("expected the feature to carry no detail, got %+v", features[0])
+	}
+}
+
 func TestResolveDetailLimit_DefaultsWhenAbsent(t *testing.T) {
 	if got := resolveDetailLimit("", false); got != defaultDetailLimit {
 		t.Fatalf("expected default %d, got %d", defaultDetailLimit, got)
@@ -433,6 +533,29 @@ func TestResolveDetailLimit_UsesConfiguredValue(t *testing.T) {
 func TestResolveDetailLimit_FallsBackOnUnparseableValue(t *testing.T) {
 	if got := resolveDetailLimit("not-a-number", true); got != defaultDetailLimit {
 		t.Fatalf("expected default on unparseable value, got %d", got)
+	}
+}
+
+func TestResolveDetailLimit_FallsBackOnBlankPresentValue(t *testing.T) {
+	if got := resolveDetailLimit("", true); got != defaultDetailLimit {
+		t.Fatalf("expected default on a blank present value, got %d", got)
+	}
+}
+
+func TestResolveDetailLimit_ZeroDisablesEnrichmentEntirely(t *testing.T) {
+	// An explicit "0" is not "unparseable" and must not fall back to the
+	// default - it is the operator's way of turning Wikipedia enrichment off
+	// altogether (osm-overpass.config_fields.json's detail_limit help text).
+	if got := resolveDetailLimit("0", true); got != 0 {
+		t.Fatalf("expected an explicit 0 to be honored as-is, got %d", got)
+	}
+}
+
+func TestResolveDetailLimit_NegativeFallsBackToDefault(t *testing.T) {
+	// A negative limit makes no sense as a count; treat it like any other
+	// malformed value rather than let a typo silently mean "disable".
+	if got := resolveDetailLimit("-1", true); got != defaultDetailLimit {
+		t.Fatalf("expected default on a negative value, got %d", got)
 	}
 }
 
@@ -607,5 +730,74 @@ func TestParseOverpassBody_RateLimitHTMLReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rate") {
 		t.Fatalf("expected error message to mention rate limit, got: %v", err)
+	}
+}
+
+// ── runFetchPOI: fetch_poi's host-testable orchestration ─────────────────
+//
+// Mirrors runPlaceNameAt/runSearchPlaces's own tests (place_search_test.go):
+// an injected overpassQueryFunc stands in for the real Overpass call, and an
+// injected clock/fetchSummary stand in for time.Now and the real Wikipedia
+// call, so the whole query -> classify -> enrich pipeline runs under `go
+// test` with no network or WASM runtime involved.
+
+func TestRunFetchPOI_OverpassErrorFailsCallBeforeAnyEnrichment(t *testing.T) {
+	query := func(q string) ([]overpassElement, error) {
+		return nil, errors.New("overpass rate limited")
+	}
+	fetchCalls := 0
+	fetchSummary := func(title string) (string, string, bool) {
+		fetchCalls++
+		return "", "", false
+	}
+
+	features, truncated, err := runFetchPOI(
+		query, -20.4467, 149.0353, 9260, []string{"island"}, defaultDetailLimit,
+		time.Now(), time.Now, fetchSummary,
+	)
+
+	if err == nil {
+		t.Fatalf("expected the overpass query error to surface, not be masked as an empty success")
+	}
+	if features != nil || truncated != nil {
+		t.Fatalf("expected no features/truncated on a query error, got %+v / %v", features, truncated)
+	}
+	if fetchCalls != 0 {
+		t.Fatalf("expected enrichment never to run after a failed overpass query, got %d fetch calls", fetchCalls)
+	}
+}
+
+func TestRunFetchPOI_ClassifiesAndEnrichesWithinBudget(t *testing.T) {
+	query := func(q string) ([]overpassElement, error) {
+		return []overpassElement{
+			{Type: "node", ID: 1, Lat: f64p(-20.447), Lon: f64p(149.036), Tags: map[string]string{
+				"place": "island", "name": "Lindeman Island", "wikipedia": "en:Lindeman Island",
+			}},
+		}, nil
+	}
+	fetchSummary := func(title string) (string, string, bool) {
+		if title != "Lindeman Island" {
+			t.Fatalf("expected the wikipedia title to be passed through, got %q", title)
+		}
+		return "An island in the Whitsundays.", "https://en.wikipedia.org/wiki/Lindeman_Island", true
+	}
+	start := time.Now()
+
+	features, truncated, err := runFetchPOI(
+		query, -20.4467, 149.0353, 9260, []string{"island"}, defaultDetailLimit,
+		start, time.Now, fetchSummary,
+	)
+
+	if err != nil {
+		t.Fatalf("runFetchPOI: %v", err)
+	}
+	if len(truncated) != 0 {
+		t.Fatalf("expected no truncated categories, got %v", truncated)
+	}
+	if len(features) != 1 || features[0].Name != "Lindeman Island" {
+		t.Fatalf("expected the classified island feature, got %+v", features)
+	}
+	if features[0].Detail == "" || features[0].SourceURL == "" {
+		t.Fatalf("expected the feature to be enriched within budget, got %+v", features[0])
 	}
 }

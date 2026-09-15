@@ -19,11 +19,17 @@
 // malformed override fails the call outright rather than silently using the
 // default.
 //
-// After classification, the nearest detail_limit (config, default 5)
-// features carrying an OSM "wikipedia" tag are enriched with the first
-// sentence of the English Wikipedia REST page summary. A feature that has
-// no wikipedia tag, or whose summary fetch fails, simply carries no detail
-// - never a placeholder string.
+// After classification, the nearest detail_limit (config, default 5,
+// operator-editable, 0 disables it) features carrying an OSM "wikipedia" tag
+// are enriched with the first sentence of the English Wikipedia REST page
+// summary. A feature that has no wikipedia tag, or whose summary fetch
+// fails, simply carries no detail - never a placeholder string. Enrichment
+// is also cut short - leaving any remaining features un-enriched, never
+// failing the call - once enrichmentBudget (osm-overpass.go) of the call's
+// own run time has passed, since the host aborts the whole fetch_poi call at
+// its own WASM_PLUGIN_TIMEOUT_MS if enriching every feature sequentially
+// would run long on a slow link. See runFetchPOI and enrichNearestFeatures
+// in osm-overpass.go.
 //
 // Two further exports are OPTIONAL and independent of fetch_poi:
 // place_name_at (one ring's worth of backend/place_name.go's anchorage/bay/
@@ -31,10 +37,10 @@
 // find_places two-rung name-search ladder). Both are plain ports of that
 // backend logic onto this plugin's own Overpass endpoint - see
 // osm-overpass.go's "place_name_at" and "search_places" sections for the
-// query building/ranking/orchestration logic (runPlaceNameAt,
+// query building/ranking/orchestration logic (runFetchPOI, runPlaceNameAt,
 // runSearchPlaces), which is exercised directly by `go test` via the
 // injectable overpassQueryFunc; this file supplies doOverpassQuery, the one
-// place both wasmexports below actually call the pdk HTTP client.
+// place all three wasmexports below actually call the pdk HTTP client.
 //
 // This file (main.go) holds only the thin //go:wasmexport wrapper layer;
 // all the actual query-building/parsing logic lives in osm-overpass.go,
@@ -49,6 +55,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/extism/go-pdk"
 )
@@ -107,53 +114,29 @@ func ttlSeconds() int32 {
 
 //go:wasmexport fetch_poi
 func fetchPOI() int32 {
+	// Recorded before the Overpass query even runs, since that query is
+	// itself part of what enrichmentBudget (osm-overpass.go) measures
+	// against - see runFetchPOI/enrichNearestFeatures there for why.
+	start := time.Now()
+
 	var input wasmFetchPOIInput
 	if err := pdk.InputJSON(&input); err != nil {
 		pdk.SetError(err)
 		return -1
 	}
 
-	query := buildOverpassPOIQuery(input.Lat, input.Lon, input.RadiusM, input.Categories)
-
-	overpassURL, err := resolveOverpassURL(pdk.GetConfig("overpass_url"))
-	if err != nil {
-		pdk.SetError(err)
-		return -1
-	}
-
-	req := pdk.NewHTTPRequest(pdk.MethodPost, overpassURL)
-	req.SetHeader("Content-Type", "application/x-www-form-urlencoded")
-	req.SetHeader("User-Agent", "helmcentral-osm-overpass-plugin/1.0")
-	req.SetBody([]byte("data=" + url.QueryEscape(query)))
-	resp := req.Send()
-
-	body := resp.Body()
-	contentType := headerCaseInsensitive(resp.Headers(), "Content-Type")
-
-	if resp.Status() != 200 {
-		if looksLikeOverpassRateLimit(contentType, body) {
-			pdk.SetErrorString("overpass rate limited (HTTP " + fmt.Sprint(resp.Status()) + " with a non-JSON body)")
-			return -1
-		}
-		pdk.SetErrorString(fmt.Sprintf("overpass returned status %d", resp.Status()))
-		return -1
-	}
-
-	elements, err := parseOverpassBody(contentType, body)
-	if err != nil {
-		pdk.SetError(err)
-		return -1
-	}
-
-	features, truncated := classifyAndCountFeatures(input.Categories, elements)
-
 	detailLimit := resolveDetailLimit(pdk.GetConfig("detail_limit"))
-	for _, idx := range nearestWikipediaFeatures(features, input.Lat, input.Lon, detailLimit) {
-		title := wikipediaTitle(features[idx].tags["wikipedia"])
-		if title == "" {
-			continue
-		}
-		enrichWithWikipediaSummary(&features[idx], title)
+
+	features, truncated, err := runFetchPOI(
+		doOverpassQuery,
+		input.Lat, input.Lon, input.RadiusM, input.Categories,
+		detailLimit,
+		start, time.Now,
+		fetchWikipediaSummary,
+	)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
 	}
 
 	output := wasmFetchPOIOutput{
@@ -175,37 +158,36 @@ func fetchPOI() int32 {
 	return 0
 }
 
-// enrichWithWikipediaSummary fetches title's English Wikipedia REST page
-// summary and, on success, sets f.Detail/f.SourceURL. Any failure (network
-// error, non-2xx, unparseable body, no extract) leaves both fields empty -
-// never a placeholder - per the plugin contract.
-func enrichWithWikipediaSummary(f *poiFeatureOut, title string) {
+// fetchWikipediaSummary fetches title's English Wikipedia REST page summary
+// and reports (detail, sourceURL, true) on success. Any failure (network
+// error, non-2xx, unparseable body, no extract) reports ok=false - never a
+// placeholder string - per the plugin contract; enrichNearestFeatures
+// (osm-overpass.go) leaves a feature's Detail/SourceURL untouched when ok is
+// false, exactly as it does for a feature this budget never got to.
+func fetchWikipediaSummary(title string) (detail, sourceURL string, ok bool) {
 	req := pdk.NewHTTPRequest(pdk.MethodGet, wikipediaSummaryURL(title))
 	req.SetHeader("User-Agent", "helmcentral-osm-overpass-plugin/1.0")
 	resp := req.Send()
 	if resp.Status() < 200 || resp.Status() >= 300 {
-		return
+		return "", "", false
 	}
 
 	detail, sourceURL, err := parseWikipediaSummary(resp.Body())
 	if err != nil {
-		return
+		return "", "", false
 	}
-	f.Detail = detail
-	f.SourceURL = sourceURL
+	return detail, sourceURL, true
 }
 
 // doOverpassQuery posts one already-built Overpass QL query to the
 // configured Overpass endpoint (resolveOverpassURL) and returns its parsed
 // elements, or an error naming the failure - a transport error, a non-200
 // status, a detected rate limit, a runtime error remark, or a JSON parse
-// failure - never an empty success. Shared by the place_name_at and
-// search_places wasmexports below so their osm-overpass.go orchestration
-// (runPlaceNameAt, runSearchPlaces) stays plain-Go-testable via a fake
-// overpassQueryFunc while this is the one place that actually performs the
-// HTTP call for both. fetch_poi above keeps its own inline version since it
-// also needs the response's Content-Type for its own rate-limit check at a
-// second call site (Wikipedia enrichment uses a different endpoint entirely).
+// failure - never an empty success. Shared by all three wasmexports below
+// (fetch_poi, place_name_at, search_places) so their osm-overpass.go
+// orchestration (runFetchPOI, runPlaceNameAt, runSearchPlaces) stays
+// plain-Go-testable via a fake overpassQueryFunc while this is the one place
+// that actually performs the HTTP call for all three.
 func doOverpassQuery(query string) ([]overpassElement, error) {
 	overpassURL, err := resolveOverpassURL(pdk.GetConfig("overpass_url"))
 	if err != nil {

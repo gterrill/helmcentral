@@ -5,5 +5,12 @@
     "type": "url",
     "placeholder": "https://overpass-api.de/api/interpreter",
     "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it. Any mirror other than those two must also be added to this plugin's allowed hosts."
+  },
+  {
+    "key": "detail_limit",
+    "label": "Wikipedia detail lookups",
+    "type": "text",
+    "placeholder": "5",
+    "help": "How many of the nearest results get an extra Wikipedia summary fetched. Blank or invalid uses the default of 5. Each lookup is its own round trip on top of the Overpass query, so on a slow link it costs several seconds - set to 0 to skip Wikipedia lookups entirely and only get plain OpenStreetMap names."
   }
 ]
