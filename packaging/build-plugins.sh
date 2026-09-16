@@ -44,9 +44,21 @@ build() {
   # config defaults, and operator-editable config fields; the backend
   # refuses hosts and secrets that aren't listed, so they must travel with the
   # .wasm rather than being optional extras.
+  #
+  # A sidecar the source no longer ships is deleted from $OUT rather than
+  # left behind. Copy-if-present alone never prunes, so a sidecar that was
+  # retired upstream survived in every already-built plugin directory
+  # forever. osm-overpass.config.json is the case that proved it: ADR 0100
+  # moved overpass_url out of config.json and deleted the
+  # "${settings.<path>}" reference syntax it used, but the built copy stayed
+  # on disk carrying a now-meaningless "${settings.overpass.url}", which
+  # resolved to an empty string and silently pinned the plugin to the
+  # default endpoint.
   for sidecar in allowed_hosts config config_fields allowed_secrets; do
     if [ -f "$name.$sidecar.json" ]; then
       cp "$name.$sidecar.json" "$OUT/$category/$name.$sidecar.json"
+    else
+      rm -f "$OUT/$category/$name.$sidecar.json"
     fi
   done
 }
