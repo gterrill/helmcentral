@@ -202,6 +202,22 @@ chosen doesn't support tool calling, a question comes back with an upstream
 error saying no endpoint supports tool use; see [Set up
 Mate](../how-to/set-up-the-assistant.md) for what to do about that.
 
+Some models answer a question by writing out a tool call as ordinary text
+rather than making one. Mate refuses that reply instead of showing it to
+you, and the error names the model, because a page of markup where an
+answer should be is worse than being told plainly that this model can't do
+the job. Pick a different one in Settings → Mate.
+
+A lookup that keeps failing is abandoned rather than retried forever. If
+one of Mate's tools fails three times while answering a single question -
+usually a place search against an Overpass server that isn't reachable from
+the boat today - it stops being called for the rest of that answer, and
+Mate tells you the lookup was unavailable and answers with what it has. The
+alternative, which is what used to happen, was an answer that never
+arrived: a model will happily spend every round it is allowed retrying a
+server that has stopped responding. If place search is the one failing, the
+configuration reference explains how to point OpenStreetMap at a mirror.
+
 If Mate can answer but voice specifically won't work, the microphone button
 says why rather than sitting there unresponsive: no speech recognition in
 this browser, or the app needs to be opened over https first. See [Talk to
