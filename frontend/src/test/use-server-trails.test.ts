@@ -1,4 +1,3 @@
-import { createElement, StrictMode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -36,9 +35,16 @@ describe('useServerTrails', () => {
     const mockFetch = vi.fn().mockResolvedValue(makeResponse({ self: points, ais: {} }))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { result } = renderHook(() => useServerTrails(5000), {
-      wrapper: ({ children }) => createElement(StrictMode, null, children),
-    })
+    // `reactStrictMode: true` (Testing Library's own option), not a
+    // `<StrictMode>` wrapper composed via the `wrapper` option: under React
+    // 19, StrictMode only double-invokes effects when it is the outermost
+    // element handed to the root's render() call. A wrapper composes it one
+    // function-component layer down (wrapper -> StrictMode -> TestComponent),
+    // and that layer is enough for React 19 to skip the mount/cleanup/remount
+    // replay entirely — the effect then only ever runs once, silently, with
+    // no error. `reactStrictMode` avoids the extra layer by having Testing
+    // Library apply StrictMode itself, last, around the whole tree.
+    const { result } = renderHook(() => useServerTrails(5000), { reactStrictMode: true })
 
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(result.current.getSelfTrail().length).toBeGreaterThan(0))

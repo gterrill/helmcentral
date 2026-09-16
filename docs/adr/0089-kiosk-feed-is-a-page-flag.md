@@ -316,7 +316,7 @@ it can change with a firmware update in a way this ADR's reasoning does not.
   remain open work, tracked separately from this decision.
 - Two follow-on hardening gaps turned up once the feed was cycling
   unattended: a tile that throws during render used to take the whole app
-  down with it (React 19 unmounts the entire root on an uncaught render
+  down with it (React unmounts the entire root on an uncaught render
   error), and the Nearby and anchor-watch tiles both mount a MapLibre map,
   which throws outright on a browser with no WebGL2 — exactly what the
   wall's WPE WebKit 2.38 browser is. `TileErrorBoundary` now wraps every

@@ -270,7 +270,13 @@ describe('useAssistantConversations', () => {
     rerender({ initialId: 'c9' })
 
     await waitFor(() => expect(result.current.activeId).toBe('c9'))
-    expect(result.current.messages.map((m) => m.content)).toEqual(['from c9'])
+    // activeId and messages land in separate commits — select() flips
+    // activeId immediately, then loads messages once its own fetch resolves
+    // — so a synchronous check right after the activeId waitFor is racing
+    // that second commit rather than verifying it.
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.content)).toEqual(['from c9'])
+    })
   })
 
   it('does not re-select on mount just because initialId happens to be non-null', async () => {

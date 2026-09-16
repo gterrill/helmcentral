@@ -2,7 +2,7 @@
  * Whether this browser can create a WebGL2 rendering context.
  *
  * MapLibre GL JS 5 requires WebGL2 and throws synchronously out of its own
- * constructor when it cannot get one. React 19 unmounts the whole root on an
+ * constructor when it cannot get one. React unmounts the whole root on an
  * uncaught render error, so a map-bearing tile that just tries anyway can
  * blank the entire app on a browser that lacks it — the wall display's WPE
  * WebKit 2.38 kiosk browser among them (ADR 0089 §11). Every map-bearing

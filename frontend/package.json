@@ -12,6 +12,9 @@
     "knip": "knip",
     "knip:deps": "knip --include dependencies,unlisted"
   },
+  "overrides": {
+    "react-is": "^19.2"
+  },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@fontsource/geist-mono": "^5.2.8",
@@ -22,8 +25,8 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",
     "maplibre-gl": "^5.24.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2",
+    "react-dom": "^19.2",
     "react-grid-layout": "^2.2.3",
     "react-map-gl": "^8.1.1",
     "react-markdown": "^10.1.0",
@@ -38,8 +41,8 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^20.10.0",
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.67.0",
     "@vitejs/plugin-react": "^6.1.0",
