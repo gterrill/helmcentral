@@ -40,6 +40,7 @@ Steps for specific tasks.
 - [Set up Mate](how-to/set-up-the-assistant.md)
 - [Talk to Mate](how-to/talk-to-mate.md)
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
+- [Duplicate a gauge group onto another instance](how-to/duplicate-a-gauge-group.md)
 - [Development](how-to/development.md), running the stack, tests and release builds.
 
 ## Reference
@@ -48,8 +49,8 @@ Lookup material: fields, formats, environment variables and file paths.
 
 - [Configuration](reference/configuration.md), covering every environment
   variable, state path and startup behaviour.
-- [Engine profiles](reference/engine-profiles.md), the profile JSON format and
-  its fields.
+- [Equipment profiles](reference/equipment-profiles.md), the profile JSON
+  format for engines, alternators and generators.
 - [Provider plugins](reference/plugins.md), the WASM sandbox and the per-category
   contracts.
 - [POI categories](reference/poi-categories.md), the eleven points-of-interest

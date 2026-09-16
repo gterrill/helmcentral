@@ -1,65 +1,77 @@
-# Engine profiles
+# Equipment profiles
 
-An engine profile is a JSON file that defines a specific engine model,
-including the required gauges, display scales, normal operating ranges, and
-service intervals. Placing a file in `plugins/engine-profiles/` and restarting
-makes it available under **Add Widget → From engine profile…**, which builds a
-configured tile in two clicks.
+An equipment profile is a JSON file describing one piece of machinery: the
+gauges it needs, their display scales, its normal operating ranges, and its
+service intervals. Applying one builds a configured tile in two clicks instead
+of typing a dozen paths and scales by hand.
 
-Unlike other components in `plugins/`, profiles are plain JSON rather than
-compiled plugins. Because a profile specifies alarm thresholds, you must be
-able to open the file and verify the exact value at which an alarm, such as oil
-pressure, will trigger. A compiled module introduces an unnecessary build step
-for declarative data that contains no executable logic.
+Three kinds of equipment are covered, set by the file's `kind` field:
+
+| `kind` | Covers | Path suffixes |
+| --- | --- | --- |
+| `engine` | Main propulsion engines | Anything except `phase.` or `total.` |
+| `alternator` | Engine-driven alternators | Anything except `phase.` or `total.` |
+| `generator` | AC gensets | Must start with `phase.` or `total.` |
+
+Profiles live in `plugins/engine-profiles/`. Drop a file in and restart, or
+manage them from **Settings → Equipment**, which can upload, edit, download and
+delete without touching the filesystem. Either way they appear under **Add
+Widget → From equipment profile…**.
+
+Unlike the rest of `plugins/`, profiles are plain JSON rather than compiled
+modules. Because a profile can carry alarm thresholds, you have to be able to
+open the file and read the exact value at which an alarm will fire. A compiled
+module would add a build step to declarative data that runs no code.
 
 ## What ships, and what does not
 
-The bundled `cummins-qsb67-550.json` file contains **no alarm thresholds**.
+**No bundled profile carries a single alarm threshold.** All three ship empty
+slots.
 
-Cummins does not publish QSB 6.7 setpoints in public documentation: they are
-located in the operator's manual and in QuickServe. Publicly available material
-provides general operating guidance rather than verified setpoints. For
-example, configuring an alarm at 25 psi based on forum guidance stating cruise
-oil pressure runs 40 to 80 psi risks raising alarms that the engine ECU does
-not trigger, causing operators to disregard the alarm list. Therefore, the
-bundled profile provides:
+This is a hard rule, not a gap someone forgot to fill. A threshold in a bundled
+file becomes a live alarm on your boat, set from a datasheet by someone who has
+never seen your installation. Published material gives general operating
+guidance, not verified setpoints: configuring a low oil pressure alarm at 25 psi
+because a forum says cruise pressure runs 40 to 80 risks raising alarms your
+engine ECU does not, which teaches you to ignore the alarm list.
 
-- **Green advisory bands** where a published source exists, citing each
-  source. These colour the gauge without raising alarms.
-- **Empty alarm slots** for other parameters, with notes specifying what to
-  look up.
+What a bundled profile does give you:
 
-Entering values from your manual completes the file for operational use and
-sharing.
+- **Green advisory bands** where a published source exists, each citing its
+  source. These colour the gauge and raise nothing.
+- **Empty alarm slots** for everything else, each noting what to look up.
 
-Applying a profile to an existing tile configures existing gauges and adds
-missing ones, completing a partially built tile. The instance prefix is taken
-from the tile's existing gauges, so applying a profile to a port tile cannot
-append starboard gauges. Existing gauges not defined in the profile are left
-untouched.
+Filling in the values from your manual completes the file for real use and for
+sharing. A test enforces the rule, so a bundled profile that ships a live
+threshold fails the build.
+
+Applying a profile to a tile that already exists configures the gauges it finds
+and appends the ones it does not, which completes a partly built tile. The
+instance prefix comes from the tile's existing gauges, so applying a profile to
+a port tile cannot append starboard gauges. Gauges the profile does not mention
+are left alone.
 
 ## Filling in your thresholds
 
-You can configure thresholds in two ways: either edit the JSON file and restart
-the server, or apply the profile to a tile and edit the
-zones on each gauge through the standard gauge configuration dialog. Both
-methods produce the same configuration; the UI dialog provides immediate visual
-reference to the gauge layout during configuration.
+Two ways, same result. Edit the JSON and restart, or apply the profile to a
+tile and edit the zones on each gauge in the ordinary gauge configuration
+dialog. The dialog is easier to check against the gauge layout as you go.
 
-A zone configured with any severity level other than **Healthy** raises an
-alarm at its threshold through the full alarm pipeline: the banner, the CHK
-lamp, operator acknowledgement, and all configured notification transports.
-**Healthy** bands colour the gauge without raising alarms, which is the
-mechanism used for advisory ranges.
+A zone at any severity other than **Healthy** raises an alarm at its threshold
+through the whole pipeline: the banner, the CHK lamp, acknowledgement, and
+every configured notification transport. **Healthy** bands colour the gauge and
+raise nothing, which is how advisory ranges work.
 
-The values required from the manual are typically the low oil pressure warning
-and alarm, the high coolant temperature warning and derate point, and the
-overspeed limit.
+From an engine manual you usually want the low oil pressure warning and alarm,
+the high coolant temperature warning and derate point, and the overspeed limit.
+From an alternator manual, the temperature limit and the output voltage window.
 
 ## Format
 
 ```json
 {
+  "schema_version": 1,
+  "kind": "engine",
   "id": "cummins-qsb67-550",
   "name": "Cummins QSB 6.7 550",
   "manufacturer": "Cummins",
@@ -72,6 +84,7 @@ overspeed limit.
     {
       "path_suffix": "oilPressure",
       "label": "Oil Press",
+      "hero": true,
       "display": "radial",
       "quantity": "pressure",
       "unit": "psi",
@@ -96,48 +109,85 @@ overspeed limit.
 
 ### Fields worth explaining
 
-**`path_suffix`, not a full path.** You select the instance prefix (such as
-`propulsion.port`) when applying the profile, allowing one file to serve
-multiple engines. The dialog suggests prefixes currently published by the
-server and permits manual entry. When engines are shut down, nothing under
-`propulsion.*` is published, which is typically when gauge configuration
-takes place.
+**`schema_version` and `kind`.** Both are required. `schema_version` is `1`;
+anything else is refused rather than guessed at. `kind` is `engine`,
+`alternator` or `generator`, and it decides which path suffixes are legal. The
+apply dialog lists every kind together and shows each profile's kind beside its
+name. A file written before these fields existed still loads: it is read as a
+version 1 engine profile.
 
-**Zones are a direction and a threshold**, not a from/to pair. For example,
-`"direction": "below"` with `"threshold": 15` covers all values below 15. A
-band must anchor to one end of the gauge scale, which is the only structure
-that maps directly to an alarm threshold; a band floating in the middle of the
-range has no single-threshold equivalent and is rejected.
+**`path_suffix`, not a full path.** You pick the instance prefix, such as
+`propulsion.port` or `electrical.alternator.1`, when you apply the profile, so
+one file serves both engines. The dialog suggests prefixes the server is
+currently publishing and lets you type your own. With the engines shut down
+nothing under `propulsion.*` is published, which is usually exactly when you
+are sitting at the nav station configuring gauges.
 
-Thresholds are defined in the gauge's **display unit** (psi, °C), not
-SignalK's SI unit. Conversion occurs before values are passed to the alarm
-engine.
+**`hero` marks one gauge as the headline.** At most one per profile. That
+member renders larger and spans the tile's full width. Leave it out and every
+member is the same size.
 
-**`"threshold": null` is a slot.** The manufacturer specifies a value here
-that the profile does not include. It appears in the apply preview as "not set"
-to prompt manual lookup, and is excluded from the saved configuration to prevent
-assigning an arbitrary default value.
+**Zones are a direction and a threshold**, not a from/to pair. `"direction":
+"below"` with `"threshold": 15` covers everything below 15. A band has to
+anchor to one end of the gauge scale, because that is the only shape that maps
+to a single alarm threshold. A band floating in the middle of the range has no
+equivalent and is rejected.
 
-**Service items with no interval are slots too.** They identify an engine
-service task without defining an unverified interval.
+Thresholds are in the gauge's **display unit**, psi or °C, not SignalK's SI
+unit. The conversion happens before the alarm engine sees the value, which is
+why the next field matters more than it looks.
 
-**`quantity` and `unit`** must be recognized by Helmcentral (see
+**`quantity` and `unit` must both be recognised** (see
 `frontend/src/lib/quantities.ts` and `backend/quantities.go`). An unknown unit
-is rejected at load time rather than silently comparing psi against pascals.
+is refused at load time rather than quietly comparing psi against pascals. This
+is the field that decides how your threshold is converted, so a gauge declared
+as a raw number will compare a Celsius threshold against a Kelvin reading and
+raise an alarm that can never clear.
+
+**`"threshold": null` is a slot.** The manufacturer has a number here and the
+profile does not. It shows in the apply preview as "not set" so you know to
+look it up, and it is left out of the saved configuration rather than being
+filled with a default nobody chose.
+
+**Service items with no interval are slots too.** They name a job the machine
+needs without inventing an interval for it.
 
 ## When a profile does not load
 
-An invalid file is skipped, logged, and reported. Other profiles still load, and
-the apply dialog indicates which file failed and why. Common causes include: an
-unknown `unit` or `quantity`, an unknown `display`, a zone whose `direction` is
-not `below` or `above`, `min` not lower than `max`, a zone with a threshold on
-a gauge that has no scale, or duplicate `id` values across profiles.
+A bad file is skipped, logged, and reported. The others still load, and the
+apply dialog names the file that failed and why. Common causes: an unknown
+`unit`, `quantity` or `display`; a zone whose `direction` is neither `below`
+nor `above`; `min` not below `max`; a zone with a threshold on a gauge that has
+no scale; two profiles sharing an `id`; a generator gauge whose suffix does not
+start with `phase.` or `total.`; or an engine or alternator gauge whose suffix
+does.
+
+## Managing profiles over the API
+
+| Method and path | Does |
+| --- | --- |
+| `GET /api/equipment-profiles` | Every profile, plus any that failed to load. Takes `?kind=` to filter. |
+| `GET /api/equipment-profiles/:id` | One profile. |
+| `GET /api/equipment-profiles/:id/download` | The same, as a file attachment. |
+| `POST /api/equipment-profiles` | Create. Refuses an id that already exists. |
+| `PUT /api/equipment-profiles/:id` | Replace. |
+| `DELETE /api/equipment-profiles/:id` | Remove the file from disk. |
+
+Every write is validated against the JSON schema and then against the same
+rules the loader applies, so the API cannot store a profile the dashboard would
+refuse. A rejected write comes back with the failing field paths, which is what
+**Settings → Equipment** shows you in its editor.
+
+`GET /api/engine-profiles` and `PUT /api/engine-profiles/:id` still work,
+filtered to `kind: engine`.
+
+An `id` used as a filename must be lowercase letters, numbers, dots,
+underscores and hyphens, starting with a letter or number.
 
 ## Service intervals
 
-The `service` block is validated and served, but no subsystem consumes it yet.
-Maintenance functionality (the datastore, completion logging, and service-due
-alarms) will be implemented in the next build. When deployed, a service-due
-rule will evaluate `runTime above (last completion hours + interval)`.
-Logging completed work will advance the threshold, causing the alarm to clear
-and re-arm automatically.
+The `service` block is validated and served, but nothing consumes it yet.
+Maintenance work (the datastore, completion logging, service-due alarms) comes
+later. When it lands, a service-due rule will evaluate `runTime above (last
+completion hours + interval)`, and logging a completed job will advance the
+threshold so the alarm clears and re-arms on its own.
