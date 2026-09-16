@@ -53,6 +53,14 @@ async function clickWhenEnabled(name: string) {
   fireEvent.click(screen.getByRole('button', { name }))
 }
 
+// Waits on the name field rather than findByDisplayValue. While selectedID is
+// still settling (value="" matches no <option>) the <select> shows its first
+// option, which carries this same text, so a bare display-value match can
+// resolve before the profile has been selected and loaded.
+async function waitForFirstProfile() {
+  await waitFor(() => expect(screen.getByLabelText('Profile name')).toHaveValue('Cummins QSB 6.7 550'))
+}
+
 const openMock = vi.fn()
 const fetchMock = vi.fn()
 
@@ -104,7 +112,7 @@ describe('EquipmentSection', () => {
   it('lets the operator edit the selected profile', async () => {
     render(<EquipmentSection />)
 
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     const nameInput = screen.getByLabelText('Profile name')
     expect(nameInput).toHaveAttribute('readonly')
@@ -123,7 +131,7 @@ describe('EquipmentSection', () => {
 
   it('validates profile JSON before saving and does not call the API on parse failure', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     await clickWhenEnabled('Edit')
     fireEvent.change(screen.getByLabelText('Profile JSON'), {
@@ -139,7 +147,7 @@ describe('EquipmentSection', () => {
 
   it('saves valid JSON to the profile update endpoint', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     await clickWhenEnabled('Edit')
     fireEvent.change(screen.getByLabelText('Profile JSON'), {
@@ -165,7 +173,7 @@ describe('EquipmentSection', () => {
 
   it('creates a new profile from the New profile action', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     fireEvent.click(screen.getByRole('button', { name: 'New profile' }))
     fireEvent.change(screen.getByLabelText('Profile name'), {
@@ -183,7 +191,7 @@ describe('EquipmentSection', () => {
 
   it('switches new profile template based on selected kind', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     fireEvent.click(screen.getByRole('button', { name: 'New profile' }))
 
@@ -207,7 +215,7 @@ describe('EquipmentSection', () => {
 
   it('asks for confirmation before deleting, naming the profile, and does not delete on cancel', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     await clickWhenEnabled('Delete equipment profile')
 
@@ -225,7 +233,7 @@ describe('EquipmentSection', () => {
 
   it('deletes the selected profile via API once the confirmation dialog is accepted', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     await clickWhenEnabled('Delete equipment profile')
     await screen.findByText('Delete "Cummins QSB 6.7 550"?')
@@ -241,7 +249,7 @@ describe('EquipmentSection', () => {
 
   it('opens download endpoint for the selected profile', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     fireEvent.click(screen.getByRole('button', { name: 'Download equipment profile' }))
 
@@ -253,7 +261,7 @@ describe('EquipmentSection', () => {
 
   it('uploads a profile file through the equipment create endpoint', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     const uploadInput = screen.getByLabelText('Upload equipment profile file') as HTMLInputElement
     const uploadFile = new File([
@@ -286,7 +294,7 @@ describe('EquipmentSection', () => {
 
   it('shows duplicate-id upload conflict returned by the backend', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     const uploadInput = screen.getByLabelText('Upload equipment profile file') as HTMLInputElement
     const uploadFile = new File([
@@ -316,7 +324,7 @@ describe('EquipmentSection', () => {
 
   it('renders schema validation path details returned on save', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     await clickWhenEnabled('Edit')
     fireEvent.change(screen.getByLabelText('Profile JSON'), {
@@ -333,7 +341,7 @@ describe('EquipmentSection', () => {
 
   it('rejects an uploaded file with invalid JSON before API create', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     const uploadInput = screen.getByLabelText('Upload equipment profile file') as HTMLInputElement
     const uploadFile = new File(['{"id":'], 'bad.json', { type: 'application/json' })
@@ -354,7 +362,7 @@ describe('EquipmentSection', () => {
   // the fresh draft never appeared.
   it('shows a blank new-profile draft after selecting a profile other than the first', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     fireEvent.change(screen.getByLabelText('Profile'), { target: { value: secondProfile.id } })
     // Scoped to the name field specifically: the <select>'s own selected
@@ -371,7 +379,7 @@ describe('EquipmentSection', () => {
 
   it('shows the uploaded profile immediately, and still shows it once the list reload lands', async () => {
     render(<EquipmentSection />)
-    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+    await waitForFirstProfile()
 
     // Select a profile that is not profiles[0] first — otherwise the bug
     // (falling back to the first profile while the upload is in flight)

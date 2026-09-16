@@ -20,17 +20,23 @@ import type { EngineProfile, EquipmentProfileValidationError } from '@/lib/engin
 
 type ProfileKind = 'engine' | 'alternator' | 'generator'
 
+// Shown only before the first profile has actually loaded and settled (or
+// after the last one is deleted). It must never resemble real profile data:
+// a plausible-looking placeholder ("Cummins QSB 6.7 550") used to sit here,
+// and any test - or operator - watching for that exact profile to appear
+// could be satisfied by this placeholder a render or two before the real
+// profile had actually loaded and been selected, which is exactly the gap a
+// click landing in could act on stale state (e.g. edit box open, wrong
+// profile still selected). An empty id also means the Download/Delete
+// handlers' `!profile.id` guards correctly treat "nothing loaded yet" as
+// nothing to act on.
 const defaultProfile = {
   schema_version: 1,
   kind: 'engine' as ProfileKind,
-  id: 'cummins-qsb67-550',
-  name: 'Cummins QSB 6.7 550',
-  file: 'cummins-qsb67-550.json',
-  json: `{
-  "id": "cummins-qsb67-550",
-  "name": "Cummins QSB 6.7 550",
-  "gauge_count": 8
-}`,
+  id: '',
+  name: '',
+  file: '',
+  json: '',
 }
 
 const newProfileTemplates: Record<ProfileKind, EngineProfile> = {
