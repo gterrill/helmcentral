@@ -960,6 +960,24 @@ describe('ForecastDrawer refresh age', () => {
     expect(screen.getByTestId('forecast-selected-precip')).toHaveTextContent('0%')
   })
 
+  // Precip only earns the same bold weight as wind/gusts once the chance is
+  // high enough to be worth planning around; at or below that it is still a
+  // real reading, just not an escalation.
+  it('bolds the precip reading only once the chance clears 20%, not at or below it', () => {
+    const { unmount } = render(<ForecastDrawer forecast={[buildDay({ precipitation: 20 })]} loading={false} error={null} unit="metric" />)
+    expect(screen.getByTestId('forecast-selected-precip').className).not.toMatch(/\bfont-semibold\b/)
+    unmount()
+
+    render(<ForecastDrawer forecast={[buildDay({ precipitation: 21 })]} loading={false} error={null} unit="metric" />)
+    expect(screen.getByTestId('forecast-selected-precip').className).toMatch(/\bfont-semibold\b/)
+  })
+
+  it('does not bold the precip reading when the chance is unavailable', () => {
+    render(<ForecastDrawer forecast={[buildDay({ precipitation: null })]} loading={false} error={null} unit="metric" />)
+
+    expect(screen.getByTestId('forecast-selected-precip').className).not.toMatch(/\bfont-semibold\b/)
+  })
+
   // Humidity and visibility are now real provider fields (hourly mean/min,
   // reduced host-side), not arithmetic on the precipitation chance - see
   // backend/weather_providers.go's sentinelHumidityPct/sentinelVisibilityNm.
@@ -1282,7 +1300,7 @@ describe('ForecastDrawer wave steepness', () => {
 })
 
 describe('ForecastDrawer wave leading indicators', () => {
-  // Mirrors extendedIntro's epistemic structure (forecast-extended-intro):
+  // Mirrors upperAirIntro's epistemic structure (forecast-upper-air-intro):
   // no provider/no data is silence, because nothing was looked at; checked
   // and found clear is a sentence, because something was. Rendering nothing
   // here made "the indicators were checked and are clear" indistinguishable
@@ -2276,28 +2294,30 @@ function buildUpperAirRun(count: number, troughIndexes: number[], outlookOverrid
   }))
 }
 
-describe('ForecastDrawer ten-day window resolution', () => {
+describe('ForecastDrawer upper-air window resolution', () => {
   // ADR 0071 treats a boat with no upper-air plugin as a normal
   // configuration, not a degraded one. There is nothing to resolve, and the
   // Upper Air panel is absent too, so the header stays silent.
   it('says nothing when no upper-air provider is installed', () => {
     render(<ForecastDrawer forecast={buildDayRun(10)} loading={false} error={null} unit="metric" />)
 
-    expect(screen.queryByTestId('forecast-extended-intro')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-upper-air-intro')).not.toBeInTheDocument()
   })
 
   it('names the flagged days that fall inside the visible ten', () => {
+    const upperAirDays = buildUpperAirRun(10, [0, 4])
     render(
       <ForecastDrawer
         forecast={buildDayRun(10)}
-        upperAirDays={buildUpperAirRun(10, [0, 4])}
+        upperAirDays={upperAirDays}
+        upperAirSeries={buildUpperAirSeries(upperAirDays.map((d) => d.dayKey), () => 5850)}
         loading={false}
         error={null}
         unit="metric"
       />,
     )
 
-    expect(screen.getByTestId('forecast-extended-intro')).toHaveTextContent(
+    expect(screen.getByTestId('forecast-upper-air-intro')).toHaveTextContent(
       'Upper air supports a surface low developing on Sun 14 and Thu 18.',
     )
   })
@@ -2305,17 +2325,19 @@ describe('ForecastDrawer ten-day window resolution', () => {
   // Naming a day the reader cannot select in this strip would be a dead
   // reference, so the ones past day ten are pointed at, not named.
   it('points at the trace instead of naming days beyond the strip', () => {
+    const upperAirDays = buildUpperAirRun(12, [11])
     render(
       <ForecastDrawer
         forecast={buildDayRun(10)}
-        upperAirDays={buildUpperAirRun(12, [11])}
+        upperAirDays={upperAirDays}
+        upperAirSeries={buildUpperAirSeries(upperAirDays.map((d) => d.dayKey), () => 5850)}
         loading={false}
         error={null}
         unit="metric"
       />,
     )
 
-    const intro = screen.getByTestId('forecast-extended-intro')
+    const intro = screen.getByTestId('forecast-upper-air-intro')
     expect(intro).toHaveTextContent(
       'Upper air supports a surface low developing later in the 12 day trace below.',
     )
@@ -2323,17 +2345,19 @@ describe('ForecastDrawer ten-day window resolution', () => {
   })
 
   it('names the in-window days and still points at the rest', () => {
+    const upperAirDays = buildUpperAirRun(12, [0, 11])
     render(
       <ForecastDrawer
         forecast={buildDayRun(10)}
-        upperAirDays={buildUpperAirRun(12, [0, 11])}
+        upperAirDays={upperAirDays}
+        upperAirSeries={buildUpperAirSeries(upperAirDays.map((d) => d.dayKey), () => 5850)}
         loading={false}
         error={null}
         unit="metric"
       />,
     )
 
-    expect(screen.getByTestId('forecast-extended-intro')).toHaveTextContent(
+    expect(screen.getByTestId('forecast-upper-air-intro')).toHaveTextContent(
       'Upper air supports a surface low developing on Sun 14, and again later in the 12 day trace below.',
     )
   })
@@ -2342,17 +2366,19 @@ describe('ForecastDrawer ten-day window resolution', () => {
   // silence as "no provider installed" - a future refactor that renders
   // nothing here would be telling the reader nothing was looked at.
   it('says so plainly when the upper air was checked and nothing is developing', () => {
+    const upperAirDays = buildUpperAirRun(12, [])
     render(
       <ForecastDrawer
         forecast={buildDayRun(10)}
-        upperAirDays={buildUpperAirRun(12, [])}
+        upperAirDays={upperAirDays}
+        upperAirSeries={buildUpperAirSeries(upperAirDays.map((d) => d.dayKey), () => 5850)}
         loading={false}
         error={null}
         unit="metric"
       />,
     )
 
-    expect(screen.getByTestId('forecast-extended-intro')).toHaveTextContent(
+    expect(screen.getByTestId('forecast-upper-air-intro')).toHaveTextContent(
       'No upper support for a surface low in the next 12 days.',
     )
   })
@@ -2361,17 +2387,19 @@ describe('ForecastDrawer ten-day window resolution', () => {
   // "no upper support" off an absent outlook is the reassurance nobody
   // measured that the rest of this component is careful to avoid.
   it('stays silent when the provider returned no usable outlook for any day', () => {
+    const upperAirDays = buildUpperAirRun(12, [], { present: false })
     render(
       <ForecastDrawer
         forecast={buildDayRun(10)}
-        upperAirDays={buildUpperAirRun(12, [], { present: false })}
+        upperAirDays={upperAirDays}
+        upperAirSeries={buildUpperAirSeries(upperAirDays.map((d) => d.dayKey), () => 5850)}
         loading={false}
         error={null}
         unit="metric"
       />,
     )
 
-    expect(screen.queryByTestId('forecast-extended-intro')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-upper-air-intro')).not.toBeInTheDocument()
   })
 
   // The badge used to label the units (500mb) while the meaning sat in a
@@ -2390,6 +2418,68 @@ describe('ForecastDrawer ten-day window resolution', () => {
     const marker = screen.getByTestId('forecast-upper-air-marker')
     expect(marker).toHaveTextContent('TROUGH')
     expect(marker).toHaveAccessibleName('Upper air supports a surface low developing')
+  })
+})
+
+// --- The 10-Day panel's own intro, now that the upper-air finding moved out ---
+//
+// forecast-extended-intro used to carry the upper-air sentence tested above
+// (now forecast-upper-air-intro, in the Upper Air panel). The algorithm that
+// builds this sentence - bucketing, run-length grouping, the label and
+// clause phrasing - is unit-tested directly against
+// lib/forecast-condition-summary.ts; this only checks that it is actually
+// wired up as this panel's intro.
+describe('ForecastDrawer extended forecast conditions summary', () => {
+  it('renders the conditions summary as the 10-Day panel intro', () => {
+    render(
+      <ForecastDrawer
+        forecast={[
+          buildDay({ dayKey: '2026-06-14', dayName: 'Sunday', condition: 'Drizzle' }),
+          buildDay({ dayKey: '2026-06-15', dayName: 'Monday', condition: 'Drizzle' }),
+          buildDay({ dayKey: '2026-06-16', dayName: 'Tuesday', condition: 'Mostly Sunny' }),
+        ]}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const intro = screen.getByTestId('forecast-extended-intro')
+    expect(intro).toHaveTextContent('Drizzle expected the next 2 days, followed by a mostly sunny day.')
+
+    const panel = screen.getByTestId('forecast-panel-extended')
+    expect(within(panel).getByTestId('forecast-extended-intro')).toBe(intro)
+  })
+
+  it('uses the same paragraph classes the old upper-air intro used', () => {
+    render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
+
+    const intro = screen.getByTestId('forecast-extended-intro')
+    expect(intro.tagName).toBe('P')
+    expect(intro.className).toBe('pr-2 text-base font-medium leading-relaxed text-foreground/90')
+  })
+
+  // The day card carries no coloured trough tint any more, so a flagged day
+  // has to ride along in this sentence instead - this checks the strip's
+  // trough flag actually reaches buildConditionsSummary, not just that the
+  // library function behaves (that's covered directly in
+  // forecast-condition-summary.test.ts).
+  it('folds a trough day from the upper-air strip into the conditions sentence', () => {
+    const upperAirDays = buildUpperAirRun(10, [4])
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(10)}
+        upperAirDays={upperAirDays}
+        upperAirSeries={buildUpperAirSeries(upperAirDays.map((d) => d.dayKey), () => 5850)}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const intro = screen.getByTestId('forecast-extended-intro')
+    expect(intro).toHaveTextContent('trough aloft')
+    expect(intro).toHaveTextContent('Thu 18')
   })
 })
 
@@ -2499,6 +2589,29 @@ describe('ForecastDrawer chart decoder keys', () => {
     expect(key).not.toHaveTextContent(/red marks/i)
     expect(key).toHaveTextContent('Grey band marks heights below 5851 m.')
     expect(key).toHaveTextContent('Trace smoothed over 18 hours.')
+  })
+
+  // The mechanism sentence used to sit above the panel as its own intro
+  // paragraph; it now opens the key itself, ahead of what the shading and
+  // the smoothing mean, rather than being a separate paragraph the reader
+  // has to connect back to the chart below it.
+  it('opens the upper-air key with the trough-to-surface-wind mechanism, ahead of the shading and smoothing notes', () => {
+    render(
+      <ForecastDrawer
+        forecast={buildDayRun(2)}
+        upperAirDays={buildUpperAirRun(2, [1])}
+        upperAirSeries={buildUpperAirSeries(['2026-06-14', '2026-06-15'], (idx) => 5900 - idx * 4)}
+        upperAirWindow={UPPER_AIR_WINDOW}
+        loading={false}
+        error={null}
+        unit="metric"
+      />,
+    )
+
+    const key = screen.getByTestId('forecast-upper-air-key')
+    expect(key.textContent?.trim().startsWith(
+      'Upper-level troughs feed surface lows. Expect stronger surface winds 24 to 48 hours later when heights drop into the shaded zone.',
+    )).toBe(true)
   })
 })
 
@@ -2961,22 +3074,27 @@ describe('ForecastDrawer visual weight', () => {
 
     const wind = chipFor('forecast-selected-wind')
     const gust = chipFor('forecast-selected-gust')
-    const upperAir = screen.getByTestId('forecast-upper-air-detail')
+    const precip = chipFor('forecast-selected-precip')
 
-    // Tier 1 keeps the chip treatment and gains weight.
-    for (const chip of [wind, gust, upperAir]) {
+    // Tier 1 keeps the chip treatment and gains weight: wind, gusts and
+    // precip are what a passage decision turns on.
+    for (const chip of [wind, gust, precip]) {
       expect(chip.className).toMatch(/\btext-sm\b/)
       expect(chip.className).toMatch(/\bbg-/)
     }
     // A stronger ground than the flat bg-muted/50 every chip used to share.
     expect(wind.className).not.toMatch(/bg-muted\/50\b/)
     expect(gust.className).not.toMatch(/bg-muted\/50\b/)
+    expect(precip.className).not.toMatch(/bg-muted\/50\b/)
 
-    // Tier 2 drops the chip entirely: plain text, smallest step, muted.
+    // Tier 2 drops the chip entirely: plain text, smallest step, muted -
+    // including the 500mb reading, now a reference stat rather than a
+    // decision chip.
+    const upperAir = screen.getByTestId('forecast-upper-air-detail')
     const reference = [
-      chipFor('forecast-selected-precip'),
       chipFor('forecast-selected-humidity'),
       chipFor('forecast-selected-visibility'),
+      upperAir,
     ]
     for (const stat of reference) {
       expect(stat.className).toMatch(/\btext-2xs\b/)
@@ -2985,15 +3103,22 @@ describe('ForecastDrawer visual weight', () => {
       expect(stat.className).not.toMatch(/\brounded\b/)
     }
 
-    // Both tiers still live in one wrapping row, decisions first.
+    // Both tiers still live in one wrapping row, decisions first, and the
+    // 500mb reading sits directly after UV Index - the last of the tier 2
+    // stats before sunrise/sunset/moon.
     const row = wind.parentElement as HTMLElement
-    for (const stat of [gust, upperAir, ...reference]) {
+    for (const stat of [gust, precip, ...reference]) {
       expect(stat.parentElement).toBe(row)
     }
     const order = Array.from(row.children)
-    for (const stat of reference) {
-      expect(order.indexOf(stat)).toBeGreaterThan(order.indexOf(upperAir))
+    for (const stat of [gust, precip]) {
+      expect(order.indexOf(stat)).toBeGreaterThan(order.indexOf(wind))
     }
+    for (const stat of reference) {
+      expect(order.indexOf(stat)).toBeGreaterThan(order.indexOf(precip))
+    }
+    const uv = chipFor('forecast-selected-uv')
+    expect(order.indexOf(upperAir)).toBe(order.indexOf(uv) + 1)
 
     // Sunrise/sunset/moon keep their icons even without the chip ground.
     const moon = screen.getByText('Moon').closest('span') as HTMLElement
@@ -3001,10 +3126,13 @@ describe('ForecastDrawer visual weight', () => {
     expect(moon.querySelector('[aria-hidden]')).not.toBeNull()
   })
 
-  // The 500mb chip already reads differently when the air aloft supports a
-  // surface low. Now that its whole tier sits on a stronger ground, that
-  // distinction has to survive rather than be swallowed by the new baseline.
-  it('keeps the 500mb chip distinct when the upper air supports a low', () => {
+  // The 500mb reading used to carry its own tint when the upper air
+  // supported a surface low. Demoted to a reference stat alongside precip/
+  // humidity/visibility, it now renders through the same plain text as
+  // every other reference stat - the trough/quiet distinction survives in
+  // the sentence itself ("lowest of the window..." vs "jet NN kt"), not in
+  // a colour, so there is no more tint to keep distinct.
+  it('renders the 500mb reference stat identically whether or not the upper air supports a low', () => {
     const props = {
       forecast: [buildDay()],
       upperAirSeries: buildUpperAirSeries(['2026-06-14'], (idx) => 5900 - idx * 4),
@@ -3017,15 +3145,15 @@ describe('ForecastDrawer visual weight', () => {
     const { unmount } = render(
       <ForecastDrawer {...props} upperAirDays={[buildUpperAirDay('2026-06-14', { troughSupport: false })]} />,
     )
-    const quiet = screen.getByTestId('forecast-upper-air-detail').className
+    const quiet = screen.getByTestId('forecast-upper-air-detail')
+    expect(quiet.className).toBe('text-2xs text-muted-foreground')
+    expect(quiet).not.toHaveTextContent(/surface low developing/i)
     unmount()
 
     render(<ForecastDrawer {...props} upperAirDays={[buildUpperAirDay('2026-06-14', { troughSupport: true })]} />)
-    const trough = screen.getByTestId('forecast-upper-air-detail').className
-
-    expect(trough).not.toBe(quiet)
-    expect(trough).toMatch(/gauge-secondary/)
-    expect(quiet).not.toMatch(/gauge-secondary/)
+    const trough = screen.getByTestId('forecast-upper-air-detail')
+    expect(trough.className).toBe('text-2xs text-muted-foreground')
+    expect(trough).toHaveTextContent(/surface low developing/i)
   })
 
   it('gives the hourly tile display slot to wind, with temperature underneath', () => {
@@ -3273,6 +3401,10 @@ describe('ForecastDrawer still digits', () => {
       />,
     )
 
+    // forecast-upper-air-detail is excluded here: it's a plain reference
+    // stat now (text-2xs text-muted-foreground, no chip), and its testid
+    // sits on the whole "500mb 5835 m ..." sentence rather than on a single
+    // numeric readout, so tabular-nums was never the right fit for it.
     for (const testId of [
       'forecast-selected-wind',
       'forecast-selected-gust',
@@ -3280,7 +3412,6 @@ describe('ForecastDrawer still digits', () => {
       'forecast-selected-humidity',
       'forecast-selected-visibility',
       'forecast-selected-uv',
-      'forecast-upper-air-detail',
     ]) {
       expect(screen.getByTestId(testId).className, testId).toMatch(/\btabular-nums\b/)
     }

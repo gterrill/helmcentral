@@ -18,6 +18,7 @@ import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
 import type { UpperAirDay, UpperAirSample, UpperAirWindow } from '@/hooks/use-upper-air'
 import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useMeasuredWidth } from '@/hooks/use-measured-width'
+import { buildConditionsSummary } from '@/lib/forecast-condition-summary'
 import { compassPointFor } from '@/lib/format'
 import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
 import { fahrenheitToCelsius } from '@/lib/units'
@@ -729,7 +730,7 @@ export function ForecastDrawer({
   // something was. Days the provider had no outlook for count as the former:
   // "no upper support" off an absent outlook would be a reassurance nobody
   // measured.
-  const extendedIntro = useMemo(() => {
+  const upperAirIntro = useMemo(() => {
     if (!upperAirDays.some((day) => day.outlook.present)) return null
 
     const visibleDayKeys = new Set(days.map((day) => day.dayKey))
@@ -761,11 +762,38 @@ export function ForecastDrawer({
     }
 
     return (
-      <p data-testid="forecast-extended-intro" className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
+      <p data-testid="forecast-upper-air-intro" className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
         {text}
       </p>
     )
   }, [days, upperAirDays, upperAirDayLabels, upperAirFlaggedDayKeys])
+
+  // --- What the ten days add up to, in plain conditions ---
+  //
+  // The strip shows ten cards, one condition each, and never says what they
+  // add up to as a run - a reader has to scan all ten to notice "it's wet
+  // today and tomorrow, then clear." buildConditionsSummary does that
+  // scanning once, off days[].condition, and is unit-tested on its own in
+  // lib/forecast-condition-summary.ts; this just wires the sentence in as
+  // this panel's intro. Trough days ride along too - the same
+  // upperAirFlaggedDayKeys/upperAirDayLabels the Upper Air intro above uses,
+  // just folded into this sentence instead of a second one.
+  const extendedIntro = useMemo(() => {
+    const summaryDays = days.map((day) => ({
+      condition: day.condition,
+      dayName: day.dayName,
+      label: upperAirDayLabels.get(day.dayKey) ?? `${day.dayName.slice(0, 3)} ${day.date.replace(/^[A-Za-z]+ /, '')}`,
+      trough: upperAirFlaggedDayKeys.has(day.dayKey),
+    }))
+    const summary = buildConditionsSummary(summaryDays)
+    if (!summary) return null
+
+    return (
+      <p data-testid="forecast-extended-intro" className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
+        {summary}
+      </p>
+    )
+  }, [days, upperAirDayLabels, upperAirFlaggedDayKeys])
 
   const upperAirChartData = useMemo(() => {
     // Carried alongside the raw height rather than replacing it: the trace is
@@ -1467,34 +1495,28 @@ export function ForecastDrawer({
                 * Two tiers in one wrapping row, both visible. Ten identical
                 * chips are ten peers, and working memory does not hold ten:
                 * the eye has to scan the lot to find the one it came for.
-                * Nothing is hidden here, it is ranked. Decisions (wind, gusts,
-                * and what the air aloft is doing) keep the chip and get the
-                * weight; the reference stats drop the chip and sit as plain
-                * muted text after them. No colour escalation on wind - see
+                * Nothing is hidden here, it is ranked. Decisions (wind, gusts
+                * and precip) keep the chip and get the weight; the reference
+                * stats, the 500mb reading among them, drop the chip and sit
+                * as plain muted text after them. No colour escalation on wind - see
                 * ADR 0071 section 2, there is no sourced threshold to escalate
                 * against and an invented one is worse than none.
                 */}
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
                 <span className="rounded bg-muted/80 px-2 py-1 text-sm">Wind <span data-testid="forecast-selected-wind" className="font-semibold tabular-nums text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
                 <span className="rounded bg-muted/80 px-2 py-1 text-sm">Gusts <span data-testid="forecast-selected-gust" className="font-semibold tabular-nums text-chart-gust">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Precip <span data-testid="forecast-selected-precip" className={`tabular-nums${precipitationPct !== null && precipitationPct > 20 ? ' font-semibold' : ''}`}>{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
+                <span className="text-2xs text-muted-foreground">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold tabular-nums">{humidityPct === null ? '—' : `${Math.round(humidityPct)}%`}</span></span>
+                <span className="text-2xs text-muted-foreground">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold tabular-nums">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
+                <span className="text-2xs text-muted-foreground">UV Index <span data-testid="forecast-selected-uv" className="font-semibold tabular-nums text-gauge-secondary">{uvIndex}</span></span>
                 {selectedUpperAir?.present && (
-                  <span
-                    data-testid="forecast-upper-air-detail"
-                    /* The trough tint has to stay legible against a tier
-                       baseline that is now bg-muted/80 rather than /50, so it
-                       goes up to /35 and keeps its own hue. */
-                    className={`rounded px-2 py-1 text-sm tabular-nums ${selectedUpperAir.troughSupport ? 'bg-gauge-secondary/35 text-foreground' : 'bg-muted/80'}`}
-                  >
+                  <span data-testid="forecast-upper-air-detail" className="text-2xs text-muted-foreground">
                     500mb <span className="font-semibold">{Math.round(selectedUpperAir.height500M)} m</span>
                     {selectedUpperAir.troughSupport
                       ? ', lowest of the window after a sustained fall. Conditions aloft support a surface low developing.'
                       : ` \u00b7 jet ${Math.round(selectedUpperAir.peakWind500Kts)} kt`}
                   </span>
                 )}
-                <span className="text-2xs text-muted-foreground">Precip <span data-testid="forecast-selected-precip" className="font-semibold tabular-nums">{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
-                <span className="text-2xs text-muted-foreground">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold tabular-nums">{humidityPct === null ? '—' : `${Math.round(humidityPct)}%`}</span></span>
-                <span className="text-2xs text-muted-foreground">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold tabular-nums">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
-                <span className="text-2xs text-muted-foreground">UV Index <span data-testid="forecast-selected-uv" className="font-semibold tabular-nums text-gauge-secondary">{uvIndex}</span></span>
                 {selectedDay.sunriseTime && (
                   <span className="flex items-center gap-1 text-2xs text-muted-foreground">
                     <Sunrise size={12} className="text-gauge-primary" />
@@ -2103,17 +2125,15 @@ export function ForecastDrawer({
           // live one.
           stale={upperAirStale}
           staleLabel={upperAirStaleLabel}
-          intro={
-            <p className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
-              Upper-level troughs feed surface lows. Expect stronger surface winds 24 to 48 hours later when heights drop into the shaded zone.
-            </p>
-          }
+          intro={upperAirIntro}
         >
           <div className="px-2.5 py-2.5">
           {/* Both scales are readable off the two axes now, so the key is down
-              to what the axes cannot say: what the grey shading means, what the
-              red means, and that the line has been smoothed. */}
+              to what the axes cannot say: the mechanism itself, what the grey
+              shading means, what the red means, and that the line has been
+              smoothed. */}
           <p data-testid="forecast-upper-air-key" className="mb-2 text-sm text-muted-foreground">
+            Upper-level troughs feed surface lows. Expect stronger surface winds 24 to 48 hours later when heights drop into the shaded zone.{' '}
             {upperAirWindow?.present && (
               <>Grey band marks heights below {Math.round(upperAirWindow.lowQuintileM)} m. </>
             )}
