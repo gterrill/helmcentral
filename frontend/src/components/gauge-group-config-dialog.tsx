@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Plus, Star, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -20,7 +20,6 @@ import {
   GAUGE_GROUP_MAX_COLUMNS,
   GAUGE_GROUP_MAX_GAUGES,
   GAUGE_GROUP_TITLE_MAX_LENGTH,
-  rewriteGaugePaths,
   type DashboardLayoutItem,
   type GaugeGroupWidgetConfig,
   type GaugeWidgetConfig,
@@ -40,23 +39,18 @@ interface GaugeGroupConfigDialogProps {
 /**
  * Builds and retargets a gauge group (ADR 0049).
  *
- * The find/replace row is the reason the feature exists: Duplicate makes a
- * copy of "Port" under a fresh id, then replace `port` with `starboard` in
- * this same dialog and five gauges move to the other engine in one pass
- * instead of five rounds of retyping.
+ * The find/replace row is the reason the feature exists: duplicate "Port",
+ * replace `port` with `starboard`, and five gauges move to the other engine in
+ * one pass instead of five rounds of retyping.
  */
 export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }: GaugeGroupConfigDialogProps) {
   const { paths } = useSignalKPaths(widget !== null)
   const [config, setConfig] = useState<GaugeGroupWidgetConfig>(defaultGroupConfig)
-  const [replaceFrom, setReplaceFrom] = useState('')
-  const [replaceTo, setReplaceTo] = useState('')
   const [profileOpen, setProfileOpen] = useState(false)
 
   // Re-seed per instance, so editing one group never shows another's settings.
   useEffect(() => {
     setConfig(widget?.gaugeGroup ? structuredClone(widget.gaugeGroup) : defaultGroupConfig())
-    setReplaceFrom('')
-    setReplaceTo('')
   }, [widget?.id, widget?.gaugeGroup])
 
   const setGauge = (index: number, next: GaugeWidgetConfig) =>
@@ -90,18 +84,6 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
       else if (hero === target) hero = index
       return { ...current, gauges, hero }
     })
-
-  // Computed, never applied on its own: an operator sees a typo'd search term
-  // produce nothing before pressing Apply, rather than after.
-  const preview = useMemo(() => {
-    if (replaceFrom === '') return []
-    return config.gauges
-      .map((gauge, index) => ({ index, from: gauge.path, to: gauge.path.split(replaceFrom).join(replaceTo) }))
-      .filter((row) => row.from !== row.to)
-  }, [config.gauges, replaceFrom, replaceTo])
-
-  const applyReplace = () =>
-    setConfig((current) => ({ ...current, gauges: rewriteGaugePaths(current.gauges, replaceFrom, replaceTo) }))
 
   const canSave =
     config.title.trim() !== '' &&
@@ -159,50 +141,6 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
           <Button variant="secondary" className="w-fit" onClick={() => setProfileOpen(true)}>
             Apply an equipment profile…
           </Button>
-
-          {/* Retargets every member's path in one pass — the payoff of
-              Duplicate: copy "Port", replace `port` with `starboard` here,
-              and every gauge below moves to the other engine at once. */}
-          <div className="rounded-md border border-border bg-background/60 p-3">
-            <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <Field>
-                <FieldLabel htmlFor="gauge-group-replace-from">Replace</FieldLabel>
-                <Input
-                  id="gauge-group-replace-from"
-                  value={replaceFrom}
-                  onChange={(e) => setReplaceFrom(e.target.value)}
-                  placeholder="port"
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="gauge-group-replace-to">With</FieldLabel>
-                <Input
-                  id="gauge-group-replace-to"
-                  value={replaceTo}
-                  onChange={(e) => setReplaceTo(e.target.value)}
-                  placeholder="starboard"
-                />
-              </Field>
-              <Button variant="secondary" disabled={preview.length === 0} onClick={applyReplace}>
-                Apply
-              </Button>
-            </div>
-
-            {replaceFrom !== '' && (
-              <div data-testid="gauge-group-replace-preview" className="mt-2 grid gap-0.5">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  {preview.length === 0
-                    ? 'No paths match'
-                    : `${preview.length} of ${config.gauges.length} paths will change`}
-                </span>
-                {preview.map((row) => (
-                  <span key={row.index} className="truncate text-[11px] text-muted-foreground">
-                    {row.from} → <span className="text-primary">{row.to}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
 
           {config.gauges.map((gauge, index) => (
             // Keyed by index: members have no id of their own, and duplicate

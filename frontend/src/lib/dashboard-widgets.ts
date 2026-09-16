@@ -502,6 +502,12 @@ function cloneGaugeGroup(group: GaugeGroupWidgetConfig): GaugeGroupWidgetConfig 
  *
  * Paths only. Labels are left alone deliberately: "Port RPM" is a two-word
  * edit, while a wrong bulk label rewrite is silent and easy to miss.
+ *
+ * No caller right now, on purpose. The gauge group dialog had a Replace/With
+ * row wired to this, but the preview list grows with every match and there
+ * was no layout found that didn't make the dialog resize as you typed, so
+ * the row was pulled. Keeping the function for when that layout problem is
+ * solved rather than deleting it.
  */
 export function rewriteGaugePaths(
   gauges: readonly GaugeWidgetConfig[],

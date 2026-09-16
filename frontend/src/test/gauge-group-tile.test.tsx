@@ -198,3 +198,57 @@ describe('staleness (ADR 0083)', () => {
     expect(screen.getByText('1800')).toBeInTheDocument()
   })
 })
+
+/**
+ * Size came from spelling before this: a member whose path ended in
+ * `.temperature`, or whose label was exactly "Temp", rendered a step larger
+ * than its siblings. Nothing declared that, so renaming a label shrank the
+ * gauge and `exhaustTemperature` stayed small next to a "Temp" that did not.
+ * `hero` is the field that says a member should stand out.
+ */
+describe('GaugeGroupTile member sizing', () => {
+  const sizeOf = (readingText: string) =>
+    Array.from(screen.getByText(readingText).classList).find((c) => c.startsWith('text-'))
+
+  test('sizes every non-hero member alike, whatever its path or label says', () => {
+    const config: GaugeGroupWidgetConfig = {
+      title: 'Alternator',
+      gauges: [
+        { path: 'electrical.alternator.1.temperature', label: 'Temp', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0 },
+        { path: 'electrical.alternator.1.current', label: 'Amps', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 },
+      ],
+    }
+    render(
+      <GaugeGroupTile
+        config={config}
+        values={{ 'electrical.alternator.1.temperature': 330.15, 'electrical.alternator.1.current': 120 }}
+        editing={false}
+        onConfigure={vi.fn()}
+      />,
+    )
+
+    expect(sizeOf('57')).toBe(sizeOf('120'))
+  })
+
+  test('the hero member is the one that renders larger', () => {
+    const config: GaugeGroupWidgetConfig = {
+      title: 'Alternator',
+      hero: 1,
+      gauges: [
+        { path: 'electrical.alternator.1.temperature', label: 'Temp', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0 },
+        { path: 'electrical.alternator.1.current', label: 'Amps', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 },
+      ],
+    }
+    render(
+      <GaugeGroupTile
+        config={config}
+        values={{ 'electrical.alternator.1.temperature': 330.15, 'electrical.alternator.1.current': 120 }}
+        editing={false}
+        onConfigure={vi.fn()}
+      />,
+    )
+
+    expect(sizeOf('120')).toBe('text-4xl')
+    expect(sizeOf('57')).not.toBe('text-4xl')
+  })
+})

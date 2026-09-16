@@ -83,21 +83,19 @@ export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, age
           const r = readings[index]
           const isHero = heroIndex === index
           const label = gauge.label.trim() || gauge.path.split('.').slice(-1)[0]
-          const isTemperature = /(^|\.)temperature$/i.test(gauge.path) || /^temp(?:erature)?$/i.test(label)
-          const labelTrackingClass = isHero || isTemperature ? 'tracking-[0.16em]' : 'tracking-[0.14em]'
-          const readoutSizeClass = isHero ? 'text-4xl' : isTemperature ? 'text-xl' : 'text-lg'
+          // Emphasis comes from `hero` and nothing else. This used to test the
+          // path and label against /temperature/ and render a match a step
+          // larger, which meant the size depended on spelling: renaming a
+          // label from "Temp" to "Coolant" shrank the gauge, and
+          // exhaustTemperature stayed small beside a sibling that matched.
+          const labelTrackingClass = isHero ? 'tracking-[0.16em]' : 'tracking-[0.14em]'
+          const readoutSizeClass = isHero ? 'text-4xl' : 'text-lg'
           const unitSizeClass = isHero ? 'text-xs' : 'text-[10px]'
           const readoutGapClass = isHero ? 'gap-1' : 'gap-0.5'
           const panelClass = isHero
             ? 'rounded-md border bg-background/60 px-3 py-3'
-            : isTemperature
-              ? 'rounded-md border bg-background/60 px-3 py-2'
-              : 'rounded-md border bg-background/60 px-2 py-2'
-          const fallbackTextClass = isHero
-            ? 'text-gauge-secondary'
-            : isTemperature
-              ? 'text-gauge-secondary'
-              : 'text-foreground'
+            : 'rounded-md border bg-background/60 px-2 py-2'
+          const fallbackTextClass = isHero ? 'text-gauge-secondary' : 'text-foreground'
           return (
             // Keyed by index: paths are not unique within a group (the same
             // value in two units is legitimate) and members have no id of

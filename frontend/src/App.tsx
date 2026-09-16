@@ -1028,43 +1028,29 @@ export function App() {
   }, [activePage, effectiveWidgets, gaugeGroupDraft, updatePage])
 
   /**
-   * Duplicate button inside the gauge group dialog (ADR 0102). Two cases,
-   * both needing the edited config saved as well as copied:
+   * Duplicate button inside the gauge group dialog. This is Save As, not
+   * Save And Copy: change the values, then click Duplicate instead of Save,
+   * and the edits land on a new tile while the original is left exactly as
+   * it was when the dialog opened. Same for a brand-new draft that has
+   * never been saved: Duplicate produces the one tile carrying the edits,
+   * not a saved draft plus a separate copy.
    *
-   *  - A brand-new draft (added via handleAddGaugeGroup) isn't in
-   *    effectiveWidgets yet — only the Save button puts it there. Duplicating
-   *    it has to persist the draft itself, not just a copy of it, or the
-   *    tile the operator just built vanishes and only the copy survives.
-   *  - An already-saved group is in effectiveWidgets under its old config.
-   *    The dialog hands us what's currently typed, which may differ from
-   *    that stored config, so the original has to be written back too — not
-   *    just the copy — or an edit made right before hitting Duplicate is
-   *    silently lost from the source tile.
-   *
-   * `baseline` is effectiveWidgets with the edited widget accounted for
-   * either way, so the same maxY/id-collision logic below works for both
-   * cases without a second branch.
+   * gaugeGroupDraft is always set here, since the dialog that calls this
+   * only renders when it is, so there is no stand-in widget to build for
+   * the case where it isn't.
    */
   const handleDuplicateGaugeGroup = useCallback((gaugeGroup: GaugeGroupWidgetConfig) => {
     if (!activePage || !gaugeGroupDraft) return
-    const id = gaugeGroupDraft.id
     const edited = { ...gaugeGroupDraft, gaugeGroup }
-    const alreadySaved = effectiveWidgets.some((w) => w.id === id)
-    const baseline = alreadySaved ? effectiveWidgets : [...effectiveWidgets, edited]
-
-    const copy = duplicateWidget(edited, baseline)
+    const copy = duplicateWidget(edited, effectiveWidgets)
     if (!copy) return
 
     // Same placement a fresh widget gets elsewhere in this file: below
     // everything else, so the copy never lands on top of its source.
-    const maxY = baseline.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
     const placedCopy = { ...copy, x: 0, y: maxY }
 
-    const widgets = alreadySaved
-      ? [...effectiveWidgets.map((w) => (w.id === id ? edited : w)), placedCopy]
-      : [...baseline, placedCopy]
-
-    void updatePage(activePage.id, { widgets })
+    void updatePage(activePage.id, { widgets: [...effectiveWidgets, placedCopy] })
     setGaugeGroupDraft(null)
   }, [activePage, effectiveWidgets, gaugeGroupDraft, updatePage])
 

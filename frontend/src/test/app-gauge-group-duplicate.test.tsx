@@ -1,23 +1,16 @@
 /**
  * App-level coverage for the gauge group Duplicate button (docs/adr/0102).
  *
- * Commit 3f7986b moved Duplicate from the grid chrome into the gauge group
- * config dialog and introduced two bugs in App.tsx's handleDuplicateGaugeGroup:
- *
- *   Bug A: duplicating a brand-new (never-saved) draft wrote only the copy.
- *   handleAddGaugeGroup sets gaugeGroupDraft locally without adding it to
- *   effectiveWidgets, so "[...effectiveWidgets, copy]" silently dropped the
- *   draft the operator had just built.
- *
- *   Bug B: duplicating an already-saved group applied the operator's edits
- *   only to the copy. The original stayed in effectiveWidgets under its old
- *   config, so a Celsius-vs-raw mismatch fixed on screen was still present
- *   in what actually got saved for the source tile.
+ * Duplicate is Save As, not Save And Copy: change the values in the dialog,
+ * then click Duplicate instead of Save, and the edits land on a new tile
+ * while the source is left exactly as it was when the dialog opened. For a
+ * brand-new draft that was never saved, that means Duplicate produces the
+ * one tile carrying the edits, not a saved draft plus a separate copy.
  *
  * gauge-group-config-dialog.test.tsx only proves the onDuplicate callback
  * fires with the right config — it stops at the dialog boundary and never
- * touches App's handler, which is where both bugs actually live. That's why
- * neither one was caught. These tests drive the real App component (real
+ * touches App's handler, which is where this placement and persistence
+ * logic actually lives. These tests drive the real App component (real
  * useDashboardPages hook, fetch stubbed as a tiny in-memory backend) through
  * the same clicks an operator would make.
  */
@@ -256,7 +249,7 @@ function widgetsFromLastPatch(): DashboardLayoutItem[] {
 }
 
 describe('duplicating a gauge group from App', () => {
-  it('persists both the new draft and its copy, not just the copy (bug A)', async () => {
+  it('yields exactly one widget carrying the edits, for a brand-new draft that was never saved', async () => {
     render(<App />)
     await activePageReady()
     enterEditMode()
@@ -272,33 +265,14 @@ describe('duplicating a gauge group from App', () => {
     await waitFor(() => expect(patchCalls.length).toBeGreaterThan(0))
     const widgets = widgetsFromLastPatch()
 
-    // Buggy handler wrote only the copy: length 1, draft gone entirely.
-    expect(widgets).toHaveLength(2)
-    expect(widgets.every((w) => w.gaugeGroup?.title === 'Port')).toBe(true)
-    expect(widgets.every((w) => w.gaugeGroup?.gauges[0]?.path === 'propulsion.port.revolutions')).toBe(true)
-    expect(new Set(widgets.map((w) => w.id)).size).toBe(2)
+    // The draft never joined the widget list on its own account, so
+    // Duplicate has only the copy to write: one tile, not two.
+    expect(widgets).toHaveLength(1)
+    expect(widgets[0].gaugeGroup?.title).toBe('Port')
+    expect(widgets[0].gaugeGroup?.gauges[0]?.path).toBe('propulsion.port.revolutions')
   })
 
-  it('offsets the copy so it does not land on top of the freshly saved draft', async () => {
-    render(<App />)
-    await activePageReady()
-    enterEditMode()
-    await openGaugeGroupDialogFromAddWidget()
-
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Port' } })
-    fireEvent.change(screen.getAllByLabelText('SignalK path')[0], {
-      target: { value: 'propulsion.port.revolutions' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: /duplicate this tile/i }))
-
-    await waitFor(() => expect(patchCalls.length).toBeGreaterThan(0))
-    const [a, b] = widgetsFromLastPatch()
-    expect(a).toBeDefined()
-    expect(b).toBeDefined()
-    expect(a.x === b.x && a.y === b.y).toBe(false)
-  })
-
-  it('saves the edit to the original and adds a copy, for an already-saved group (bug B)', async () => {
+  it('leaves an already-saved original untouched in the PATCH body and adds one new widget carrying the edits', async () => {
     seedPage([
       {
         id: 'gauge-group:existing1',
@@ -325,12 +299,45 @@ describe('duplicating a gauge group from App', () => {
 
     expect(widgets).toHaveLength(2)
     const original = widgets.find((w) => w.id === 'gauge-group:existing1')
-    // Buggy handler left the original's title as 'Port' — the edit only
-    // ever reached the copy.
-    expect(original?.gaugeGroup?.title).toBe('Starboard')
+    // Save As: the edit lands on the copy only. The original keeps the
+    // config it had when the dialog opened.
+    expect(original?.gaugeGroup?.title).toBe('Port')
 
     const copy = widgets.find((w) => w.id !== 'gauge-group:existing1')
     expect(copy?.gaugeGroup?.title).toBe('Starboard')
-    expect(copy && original && (copy.x !== original.x || copy.y !== original.y)).toBe(true)
+  })
+
+  it("does not sit the copy at the original's coordinates", async () => {
+    seedPage([
+      {
+        id: 'gauge-group:existing1',
+        x: 0, y: 0, w: 4, h: 7,
+        gaugeGroup: {
+          title: 'Port',
+          gauges: [
+            { path: 'propulsion.port.revolutions', label: 'RPM', display: 'numeric', quantity: 'frequency', unit: 'rpm' },
+          ],
+        },
+      },
+    ])
+
+    render(<App />)
+    await activePageReady()
+    enterEditMode()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure Port' }))
+    fireEvent.click(screen.getByRole('button', { name: /duplicate this tile/i }))
+
+    await waitFor(() => expect(patchCalls.length).toBeGreaterThan(0))
+    const widgets = widgetsFromLastPatch()
+    const original = widgets.find((w) => w.id === 'gauge-group:existing1')
+    const copy = widgets.find((w) => w.id !== 'gauge-group:existing1')
+
+    expect(original).toBeDefined()
+    expect(copy).toBeDefined()
+    expect(copy!.x === original!.x && copy!.y === original!.y).toBe(false)
+    // Below everything else on the page, same as any other freshly placed
+    // widget, rather than stacked directly on its source.
+    expect(copy!.y).toBe(original!.y + original!.h)
   })
 })
