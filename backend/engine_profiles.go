@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +34,8 @@ import (
 const (
 	engineProfileMaxGauges  = 24
 	engineProfileMaxService = 64
+	profileKindEngine       = "engine"
+	profileKindGenerator    = "generator"
 )
 
 // engineProfileZone is a band expressed the way the zone editor expresses one:
@@ -81,15 +85,17 @@ type engineProfileService struct {
 }
 
 type engineProfile struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Manufacturer string                 `json:"manufacturer,omitempty"`
-	Model        string                 `json:"model,omitempty"`
-	RatingHP     int                    `json:"rating_hp,omitempty"`
-	Source       string                 `json:"source,omitempty"`
-	Notes        string                 `json:"notes,omitempty"`
-	Gauges       []engineProfileGauge   `json:"gauges"`
-	Service      []engineProfileService `json:"service,omitempty"`
+	SchemaVersion int                    `json:"schema_version"`
+	Kind          string                 `json:"kind"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Manufacturer  string                 `json:"manufacturer,omitempty"`
+	Model         string                 `json:"model,omitempty"`
+	RatingHP      int                    `json:"rating_hp,omitempty"`
+	Source        string                 `json:"source,omitempty"`
+	Notes         string                 `json:"notes,omitempty"`
+	Gauges        []engineProfileGauge   `json:"gauges"`
+	Service       []engineProfileService `json:"service,omitempty"`
 }
 
 // engineProfileProblem names a file that could not be loaded and why. A bad
@@ -105,6 +111,7 @@ var (
 	engineProfilesState    []engineProfile
 	engineProfileProblems  []engineProfileProblem
 	validEngineZoneDirects = map[string]bool{"below": true, "above": true}
+	profileIDPattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 )
 
 func engineProfilesDir() string {
@@ -114,6 +121,18 @@ func engineProfilesDir() string {
 // validateEngineProfile reuses the gauge rules rather than restating them, so
 // a profile can never describe a gauge the dashboard would reject.
 func validateEngineProfile(p engineProfile) error {
+	if p.Kind == "" {
+		p.Kind = profileKindEngine
+	}
+	if p.SchemaVersion == 0 {
+		p.SchemaVersion = 1
+	}
+	if p.SchemaVersion != 1 {
+		return fmt.Errorf("unsupported schema_version %d", p.SchemaVersion)
+	}
+	if p.Kind != profileKindEngine && p.Kind != profileKindGenerator {
+		return fmt.Errorf("unsupported kind %q", p.Kind)
+	}
 	if strings.TrimSpace(p.ID) == "" {
 		return fmt.Errorf("profile requires an id")
 	}
@@ -133,6 +152,12 @@ func validateEngineProfile(p engineProfile) error {
 	for _, gauge := range p.Gauges {
 		if err := validateEngineProfileGauge(gauge); err != nil {
 			return fmt.Errorf("gauge %q: %w", gauge.PathSuffix, err)
+		}
+		if p.Kind == profileKindGenerator && !strings.HasPrefix(gauge.PathSuffix, "phase.") && !strings.HasPrefix(gauge.PathSuffix, "total.") {
+			return fmt.Errorf("gauge %q: path_suffix must start with phase. or total. for generator profiles", gauge.PathSuffix)
+		}
+		if p.Kind == profileKindEngine && (strings.HasPrefix(gauge.PathSuffix, "phase.") || strings.HasPrefix(gauge.PathSuffix, "total.")) {
+			return fmt.Errorf("gauge %q: path_suffix cannot start with phase. or total. for engine profiles", gauge.PathSuffix)
 		}
 	}
 
@@ -228,8 +253,32 @@ func loadEngineProfiles() {
 			continue
 		}
 
+		canonical, err := canonicalizeProfileDocument(data)
+		if err != nil {
+			fail(err)
+			continue
+		}
+
+		schemaErrors, err := validateProfileDocument(canonical)
+		if err != nil {
+			fail(err)
+			continue
+		}
+		if len(schemaErrors) > 0 {
+			parts := make([]string, 0, len(schemaErrors))
+			for _, issue := range schemaErrors {
+				if strings.TrimSpace(issue.Path) == "" {
+					parts = append(parts, issue.Message)
+					continue
+				}
+				parts = append(parts, fmt.Sprintf("%s: %s", issue.Path, issue.Message))
+			}
+			fail(fmt.Errorf(strings.Join(parts, "; ")))
+			continue
+		}
+
 		var profile engineProfile
-		if err := json.Unmarshal(data, &profile); err != nil {
+		if err := json.Unmarshal(canonical, &profile); err != nil {
 			fail(err)
 			continue
 		}
@@ -285,8 +334,13 @@ func engineProfileFileForID(id string) (string, error) {
 			continue
 		}
 
+		canonical, err := canonicalizeProfileDocument(data)
+		if err != nil {
+			continue
+		}
+
 		var profile engineProfile
-		if err := json.Unmarshal(data, &profile); err != nil {
+		if err := json.Unmarshal(canonical, &profile); err != nil {
 			continue
 		}
 
@@ -298,38 +352,139 @@ func engineProfileFileForID(id string) (string, error) {
 	return "", os.ErrNotExist
 }
 
-// GET /api/engine-profiles
-func engineProfilesHandler(c echo.Context) error {
+func filteredEngineProfiles(profiles []engineProfile, kind string) []engineProfile {
+	if strings.TrimSpace(kind) == "" {
+		return profiles
+	}
+	filtered := make([]engineProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile.Kind == kind {
+			filtered = append(filtered, profile)
+		}
+	}
+	return filtered
+}
+
+func parseProfileID(raw string) (string, error) {
+	id, err := url.PathUnescape(raw)
+	if err != nil {
+		return "", fmt.Errorf("malformed profile id")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", fmt.Errorf("profile id is required")
+	}
+	return id, nil
+}
+
+func profileFileName(id string) (string, error) {
+	if !profileIDPattern.MatchString(id) {
+		return "", fmt.Errorf("profile id may only use lowercase letters, numbers, dots, underscores, and hyphens")
+	}
+	return id + ".json", nil
+}
+
+func decodeProfileFromRequest(c echo.Context) (engineProfile, []profileValidationError, int, error) {
+	raw, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return engineProfile{}, nil, http.StatusBadRequest, fmt.Errorf("invalid request payload")
+	}
+
+	canonical, err := canonicalizeProfileDocument(raw)
+	if err != nil {
+		return engineProfile{}, nil, http.StatusBadRequest, fmt.Errorf("invalid request payload")
+	}
+
+	schemaErrors, err := validateProfileDocument(canonical)
+	if err != nil {
+		return engineProfile{}, nil, http.StatusInternalServerError, fmt.Errorf("profile schema validator unavailable")
+	}
+	if len(schemaErrors) > 0 {
+		return engineProfile{}, schemaErrors, http.StatusBadRequest, fmt.Errorf("profile failed schema validation")
+	}
+
+	var profile engineProfile
+	if err := json.Unmarshal(canonical, &profile); err != nil {
+		return engineProfile{}, nil, http.StatusBadRequest, fmt.Errorf("invalid request payload")
+	}
+	if err := validateEngineProfile(profile); err != nil {
+		return engineProfile{}, []profileValidationError{{Message: err.Error()}}, http.StatusBadRequest, fmt.Errorf("profile failed semantic validation")
+	}
+
+	return profile, nil, 0, nil
+}
+
+func readProfileByID(id string) (engineProfile, error) {
+	path, err := engineProfileFileForID(id)
+	if err != nil {
+		return engineProfile{}, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return engineProfile{}, err
+	}
+
+	canonical, err := canonicalizeProfileDocument(data)
+	if err != nil {
+		return engineProfile{}, err
+	}
+
+	var profile engineProfile
+	if err := json.Unmarshal(canonical, &profile); err != nil {
+		return engineProfile{}, err
+	}
+	return profile, nil
+}
+
+// GET /api/equipment-profiles
+func equipmentProfilesHandler(c echo.Context) error {
 	profiles, problems := engineProfiles()
 	if profiles == nil {
 		profiles = []engineProfile{}
 	}
+
+	if kind := strings.TrimSpace(c.QueryParam("kind")); kind != "" {
+		profiles = filteredEngineProfiles(profiles, kind)
+	}
+
 	if problems == nil {
 		problems = []engineProfileProblem{}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"profiles": profiles, "problems": problems})
 }
 
-// PUT /api/engine-profiles/:id
-func updateEngineProfileHandler(c echo.Context) error {
-	id, err := url.PathUnescape(c.Param("id"))
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "malformed profile id"})
+// GET /api/engine-profiles
+func engineProfilesHandler(c echo.Context) error {
+	profiles, problems := engineProfiles()
+	if profiles == nil {
+		profiles = []engineProfile{}
 	}
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "profile id is required"})
+	profiles = filteredEngineProfiles(profiles, profileKindEngine)
+	if problems == nil {
+		problems = []engineProfileProblem{}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"profiles": profiles, "problems": problems})
+}
+
+func updateProfileHandler(c echo.Context, requiredKind string) error {
+	id, err := parseProfileID(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	var profile engineProfile
-	if err := c.Bind(&profile); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+	profile, schemaErrors, statusCode, err := decodeProfileFromRequest(c)
+	if err != nil {
+		if len(schemaErrors) > 0 {
+			return c.JSON(statusCode, map[string]any{"error": err.Error(), "errors": schemaErrors})
+		}
+		return c.JSON(statusCode, map[string]string{"error": err.Error()})
 	}
 	if strings.TrimSpace(profile.ID) != id {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "payload id must match path id"})
 	}
-	if err := validateEngineProfile(profile); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if strings.TrimSpace(requiredKind) != "" && profile.Kind != requiredKind {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "payload kind does not match endpoint"})
 	}
 
 	path, err := engineProfileFileForID(id)
@@ -346,4 +501,119 @@ func updateEngineProfileHandler(c echo.Context) error {
 
 	loadEngineProfiles()
 	return c.JSON(http.StatusOK, map[string]any{"profile": profile})
+}
+
+// POST /api/equipment-profiles
+func createEquipmentProfileHandler(c echo.Context) error {
+	profile, schemaErrors, statusCode, err := decodeProfileFromRequest(c)
+	if err != nil {
+		if len(schemaErrors) > 0 {
+			return c.JSON(statusCode, map[string]any{"error": err.Error(), "errors": schemaErrors})
+		}
+		return c.JSON(statusCode, map[string]string{"error": err.Error()})
+	}
+
+	id := strings.TrimSpace(profile.ID)
+	if _, err := engineProfileFileForID(id); err == nil {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "profile id already exists"})
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to inspect existing profiles"})
+	}
+
+	name, err := profileFileName(id)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	path := filepath.Join(engineProfilesDir(), name)
+	if _, err := os.Stat(path); err == nil {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "profile file already exists"})
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to inspect profile path"})
+	}
+
+	if err := writeJSONFileAtomic(path, profile); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save profile"})
+	}
+
+	loadEngineProfiles()
+	return c.JSON(http.StatusCreated, map[string]any{"profile": profile})
+}
+
+// GET /api/equipment-profiles/:id
+func getEquipmentProfileHandler(c echo.Context) error {
+	id, err := parseProfileID(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	profile, err := readProfileByID(id)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read profile"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"profile": profile})
+}
+
+// GET /api/equipment-profiles/:id/download
+func downloadEquipmentProfileHandler(c echo.Context) error {
+	id, err := parseProfileID(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	profile, err := readProfileByID(id)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read profile"})
+	}
+
+	payload, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to encode profile"})
+	}
+
+	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
+	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf("attachment; filename=%q", id+".json"))
+	return c.Blob(http.StatusOK, echo.MIMEApplicationJSONCharsetUTF8, payload)
+}
+
+// DELETE /api/equipment-profiles/:id
+func deleteEquipmentProfileHandler(c echo.Context) error {
+	id, err := parseProfileID(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	path, err := engineProfileFileForID(id)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to locate profile"})
+	}
+
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to delete profile"})
+	}
+
+	loadEngineProfiles()
+	return c.NoContent(http.StatusNoContent)
+}
+
+// PUT /api/equipment-profiles/:id
+func updateEquipmentProfileHandler(c echo.Context) error {
+	return updateProfileHandler(c, "")
+}
+
+// PUT /api/engine-profiles/:id
+func updateEngineProfileHandler(c echo.Context) error {
+	return updateProfileHandler(c, profileKindEngine)
 }

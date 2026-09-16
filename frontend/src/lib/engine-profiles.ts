@@ -41,6 +41,8 @@ export interface EngineProfileService {
 }
 
 export interface EngineProfile {
+  schema_version?: number
+  kind?: 'engine' | 'generator'
   id: string
   name: string
   manufacturer?: string
@@ -55,6 +57,11 @@ export interface EngineProfile {
 export interface EngineProfileProblem {
   file: string
   error: string
+}
+
+export interface EquipmentProfileValidationError {
+  path?: string
+  message: string
 }
 
 /**

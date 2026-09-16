@@ -1,4 +1,6 @@
 {
+  "schema_version": 1,
+  "kind": "generator",
   "id": "cummins-onan-13-5kw-60hz",
   "name": "Cummins Onan 13.5 kW 60 Hz",
   "manufacturer": "Cummins Onan",

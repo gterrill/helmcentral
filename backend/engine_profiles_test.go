@@ -49,6 +49,22 @@ const goodProfile = `{
   ]
 }`
 
+const goodGeneratorProfile = `{
+	"schema_version": 1,
+	"kind": "generator",
+	"id": "test-generator",
+	"name": "Test Generator",
+	"gauges": [
+		{
+			"path_suffix": "phase.A.frequency",
+			"label": "Hz",
+			"display": "numeric",
+			"quantity": "frequency",
+			"unit": "Hz"
+		}
+	]
+}`
+
 func TestLoadEngineProfiles(t *testing.T) {
 	setupEngineProfiles(t, map[string]string{"test.json": goodProfile})
 
@@ -180,6 +196,52 @@ func TestEngineProfilesHandler(t *testing.T) {
 	}
 }
 
+func TestEquipmentProfilesHandlerSupportsKindFilter(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{
+		"engine.json":    goodProfile,
+		"generator.json": goodGeneratorProfile,
+	})
+
+	e := echo.New()
+	allRec := httptest.NewRecorder()
+	allCtx := e.NewContext(httptest.NewRequest(http.MethodGet, "/api/equipment-profiles", nil), allRec)
+
+	if err := equipmentProfilesHandler(allCtx); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if allRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", allRec.Code)
+	}
+
+	var allBody struct {
+		Profiles []engineProfile `json:"profiles"`
+	}
+	if err := json.Unmarshal(allRec.Body.Bytes(), &allBody); err != nil {
+		t.Fatalf("failed to decode all response: %v", err)
+	}
+	if len(allBody.Profiles) != 2 {
+		t.Fatalf("expected both profiles, got %+v", allBody.Profiles)
+	}
+
+	engineRec := httptest.NewRecorder()
+	engineReq := httptest.NewRequest(http.MethodGet, "/api/equipment-profiles?kind=engine", nil)
+	engineCtx := e.NewContext(engineReq, engineRec)
+
+	if err := equipmentProfilesHandler(engineCtx); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var engineBody struct {
+		Profiles []engineProfile `json:"profiles"`
+	}
+	if err := json.Unmarshal(engineRec.Body.Bytes(), &engineBody); err != nil {
+		t.Fatalf("failed to decode engine response: %v", err)
+	}
+	if len(engineBody.Profiles) != 1 || engineBody.Profiles[0].Kind != "engine" {
+		t.Fatalf("expected one engine profile, got %+v", engineBody.Profiles)
+	}
+}
+
 func TestUpdateEngineProfileHandler(t *testing.T) {
 	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
 
@@ -262,6 +324,190 @@ func TestUpdateEngineProfileHandlerRejectsIDMismatch(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateEquipmentProfileHandlerRejectsSchemaMismatch(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	body := `{
+		"schema_version": 1,
+		"kind": "generator",
+		"id": "test-engine",
+		"name": "Bad Generator",
+		"gauges": [
+			{
+				"path_suffix": "oilPressure",
+				"label": "Oil",
+				"display": "radial",
+				"quantity": "pressure",
+				"unit": "psi"
+			}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/api/equipment-profiles/test-engine", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/equipment-profiles/:id")
+	c.SetParamNames("id")
+	c.SetParamValues("test-engine")
+
+	if err := updateEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Error  string                   `json:"error"`
+		Errors []profileValidationError `json:"errors"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if payload.Error == "" || len(payload.Errors) == 0 {
+		t.Fatalf("expected structured schema errors, got %+v", payload)
+	}
+}
+
+func TestCreateEquipmentProfileHandler(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	body := `{
+		"schema_version": 1,
+		"kind": "generator",
+		"id": "new-generator",
+		"name": "New Generator",
+		"gauges": [
+			{
+				"path_suffix": "phase.A.frequency",
+				"label": "Hz",
+				"display": "numeric",
+				"quantity": "frequency",
+				"unit": "Hz"
+			}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/equipment-profiles", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := createEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	profiles, _ := engineProfiles()
+	if len(profiles) != 2 {
+		t.Fatalf("expected two profiles after create, got %+v", profiles)
+	}
+
+	if _, err := os.Stat(filepath.Join(engineProfilesDir(), "new-generator.json")); err != nil {
+		t.Fatalf("expected created file on disk: %v", err)
+	}
+}
+
+func TestCreateEquipmentProfileHandlerRejectsDuplicateID(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/equipment-profiles", bytes.NewBufferString(goodProfile))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := createEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetEquipmentProfileHandler(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/api/equipment-profiles/test-engine", nil), rec)
+	c.SetPath("/api/equipment-profiles/:id")
+	c.SetParamNames("id")
+	c.SetParamValues("test-engine")
+
+	if err := getEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Profile engineProfile `json:"profile"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if payload.Profile.ID != "test-engine" {
+		t.Fatalf("expected fetched profile, got %+v", payload.Profile)
+	}
+}
+
+func TestDownloadEquipmentProfileHandler(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/api/equipment-profiles/test-engine/download", nil), rec)
+	c.SetPath("/api/equipment-profiles/:id/download")
+	c.SetParamNames("id")
+	c.SetParamValues("test-engine")
+
+	if err := downloadEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get(echo.HeaderContentDisposition), "test-engine.json") {
+		t.Fatalf("expected content-disposition filename, got %q", rec.Header().Get(echo.HeaderContentDisposition))
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("response is not valid json: %v", err)
+	}
+}
+
+func TestDeleteEquipmentProfileHandler(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{
+		"good.json":      goodProfile,
+		"generator.json": goodGeneratorProfile,
+	})
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodDelete, "/api/equipment-profiles/test-generator", nil), rec)
+	c.SetPath("/api/equipment-profiles/:id")
+	c.SetParamNames("id")
+	c.SetParamValues("test-generator")
+
+	if err := deleteEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	profiles, _ := engineProfiles()
+	if len(profiles) != 1 || profiles[0].ID != "test-engine" {
+		t.Fatalf("expected generator deleted, got %+v", profiles)
 	}
 }
 

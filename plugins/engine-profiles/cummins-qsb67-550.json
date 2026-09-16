@@ -1,4 +1,6 @@
 {
+  "schema_version": 1,
+  "kind": "engine",
   "id": "cummins-qsb67-550",
   "name": "Cummins QSB 6.7 550",
   "manufacturer": "Cummins",

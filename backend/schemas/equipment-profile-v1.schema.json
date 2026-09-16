@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://helmcentral.local/schemas/equipment-profile-v1.schema.json",
+  "title": "Equipment Profile v1",
+  "oneOf": [
+    { "$ref": "#/definitions/engineProfile" },
+    { "$ref": "#/definitions/generatorProfile" }
+  ],
+  "definitions": {
+    "baseProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "id", "name"],
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "kind": { "type": "string", "enum": ["engine", "generator"] },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "manufacturer": { "type": "string" },
+        "model": { "type": "string" },
+        "rating_hp": { "type": "integer", "minimum": 0 },
+        "source": { "type": "string" },
+        "notes": { "type": "string" },
+        "gauges": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/gauge" }
+        },
+        "service": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/service" }
+        }
+      },
+      "anyOf": [
+        { "required": ["gauges"] },
+        { "required": ["service"] }
+      ]
+    },
+    "engineProfile": {
+      "allOf": [
+        { "$ref": "#/definitions/baseProfile" },
+        {
+          "properties": {
+            "kind": { "const": "engine" },
+            "gauges": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  { "$ref": "#/definitions/gauge" },
+                  {
+                    "properties": {
+                      "path_suffix": {
+                        "type": "string",
+                        "not": { "pattern": "^(total\\.|phase\\.)" }
+                      }
+                    },
+                    "required": ["path_suffix"]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "generatorProfile": {
+      "allOf": [
+        { "$ref": "#/definitions/baseProfile" },
+        {
+          "properties": {
+            "kind": { "const": "generator" },
+            "gauges": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  { "$ref": "#/definitions/gauge" },
+                  {
+                    "properties": {
+                      "path_suffix": {
+                        "type": "string",
+                        "pattern": "^(total\\.|phase\\.)"
+                      }
+                    },
+                    "required": ["path_suffix"]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "zone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "state"],
+      "properties": {
+        "direction": { "type": "string", "enum": ["below", "above"] },
+        "threshold": { "type": ["number", "null"] },
+        "state": { "type": "string", "enum": ["normal", "warn", "alarm"] },
+        "source": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "gauge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path_suffix", "label", "display", "quantity", "unit"],
+      "properties": {
+        "path_suffix": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "display": { "type": "string", "enum": ["numeric", "radial", "bar", "lamp", "trend"] },
+        "quantity": { "type": "string", "minLength": 1 },
+        "unit": { "type": "string", "minLength": 1 },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "decimals": { "type": "integer" },
+        "zones": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/zone" }
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "interval_hours": { "type": ["number", "null"] },
+        "interval_months": { "type": ["integer", "null"] },
+        "first_at_hours": { "type": ["number", "null"] },
+        "supersedes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "source": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
