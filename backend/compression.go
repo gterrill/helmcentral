@@ -45,11 +45,19 @@ var noCompressRoutePatterns = map[string]bool{
 	// single small event decodes before the handler ever returns.
 	//
 	// assistant_handlers.go: postAssistantMessageHandler streams its reply
-	// as SSE too, over the same connection that accepted the POST, but
-	// stays skipped here — it was not part of this pass, and unlike the
-	// two above its per-token chunks are small enough, and frequent enough,
-	// that the same MinLength/Flush interaction has not been checked for
-	// it.
+	// as SSE too, over the same connection that accepted the POST, and
+	// stays skipped here for the same reason as the two routes above, now
+	// more true than when this note was first written: since the backend
+	// token-streaming follow-up ADR 0093 §5 named (assistant_run.go's run)
+	// this route flushes a "delta" frame per streamed fragment of the
+	// model's answer, genuinely small and genuinely frequent, on top of its
+	// "status"/"retract"/"message"/"error" frames - not the whole-message-
+	// at-once shape this comment used to describe. The gzipResponseWriter.
+	// Flush() behaviour above should cover it identically, but that has not
+	// been exercised through the real middleware stack the way
+	// TestCompression_SSEStreamIsGzippedAndStreamsBeforeHandlerReturns does
+	// for the other two, so it stays off this list rather than assumed
+	// safe.
 	"/api/assistant/conversations/:id/messages": true,
 
 	// WebSocket upgrade (grep for "websocket.Accept" turned up exactly this

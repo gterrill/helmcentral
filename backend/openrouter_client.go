@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -275,6 +277,9 @@ type openRouterChatRequest struct {
 	Plugins    []openRouterPlugin     `json:"plugins,omitempty"`
 	ToolChoice string                 `json:"tool_choice,omitempty"`
 	Usage      *openRouterUsageOption `json:"usage,omitempty"`
+	// Stream is always set true by openRouterChatCompletion itself, never by
+	// a caller building this struct - see that function's doc comment.
+	Stream bool `json:"stream,omitempty"`
 }
 
 type openRouterChoice struct {
@@ -309,15 +314,105 @@ type openRouterChatResponse struct {
 	Error   *openRouterAPIError `json:"error,omitempty"`
 }
 
-// openRouterChatCompletion posts one chat-completion request and returns the
-// decoded response. Three failure shapes all surface as a single-line error
-// carrying the upstream message and (where meaningful) the HTTP status,
-// mirroring how place_name.go and wasm_plugin.go trim upstream errors for a
-// status line rather than a stack trace: a non-2xx status, a 2xx response
-// that still carries a top-level error object (some OpenRouter failure
-// modes report this way instead of a non-2xx status), and a 2xx response
-// with zero choices (nothing to reply with).
-func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest) (openRouterChatResponse, error) {
+// openRouterStreamToolCallDelta is one fragment of one tool call inside a
+// streamed chunk's delta.tool_calls array. Index is the only field every
+// fragment for a given tool call carries; OpenRouter sends id/type/
+// function.name once, on the first fragment for that index, and every
+// fragment (including that first one) carries a piece of
+// function.arguments to be concatenated in order - see
+// openRouterChatCompletion's accumulation loop. Arguments is typed as
+// openRouterArguments, not a plain string, purely for the tolerant-decoding
+// safety net described on that type: real captures (backend/testdata/
+// openrouter_stream_toolcall.txt) show every fragment's own JSON encoding
+// is a plain string, but should a model behind OpenRouter ever emit one
+// fragment as a bare JSON object instead, this decodes it the same way a
+// non-streamed response already would rather than failing to parse.
+type openRouterStreamToolCallDelta struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string              `json:"name"`
+		Arguments openRouterArguments `json:"arguments"`
+	} `json:"function"`
+}
+
+// openRouterStreamChoice is one choice inside a streamed chunk. Unlike
+// openRouterChoice (the non-streaming shape), Message is replaced by Delta:
+// a fragment to be merged into the choice being assembled, not a complete
+// message. FinishReason is empty on every fragment but the last one or two
+// for a choice (OpenRouter's own captures show it repeated, once with no
+// usage and again on the chunk that carries usage).
+type openRouterStreamChoice struct {
+	Index int `json:"index"`
+	Delta struct {
+		Role      string                          `json:"role"`
+		Content   openRouterContent               `json:"content"`
+		ToolCalls []openRouterStreamToolCallDelta `json:"tool_calls"`
+	} `json:"delta"`
+	FinishReason string `json:"finish_reason"`
+}
+
+// openRouterStreamChunk is one `data: {...}` line of a streamed response -
+// see openRouterChatCompletion's doc comment for the accumulation this
+// feeds. Usage is a pointer (unlike openRouterChatResponse.Usage's plain
+// value) because its presence, not its zero value, is what marks the chunk
+// that carries the reply's final cost accounting; every other chunk omits
+// the field entirely.
+type openRouterStreamChunk struct {
+	ID      string                   `json:"id"`
+	Model   string                   `json:"model"`
+	Choices []openRouterStreamChoice `json:"choices"`
+	Usage   *openRouterUsage         `json:"usage"`
+	Error   *openRouterAPIError      `json:"error"`
+}
+
+// openRouterStreamToolCallAccum accumulates one tool call's fields across
+// however many delta fragments carried pieces of it - see
+// openRouterChatCompletion.
+type openRouterStreamToolCallAccum struct {
+	id, callType, name string
+	arguments          strings.Builder
+}
+
+// openRouterChatCompletion posts one chat-completion request and returns
+// the fully assembled response, exactly the same openRouterChatResponse
+// shape callers read today (ADR 0093 §3's tolerant openRouterContent/
+// openRouterArguments decoding and the runner's cost-summing both stay
+// unchanged) - built here from OpenRouter's server-sent-events stream
+// instead of one JSON body, since req.Stream is always forced true
+// (Helmcentral's "token-by-token streaming... deliberately out of scope"
+// note in ADR 0093 §5 is what this function retires).
+//
+// onContent is called once per non-empty content fragment, in the order
+// OpenRouter sent them, so a caller (assistant_run.go's run) can forward
+// partial text to the operator as it arrives; it is never called for a
+// tool-call-only fragment or an empty content string. Pass a no-op func if
+// a caller has nothing to do with partial text.
+//
+// The body is read with a bufio.Reader over whole lines
+// (reader.ReadString('\n')), never bufio.Scanner: Scanner's default token
+// buffer caps a single line at 64KB, and one line here is one whole SSE
+// event - a tool call's arguments alone can exceed that (see
+// TestOpenRouterChatCompletion_LongArgumentsLineDecodes).
+//
+// Four failure shapes surface as a single-line error, mirroring how
+// place_name.go and wasm_plugin.go trim upstream errors for a status line
+// rather than a stack trace: a non-2xx status (body read as plain JSON, not
+// a stream - OpenRouter never streams an error response), a chunk carrying
+// its own top-level error object (some OpenRouter failure modes report
+// this way mid-stream instead of a non-2xx status or even instead of
+// closing the connection), the stream ending (EOF) with neither a `data:
+// [DONE]` line nor any finish_reason ever seen (a cut connection, not a
+// completed answer), and a completed stream that never carried a single
+// choice (nothing to reply with, as today's non-streaming zero-choices
+// check). ctx cancellation surfaces through the ordinary read-error path:
+// a *http.Client ties body reads to the request's context, so a read
+// failing because ctx was cancelled comes back wrapping ctx.Err(), and
+// errors.Is(err, context.Canceled) still holds for a caller checking it.
+func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest, onContent func(string)) (openRouterChatResponse, error) {
+	req.Stream = true
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		return openRouterChatResponse{}, fmt.Errorf("marshal openrouter request: %w", err)
@@ -338,31 +433,143 @@ func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey s
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return openRouterChatResponse{}, fmt.Errorf("read openrouter response: %w", err)
-	}
-
-	var parsed openRouterChatResponse
-	parseErr := json.Unmarshal(respBody, &parsed)
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return openRouterChatResponse{}, fmt.Errorf("read openrouter response: %w", readErr)
+		}
 		msg := strings.TrimSpace(string(respBody))
-		if parseErr == nil && parsed.Error != nil && parsed.Error.Message != "" {
+		var parsed openRouterChatResponse
+		if err := json.Unmarshal(respBody, &parsed); err == nil && parsed.Error != nil && parsed.Error.Message != "" {
 			msg = parsed.Error.Message
 		}
 		return openRouterChatResponse{}, fmt.Errorf("openrouter status %d: %s", resp.StatusCode, firstErrorLine(errors.New(msg)))
 	}
 
-	if parseErr != nil {
-		return openRouterChatResponse{}, fmt.Errorf("parse openrouter response: %w", parseErr)
+	var (
+		id, model, role string
+		content         strings.Builder
+		finishReason    string
+		usage           openRouterUsage
+		sawChoice       bool
+		sawDone         bool
+		toolOrder       []int
+		toolCalls       = map[int]*openRouterStreamToolCallAccum{}
+	)
+
+	reader := bufio.NewReader(resp.Body)
+readLoop:
+	for {
+		line, readErr := reader.ReadString('\n')
+		trimmed := strings.TrimRight(line, "\r\n")
+
+		switch {
+		case trimmed == "":
+			// The blank line separating SSE events - nothing to do.
+		case strings.HasPrefix(trimmed, ":"):
+			// A comment line, e.g. OpenRouter's ": OPENROUTER PROCESSING"
+			// keepalive - not an event.
+		case strings.HasPrefix(trimmed, "data:"):
+			payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+			if payload == "[DONE]" {
+				sawDone = true
+				break readLoop
+			}
+
+			var chunk openRouterStreamChunk
+			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+				return openRouterChatResponse{}, fmt.Errorf("parse openrouter stream chunk: %w", err)
+			}
+			if chunk.Error != nil {
+				return openRouterChatResponse{}, fmt.Errorf("openrouter error: %s", firstErrorLine(errors.New(chunk.Error.Message)))
+			}
+			if chunk.ID != "" {
+				id = chunk.ID
+			}
+			if chunk.Model != "" {
+				model = chunk.Model
+			}
+			if chunk.Usage != nil {
+				usage = *chunk.Usage
+			}
+			if len(chunk.Choices) > 0 {
+				sawChoice = true
+				choice := chunk.Choices[0]
+				if choice.Delta.Role != "" {
+					role = choice.Delta.Role
+				}
+				if fragment := string(choice.Delta.Content); fragment != "" {
+					content.WriteString(fragment)
+					onContent(fragment)
+				}
+				for _, tc := range choice.Delta.ToolCalls {
+					acc, ok := toolCalls[tc.Index]
+					if !ok {
+						acc = &openRouterStreamToolCallAccum{}
+						toolCalls[tc.Index] = acc
+						toolOrder = append(toolOrder, tc.Index)
+					}
+					if tc.ID != "" {
+						acc.id = tc.ID
+					}
+					if tc.Type != "" {
+						acc.callType = tc.Type
+					}
+					if tc.Function.Name != "" {
+						acc.name = tc.Function.Name
+					}
+					acc.arguments.WriteString(string(tc.Function.Arguments))
+				}
+				if choice.FinishReason != "" {
+					finishReason = choice.FinishReason
+				}
+			}
+		}
+
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break readLoop
+			}
+			return openRouterChatResponse{}, fmt.Errorf("read openrouter stream: %w", readErr)
+		}
 	}
-	if parsed.Error != nil {
-		return openRouterChatResponse{}, fmt.Errorf("openrouter error: %s", firstErrorLine(errors.New(parsed.Error.Message)))
+
+	if !sawDone && finishReason == "" {
+		return openRouterChatResponse{}, errors.New("openrouter stream ended early")
 	}
-	if len(parsed.Choices) == 0 {
+	if !sawChoice {
 		return openRouterChatResponse{}, fmt.Errorf("openrouter returned no choices (status %d)", resp.StatusCode)
 	}
 
-	return parsed, nil
+	if role == "" {
+		role = "assistant"
+	}
+	msg := openRouterMessage{Role: role, Content: openRouterContent(content.String())}
+	if len(toolOrder) > 0 {
+		sort.Ints(toolOrder)
+		calls := make([]openRouterToolCall, 0, len(toolOrder))
+		for _, idx := range toolOrder {
+			acc := toolCalls[idx]
+			calls = append(calls, openRouterToolCall{
+				ID:   acc.id,
+				Type: acc.callType,
+				Function: openRouterToolCallFunction{
+					Name:      acc.name,
+					Arguments: openRouterArguments(acc.arguments.String()),
+				},
+			})
+		}
+		msg.ToolCalls = calls
+	}
+
+	return openRouterChatResponse{
+		ID:    id,
+		Model: model,
+		Choices: []openRouterChoice{{
+			Index:        0,
+			Message:      msg,
+			FinishReason: finishReason,
+		}},
+		Usage: usage,
+	}, nil
 }

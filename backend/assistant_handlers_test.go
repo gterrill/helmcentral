@@ -51,22 +51,28 @@ func writeAssistantSettingsFixture(t *testing.T, enabled bool, model string) str
 
 // fakeAssistantRunner is a whole-run assistantRunnerFace test double: it
 // emits one status event (proving the handler wires emit through to
-// whatever newAssistantRunner returns) and then returns a canned reply or
-// error, with no real OpenRouter or tool-call machinery involved. gotSystem
-// records the system prompt run was actually called with, so a test can
-// assert on what postAssistantMessageHandler built for that turn (e.g. the
-// "## Spoken summary" instruction and a screen-context sentence) without
-// scripting an OpenRouter doer.
+// whatever newAssistantRunner returns), then one "delta" event per string
+// in deltas (if any - proving the handler forwards whatever run() emits,
+// token streaming included, ahead of its own "message" event), and then
+// returns a canned reply or error, with no real OpenRouter or tool-call
+// machinery involved. gotSystem records the system prompt run was actually
+// called with, so a test can assert on what postAssistantMessageHandler
+// built for that turn (e.g. the "## Spoken summary" instruction and a
+// screen-context sentence) without scripting an OpenRouter doer.
 type fakeAssistantRunner struct {
 	emit      assistantEmitter
 	reply     assistantReply
 	err       error
 	gotSystem string
+	deltas    []string
 }
 
 func (f *fakeAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 	f.gotSystem = systemStable + systemLive
 	f.emit("status", assistantStatus("Thinking…"))
+	for _, d := range f.deltas {
+		f.emit("delta", assistantDelta(d))
+	}
 	if f.err != nil {
 		return assistantReply{}, f.err
 	}
@@ -886,6 +892,79 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	}
 	if strings.Contains(runner.gotSystem, "The operator is looking at") {
 		t.Fatalf("expected no screen sentence with no screen field, got:\n%s", runner.gotSystem)
+	}
+}
+
+// TestPostAssistantMessageHandler_StreamsDeltaEventsBeforeMessage proves
+// the handler forwards whatever "delta" events the runner emits (backend
+// token streaming) onto the same SSE response, ahead of its own "message"
+// event - postAssistantMessageHandler itself has no streaming logic of its
+// own to test here, only that it does not buffer or reorder what run()
+// hands it, the same way TestPostAssistantMessageHandler_
+// SuccessStreamsSSEAndPersistsRows already checks for "status".
+func TestPostAssistantMessageHandler_StreamsDeltaEventsBeforeMessage(t *testing.T) {
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	store := withTestAssistantStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	conv, err := store.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		return &fakeAssistantRunner{
+			emit:   emit,
+			deltas: []string{"Tongue Bay ", "first, on the rising tide."},
+			reply: assistantReply{
+				Content: "Tongue Bay first, on the rising tide.",
+				Model:   "openai/gpt-4o",
+			},
+		}
+	})
+
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages",
+		`{"content":"Tongue Bay or Blue Pearl Bay first?"}`, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	body := rec.Body.String()
+	deltaMarkerIdx := strings.Index(body, "event: delta\n")
+	messageMarkerIdx := strings.Index(body, "event: message\n")
+	if deltaMarkerIdx == -1 {
+		t.Fatalf("expected at least one delta frame, got:\n%s", body)
+	}
+	if messageMarkerIdx == -1 {
+		t.Fatalf("expected a message frame, got:\n%s", body)
+	}
+	if deltaMarkerIdx >= messageMarkerIdx {
+		t.Fatalf("expected delta frames to precede the message frame, got:\n%s", body)
+	}
+
+	firstDelta := extractSSEEventData(t, body, "delta")
+	var frame struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(firstDelta), &frame); err != nil {
+		t.Fatalf("unmarshal delta frame: %v", err)
+	}
+	if frame.Text != "Tongue Bay " {
+		t.Fatalf("expected the first delta's text to round-trip, got %q", frame.Text)
+	}
+
+	data := extractSSEEventData(t, body, "message")
+	var msgFrame struct {
+		Message assistantMessage `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(data), &msgFrame); err != nil {
+		t.Fatalf("unmarshal message frame: %v", err)
+	}
+	if msgFrame.Message.Content != "Tongue Bay first, on the rising tide." {
+		t.Fatalf("expected the message event to carry the full final content, got %q", msgFrame.Message.Content)
 	}
 }
 
