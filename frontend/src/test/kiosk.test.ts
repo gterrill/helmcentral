@@ -16,18 +16,18 @@ function page(id: string, overrides: Partial<KioskEligiblePage> = {}): KioskElig
 }
 
 describe('kioskRowsThatFit', () => {
-  it('fits 7 rows into the 344px fold budget', () => {
-    expect(KIOSK_FOLD_PX).toBe(344)
-    expect(kioskRowsThatFit(KIOSK_FOLD_PX)).toBe(7)
+  it('fits 9 rows into the 352px fold budget', () => {
+    expect(KIOSK_FOLD_PX).toBe(352)
+    expect(kioskRowsThatFit(KIOSK_FOLD_PX)).toBe(9)
   })
 
-  it('fits exactly 7 rows at 320px and not yet 8 at 344px', () => {
-    expect(kioskRowsThatFit(320)).toBe(7)
-    expect(kioskRowsThatFit(344)).toBe(7)
+  it('fits exactly 8 rows at 312px and not yet 9 at 344px', () => {
+    expect(kioskRowsThatFit(312)).toBe(8)
+    expect(kioskRowsThatFit(344)).toBe(8)
   })
 
-  it('fits 8 rows once the budget reaches 368px', () => {
-    expect(kioskRowsThatFit(368)).toBe(8)
+  it('fits 9 rows once the budget reaches 352px', () => {
+    expect(kioskRowsThatFit(352)).toBe(9)
   })
 })
 

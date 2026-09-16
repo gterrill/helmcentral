@@ -56,7 +56,7 @@ export function KioskShell({ rotate, height = null, alarms, children }: KioskShe
     // The instrument skin's board padding/radius exist for a tile sitting
     // inside the app shell's own chrome. The kiosk root IS the screen, so
     // both are zeroed here rather than letting the skin eat into the
-    // already-tight 344px fold budget (lib/kiosk.ts's KIOSK_FOLD_PX).
+    // already-tight 352px fold budget (lib/kiosk.ts's KIOSK_FOLD_PX).
     ['--board-pad' as string]: '0px',
     ['--board-radius' as string]: '0px',
   }
