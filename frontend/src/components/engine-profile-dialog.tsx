@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { useEngineProfiles } from '@/hooks/use-engine-profiles'
+import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import type { GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import {
@@ -50,7 +50,7 @@ interface EngineProfileDialogProps {
 export function EngineProfileDialog({
   open, onCancel, onApply, applyLabel = 'Add tile', existingGauges,
 }: EngineProfileDialogProps) {
-  const { profiles, problems, loading } = useEngineProfiles(open)
+  const { profiles, problems, loading } = useEquipmentProfiles(open)
   const { paths } = useSignalKPaths(open)
 
   const [profileID, setProfileID] = useState('')
@@ -132,7 +132,11 @@ export function EngineProfileDialog({
                 value={profile?.id ?? ''}
                 onChange={(e) => setProfileID(e.target.value)}
               >
-                {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{p.kind ? ` (${p.kind})` : ''}
+                  </option>
+                ))}
               </select>
               {profile?.source && <FieldDescription>{profile.source}</FieldDescription>}
             </Field>

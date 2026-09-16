@@ -27,7 +27,7 @@ const bundled: EngineProfile = {
 
 function stubProfiles(profiles: EngineProfile[], problems: { file: string; error: string }[] = []) {
   vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
-    if (String(url).includes('/api/engine-profiles')) {
+    if (String(url).includes('/api/equipment-profiles') || String(url).includes('/api/engine-profiles')) {
       return Promise.resolve({ ok: true, json: async () => ({ profiles, problems }) })
     }
     return Promise.resolve({ ok: true, json: async () => ({ paths: [{ path: 'propulsion.port.oilPressure' }] }) })
@@ -50,6 +50,14 @@ describe('EngineProfileDialog', () => {
     const preview = await screen.findByTestId('engine-profile-preview')
     expect(within(preview).getByText(/Oil Press/)).toBeInTheDocument()
     expect(within(preview).getByText(/Coolant/)).toBeInTheDocument()
+  })
+
+  test('shows the equipment kind in the selector for generator profiles', async () => {
+    stubProfiles([{ ...bundled, kind: 'generator', id: 'generator-profile', name: 'Generator Profile' }])
+    renderDialog()
+
+    const option = await screen.findByRole('option', { name: /Generator Profile \(generator\)/i })
+    expect(option).toBeInTheDocument()
   })
 
   /**
