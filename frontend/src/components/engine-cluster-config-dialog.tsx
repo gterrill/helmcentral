@@ -142,7 +142,7 @@ interface EngineClusterConfigDialogProps {
 
 export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineClusterConfigDialogProps) {
   const { paths } = useSignalKPaths(widget !== null)
-  const { profiles } = useEngineProfiles(widget !== null)
+  const { profiles, error: profilesError } = useEngineProfiles(widget !== null)
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
   const [profileID, setProfileID] = useState('')
   const [instance, setInstance] = useState('')
@@ -207,6 +207,14 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
         </DialogHeader>
 
         <div className="grid gap-3">
+          {/* An empty Profile list means "none installed". A failed fetch has
+              to say so instead of borrowing that same empty look, or a broken
+              backend reads as a bare cupboard. */}
+          {profilesError && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive" role="alert">
+              Could not load engine profiles: {profilesError}
+            </p>
+          )}
           <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
             <Field>
               <FieldLabel htmlFor="cluster-profile">Profile</FieldLabel>

@@ -176,6 +176,21 @@ describe('EngineProfileDialog', () => {
     renderDialog()
     expect(await screen.findByText(/no equipment profiles/i)).toBeInTheDocument()
   })
+
+  // A failed fetch and an empty profiles directory must not read the same —
+  // one is "nothing installed", the other is "the backend is broken" — or the
+  // operator has no way to tell which one they are looking at.
+  test('surfaces a failed profile fetch as an error, not as an empty list', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: 'profiles directory unreadable' }),
+    }))
+    renderDialog()
+
+    expect(await screen.findByText(/profiles directory unreadable/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no equipment profiles/i)).not.toBeInTheDocument()
+  })
 })
 
 describe('applying to a tile that already exists', () => {

@@ -20,6 +20,39 @@ const profile = {
   ],
 }
 
+// A second profile, so a test can select something other than profiles[0]
+// and prove the UI is actually tracking that selection rather than always
+// falling back to the first entry.
+const secondProfile = {
+  schema_version: 1,
+  kind: 'generator',
+  id: 'onan-mdkdm',
+  name: 'Onan MDKDM',
+  gauges: [
+    {
+      path_suffix: 'phase.A.frequency',
+      label: 'Frequency',
+      display: 'numeric',
+      quantity: 'frequency',
+      unit: 'Hz',
+    },
+  ],
+}
+
+/**
+ * Clicks a button that the section disables while the profile list is still
+ * loading. The list reaches the form a microtask before the hook clears
+ * `loading`, so a bare click can land on a still-disabled control and do
+ * nothing at all, silently, leaving the assertion after it to fail.
+ */
+async function clickWhenEnabled(name: string) {
+  // Re-queried on every attempt, not captured once: a render between the
+  // lookup and the click swaps the DOM node, and clicking the detached one
+  // does nothing.
+  await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name }))
+}
+
 const openMock = vi.fn()
 const fetchMock = vi.fn()
 
@@ -29,7 +62,7 @@ beforeEach(() => {
   fetchMock.mockReset()
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     if (String(url).includes('/api/equipment-profiles') && (!init || init.method === undefined)) {
-      return Promise.resolve({ ok: true, json: async () => ({ profiles: [profile], problems: [] }) })
+      return Promise.resolve({ ok: true, json: async () => ({ profiles: [profile, secondProfile], problems: [] }) })
     }
 
     if (String(url).includes('/api/equipment-profiles') && init?.method === 'PUT') {
@@ -76,7 +109,7 @@ describe('EquipmentSection', () => {
     const nameInput = screen.getByLabelText('Profile name')
     expect(nameInput).toHaveAttribute('readonly')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    await clickWhenEnabled('Edit')
 
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument()
     expect(screen.getByLabelText('Profile name')).not.toHaveAttribute('readonly')
@@ -92,7 +125,7 @@ describe('EquipmentSection', () => {
     render(<EquipmentSection />)
     await screen.findByDisplayValue('Cummins QSB 6.7 550')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    await clickWhenEnabled('Edit')
     fireEvent.change(screen.getByLabelText('Profile JSON'), {
       target: { value: '{"id":' },
     })
@@ -108,7 +141,7 @@ describe('EquipmentSection', () => {
     render(<EquipmentSection />)
     await screen.findByDisplayValue('Cummins QSB 6.7 550')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    await clickWhenEnabled('Edit')
     fireEvent.change(screen.getByLabelText('Profile JSON'), {
       target: {
         value: JSON.stringify({ ...profile, name: 'Cummins QSB 6.7 600' }, null, 2),
@@ -172,11 +205,31 @@ describe('EquipmentSection', () => {
     expect((screen.getByLabelText('Profile JSON') as HTMLTextAreaElement).value).toContain('"path_suffix": "phase.A.frequency"')
   })
 
-  it('deletes the selected profile via API', async () => {
+  it('asks for confirmation before deleting, naming the profile, and does not delete on cancel', async () => {
     render(<EquipmentSection />)
     await screen.findByDisplayValue('Cummins QSB 6.7 550')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete equipment profile' }))
+    await clickWhenEnabled('Delete equipment profile')
+
+    // The DELETE must not fire until the operator confirms.
+    expect(screen.getByText('Delete "Cummins QSB 6.7 550"?')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Delete "Cummins QSB 6.7 550"?')).not.toBeInTheDocument()
+    })
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
+  })
+
+  it('deletes the selected profile via API once the confirmation dialog is accepted', async () => {
+    render(<EquipmentSection />)
+    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+
+    await clickWhenEnabled('Delete equipment profile')
+    await screen.findByText('Delete "Cummins QSB 6.7 550"?')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -265,7 +318,7 @@ describe('EquipmentSection', () => {
     render(<EquipmentSection />)
     await screen.findByDisplayValue('Cummins QSB 6.7 550')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    await clickWhenEnabled('Edit')
     fireEvent.change(screen.getByLabelText('Profile JSON'), {
       target: {
         value: JSON.stringify({ ...profile, notes: 'schema-error-profile' }, null, 2),
@@ -292,5 +345,94 @@ describe('EquipmentSection', () => {
 
     const postCalls = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
     expect(postCalls).toHaveLength(0)
+  })
+
+  // "Nothing selected" was overloaded onto selectedID === '', which also
+  // happens to match no profile and so fell back to profiles[0]. Selecting
+  // any profile other than the first, then starting a new one, is the exact
+  // repro: the fallback silently substituted the first profile back in and
+  // the fresh draft never appeared.
+  it('shows a blank new-profile draft after selecting a profile other than the first', async () => {
+    render(<EquipmentSection />)
+    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+
+    fireEvent.change(screen.getByLabelText('Profile'), { target: { value: secondProfile.id } })
+    // Scoped to the name field specifically: the <select>'s own selected
+    // option carries this same text, and matching on display value alone is
+    // ambiguous between the two.
+    await waitFor(() => expect(screen.getByLabelText('Profile name')).toHaveValue(secondProfile.name))
+
+    fireEvent.click(screen.getByRole('button', { name: 'New profile' }))
+
+    expect(screen.getByLabelText('Profile name')).toHaveValue('New engine profile')
+    expect(screen.getByLabelText('Profile name')).not.toHaveAttribute('readonly')
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument()
+  })
+
+  it('shows the uploaded profile immediately, and still shows it once the list reload lands', async () => {
+    render(<EquipmentSection />)
+    await screen.findByDisplayValue('Cummins QSB 6.7 550')
+
+    // Select a profile that is not profiles[0] first — otherwise the bug
+    // (falling back to the first profile while the upload is in flight)
+    // would be invisible, since the first profile is already on screen.
+    fireEvent.change(screen.getByLabelText('Profile'), { target: { value: secondProfile.id } })
+    await waitFor(() => expect(screen.getByLabelText('Profile name')).toHaveValue(secondProfile.name))
+
+    const uploadedProfile = {
+      schema_version: 1,
+      kind: 'generator',
+      id: 'uploaded-generator',
+      name: 'Uploaded Generator',
+      gauges: [
+        { path_suffix: 'phase.A.frequency', label: 'Hz', display: 'numeric', quantity: 'frequency', unit: 'Hz' },
+      ],
+    }
+
+    // The reload() fetch that follows a successful upload is held open here,
+    // so the test can prove the display neither waits on it nor reverts once
+    // it lands.
+    let releaseReload: () => void = () => {}
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve })
+
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/equipment-profiles') && init?.method === 'POST') {
+        return Promise.resolve({ ok: true, status: 201, json: async () => ({ profile: uploadedProfile }) })
+      }
+      if (String(url).includes('/api/equipment-profiles') && (!init || init.method === undefined)) {
+        return reloadGate.then(() => ({
+          ok: true,
+          json: async () => ({ profiles: [profile, secondProfile, uploadedProfile], problems: [] }),
+        }))
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    const uploadInput = screen.getByLabelText('Upload equipment profile file') as HTMLInputElement
+    const uploadFile = new File([JSON.stringify(uploadedProfile)], 'uploaded-generator.json', { type: 'application/json' })
+    fireEvent.change(uploadInput, { target: { files: [uploadFile] } })
+
+    await waitFor(() => expect(screen.getByLabelText('Profile name')).toHaveValue('Uploaded Generator'))
+
+    releaseReload()
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([u, i]) =>
+      String(u).includes('/api/equipment-profiles') && (!i || (i as RequestInit).method === undefined),
+    ).length).toBeGreaterThan(1))
+
+    // Still the uploaded profile once the reload lands — it must not revert.
+    expect(screen.getByLabelText('Profile name')).toHaveValue('Uploaded Generator')
+  })
+
+  it('surfaces a failed profile fetch as an error instead of an empty profile list', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/equipment-profiles') && (!init || init.method === undefined)) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'profiles directory unreadable' }) })
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ error: 'not found' }) })
+    })
+
+    render(<EquipmentSection />)
+
+    expect(await screen.findByText(/profiles directory unreadable/i)).toBeInTheDocument()
   })
 })

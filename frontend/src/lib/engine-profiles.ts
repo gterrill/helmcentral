@@ -103,21 +103,7 @@ function gaugeSettingsFor(gauge: EngineProfileGauge): Omit<GaugeWidgetConfig, 'p
 }
 
 function joinPath(prefix: string, suffix: string): string {
-  const normalized = normalizeProfileSuffix(suffix)
-  return `${prefix.trim().replace(/\.+$/, '')}.${normalized}`
-}
-
-function normalizeProfileSuffix(suffix: string): string {
-  switch (suffix) {
-    case 'outputVoltage':
-      return 'voltage'
-    case 'outputCurrent':
-      return 'current'
-    case 'outputPower':
-      return 'power'
-    default:
-      return suffix
-  }
+  return `${prefix.trim().replace(/\.+$/, '')}.${suffix}`
 }
 
 /** Builds a full gauge set for one engine instance, e.g. `propulsion.port`. */
@@ -140,8 +126,7 @@ export function gaugeIndexByProfileSuffix(
   gauges: readonly GaugeWidgetConfig[],
   suffix: string,
 ): number | undefined {
-  const normalized = normalizeProfileSuffix(suffix)
-  const index = gauges.findIndex((gauge) => matchBySuffix(gauge.path, [normalized]) === normalized)
+  const index = gauges.findIndex((gauge) => matchBySuffix(gauge.path, [suffix]) === suffix)
   return index === -1 ? undefined : index
 }
 
@@ -157,7 +142,7 @@ export function applyProfileToGauges(
 ): GaugeWidgetConfig[] {
   return gauges.map((gauge) => {
     const suffix = matchBySuffix(gauge.path, profile.gauges.map((g) => g.path_suffix))
-    const match = suffix === null ? undefined : profile.gauges.find((c) => normalizeProfileSuffix(c.path_suffix) === suffix)
+    const match = suffix === null ? undefined : profile.gauges.find((c) => c.path_suffix === suffix)
     if (!match) return gauge
     return { ...gauge, ...gaugeSettingsFor(match) }
   })
@@ -172,7 +157,7 @@ export function applyProfileToGauges(
  * silently.
  */
 function matchBySuffix(path: string, suffixes: readonly string[]): string | null {
-  for (const suffix of [...suffixes].map(normalizeProfileSuffix).sort((a, b) => b.length - a.length)) {
+  for (const suffix of [...suffixes].sort((a, b) => b.length - a.length)) {
     if (path === suffix || path.endsWith(`.${suffix}`)) return suffix
   }
   return null
@@ -216,7 +201,7 @@ export function mergeGaugeSettingsBySuffix(
   suffixes: readonly string[],
 ): MergedGauges {
   const bySuffix = new Map<string, GaugeWidgetConfig>()
-  incoming.forEach((gauge, index) => bySuffix.set(normalizeProfileSuffix(suffixes[index] ?? ''), gauge))
+  incoming.forEach((gauge, index) => bySuffix.set(suffixes[index] ?? '', gauge))
 
   const covered = new Set<string>()
   let updated = 0
@@ -230,7 +215,7 @@ export function mergeGaugeSettingsBySuffix(
     return { ...gauge, ...settingsOnly(match) }
   })
 
-  const additions = incoming.filter((_, index) => !covered.has(normalizeProfileSuffix(suffixes[index] ?? '')))
+  const additions = incoming.filter((_, index) => !covered.has(suffixes[index] ?? ''))
   return { gauges: [...merged, ...additions.map((gauge) => ({ ...gauge }))], updated, added: additions.length }
 }
 
@@ -285,7 +270,7 @@ export function instancePrefixCandidates(
   profile: EngineProfile,
   paths: readonly { path: string }[],
 ): string[] {
-  const suffixes = profile.gauges.map((g) => normalizeProfileSuffix(g.path_suffix))
+  const suffixes = profile.gauges.map((g) => g.path_suffix)
   const hits = new Map<string, number>()
 
   for (const { path } of paths) {

@@ -160,7 +160,7 @@ function NumericGauge({ text, unitLabel, zone, density, fallbackTextClass, reado
         text={text}
         unitLabel={unitLabel}
         zone={zone}
-        size={readoutSizeClass ?? (density === 'compact' ? 'text-2xl' : density === 'hero' ? 'text-4xl' : 'text-4xl')}
+        size={readoutSizeClass ?? (density === 'compact' ? 'text-2xl' : 'text-4xl')}
         fallbackTextClass={fallbackTextClass}
         unitSizeClass={unitSizeClass}
         readoutGapClass={readoutGapClass}

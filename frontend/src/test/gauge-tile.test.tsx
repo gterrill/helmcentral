@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { GaugeTile, majorStepFor } from '@/components/gauge-tile'
+import { GaugeBody, GaugeTile, majorStepFor } from '@/components/gauge-tile'
 import type { GaugeDisplay, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { severityFill } from '@/lib/severity'
 
@@ -292,5 +292,26 @@ describe('instrument ring style (ADR 0054)', () => {
     expect(majorStepFor(0, 3300)).toBe(500)
     expect(majorStepFor(0, 100)).toBe(20)
     expect(majorStepFor(0, 1)).toBe(0.2)
+  })
+})
+
+// A numeric gauge has no dial or bar taking up room, so it was already at its
+// largest readout size at 'full' density before 'hero' existed. The fallback
+// ternary once repeated that same 'text-4xl' as a separate 'hero' arm, which
+// no branch of it could ever tell apart from 'full' — collapsed here to the
+// two sizes that are actually distinct.
+describe('numeric readout size without an explicit readoutSizeClass', () => {
+  const numeric = config({ display: 'numeric' })
+
+  test('hero and full density render the same, largest size', () => {
+    const { container: full } = render(<GaugeBody config={numeric} value={241325} density="full" />)
+    const { container: hero } = render(<GaugeBody config={numeric} value={241325} density="hero" />)
+    expect(full.querySelector('.font-display')).toHaveClass('text-4xl')
+    expect(hero.querySelector('.font-display')).toHaveClass('text-4xl')
+  })
+
+  test('compact density renders smaller', () => {
+    const { container } = render(<GaugeBody config={numeric} value={241325} density="compact" />)
+    expect(container.querySelector('.font-display')).toHaveClass('text-2xl')
   })
 })

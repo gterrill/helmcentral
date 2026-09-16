@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Upload, Download, PencilLine, Trash2, Plus } from 'lucide-react'
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -100,48 +110,65 @@ function toEditableProfile(profile: EngineProfile) {
 }
 
 export function EquipmentSection() {
-  const { profiles, loading, reload } = useEquipmentProfiles(true)
+  const { profiles, loading, error: loadError, reload } = useEquipmentProfiles(true)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [profile, setProfile] = useState(defaultProfile)
-  const [selectedID, setSelectedID] = useState('')
+  // null is a real state, not a sentinel string: "no profile is selected"
+  // (the initial load, or a fresh "New profile" draft). Using '' for that
+  // used to mean an ordinary string-keyed lookup missed, which fell through
+  // to a "pick something" fallback below — exactly when a draft or an
+  // in-flight upload most needed selectedID to mean nothing at all.
+  const [selectedID, setSelectedID] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<EquipmentProfileValidationError[]>([])
 
+  // No fallback here: an id that does not (yet) match any loaded profile
+  // means "not found," never "assume the first one." A just-uploaded id is
+  // exactly that case until reload() lands, and substituting profiles[0] in
+  // the meantime is the bug this replaces.
   const selectedProfile = useMemo(
-    () => profiles.find((item) => item.id === selectedID) ?? profiles[0],
+    () => (selectedID === null ? undefined : profiles.find((item) => item.id === selectedID)),
     [profiles, selectedID],
   )
 
+  // The one place "pick something by default" belongs: nothing has been
+  // selected yet and the operator isn't mid-draft. Runs once profiles load,
+  // not on every list change, so it can't fight an explicit selection.
   useEffect(() => {
-    if (!selectedProfile) {
-      setSelectedID('')
-      setProfile(defaultProfile)
-      setIsCreating(false)
-      setIsEditing(false)
-      return
-    }
+    if (isCreating) return
+    if (selectedID !== null) return
+    if (profiles.length === 0) return
+    setSelectedID(profiles[0].id)
+  }, [isCreating, selectedID, profiles])
 
-    setSelectedID(selectedProfile.id)
+  // Loads the selected profile's data into the editable draft. Guarded on
+  // isCreating so a fresh "New profile" draft (selectedID intentionally
+  // null) is never overwritten, and on `selectedProfile` being found so an
+  // id that hasn't reached `profiles` yet (mid-upload) keeps whatever the
+  // handler already put in `profile` instead of being reset out from under it.
+  useEffect(() => {
+    if (isCreating) return
+    if (!selectedProfile) return
     setProfile(toEditableProfile(selectedProfile))
-    setIsCreating(false)
     setIsEditing(false)
     setError(null)
     setJsonError(null)
     setValidationErrors([])
-  }, [selectedProfile?.id])
+  }, [selectedProfile?.id, isCreating])
 
   const handleEdit = () => setIsEditing(true)
 
   const handleNew = () => {
     setIsCreating(true)
     setIsEditing(true)
-    setSelectedID('')
+    setSelectedID(null)
     setError(null)
     setJsonError(null)
     setValidationErrors([])
@@ -237,7 +264,7 @@ export function EquipmentSection() {
         throw new Error(payload?.error ?? 'Unable to delete profile.')
       }
 
-      setSelectedID('')
+      setSelectedID(null)
       setProfile(defaultProfile)
       setIsEditing(false)
       setIsCreating(false)
@@ -247,6 +274,19 @@ export function EquipmentSection() {
     } finally {
       setDeleting(false)
     }
+  }
+
+  // The DELETE is a real os.Remove on the backend — one click and the file
+  // is gone. This just opens the confirmation; handleDelete above still does
+  // the actual fetch, and only runs once the dialog is accepted.
+  const handleDeleteClick = () => {
+    if (!profile.id || isCreating) return
+    setPendingDelete({ id: profile.id, name: profile.name })
+  }
+
+  const handleConfirmDelete = () => {
+    setPendingDelete(null)
+    void handleDelete()
   }
 
   const handleSave = async () => {
@@ -342,6 +382,15 @@ export function EquipmentSection() {
         <FieldLegend variant="label">Equipment profiles</FieldLegend>
 
         <div className="mt-3 space-y-4">
+          {loadError && (
+            // A failed fetch and an empty profiles directory must not look
+            // the same: one means "nothing installed," the other means the
+            // backend is broken.
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive" role="alert">
+              Could not load equipment profiles: {loadError}
+            </p>
+          )}
+
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" className="gap-2" onClick={handleNew}>
               <Plus className="h-4 w-4" />
@@ -367,7 +416,7 @@ export function EquipmentSection() {
               <select
                 id="equipment-profile-select"
                 className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={selectedID}
+                value={selectedID ?? ''}
                 onChange={(event) => setSelectedID(event.target.value)}
                 disabled={isEditing || saving || deleting}
               >
@@ -444,7 +493,7 @@ export function EquipmentSection() {
                   size="sm"
                   className="gap-2 text-destructive"
                   aria-label="Delete equipment profile"
-                  onClick={() => { void handleDelete() }}
+                  onClick={handleDeleteClick}
                   disabled={isCreating || deleting || loading || profiles.length === 0}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -511,6 +560,31 @@ export function EquipmentSection() {
           </Field>
         </div>
       </FieldSet>
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{pendingDelete?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the profile file from disk. It can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleConfirmDelete}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

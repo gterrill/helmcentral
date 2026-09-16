@@ -34,27 +34,6 @@ const profile: EngineProfile = {
 }
 
 describe('profileToGauges', () => {
-  test('normalizes legacy alternator output suffixes to the live SignalK names', () => {
-    const alternator: EngineProfile = {
-      id: 'alt',
-      name: 'Legacy alternator',
-      kind: 'alternator',
-      gauges: [
-        { path_suffix: 'outputVoltage', label: 'Output Volts', display: 'numeric', quantity: 'potential', unit: 'V' },
-        { path_suffix: 'outputCurrent', label: 'Output Amps', display: 'numeric', quantity: 'current', unit: 'A' },
-        { path_suffix: 'outputPower', label: 'Output Power', display: 'numeric', quantity: 'power', unit: 'W' },
-        { path_suffix: 'temperature', label: 'Temp', display: 'numeric', quantity: 'temperature', unit: 'C' },
-      ],
-    }
-
-    expect(profileToGauges(alternator, 'electrical.alternator.0').map((g) => g.path)).toEqual([
-      'electrical.alternator.0.voltage',
-      'electrical.alternator.0.current',
-      'electrical.alternator.0.power',
-      'electrical.alternator.0.temperature',
-    ])
-  })
-
   test('composes the full path from the instance prefix and the suffix', () => {
     const gauges = profileToGauges(profile, 'propulsion.port')
     expect(gauges.map((g) => g.path)).toEqual([
@@ -126,12 +105,12 @@ describe('profile hero gauge', () => {
     expect(profileHeroGaugeIndex(profile)).toBeUndefined()
   })
 
-  test('finds a gauge index by profile suffix using normalized names', () => {
+  test('finds a gauge index by profile suffix', () => {
     const gauges = [
       { path: 'electrical.alternator.0.voltage', label: 'V', display: 'numeric' as const, quantity: 'potential', unit: 'V' },
       { path: 'electrical.alternator.0.temperature', label: 'Temp', display: 'numeric' as const, quantity: 'temperature', unit: 'C' },
     ]
-    expect(gaugeIndexByProfileSuffix(gauges, 'outputVoltage')).toBe(0)
+    expect(gaugeIndexByProfileSuffix(gauges, 'voltage')).toBe(0)
     expect(gaugeIndexByProfileSuffix(gauges, 'temperature')).toBe(1)
   })
 })

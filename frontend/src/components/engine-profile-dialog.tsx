@@ -51,7 +51,7 @@ interface EngineProfileDialogProps {
 export function EngineProfileDialog({
   open, onCancel, onApply, applyLabel = 'Add tile', existingGauges,
 }: EngineProfileDialogProps) {
-  const { profiles, problems, loading } = useEquipmentProfiles(open)
+  const { profiles, problems, loading, error } = useEquipmentProfiles(open)
   const { paths } = useSignalKPaths(open)
 
   const [profileID, setProfileID] = useState('')
@@ -119,7 +119,14 @@ export function EngineProfileDialog({
           </div>
         )}
 
-        {!loading && profiles.length === 0 ? (
+        {error ? (
+          // A failed fetch and an empty profiles directory must not look the
+          // same — one means "nothing installed", the other means the
+          // backend is broken, and conflating them hides a real failure.
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive" role="alert">
+            Could not load equipment profiles: {error}
+          </p>
+        ) : !loading && profiles.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No equipment profiles installed. Drop a .json profile into plugins/engine-profiles and restart.
           </p>
