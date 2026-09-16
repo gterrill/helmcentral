@@ -2,12 +2,13 @@
 
 ## Status
 
-Accepted. Extends ADR 0049 (gauge groups and the duplicate affordance, whose
-find-and-replace retarget row this ADR restores), ADR 0050 (gauge zones as the
-alarm source, whose unit conversion is what made the failure dangerous rather
-than merely untidy), ADR 0053 (engine profiles, generalised here to equipment
-profiles) and ADR 0054, which corrected ADR 0053's bundled profile for the same
-class of fault this ADR corrects again.
+Accepted. Extends ADR 0049 (gauge groups and the duplicate affordance, restored
+here for every widget kind), ADR 0050 (gauge zones as the alarm source, whose
+unit conversion is what made the failure dangerous rather than merely untidy)
+and ADR 0053 (engine profiles, generalised here to equipment profiles). Reverses
+ADR 0053's rule that a bundled profile carries no alarm thresholds, replacing it
+with a requirement that a bundled threshold cite its source. References ADR 0054,
+which corrected ADR 0053's bundled profile for a neighbouring fault.
 
 ## Context
 
@@ -28,7 +29,10 @@ threshold of 100 through the identity unit and compared it against a path
 reporting 329.15 Kelvin. The alarm raised at 56 C and could not clear, because
 the reading would have had to fall to 97 K.
 
-Three changes had to line up for that to happen, and all three were ours:
+One change caused that, and it was ours. The threshold itself was never the
+problem: the Port Alternator tile carries the same 100 C warn band, sat at 58 C
+while Starboard was alarming at 57 C, and raised nothing. The difference was
+entirely the declared quantity.
 
 The gauge path picker overwrote a gauge's quantity and unit on every repick,
 inferring them from SignalK's `meta.units`. Almost nothing on this vessel
@@ -37,15 +41,14 @@ declares `meta.units` (eight paths out of 832), so the inference fell through to
 path declares nothing, leave what is there" from "the path declares a raw
 number".
 
-The find-and-replace retarget row was removed from the gauge group dialog in
-favour of a Duplicate button. Retargeting a copied group then meant repicking
-every path by hand, which ran the picker once per member and wiped the units
-four times over.
+What made it easy to hit was that the find-and-replace retarget row had been
+removed from the gauge group dialog in favour of a Duplicate button. Retargeting
+a copied group then meant repicking every path by hand, which ran the picker
+once per member and wiped the units four times over.
 
-The bundled alternator profile shipped live warn thresholds where the rule is
-that a bundled profile ships empty slots. Published manufacturer data gives
-advisory ranges, not factory setpoints, and the profile's own source note said
-as much while shipping a threshold of 100 anyway.
+Separately, and wrongly, the bundled alternator profile's thresholds were
+blamed for the alarm and nulled. They are the Prestolite specification's own
+figures and they were correct all along.
 
 The same commit range also removed the per-widget duplicate button from the grid
 chrome for every widget kind, which cost clusters, standalone gauges, embeds,
@@ -72,17 +75,25 @@ reached on every path, including directly from tests; the schema is only reached
 through the three entry points that all go on to call it. One rule in two places
 drifts, and the copy that is always reached is the one worth keeping.
 
-### A bundled profile ships slots, never setpoints
+### A bundled threshold has to say where it came from
 
-Every zone in a bundled profile carries a `null` threshold. The band, its
-direction, its severity and its cited source all ship; the number does not. The
-operator fills it from their own service manuals.
+ADR 0053 ruled that bundled profiles ship `null` alarm thresholds, enforced by a
+test. Its reasoning was specific and sound: Cummins does not publish QSB 6.7
+setpoints, so any number in that file would have been a guess off a forum, and
+under ADR 0050 a guess in a bundled file becomes a live alarm on someone's boat.
 
-This is not a style preference. Under ADR 0050 a threshold in a bundled file is
-a live alarm on someone's boat, set from a datasheet by someone who has never
-seen the installation. `TestBundledProfilesShipNoAlarmThresholds` enforces it,
-and it caught this violation. The test was committed failing, which is the only
-reason the rule needed restating here.
+That reasoning was then generalised into a ban on all bundled thresholds, which
+is broader than the argument supports. The Prestolite Electric / Leece-Neville
+specification does publish figures for the Cummins 5285862, and refusing to ship
+them helps nobody. A cited setpoint and a guessed one are different things, and
+the old rule could not tell them apart because it only looked at whether a
+number was present.
+
+The rule is now about provenance. A warn or alarm zone may carry a threshold
+only if the zone cites its `source`. An uncited threshold still fails the test,
+and a `null` threshold is still a legitimate slot for the case ADR 0053
+described, which is why the QSB and Onan profiles are unchanged. This supersedes
+ADR 0053's blanket rule; the rest of that ADR stands.
 
 ### Picking a path does not overwrite units
 
@@ -94,19 +105,33 @@ that map to a known quantity, and otherwise leaves the operator's choice alone.
 A fresh gauge still lands on `raw` when it picks a unit-less path, because that
 is what it already was.
 
-### The retarget row comes back, and duplicate reaches every kind again
-
-The find-and-replace row returns to the gauge group dialog. It is the only way
-to move a copied group onto another instance without running the path picker,
-and after this ADR it is no longer the only safe one, but it is still the right
-tool: one edit instead of one per member.
+### Duplicate reaches every kind again, and stays Save As
 
 The per-widget duplicate button returns to the grid chrome for every
-multi-instance kind, as ADR 0049 had it. The gauge group dialog keeps its own
-Duplicate button as well, since it is more discoverable while configuring.
-Duplicating a group now persists an unsaved draft alongside its copy, saves
-dialog edits back to the original rather than discarding them, and offsets the
-copy so it does not land underneath its source.
+multi-instance kind, as ADR 0049 had it. Clusters, standalone gauges, embeds,
+Nearby maps and lamp strips had lost it with no decision recorded, and the
+replacement button reached only gauge groups.
+
+Duplicate applies the dialog's edits to the copy and leaves the original alone.
+That is Save As, it is deliberate, and it is how the operator retargets a tile:
+open the group, change what differs, press Duplicate instead of Save. The copy
+is now placed below everything else rather than inheriting the source's
+coordinates, which was the only part of that flow that needed fixing.
+
+The find-and-replace retarget row stays removed. It belongs beside the Duplicate
+button and revealed only once Duplicate is pressed, and no layout was found that
+did not make the dialog resize as the preview grew a line per matching path.
+`rewriteGaugePaths` is kept with its tests and no caller, against that layout
+being solved later.
+
+### Emphasis is declared, not spelled
+
+A gauge group sized its members by testing the path and label against
+`/temperature/` and rendering a match a step larger. Size then depended on
+spelling: renaming a label from "Temp" to "Coolant" shrank the gauge, and
+`exhaustTemperature` stayed small beside a sibling that happened to match.
+`hero` already says which member should stand out, so it is the only thing that
+changes a member's size now.
 
 ### Nothing selected is a state, not an empty string
 
@@ -134,9 +159,16 @@ Both hooks now carry the error, and both dialogs that consume them show it.
 
 ## What was rejected
 
-**Relaxing the bundled-threshold test.** It was the guard that caught the fault.
-A test that fails only when something is wrong and gets edited when it does is
-not a test.
+**Deleting the bundled-threshold test.** Loosening it to check provenance rather
+than absence is not the same as removing it. An uncited number in a bundled file
+is still exactly the failure ADR 0053 was written to prevent, and the test still
+catches it.
+
+**Blaming the threshold for the alarm.** This was the first diagnosis and it was
+wrong, which is worth recording because it nearly cost a correct profile its
+figures. The Port tile carried the identical band and stayed quiet at a higher
+temperature. Whenever a threshold looks absurd against a reading, check the
+declared quantity before touching the number.
 
 **Keeping the old `raw` fallback behind a flag.** The picker had exactly one
 correct behaviour here and the old one had no defensible use: an operator who
@@ -149,14 +181,27 @@ copies of one rule.
 kinds made the affordance wrong for them, and the removal was never written
 down as a decision.
 
+**Making Duplicate save the original too.** Briefly done and reverted. Duplicate
+is Save As: the whole point is to edit the fields and take the result somewhere
+new without disturbing what you opened.
+
+**Restoring the retarget row where it used to sit.** It works, and it was
+rejected on layout grounds rather than on function. Putting it back above the
+gauge list reintroduces the resizing dialog that got it removed.
+
 ## Consequences
 
 A gauge group copied and retargeted keeps its units, so a zone authored in
 Celsius stays a Celsius zone and the alarm it derives compares like with like.
 
-Bundled profiles are now inert until an operator fills them in. A freshly
-applied profile raises nothing, which is a deliberate trade: a profile that
-alarms out of the box would be alarming on numbers nobody on the vessel chose.
+A bundled profile can now arrive with working alarms where the manufacturer
+publishes the figures, as the alternator does, and still ships empty slots where
+they do not, as both Cummins engines do. The operator reads the `source` beside
+each number to know which they have.
+
+Retargeting a duplicated tile means repicking each path until the layout problem
+with the find-and-replace row is solved. That is safe now, since the picker
+leaves an existing quantity alone, but it is still one edit per member.
 
 The `outputVoltage`, `outputCurrent` and `outputPower` suffix aliases added
 alongside the alternator profile are removed. No shipped profile used them and

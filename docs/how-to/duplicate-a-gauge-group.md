@@ -2,68 +2,59 @@
 
 Most machinery on a boat comes in pairs. Once you have a tile reading the port
 engine, the starboard one wants the same gauges with the same scales and the
-same bands, pointed at a different instance. This copies the tile and moves
-every path across in one edit.
+same bands, pointed at a different instance.
+
+Duplicate works the way Save As does. You open the tile you already have, change
+what differs, and press **Duplicate** instead of **Save**. Your edits go to the
+new tile and the one you opened is left exactly as it was.
 
 The worked example is a Port Alternator tile becoming a Starboard Alternator
-tile. The same steps work for engines, gensets, or anything else where the
-paths differ by one word.
+tile. The same steps suit engines, gensets, or anything else where the paths
+differ by one word or one digit.
 
 1. Turn on **Layout** mode.
-2. On the tile you want to copy, choose the **Configure** control (the sliders
-   icon in the tile header) to open the Gauge Group dialog. The copy button on
-   the tile's corner also works, but it duplicates immediately without giving
-   you a chance to retarget first, leaving you to edit every path by hand
-   afterwards.
+2. On the tile you want to copy, choose the **Configure** control, the sliders
+   icon in the tile header.
 3. Change **Title** to `Starboard Alternator`.
-4. In the **Replace** field type `port`, and in **With** type `starboard`. Use
-   whatever actually differs between your two paths: for alternators it is
-   usually a digit, so `alternator.0` and `alternator.1`.
-5. Read the preview under the two fields. It tells you how many of the tile's
-   paths will change and shows each one before and after. If it says **No
-   paths match**, your search text is not in any path and nothing will happen.
-   Fix it before going on.
-6. Choose **Apply**. The paths change; the labels do not. A wrong bulk label
-   rewrite is silent and easy to miss, so those stay yours to edit.
-7. Choose **Duplicate**. The new tile is added below everything else on the
-   page, and the original keeps the configuration it had before you opened the
-   dialog.
+4. For each gauge in the list, change its **Path** to the other instance. For
+   alternators that is usually one digit, `electrical.alternator.0.current`
+   becoming `electrical.alternator.1.current`.
+5. Choose **Duplicate**. The new tile is added below everything else on the
+   page. The Port tile keeps the title and paths it had when you opened it.
 
-The copy carries the scales, the bands and the units across. Check the new tile
-reads live values before you leave Layout mode. A gauge showing dashes means
-the path is not being published, which usually means a typo in step 4 or an
-instance that is genuinely not on the bus.
+Nothing else needs touching. Labels, scales, decimals and bands all come across,
+so a warn band at 100 °C on the port alternator is a warn band at 100 °C on the
+starboard one.
 
-## Why not just repick the paths
+Check the new tile reads live values before you leave Layout mode. A gauge
+showing dashes means its path is not being published, which is usually a typo in
+step 4 or an instance that genuinely is not on the bus.
 
-You can open each gauge and pick its path from the list instead, and for a
-one-gauge tile that is quicker. For anything larger, the find and replace row
-is one edit instead of one per member, and it is harder to get half-right.
+## If you only want a second copy, unchanged
 
-Picking a path also preselects the gauge's quantity and unit from whatever
-SignalK publishes as that path's metadata. On this boat only a handful of paths
-declare any, so for most of them the picker leaves your existing choice alone,
-which is what you want when you are retargeting a tile that was already set up
-correctly.
+Skip the dialog. Every tile that can exist more than once per page has a copy
+button on its corner in Layout mode: gauges, gauge groups, engine clusters,
+embeds, Nearby maps and lamp strips. That duplicates immediately, paths and all,
+which is what you want when the second tile belongs on another page rather than
+on another engine.
+
+Built-in tiles are one per page and have no copy button.
 
 ## Check the units survived
 
-This matters more than it sounds. A gauge's **Quantity** and **Unit** decide
-how its bands are converted before the alarm engine sees them. A band of 100
-means 100 °C on a gauge declared as a temperature in Celsius, and it means the
-bare number 100 on a gauge declared as a raw value. Temperature arrives on the
-bus in Kelvin, so a raw gauge will compare 100 against a reading of 329 and
-raise a warning at 56 °C that can never clear.
+This matters more than it sounds. A gauge's **Quantity** and **Unit** decide how
+its bands are converted before the alarm engine sees them. A band of 100 means
+100 °C on a gauge declared as a temperature in Celsius, and it means the bare
+number 100 on a gauge declared as **Raw**. Temperature arrives on the bus in
+Kelvin, so a raw gauge compares 100 against a reading of 329 and raises a warning
+at 56 °C that can never clear.
 
-After duplicating, open one gauge on the new tile and confirm **Quantity** and
-**Unit** read what you expect rather than **Raw**. If a tile is raising a
-warning whose numbers look far too large, that is almost always what happened.
+Changing a path only changes the quantity when the new path publishes units of
+its own, which few paths on this boat do. So a tile that was set up correctly
+stays correct through a retarget. It is still worth opening one gauge on the new
+tile and confirming **Quantity** and **Unit** read what you expect rather than
+**Raw**.
 
-## Duplicating other tiles
-
-Every tile that can exist more than once per page has a copy button on its
-corner in Layout mode: gauges, gauge groups, engine clusters, embeds, Nearby
-maps and lamp strips. Built-in tiles are one per page and have no copy button.
-
-Only gauge groups get the find and replace row, because only they hold a set of
-paths that share a prefix.
+If a tile raises a warning whose numbers look far too large for the units on the
+label, that is almost always what has happened. Fix the quantity rather than the
+threshold.

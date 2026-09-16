@@ -25,25 +25,35 @@ module would add a build step to declarative data that runs no code.
 
 ## What ships, and what does not
 
-**No bundled profile carries a single alarm threshold.** All three ship empty
-slots.
+A bundled profile may carry a working alarm threshold, but only where the
+manufacturer publishes the figure and the profile says so. Every threshold in a
+bundled file cites its `source`, and a test refuses one that does not.
 
-This is a hard rule, not a gap someone forgot to fill. A threshold in a bundled
-file becomes a live alarm on your boat, set from a datasheet by someone who has
-never seen your installation. Published material gives general operating
-guidance, not verified setpoints: configuring a low oil pressure alarm at 25 psi
-because a forum says cruise pressure runs 40 to 80 risks raising alarms your
-engine ECU does not, which teaches you to ignore the alarm list.
+That split is deliberate, and the three bundled profiles land on both sides of
+it:
 
-What a bundled profile does give you:
+| Profile | Thresholds |
+| --- | --- |
+| `cummins-5285862` (alternator) | Shipped, from the Prestolite Electric / Leece-Neville specification |
+| `cummins-qsb67-550` (engine) | Empty slots |
+| `cummins-onan-13-5kw-60hz` (generator) | Empty slots |
 
-- **Green advisory bands** where a published source exists, each citing its
-  source. These colour the gauge and raise nothing.
-- **Empty alarm slots** for everything else, each noting what to look up.
+The two Cummins engines ship nothing because Cummins does not publish QSB 6.7
+setpoints. They are in the operator's manual and in QuickServe. Publicly
+available material gives general operating guidance instead, and a low oil
+pressure alarm set at 25 psi because a forum says cruise pressure runs 40 to 80
+would raise alarms your ECU does not, which teaches you to ignore the alarm
+list. A number nobody can source is worse than no number.
 
-Filling in the values from your manual completes the file for real use and for
-sharing. A test enforces the rule, so a bundled profile that ships a live
-threshold fails the build.
+Where a figure is published, withholding it helps nobody, so the alternator
+ships its charging window, its sustained output limit and its thermal limit.
+
+Every bundled profile also carries **green advisory bands** where a published
+source exists, each citing it. Those colour the gauge and raise nothing.
+
+Check any shipped threshold against your own installation before relying on it.
+A specification describes the machine, not the way yours is mounted, loaded or
+cooled.
 
 Applying a profile to a tile that already exists configures the gauges it finds
 and appends the ones it does not, which completes a partly built tile. The
@@ -148,6 +158,11 @@ raise an alarm that can never clear.
 profile does not. It shows in the apply preview as "not set" so you know to
 look it up, and it is left out of the saved configuration rather than being
 filled with a default nobody chose.
+
+**A threshold that is set must cite its `source`.** This is enforced for the
+bundled profiles by a test, not for your own files. It is worth following in
+yours anyway: in a year you will want to know whether 100 came from the
+specification or from an afternoon's guess.
 
 **Service items with no interval are slots too.** They name a job the machine
 needs without inventing an interval for it.
