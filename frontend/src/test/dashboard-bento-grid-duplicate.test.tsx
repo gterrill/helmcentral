@@ -1,6 +1,9 @@
 /**
- * The layout chrome no longer offers copy buttons. Duplicate is a modal action
- * on the tile itself, so the grid stays focused on arrangement and removal.
+ * The duplicate affordance (ADR 0049). Builtin widgets are one-per-page, so
+ * only the token-id kinds — gauge, gauge group, embed — get the button.
+ *
+ * react-grid-layout has no real DOM layout engine in jsdom, so the library is
+ * mocked to render its children, matching dashboard-bento-grid-embed-layout.
  */
 import type { ComponentType, ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
@@ -46,15 +49,27 @@ beforeEach(() => {
 })
 
 describe('duplicate affordance', () => {
-  it('keeps duplicate off the layout chrome entirely', () => {
+  it('offers duplicate for every multi-instance widget', () => {
     renderGrid(true)
-    expect(screen.queryByLabelText(/Duplicate/i)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /duplicate/i })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Duplicate Depth widget')).toBeInTheDocument()
+    expect(screen.getByLabelText('Duplicate Grafana widget')).toBeInTheDocument()
+    expect(screen.getByLabelText('Duplicate Port widget')).toBeInTheDocument()
   })
 
-  it('is absent outside layout mode as well', () => {
+  it('offers none for a builtin, which is one per page', () => {
+    renderGrid(true)
+    expect(screen.queryByLabelText('Duplicate Apparent Wind widget')).not.toBeInTheDocument()
+    expect(screen.getAllByLabelText(/^Duplicate /)).toHaveLength(3)
+  })
+
+  it('reports the id that was duplicated', () => {
+    const onDuplicateWidget = renderGrid(true)
+    screen.getByLabelText('Duplicate Port widget').click()
+    expect(onDuplicateWidget).toHaveBeenCalledWith('gauge-group:m1x8abcd')
+  })
+
+  it('is layout-mode chrome, absent otherwise', () => {
     renderGrid(false)
-    expect(screen.queryByLabelText(/Duplicate/i)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /duplicate/i })).not.toBeInTheDocument()
+    expect(screen.queryAllByLabelText(/^Duplicate /)).toHaveLength(0)
   })
 })

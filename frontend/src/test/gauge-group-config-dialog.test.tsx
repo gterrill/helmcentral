@@ -76,7 +76,53 @@ describe('GaugeGroupConfigDialog', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
-  test('duplicates the current config and closes without any replace controls', () => {
+  describe('replace in all paths', () => {
+    function typeReplacement(from: string, to: string) {
+      fireEvent.change(screen.getByLabelText('Replace'), { target: { value: from } })
+      fireEvent.change(screen.getByLabelText('With'), { target: { value: to } })
+    }
+
+    test('previews the count before anything is applied', () => {
+      render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={vi.fn()} />)
+      typeReplacement('port', 'starboard')
+
+      const preview = screen.getByTestId('gauge-group-replace-preview')
+      expect(preview).toHaveTextContent('2 of 3 paths will change')
+      expect(within(preview).getByText(/propulsion\.starboard\.revolutions/)).toBeInTheDocument()
+      // Nothing has actually changed yet.
+      expect(pathInputs()[0].value).toBe('propulsion.port.revolutions')
+    })
+
+    test('says so when the search text matches nothing', () => {
+      render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={vi.fn()} />)
+      typeReplacement('nothing-matches', 'x')
+      expect(screen.getByTestId('gauge-group-replace-preview')).toHaveTextContent('No paths match')
+      expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+    })
+
+    test('rewrites every matching path and leaves labels alone', () => {
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={onSave} />)
+
+      typeReplacement('port', 'starboard')
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+      expect(pathInputs().map((i) => i.value)).toEqual([
+        'propulsion.starboard.revolutions',
+        'propulsion.starboard.oilPressure',
+        'environment.depth.belowTransducer',
+      ])
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(onSave).toHaveBeenCalledOnce()
+      const saved = onSave.mock.calls[0][0] as GaugeGroupWidgetConfig
+      expect(saved.gauges[0].path).toBe('propulsion.starboard.revolutions')
+      expect(saved.gauges[0].label).toBe('RPM')
+      expect(saved.gauges[1].label).toBe('Oil Press')
+    })
+  })
+
+  test('duplicates the current config and closes', () => {
     const onDuplicate = vi.fn()
     render(
       <GaugeGroupConfigDialog
@@ -86,9 +132,6 @@ describe('GaugeGroupConfigDialog', () => {
         onDuplicate={onDuplicate}
       />,
     )
-
-    expect(screen.queryByLabelText('Replace')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('With')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /duplicate this tile/i }))
 

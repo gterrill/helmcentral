@@ -3,7 +3,7 @@ import GridLayout, { WidthProvider, type LayoutItem } from 'react-grid-layout/le
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import '@/styles/dashboard-bento-grid.css'
-import { GripVertical, X } from 'lucide-react'
+import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
@@ -23,7 +23,7 @@ export const GRID_MARGIN = 16
  * 1920x360 strip is one tile-row tall at the ordinary 48px step (32px row +
  * 16px margin), which gives a stacked pair of tiles seven rows to split
  * between them and no split that feeds both. At 8px the same strip holds
- * eight rows, which is what lets Forecast sit above Sea State without either
+ * nine rows, which is what lets Forecast sit above Sea State without either
  * losing its content. Only pages flagged for the wall take it (App.tsx), so
  * the helm and nav boards keep the step they were authored against.
  */
@@ -277,6 +277,19 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
           >
             <X className="h-3.5 w-3.5" />
           </button>
+          {isMultiInstanceWidgetId(heroWidget.id) && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDuplicateWidget(heroWidget.id)
+              }}
+              className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+              aria-label={`Duplicate ${widgetDisplayName(heroWidget)} widget`}
+            >
+              <Copy className="h-3 w-3" />
+            </button>
+          )}
         </>
       )}
     </div>
@@ -368,6 +381,19 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
+                    {isMultiInstanceWidgetId(w.id) && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onDuplicateWidget(w.id)
+                        }}
+                        className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+                        aria-label={`Duplicate ${widgetDisplayName(w)} widget`}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    )}
                     <div
                       className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
                       role="button"
