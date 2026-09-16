@@ -160,6 +160,11 @@ func validateEngineProfile(p engineProfile) error {
 		if gauge.Hero {
 			heroCount++
 		}
+		// The phase./total. prefix rule lives here only, not in the JSON schema
+		// too. This function is reached on every path a profile can enter the
+		// system — file load, POST, PUT — and directly from tests, whereas the
+		// schema is only ever reached through those same three entry points on
+		// their way to calling this. Two copies of one rule drift; keep one.
 		if p.Kind == profileKindGenerator && !strings.HasPrefix(gauge.PathSuffix, "phase.") && !strings.HasPrefix(gauge.PathSuffix, "total.") {
 			return fmt.Errorf("gauge %q: path_suffix must start with phase. or total. for generator profiles", gauge.PathSuffix)
 		}
@@ -283,7 +288,7 @@ func loadEngineProfiles() {
 				}
 				parts = append(parts, fmt.Sprintf("%s: %s", issue.Path, issue.Message))
 			}
-			fail(fmt.Errorf(strings.Join(parts, "; ")))
+			fail(errors.New(strings.Join(parts, "; ")))
 			continue
 		}
 

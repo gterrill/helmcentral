@@ -20,13 +20,13 @@
       "zones": [
         {
           "direction": "below",
-          "threshold": 24,
+          "threshold": null,
           "state": "warn",
           "source": "Reference operating band for a 24V charging system"
         },
         {
           "direction": "above",
-          "threshold": 30,
+          "threshold": null,
           "state": "warn",
           "source": "Reference upper limit for a 24V system"
         }
@@ -44,7 +44,7 @@
       "zones": [
         {
           "direction": "above",
-          "threshold": 320,
+          "threshold": null,
           "state": "warn",
           "source": "High-amperage output reference band for a heavy-duty 24V alternator"
         }
@@ -73,7 +73,7 @@
       "zones": [
         {
           "direction": "above",
-          "threshold": 100,
+          "threshold": null,
           "state": "warn",
           "source": "Thermal warning band for a hard-working OEM alternator"
         }

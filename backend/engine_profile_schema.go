@@ -52,15 +52,14 @@ func canonicalizeProfileDocument(raw []byte) ([]byte, error) {
 	return json.Marshal(doc)
 }
 
-func validateProfileDocument(raw []byte) ([]profileValidationError, error) {
+// validateProfileDocument checks a profile document against the schema. The
+// caller must have already run it through canonicalizeProfileDocument — this
+// validates the document it is given rather than re-deriving one, so every
+// caller canonicalizes exactly once at the edge.
+func validateProfileDocument(canonical []byte) ([]profileValidationError, error) {
 	schema, err := equipmentSchema()
 	if err != nil {
 		return nil, fmt.Errorf("equipment profile schema unavailable: %w", err)
-	}
-
-	canonical, err := canonicalizeProfileDocument(raw)
-	if err != nil {
-		return nil, err
 	}
 
 	result, err := schema.Validate(gojsonschema.NewBytesLoader(canonical))
