@@ -6,7 +6,7 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import type { SignalKPath } from '@/hooks/use-signalk-paths'
 import { GAUGE_TREND_WINDOWS, type GaugeDisplay, type GaugeWidgetConfig, type GaugeZone } from '@/lib/dashboard-widgets'
-import { QUANTITIES, quantityById, quantityForSIUnit, unitOption } from '@/lib/quantities'
+import { inferredQuantityForSIUnit, QUANTITIES, quantityById, unitOption } from '@/lib/quantities'
 
 /**
  * Severities are the alarm vocabulary (ADR 0038), because a zone *is* an alarm
@@ -65,15 +65,23 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
   /**
    * Picking a path preselects the quantity from SignalK's own meta.units, so
    * the operator does not have to know that oil pressure arrives in pascals.
+   *
+   * Most paths on a real boat carry no meta.units at all, so "nothing to
+   * infer" has to leave the gauge's existing quantity and unit alone rather
+   * than reset them to raw. Without this, repicking a path on a gauge that
+   * was already set up (say temperature/C, with zones authored in °C) wipes
+   * that config to raw/raw while the zone thresholds stay in °C — the
+   * backend then compares a °C threshold against a Kelvin reading and fires
+   * a bogus alarm. This is exactly what happens when the group-duplicate
+   * button repicks every member's path.
    */
   const choosePath = (path: string) => {
     const match = known.get(path)
-    const inferred = quantityForSIUnit(match?.units)
+    const inferred = inferredQuantityForSIUnit(match?.units)
     onChange({
       ...value,
       path,
-      quantity: inferred.id,
-      unit: inferred.units[0].id,
+      ...(inferred ? { quantity: inferred.id, unit: inferred.units[0].id } : {}),
       label: value.label || path.split('.').slice(-1)[0],
     })
   }

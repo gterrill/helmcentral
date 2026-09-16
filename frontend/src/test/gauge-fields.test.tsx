@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, test, vi } from 'vitest'
 
-import { GaugeFields } from '@/components/gauge-fields'
+import { GaugeFields, defaultGaugeConfig } from '@/components/gauge-fields'
 import type { GaugeWidgetConfig } from '@/lib/dashboard-widgets'
+import type { SignalKPath } from '@/hooks/use-signalk-paths'
 
 function config(overrides: Partial<GaugeWidgetConfig> = {}): GaugeWidgetConfig {
   return {
@@ -17,8 +18,8 @@ function config(overrides: Partial<GaugeWidgetConfig> = {}): GaugeWidgetConfig {
   }
 }
 
-function renderFields(value: GaugeWidgetConfig, onChange = vi.fn()) {
-  render(<GaugeFields value={value} onChange={onChange} paths={[]} idPrefix="g" />)
+function renderFields(value: GaugeWidgetConfig, onChange = vi.fn(), paths: SignalKPath[] = []) {
+  render(<GaugeFields value={value} onChange={onChange} paths={paths} idPrefix="g" />)
   return onChange
 }
 
@@ -100,5 +101,60 @@ describe('zone editing', () => {
     // The unit sits beside the threshold input, not only in the unit select.
     const suffix = screen.getByLabelText('Zone 1 threshold').parentElement!
     expect(suffix).toHaveTextContent('psi')
+  })
+})
+
+describe('choosePath', () => {
+  // On the real boat most SignalK paths carry no units meta at all. Repicking
+  // a path on a gauge that already had a known quantity must not clobber it —
+  // the alternator temperature gauge stays °C, not silently drop to raw/K.
+  test('picking a unit-less path keeps the gauge\'s existing quantity, unit and zones', () => {
+    const zoned = config({
+      quantity: 'temperature',
+      unit: 'C',
+      zones: [{ from: 80, to: 100, state: 'warn' }],
+    })
+    const noUnits: SignalKPath[] = [{ path: 'propulsion.port.alternatorTemperature' }]
+    const onChange = renderFields(zoned, vi.fn(), noUnits)
+
+    fireEvent.change(screen.getByLabelText('SignalK path'), {
+      target: { value: 'propulsion.port.alternatorTemperature' },
+    })
+
+    const next = onChange.mock.calls[0][0] as GaugeWidgetConfig
+    expect(next.path).toBe('propulsion.port.alternatorTemperature')
+    expect(next.quantity).toBe('temperature')
+    expect(next.unit).toBe('C')
+    expect(next.zones).toEqual(zoned.zones)
+  })
+
+  test('picking a path with known units still infers the quantity and unit', () => {
+    const zoned = config({ quantity: 'temperature', unit: 'C' })
+    const withUnits: SignalKPath[] = [{ path: 'tanks.freshWater.pressure', units: 'Pa' }]
+    const onChange = renderFields(zoned, vi.fn(), withUnits)
+
+    fireEvent.change(screen.getByLabelText('SignalK path'), {
+      target: { value: 'tanks.freshWater.pressure' },
+    })
+
+    const next = onChange.mock.calls[0][0] as GaugeWidgetConfig
+    expect(next.quantity).toBe('pressure')
+    expect(next.unit).toBe('kPa')
+  })
+
+  // A fresh gauge has never had a quantity assigned, so raw/raw picking a
+  // unit-less path is unchanged behaviour, not a special case.
+  test('a fresh gauge picking a unit-less path stays raw/raw', () => {
+    const fresh = defaultGaugeConfig()
+    const noUnits: SignalKPath[] = [{ path: 'propulsion.port.alternatorTemperature' }]
+    const onChange = renderFields(fresh, vi.fn(), noUnits)
+
+    fireEvent.change(screen.getByLabelText('SignalK path'), {
+      target: { value: 'propulsion.port.alternatorTemperature' },
+    })
+
+    const next = onChange.mock.calls[0][0] as GaugeWidgetConfig
+    expect(next.quantity).toBe('raw')
+    expect(next.unit).toBe('raw')
   })
 })

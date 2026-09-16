@@ -199,6 +199,20 @@ export function quantityForSIUnit(siUnit: string | undefined): Quantity {
   return QUANTITIES.find((quantity) => quantity.siUnit === trimmed) ?? quantityById('raw')
 }
 
+/**
+ * Same inference as `quantityForSIUnit`, but returns null instead of falling
+ * back to `raw` when nothing can be inferred. Most SignalK paths on a real
+ * boat carry no meta.units at all, and a caller that wants to *preselect* a
+ * quantity (like the gauge path picker) needs to tell "no meta, don't touch
+ * what's already there" apart from "meta says raw" — `quantityForSIUnit`
+ * collapses both into `raw` and can't make that distinction.
+ */
+export function inferredQuantityForSIUnit(siUnit: string | undefined): Quantity | null {
+  const trimmed = (siUnit ?? '').trim()
+  if (trimmed === '') return null
+  return QUANTITIES.find((quantity) => quantity.siUnit === trimmed) ?? null
+}
+
 export function unitOption(quantityId: QuantityId | string, unitId: string | undefined): UnitOption {
   const quantity = quantityById(quantityId)
   return quantity.units.find((unit) => unit.id === unitId) ?? quantity.units[0]
