@@ -22,7 +22,26 @@ function pathInputs(): HTMLInputElement[] {
 }
 
 beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ paths: [] }) }))
+  vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+    if (String(url).includes('/api/equipment-profiles') || String(url).includes('/api/engine-profiles')) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          profiles: [{
+            id: 'alt',
+            name: 'Alternator',
+            kind: 'alternator',
+            gauges: [
+              { path_suffix: 'power', label: 'Output', hero: true, display: 'numeric', quantity: 'power', unit: 'W' },
+              { path_suffix: 'temperature', label: 'Temp', display: 'numeric', quantity: 'temperature', unit: 'C' },
+            ],
+          }],
+          problems: [],
+        }),
+      })
+    }
+    return Promise.resolve({ ok: true, json: async () => ({ paths: [{ path: 'propulsion.port.revolutions' }] }) })
+  }))
 })
 
 describe('GaugeGroupConfigDialog', () => {
@@ -57,49 +76,28 @@ describe('GaugeGroupConfigDialog', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
-  describe('replace in all paths', () => {
-    function typeReplacement(from: string, to: string) {
-      fireEvent.change(screen.getByLabelText('Replace'), { target: { value: from } })
-      fireEvent.change(screen.getByLabelText('With'), { target: { value: to } })
-    }
+  test('duplicates the current config and closes without any replace controls', () => {
+    const onDuplicate = vi.fn()
+    render(
+      <GaugeGroupConfigDialog
+        widget={widget(portEngine)}
+        onCancel={vi.fn()}
+        onSave={vi.fn()}
+        onDuplicate={onDuplicate}
+      />,
+    )
 
-    test('previews the count before anything is applied', () => {
-      render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={vi.fn()} />)
-      typeReplacement('port', 'starboard')
+    expect(screen.queryByLabelText('Replace')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('With')).not.toBeInTheDocument()
 
-      const preview = screen.getByTestId('gauge-group-replace-preview')
-      expect(preview).toHaveTextContent('2 of 3 paths will change')
-      expect(within(preview).getByText(/propulsion\.starboard\.revolutions/)).toBeInTheDocument()
-      // Nothing has actually changed yet.
-      expect(pathInputs()[0].value).toBe('propulsion.port.revolutions')
-    })
+    fireEvent.click(screen.getByRole('button', { name: /duplicate this tile/i }))
 
-    test('says so when the search text matches nothing', () => {
-      render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={vi.fn()} />)
-      typeReplacement('nothing-matches', 'x')
-      expect(screen.getByTestId('gauge-group-replace-preview')).toHaveTextContent('No paths match')
-      expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
-    })
-
-    test('rewrites every matching path and leaves labels alone', () => {
-      const onSave = vi.fn()
-      render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={onSave} />)
-
-      typeReplacement('port', 'starboard')
-      fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
-
-      expect(pathInputs().map((i) => i.value)).toEqual([
-        'propulsion.starboard.revolutions',
-        'propulsion.starboard.oilPressure',
-        'environment.depth.belowTransducer',
-      ])
-
-      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-      expect(onSave).toHaveBeenCalledOnce()
-      const saved = onSave.mock.calls[0][0] as GaugeGroupWidgetConfig
-      expect(saved.gauges[0].path).toBe('propulsion.starboard.revolutions')
-      expect(saved.gauges[0].label).toBe('RPM')
-      expect(saved.gauges[1].label).toBe('Oil Press')
+    expect(onDuplicate).toHaveBeenCalledOnce()
+    expect(onDuplicate.mock.calls[0][0]).toMatchObject({
+      title: 'Port',
+      gauges: expect.arrayContaining([
+        expect.objectContaining({ path: 'propulsion.port.revolutions' }),
+      ]),
     })
   })
 
@@ -117,5 +115,54 @@ describe('GaugeGroupConfigDialog', () => {
     )
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Starboard')
     expect(pathInputs()).toHaveLength(1)
+  })
+
+  test('saves the selected hero gauge index', () => {
+    const onSave = vi.fn()
+    render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={onSave} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /set gauge 1 as hero/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const saved = onSave.mock.calls[0][0] as GaugeGroupWidgetConfig
+    expect(saved.hero).toBe(0)
+  })
+
+  test('moves the hero index with its gauge when reordered', () => {
+    const onSave = vi.fn()
+    render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={onSave} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /set gauge 1 as hero/i }))
+    fireEvent.click(screen.getByRole('button', { name: /move gauge 1 down/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const saved = onSave.mock.calls[0][0] as GaugeGroupWidgetConfig
+    expect(saved.hero).toBe(1)
+  })
+
+  test('clears the hero index when that gauge is removed', () => {
+    const onSave = vi.fn()
+    render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={onSave} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /set gauge 2 as hero/i }))
+    fireEvent.click(screen.getAllByRole('button', { name: /remove gauge/i })[1])
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const saved = onSave.mock.calls[0][0] as GaugeGroupWidgetConfig
+    expect(saved.hero).toBeUndefined()
+  })
+
+  test('adopts the profile hero when applying an equipment profile', async () => {
+    const onSave = vi.fn()
+    render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={onSave} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /apply an equipment profile/i }))
+    fireEvent.change(await screen.findByLabelText('Engine instance'), { target: { value: 'electrical.alternator.0' } })
+    fireEvent.click(screen.getByRole('button', { name: /apply to these gauges/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const saved = onSave.mock.calls[0][0] as GaugeGroupWidgetConfig
+    expect(saved.hero).toBeDefined()
+    expect(saved.gauges[saved.hero!].label).toBe('Output')
   })
 })

@@ -19,6 +19,12 @@ function columnsFor(config: GaugeGroupWidgetConfig): number {
   return config.gauges.length > 1 ? 2 : 1
 }
 
+function heroIndexFor(config: GaugeGroupWidgetConfig): number | null {
+  if (config.hero === undefined) return null
+  if (!Number.isInteger(config.hero)) return null
+  return config.hero >= 0 && config.hero < config.gauges.length ? config.hero : null
+}
+
 interface GaugeGroupTileProps {
   config: GaugeGroupWidgetConfig
   /** Every bound path's current SI value; the group looks up its own members. */
@@ -36,6 +42,8 @@ interface GaugeGroupTileProps {
  */
 export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, ages, editing, onConfigure }: GaugeGroupTileProps) {
   const title = config.title.trim() || 'Gauges'
+  const columns = columnsFor(config)
+  const heroIndex = heroIndexFor(config)
   // reading() does the same conversion GaugeBody does per member, and blanks
   // a stale member to the same absence a never-reported one gets (ADR 0083),
   // so the tile edge, worstZoneState and each member's readout all agree on
@@ -69,25 +77,55 @@ export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, age
     >
       <div
         className="grid gap-2 [grid-template-columns:repeat(var(--gauge-group-cols),minmax(0,1fr))]"
-        style={{ '--gauge-group-cols': columnsFor(config) } as React.CSSProperties}
+        style={{ '--gauge-group-cols': columns } as React.CSSProperties}
       >
         {config.gauges.map((gauge, index) => {
           const r = readings[index]
+          const isHero = heroIndex === index
+          const label = gauge.label.trim() || gauge.path.split('.').slice(-1)[0]
+          const isTemperature = /(^|\.)temperature$/i.test(gauge.path) || /^temp(?:erature)?$/i.test(label)
+          const labelTrackingClass = isHero || isTemperature ? 'tracking-[0.16em]' : 'tracking-[0.14em]'
+          const readoutSizeClass = isHero ? 'text-4xl' : isTemperature ? 'text-xl' : 'text-lg'
+          const unitSizeClass = isHero ? 'text-xs' : 'text-[10px]'
+          const readoutGapClass = isHero ? 'gap-1' : 'gap-0.5'
+          const panelClass = isHero
+            ? 'rounded-md border bg-background/60 px-3 py-3'
+            : isTemperature
+              ? 'rounded-md border bg-background/60 px-3 py-2'
+              : 'rounded-md border bg-background/60 px-2 py-2'
+          const fallbackTextClass = isHero
+            ? 'text-gauge-secondary'
+            : isTemperature
+              ? 'text-gauge-secondary'
+              : 'text-foreground'
           return (
             // Keyed by index: paths are not unique within a group (the same
             // value in two units is legitimate) and members have no id of
             // their own.
-            <div key={index} className="flex min-w-0 flex-col gap-1">
-              <span className="flex min-w-0 items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                <span className="truncate">{gauge.label.trim() || gauge.path.split('.').slice(-1)[0]}</span>
-                {r.stale && (
-                  <span className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
-                    Stale {formatDataAge(r.age)}
-                  </span>
-                )}
-              </span>
-              <div className={r.stale ? 'grayscale' : undefined}>
-                <GaugeBody config={gauge} value={r.stale ? null : (values[gauge.path] ?? null)} density="compact" />
+            <div
+              key={index}
+              className="flex min-w-0 flex-col gap-1"
+              style={isHero && columns > 1 ? { gridColumn: 'span 2 / span 2' } : undefined}
+              data-testid={isHero ? 'gauge-group-hero' : undefined}
+            >
+              <div className={`${panelClass} ${r.stale ? 'grayscale' : ''}`.trim()}>
+                <span className={`flex min-w-0 items-center gap-1 text-[10px] uppercase ${labelTrackingClass} text-muted-foreground`}>
+                  <span className="truncate">{label}</span>
+                  {r.stale && (
+                    <span className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
+                      Stale {formatDataAge(r.age)}
+                    </span>
+                  )}
+                </span>
+                <GaugeBody
+                  config={gauge}
+                  value={r.stale ? null : (values[gauge.path] ?? null)}
+                  density={isHero ? 'hero' : 'compact'}
+                  fallbackTextClass={fallbackTextClass}
+                  readoutSizeClass={readoutSizeClass}
+                  unitSizeClass={unitSizeClass}
+                  readoutGapClass={readoutGapClass}
+                />
               </div>
             </div>
           )

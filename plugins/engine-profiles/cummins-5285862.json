@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "alternator",
+  "id": "cummins-5285862",
+  "name": "Cummins 5285862 24V alternator",
+  "manufacturer": "Prestolite Electric / Leece-Neville",
+  "model": "Cummins 5285862 heavy-duty OEM alternator",
+  "source": "Prestolite Electric / Leece-Neville OEM alternator specification; use as a reference profile for a 24V high-output installation, not as a factory alarm setpoint",
+  "notes": "Brushless, high-efficiency 24V alternator intended for heavy-duty Cummins marine and industrial service. The gauges below are a conservative reference set for monitoring output voltage, charging current, power delivery, and temperature. Set any warn or alarm thresholds from your vessel's service manuals before using this profile as active alarm logic.",
+  "gauges": [
+    {
+      "path_suffix": "voltage",
+      "label": "Output Volts",
+      "display": "numeric",
+      "quantity": "potential",
+      "unit": "V",
+      "min": 0,
+      "max": 32,
+      "decimals": 1,
+      "zones": [
+        {
+          "direction": "below",
+          "threshold": 24,
+          "state": "warn",
+          "source": "Reference operating band for a 24V charging system"
+        },
+        {
+          "direction": "above",
+          "threshold": 30,
+          "state": "warn",
+          "source": "Reference upper limit for a 24V system"
+        }
+      ]
+    },
+    {
+      "path_suffix": "current",
+      "label": "Output Amps",
+      "display": "numeric",
+      "quantity": "current",
+      "unit": "A",
+      "min": 0,
+      "max": 400,
+      "decimals": 0,
+      "zones": [
+        {
+          "direction": "above",
+          "threshold": 320,
+          "state": "warn",
+          "source": "High-amperage output reference band for a heavy-duty 24V alternator"
+        }
+      ]
+    },
+    {
+      "path_suffix": "power",
+      "label": "Output Power",
+      "hero": true,
+      "display": "numeric",
+      "quantity": "power",
+      "unit": "W",
+      "min": 0,
+      "max": 12000,
+      "decimals": 0
+    },
+    {
+      "path_suffix": "temperature",
+      "label": "Temp",
+      "display": "numeric",
+      "quantity": "temperature",
+      "unit": "C",
+      "min": 0,
+      "max": 150,
+      "decimals": 0,
+      "zones": [
+        {
+          "direction": "above",
+          "threshold": 100,
+          "state": "warn",
+          "source": "Thermal warning band for a hard-working OEM alternator"
+        }
+      ]
+    }
+  ]
+}

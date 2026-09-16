@@ -56,7 +56,7 @@ export function Tile({
   return (
     <Card
       className={cn(
-        'h-full gap-0 py-4',
+        'h-full gap-0 py-2',
         stale && 'border-amber-500 dark:border-amber-400',
         showState && severityBorderClass(state),
         className,
@@ -67,7 +67,7 @@ export function Tile({
       {/* Padding and letter-spacing tighten before anything else at phone width. The
           0.22em tracking costs more width than the horizontal padding does, so it is
           the first thing to give. */}
-      <CardHeader className="flex-row items-center gap-2 space-y-0 px-3 pb-3 sm:px-4">
+      <CardHeader className="flex flex-row items-center gap-2 space-y-0 px-3 pb-2 sm:px-4">
         <CardTitle
           as="h2"
           className={cn(
@@ -91,12 +91,12 @@ export function Tile({
             </span>
           )}
         </CardTitle>
-        {/* One grid child, not two: CardHeader is a grid with no explicit
-            column track for an auto-placed item, so a bare sibling span
-            wrapped its own row under the title instead of sitting at the
-            rule's end. Wrapping the rule and the dot in a single flex row
-            keeps the grid child count exactly what it was before the dot
-            existed, and lets the dot sit flush with the rule inside it. */}
+        {/* The rule and the state dot are one flex item, not two siblings of
+            the header. Only this wrapper carries flex-1, so it is the item
+            that grows to fill the space between the title and titleExtra;
+            the rule inside it takes that room and the dot, sized to its own
+            content, sits flush at the rule's trailing end instead of
+            picking up the header's own gap-2 spacing before it. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className="h-px flex-1 bg-border/70" />
           {showState && (

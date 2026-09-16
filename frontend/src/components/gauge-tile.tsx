@@ -22,11 +22,12 @@ function activeZone(value: number | null, zones: GaugeZone[] | undefined): Gauge
  * is one member of a gauge group (ADR 0049), where the group tile supplies the
  * single border and N nested ones would just be noise.
  */
-export type GaugeDensity = 'full' | 'compact'
+export type GaugeDensity = 'full' | 'compact' | 'hero'
 
 const SHELL: Record<GaugeDensity, string> = {
   full: 'rounded-md border bg-background/60 px-3 py-3',
   compact: '',
+  hero: '',
 }
 
 interface GaugeBodyProps {
@@ -34,6 +35,10 @@ interface GaugeBodyProps {
   /** Raw SI value from SignalK, or null when the path is absent. */
   value: number | null
   density?: GaugeDensity
+  fallbackTextClass?: string
+  readoutSizeClass?: string
+  unitSizeClass?: string
+  readoutGapClass?: string
 }
 
 /**
@@ -45,7 +50,15 @@ interface GaugeBodyProps {
  * user-configurable renderers, and ADR 0049 widens that carve-out to cover a
  * renderer shared between the standalone and grouped cases.
  */
-export function GaugeBody({ config, value, density = 'full' }: GaugeBodyProps) {
+export function GaugeBody({
+  config,
+  value,
+  density = 'full',
+  fallbackTextClass = 'text-gauge-primary',
+  readoutSizeClass,
+  unitSizeClass,
+  readoutGapClass,
+}: GaugeBodyProps) {
   const unit = unitOption(config.quantity, config.unit)
   const text = formatQuantity(value, config.quantity, config.unit, config.decimals)
   const converted = value === null ? null : convertFromSI(value, config.quantity, config.unit)
@@ -53,15 +66,15 @@ export function GaugeBody({ config, value, density = 'full' }: GaugeBodyProps) {
 
   switch (config.display) {
     case 'radial':
-      return <RadialGauge value={converted} zone={zone} config={config} text={text} unitLabel={unit.label} density={density} />
+      return <RadialGauge value={converted} zone={zone} config={config} text={text} unitLabel={unit.label} density={density} fallbackTextClass={fallbackTextClass} readoutSizeClass={readoutSizeClass} unitSizeClass={unitSizeClass} readoutGapClass={readoutGapClass} />
     case 'bar':
-      return <BarGauge value={converted} zone={zone} config={config} text={text} unitLabel={unit.label} density={density} />
+      return <BarGauge value={converted} zone={zone} config={config} text={text} unitLabel={unit.label} density={density} fallbackTextClass={fallbackTextClass} readoutSizeClass={readoutSizeClass} unitSizeClass={unitSizeClass} readoutGapClass={readoutGapClass} />
     case 'lamp':
       return <LampGauge value={converted} zone={zone} text={text} density={density} />
     case 'trend':
-      return <TrendGauge zone={zone} config={config} text={text} unitLabel={unit.label} density={density} />
+      return <TrendGauge zone={zone} config={config} text={text} unitLabel={unit.label} density={density} fallbackTextClass={fallbackTextClass} readoutSizeClass={readoutSizeClass} unitSizeClass={unitSizeClass} readoutGapClass={readoutGapClass} />
     default:
-      return <NumericGauge zone={zone} text={text} unitLabel={unit.label} density={density} />
+      return <NumericGauge zone={zone} text={text} unitLabel={unit.label} density={density} fallbackTextClass={fallbackTextClass} readoutSizeClass={readoutSizeClass} unitSizeClass={unitSizeClass} readoutGapClass={readoutGapClass} />
   }
 }
 
@@ -112,21 +125,46 @@ export const GaugeTile = memo(function GaugeTile({ config, value, ages, editing,
  * The structural dash, never a zero. A gauge reading 0 when it means "no data"
  * is the dangerous failure — AGENTS.md's zero-state rule exists for this.
  */
-function Readout({ text, unitLabel, zone, size }: { text: string | null; unitLabel: string; zone: GaugeZone['state'] | null; size: string }) {
+function Readout({ text, unitLabel, zone, size, fallbackTextClass, unitSizeClass, readoutGapClass }: {
+  text: string | null
+  unitLabel: string
+  zone: GaugeZone['state'] | null
+  size: string
+  fallbackTextClass: string
+  unitSizeClass?: string
+  readoutGapClass?: string
+}) {
   return (
-    <div className="flex items-baseline gap-1 min-w-0">
-      <span className={`font-display ${size} tabular-nums leading-none tracking-tight truncate ${severityTextClass(zone, 'text-gauge-primary')}`}>
+    <div className={`flex items-baseline ${readoutGapClass ?? 'gap-1'} min-w-0`}>
+      <span className={`font-display ${size} tabular-nums leading-none tracking-tight truncate ${severityTextClass(zone, fallbackTextClass)}`}>
         {text ?? '--'}
       </span>
-      {unitLabel && <span className="text-[11px] leading-none text-muted-foreground">{unitLabel}</span>}
+      {unitLabel && <span className={`${unitSizeClass ?? 'text-[11px]'} leading-none text-muted-foreground`}>{unitLabel}</span>}
     </div>
   )
 }
 
-function NumericGauge({ text, unitLabel, zone, density }: { text: string | null; unitLabel: string; zone: GaugeZone['state'] | null; density: GaugeDensity }) {
+function NumericGauge({ text, unitLabel, zone, density, fallbackTextClass, readoutSizeClass, unitSizeClass, readoutGapClass }: {
+  text: string | null
+  unitLabel: string
+  zone: GaugeZone['state'] | null
+  density: GaugeDensity
+  fallbackTextClass: string
+  readoutSizeClass?: string
+  unitSizeClass?: string
+  readoutGapClass?: string
+}) {
   return (
     <div className={SHELL[density]}>
-      <Readout text={text} unitLabel={unitLabel} zone={zone} size={density === 'compact' ? 'text-2xl' : 'text-4xl'} />
+      <Readout
+        text={text}
+        unitLabel={unitLabel}
+        zone={zone}
+        size={readoutSizeClass ?? (density === 'compact' ? 'text-2xl' : density === 'hero' ? 'text-4xl' : 'text-4xl')}
+        fallbackTextClass={fallbackTextClass}
+        unitSizeClass={unitSizeClass}
+        readoutGapClass={readoutGapClass}
+      />
     </div>
   )
 }
@@ -138,10 +176,16 @@ function LampGauge({ value, zone, text, density }: { value: number | null; zone:
 
   return (
     <div className={`flex items-center gap-3 ${SHELL[density]}`}>
-      <svg viewBox="0 0 24 24" className={compact ? 'h-6 w-6 shrink-0' : 'h-8 w-8 shrink-0'} aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        className={compact ? 'h-6 w-6 shrink-0' : density === 'hero' ? 'h-10 w-10 shrink-0' : 'h-8 w-8 shrink-0'}
+        aria-hidden="true"
+      >
         <circle cx="12" cy="12" r="9" fill={color} opacity={lit ? 1 : 0.25} />
       </svg>
-      <span className={`font-display ${compact ? 'text-xl' : 'text-2xl'} tabular-nums leading-none text-gauge-primary`}>
+      <span
+        className={`font-display ${compact ? 'text-xl' : density === 'hero' ? 'text-3xl' : 'text-2xl'} tabular-nums leading-none text-gauge-primary`}
+      >
         {text === null ? '--' : lit ? 'ON' : 'OFF'}
       </span>
     </div>
@@ -177,20 +221,32 @@ function clampFraction(value: number | null, min: number, max: number): number |
   return Math.max(0, Math.min(1, (value - min) / (max - min)))
 }
 
-function BarGauge({ value, zone, config, text, unitLabel, density }: {
+function BarGauge({ value, zone, config, text, unitLabel, density, fallbackTextClass, readoutSizeClass, unitSizeClass, readoutGapClass }: {
   value: number | null
   zone: GaugeZone['state'] | null
   config: GaugeWidgetConfig
   text: string | null
   unitLabel: string
   density: GaugeDensity
+  fallbackTextClass: string
+  readoutSizeClass?: string
+  unitSizeClass?: string
+  readoutGapClass?: string
 }) {
   const { min, max } = rangeFor(config)
   const fraction = clampFraction(value, min, max)
 
   return (
     <div className={SHELL[density]}>
-      <Readout text={text} unitLabel={unitLabel} zone={zone} size={density === 'compact' ? 'text-xl' : 'text-3xl'} />
+      <Readout
+        text={text}
+        unitLabel={unitLabel}
+        zone={zone}
+        size={readoutSizeClass ?? (density === 'compact' ? 'text-xl' : density === 'hero' ? 'text-4xl' : 'text-3xl')}
+        fallbackTextClass={fallbackTextClass}
+        unitSizeClass={unitSizeClass}
+        readoutGapClass={readoutGapClass}
+      />
       <svg viewBox="0 0 100 8" preserveAspectRatio="none" className="mt-2 w-full" height="8" aria-hidden="true">
         <rect x="0" y="2" width="100" height="4" rx="2" fill="hsl(var(--muted))" />
         {(config.zones ?? []).map((z, index) => {
@@ -215,13 +271,17 @@ function BarGauge({ value, zone, config, text, unitLabel, density }: {
  * that precedent, and ADR 0012 makes a point of the dashboard having no chart
  * library. A 240-degree arc is the marine instrument convention.
  */
-function RadialGauge({ value, zone, config, text, unitLabel, density }: {
+function RadialGauge({ value, zone, config, text, unitLabel, density, fallbackTextClass, readoutSizeClass, unitSizeClass, readoutGapClass }: {
   value: number | null
   zone: GaugeZone['state'] | null
   config: GaugeWidgetConfig
   text: string | null
   unitLabel: string
   density: GaugeDensity
+  fallbackTextClass: string
+  readoutSizeClass?: string
+  unitSizeClass?: string
+  readoutGapClass?: string
 }) {
   // Hoisted above the instrument branch below: a hook after a conditional
   // return changes hook order between renders.
@@ -236,7 +296,10 @@ function RadialGauge({ value, zone, config, text, unitLabel, density }: {
     const scaledUnit = config.labelDivisor ? `${unitLabel} x${config.labelDivisor}`.trim() : unitLabel
     const readout = (
       <Readout text={text} unitLabel={scaledUnit} zone={zone}
-        size={density === 'compact' ? 'text-xl' : 'text-3xl'} />
+        size={readoutSizeClass ?? (density === 'compact' ? 'text-xl' : density === 'hero' ? 'text-4xl' : 'text-3xl')}
+        fallbackTextClass={fallbackTextClass}
+        unitSizeClass={unitSizeClass}
+        readoutGapClass={readoutGapClass} />
     )
     return (
       <div className={`flex flex-col items-center ${SHELL[density]}`}>
@@ -309,7 +372,15 @@ function RadialGauge({ value, zone, config, text, unitLabel, density }: {
         )}
       </svg>
 
-      <Readout text={text} unitLabel={unitLabel} zone={zone} size={density === 'compact' ? 'text-xl' : 'text-3xl'} />
+      <Readout
+        text={text}
+        unitLabel={unitLabel}
+        zone={zone}
+        size={readoutSizeClass ?? (density === 'compact' ? 'text-xl' : density === 'hero' ? 'text-4xl' : 'text-3xl')}
+        fallbackTextClass={fallbackTextClass}
+        unitSizeClass={unitSizeClass}
+        readoutGapClass={readoutGapClass}
+      />
     </div>
   )
 }
@@ -322,19 +393,31 @@ function RadialGauge({ value, zone, config, text, unitLabel, density }: {
  * Hand-rolled SVG following depth-sparkline.tsx, since the dashboard carries no
  * chart library.
  */
-function TrendGauge({ zone, config, text, unitLabel, density }: {
+function TrendGauge({ zone, config, text, unitLabel, density, fallbackTextClass, readoutSizeClass, unitSizeClass, readoutGapClass }: {
   zone: GaugeZone['state'] | null
   config: GaugeWidgetConfig
   text: string | null
   unitLabel: string
   density: GaugeDensity
+  fallbackTextClass: string
+  readoutSizeClass?: string
+  unitSizeClass?: string
+  readoutGapClass?: string
 }) {
   const window = config.window ?? '3h'
   const { points, error } = useTelemetryHistory(config.path, window, config.path.trim() !== '')
 
   return (
     <div className={SHELL[density]}>
-      <Readout text={text} unitLabel={unitLabel} zone={zone} size={density === 'compact' ? 'text-xl' : 'text-3xl'} />
+      <Readout
+        text={text}
+        unitLabel={unitLabel}
+        zone={zone}
+        size={readoutSizeClass ?? (density === 'compact' ? 'text-xl' : density === 'hero' ? 'text-4xl' : 'text-3xl')}
+        fallbackTextClass={fallbackTextClass}
+        unitSizeClass={unitSizeClass}
+        readoutGapClass={readoutGapClass}
+      />
       {error ? (
         // Never an empty chart: a flat line drawn because no database exists
         // reads exactly like a sensor holding steady.

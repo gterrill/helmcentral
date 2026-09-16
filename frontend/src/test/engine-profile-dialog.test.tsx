@@ -135,6 +135,23 @@ describe('EngineProfileDialog', () => {
     expect(gauges[0].zones).toEqual([{ from: 40, to: 100, state: 'normal' }])
   })
 
+  test('passes the profile-designated hero gauge index on apply', async () => {
+    stubProfiles([{
+      ...bundled,
+      gauges: [
+        { ...bundled.gauges[0] },
+        { ...bundled.gauges[1], hero: true },
+      ],
+    }])
+
+    const onApply = renderDialog()
+    await screen.findByTestId('engine-profile-preview')
+    fireEvent.click(screen.getByRole('button', { name: /^Add tile$/ }))
+
+    const [, , , hero] = onApply.mock.calls[0]
+    expect(hero).toBe(1)
+  })
+
   test('suggests instances the server is publishing', async () => {
     const { container } = render(<EngineProfileDialog open onCancel={vi.fn()} onApply={vi.fn()} />)
     await screen.findByTestId('engine-profile-preview')
@@ -157,7 +174,7 @@ describe('EngineProfileDialog', () => {
   test('says so when there are no profiles at all', async () => {
     stubProfiles([])
     renderDialog()
-    expect(await screen.findByText(/no engine profiles/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no equipment profiles/i)).toBeInTheDocument()
   })
 })
 

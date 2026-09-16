@@ -17,6 +17,7 @@ import type { GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import {
   alarmZoneCount,
   commonInstancePrefix,
+  profileHeroGaugeIndex,
   instancePrefixCandidates,
   mergeGaugeSettingsBySuffix,
   profileToGauges,
@@ -29,7 +30,7 @@ interface EngineProfileDialogProps {
   open: boolean
   onCancel: () => void
   /** Suffixes are passed alongside so a dotted one matches as a whole. */
-  onApply: (title: string, gauges: GaugeWidgetConfig[], suffixes: string[]) => void
+  onApply: (title: string, gauges: GaugeWidgetConfig[], suffixes: string[], hero?: number) => void
   /** Set when applying to a group that already exists, to reword the action. */
   applyLabel?: string
   /**
@@ -99,7 +100,7 @@ export function EngineProfileDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Engine profile</DialogTitle>
+          <DialogTitle>Equipment profile</DialogTitle>
           <DialogDescription>
             Builds a configured tile from a manufacturer profile — paths, scales and operating bands.
           </DialogDescription>
@@ -120,7 +121,7 @@ export function EngineProfileDialog({
 
         {!loading && profiles.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No engine profiles installed. Drop a .json profile into plugins/engine-profiles and restart.
+            No equipment profiles installed. Drop a .json profile into plugins/engine-profiles and restart.
           </p>
         ) : (
           <div className="grid gap-3">
@@ -207,6 +208,7 @@ export function EngineProfileDialog({
               title.trim(),
               profileToGauges(profile, instance),
               profile.gauges.map((g) => g.path_suffix),
+              profileHeroGaugeIndex(profile),
             )}
           >
             {applyLabel}
@@ -223,7 +225,14 @@ function GaugeRow({ gauge, instance }: { gauge: EngineProfileGauge; instance: st
   return (
     <div className="grid min-w-0 gap-0.5 border-b border-border/60 pb-1.5 last:border-b-0 last:pb-0">
       <div className="flex min-w-0 items-baseline justify-between gap-2">
-        <span className="truncate text-sm">{gauge.label}</span>
+        <span className="truncate text-sm">
+          {gauge.label}
+          {gauge.hero && (
+            <span className="ml-2 rounded-sm border border-border bg-background px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+              Hero
+            </span>
+          )}
+        </span>
         <span className="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
           {gauge.min ?? 0}–{gauge.max ?? 100} {unit}
         </span>

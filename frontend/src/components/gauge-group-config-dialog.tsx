@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ChevronUp, Plus, Star, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -15,12 +15,11 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { GaugeFields, defaultGaugeConfig } from '@/components/gauge-fields'
 import { Input } from '@/components/ui/input'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
-import { mergeGaugeSettingsBySuffix } from '@/lib/engine-profiles'
+import { gaugeIndexByProfileSuffix, mergeGaugeSettingsBySuffix } from '@/lib/engine-profiles'
 import {
   GAUGE_GROUP_MAX_COLUMNS,
   GAUGE_GROUP_MAX_GAUGES,
   GAUGE_GROUP_TITLE_MAX_LENGTH,
-  rewriteGaugePaths,
   type DashboardLayoutItem,
   type GaugeGroupWidgetConfig,
   type GaugeWidgetConfig,
@@ -34,6 +33,7 @@ interface GaugeGroupConfigDialogProps {
   widget: DashboardLayoutItem | null
   onCancel: () => void
   onSave: (config: GaugeGroupWidgetConfig) => void
+  onDuplicate?: (config: GaugeGroupWidgetConfig) => void
 }
 
 /**
@@ -43,18 +43,14 @@ interface GaugeGroupConfigDialogProps {
  * replace `port` with `starboard`, and five gauges move to the other engine in
  * one pass instead of five rounds of retyping.
  */
-export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupConfigDialogProps) {
+export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }: GaugeGroupConfigDialogProps) {
   const { paths } = useSignalKPaths(widget !== null)
   const [config, setConfig] = useState<GaugeGroupWidgetConfig>(defaultGroupConfig)
-  const [replaceFrom, setReplaceFrom] = useState('')
-  const [replaceTo, setReplaceTo] = useState('')
   const [profileOpen, setProfileOpen] = useState(false)
 
   // Re-seed per instance, so editing one group never shows another's settings.
   useEffect(() => {
     setConfig(widget?.gaugeGroup ? structuredClone(widget.gaugeGroup) : defaultGroupConfig())
-    setReplaceFrom('')
-    setReplaceTo('')
   }, [widget?.id, widget?.gaugeGroup])
 
   const setGauge = (index: number, next: GaugeWidgetConfig) =>
@@ -67,7 +63,15 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupC
     setConfig((current) => ({ ...current, gauges: [...current.gauges, defaultGaugeConfig()] }))
 
   const removeGauge = (index: number) =>
-    setConfig((current) => ({ ...current, gauges: current.gauges.filter((_, i) => i !== index) }))
+    setConfig((current) => {
+      const gauges = current.gauges.filter((_, i) => i !== index)
+      let hero = current.hero
+      if (hero !== undefined) {
+        if (hero === index) hero = undefined
+        else if (hero > index) hero = hero - 1
+      }
+      return { ...current, gauges, hero }
+    })
 
   const moveGauge = (index: number, delta: number) =>
     setConfig((current) => {
@@ -75,25 +79,17 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupC
       if (target < 0 || target >= current.gauges.length) return current
       const gauges = [...current.gauges]
       ;[gauges[index], gauges[target]] = [gauges[target], gauges[index]]
-      return { ...current, gauges }
+      let hero = current.hero
+      if (hero === index) hero = target
+      else if (hero === target) hero = index
+      return { ...current, gauges, hero }
     })
-
-  // Computed, never applied on its own: an operator sees a typo'd search term
-  // produce nothing before pressing Apply, rather than after.
-  const preview = useMemo(() => {
-    if (replaceFrom === '') return []
-    return config.gauges
-      .map((gauge, index) => ({ index, from: gauge.path, to: gauge.path.split(replaceFrom).join(replaceTo) }))
-      .filter((row) => row.from !== row.to)
-  }, [config.gauges, replaceFrom, replaceTo])
-
-  const applyReplace = () =>
-    setConfig((current) => ({ ...current, gauges: rewriteGaugePaths(current.gauges, replaceFrom, replaceTo) }))
 
   const canSave =
     config.title.trim() !== '' &&
     config.gauges.length > 0 &&
     config.gauges.length <= GAUGE_GROUP_MAX_GAUGES &&
+    (config.hero === undefined || (config.hero >= 0 && config.hero < config.gauges.length)) &&
     config.gauges.every((g) => g.path.trim() !== '')
 
   return (
@@ -102,13 +98,12 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupC
         <DialogHeader>
           <DialogTitle>Gauge Group</DialogTitle>
           <DialogDescription>
-            A named cluster of gauges in one tile. Duplicate the tile to build the other engine, then
-            replace the paths in one pass.
+            A named cluster of gauges in one tile.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
             <Field>
               <FieldLabel htmlFor="gauge-group-title">Title</FieldLabel>
               <Input
@@ -144,49 +139,8 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupC
               ones the profile has that this tile lacks, matching by path
               suffix. Paths and labels are the operator's own (ADR 0053). */}
           <Button variant="secondary" className="w-fit" onClick={() => setProfileOpen(true)}>
-            Apply an engine profile…
+            Apply an equipment profile…
           </Button>
-
-          <div className="rounded-md border border-border bg-background/60 p-3">
-            <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <Field>
-                <FieldLabel htmlFor="gauge-group-replace-from">Replace</FieldLabel>
-                <Input
-                  id="gauge-group-replace-from"
-                  value={replaceFrom}
-                  onChange={(e) => setReplaceFrom(e.target.value)}
-                  placeholder="port"
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="gauge-group-replace-to">With</FieldLabel>
-                <Input
-                  id="gauge-group-replace-to"
-                  value={replaceTo}
-                  onChange={(e) => setReplaceTo(e.target.value)}
-                  placeholder="starboard"
-                />
-              </Field>
-              <Button variant="secondary" disabled={preview.length === 0} onClick={applyReplace}>
-                Apply
-              </Button>
-            </div>
-
-            {replaceFrom !== '' && (
-              <div data-testid="gauge-group-replace-preview" className="mt-2 grid gap-0.5">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  {preview.length === 0
-                    ? 'No paths match'
-                    : `${preview.length} of ${config.gauges.length} paths will change`}
-                </span>
-                {preview.map((row) => (
-                  <span key={row.index} className="truncate text-[11px] text-muted-foreground">
-                    {row.from} → <span className="text-primary">{row.to}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
 
           {config.gauges.map((gauge, index) => (
             // Keyed by index: members have no id of their own, and duplicate
@@ -196,6 +150,20 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupC
                 <span className="flex-1 truncate text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Gauge {index + 1}
                 </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={config.hero === index ? `Unset gauge ${index + 1} hero` : `Set gauge ${index + 1} as hero`}
+                  aria-pressed={config.hero === index}
+                  onClick={() =>
+                    setConfig((current) => ({
+                      ...current,
+                      hero: current.hero === index ? undefined : index,
+                    }))
+                  }
+                >
+                  <Star className={`size-3.5 ${config.hero === index ? 'fill-current text-primary' : 'text-muted-foreground'}`} />
+                </Button>
                 <Button size="sm" variant="ghost" aria-label={`Move gauge ${index + 1} up`}
                   disabled={index === 0} onClick={() => moveGauge(index, -1)}>
                   <ChevronUp className="size-3.5" />
@@ -234,18 +202,41 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave }: GaugeGroupC
           applyLabel="Apply to these gauges"
           existingGauges={config.gauges}
           onCancel={() => setProfileOpen(false)}
-          onApply={(_title, profileGauges, suffixes) => {
+          onApply={(_title, profileGauges, suffixes, profileHero) => {
             setConfig((current) => ({
               ...current,
-              gauges: mergeGaugeSettingsBySuffix(current.gauges, profileGauges, suffixes).gauges,
+              ...(() => {
+                const merged = mergeGaugeSettingsBySuffix(current.gauges, profileGauges, suffixes)
+                if (profileHero === undefined) return { gauges: merged.gauges }
+                const heroSuffix = suffixes[profileHero]
+                const hero = heroSuffix === undefined ? undefined : gaugeIndexByProfileSuffix(merged.gauges, heroSuffix)
+                return { gauges: merged.gauges, hero }
+              })(),
             }))
             setProfileOpen(false)
           }}
         />
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button disabled={!canSave} onClick={() => onSave(config)}>Save</Button>
+        <DialogFooter className="mt-2 flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-1 justify-start">
+            <Button
+              variant="outline"
+              className="w-fit border-dashed border-primary/40 bg-primary/5 text-primary hover:bg-primary/10"
+              onClick={() => {
+                onDuplicate?.(config)
+                onCancel()
+              }}
+              title="Duplicate this tile"
+              aria-label="Duplicate this tile"
+            >
+              Duplicate
+            </Button>
+          </div>
+
+          <div className="flex shrink-0 items-center justify-end gap-2">
+            <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+            <Button disabled={!canSave} onClick={() => onSave(config)}>Save</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -141,6 +141,8 @@ export interface GaugeGroupWidgetConfig {
   title: string
   /** Columns inside the tile; undefined derives a count from the member count. */
   columns?: number
+  /** Index of the member rendered as the larger two-column hero readout. */
+  hero?: number
   gauges: GaugeWidgetConfig[]
 }
 

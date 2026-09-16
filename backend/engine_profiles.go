@@ -35,6 +35,7 @@ const (
 	engineProfileMaxGauges  = 24
 	engineProfileMaxService = 64
 	profileKindEngine       = "engine"
+	profileKindAlternator   = "alternator"
 	profileKindGenerator    = "generator"
 )
 
@@ -59,6 +60,7 @@ type engineProfileGauge struct {
 	// chosen at apply time, so one profile serves both engines.
 	PathSuffix string              `json:"path_suffix"`
 	Label      string              `json:"label"`
+	Hero       bool                `json:"hero,omitempty"`
 	Display    string              `json:"display"`
 	Quantity   string              `json:"quantity"`
 	Unit       string              `json:"unit"`
@@ -130,7 +132,7 @@ func validateEngineProfile(p engineProfile) error {
 	if p.SchemaVersion != 1 {
 		return fmt.Errorf("unsupported schema_version %d", p.SchemaVersion)
 	}
-	if p.Kind != profileKindEngine && p.Kind != profileKindGenerator {
+	if p.Kind != profileKindEngine && p.Kind != profileKindAlternator && p.Kind != profileKindGenerator {
 		return fmt.Errorf("unsupported kind %q", p.Kind)
 	}
 	if strings.TrimSpace(p.ID) == "" {
@@ -149,16 +151,24 @@ func validateEngineProfile(p engineProfile) error {
 		return fmt.Errorf("profile has too many service items")
 	}
 
+	heroCount := 0
+
 	for _, gauge := range p.Gauges {
 		if err := validateEngineProfileGauge(gauge); err != nil {
 			return fmt.Errorf("gauge %q: %w", gauge.PathSuffix, err)
 		}
+		if gauge.Hero {
+			heroCount++
+		}
 		if p.Kind == profileKindGenerator && !strings.HasPrefix(gauge.PathSuffix, "phase.") && !strings.HasPrefix(gauge.PathSuffix, "total.") {
 			return fmt.Errorf("gauge %q: path_suffix must start with phase. or total. for generator profiles", gauge.PathSuffix)
 		}
-		if p.Kind == profileKindEngine && (strings.HasPrefix(gauge.PathSuffix, "phase.") || strings.HasPrefix(gauge.PathSuffix, "total.")) {
-			return fmt.Errorf("gauge %q: path_suffix cannot start with phase. or total. for engine profiles", gauge.PathSuffix)
+		if (p.Kind == profileKindEngine || p.Kind == profileKindAlternator) && (strings.HasPrefix(gauge.PathSuffix, "phase.") || strings.HasPrefix(gauge.PathSuffix, "total.")) {
+			return fmt.Errorf("gauge %q: path_suffix cannot start with phase. or total. for %s profiles", gauge.PathSuffix, p.Kind)
 		}
+	}
+	if heroCount > 1 {
+		return fmt.Errorf("profile has more than one hero gauge")
 	}
 
 	seenService := map[string]bool{}

@@ -8,7 +8,7 @@ import { apiBaseUrl } from '@/config/api'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import type { EngineProfile, EquipmentProfileValidationError } from '@/lib/engine-profiles'
 
-type ProfileKind = 'engine' | 'generator'
+type ProfileKind = 'engine' | 'alternator' | 'generator'
 
 const defaultProfile = {
   schema_version: 1,
@@ -38,6 +38,24 @@ const newProfileTemplates: Record<ProfileKind, EngineProfile> = {
         unit: 'psi',
         min: 0,
         max: 100,
+      },
+    ],
+  },
+  alternator: {
+    schema_version: 1,
+    kind: 'alternator',
+    id: 'new-alternator-profile',
+    name: 'New alternator profile',
+    gauges: [
+      {
+        path_suffix: 'voltage',
+        label: 'Output voltage',
+        hero: true,
+        display: 'numeric',
+        quantity: 'potential',
+        unit: 'V',
+        min: 0,
+        max: 60,
       },
     ],
   },
@@ -447,6 +465,7 @@ export function EquipmentSection() {
                 disabled={saving}
               >
                 <option value="engine">Engine</option>
+                <option value="alternator">Alternator</option>
                 <option value="generator">Generator</option>
               </select>
               <FieldDescription>
@@ -465,7 +484,7 @@ export function EquipmentSection() {
               aria-invalid={jsonError !== null ? 'true' : undefined}
             />
             <FieldDescription>
-              Upload or create a JSON profile, then apply it from the dashboard’s “From engine profile…” action.
+              Upload or create a JSON profile, then apply it from the dashboard’s “From equipment profile…” action.
             </FieldDescription>
           </Field>
 

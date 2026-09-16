@@ -158,6 +158,13 @@ describe('EquipmentSection', () => {
     expect(kindSelect).toHaveValue('engine')
     expect((screen.getByLabelText('Profile JSON') as HTMLTextAreaElement).value).toContain('"kind": "engine"')
 
+    fireEvent.change(kindSelect, { target: { value: 'alternator' } })
+
+    expect(screen.getByLabelText('Profile name')).toHaveValue('New alternator profile')
+    expect((screen.getByLabelText('Profile JSON') as HTMLTextAreaElement).value).toContain('"kind": "alternator"')
+    expect((screen.getByLabelText('Profile JSON') as HTMLTextAreaElement).value).toContain('"path_suffix": "voltage"')
+    expect((screen.getByLabelText('Profile JSON') as HTMLTextAreaElement).value).toContain('"hero": true')
+
     fireEvent.change(kindSelect, { target: { value: 'generator' } })
 
     expect(screen.getByLabelText('Profile name')).toHaveValue('New generator profile')

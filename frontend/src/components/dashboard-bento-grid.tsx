@@ -3,7 +3,7 @@ import GridLayout, { WidthProvider, type LayoutItem } from 'react-grid-layout/le
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import '@/styles/dashboard-bento-grid.css'
-import { Copy, GripVertical, X } from 'lucide-react'
+import { GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
@@ -18,9 +18,20 @@ const GRID_COLUMNS = 12
 export const GRID_ROW_HEIGHT = 32
 export const GRID_MARGIN = 16
 
+/**
+ * The vertical margin a wall-display page uses instead of GRID_MARGIN. The
+ * 1920x360 strip is one tile-row tall at the ordinary 48px step (32px row +
+ * 16px margin), which gives a stacked pair of tiles seven rows to split
+ * between them and no split that feeds both. At 8px the same strip holds
+ * eight rows, which is what lets Forecast sit above Sea State without either
+ * losing its content. Only pages flagged for the wall take it (App.tsx), so
+ * the helm and nav boards keep the step they were authored against.
+ */
+export const WALL_ROW_MARGIN = 8
+
 /** What a row count is worth in pixels: n rows and the n-1 margins between them. */
-export function gridPixelHeight(rows: number): number {
-  return rows * GRID_ROW_HEIGHT + Math.max(0, rows - 1) * GRID_MARGIN
+export function gridPixelHeight(rows: number, rowMargin: number = GRID_MARGIN): number {
+  return rows * GRID_ROW_HEIGHT + Math.max(0, rows - 1) * rowMargin
 }
 
 /** The fewest whole rows that will hold a given height. */
@@ -38,8 +49,9 @@ const GAUGE_WIDGET_CONSTRAINTS = { minW: 2, minH: 4 }
 
 const EMBED_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
 
-// A cluster needs the room a single gauge does not.
-const GAUGE_GROUP_WIDGET_CONSTRAINTS = { minW: 3, minH: 6 }
+// Gauge groups can host compact telemetry sets (e.g. a single alternator),
+// so they keep the same width floor as the built-in alternator tile.
+const GAUGE_GROUP_WIDGET_CONSTRAINTS = { minW: 2, minH: 6 }
 
 // A ribbon is wide and short by nature.
 const LAMP_STRIP_WIDGET_CONSTRAINTS = { minW: 3, minH: 2 }
@@ -53,8 +65,9 @@ export const POI_MAP_SPLIT_MIN_W = 8
 // Tile header, its top padding, and the card's bottom padding: everything the
 // cluster canvas sits inside. Measured rather than derived, since it comes out
 // of the Card and CardHeader utility classes rather than a number this file
-// could import.
-const TILE_CHROME_H = 54 + 16
+// could import. 8px card padding-top + 24px header (including its own 8px
+// bottom padding) + 8px card padding-bottom.
+const TILE_CHROME_H = 8 + 24 + 8
 
 /**
  * Derived from the canvas rather than written down beside it. The number here
@@ -136,9 +149,17 @@ export interface DashboardBentoGridProps {
    * (ADR 0072).
    */
   heroId?: string
+  /**
+   * Vertical margin between rows, for a page whose height budget is fixed by
+   * hardware rather than by a scrolling viewport. Defaults to GRID_MARGIN, so
+   * every ordinary board keeps the geometry it was authored against; wall
+   * pages pass WALL_ROW_MARGIN. Horizontal margin is never narrowed: width is
+   * the one axis the 1920px strip has to spare.
+   */
+  rowMargin?: number
 }
 
-export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle, heroId }: DashboardBentoGridProps) {
+export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle, heroId, rowMargin = GRID_MARGIN }: DashboardBentoGridProps) {
   // Below `lg`, render a plain reflowed stack instead of the RGL grid — never both at once.
   // Toggling between them via CSS (rather than this JS media query) would mount both layouts
   // simultaneously, leaving duplicate DOM nodes per widget: wasted render cost for real users,
@@ -247,22 +268,15 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
         <>
           <button
             type="button"
-            onClick={() => onRemoveWidget(heroWidget.id)}
+            onClick={(e) => {
+              e.stopPropagation()
+              onRemoveWidget(heroWidget.id)
+            }}
             className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
             aria-label={`Remove ${widgetDisplayName(heroWidget)} widget`}
           >
             <X className="h-3.5 w-3.5" />
           </button>
-          {isMultiInstanceWidgetId(heroWidget.id) && (
-            <button
-              type="button"
-              onClick={() => onDuplicateWidget(heroWidget.id)}
-              className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
-              aria-label={`Duplicate ${widgetDisplayName(heroWidget)} widget`}
-            >
-              <Copy className="h-3 w-3" />
-            </button>
-          )}
         </>
       )}
     </div>
@@ -295,7 +309,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               // The operator's sizing intent as a floor, not a fixed height: text wraps
               // more at phone width, so a height copied straight from the desktop grid
               // would clip. Mirrors RGL's own row maths (rowHeight + margin).
-              style={{ minHeight: w.h * GRID_ROW_HEIGHT + (w.h - 1) * GRID_MARGIN }}
+              style={{ minHeight: gridPixelHeight(w.h, rowMargin) }}
             >
               <TileErrorBoundary key={w.id} widget={w}>
                 {renderWidget(w)}
@@ -315,7 +329,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
         layout={rglLayout}
         cols={GRID_COLUMNS}
         rowHeight={GRID_ROW_HEIGHT}
-        margin={[GRID_MARGIN, GRID_MARGIN]}
+        margin={[GRID_MARGIN, rowMargin]}
         containerPadding={[0, 0]}
         isDraggable={editing}
         isResizable={editing}
@@ -345,22 +359,15 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                   <>
                     <button
                       type="button"
-                      onClick={() => onRemoveWidget(w.id)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onRemoveWidget(w.id)
+                      }}
                       className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
                       aria-label={`Remove ${widgetDisplayName(w)} widget`}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
-                    {isMultiInstanceWidgetId(w.id) && (
-                      <button
-                        type="button"
-                        onClick={() => onDuplicateWidget(w.id)}
-                        className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
-                        aria-label={`Duplicate ${widgetDisplayName(w)} widget`}
-                      >
-                        <Copy className="h-3 w-3" />
-                      </button>
-                    )}
                     <div
                       className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
                       role="button"

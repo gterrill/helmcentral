@@ -247,6 +247,7 @@ type dashboardClusterFuelRail struct {
 type dashboardGaugeGroupConfig struct {
 	Title   string                 `json:"title"`
 	Columns *int                   `json:"columns,omitempty"`
+	Hero    *int                   `json:"hero,omitempty"`
 	Gauges  []dashboardGaugeConfig `json:"gauges"`
 }
 
@@ -1264,6 +1265,9 @@ func validateGaugeGroupWidget(w dashboardLayoutItem) string {
 	}
 	if w.GaugeGroup.Columns != nil && (*w.GaugeGroup.Columns < 1 || *w.GaugeGroup.Columns > gaugeGroupMaxColumns) {
 		return "gauge group columns out of range: " + w.ID
+	}
+	if w.GaugeGroup.Hero != nil && (*w.GaugeGroup.Hero < 0 || *w.GaugeGroup.Hero >= len(w.GaugeGroup.Gauges)) {
+		return "gauge group hero out of range: " + w.ID
 	}
 	for _, g := range w.GaugeGroup.Gauges {
 		if msg := validateGaugeConfig(g, w.ID); msg != "" {

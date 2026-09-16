@@ -31,10 +31,10 @@ describe('the engine cluster resize floor', () => {
   /**
    * Measured in the browser at scale 1, which is the tallest the tile ever
    * gets: useFitScale only ever shrinks the canvas, so a wider column costs no
-   * extra height. 54px of tile header and top padding, 228.4px of canvas,
-   * 16px of bottom padding.
+   * extra height. 32px of tile header and top padding, 228.4px of canvas,
+   * 8px of bottom padding.
    */
-  const MEASURED_TILE_HEIGHT = 54 + 228.4 + 16
+  const MEASURED_TILE_HEIGHT = 32 + 228.4 + 8
 
   test('holds the whole tile', () => {
     expect(gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH))
@@ -55,7 +55,7 @@ describe('the engine cluster resize floor', () => {
 describe('the fuel rail', () => {
   test('costs the cluster no extra rows', () => {
     expect(gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH))
-      .toBeGreaterThanOrEqual(54 + 228.4 + 16)
+      .toBeGreaterThanOrEqual(32 + 228.4 + 8)
   })
 
   test('needs a wider column than a bare cluster', () => {

@@ -1495,6 +1495,16 @@ func TestValidateGaugeGroupAcceptsAWellFormedGroup(t *testing.T) {
 	}
 }
 
+func TestValidateGaugeGroupAcceptsHeroIndexInRange(t *testing.T) {
+	config := validGaugeGroupConfig()
+	hero := 0
+	config.Hero = &hero
+	widget := gaugeGroupWidget("gauge-group:abcd1234", config)
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg != "" {
+		t.Fatalf("expected a valid hero index to be accepted, got %q", msg)
+	}
+}
+
 func TestValidateGaugeGroupRejectsBadInput(t *testing.T) {
 	tooMany := validGaugeGroupConfig()
 	tooMany.Gauges = make([]dashboardGaugeConfig, gaugeGroupMaxGauges+1)
@@ -1522,6 +1532,14 @@ func TestValidateGaugeGroupRejectsBadInput(t *testing.T) {
 	zero := 0
 	zeroColumns.Columns = &zero
 
+	negativeHero := validGaugeGroupConfig()
+	neg := -1
+	negativeHero.Hero = &neg
+
+	pastEndHero := validGaugeGroupConfig()
+	out := len(pastEndHero.Gauges)
+	pastEndHero.Hero = &out
+
 	emptyGauges := validGaugeGroupConfig()
 	emptyGauges.Gauges = nil
 
@@ -1539,6 +1557,8 @@ func TestValidateGaugeGroupRejectsBadInput(t *testing.T) {
 		{"unknown member zone state", gaugeGroupWidget("gauge-group:abcd1234", badZone)},
 		{"title too long", gaugeGroupWidget("gauge-group:abcd1234", longTitle)},
 		{"zero columns", gaugeGroupWidget("gauge-group:abcd1234", zeroColumns)},
+		{"negative hero", gaugeGroupWidget("gauge-group:abcd1234", negativeHero)},
+		{"hero past end", gaugeGroupWidget("gauge-group:abcd1234", pastEndHero)},
 	}
 
 	for _, tc := range cases {

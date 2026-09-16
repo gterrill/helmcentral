@@ -65,6 +65,25 @@ const goodGeneratorProfile = `{
 	]
 }`
 
+const goodAlternatorProfile = `{
+	"schema_version": 1,
+	"kind": "alternator",
+	"id": "test-alternator",
+	"name": "Test Alternator",
+	"gauges": [
+		{
+			"path_suffix": "voltage",
+			"label": "Output Voltage",
+			"hero": true,
+			"display": "numeric",
+			"quantity": "potential",
+			"unit": "V",
+			"min": 0,
+			"max": 60
+		}
+	]
+}`
+
 func TestLoadEngineProfiles(t *testing.T) {
 	setupEngineProfiles(t, map[string]string{"test.json": goodProfile})
 
@@ -107,6 +126,7 @@ func TestLoadEngineProfilesReportsBadFilesWithoutLosingGoodOnes(t *testing.T) {
 		"bad-direction.json": `{"id":"x","name":"X","gauges":[{"path_suffix":"a","display":"radial","quantity":"raw","unit":"raw","min":0,"max":10,"zones":[{"direction":"sideways","threshold":1,"state":"warn"}]}]}`,
 		"bad-interval.json":  `{"id":"i","name":"I","gauges":[],"service":[{"id":"oil","description":"Oil","interval_hours":-5}]}`,
 		"dup-service.json":   `{"id":"ds","name":"DS","gauges":[],"service":[{"id":"oil","interval_hours":250},{"id":"oil","interval_hours":500}]}`,
+		"two-hero.json":      `{"id":"h","name":"H","gauges":[{"path_suffix":"a","label":"A","hero":true,"display":"numeric","quantity":"raw","unit":"raw"},{"path_suffix":"b","label":"B","hero":true,"display":"numeric","quantity":"raw","unit":"raw"}]}`,
 		"no-gauges.json":     `{"id":"g","name":"G"}`,
 	}
 	setupEngineProfiles(t, cases)
@@ -122,6 +142,20 @@ func TestLoadEngineProfilesReportsBadFilesWithoutLosingGoodOnes(t *testing.T) {
 		if problem.File == "" || problem.Error == "" {
 			t.Fatalf("a problem must name the file and the reason, got %+v", problem)
 		}
+	}
+}
+
+func TestLoadEngineProfilesAcceptsSingleHeroGauge(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{
+		"hero.json": `{"id":"h","name":"H","gauges":[{"path_suffix":"oilPressure","label":"Oil","hero":true,"display":"numeric","quantity":"pressure","unit":"psi"}]}`,
+	})
+
+	profiles, problems := engineProfiles()
+	if len(problems) != 0 {
+		t.Fatalf("expected a single hero gauge to be accepted, got %+v", problems)
+	}
+	if len(profiles) != 1 || len(profiles[0].Gauges) != 1 || !profiles[0].Gauges[0].Hero {
+		t.Fatalf("expected hero gauge to survive, got %+v", profiles)
 	}
 }
 
@@ -411,6 +445,38 @@ func TestCreateEquipmentProfileHandler(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(engineProfilesDir(), "new-generator.json")); err != nil {
 		t.Fatalf("expected created file on disk: %v", err)
+	}
+}
+
+func TestCreateEquipmentProfileHandlerAcceptsAlternatorKind(t *testing.T) {
+	setupEngineProfiles(t, map[string]string{"good.json": goodProfile})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/equipment-profiles", bytes.NewBufferString(goodAlternatorProfile))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := createEquipmentProfileHandler(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for alternator kind, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	profiles, _ := engineProfiles()
+	if len(profiles) != 2 {
+		t.Fatalf("expected two profiles after alternator create, got %+v", profiles)
+	}
+	var found bool
+	for _, profile := range profiles {
+		if profile.Kind == "alternator" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected alternator profile kind, got %+v", profiles)
 	}
 }
 

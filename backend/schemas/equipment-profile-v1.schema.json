@@ -4,6 +4,7 @@
   "title": "Equipment Profile v1",
   "oneOf": [
     { "$ref": "#/definitions/engineProfile" },
+    { "$ref": "#/definitions/alternatorProfile" },
     { "$ref": "#/definitions/generatorProfile" }
   ],
   "definitions": {
@@ -13,7 +14,7 @@
       "required": ["schema_version", "kind", "id", "name"],
       "properties": {
         "schema_version": { "type": "integer", "const": 1 },
-        "kind": { "type": "string", "enum": ["engine", "generator"] },
+        "kind": { "type": "string", "enum": ["engine", "alternator", "generator"] },
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
         "manufacturer": { "type": "string" },
@@ -41,6 +42,33 @@
         {
           "properties": {
             "kind": { "const": "engine" },
+            "gauges": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  { "$ref": "#/definitions/gauge" },
+                  {
+                    "properties": {
+                      "path_suffix": {
+                        "type": "string",
+                        "not": { "pattern": "^(total\\.|phase\\.)" }
+                      }
+                    },
+                    "required": ["path_suffix"]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "alternatorProfile": {
+      "allOf": [
+        { "$ref": "#/definitions/baseProfile" },
+        {
+          "properties": {
+            "kind": { "const": "alternator" },
             "gauges": {
               "type": "array",
               "items": {
@@ -108,6 +136,7 @@
       "properties": {
         "path_suffix": { "type": "string", "minLength": 1 },
         "label": { "type": "string", "minLength": 1 },
+        "hero": { "type": "boolean" },
         "display": { "type": "string", "enum": ["numeric", "radial", "bar", "lamp", "trend"] },
         "quantity": { "type": "string", "minLength": 1 },
         "unit": { "type": "string", "minLength": 1 },

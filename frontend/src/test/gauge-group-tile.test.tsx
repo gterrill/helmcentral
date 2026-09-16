@@ -61,7 +61,7 @@ describe('GaugeGroupTile', () => {
     const { rerender } = render(
       <GaugeGroupTile config={config} values={{ 'propulsion.port.oilPressure': 241325 }} editing={false} onConfigure={vi.fn()} />,
     )
-    expect(screen.getByText('35.0').className).toContain('text-gauge-primary')
+    expect(screen.getByText('35.0').className).toContain('text-foreground')
 
     rerender(
       <GaugeGroupTile config={config} values={{ 'propulsion.port.oilPressure': 68947 }} editing={false} onConfigure={vi.fn()} />,
@@ -84,6 +84,33 @@ describe('GaugeGroupTile', () => {
   test('falls back to a structural title when the group is unnamed', () => {
     render(<GaugeGroupTile config={{ ...portEngine, title: '  ' }} values={values} editing={false} onConfigure={vi.fn()} />)
     expect(screen.getByText('Gauges')).toBeInTheDocument()
+  })
+
+  test('renders a designated hero gauge as a two-column member with larger readout text', () => {
+    render(
+      <GaugeGroupTile
+        config={{ ...portEngine, hero: 0 }}
+        values={values}
+        editing={false}
+        onConfigure={vi.fn()}
+      />,
+    )
+
+    const hero = screen.getByTestId('gauge-group-hero')
+    expect(hero).toHaveStyle({ gridColumn: 'span 2 / span 2' })
+    expect(screen.getByText('1800').className).toContain('text-4xl')
+  })
+
+  test('ignores an out-of-range hero index', () => {
+    render(
+      <GaugeGroupTile
+        config={{ ...portEngine, hero: 99 }}
+        values={values}
+        editing={false}
+        onConfigure={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('gauge-group-hero')).not.toBeInTheDocument()
   })
 })
 

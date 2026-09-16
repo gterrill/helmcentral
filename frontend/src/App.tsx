@@ -69,7 +69,7 @@ import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { RouteTile } from '@/components/route-tile'
-import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
+import { DashboardBentoGrid, WALL_ROW_MARGIN } from '@/components/dashboard-bento-grid'
 import { PageSkinSelect } from '@/components/page-skin-select'
 import { PageHeroSelect } from '@/components/page-hero-select'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
@@ -1000,15 +1000,16 @@ export function App() {
     setGaugeDraft(null)
   }, [activePage, effectiveWidgets, gaugeDraft, updatePage])
 
-  // Wider and taller than a single gauge: a cluster needs the room.
+  // Starts at the same footprint as the built-in Alternator tile so a pair
+  // can sit side-by-side without a resize pass.
   const handleAddGaugeGroup = useCallback(() => {
     const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
     setGaugeGroupDraft({
       id: newGaugeGroupWidgetId(effectiveWidgets),
       x: 0,
       y: maxY,
-      w: 6,
-      h: 8,
+      w: 4,
+      h: 7,
       gaugeGroup: { title: '', gauges: [{ path: '', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' }] },
     })
   }, [effectiveWidgets])
@@ -1026,19 +1027,36 @@ export function App() {
     setGaugeGroupDraft(null)
   }, [activePage, effectiveWidgets, gaugeGroupDraft, updatePage])
 
+  const handleDuplicateGaugeGroup = useCallback((gaugeGroup: GaugeGroupWidgetConfig) => {
+    if (!activePage) return
+    const source = gaugeGroupDraft ? { ...gaugeGroupDraft, gaugeGroup } : {
+      id: newGaugeGroupWidgetId(effectiveWidgets),
+      x: 0,
+      y: effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0),
+      w: 4,
+      h: 7,
+      gaugeGroup,
+    }
+    const copy = duplicateWidget(source, effectiveWidgets)
+    if (!copy) return
+
+    void updatePage(activePage.id, { widgets: [...effectiveWidgets, copy] })
+    setGaugeGroupDraft(null)
+  }, [activePage, effectiveWidgets, gaugeGroupDraft, updatePage])
+
   /**
    * An engine profile lands as an ordinary gauge group (ADR 0053) — already
    * configured, and saved straight away rather than held as a draft, because
    * unlike a blank tile it is valid the moment it is built.
    */
-  const handleApplyEngineProfile = useCallback((title: string, gauges: GaugeWidgetConfig[]) => {
+  const handleApplyEngineProfile = useCallback((title: string, gauges: GaugeWidgetConfig[], _suffixes: string[], hero?: number) => {
     if (!activePage) return
     const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
     void updatePage(activePage.id, {
       widgets: [...effectiveWidgets, {
         id: newGaugeGroupWidgetId(effectiveWidgets),
-        x: 0, y: maxY, w: 6, h: 8,
-        gaugeGroup: { title, gauges },
+        x: 0, y: maxY, w: 4, h: 7,
+        gaugeGroup: { title, gauges, ...(hero === undefined ? {} : { hero }) },
       }],
     })
     setEngineProfileOpen(false)
@@ -1604,6 +1622,12 @@ export function App() {
           onRemoveWidget={handleRemoveWidget}
           onDuplicateWidget={handleDuplicateWidget}
           onLayoutSettle={handleLayoutSettle}
+          // A wall page's height is fixed by the panel, not by a scrolling
+          // viewport, so its rows sit closer together. Taken from the page's
+          // own kiosk flag rather than from the route, so the helm browser
+          // authoring the page lays it out at the same geometry the wall will
+          // render it at and the fold guide stays honest.
+          rowMargin={activePage?.kiosk ? WALL_ROW_MARGIN : undefined}
         />
 
         {/* Authoring aid, not a kiosk feature: only shown while editing a
@@ -1674,7 +1698,7 @@ export function App() {
                 onClick={() => setEngineProfileOpen(true)}
                 className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
-                From engine profile…
+                From equipment profile…
               </button>
               <button
                 type="button"
@@ -1720,6 +1744,7 @@ export function App() {
         widget={gaugeGroupDraft}
         onCancel={() => setGaugeGroupDraft(null)}
         onSave={handleSaveGaugeGroup}
+        onDuplicate={handleDuplicateGaugeGroup}
       />
 
       <EngineClusterConfigDialog

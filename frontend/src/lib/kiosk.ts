@@ -1,4 +1,4 @@
-import { GRID_MARGIN, GRID_ROW_HEIGHT } from '@/components/dashboard-bento-grid'
+import { GRID_ROW_HEIGHT, WALL_ROW_MARGIN } from '@/components/dashboard-bento-grid'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 
 // Pure and React-free (ADR 0089), same reasoning app-location.ts gives for
@@ -9,20 +9,20 @@ import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 /** The wall display's own physical strip: 1920x360, mounted upside down. */
 export const KIOSK_VIEWPORT_HEIGHT_PX = 360
 
-/** kiosk-shell.tsx's root padding (`p-2` = 8px) on every edge. */
-export const KIOSK_ROOT_PADDING_PX = 8
+/** kiosk-shell.tsx's root padding (`p-1` = 4px) on every edge. */
+export const KIOSK_ROOT_PADDING_PX = 4
 
 /**
  * What's actually left for the grid once the root's own top and bottom
- * padding are subtracted: 360 - 8 - 8 = 344px. At GRID_ROW_HEIGHT=32 and
- * GRID_MARGIN=16 that's exactly 7 rows (320px used, 24px to spare) — 8 rows
- * (368px) does not fit. kiosk-fold-guide.tsx draws its line here.
+ * padding are subtracted: 360 - 4 - 4 = 352px. At GRID_ROW_HEIGHT=32 and
+ * WALL_ROW_MARGIN=8 that's 9 rows (352px used, none to spare) - 10 rows
+ * (392px) does not fit. kiosk-fold-guide.tsx draws its line here.
  */
 export const KIOSK_FOLD_PX = KIOSK_VIEWPORT_HEIGHT_PX - 2 * KIOSK_ROOT_PADDING_PX
 
 /** How many whole grid rows fit inside a budget of `px` pixels. */
 export function kioskRowsThatFit(px: number): number {
-  return Math.floor((px + GRID_MARGIN) / (GRID_ROW_HEIGHT + GRID_MARGIN))
+  return Math.floor((px + WALL_ROW_MARGIN) / (GRID_ROW_HEIGHT + WALL_ROW_MARGIN))
 }
 
 export interface KioskOptions {

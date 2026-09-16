@@ -76,7 +76,7 @@ export function KioskShell({ rotate, height = null, alarms, children }: KioskShe
     <div
       data-testid="kiosk-root"
       data-rotate={rotate}
-      className={`fixed${positionClassName} overflow-hidden bg-background p-2`}
+      className={`fixed${positionClassName} overflow-hidden bg-background p-1`}
       style={style}
     >
       {children}

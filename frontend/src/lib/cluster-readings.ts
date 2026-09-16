@@ -51,7 +51,12 @@ export function zoneFor(
 ): GaugeZone['state'] | 'outside' | null {
   if (value === null || !zones || zones.length === 0) return null
   const hit = zones.find((zone) => value >= Math.min(zone.from, zone.to) && value <= Math.max(zone.from, zone.to))
-  return hit ? hit.state : 'outside'
+  if (hit) return hit.state
+  // `outside` means "outside the declared healthy band", not merely
+  // "not in any band". Profiles that only define one-sided warn/alarm
+  // thresholds should remain neutral until crossed.
+  const hasNormalBand = zones.some((zone) => zone.state === 'normal')
+  return hasNormalBand ? 'outside' : null
 }
 
 export function zoneTextClass(state: ReturnType<typeof zoneFor>): string {
