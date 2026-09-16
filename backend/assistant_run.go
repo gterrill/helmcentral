@@ -24,6 +24,26 @@ import (
 // OpenRouter spend.
 const assistantMaxToolRounds = 8
 
+// assistantMaxToolFailures bounds how many times one named tool may fail
+// before the loop stops dispatching it for the rest of this run. Three
+// strikes is not a magic number chosen for its own sake: a tool that has
+// failed this many times in a row is not transiently flaky, it is down
+// (Overpass unreachable, a plugin misconfigured, a provider timing out
+// every call), and a model with assistantMaxToolRounds rounds to spend
+// will burn the whole budget retrying it rather than answering with what
+// it already has. That is exactly what happened in the incident that added
+// this const: every find_places call failed because Overpass was down, the
+// model retried it in 7 of 8 rounds, and the forced final round then had
+// no budget left to actually answer - it returned raw tool-call markup
+// instead (see assistantTextToolCallMarker below).
+//
+// This is deliberately NOT a masking fallback under AGENTS.md's fallback
+// policy: once a tool is withheld (assistantWithheldToolResult), the
+// synthesised tool result tells the model plainly that the tool is gone
+// and to say so to the operator, so the upstream failure still reaches the
+// answer instead of being silently retried into dead time.
+const assistantMaxToolFailures = 3
+
 // assistantMaxConcurrentToolCalls caps how many of one round's tool calls
 // run at once. The system prompt asks the model to fetch both a wind
 // forecast and tides for every candidate anchorage under discussion, so one
@@ -55,6 +75,65 @@ type assistantReply struct {
 	ToolRounds       int
 }
 
+// assistantToolFailures counts, per tool name, how many times a tool call
+// has failed across one whole call to run - not per round. It is created
+// once in run and threaded into every round's runToolRound so a tool that
+// fails once every round for assistantMaxToolFailures rounds is treated
+// exactly like one that fails assistantMaxToolFailures times in a single
+// round: both mean "this tool is down for the rest of this answer" (see
+// assistantMaxToolFailures). It carries its own mutex rather than reusing
+// runToolRound's local mu - that one only serialises r.emit and firstErr
+// within a single round's goroutines and is recreated fresh on every call,
+// so it cannot hold state that has to survive from one round to the next.
+type assistantToolFailures struct {
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+// record increments name's failure count and returns the new total. Called
+// once per failed tool execution; a withheld call (see exhausted) never
+// reaches this, so declining to dispatch a call never inflates the count
+// past what has actually failed.
+func (f *assistantToolFailures) record(name string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.counts[name]++
+	return f.counts[name]
+}
+
+// exhausted reports whether name has already failed assistantMaxToolFailures
+// times this run, i.e. whether runToolRound should withhold it rather than
+// dispatch it again.
+func (f *assistantToolFailures) exhausted(name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.counts[name] >= assistantMaxToolFailures
+}
+
+// assistantWithheldToolResult builds the tool-role message content
+// runToolRound sends back for a call it declines to dispatch because name
+// has already failed assistantMaxToolFailures times this run. It is built
+// with json.Marshal into the same {"error": "..."} shape a real failure
+// produces a little further down in runToolRound, so the model sees one
+// consistent envelope either way - but the message text is deliberately
+// different from a normal failure: it tells the model outright that the
+// tool is finished for this answer and what to do about it, rather than
+// leaving it to guess whether retrying might work this time. That is what
+// makes this fail-fast rather than a masking fallback (AGENTS.md's
+// fallback policy) - the model is told plainly, so the failure reaches the
+// operator in the answer instead of being quietly retried away.
+func assistantWithheldToolResult(name string) (string, error) {
+	msg := fmt.Sprintf(
+		"%s has failed %d times and is unavailable for the rest of this answer. Do not call it again. Answer using what you already have and tell the operator %s was unavailable.",
+		name, assistantMaxToolFailures, name,
+	)
+	body, err := json.Marshal(map[string]string{"error": msg})
+	if err != nil {
+		return "", fmt.Errorf("marshal withheld tool result for %q: %w", name, err)
+	}
+	return string(body), nil
+}
+
 // assistantEmitter pushes one named progress event to the SSE stream a
 // caller is writing (assistant_handlers.go). This file only ever emits
 // "status" events with an {"text": "..."} payload (see assistantStatus);
@@ -82,6 +161,49 @@ type assistantRunner struct {
 	autoRouter assistantAutoRouterOptions
 	tools      assistantToolExecutor
 	emit       assistantEmitter
+}
+
+// assistantTextToolCallMarkers lists the substrings that mark a message's
+// content as one specific model family's own text tool-call dialect rather
+// than a real answer - see assistantTextToolCallMarker for how these are
+// used. One entry per known text tool-call dialect, with a comment naming
+// the model family each belongs to.
+var assistantTextToolCallMarkers = []string{
+	"<｜DSML｜",              // DeepSeek - the dialect behind the incident assistantMaxToolFailures responds to; the full-width pipe characters (U+FF5C) are part of the literal, not a typo
+	"<｜tool▁calls▁begin｜>", // DeepSeek's older tool-call dialect
+	"<function_calls>",     // Anthropic-style XML
+	"<invoke name=\"",      // Anthropic-style XML
+	"<tool_call>",          // Qwen / Hermes / ChatML
+	"<|python_tag|>",       // Llama
+}
+
+// assistantTextToolCallMarker scans content for any marker in
+// assistantTextToolCallMarkers and returns the first one found. It exists
+// because a model can fall back to emitting a tool call in its own text
+// markup instead of the structured tool_calls field OpenRouter normally
+// decodes - most commonly once tools are withdrawn with tool_choice "none"
+// on the forced final round, though nothing here assumes that; a model can
+// do this on any round. When that happens,
+// resp.Choices[0].Message.ToolCalls is empty (there is nothing to run) and
+// Content holds raw, model-internal syntax instead of prose - see run's use
+// of this function for what happens next.
+//
+// This is a plain substring scan, so it can false-positive on a legitimate
+// answer that happens to quote one of these markers verbatim - for
+// example, an answer that shows the operator an example of Anthropic's
+// tool-call XML. That trade is deliberate: none of Helmcentral's tools,
+// system prompt, or manual content ever produce this markup in a genuine
+// answer, so a false positive here is vanishingly unlikely, and a
+// silently-broken answer served to the operator as if it were real prose -
+// the failure mode this exists to catch - is worse than an occasional
+// loud, explicit error asking the operator to pick a different model.
+func assistantTextToolCallMarker(content string) (string, bool) {
+	for _, marker := range assistantTextToolCallMarkers {
+		if strings.Contains(content, marker) {
+			return marker, true
+		}
+	}
+	return "", false
 }
 
 func autoRouterPluginForModel(model string, opts assistantAutoRouterOptions) *openRouterPlugin {
@@ -152,7 +274,15 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 // a final answer. A model that still calls a tool on that forced round is a
 // bug in the model's behaviour Helmcentral cannot paper over, so that
 // surfaces as an error rather than a fabricated reply (AGENTS.md's fallback
-// policy). Every completion is independently timed out
+// policy). The same is true of a model that swaps the structured tool_calls
+// field for its own text tool-call markup instead of a real answer (see
+// assistantTextToolCallMarker) - accepting that text as the reply would
+// show the operator raw model-internal syntax instead of an error, so it is
+// checked and rejected on every round, not only the forced one, since a
+// model doing this mid-run is just as broken. A tool that keeps failing is
+// handled separately and earlier: assistantMaxToolFailures withholds it
+// from further dispatch (see runToolRound) well before the round budget
+// above is exhausted. Every completion is independently timed out
 // (openRouterCompletionTimeout); the whole call is bounded by
 // assistantRunTimeout via ctx.
 func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
@@ -162,6 +292,10 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	messages := make([]openRouterMessage, 0, len(history)+1)
 	messages = append(messages, assistantSystemMessage(r.model, systemStable, systemLive))
 	messages = append(messages, history...)
+
+	// failures tracks each tool's failure count for this whole run (every
+	// round), not just one round - see assistantToolFailures.
+	failures := &assistantToolFailures{counts: make(map[string]int)}
 
 	var reply assistantReply
 
@@ -203,7 +337,11 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		// answer - only a choice with zero tool calls is treated as final.
 		choice := resp.Choices[0].Message
 		if len(choice.ToolCalls) == 0 {
-			reply.Content = string(choice.Content)
+			content := string(choice.Content)
+			if marker, found := assistantTextToolCallMarker(content); found {
+				return assistantReply{}, fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings", r.model, marker)
+			}
+			reply.Content = content
 			return reply, nil
 		}
 
@@ -213,7 +351,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 
 		messages = append(messages, choice)
 
-		toolMessages, terr := r.runToolRound(ctx, choice.ToolCalls)
+		toolMessages, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
 		if terr != nil {
 			return assistantReply{}, terr
 		}
@@ -229,21 +367,29 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // order regardless of which finished first, since each tool-role message's
 // tool_call_id has to line up with the assistant message that requested it.
 //
-// The "about to call" status event for each call is emitted here in the
-// outer, sequential loop, before that call's goroutine is even started, so
-// the SSE stream still announces tool calls in the order the model asked
-// for them - only the actual work (and a failure's status event) happens
-// concurrently. r.emit itself is not safe for concurrent use (it writes SSE
-// frames straight to the HTTP response), so every call to it from inside a
-// goroutine below is serialised through mu.
+// failures tracks each tool's failure count across the whole run (see
+// assistantToolFailures), so a call to a tool that has already failed
+// assistantMaxToolFailures times is withheld rather than dispatched: its
+// tool-role result is synthesised directly by assistantWithheldToolResult,
+// with no call to r.tools.execute and no semaphore slot spent on it.
+//
+// The "about to call" status event for each dispatched call is emitted
+// here in the outer, sequential loop, before that call's goroutine is even
+// started, so the SSE stream still announces tool calls in the order the
+// model asked for them - only the actual work (and a failure's status
+// event) happens concurrently. r.emit itself is not safe for concurrent use
+// (it writes SSE frames straight to the HTTP response), so every call to it
+// from inside a goroutine below is serialised through mu.
 //
 // Every tool assistant_tools.go defines (find_places, get_wind_forecast,
 // get_tides, estimate_passage, read_manual) only reads: none of them writes
 // to the conversation store, settings, or any other shared state, so
-// running a round's calls in parallel needs no locking beyond r.emit's own.
-// If a future tool ever needs to mutate shared state, it must either take
-// its own lock or be called out here as one that has to run serially.
-func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall) ([]openRouterMessage, error) {
+// running a round's calls in parallel needs no locking beyond r.emit's own
+// and failures' own (see assistantToolFailures's doc comment for why that
+// one is not just guarded by this round's local mu). If a future tool ever
+// needs to mutate shared state, it must either take its own lock or be
+// called out here as one that has to run serially.
+func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall, failures *assistantToolFailures) ([]openRouterMessage, error) {
 	for _, call := range calls {
 		if call.ID == "" {
 			return nil, fmt.Errorf("assistant requested tool %q with no tool_call id", call.Function.Name)
@@ -257,6 +403,33 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 	var firstErr error
 
 	for i, call := range calls {
+		args := json.RawMessage(call.Function.Arguments)
+
+		if failures.exhausted(call.Function.Name) {
+			mu.Lock()
+			stop := firstErr != nil
+			mu.Unlock()
+			if stop {
+				break
+			}
+
+			body, werr := assistantWithheldToolResult(call.Function.Name)
+			if werr != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = werr
+				}
+				mu.Unlock()
+				break
+			}
+			log.Printf("assistant: tool %s WITHHELD, already failed %d times", call.Function.Name, assistantMaxToolFailures)
+			mu.Lock()
+			r.emit("status", assistantStatus(fmt.Sprintf("%s is unavailable after %d failures, skipping", call.Function.Name, assistantMaxToolFailures)))
+			mu.Unlock()
+			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
+			continue
+		}
+
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
@@ -273,7 +446,6 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			break
 		}
 
-		args := json.RawMessage(call.Function.Arguments)
 		mu.Lock()
 		r.emit("status", assistantStatus(describeAssistantToolCall(call.Function.Name, args)))
 		mu.Unlock()
@@ -288,6 +460,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			result, terr := r.tools.execute(ctx, call.Function.Name, args)
 			elapsed := time.Since(toolStart).Round(time.Millisecond)
 			if terr != nil {
+				failures.record(call.Function.Name)
 				oneLine := firstErrorLine(terr)
 				log.Printf("assistant: tool %s failed after %s: %v", call.Function.Name, elapsed, terr)
 				errBody, merr := json.Marshal(map[string]string{"error": oneLine})

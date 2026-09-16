@@ -526,6 +526,200 @@ func TestAssistantRunner_ToolExecutorErrorBecomesErrorJSONAndContinues(t *testin
 	}
 }
 
+// ── per-tool failure budget (the find_places/Overpass-down incident) ──────
+//
+// Background: a real conversation had every find_places call fail because
+// Overpass was down. The model retried it in 7 of 8 rounds, burning the
+// whole assistantMaxToolRounds budget, and only on the forced final round
+// (with no budget left to actually answer) did it fall back to text
+// tool-call markup - see the next section below. assistantMaxToolFailures
+// exists so a tool that is simply down stops being retried long before the
+// round budget is exhausted, leaving the model rounds to spend on an
+// answer instead.
+
+// TestAssistantRunner_ToolExhaustsFailureBudgetAndIsWithheldOnFourthCall
+// asks for the same failing tool once per round across
+// assistantMaxToolFailures+1 rounds and checks two things: the tool is
+// actually executed only assistantMaxToolFailures times (never a 4th), and
+// the request that follows the withheld 4th call carries a synthesised
+// tool-role message telling the model, in the same {"error": "..."} JSON
+// shape a real failure produces, that the tool is gone for the rest of
+// this answer.
+func TestAssistantRunner_ToolExhaustsFailureBudgetAndIsWithheldOnFourthCall(t *testing.T) {
+	responses := make([]*http.Response, 0, assistantMaxToolFailures+2)
+	errs := make([]error, 0, assistantMaxToolFailures+2)
+	for i := 0; i <= assistantMaxToolFailures; i++ {
+		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
+		errs = append(errs, nil)
+	}
+	responses = append(responses, finalResponse(t, "here is what I know without tides", "m", openRouterUsage{}))
+	errs = append(errs, nil)
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{errs: map[string]error{
+		"get_tides": errors.New("tide station offline"),
+	}}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	reply, err := runner.run(context.Background(), "system", "", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if reply.Content != "here is what I know without tides" {
+		t.Fatalf("unexpected content: %q", reply.Content)
+	}
+
+	if len(tools.calls) != assistantMaxToolFailures {
+		t.Fatalf("expected get_tides to be executed exactly %d times, got %d: %+v", assistantMaxToolFailures, len(tools.calls), tools.calls)
+	}
+
+	// The request sent right after the withheld 4th call is at index
+	// assistantMaxToolFailures+1 (one request per round: rounds 0..3 asked
+	// for the tool, round 4 is what follows the withheld call).
+	withheldReq := doer.requests[assistantMaxToolFailures+1]
+	var toolMsg *openRouterMessage
+	for i := range withheldReq.Messages {
+		if withheldReq.Messages[i].Role == "tool" {
+			toolMsg = &withheldReq.Messages[i]
+		}
+	}
+	if toolMsg == nil {
+		t.Fatalf("expected a tool-role message for the withheld 4th call, got %+v", withheldReq.Messages)
+	}
+	var decoded struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(toolMsg.Content), &decoded); err != nil {
+		t.Fatalf("expected the withheld call's tool message to decode as {\"error\":...}, got %q: %v", toolMsg.Content, err)
+	}
+	if !strings.Contains(decoded.Error, "unavailable") {
+		t.Fatalf("expected the withheld call's error to say the tool is unavailable, got %q", decoded.Error)
+	}
+}
+
+// TestAssistantRunner_UnrelatedToolUnaffectedByExhaustedToolBudget proves the
+// failure budget is tracked per tool name, not globally: get_tides fails on
+// every round and is withheld after assistantMaxToolFailures calls, but
+// get_wind_forecast - present in every one of the same rounds - keeps
+// executing normally the whole time, including on the round where
+// get_tides is withheld.
+func TestAssistantRunner_UnrelatedToolUnaffectedByExhaustedToolBudget(t *testing.T) {
+	roundResponse := func(round int) *http.Response {
+		return chatResponse(t, http.StatusOK, openRouterChatResponse{
+			Choices: []openRouterChoice{{
+				Message: openRouterMessage{
+					Role: "assistant",
+					ToolCalls: []openRouterToolCall{
+						{ID: fmt.Sprintf("tides_%d", round), Type: "function", Function: openRouterToolCallFunction{Name: "get_tides", Arguments: openRouterArguments(`{"lat":1,"lon":2}`)}},
+						{ID: fmt.Sprintf("wind_%d", round), Type: "function", Function: openRouterToolCallFunction{Name: "get_wind_forecast", Arguments: openRouterArguments(`{"lat":1,"lon":2}`)}},
+					},
+				},
+			}},
+		})
+	}
+
+	responses := make([]*http.Response, 0, assistantMaxToolFailures+2)
+	errs := make([]error, 0, assistantMaxToolFailures+2)
+	for i := 0; i <= assistantMaxToolFailures; i++ {
+		responses = append(responses, roundResponse(i))
+		errs = append(errs, nil)
+	}
+	responses = append(responses, finalResponse(t, "wind checked, no tides", "m", openRouterUsage{}))
+	errs = append(errs, nil)
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{
+		errs:    map[string]error{"get_tides": errors.New("tide station offline")},
+		results: map[string]string{"get_wind_forecast": `{"days":[]}`},
+	}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	if _, err := runner.run(context.Background(), "system", "", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got := map[string]int{}
+	for _, c := range tools.calls {
+		got[c.name]++
+	}
+	if got["get_tides"] != assistantMaxToolFailures {
+		t.Fatalf("expected get_tides executed exactly %d times before its budget withheld it, got %d", assistantMaxToolFailures, got["get_tides"])
+	}
+	if got["get_wind_forecast"] != assistantMaxToolFailures+1 {
+		t.Fatalf("expected get_wind_forecast to keep executing every round unaffected by get_tides' exhausted budget, got %d", got["get_wind_forecast"])
+	}
+}
+
+// TestAssistantRunner_ToolFailureBudgetAccumulatesAcrossNonConsecutiveRounds
+// spreads get_tides' three failures across rounds 0, 2 and 4, with
+// get_wind_forecast-only rounds in between that never touch get_tides at
+// all. If the failure count were ever reset per round (or only accumulated
+// across consecutive rounds) this would never reach the budget; because the
+// count lives for the whole run, the 4th ask - in round 5 - is still
+// withheld.
+func TestAssistantRunner_ToolFailureBudgetAccumulatesAcrossNonConsecutiveRounds(t *testing.T) {
+	tidesCall := func(id string) *http.Response {
+		return toolCallResponse(t, id, "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{})
+	}
+	windCall := func(id string) *http.Response {
+		return toolCallResponse(t, id, "get_wind_forecast", `{"lat":1,"lon":2}`, openRouterUsage{})
+	}
+
+	responses := []*http.Response{
+		tidesCall("tides_0"), // round 0: fails, count -> 1
+		windCall("wind_0"),   // round 1: unrelated tool, get_tides untouched
+		tidesCall("tides_1"), // round 2: fails, count -> 2
+		windCall("wind_1"),   // round 3: unrelated tool again
+		tidesCall("tides_2"), // round 4: fails, count -> 3, budget exhausted
+		tidesCall("tides_3"), // round 5: 4th ask - must be withheld
+		finalResponse(t, "no tides available, but the wind looks fine", "m", openRouterUsage{}), // round 6
+	}
+	errs := make([]error, len(responses))
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{
+		errs:    map[string]error{"get_tides": errors.New("tide station offline")},
+		results: map[string]string{"get_wind_forecast": `{"days":[]}`},
+	}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	reply, err := runner.run(context.Background(), "system", "", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if reply.Content != "no tides available, but the wind looks fine" {
+		t.Fatalf("unexpected content: %q", reply.Content)
+	}
+
+	got := map[string]int{}
+	for _, c := range tools.calls {
+		got[c.name]++
+	}
+	if got["get_tides"] != assistantMaxToolFailures {
+		t.Fatalf("expected get_tides executed exactly %d times across non-consecutive rounds, got %d", assistantMaxToolFailures, got["get_tides"])
+	}
+	if got["get_wind_forecast"] != 2 {
+		t.Fatalf("expected get_wind_forecast executed twice, got %d", got["get_wind_forecast"])
+	}
+
+	last := doer.requests[len(doer.requests)-1]
+	var toolMsg *openRouterMessage
+	for i := range last.Messages {
+		if last.Messages[i].Role == "tool" && last.Messages[i].ToolCallID == "tides_3" {
+			toolMsg = &last.Messages[i]
+		}
+	}
+	if toolMsg == nil {
+		t.Fatalf("expected the withheld tides_3 call's tool message in the final request, got %+v", last.Messages)
+	}
+	if !strings.Contains(string(toolMsg.Content), "unavailable") {
+		t.Fatalf("expected the withheld call's message to say the tool is unavailable, got %q", toolMsg.Content)
+	}
+}
+
 func TestAssistantRunner_ForcedFinalRoundSendsNoToolsAndToolChoiceNone(t *testing.T) {
 	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
 	errs := make([]error, 0, assistantMaxToolRounds+1)
@@ -593,6 +787,111 @@ func TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors(t *testin
 	}
 	if !strings.Contains(err.Error(), fmt.Sprintf("%d tool rounds", assistantMaxToolRounds)) {
 		t.Fatalf("expected the error to name the round cap, got %q", err)
+	}
+}
+
+// ── text tool-call markup rejected as a final answer ───────────────────────
+//
+// Background: on the forced final round of the incident above, the model
+// (DeepSeek) had no tool budget left and no tools on offer (tool_choice
+// "none"), so instead of prose it emitted its own native tool-call markup
+// (DSML) as the message content. assistant_run.go's old
+// "len(choice.ToolCalls) == 0 -> treat as final" check had no way to tell
+// that apart from a real answer, so it was persisted and shown to the
+// operator verbatim. assistantTextToolCallMarker exists to catch this.
+
+// TestAssistantRunner_TextToolCallMarkupInFinalResponseErrorsInsteadOfReturningReply
+// uses the exact DeepSeek DSML content persisted during the real incident
+// this change responds to, and checks it is rejected with an error - never
+// handed back as a reply - and that the error names the model.
+func TestAssistantRunner_TextToolCallMarkupInFinalResponseErrorsInsteadOfReturningReply(t *testing.T) {
+	const dsmlContent = "\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"find_places\">\n<｜DSML｜ parameter name=\"query\" string=\"true\">Cairns</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>"
+
+	round0 := finalResponse(t, dsmlContent, "deepseek/deepseek-chat", openRouterUsage{})
+	doer := &queuedChatDoer{responses: []*http.Response{round0}, errs: []error{nil}}
+	tools := &fakeToolExecutor{}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "deepseek/deepseek-chat", tools: tools, emit: emit}
+	reply, err := runner.run(context.Background(), "system", "", nil)
+	if err == nil {
+		t.Fatalf("expected an error for a DeepSeek DSML tool call returned as plain text, got reply %+v", reply)
+	}
+	if !strings.Contains(err.Error(), "deepseek/deepseek-chat") {
+		t.Fatalf("expected the error to name the model, got %q", err)
+	}
+	if reply != (assistantReply{}) {
+		t.Fatalf("expected a zero-value reply on error, got %+v", reply)
+	}
+}
+
+// TestAssistantRunner_TextToolCallMarkupOnForcedFinalRoundStillErrors checks
+// the same rejection fires on the forced final round (round ==
+// assistantMaxToolRounds) - the exact round the real incident's markup came
+// back on - rather than only on an earlier round.
+func TestAssistantRunner_TextToolCallMarkupOnForcedFinalRoundStillErrors(t *testing.T) {
+	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
+	errs := make([]error, 0, assistantMaxToolRounds+1)
+	for i := 0; i < assistantMaxToolRounds; i++ {
+		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "find_places", `{"query":"Cairns"}`, openRouterUsage{}))
+		errs = append(errs, nil)
+	}
+	// On the forced final round (tools withdrawn, tool_choice "none") the
+	// model falls back to its own text tool-call markup instead of prose.
+	const qwenToolCallContent = `<tool_call>{"name": "find_places", "arguments": {"query": "Cairns"}}</tool_call>`
+	responses = append(responses, finalResponse(t, qwenToolCallContent, "qwen/qwen-2.5", openRouterUsage{}))
+	errs = append(errs, nil)
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{results: map[string]string{"find_places": `{"results":[]}`}}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "qwen/qwen-2.5", tools: tools, emit: emit}
+	_, err := runner.run(context.Background(), "system", "", nil)
+	if err == nil {
+		t.Fatal("expected an error when the forced final round returns text tool-call markup instead of an answer")
+	}
+	if !strings.Contains(err.Error(), "qwen/qwen-2.5") {
+		t.Fatalf("expected the error to name the model, got %q", err)
+	}
+	if !strings.Contains(err.Error(), "<tool_call>") {
+		t.Fatalf("expected the error to name the marker found, got %q", err)
+	}
+}
+
+// TestAssistantTextToolCallMarker is a table-driven unit test over every
+// marker in assistantTextToolCallMarkers, plus several clean strings a real
+// answer might plausibly contain (including prose that mentions a tool by
+// name, and prose with an unrelated angle bracket) to check the scan does
+// not fire on those.
+func TestAssistantTextToolCallMarker(t *testing.T) {
+	tests := []struct {
+		name       string
+		content    string
+		wantMarker string
+		wantFound  bool
+	}{
+		{name: "deepseek dsml", content: "prefix <｜DSML｜ calls> suffix", wantMarker: "<｜DSML｜", wantFound: true},
+		{name: "deepseek legacy tool calls begin", content: "prefix <｜tool▁calls▁begin｜> suffix", wantMarker: "<｜tool▁calls▁begin｜>", wantFound: true},
+		{name: "anthropic function_calls", content: "prefix <function_calls> suffix", wantMarker: "<function_calls>", wantFound: true},
+		{name: "anthropic invoke", content: `prefix <invoke name="find_places"> suffix`, wantMarker: `<invoke name="`, wantFound: true},
+		{name: "qwen/hermes/chatml tool_call", content: "prefix <tool_call> suffix", wantMarker: "<tool_call>", wantFound: true},
+		{name: "llama python_tag", content: "prefix <|python_tag|> suffix", wantMarker: "<|python_tag|>", wantFound: true},
+		{name: "clean prose", content: "Tongue Bay looks better on the rising tide.", wantFound: false},
+		{name: "empty content", content: "", wantFound: false},
+		{name: "prose mentioning a tool by name", content: "I would normally call get_tides here, but it is unavailable.", wantFound: false},
+		{name: "prose with an unrelated angle bracket", content: "Depth is <3m at low water, watch the swing.", wantFound: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			marker, found := assistantTextToolCallMarker(tt.content)
+			if found != tt.wantFound {
+				t.Fatalf("assistantTextToolCallMarker(%q) found = %v, want %v", tt.content, found, tt.wantFound)
+			}
+			if found && marker != tt.wantMarker {
+				t.Fatalf("assistantTextToolCallMarker(%q) marker = %q, want %q", tt.content, marker, tt.wantMarker)
+			}
+		})
 	}
 }
 
