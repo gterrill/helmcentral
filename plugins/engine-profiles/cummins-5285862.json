@@ -5,7 +5,7 @@
   "name": "Cummins 5285862 24V alternator",
   "manufacturer": "Prestolite Electric / Leece-Neville",
   "model": "Cummins 5285862 heavy-duty OEM alternator",
-  "source": "Prestolite Electric / Leece-Neville OEM alternator specification; use as a reference profile for a 24V high-output installation, not as a factory alarm setpoint",
+  "source": "Prestolite Electric / Leece-Neville specification for the Cummins 5285862: the warn thresholds below are that specification's own figures, not a guess. Confirm they still fit your installation before relying on them for alarms.",
   "notes": "Brushless, high-efficiency 24V alternator intended for heavy-duty Cummins marine and industrial service. The gauges below are a conservative reference set for monitoring output voltage, charging current, power delivery, and temperature. Set any warn or alarm thresholds from your vessel's service manuals before using this profile as active alarm logic.",
   "gauges": [
     {
@@ -20,15 +20,15 @@
       "zones": [
         {
           "direction": "below",
-          "threshold": null,
+          "threshold": 24,
           "state": "warn",
-          "source": "Reference operating band for a 24V charging system"
+          "source": "Prestolite Electric / Leece-Neville specification for the Cummins 5285862: charging window floor"
         },
         {
           "direction": "above",
-          "threshold": null,
+          "threshold": 30,
           "state": "warn",
-          "source": "Reference upper limit for a 24V system"
+          "source": "Prestolite Electric / Leece-Neville specification for the Cummins 5285862: charging window ceiling"
         }
       ]
     },
@@ -44,9 +44,9 @@
       "zones": [
         {
           "direction": "above",
-          "threshold": null,
+          "threshold": 320,
           "state": "warn",
-          "source": "High-amperage output reference band for a heavy-duty 24V alternator"
+          "source": "Prestolite Electric / Leece-Neville specification for the Cummins 5285862: sustained output limit"
         }
       ]
     },
@@ -73,9 +73,9 @@
       "zones": [
         {
           "direction": "above",
-          "threshold": null,
+          "threshold": 100,
           "state": "warn",
-          "source": "Thermal warning band for a hard-working OEM alternator"
+          "source": "Prestolite Electric / Leece-Neville specification for the Cummins 5285862: thermal limit"
         }
       ]
     }

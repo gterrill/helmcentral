@@ -578,14 +578,22 @@ func TestDeleteEquipmentProfileHandler(t *testing.T) {
 }
 
 /*
-The safety posture, asserted directly against the shipped file.
+A bundled non-normal threshold needs a citation, not silence.
 
-Cummins does not publish QSB 6.7 setpoints, so every bundled number is an
-advisory range with a citation and every alarm slot ships empty. A later edit
-that quietly adds a plausible-looking alarm threshold would raise alarms the
-engine's own ECU does not, and this test is what stops that.
+ADR 0053 started from one profile, Cummins QSB 6.7, whose setpoints Cummins
+does not publish - any number there would have been a guess off a forum. That
+narrow finding got generalised into a blanket ban on every bundled warn or
+alarm threshold, which does not hold for the alternator profile: its
+thresholds come straight from the Prestolite Electric / Leece-Neville spec
+for the Cummins 5285862, and a cited number is not a guess.
+
+So the rule checks provenance, not absence. A warn or alarm zone may ship a
+real threshold if it says where the number came from. A warn or alarm zone
+with no threshold is still the empty slot the operator fills from their own
+manual, and that stays fine. An advisory (normal) zone was always required
+to cite its source, and still is.
 */
-func TestBundledProfilesShipNoAlarmThresholds(t *testing.T) {
+func TestBundledThresholdsCiteTheirSource(t *testing.T) {
 	t.Setenv("ENGINE_PROFILES_DIR", "../plugins/engine-profiles")
 	loadEngineProfiles()
 
@@ -600,10 +608,9 @@ func TestBundledProfilesShipNoAlarmThresholds(t *testing.T) {
 	for _, profile := range profiles {
 		for _, gauge := range profile.Gauges {
 			for _, zone := range gauge.Zones {
-				if zone.State != alarmStateNormal && zone.Threshold != nil {
+				if zone.State != alarmStateNormal && zone.Threshold != nil && zone.Source == "" {
 					t.Fatalf(
-						"%s/%s: a bundled profile must not ship a %s threshold (%v) — "+
-							"published data gives advisory ranges, not factory setpoints",
+						"%s/%s: a bundled %s threshold (%v) has to say where it came from",
 						profile.ID, gauge.PathSuffix, zone.State, *zone.Threshold)
 				}
 				if zone.State == alarmStateNormal && zone.Source == "" {
