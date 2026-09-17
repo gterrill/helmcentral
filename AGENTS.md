@@ -12,8 +12,6 @@
 - Run `/code-review high` on the commits since the last tag before creating a release tag. For large migrations (framework or major dependency upgrades), use `/code-review ultra` instead.
 - Check each finding against the code before acting on it. `high` and above report uncertain findings.
 - Findings applied with `--fix` still have to follow the Fallback and Test-First policies below.
-- Agents cannot start `/code-review` themselves. When asked to tag a release, ask whether the pre-release review has run, and do not tag until it has.
-- Code review does not run in CI. This repo commits straight to `main` with a single operator, so the review happens locally before the push.
 
 ## Fallback Policy
 
