@@ -321,6 +321,38 @@ func TestAssistantStatusHandler_EnabledKeyBlankModelNamesModel(t *testing.T) {
 	}
 }
 
+// TestCheckAssistantReadiness_BlankDocumentModelDoesNotBlockChat is the
+// follow-up correction to the review finding above: checkAssistantReadiness
+// (and therefore readiness.Problem, which both assistantStatusHandler and
+// postAssistantMessageHandler gate chat on) must stay chat-only. A blank
+// assistant.document_model is a document-enrichment concern - enforced by
+// documentEnrichReadinessProblem (documents_enrich.go), applied only on the
+// document upload/reindex handlers and the indexer's enrich stage - and
+// must never make chat itself report not-ready.
+func TestCheckAssistantReadiness_BlankDocumentModelDoesNotBlockChat(t *testing.T) {
+	store := withTestSecretsStore(t)
+	if err := store.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.yaml")
+	body := "assistant:\n    enabled: true\n    model: \"openai/gpt-4o\"\n    document_model: \"\"\n    notes: \"\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write settings fixture: %v", err)
+	}
+
+	readiness, apiKey, err := checkAssistantReadiness(path)
+	if err != nil {
+		t.Fatalf("checkAssistantReadiness: %v", err)
+	}
+	if readiness.Problem != "" {
+		t.Fatalf("expected chat readiness to stay ready despite a blank document model, got problem %q", readiness.Problem)
+	}
+	if apiKey == "" {
+		t.Fatalf("expected the api key to be returned once chat itself is ready")
+	}
+}
+
 func TestAssistantStatusHandler_AllSetIsReadyWithEchoedModel(t *testing.T) {
 	store := withTestSecretsStore(t)
 	if err := store.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {

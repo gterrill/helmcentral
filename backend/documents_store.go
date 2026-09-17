@@ -1252,6 +1252,63 @@ func (s *documentStore) ChunksFrom(id string, fromSeq int) ([]documentChunk, err
 	return out, rows.Err()
 }
 
+// SetExtracted stores the extract stage's flattened Markdown and page count
+// on the document row (B4's documents_indexer.go) - separate from
+// ReplaceChunks(local), which stores the same text chunked for search: the
+// enrich stage's text-layer-PDF and text-type branches need the whole
+// markdown in one string (the first 24k characters of it) to send
+// OpenRouter, not the chunk-by-chunk form, and documentNeedsOCR recomputes
+// the OCR heuristic from markdown/page_count after a restart rather than
+// needing its own persisted column.
+func (s *documentStore) SetExtracted(id, markdown string, pageCount int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(`UPDATE documents SET markdown = ?, page_count = ?, updated_at = ? WHERE id = ?`, markdown, pageCount, s.now().Unix(), id)
+	if err != nil {
+		return fmt.Errorf("set extracted: %w", err)
+	}
+	return checkRowsAffected(res, errDocumentNotFound)
+}
+
+// SetWarning stores a non-fatal message in documents.error without
+// disturbing status, stage or indexed_with (B4's documents_indexer.go): a
+// document whose extract stage found some but not all pages unreadable
+// still reaches indexed, but the warning needs to survive SetIndexed's own
+// unconditional error=” clear (SetIndexed marks a clean finish; this
+// records that the finish was not entirely clean) - so the indexer calls
+// SetIndexed first, then SetWarning, whenever there is one to carry
+// forward.
+func (s *documentStore) SetWarning(id, msg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(`UPDATE documents SET error = ?, updated_at = ? WHERE id = ?`, msg, s.now().Unix(), id)
+	if err != nil {
+		return fmt.Errorf("set warning: %w", err)
+	}
+	return checkRowsAffected(res, errDocumentNotFound)
+}
+
+// AddIndexCost records which model performed an enrich-stage OpenRouter
+// call and adds its usage.cost to the document's running index_cost_usd
+// total (B4's documents_enrich.go) - a running total, not an overwrite,
+// since a document reindexed more than once should show everything spent
+// on it, not just the most recent pass.
+func (s *documentStore) AddIndexCost(id, model string, cost float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(
+		`UPDATE documents SET index_model = ?, index_cost_usd = index_cost_usd + ?, updated_at = ? WHERE id = ?`,
+		model, cost, s.now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("add index cost: %w", err)
+	}
+	return checkRowsAffected(res, errDocumentNotFound)
+}
+
 func (s *documentStore) SetStage(id, stage string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

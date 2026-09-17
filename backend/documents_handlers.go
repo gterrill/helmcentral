@@ -598,6 +598,10 @@ func uploadDocumentHandler(c echo.Context) error {
 		log.Printf("documents: upload: check assistant readiness: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	// documentEnrichReadinessProblem, not readiness.Problem directly: this
+	// consent decision also requires a document model, a document-only
+	// requirement that must never affect chat's own readiness.
+	enrichProblem := documentEnrichReadinessProblem(readiness)
 
 	// Everything from here to Insert runs under sha's own lock, shared with
 	// deleteDocumentHandler: a concurrent delete of the document this hash
@@ -634,7 +638,7 @@ func uploadDocumentHandler(c echo.Context) error {
 		Title:        title,
 		MIME:         detectDocumentMIME(head.buf, filename),
 		SizeBytes:    size,
-		Enrich:       readiness.Problem == "",
+		Enrich:       enrichProblem == "",
 		OperatorTags: parseDocumentTagsField(tagsRaw),
 	})
 	if errors.Is(err, errDocumentDuplicate) {
@@ -778,7 +782,11 @@ func reindexDocumentHandler(c echo.Context) error {
 		log.Printf("documents: reindex: check assistant readiness: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	enrich := readiness.Problem == ""
+	// documentEnrichReadinessProblem, not readiness.Problem directly: this
+	// consent decision also requires a document model, a document-only
+	// requirement that must never affect chat's own readiness.
+	problem := documentEnrichReadinessProblem(readiness)
+	enrich := problem == ""
 
 	if err := globalDocumentStore.MarkReindex(id, enrich); err != nil {
 		return writeDocumentError(c, err)
@@ -794,7 +802,7 @@ func reindexDocumentHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"document": toDocumentJSON(doc),
 		"enrich":   enrich,
-		"problem":  readiness.Problem,
+		"problem":  problem,
 	})
 }
 

@@ -369,6 +369,108 @@ func TestDocumentStore_SetStageUnknownIDReturnsNotFound(t *testing.T) {
 	}
 }
 
+// TestDocumentStore_SetExtractedStoresMarkdownAndPageCount pins B4's
+// extract-stage store write: the indexer needs the whole flattened markdown
+// (not just the chunked form ReplaceChunks stores) for the enrich stage's
+// text-layer-PDF branch, which sends the first 24k characters of it.
+func TestDocumentStore_SetExtractedStoresMarkdownAndPageCount(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-extracted", "manual.pdf", nil)
+
+	if err := store.SetExtracted(doc.ID, "# Engine Manual\n\nChange the impeller yearly.", 3); err != nil {
+		t.Fatalf("SetExtracted: %v", err)
+	}
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Markdown != "# Engine Manual\n\nChange the impeller yearly." {
+		t.Fatalf("unexpected markdown: %q", got.Markdown)
+	}
+	if got.PageCount != 3 {
+		t.Fatalf("expected page_count 3, got %d", got.PageCount)
+	}
+}
+
+func TestDocumentStore_SetExtractedUnknownIDReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if err := store.SetExtracted("does-not-exist", "text", 1); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected errDocumentNotFound, got %v", err)
+	}
+}
+
+// TestDocumentStore_SetWarningSurvivesSetIndexed pins the mechanism B4's
+// indexer relies on to keep a partial-page-extraction warning visible on a
+// document that still reaches indexed: SetIndexed itself clears
+// documents.error unconditionally (TestDocumentStore_SetStageSetIndexedSetFailedTransitions
+// pins that as a clean-finish guarantee), so the indexer calls SetWarning
+// again, after SetIndexed, to restore the message. This test proves that
+// ordering actually leaves the warning in place rather than being wiped.
+func TestDocumentStore_SetWarningSurvivesSetIndexed(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-warning", "manual.pdf", nil)
+
+	if err := store.SetIndexed(doc.ID, "local"); err != nil {
+		t.Fatalf("SetIndexed: %v", err)
+	}
+	if err := store.SetWarning(doc.ID, "1 of 2 pages unreadable: pdf p2: panic: bad TL"); err != nil {
+		t.Fatalf("SetWarning: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "indexed" {
+		t.Fatalf("expected SetWarning to leave status alone, got %q", got.Status)
+	}
+	if got.Error != "1 of 2 pages unreadable: pdf p2: panic: bad TL" {
+		t.Fatalf("expected the warning to survive after SetIndexed, got %q", got.Error)
+	}
+}
+
+func TestDocumentStore_SetWarningUnknownIDReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if err := store.SetWarning("does-not-exist", "x"); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected errDocumentNotFound, got %v", err)
+	}
+}
+
+// TestDocumentStore_AddIndexCostAccumulatesAcrossCalls pins that a document
+// reindexed more than once keeps a running total rather than each pass
+// hiding what the previous one already spent - the whole point of tracking
+// real spend rather than an estimate.
+func TestDocumentStore_AddIndexCostAccumulatesAcrossCalls(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-cost", "receipt.png", nil)
+
+	if err := store.AddIndexCost(doc.ID, "google/gemini-2.5-flash", 0.0011695); err != nil {
+		t.Fatalf("AddIndexCost: %v", err)
+	}
+	if err := store.AddIndexCost(doc.ID, "google/gemini-2.5-flash", 0.0005); err != nil {
+		t.Fatalf("AddIndexCost: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.IndexModel != "google/gemini-2.5-flash" {
+		t.Fatalf("unexpected index_model: %q", got.IndexModel)
+	}
+	const want = 0.0011695 + 0.0005
+	if diff := got.IndexCostUSD - want; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("expected index_cost_usd to accumulate to %v, got %v", want, got.IndexCostUSD)
+	}
+}
+
+func TestDocumentStore_AddIndexCostUnknownIDReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if err := store.AddIndexCost("does-not-exist", "m", 0.01); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected errDocumentNotFound, got %v", err)
+	}
+}
+
 func TestDocumentStore_UpdateMetaReplacesOperatorTagsAndRebuildsMetaChunk(t *testing.T) {
 	store := newTestDocumentStore(t)
 	doc := mustInsertDocument(t, store, "sha-meta", "invoice.pdf", nil)

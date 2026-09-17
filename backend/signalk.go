@@ -140,8 +140,13 @@ type settingsPayload struct {
 	// backend stores and round-trips them but does not otherwise act on
 	// them.
 	Assistant struct {
-		Enabled        bool     `json:"enabled"`
-		Model          string   `json:"model"`
+		Enabled bool   `json:"enabled"`
+		Model   string `json:"model"`
+		// DocumentModel is the model the document indexer's enrich stage
+		// (ADR 0106) uses for OCR and suggested title/summary/tags - a
+		// separate setting from Model since it runs unattended on every
+		// upload rather than being picked per conversation.
+		DocumentModel  string   `json:"document_model"`
 		Notes          string   `json:"notes"`
 		AllowedModels  []string `json:"allowed_models"`
 		ExcludedModels []string `json:"excluded_models"`
@@ -249,6 +254,7 @@ func updateSettingsHandler(c echo.Context) error {
 	settings["assistant"] = map[string]any{
 		"enabled":         normalized.Assistant.Enabled,
 		"model":           normalized.Assistant.Model,
+		"document_model":  normalized.Assistant.DocumentModel,
 		"notes":           normalized.Assistant.Notes,
 		"allowed_models":  normalized.Assistant.AllowedModels,
 		"excluded_models": normalized.Assistant.ExcludedModels,
@@ -464,6 +470,17 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		// "absent" and papered over with normalizeSettingsPayload({})'s
 		// default model.
 		payload.Assistant.Model = strings.TrimSpace(coerceString(assistantMap["model"]))
+		// document_model (ADR 0106) is newer than the assistant block itself,
+		// so unlike model above, a settings.yaml written before it existed
+		// has the key genuinely absent rather than present-and-blank - and a
+		// plain map lookup can't tell those apart (both come back as the
+		// zero value ""). Only an explicit key, present() checked before
+		// coercing, overrides the normalizeSettingsPayload({}) default set
+		// above; an absent key leaves that default in place, the same
+		// presence-vs-value distinction auto_raise_on_motoring uses below.
+		if raw, ok := assistantMap["document_model"]; ok {
+			payload.Assistant.DocumentModel = strings.TrimSpace(coerceString(raw))
+		}
 		payload.Assistant.Notes = coerceString(assistantMap["notes"])
 		payload.Assistant.AllowedModels = coerceStringList(assistantMap["allowed_models"])
 		payload.Assistant.ExcludedModels = coerceStringList(assistantMap["excluded_models"])
@@ -598,6 +615,10 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.Model = strings.TrimSpace(req.Assistant.Model)
 	if normalized.Assistant.Model == "" {
 		normalized.Assistant.Model = defaultAssistantModel
+	}
+	normalized.Assistant.DocumentModel = strings.TrimSpace(req.Assistant.DocumentModel)
+	if normalized.Assistant.DocumentModel == "" {
+		normalized.Assistant.DocumentModel = defaultDocumentModel
 	}
 	normalized.Assistant.Notes = strings.TrimSpace(req.Assistant.Notes)
 	normalized.Assistant.AllowedModels = normalizeAssistantModelPatterns(req.Assistant.AllowedModels)

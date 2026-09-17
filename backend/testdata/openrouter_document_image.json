@@ -1,0 +1,46 @@
+{
+    "id": "gen-1789630380-dZ6fhfyKsUVVdv7yyedx",
+    "object": "chat.completion",
+    "created": 1789630380,
+    "model": "google/gemini-2.5-flash",
+    "provider": "Google",
+    "system_fingerprint": null,
+    "service_tier": "default",
+    "choices": [
+        {
+            "index": 0,
+            "logprobs": null,
+            "finish_reason": "stop",
+            "native_finish_reason": "STOP",
+            "message": {
+                "role": "assistant",
+                "content": "```json\n{\"text\": \"WHITSUNDAY MARINE SUPPLIES\\n\\nAirlie Beach QLD 4802\\nTax invoice 20931\\n12 Sep 2026\\n\\nJohnson impeller kit 09-1027B 1 x $89.50\\nRacor 2040PM-OR fuel filter 2 x $42.00\\nYanmar 4JH oil filter 119305-35151 1 x $31.95\\n\\nTOTAL AUD $205.45 incl GST $18.68\", \"title\": \"Invoice from Whitsunday Marine Supplies\", \"summary\": \"This is an invoice from Whitsunday Marine Supplies for marine parts including a Johnson impeller kit, Racor fuel filters, and a Yanmar oil filter, totaling AUD $205.45 including GST.\", \"tags\": [\"invoice\", \"marine supplies\", \"Johnson\", \"Racor\", \"Yanmar\", \"impeller kit\", \"fuel filter\", \"oil filter\", \"AUD\", \"GST\"]}\n```",
+                "refusal": null,
+                "reasoning": null
+            }
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 1840,
+        "completion_tokens": 247,
+        "total_tokens": 2087,
+        "cost": 0.0011695,
+        "is_byok": false,
+        "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
+            "audio_tokens": 0,
+            "video_tokens": 0
+        },
+        "cost_details": {
+            "upstream_inference_cost": 0.0011695,
+            "upstream_inference_prompt_cost": 0.000552,
+            "upstream_inference_completions_cost": 0.0006175
+        },
+        "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "image_tokens": 0,
+            "audio_tokens": 0
+        }
+    }
+}

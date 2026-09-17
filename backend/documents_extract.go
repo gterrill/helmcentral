@@ -106,12 +106,28 @@ type extractedPage struct {
 // extractedDocument is extractDocumentText's result: per-page text when the
 // source has real pages (PDFs), a flattened Markdown/text view used both for
 // non-paged chunking and for B4's enrichment prompt, and whether the local
-// text is thin enough that Mate's OCR should be offered.
+// text is thin enough that Mate's OCR should be offered. FailedPages and
+// FirstPageErr surface a partial PDF failure (some but not all pages)
+// rather than letting it disappear silently: extractPDF used to just skip a
+// failed page's text and move on, which meant a page's worth of missing
+// text never showed up anywhere the operator could see it (found in B2
+// review, addressed in B4 - documents_indexer.go writes FailedPages/
+// FirstPageErr to documents.error so it stays visible even once the
+// document reaches indexed).
 type extractedDocument struct {
 	Pages     []extractedPage
 	PageCount int
 	Markdown  string
 	NeedsOCR  bool
+
+	// FailedPages holds the 1-indexed page numbers extractPDFPage could not
+	// read, in ascending order. Empty for every non-PDF source and for a
+	// PDF whose pages all extracted cleanly.
+	FailedPages []int
+	// FirstPageErr is the first failed page's own error text (extractPDF's
+	// firstErr, already page-numbered and path-qualified). Empty exactly
+	// when FailedPages is empty.
+	FirstPageErr string
 }
 
 // extractDocumentText extracts whatever local, non-paid text it can from the
@@ -180,7 +196,7 @@ func extractPDF(ctx context.Context, path string) (extractedDocument, error) {
 	fonts := make(map[string]*pdf.Font)
 	pages := make([]extractedPage, 0, numPages)
 	var firstErr error
-	var failedPages int
+	var failedPages []int
 
 	for i := 1; i <= numPages; i++ {
 		if err := ctx.Err(); err != nil {
@@ -189,7 +205,7 @@ func extractPDF(ctx context.Context, path string) (extractedDocument, error) {
 
 		text, pageErr := extractPDFPage(reader, i, fonts)
 		if pageErr != nil {
-			failedPages++
+			failedPages = append(failedPages, i)
 			if firstErr == nil {
 				firstErr = fmt.Errorf("pdf %s page %d: %w", path, i, pageErr)
 			}
@@ -198,7 +214,7 @@ func extractPDF(ctx context.Context, path string) (extractedDocument, error) {
 		pages = append(pages, extractedPage{Number: i, Text: text})
 	}
 
-	if numPages > 0 && failedPages == numPages {
+	if numPages > 0 && len(failedPages) == numPages {
 		return extractedDocument{}, firstErr
 	}
 
@@ -215,11 +231,18 @@ func extractPDF(ctx context.Context, path string) (extractedDocument, error) {
 		needsOCR = avg < pdfNeedsOCRAvgCharsPerPage
 	}
 
+	var firstPageErr string
+	if firstErr != nil {
+		firstPageErr = firstErr.Error()
+	}
+
 	return extractedDocument{
-		Pages:     pages,
-		PageCount: numPages,
-		Markdown:  strings.Join(mdParts, "\n\n"),
-		NeedsOCR:  needsOCR,
+		Pages:        pages,
+		PageCount:    numPages,
+		Markdown:     strings.Join(mdParts, "\n\n"),
+		NeedsOCR:     needsOCR,
+		FailedPages:  failedPages,
+		FirstPageErr: firstPageErr,
 	}, nil
 }
 

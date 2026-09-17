@@ -476,6 +476,108 @@ func TestSettingsPayloadRoundTripsAssistantAutoRouterSettings(t *testing.T) {
 	}
 }
 
+// TestSettingsPayloadRoundTripsAssistantDocumentModel mirrors
+// TestSettingsPayloadRoundTripsAssistantBlock above for
+// assistant.document_model (ADR 0106): a separate model id from the chat
+// model, used only by the document indexer's enrich stage.
+func TestSettingsPayloadRoundTripsAssistantDocumentModel(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.Model = "openai/gpt-4o"
+		p.Assistant.DocumentModel = "openai/gpt-4o-mini"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	payload := buildSettingsPayload(saved)
+	if payload.Assistant.DocumentModel != "openai/gpt-4o-mini" {
+		t.Fatalf("expected assistant.document_model to round-trip, got %q", payload.Assistant.DocumentModel)
+	}
+	if payload.Assistant.Model != "openai/gpt-4o" {
+		t.Fatalf("expected assistant.model to survive untouched, got %q", payload.Assistant.Model)
+	}
+}
+
+// TestNormalizeSettingsPayloadDefaultsDocumentModel pins a blank
+// document_model to defaultDocumentModel, the same "blank means default"
+// pattern defaultAssistantModel uses for the chat model.
+func TestNormalizeSettingsPayloadDefaultsDocumentModel(t *testing.T) {
+	blank := normalizeSettingsPayload(settingsPayload{})
+	if blank.Assistant.DocumentModel != defaultDocumentModel {
+		t.Fatalf("expected a blank document model to default to %q, got %q", defaultDocumentModel, blank.Assistant.DocumentModel)
+	}
+
+	req := settingsPayload{}
+	req.Assistant.DocumentModel = "  openai/gpt-4o-mini  "
+	normalized := normalizeSettingsPayload(req)
+	if normalized.Assistant.DocumentModel != "openai/gpt-4o-mini" {
+		t.Fatalf("expected assistant.document_model to be trimmed, got %q", normalized.Assistant.DocumentModel)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesBlankDocumentModelFromDisk mirrors
+// TestBuildSettingsPayload_SurfacesBlankAssistantModelFromDisk: a
+// document_model explicitly saved as "" on disk must surface as "", not be
+// mistaken for "absent" and papered over with defaultDocumentModel.
+func TestBuildSettingsPayload_SurfacesBlankDocumentModelFromDisk(t *testing.T) {
+	settings := map[string]any{
+		"assistant": map[string]any{
+			"enabled":        true,
+			"model":          "openai/gpt-4o",
+			"document_model": "",
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+	if payload.Assistant.DocumentModel != "" {
+		t.Fatalf("expected a blank assistant.document_model on disk to surface as blank, got %q", payload.Assistant.DocumentModel)
+	}
+}
+
+// TestBuildSettingsPayload_AbsentAssistantBlockDefaultsDocumentModel mirrors
+// TestBuildSettingsPayload_AbsentAssistantBlockDefaults: no assistant key at
+// all must yield defaultDocumentModel, not a zero-value id that would fail
+// an enrich-stage call outright.
+func TestBuildSettingsPayload_AbsentAssistantBlockDefaultsDocumentModel(t *testing.T) {
+	payload := buildSettingsPayload(map[string]any{})
+	if payload.Assistant.DocumentModel != defaultDocumentModel {
+		t.Fatalf("expected assistant.document_model to default to %q when the block is absent, got %q", defaultDocumentModel, payload.Assistant.DocumentModel)
+	}
+}
+
+// TestBuildSettingsPayload_AssistantBlockPredatesDocumentModelKeyDefaults
+// pins the actual bug found in review: a settings.yaml written before
+// document_model existed (ADR 0106) has an assistant: block - enabled,
+// model, notes - but no document_model key at all. Unlike the
+// entirely-absent-block case above, assistantMap's own type assertion
+// succeeds here, so a naive unconditional coerceString of a missing map key
+// returns "" indistinguishably from an operator-saved blank - and that ""
+// must NOT win over defaultDocumentModel, or every enrich call on this
+// install goes to OpenRouter with "model": "".
+func TestBuildSettingsPayload_AssistantBlockPredatesDocumentModelKeyDefaults(t *testing.T) {
+	settings := map[string]any{
+		"assistant": map[string]any{
+			"enabled": true,
+			"model":   "openai/gpt-4o",
+			"notes":   "",
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+	if payload.Assistant.DocumentModel != defaultDocumentModel {
+		t.Fatalf("expected a document_model-less assistant block to default to %q, got %q", defaultDocumentModel, payload.Assistant.DocumentModel)
+	}
+	if payload.Assistant.Model != "openai/gpt-4o" {
+		t.Fatalf("expected assistant.model to survive untouched, got %q", payload.Assistant.Model)
+	}
+}
+
 func TestNormalizeSettingsPayload_AssistantAutoRouterFieldsTrimmedAndValidated(t *testing.T) {
 	req := settingsPayload{}
 	req.Assistant.AllowedModels = []string{"  anthropic/*  ", "", "  openai/gpt-5*"}

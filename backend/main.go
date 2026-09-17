@@ -360,6 +360,33 @@ func main() {
 			sweep.RemovedTemp, sweep.OrphanFiles, sweep.MissingFiles)
 	}
 
+	// Document indexer (ADR 0106, B4): local extraction always, Mate's paid
+	// OCR/summarise-and-tag enrichment only when a document's own consent
+	// flag says so. Its own *http.Client, not openRouterHTTPClient (the
+	// streaming assistant client's, whose ResponseHeaderTimeout is 60s) -
+	// a non-streaming OCR call on a many-page scan can take minutes to
+	// return headers at all, well past what the interactive assistant ever
+	// tolerates. documentIndexerWake (documents_handlers.go) starts out nil
+	// (a no-op) so upload/reindex handlers work identically before this
+	// runs; assigning it here is what actually connects them to the queue.
+	documentsTransport := http.DefaultTransport.(*http.Transport).Clone()
+	documentsTransport.ResponseHeaderTimeout = 10 * time.Minute
+	documentsHTTPClient := &http.Client{Transport: documentsTransport}
+	docIndexer := newDocumentIndexer(
+		globalDocumentStore,
+		documentsDirPath(),
+		func() (assistantReadiness, string, error) { return checkAssistantReadiness(settingsPath) },
+		documentsHTTPClient,
+		func() (string, error) {
+			settings, err := readSettings(settingsPath)
+			if err != nil {
+				return "", err
+			}
+			return buildSettingsPayload(settings).Assistant.DocumentModel, nil
+		},
+	)
+	documentIndexerWake = docIndexer.Wake
+
 	// The assistant's read_manual tool (mate-voice-assistant plan, "App-wide
 	// voice"): docs/features, docs/how-to and docs/reference staged into
 	// backend/manual (Makefile's manual-stage target, the Dockerfile and
@@ -475,6 +502,12 @@ func main() {
 	defer cancelStream()
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	go newRadarPoller(globalRadarTargetStore, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
+	// The document indexer (above): started once at boot and woken
+	// immediately so any document left pending/extract or pending/enrich by
+	// a crash or restart resumes right away rather than waiting for the
+	// next upload or reindex to wake it.
+	go docIndexer.Run(streamCtx)
+	docIndexer.Wake()
 	// Drops non-self vessel contexts (AIS targets) this box has not heard
 	// from in an hour, so every whole-tree copy of the snapshot does not get
 	// a little slower every week it runs (backend-perf-audit.md Tier 1 #3).
