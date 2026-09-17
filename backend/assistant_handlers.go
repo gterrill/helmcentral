@@ -66,7 +66,17 @@ type assistantReadiness struct {
 	Enabled    bool   `json:"enabled"`
 	Configured bool   `json:"configured"`
 	Model      string `json:"model"`
-	Problem    string `json:"problem,omitempty"`
+	// DocumentModel is assistant.document_model (ADR 0106): a separate
+	// setting from Model, read here (buildSettingsPayload already parsed it
+	// out of the same settings read) purely so document-only callers don't
+	// have to re-read settings themselves. It deliberately plays no part in
+	// Problem below - Problem gates chat (assistant/status, assistant/run),
+	// and a blank document model must never make chat report not-ready.
+	// documentEnrichReadinessProblem (documents_enrich.go) is what actually
+	// enforces it, for the document upload/reindex handlers and the
+	// indexer's enrich stage only.
+	DocumentModel string `json:"document_model"`
+	Problem       string `json:"problem,omitempty"`
 }
 
 const openRouterModelsListURL = "https://openrouter.ai/api/v1/models"
@@ -105,8 +115,9 @@ func checkAssistantReadiness(settingsPath string) (assistantReadiness, string, e
 	payload := buildSettingsPayload(settings)
 
 	readiness := assistantReadiness{
-		Enabled: payload.Assistant.Enabled,
-		Model:   payload.Assistant.Model,
+		Enabled:       payload.Assistant.Enabled,
+		Model:         payload.Assistant.Model,
+		DocumentModel: payload.Assistant.DocumentModel,
 	}
 
 	apiKey, ok, err := globalSecretsStore.Get("OPENROUTER_API_KEY")

@@ -251,6 +251,93 @@ func TestExtractDocumentText_PDFPageCapExceeded(t *testing.T) {
 	}
 }
 
+// TestExtractDocumentText_PDFSecondPageBrokenContentStreamIsVisibleNotSilent
+// hand-crafts a 2-page PDF (via buildTwoPagePDFPage2BrokenContentStream
+// below) whose second page's content stream contains a malformed operator
+// (a "Tf" with only one operand - ledongthuc/pdf's Interpret panics with
+// "bad TL" on that, recovered by GetPlainText into a returned error, same
+// as a genuinely corrupt content stream would produce) - a broken content
+// stream extractPDFPage can neither parse nor blame on a truncated file.
+// extractPDF must not silently drop page 2's failure (the B2-review gap
+// ADR 0106 calls out): the document still succeeds as a whole (page 1 is
+// fine), but FailedPages/FirstPageErr make page 2's failure visible to the
+// indexer (documents_indexer.go) rather than a document that simply looks
+// like it has less text than it should.
+func TestExtractDocumentText_PDFSecondPageBrokenContentStreamIsVisibleNotSilent(t *testing.T) {
+	body := buildTwoPagePDFPage2BrokenContentStream(t)
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "broken-page-2.pdf", body)
+
+	ex, err := extractDocumentText(context.Background(), path, "application/pdf")
+	if err != nil {
+		t.Fatalf("extractDocumentText: unexpected top-level error (page 1 should still succeed): %v", err)
+	}
+	if ex.PageCount != 2 {
+		t.Fatalf("expected 2 declared pages, got %d", ex.PageCount)
+	}
+	if len(ex.Pages) != 1 || ex.Pages[0].Number != 1 {
+		t.Fatalf("expected only page 1 to have extracted, got %+v", ex.Pages)
+	}
+	if len(ex.FailedPages) != 1 || ex.FailedPages[0] != 2 {
+		t.Fatalf("expected FailedPages [2], got %v", ex.FailedPages)
+	}
+	if ex.FirstPageErr == "" {
+		t.Fatalf("expected a non-empty FirstPageErr describing page 2's failure")
+	}
+	if !strings.Contains(ex.FirstPageErr, "2") {
+		t.Fatalf("expected FirstPageErr to reference page 2, got %q", ex.FirstPageErr)
+	}
+}
+
+// buildTwoPagePDFPage2BrokenContentStream assembles a well-formed 2-page
+// PDF (correct header, xref table and trailer) using the same object layout
+// as buildMinimalPDFWithPagesDict, except page 2 (object 6)'s content
+// stream (object 7) carries a malformed "Tf" operator (one operand instead
+// of the required two: font name with no size). ledongthuc/pdf's Interpret
+// panics on that ("bad TL"), which Page.GetPlainText recovers into a
+// returned error - the same observable shape (extractPDFPage's own pageErr)
+// a genuinely corrupted or truncated stream produces, without needing a
+// truncated file (already covered by two_page_truncated.pdf) or a dangling
+// object reference (which ledongthuc/pdf resolves to Null and silently
+// treats as an empty page - not a failure at all).
+func buildTwoPagePDFPage2BrokenContentStream(t *testing.T) []byte {
+	t.Helper()
+	var buf strings.Builder
+	offsets := make(map[int]int)
+
+	writeObj := func(num int, body string) {
+		offsets[num] = buf.Len()
+		buf.WriteString(strconv.Itoa(num))
+		buf.WriteString(" 0 obj\n")
+		buf.WriteString(body)
+		buf.WriteString("\nendobj\n")
+	}
+
+	const page2Stream = "BT /F1 Tf (PAGE TWO BROKEN) Tj ET"
+
+	buf.WriteString("%PDF-1.4\n")
+	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObj(2, "<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>")
+	writeObj(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	writeObj(4, "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 3 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>")
+	writeObj(5, "<< /Length 44 >>\nstream\nBT /F1 12 Tf 72 700 Td (PAGE ONE OK) Tj ET\nendstream")
+	writeObj(6, "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 3 0 R >> >> /MediaBox [0 0 612 792] /Contents 7 0 R >>")
+	writeObj(7, "<< /Length "+strconv.Itoa(len(page2Stream))+" >>\nstream\n"+page2Stream+"\nendstream")
+
+	xrefStart := buf.Len()
+	buf.WriteString("xref\n0 8\n")
+	buf.WriteString("0000000000 65535 f \n")
+	for i := 1; i <= 7; i++ {
+		buf.WriteString(pad10(offsets[i]))
+		buf.WriteString(" 00000 n \n")
+	}
+	buf.WriteString("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n")
+	buf.WriteString(strconv.Itoa(xrefStart))
+	buf.WriteString("\n%%EOF")
+
+	return []byte(buf.String())
+}
+
 func TestExtractDocumentText_ContextCancelledBetweenPages(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

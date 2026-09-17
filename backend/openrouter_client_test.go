@@ -598,6 +598,281 @@ func TestOpenRouterHTTPClient_SlowBodyWithinDeadlineSucceeds(t *testing.T) {
 	}
 }
 
+// ── openRouterChatCompletionOnce (B4: non-streaming, for OCR annotations) ──
+
+func TestOpenRouterChatCompletionOnce_SendsStreamFalseAndDecodesBody(t *testing.T) {
+	body := `{"id":"gen-1","model":"google/gemini-2.5-flash","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hi"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"cost":0.001}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	req := openRouterChatRequest{Model: "google/gemini-2.5-flash", Messages: []openRouterMessage{{Role: "user", Content: "hello"}}}
+	resp, err := openRouterChatCompletionOnce(context.Background(), doer, "sk-test", req)
+	if err != nil {
+		t.Fatalf("openRouterChatCompletionOnce: %v", err)
+	}
+
+	if len(doer.requests) != 1 {
+		t.Fatalf("expected exactly one request, got %d", len(doer.requests))
+	}
+	got := doer.requests[0]
+	if auth := got.Header.Get("Authorization"); auth != "Bearer sk-test" {
+		t.Fatalf("unexpected Authorization header: %q", auth)
+	}
+	reqBody := string(doer.bodies[0])
+	if !strings.Contains(reqBody, `"stream":false`) {
+		t.Fatalf("expected the request to always set stream:false, got %s", reqBody)
+	}
+
+	if resp.Choices[0].Message.Content != "hi" {
+		t.Fatalf("unexpected content: %q", resp.Choices[0].Message.Content)
+	}
+	if resp.Usage.Cost != 0.001 {
+		t.Fatalf("expected usage.cost to decode, got %v", resp.Usage.Cost)
+	}
+}
+
+func TestOpenRouterChatCompletionOnce_401ReturnsUpstreamMessageAndStatus(t *testing.T) {
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(401, `{"error":{"message":"bad key"}}`)}}
+
+	_, err := openRouterChatCompletionOnce(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"})
+	if err == nil {
+		t.Fatalf("expected an error for a 401 response")
+	}
+	if !strings.Contains(err.Error(), "bad key") {
+		t.Fatalf("expected error to contain the upstream message, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Fatalf("expected error to contain the status code, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Fatalf("expected a one-line error, got %q", err.Error())
+	}
+}
+
+// TestOpenRouterChatCompletionOnce_EmbeddedErrorObjectIsAnError proves a 200
+// response whose body still carries a top-level "error" object (one of the
+// failure shapes openRouterChatCompletion's own doc comment describes) is
+// reported as an error rather than a reply with empty choices.
+func TestOpenRouterChatCompletionOnce_EmbeddedErrorObjectIsAnError(t *testing.T) {
+	body := `{"id":"gen-1","model":"m","choices":[],"error":{"message":"model not found"}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	_, err := openRouterChatCompletionOnce(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"})
+	if err == nil {
+		t.Fatalf("expected an error when the body carries its own error object")
+	}
+	if !strings.Contains(err.Error(), "model not found") {
+		t.Fatalf("expected error to contain the upstream message, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterChatCompletionOnce_ZeroChoicesIsAnError(t *testing.T) {
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, `{"id":"gen-1","model":"m","choices":[]}`)}}
+
+	_, err := openRouterChatCompletionOnce(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"})
+	if err == nil {
+		t.Fatalf("expected an error when the response carries no choices")
+	}
+}
+
+// ── real OpenRouter captures (backend/testdata/openrouter_document_*.json) ─
+
+func TestOpenRouterChatCompletionOnce_DecodesScannedPDFFixtureAnnotations(t *testing.T) {
+	body, err := os.ReadFile("testdata/openrouter_document_pdf.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+
+	resp, err := openRouterChatCompletionOnce(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("openRouterChatCompletionOnce: %v", err)
+	}
+
+	ann := resp.Choices[0].Message.Annotations
+	if len(ann) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(ann))
+	}
+	if ann[0].Type != "file" {
+		t.Fatalf("unexpected annotation type: %q", ann[0].Type)
+	}
+	if ann[0].File.Name != "scanned.pdf" {
+		t.Fatalf("unexpected annotation file name: %q", ann[0].File.Name)
+	}
+	if ann[0].File.Hash == "" {
+		t.Fatalf("expected a non-empty file hash")
+	}
+	parts := ann[0].File.Content
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 content parts (open sentinel, page text, close sentinel), got %d", len(parts))
+	}
+	if parts[0].Text != `<file name="scanned.pdf">` {
+		t.Fatalf("unexpected opening sentinel: %q", parts[0].Text)
+	}
+	if !strings.Contains(parts[1].Text, "WHITSUNDAY MARINE SUPPLIES") {
+		t.Fatalf("expected the OCR'd page text, got %q", parts[1].Text)
+	}
+	if parts[2].Text != "</file>" {
+		t.Fatalf("unexpected closing sentinel: %q", parts[2].Text)
+	}
+	if resp.Usage.Cost != 0.0022807 {
+		t.Fatalf("unexpected cost: %v", resp.Usage.Cost)
+	}
+	if !strings.Contains(string(resp.Choices[0].Message.Content), "```json") {
+		t.Fatalf("expected the fenced JSON suggestion reply, got %q", resp.Choices[0].Message.Content)
+	}
+}
+
+func TestOpenRouterChatCompletionOnce_DecodesTwoPageScannedPDFFixtureOnePartPerPage(t *testing.T) {
+	body, err := os.ReadFile("testdata/openrouter_document_pdf_2p.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+
+	resp, err := openRouterChatCompletionOnce(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("openRouterChatCompletionOnce: %v", err)
+	}
+
+	parts := resp.Choices[0].Message.Annotations[0].File.Content
+	if len(parts) != 4 {
+		t.Fatalf("expected 4 content parts (open sentinel, 2 pages, close sentinel), got %d", len(parts))
+	}
+	if !strings.Contains(parts[1].Text, "impeller") {
+		t.Fatalf("expected page 1 to mention impeller, got %q", parts[1].Text)
+	}
+	if !strings.Contains(parts[2].Text, "pump seal") {
+		t.Fatalf("expected page 2 to mention pump seal, got %q", parts[2].Text)
+	}
+	if resp.Usage.Cost != 0.0046432 {
+		t.Fatalf("unexpected cost: %v", resp.Usage.Cost)
+	}
+}
+
+func TestOpenRouterChatCompletionOnce_DecodesImageFixtureNoAnnotations(t *testing.T) {
+	body, err := os.ReadFile("testdata/openrouter_document_image.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+
+	resp, err := openRouterChatCompletionOnce(context.Background(), doer, "sk", openRouterChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("openRouterChatCompletionOnce: %v", err)
+	}
+	if len(resp.Choices[0].Message.Annotations) != 0 {
+		t.Fatalf("expected no annotations for an image reply, got %+v", resp.Choices[0].Message.Annotations)
+	}
+	if !strings.Contains(string(resp.Choices[0].Message.Content), `"text"`) {
+		t.Fatalf("expected the reply's JSON to carry a text field, got %q", resp.Choices[0].Message.Content)
+	}
+	if resp.Usage.Cost != 0.0011695 {
+		t.Fatalf("unexpected cost: %v", resp.Usage.Cost)
+	}
+}
+
+// ── content blocks: file / image_url, text-only-for-text-blocks ───────────
+
+func TestOpenRouterContentBlock_TextBlockMarshalUnchanged(t *testing.T) {
+	data, err := json.Marshal(openRouterContentBlock{Type: "text", Text: "hello", CacheControl: &openRouterCacheControl{Type: "ephemeral"}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	const want = `{"type":"text","text":"hello","cache_control":{"type":"ephemeral"}}`
+	if string(data) != want {
+		t.Fatalf("expected byte-identical text block marshalling, got %s, want %s", data, want)
+	}
+}
+
+func TestOpenRouterContentBlock_FileBlockOmitsTextKey(t *testing.T) {
+	data, err := json.Marshal(openRouterContentBlock{
+		Type: "file",
+		File: &openRouterFileBlock{Filename: "x.pdf", FileData: "data:application/pdf;base64,AA=="},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := decoded["text"]; ok {
+		t.Fatalf("expected no text key on a file block, got %s", data)
+	}
+	file, ok := decoded["file"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a file object, got %s", data)
+	}
+	if file["filename"] != "x.pdf" || file["file_data"] != "data:application/pdf;base64,AA==" {
+		t.Fatalf("unexpected file block: %+v", file)
+	}
+}
+
+func TestOpenRouterContentBlock_ImageURLBlockOmitsTextKey(t *testing.T) {
+	data, err := json.Marshal(openRouterContentBlock{
+		Type:     "image_url",
+		ImageURL: &openRouterImageURLBlock{URL: "data:image/png;base64,AA=="},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := decoded["text"]; ok {
+		t.Fatalf("expected no text key on an image_url block, got %s", data)
+	}
+	imageURL, ok := decoded["image_url"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected an image_url object, got %s", data)
+	}
+	if imageURL["url"] != "data:image/png;base64,AA==" {
+		t.Fatalf("unexpected image_url block: %+v", imageURL)
+	}
+}
+
+func TestOpenRouterUserMessageFromBlocks_EncodesAsContentArray(t *testing.T) {
+	msg := openRouterUserMessage(
+		openRouterContentBlock{Type: "text", Text: "Describe this file."},
+		openRouterContentBlock{Type: "file", File: &openRouterFileBlock{Filename: "x.pdf", FileData: "data:application/pdf;base64,AA=="}},
+	)
+	if msg.Role != "user" {
+		t.Fatalf("expected role user, got %q", msg.Role)
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	const want = `{"role":"user","content":[{"type":"text","text":"Describe this file."},{"type":"file","file":{"filename":"x.pdf","file_data":"data:application/pdf;base64,AA=="}}]}`
+	if string(data) != want {
+		t.Fatalf("unexpected user message JSON:\ngot:  %s\nwant: %s", data, want)
+	}
+}
+
+// ── plugin pdf.engine ───────────────────────────────────────────────────
+
+func TestOpenRouterPlugin_PDFEngineMarshalsWhenSet(t *testing.T) {
+	data, err := json.Marshal(openRouterPlugin{ID: "file-parser", PDF: &openRouterPluginPDF{Engine: "mistral-ocr"}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	const want = `{"id":"file-parser","pdf":{"engine":"mistral-ocr"}}`
+	if string(data) != want {
+		t.Fatalf("unexpected plugin JSON: got %s, want %s", data, want)
+	}
+}
+
+func TestOpenRouterPlugin_PDFOmittedWhenNil(t *testing.T) {
+	data, err := json.Marshal(openRouterPlugin{ID: "web"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), "pdf") {
+		t.Fatalf("expected no pdf key when unset, got %s", data)
+	}
+}
+
 func TestOpenRouterHTTPClient_NoHeadersWithinHeaderTimeoutFailsClearly(t *testing.T) {
 	origHeaderTimeout := openRouterResponseHeaderTimeout
 	openRouterResponseHeaderTimeout = 50 * time.Millisecond

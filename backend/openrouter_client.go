@@ -184,16 +184,62 @@ type openRouterCacheControl struct {
 	Type string `json:"type"`
 }
 
+// openRouterFileBlock is the "file" half of a file content block (B4's
+// document enrichment): a base64 data URL of the whole file, sent to the
+// file-parser plugin (openRouterPluginPDF) for OCR.
+type openRouterFileBlock struct {
+	Filename string `json:"filename"`
+	FileData string `json:"file_data"`
+}
+
+// openRouterImageURLBlock is the "image_url" half of an image content
+// block (B4's document enrichment): a base64 data URL, the same shape
+// OpenAI-compatible vision models expect.
+type openRouterImageURLBlock struct {
+	URL string `json:"url"`
+}
+
 // openRouterContentBlock is one block of a chat message's content when it
-// is sent as an array rather than a plain string. Helmcentral only ever
-// builds these for the system message it sends an Anthropic model: a
-// cache_control breakpoint on the block carrying the stable prefix tells
-// Anthropic's own cache (via OpenRouter) that everything up to and
-// including that block is eligible to be reused on the next turn.
+// is sent as an array rather than a plain string. Two callers build these:
+// assistant_run.go's assistantSystemMessage, for the system message sent to
+// an Anthropic model (a cache_control breakpoint on the block carrying the
+// stable prefix tells Anthropic's own cache, via OpenRouter, that
+// everything up to and including that block is eligible to be reused on the
+// next turn), and B4's document enrichment (documents_enrich.go), which
+// pairs a plain text prompt block with a file or image_url block carrying
+// the document itself. Only File or ImageURL is ever set, never both, and
+// never alongside a genuinely non-text Type with Text also set - MarshalJSON
+// below only ever writes the "text" key for Type=="text", so a file/image
+// block's Text field (always "" in practice) never appears on the wire.
 type openRouterContentBlock struct {
-	Type         string                  `json:"type"`
-	Text         string                  `json:"text"`
-	CacheControl *openRouterCacheControl `json:"cache_control,omitempty"`
+	Type         string
+	Text         string
+	CacheControl *openRouterCacheControl
+	File         *openRouterFileBlock
+	ImageURL     *openRouterImageURLBlock
+}
+
+// MarshalJSON encodes exactly what the plain struct tags used to before
+// File/ImageURL existed for every text block still in use today (Text
+// always written, cache_control omitted only when nil) - see
+// TestOpenRouterContentBlock_TextBlockMarshalUnchanged - while adding "file"
+// and "image_url" keys for B4's new block kinds, and omitting "text"
+// entirely for them (openRouterContentBlock's own doc comment explains why
+// a plain `Text string \`json:"text"\“ field, with no omitempty, would
+// otherwise put a stray `"text":""` on every file/image block).
+func (b openRouterContentBlock) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Type         string                   `json:"type"`
+		Text         string                   `json:"text,omitempty"`
+		CacheControl *openRouterCacheControl  `json:"cache_control,omitempty"`
+		File         *openRouterFileBlock     `json:"file,omitempty"`
+		ImageURL     *openRouterImageURLBlock `json:"image_url,omitempty"`
+	}
+	w := wire{Type: b.Type, CacheControl: b.CacheControl, File: b.File, ImageURL: b.ImageURL}
+	if b.Type == "text" {
+		w.Text = b.Text
+	}
+	return json.Marshal(w)
 }
 
 // openRouterMessage is one turn of the conversation: system, user,
@@ -216,7 +262,50 @@ type openRouterMessage struct {
 	ToolCalls  []openRouterToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string               `json:"tool_call_id,omitempty"`
 
+	// Annotations carries the file-parser plugin's OCR result (B4's
+	// document enrichment): one entry per file sent, each holding the
+	// extracted text as a sequence of content parts bracketed by
+	// `<file name="...">`/`</file>` sentinels, one part per page
+	// (backend/testdata/openrouter_document_pdf_2p.json). Decode-only - it
+	// is never set on a message this codebase sends, so MarshalJSON below
+	// (which builds its own "wire" struct field-by-field) never echoes it
+	// back into a request.
+	Annotations []openRouterAnnotation `json:"annotations,omitempty"`
+
 	contentBlocks []openRouterContentBlock
+}
+
+// openRouterAnnotationFileContentPart is one part of an
+// openRouterAnnotationFile's Content array - either a `<file ...>`/
+// `</file>` sentinel or one page's worth of OCR'd text.
+type openRouterAnnotationFileContentPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// openRouterAnnotationFile is the "file" half of one annotation: which file
+// this is (by name and content hash - re-uploading the identical bytes
+// would produce the identical hash) and its OCR'd text, split into parts.
+type openRouterAnnotationFile struct {
+	Hash    string                                `json:"hash"`
+	Name    string                                `json:"name"`
+	Content []openRouterAnnotationFileContentPart `json:"content"`
+}
+
+// openRouterAnnotation is one entry of openRouterMessage.Annotations - the
+// file-parser plugin's only documented annotation type is "file".
+type openRouterAnnotation struct {
+	Type string                   `json:"type"`
+	File openRouterAnnotationFile `json:"file"`
+}
+
+// openRouterUserMessage builds a user-role message whose content is the
+// given blocks (B4's document enrichment: a text prompt block paired with a
+// file or image_url block). Always non-empty content blocks, so
+// openRouterMessage's own MarshalJSON encodes Content as an array rather
+// than falling back to the empty plain-string case.
+func openRouterUserMessage(blocks ...openRouterContentBlock) openRouterMessage {
+	return openRouterMessage{Role: "user", contentBlocks: blocks}
 }
 
 // MarshalJSON encodes exactly what the plain struct tags above used to -
@@ -259,11 +348,19 @@ type openRouterUsageOption struct {
 	Include bool `json:"include"`
 }
 
+// openRouterPluginPDF configures the file-parser plugin's PDF handling
+// (B4's document enrichment). Engine "mistral-ocr" is the only engine this
+// codebase requests - see documents_enrich.go.
+type openRouterPluginPDF struct {
+	Engine string `json:"engine,omitempty"`
+}
+
 type openRouterPlugin struct {
-	ID             string   `json:"id"`
-	AllowedModels  []string `json:"allowed_models,omitempty"`
-	ExcludedModels []string `json:"excluded_models,omitempty"`
-	CostTier       string   `json:"cost_tier,omitempty"`
+	ID             string               `json:"id"`
+	AllowedModels  []string             `json:"allowed_models,omitempty"`
+	ExcludedModels []string             `json:"excluded_models,omitempty"`
+	CostTier       string               `json:"cost_tier,omitempty"`
+	PDF            *openRouterPluginPDF `json:"pdf,omitempty"`
 }
 
 // openRouterChatRequest is the request body for POST
@@ -277,9 +374,14 @@ type openRouterChatRequest struct {
 	Plugins    []openRouterPlugin     `json:"plugins,omitempty"`
 	ToolChoice string                 `json:"tool_choice,omitempty"`
 	Usage      *openRouterUsageOption `json:"usage,omitempty"`
-	// Stream is always set true by openRouterChatCompletion itself, never by
-	// a caller building this struct - see that function's doc comment.
-	Stream bool `json:"stream,omitempty"`
+	// Stream is always set explicitly by whichever function actually sends
+	// the request, never by a caller building this struct: true by
+	// openRouterChatCompletion (its own doc comment), false by
+	// openRouterChatCompletionOnce. No omitempty, so the false case is
+	// still visible on the wire as "stream":false rather than silently
+	// omitted (OpenRouter defaults to non-streaming either way, but B4's
+	// non-streaming call is deliberate, not an accident of a zero value).
+	Stream bool `json:"stream"`
 }
 
 type openRouterChoice struct {
@@ -375,6 +477,97 @@ type openRouterStreamToolCallAccum struct {
 	arguments          strings.Builder
 }
 
+// doOpenRouterRequest marshals req, builds the POST to
+// openRouterChatCompletionsURL with the standard headers, and executes it
+// through doer - the request-building half shared by openRouterChatCompletion
+// and openRouterChatCompletionOnce, so the two differ only in how they read
+// the response (SSE stream vs. one JSON body). The caller owns closing
+// resp.Body.
+func doOpenRouterRequest(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest) (*http.Response, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal openrouter request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, openRouterChatCompletionsURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("build openrouter request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/gterrill/helmcentral")
+	httpReq.Header.Set("X-Title", "Helmcentral")
+
+	resp, err := doer.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("openrouter request failed: %w", err)
+	}
+	return resp, nil
+}
+
+// openRouterNonSuccessError reads resp's body (a non-2xx status is never a
+// stream, even from openRouterChatCompletion's own SSE call) and reports it
+// as a single-line error: the upstream's own error.message when the body
+// parses as openRouterChatResponse and carries one, otherwise the raw body
+// text - shared by openRouterChatCompletion and openRouterChatCompletionOnce
+// so a caller sees the identical error shape from either. Closing resp.Body
+// stays the caller's job (both callers already defer it before checking the
+// status).
+func openRouterNonSuccessError(resp *http.Response) error {
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("read openrouter response: %w", readErr)
+	}
+	msg := strings.TrimSpace(string(respBody))
+	var parsed openRouterChatResponse
+	if err := json.Unmarshal(respBody, &parsed); err == nil && parsed.Error != nil && parsed.Error.Message != "" {
+		msg = parsed.Error.Message
+	}
+	return fmt.Errorf("openrouter status %d: %s", resp.StatusCode, firstErrorLine(errors.New(msg)))
+}
+
+// openRouterChatCompletionOnce posts one chat-completion request with
+// stream forced false and decodes a single JSON response body, instead of
+// openRouterChatCompletion's SSE accumulation. B4's document enrichment
+// needs this: OpenRouter only returns the file-parser plugin's OCR text
+// (message.annotations) on a non-streaming response, never over SSE (see
+// this file's package doc / ADR 0106's "OCR must not stream" constraint).
+// It shares request-building (doOpenRouterRequest) and non-2xx/embedded-error
+// handling (openRouterNonSuccessError) with the streaming call, so a 401, a
+// malformed key, or an upstream error.message surfaces identically either
+// way.
+func openRouterChatCompletionOnce(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest) (openRouterChatResponse, error) {
+	req.Stream = false
+
+	resp, err := doOpenRouterRequest(ctx, doer, apiKey, req)
+	if err != nil {
+		return openRouterChatResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openRouterChatResponse{}, openRouterNonSuccessError(resp)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return openRouterChatResponse{}, fmt.Errorf("read openrouter response: %w", err)
+	}
+
+	var parsed openRouterChatResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return openRouterChatResponse{}, fmt.Errorf("parse openrouter response: %w", err)
+	}
+	if parsed.Error != nil && parsed.Error.Message != "" {
+		return openRouterChatResponse{}, fmt.Errorf("openrouter error: %s", firstErrorLine(errors.New(parsed.Error.Message)))
+	}
+	if len(parsed.Choices) == 0 {
+		return openRouterChatResponse{}, fmt.Errorf("openrouter returned no choices (status %d)", resp.StatusCode)
+	}
+
+	return parsed, nil
+}
+
 // openRouterChatCompletion posts one chat-completion request and returns
 // the fully assembled response, exactly the same openRouterChatResponse
 // shape callers read today (ADR 0093 §3's tolerant openRouterContent/
@@ -413,37 +606,14 @@ type openRouterStreamToolCallAccum struct {
 func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest, onContent func(string)) (openRouterChatResponse, error) {
 	req.Stream = true
 
-	body, err := json.Marshal(req)
+	resp, err := doOpenRouterRequest(ctx, doer, apiKey, req)
 	if err != nil {
-		return openRouterChatResponse{}, fmt.Errorf("marshal openrouter request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, openRouterChatCompletionsURL, bytes.NewReader(body))
-	if err != nil {
-		return openRouterChatResponse{}, fmt.Errorf("build openrouter request: %w", err)
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/gterrill/helmcentral")
-	httpReq.Header.Set("X-Title", "Helmcentral")
-
-	resp, err := doer.Do(httpReq)
-	if err != nil {
-		return openRouterChatResponse{}, fmt.Errorf("openrouter request failed: %w", err)
+		return openRouterChatResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return openRouterChatResponse{}, fmt.Errorf("read openrouter response: %w", readErr)
-		}
-		msg := strings.TrimSpace(string(respBody))
-		var parsed openRouterChatResponse
-		if err := json.Unmarshal(respBody, &parsed); err == nil && parsed.Error != nil && parsed.Error.Message != "" {
-			msg = parsed.Error.Message
-		}
-		return openRouterChatResponse{}, fmt.Errorf("openrouter status %d: %s", resp.StatusCode, firstErrorLine(errors.New(msg)))
+		return openRouterChatResponse{}, openRouterNonSuccessError(resp)
 	}
 
 	var (

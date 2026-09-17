@@ -119,6 +119,12 @@ mayara:
 #   # Any OpenRouter model id that supports tool calling. Blank falls back to
 #   # this default.
 #   model: anthropic/claude-sonnet-4.5
+#   # The model the document library's indexer (ADR 0106) uses for OCR and
+#   # suggested title/summary/tags, once Mate is on and a document is
+#   # uploaded or reindexed. Separate from the chat model above - this one
+#   # runs unattended on every upload, so it needs to be vision-capable
+#   # (for the image OCR branch) and cheap. Blank falls back to this default.
+#   document_model: google/gemini-2.5-flash
 #   # Operator standing notes, injected verbatim into every system prompt.
 #   # This is where local knowledge that a general model would not know goes,
 #   # e.g. which anchorage suits which tide or wind:
