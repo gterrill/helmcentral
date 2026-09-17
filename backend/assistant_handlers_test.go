@@ -133,6 +133,18 @@ func (s *scriptedAssistantRunner) run(ctx context.Context, systemStable, systemL
 	return s.reply, nil
 }
 
+// panicAssistantRunner is a whole-run test double that panics instead of
+// returning, proving postAssistantMessageHandler's detached goroutine
+// (ADR 0105) survives a panic anywhere inside runner.run rather than taking
+// the whole process down with it - this server also runs anchor watch and
+// alarm evaluation, so a crash here is a boat-safety problem, not just an
+// assistant bug.
+type panicAssistantRunner struct{}
+
+func (p *panicAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
+	panic("simulated runner panic")
+}
+
 // waitForConditionT polls cond until it reports true, failing the test if
 // timeout elapses first. Used only where no channel-based synchronisation
 // is available - here, waiting for a background goroutine to persist a row
@@ -1187,6 +1199,60 @@ func TestPostAssistantMessageHandler_RunnerErrorEmitsErrorEventAndPersistsOnlyUs
 	if len(messages) != 1 || messages[0].Role != "user" {
 		t.Fatalf("expected only the user row to persist on a runner error, got %+v", messages)
 	}
+}
+
+// TestPostAssistantMessageHandler_RunnerPanicYieldsErrorEventAndFreesTheRun
+// proves the fix for a code-review finding: postAssistantMessageHandler's
+// detached goroutine (ADR 0105) used to have nothing but Echo's
+// middleware.Recover protecting it, and that middleware only guards the
+// request goroutine, not this one. A panic anywhere in runner.run was
+// therefore unrecovered and took the whole process down - a real problem on
+// a server that also runs anchor watch and alarm evaluation for a boat.
+//
+// The test completing at all, rather than crashing the go test binary with
+// an unrecovered panic stack trace, is itself the main proof the fix works.
+func TestPostAssistantMessageHandler_RunnerPanicYieldsErrorEventAndFreesTheRun(t *testing.T) {
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	store := withTestAssistantStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	conv, err := store.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		return &panicAssistantRunner{}
+	})
+
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	body := rec.Body.String()
+	data := extractSSEEventData(t, body, "error")
+	var errFrame struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(data), &errFrame); err != nil {
+		t.Fatalf("unmarshal error frame: %v", err)
+	}
+	if !strings.Contains(errFrame.Error, "crashed") || !strings.Contains(errFrame.Error, "simulated runner panic") {
+		t.Fatalf("expected an error message that clearly says the run crashed and names the panic value, got %q", errFrame.Error)
+	}
+
+	// finish() unblocks streamAssistantRun, which is what let
+	// postAssistantMessageHandler(c) above return - but the goroutine's
+	// deferred globalAssistantRuns.remove(id, run) still runs afterward, on
+	// its own schedule, so poll for it rather than asserting immediately.
+	waitForConditionT(t, time.Second, func() bool {
+		_, running := globalAssistantRuns.get(conv.ID)
+		return !running
+	})
 }
 
 func TestPostAssistantMessageHandler_SecondRequestWhileFirstInFlightReturns409(t *testing.T) {

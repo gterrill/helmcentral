@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -813,6 +814,20 @@ func postAssistantMessageHandler(c echo.Context) error {
 	// inside runner.run itself, ever ends it early.
 	go func() {
 		defer globalAssistantRuns.remove(id, run)
+		// A panic anywhere below - runner.run, SetTitle, AppendMessage,
+		// GetConversation - only trips Echo's middleware.Recover on the
+		// request goroutine, not this one, and this goroutine outlives the
+		// request (ADR 0105). Left unrecovered it crashes the whole process,
+		// taking anchor watch and alarm evaluation down with it. finish() is
+		// safe to call more than once (see its own comment) so this costs
+		// nothing on the normal paths, which already call it themselves.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("assistant: run for conversation %s panicked: %v\n%s", id, r, debug.Stack())
+				run.append("error", map[string]string{"error": fmt.Sprintf("the assistant run crashed: %v", r)})
+				run.finish()
+			}
+		}()
 
 		reply, runErr := runner.run(runCtx, systemStable, systemLive, history)
 		if runErr != nil {
@@ -870,13 +885,7 @@ func postAssistantMessageHandler(c echo.Context) error {
 		run.finish()
 	}()
 
-	header := c.Response().Header()
-	header.Set("Content-Type", "text/event-stream")
-	header.Set("Cache-Control", "no-cache")
-	header.Set("Connection", "keep-alive")
-	header.Set("X-Accel-Buffering", "no")
-	c.Response().WriteHeader(http.StatusOK)
-
+	writeAssistantRunSSEHeaders(c)
 	streamAssistantRun(c.Request().Context(), run, 0, c.Response())
 	return nil
 }
@@ -902,13 +911,7 @@ func getAssistantRunHandler(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 
-	header := c.Response().Header()
-	header.Set("Content-Type", "text/event-stream")
-	header.Set("Cache-Control", "no-cache")
-	header.Set("Connection", "keep-alive")
-	header.Set("X-Accel-Buffering", "no")
-	c.Response().WriteHeader(http.StatusOK)
-
+	writeAssistantRunSSEHeaders(c)
 	streamAssistantRun(c.Request().Context(), run, 0, c.Response())
 	return nil
 }

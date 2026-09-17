@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"sync"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 // This file backs ADR 0105's "the answer outlives the page" behaviour: an
@@ -206,6 +209,21 @@ const assistantRunStreamKeepalive = 15 * time.Second
 type assistantRunSSEWriter interface {
 	io.Writer
 	Flush()
+}
+
+// writeAssistantRunSSEHeaders sets the response headers streamAssistantRun's
+// framing depends on and writes the 200 status line that must precede it.
+// postAssistantMessageHandler and getAssistantRunHandler both call this
+// right before streamAssistantRun - they only differ in how they got the
+// *assistantRun to stream (starting one vs. attaching to one already
+// running).
+func writeAssistantRunSSEHeaders(c echo.Context) {
+	header := c.Response().Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+	header.Set("X-Accel-Buffering", "no")
+	c.Response().WriteHeader(http.StatusOK)
 }
 
 // streamAssistantRun writes run's event log as SSE frames to w, starting at
