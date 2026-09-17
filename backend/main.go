@@ -338,6 +338,28 @@ func main() {
 	}
 	globalAssistantStore = as
 
+	// Document store (ADR 0106): metadata, virtual folders, tags, chunks and
+	// FTS5 search behind a flat, hash-named folder of file bytes. Fail fast
+	// on open error, same reasoning as the other stores above. The
+	// documents directory is created (not just the database's own parent,
+	// which newDocumentStore already handles) so the boot sweep below
+	// always has somewhere to os.ReadDir, even on a brand new install that
+	// has never taken an upload yet.
+	ds, err := newDocumentStore(documentsDBPath())
+	if err != nil {
+		log.Fatalf("failed to open document store: %v", err)
+	}
+	globalDocumentStore = ds
+	if err := os.MkdirAll(documentsDirPath(), 0o755); err != nil {
+		log.Fatalf("failed to create documents directory: %v", err)
+	}
+	if sweep, err := sweepDocumentsDir(documentsDirPath(), globalDocumentStore); err != nil {
+		log.Fatalf("failed to sweep documents directory: %v", err)
+	} else if sweep.RemovedTemp > 0 || sweep.OrphanFiles > 0 || sweep.MissingFiles > 0 {
+		log.Printf("documents: swept %d abandoned upload(s); %d orphan file(s) and %d missing file(s) logged above",
+			sweep.RemovedTemp, sweep.OrphanFiles, sweep.MissingFiles)
+	}
+
 	// The assistant's read_manual tool (mate-voice-assistant plan, "App-wide
 	// voice"): docs/features, docs/how-to and docs/reference staged into
 	// backend/manual (Makefile's manual-stage target, the Dockerfile and
