@@ -328,13 +328,29 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"configure it, call read_manual for the relevant page first and answer from it; when it is about the " +
 		"sea, use the forecast, tide and passage tools as usual.\n\n")
 
+	// Planning horizon: every live-data rule below assumes a departure from
+	// here, now. A trip months away, or from somewhere else, has to be
+	// recognised first or Mate briefs today's weather for a passage that
+	// won't happen until next season.
+	b.WriteString("Before planning anything, work out when and from where the plan starts. If the trip leaves later " +
+		"than the forecast covers (next season, a named month, \"in a few months\") or leaves from somewhere other " +
+		"than where the boat is now, it is a planning question, not a departure briefing. For those, do not fetch " +
+		"today's wind forecast or tides and do not cite the current marine warnings, because none of them will " +
+		"apply; do not call estimate_passage or reason about fuel on board unless the operator asks. Reason from " +
+		"the season instead: prevailing winds and weather systems for that region in that month, how often a " +
+		"usable weather window comes, and current and tidal-stream patterns, all labelled as general knowledge. " +
+		"Take distances and bearings between the planned points themselves, not from the vessel's position, and " +
+		"do not open with where the boat is now. If the timing is unclear and would change the answer, say which " +
+		"you assumed in one line.\n\n")
+
 	b.WriteString("To resolve a place, call find_places with the bare feature name (\"Bona Bay\", not \"Bona Bay, " +
 		"Gloucester Island\"). If it is more than about 20 nautical miles from the vessel, or the lookup returns " +
 		"nothing, resolve a nearby feature you can name (the island, the cape, the harbour) and retry with its " +
 		"coordinates as near_lat/near_lon. If a name still will not resolve, say so and use the nearest resolved " +
 		"feature's position instead, telling the operator that is what you did.\n\n" +
 
-		"For every candidate anchorage under discussion, fetch both get_wind_forecast and get_tides. Fetch the " +
+		"When the plan starts now or within the forecast range, for every candidate anchorage under discussion, " +
+		"fetch both get_wind_forecast and get_tides. Fetch the " +
 		"forecast once per position with enough days for the whole plan; do not re-fetch the same position " +
 		"under a different name.\n\n" +
 
@@ -348,8 +364,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"with reasons, and what would change it.\n\n" +
 
 		"Whenever the question names where the boat is leaving from and where it is going, or a route, the " +
-		"answer must include a Passage section, even when the question is mainly about the anchorage. For it: " +
-		"take the distance_nm and bearing_deg that find_places returns for the destination from the vessel's " +
+		"answer must include a Passage section, even when the question is mainly about the anchorage. For a " +
+		"passage leaving from the boat's position within the forecast range: take the distance_nm and bearing_deg that find_places returns for the destination from the vessel's " +
 		"position; call estimate_passage with that distance and the planned speed and report time, fuel burn " +
 		"and fuel margin; pass that bearing as course_deg to get_wind_forecast for the destination and read " +
 		"the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, quarter, " +

@@ -217,6 +217,41 @@ func TestBuildAssistantSystemPrompt_ToolGuidancePresent(t *testing.T) {
 	}
 }
 
+// The operator asked "Can you cross Bass Strait in day hops? What anchorage
+// would you depart from?" while lying off Townsville, meaning a trip months
+// away. Mate opened with the boat's position, quoted today's wind warning,
+// and tried to work fuel from the tanks, because every rule assumed a
+// departure from here, now. A trip beyond the forecast, or from somewhere
+// else, is a planning question and gets seasonal reasoning instead.
+func TestBuildAssistantSystemPrompt_PlanningHorizonGuidance(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"work out when and from where the plan starts",
+		"later than the forecast covers",
+		"somewhere other than where the boat is now",
+		"do not fetch today's wind forecast or tides",
+		"do not cite the current marine warnings",
+		"fuel on board",
+		"prevailing winds and weather systems for that region in that month",
+		"between the planned points themselves, not from the vessel's position",
+		"say which you assumed",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the planning-horizon guidance to mention %q, got:\n%s", want, prompt)
+		}
+	}
+	// The live-data rules must be scoped to a near-term departure, not
+	// stated as unconditional.
+	for _, want := range []string{
+		"When the plan starts now or within the forecast range, for every candidate anchorage",
+		"For a passage leaving from the boat's position within the forecast range",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the live-data rule to be scoped with %q, got:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildAssistantSystemPrompt_AsksToCreateRouteForPassage(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(basePromptContext())
 	if !strings.Contains(prompt, "Would you like me to create a route for this passage?") {
