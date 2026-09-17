@@ -338,6 +338,55 @@ func main() {
 	}
 	globalAssistantStore = as
 
+	// Document store (ADR 0106): metadata, virtual folders, tags, chunks and
+	// FTS5 search behind a flat, hash-named folder of file bytes. Fail fast
+	// on open error, same reasoning as the other stores above. The
+	// documents directory is created (not just the database's own parent,
+	// which newDocumentStore already handles) so the boot sweep below
+	// always has somewhere to os.ReadDir, even on a brand new install that
+	// has never taken an upload yet.
+	ds, err := newDocumentStore(documentsDBPath())
+	if err != nil {
+		log.Fatalf("failed to open document store: %v", err)
+	}
+	globalDocumentStore = ds
+	if err := os.MkdirAll(documentsDirPath(), 0o755); err != nil {
+		log.Fatalf("failed to create documents directory: %v", err)
+	}
+	if sweep, err := sweepDocumentsDir(documentsDirPath(), globalDocumentStore); err != nil {
+		log.Fatalf("failed to sweep documents directory: %v", err)
+	} else if sweep.RemovedTemp > 0 || sweep.OrphanFiles > 0 || sweep.MissingFiles > 0 {
+		log.Printf("documents: swept %d abandoned upload(s); %d orphan file(s) and %d missing file(s) logged above",
+			sweep.RemovedTemp, sweep.OrphanFiles, sweep.MissingFiles)
+	}
+
+	// Document indexer (ADR 0106, B4): local extraction always, Mate's paid
+	// OCR/summarise-and-tag enrichment only when a document's own consent
+	// flag says so. Its own *http.Client, not openRouterHTTPClient (the
+	// streaming assistant client's, whose ResponseHeaderTimeout is 60s) -
+	// a non-streaming OCR call on a many-page scan can take minutes to
+	// return headers at all, well past what the interactive assistant ever
+	// tolerates. documentIndexerWake (documents_handlers.go) starts out nil
+	// (a no-op) so upload/reindex handlers work identically before this
+	// runs; assigning it here is what actually connects them to the queue.
+	documentsTransport := http.DefaultTransport.(*http.Transport).Clone()
+	documentsTransport.ResponseHeaderTimeout = 10 * time.Minute
+	documentsHTTPClient := &http.Client{Transport: documentsTransport}
+	docIndexer := newDocumentIndexer(
+		globalDocumentStore,
+		documentsDirPath(),
+		func() (assistantReadiness, string, error) { return checkAssistantReadiness(settingsPath) },
+		documentsHTTPClient,
+		func() (string, error) {
+			settings, err := readSettings(settingsPath)
+			if err != nil {
+				return "", err
+			}
+			return buildSettingsPayload(settings).Assistant.DocumentModel, nil
+		},
+	)
+	documentIndexerWake = docIndexer.Wake
+
 	// The assistant's read_manual tool (mate-voice-assistant plan, "App-wide
 	// voice"): docs/features, docs/how-to and docs/reference staged into
 	// backend/manual (Makefile's manual-stage target, the Dockerfile and
@@ -453,6 +502,12 @@ func main() {
 	defer cancelStream()
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	go newRadarPoller(globalRadarTargetStore, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
+	// The document indexer (above): started once at boot and woken
+	// immediately so any document left pending/extract or pending/enrich by
+	// a crash or restart resumes right away rather than waiting for the
+	// next upload or reindex to wake it.
+	go docIndexer.Run(streamCtx)
+	docIndexer.Wake()
 	// Drops non-self vessel contexts (AIS targets) this box has not heard
 	// from in an hour, so every whole-tree copy of the snapshot does not get
 	// a little slower every week it runs (backend-perf-audit.md Tier 1 #3).
@@ -621,6 +676,23 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/logs", tierRead, getLogsHandler},
 		{http.MethodGet, "/api/logs/stream", tierRead, logsStreamHandler},
 
+		// Document library (ADR 0106): metadata, virtual folders, tags,
+		// content bytes and full text, backed by globalDocumentStore
+		// (documents_store.go) and a flat hash-named folder on disk
+		// (documents_handlers.go). The two static routes ("move", "tags")
+		// are listed ahead of the "/:id" routes below purely for
+		// readability - Echo's router already prioritises a static segment
+		// over a param one regardless of registration order (confirmed
+		// against vendored router.go: "Search order/priority is: static >
+		// param > any"), so "GET /api/documents/tags" can never be captured
+		// by "GET /api/documents/:id" either way.
+		{http.MethodGet, "/api/documents", tierRead, listDocumentsHandler},
+		{http.MethodGet, "/api/documents/tags", tierRead, documentTagsHandler},
+		{http.MethodGet, "/api/documents/:id", tierRead, getDocumentHandler},
+		{http.MethodGet, "/api/documents/:id/content", tierRead, documentContentHandler},
+		{http.MethodGet, "/api/documents/:id/text", tierRead, documentTextHandler},
+		{http.MethodGet, "/api/document-folders", tierRead, listDocumentFoldersHandler},
+
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
@@ -671,6 +743,18 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// state (a new message row), which a readonly session must not
 		// trigger (ADR 0093).
 		{http.MethodPost, "/api/assistant/conversations/:id/messages", tierWrite, postAssistantMessageHandler},
+
+		// Document library writes (ADR 0106). "move" and "tags" ahead of the
+		// "/:id" routes purely for readability - see the read-tier comment
+		// above on why Echo's router never needs that ordering.
+		{http.MethodPost, "/api/documents", tierWrite, uploadDocumentHandler},
+		{http.MethodPost, "/api/documents/move", tierWrite, moveDocumentsHandler},
+		{http.MethodPatch, "/api/documents/:id", tierWrite, patchDocumentHandler},
+		{http.MethodDelete, "/api/documents/:id", tierWrite, deleteDocumentHandler},
+		{http.MethodPost, "/api/documents/:id/reindex", tierWrite, reindexDocumentHandler},
+		{http.MethodPost, "/api/document-folders", tierWrite, createDocumentFolderHandler},
+		{http.MethodPatch, "/api/document-folders/:id", tierWrite, patchDocumentFolderHandler},
+		{http.MethodDelete, "/api/document-folders/:id", tierWrite, deleteDocumentFolderHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},

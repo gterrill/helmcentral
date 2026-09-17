@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -76,8 +76,25 @@ export function EngineProfileDialog({
     [existingGauges, candidates, profile],
   )
 
+  // The seed candidates come from a separate fetch (useSignalKPaths) than
+  // the one that resolves `profile`, so it can still land after the operator
+  // has already typed an instance by hand. `instanceTouchedRef` is what
+  // stops that clobber; `seededProfileIdRef` is what still lets a genuine
+  // profile switch reseed even after the field has been touched. Both live
+  // in one effect (rather than a separate profile-change effect resetting
+  // the ref for this one to read) so there is no cross-effect ordering to
+  // rely on - each render's seeding decision is made from values current as
+  // of that same synchronous pass.
+  const instanceTouchedRef = useRef(false)
+  const seededProfileIdRef = useRef<string | undefined>(undefined)
+
   useEffect(() => {
     if (!profile) return
+    if (seededProfileIdRef.current !== profile.id) {
+      seededProfileIdRef.current = profile.id
+      instanceTouchedRef.current = false
+    }
+    if (instanceTouchedRef.current) return
     setInstance(seededPrefix)
     setTitle(seededPrefix ? titleFor(seededPrefix) : profile.name)
   }, [profile?.id, seededPrefix])
@@ -156,7 +173,10 @@ export function EngineProfileDialog({
                   id="engine-instance"
                   list="engine-instance-options"
                   value={instance}
-                  onChange={(e) => setInstance(e.target.value)}
+                  onChange={(e) => {
+                    instanceTouchedRef.current = true
+                    setInstance(e.target.value)
+                  }}
                   placeholder="propulsion.port"
                 />
                 {/* Suggestions only: with the engines off nothing under

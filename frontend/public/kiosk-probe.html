@@ -10,11 +10,13 @@
      not depend on anything the probe itself is checking for (no :has(),
      no structuredClone, nothing from the build).
 
-     Laid out as a fixed 5x2 grid so the whole report fits inside a
+     Laid out as a fixed 7x2 grid so the whole report fits inside a
      1920x360 wall strip with no scrolling - the device has no keyboard or
-     mouse to scroll with. The full detail of each check still goes to the
-     backend log (POST /api/kiosk-probe); the on-screen grid only needs to
-     be glanceable, not exhaustive. */
+     mouse to scroll with. Sized for the worst case (all checks plus the
+     rotated helmcam cell); widen this if more checks are added. The full
+     detail of each check still goes to the backend log (POST
+     /api/kiosk-probe); the on-screen grid only needs to be glanceable, not
+     exhaustive. */
   html, body {
     margin: 0;
     padding: 0;
@@ -70,7 +72,7 @@
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(7, 1fr);
     grid-template-rows: repeat(2, 1fr);
     gap: 8px;
     padding: 8px;
@@ -251,6 +253,87 @@
       hasTz = false;
     }
     addCheck('Intl timezone', hasTz, hasTz ? tz : 'resolution failed');
+  })();
+
+  // 5b-5d. Tailwind v4's CSS needs a Safari 16.4 floor: cascade layers
+  // (@layer), registered custom properties (@property) and color-mix() are
+  // all required for its generated output to work as intended, so each
+  // gets its own check here rather than being inferred from something else.
+
+  // 5b. @layer (cascade layers). Tailwind v4 emits its base/components/
+  // utilities split as @layer rules. CSS.supports can't test an at-rule, so
+  // this probes behaviourally: two layers are declared out of order with a
+  // rule in each targeting the same hidden test element, and the later
+  // layer (a) should win regardless of declaration order. An unsupported
+  // browser drops the layered rules entirely, leaving the element's width
+  // at its unstyled default instead of 1px.
+  (function checkCascadeLayers() {
+    var ok = false;
+    var detail = 'width mismatch';
+    var style = document.createElement('style');
+    style.textContent = '@layer a, b; @layer b { #probe-layer { width: 1px } } @layer a { #probe-layer { width: 2px } }';
+    var el = document.createElement('div');
+    el.id = 'probe-layer';
+    el.style.position = 'absolute';
+    el.style.visibility = 'hidden';
+    document.head.appendChild(style);
+    document.body.appendChild(el);
+    try {
+      var width = getComputedStyle(el).width;
+      ok = width === '1px';
+      detail = "computed width '" + width + "' (want '1px': layer a is declared after b, so a should win)";
+    } catch (e) {
+      ok = false;
+      detail = String(e && e.message || e).slice(0, 80);
+    } finally {
+      document.head.removeChild(style);
+      document.body.removeChild(el);
+    }
+    addCheck('css @layer', ok, detail);
+  })();
+
+  // 5c. @property (registered custom properties). Tailwind v4 uses @property
+  // to give its generated custom properties a type and an initial value.
+  // typeof CSS.registerProperty is the JS-side signal, but the app cares
+  // about the at-rule form Tailwind actually emits, so this probes that
+  // directly: an @property rule types --probe-x as a <length> with a 3px
+  // initial value, then checks that value comes back from the cascade.
+  (function checkAtProperty() {
+    var ok = false;
+    var detail = 'initial-value not applied';
+    var style = document.createElement('style');
+    style.textContent = "@property --probe-x { syntax: '<length>'; inherits: false; initial-value: 3px }";
+    var el = document.createElement('div');
+    el.style.position = 'absolute';
+    el.style.visibility = 'hidden';
+    document.head.appendChild(style);
+    document.body.appendChild(el);
+    try {
+      var value = getComputedStyle(el).getPropertyValue('--probe-x').trim();
+      ok = value === '3px';
+      var jsSignal = typeof CSS !== 'undefined' && typeof CSS.registerProperty === 'function';
+      detail = ok ? 'initial-value applied (3px)' : "got '" + value + "', want '3px' (CSS.registerProperty: " + jsSignal + ')';
+    } catch (e) {
+      ok = false;
+      detail = String(e && e.message || e).slice(0, 80);
+    } finally {
+      document.head.removeChild(style);
+      document.body.removeChild(el);
+    }
+    addCheck('css @property', ok, detail);
+  })();
+
+  // 5d. color-mix(). Tailwind v4's opacity utilities (e.g. bg-black/50)
+  // compile to color-mix(), unlike v3's plain rgba(). CSS.supports can test
+  // this one directly since it's a value, not an at-rule.
+  (function checkColorMix() {
+    var ok = false;
+    try {
+      ok = CSS.supports('color', 'color-mix(in oklab, red, blue)');
+    } catch (e) {
+      ok = false;
+    }
+    addCheck('css color-mix()', ok, "CSS.supports('color', 'color-mix(in oklab, red, blue)')");
   })();
 
   // 9. Whether the last report POST succeeded. Seeded as pending until the

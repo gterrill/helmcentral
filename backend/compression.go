@@ -45,11 +45,19 @@ var noCompressRoutePatterns = map[string]bool{
 	// single small event decodes before the handler ever returns.
 	//
 	// assistant_handlers.go: postAssistantMessageHandler streams its reply
-	// as SSE too, over the same connection that accepted the POST, but
-	// stays skipped here — it was not part of this pass, and unlike the
-	// two above its per-token chunks are small enough, and frequent enough,
-	// that the same MinLength/Flush interaction has not been checked for
-	// it.
+	// as SSE too, over the same connection that accepted the POST, and
+	// stays skipped here for the same reason as the two routes above, now
+	// more true than when this note was first written: since the backend
+	// token-streaming follow-up ADR 0093 §5 named (assistant_run.go's run)
+	// this route flushes a "delta" frame per streamed fragment of the
+	// model's answer, genuinely small and genuinely frequent, on top of its
+	// "status"/"retract"/"message"/"error" frames - not the whole-message-
+	// at-once shape this comment used to describe. The gzipResponseWriter.
+	// Flush() behaviour above should cover it identically, but that has not
+	// been exercised through the real middleware stack the way
+	// TestCompression_SSEStreamIsGzippedAndStreamsBeforeHandlerReturns does
+	// for the other two, so it stays off this list rather than assumed
+	// safe.
 	"/api/assistant/conversations/:id/messages": true,
 
 	// WebSocket upgrade (grep for "websocket.Accept" turned up exactly this
@@ -85,6 +93,18 @@ var noCompressRoutePatterns = map[string]bool{
 	// pattern can't otherwise tell the two apart).
 	"/api/world-imagery/:z/:x/:y":  true, // tile_proxy.go
 	"/api/sat-charts/:id/:z/:x/:y": true, // sat_charts.go
+
+	// documents_handlers.go: documentContentHandler serves a document's raw
+	// bytes through http.ServeContent, which needs to answer Range requests
+	// against the exact byte offsets of the underlying file (a PDF viewer's
+	// partial fetch, a scrubbed audio/video position). Gzip-wrapping those
+	// bytes would make Range's offsets meaningless, the same reasoning
+	// compressionSkipper already applies to any request carrying a Range
+	// header - this covers the initial, rangeless request for the same
+	// route too, before a client has any ETag to make a ranged follow-up
+	// against. Many of the served MIME types (PDF, JPEG, PNG, WebP) are
+	// already-compressed anyway.
+	"/api/documents/:id/content": true,
 
 	// gshhg.go: gshhgCoastlineHandler gzips its own response once at
 	// startup (gshhgCoastlineGzipped) and negotiates Content-Encoding

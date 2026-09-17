@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // This file drives the onboard assistant's agentic tool loop against
@@ -135,14 +136,39 @@ func assistantWithheldToolResult(name string) (string, error) {
 }
 
 // assistantEmitter pushes one named progress event to the SSE stream a
-// caller is writing (assistant_handlers.go). This file only ever emits
-// "status" events with an {"text": "..."} payload (see assistantStatus);
-// "message" and "error" are the handler's own, sent once run has returned.
+// caller is writing (assistant_handlers.go). This file emits "status"
+// events with a {"text": "..."} payload (see assistantStatus), "delta"
+// events carrying a fragment of the round's answer text as it streams in
+// (assistantDelta), and "retract" events with an empty payload
+// (assistantRetractPayload) telling the browser to discard whatever delta
+// text it has shown for the round just finished; "message" and "error" are
+// the handler's own, sent once run has returned.
 type assistantEmitter func(event string, payload any)
 
 // assistantStatus builds the payload every status event carries.
 func assistantStatus(text string) any {
 	return map[string]string{"text": text}
+}
+
+// assistantDelta builds the payload every delta event carries: one
+// fragment of the round's answer text, to be appended to whatever the
+// operator's browser has shown for this round so far. Typed the same as
+// assistantStatus's payload (a plain map[string]string) so a test's
+// recordingEmitter can read either kind of event's text the same way.
+func assistantDelta(text string) any {
+	return map[string]string{"text": text}
+}
+
+// assistantRetractPayload builds the payload every retract event carries:
+// an intentionally empty object. A retract event exists purely to tell the
+// browser "throw away what I showed you for this round" - the round's text
+// doesn't need to travel again to say that, and typing it as
+// map[string]string{} (rather than, say, struct{}{}) keeps it in the same
+// family as assistantStatus/assistantDelta's payloads so a test helper that
+// only knows how to read a map[string]string off an event payload still
+// works uniformly across all three event kinds.
+func assistantRetractPayload() any {
+	return map[string]string{}
 }
 
 // assistantToolExecutor is the minimal seam the loop needs from its tool
@@ -204,6 +230,56 @@ func assistantTextToolCallMarker(content string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// assistantTextToolCallMarkerMaxLen is the byte length of the longest
+// marker in assistantTextToolCallMarkers. run's onContent uses it to size
+// the streaming hold-back window (assistantSafeStreamLen below): as long as
+// a round's whole accumulated-so-far text has been scanned for a marker and
+// none was found, withholding its trailing assistantTextToolCallMarkerMaxLen-1
+// bytes at every point guarantees no marker can ever be revealed one
+// streamed fragment at a time, however it is split across chunk boundaries
+// - see assistantSafeStreamLen's doc comment for the proof.
+var assistantTextToolCallMarkerMaxLen = func() int {
+	max := 0
+	for _, marker := range assistantTextToolCallMarkers {
+		if len(marker) > max {
+			max = len(marker)
+		}
+	}
+	return max
+}()
+
+// assistantSafeStreamLen returns how many leading bytes of text are
+// provably free of any assistantTextToolCallMarkers marker, given that text
+// in its entirety has already been scanned (by the caller) and found
+// marker-free.
+//
+// The proof: let L = len(text) and let maxLen =
+// assistantTextToolCallMarkerMaxLen. This returns safeLen = L - (maxLen-1),
+// clamped to [0, L] and then backed off to the nearest rune boundary so a
+// caller never slices a multi-byte UTF-8 rune in half. For any position p <
+// safeLen (pre-clamping), p+maxLen <= L, so a marker of any length up to
+// maxLen starting at p would have to be entirely contained within text -
+// and since text has already been scanned in full and found clean, no such
+// marker exists. Therefore text[:safeLen] cannot contain the start of any
+// marker, complete or not, and is safe to emit; only the trailing
+// maxLen-1 bytes might be an in-progress marker still waiting on more
+// input, so those stay held back until either more text arrives (pushing
+// safeLen forward) or the round ends (run's flush-the-tail step, once the
+// final content is known clean).
+func assistantSafeStreamLen(text string) int {
+	safeLen := len(text) - (assistantTextToolCallMarkerMaxLen - 1)
+	if safeLen < 0 {
+		safeLen = 0
+	}
+	if safeLen > len(text) {
+		safeLen = len(text)
+	}
+	for safeLen > 0 && safeLen < len(text) && !utf8.RuneStart(text[safeLen]) {
+		safeLen--
+	}
+	return safeLen
 }
 
 func autoRouterPluginForModel(model string, opts assistantAutoRouterOptions) *openRouterPlugin {
@@ -285,6 +361,33 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 // above is exhausted. Every completion is independently timed out
 // (openRouterCompletionTimeout); the whole call is bounded by
 // assistantRunTimeout via ctx.
+//
+// Each round's text streams live to the operator as "delta" events, built
+// from the onContent callback openRouterChatCompletion invokes once per
+// content fragment as OpenRouter sends it (this is the follow-up ADR 0093
+// §5 recorded as out of scope for v1). onContent is only ever called from
+// here, synchronously, inside this same call to openRouterChatCompletion -
+// never from a goroutine - so it can call r.emit directly with no locking
+// of its own; runToolRound's own goroutines, which do need r.emit's calls
+// serialised through their local mu, only start after this round's
+// completion call has already returned.
+//
+// A round's text is never forwarded to the browser blindly, for two
+// reasons layered on top of each other. First (ADR 0093 §2's "text
+// alongside tool calls is thinking aloud, not the answer"): a round that
+// ends with tool calls was never going to keep its streamed text as the
+// final reply, so if any of it reached the operator it has to be visibly
+// taken back - see the retract event below. Second, and the reason
+// forwarding is held back rather than sent immediately and retracted
+// later (ADR 0103's text-tool-call-markup rejection): a model can emit its
+// tool call as raw text markup instead of a real answer, and that markup
+// must never be shown even for the instant before a retract could arrive.
+// assistantSafeStreamLen's hold-back window means a marker can never be
+// forwarded one streamed fragment at a time regardless of where OpenRouter
+// happens to split it across chunks - see that function's own doc comment
+// for the proof - and once assistantTextToolCallMarker finds a marker in
+// the round's accumulated text, no further delta is emitted for the rest
+// of the round at all.
 func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 	ctx, cancel := context.WithTimeout(ctx, assistantRunTimeout)
 	defer cancel()
@@ -321,8 +424,43 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			req.ToolChoice = "none"
 		}
 
+		// roundText mirrors, fragment by fragment, the content
+		// openRouterChatCompletion is assembling for this round - kept here
+		// too (rather than only reading the final resp.Choices[0].Message.
+		// Content once the round ends) because the marker scan and the
+		// hold-back window both need to run live, as each fragment arrives,
+		// not only once the whole round is in hand. emittedLen is how many
+		// of roundText's bytes have already gone out as delta events;
+		// markerFound latches once assistantTextToolCallMarker finds a
+		// marker in roundText, after which onContent stops doing anything
+		// at all for the rest of the round.
+		var (
+			roundText    strings.Builder
+			emittedLen   int
+			markerFound  bool
+			deltaEmitted bool
+		)
+		onContent := func(fragment string) {
+			if markerFound {
+				return
+			}
+			roundText.WriteString(fragment)
+			text := roundText.String()
+			if _, found := assistantTextToolCallMarker(text); found {
+				markerFound = true
+				return
+			}
+			safeLen := assistantSafeStreamLen(text)
+			if safeLen <= emittedLen {
+				return
+			}
+			r.emit("delta", assistantDelta(text[emittedLen:safeLen]))
+			emittedLen = safeLen
+			deltaEmitted = true
+		}
+
 		completionCtx, cancelCompletion := context.WithTimeout(ctx, openRouterCompletionTimeout)
-		resp, err := openRouterChatCompletion(completionCtx, r.doer, r.apiKey, req)
+		resp, err := openRouterChatCompletion(completionCtx, r.doer, r.apiKey, req, onContent)
 		cancelCompletion()
 		if err != nil {
 			return assistantReply{}, err
@@ -341,6 +479,12 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			if marker, found := assistantTextToolCallMarker(content); found {
 				return assistantReply{}, fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings", r.model, marker)
 			}
+			// The round ended clean: flush whatever the hold-back window
+			// was still withholding, so the operator sees the reply in
+			// full rather than missing its last few bytes.
+			if tail := content[emittedLen:]; tail != "" {
+				r.emit("delta", assistantDelta(tail))
+			}
 			reply.Content = content
 			return reply, nil
 		}
@@ -350,6 +494,14 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		}
 
 		messages = append(messages, choice)
+
+		// This round's text (if any reached the operator at all) was never
+		// going to be the final answer - it ended in tool calls, so
+		// whatever was shown has to be visibly withdrawn before the tool
+		// statuses below start arriving (ADR 0093 §2).
+		if deltaEmitted {
+			r.emit("retract", assistantRetractPayload())
+		}
 
 		toolMessages, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
 		if terr != nil {

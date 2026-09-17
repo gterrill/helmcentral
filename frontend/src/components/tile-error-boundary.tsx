@@ -15,7 +15,7 @@ interface TileErrorBoundaryState {
 
 /**
  * Catches a render error from exactly one widget rather than letting it
- * propagate to React's root: React 19 unmounts the whole app on an uncaught
+ * propagate to React's root: React unmounts the whole app on an uncaught
  * render error, which on the unattended wall-display kiosk (ADR 0089) would
  * blank every page of the feed until someone physically reloads it. One
  * widget throwing degrades to a failed-tile card in its own grid slot; the

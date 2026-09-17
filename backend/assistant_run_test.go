@@ -53,19 +53,151 @@ func (q *queuedChatDoer) Do(req *http.Request) (*http.Response, error) {
 	return q.responses[i], q.errs[i]
 }
 
-// chatResponse builds an *http.Response carrying resp as its JSON body, the
-// shape openRouterChatCompletion (openrouter_client.go) decodes.
+// chatResponse builds an *http.Response carrying resp. For a non-2xx
+// status it is the plain JSON body openRouterChatCompletion reads for an
+// upstream error (unchanged since streaming was added - OpenRouter never
+// streams an error response). For 2xx it is an SSE-framed body
+// (openRouterResponseStreamBody) representing the same logical response a
+// real streamed reply would carry, so every one of this file's ~30
+// pre-streaming tests keeps its original intent (it only ever asserted on
+// the fully-assembled result) without having to be rewritten one by one.
 func chatResponse(t *testing.T, status int, resp openRouterChatResponse) *http.Response {
 	t.Helper()
-	data, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("marshal chat response: %v", err)
+	if status < 200 || status >= 300 {
+		data, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatalf("marshal chat response: %v", err)
+		}
+		return &http.Response{
+			StatusCode: status,
+			Body:       io.NopCloser(bytes.NewReader(data)),
+			Header:     make(http.Header),
+		}
 	}
 	return &http.Response{
 		StatusCode: status,
-		Body:       io.NopCloser(bytes.NewReader(data)),
+		Body:       io.NopCloser(strings.NewReader(openRouterResponseStreamBody(t, resp))),
 		Header:     make(http.Header),
 	}
+}
+
+// openRouterResponseStreamBody converts resp into the SSE-framed body a
+// real streamed OpenRouter response carries for it (backend/testdata/
+// openrouter_stream_{text,toolcall}.txt, captured live, show the general
+// shape this mimics): content split into a few delta fragments, each tool
+// call's id/type/name on its first fragment and its arguments split across
+// a couple more, a final chunk carrying finish_reason and usage together,
+// then "data: [DONE]". A response built with zero choices (the zero-
+// choices test case) becomes a stream that never carries a single choice,
+// terminated normally - openRouterChatCompletion's own "zero choices" check
+// is what turns that into an error, not this builder.
+func openRouterResponseStreamBody(t *testing.T, resp openRouterChatResponse) string {
+	t.Helper()
+	var b strings.Builder
+
+	writeChunk := func(delta map[string]any, finishReason string, usage *openRouterUsage) {
+		chunk := map[string]any{
+			"id":    resp.ID,
+			"model": resp.Model,
+			"choices": []map[string]any{{
+				"index":         0,
+				"delta":         delta,
+				"finish_reason": finishReason,
+			}},
+		}
+		if usage != nil {
+			chunk["usage"] = usage
+		}
+		data, err := json.Marshal(chunk)
+		if err != nil {
+			t.Fatalf("marshal stream chunk: %v", err)
+		}
+		b.WriteString("data: ")
+		b.Write(data)
+		b.WriteString("\n\n")
+	}
+
+	if len(resp.Choices) == 0 {
+		b.WriteString("data: [DONE]\n\n")
+		return b.String()
+	}
+	choice := resp.Choices[0]
+	wroteAny := false
+
+	if content := string(choice.Message.Content); content != "" {
+		for i, fragment := range splitIntoFragments(content, 3) {
+			delta := map[string]any{"content": fragment}
+			if i == 0 {
+				delta["role"] = "assistant"
+			}
+			writeChunk(delta, "", nil)
+			wroteAny = true
+		}
+	}
+
+	for ti, tc := range choice.Message.ToolCalls {
+		argFragments := splitIntoFragments(string(tc.Function.Arguments), 2)
+		if len(argFragments) == 0 {
+			argFragments = []string{""}
+		}
+		first := map[string]any{
+			"tool_calls": []map[string]any{{
+				"index": ti, "id": tc.ID, "type": tc.Type,
+				"function": map[string]any{"name": tc.Function.Name, "arguments": argFragments[0]},
+			}},
+		}
+		if !wroteAny {
+			first["role"] = "assistant"
+		}
+		writeChunk(first, "", nil)
+		wroteAny = true
+		for _, frag := range argFragments[1:] {
+			writeChunk(map[string]any{
+				"tool_calls": []map[string]any{{"index": ti, "function": map[string]any{"arguments": frag}}},
+			}, "", nil)
+		}
+	}
+
+	if !wroteAny {
+		writeChunk(map[string]any{"role": "assistant"}, "", nil)
+	}
+
+	writeChunk(map[string]any{}, choice.FinishReason, &resp.Usage)
+	b.WriteString("data: [DONE]\n\n")
+	return b.String()
+}
+
+// splitIntoFragments divides s into at most maxParts pieces, in order, on
+// rune boundaries - good enough for building test fixtures that exercise
+// multi-chunk streaming without needing byte-exact control over where each
+// split falls. Returns nil for an empty s (no fragments to emit at all).
+func splitIntoFragments(s string, maxParts int) []string {
+	if s == "" {
+		return nil
+	}
+	runes := []rune(s)
+	if maxParts < 1 {
+		maxParts = 1
+	}
+	if len(runes) < maxParts {
+		maxParts = len(runes)
+	}
+	if maxParts <= 1 {
+		return []string{s}
+	}
+	out := make([]string, 0, maxParts)
+	base := len(runes) / maxParts
+	rem := len(runes) % maxParts
+	pos := 0
+	for i := 0; i < maxParts; i++ {
+		n := base
+		if i < rem {
+			n++
+		}
+		out = append(out, string(runes[pos:pos+n]))
+		pos += n
+	}
+	return out
 }
 
 // toolCallResponse builds a response whose only choice asks for one tool
@@ -455,20 +587,25 @@ func TestAssistantRunner_EmitsStatusEventsInOrder(t *testing.T) {
 	// The two calls run concurrently, but their "about to call" status
 	// events are still emitted in call order from the outer sequential
 	// loop (assistant_run.go's runToolRound), not from inside the
-	// goroutines that do the actual work - so this stays deterministic.
-	wantTexts := []string{
-		"Thinking…",
-		"Looking up Tongue Bay…",
-		"Fetching wind forecast for 1.0000,2.0000…",
-		"Working out the answer…",
+	// goroutines that do the actual work - so this stays deterministic. The
+	// final "delta" event is round 1's whole content ("done", 4 bytes) -
+	// short enough to stay entirely inside the hold-back window during
+	// streaming, so it never appears mid-round and is flushed whole once
+	// the round ends clean (assistant_run.go's run).
+	want := []recordedEvent{
+		{event: "status", text: "Thinking…"},
+		{event: "status", text: "Looking up Tongue Bay…"},
+		{event: "status", text: "Fetching wind forecast for 1.0000,2.0000…"},
+		{event: "status", text: "Working out the answer…"},
+		{event: "delta", text: "done"},
 	}
-	if len(*events) != len(wantTexts) {
-		t.Fatalf("expected %d events, got %d: %+v", len(wantTexts), len(*events), *events)
+	if len(*events) != len(want) {
+		t.Fatalf("expected %d events, got %d: %+v", len(want), len(*events), *events)
 	}
-	for i, want := range wantTexts {
+	for i, w := range want {
 		got := (*events)[i]
-		if got.event != "status" || got.text != want {
-			t.Fatalf("event %d: got {%q %q}, want status %q", i, got.event, got.text, want)
+		if got.event != w.event || got.text != w.text {
+			t.Fatalf("event %d: got {%q %q}, want {%q %q}", i, got.event, got.text, w.event, w.text)
 		}
 	}
 }
@@ -1163,5 +1300,205 @@ func TestAssistantRunner_NonAnthropicModelRequestHasNoCacheControl(t *testing.T)
 	}
 	if strings.Contains(string(doer.rawBodies[0]), "cache_control") {
 		t.Fatalf("expected no cache_control for a non-anthropic model, got %s", doer.rawBodies[0])
+	}
+}
+
+// ── token streaming: delta/retract events (backend token streaming) ────────
+//
+// run's onContent (assistant_run.go) turns openRouterChatCompletion's
+// streamed content fragments into "delta" SSE events, held back by
+// assistantSafeStreamLen's window so a text tool-call marker
+// (assistantTextToolCallMarker, ADR 0103) can never be revealed one
+// fragment at a time, and retracted with a "retract" event if the round
+// that streamed them turned out to end in tool calls rather than a final
+// answer (ADR 0093 §2: text alongside tool calls is thinking aloud, not
+// the answer). These tests exercise that machinery directly against
+// runner.run, the same way every other test in this file does.
+
+// deltaTexts returns, in order, the text payload of every "delta" event in
+// events.
+func deltaTexts(events []recordedEvent) []string {
+	var out []string
+	for _, e := range events {
+		if e.event == "delta" {
+			out = append(out, e.text)
+		}
+	}
+	return out
+}
+
+func TestAssistantRunner_DeltaEventsConcatenateToFinalContent(t *testing.T) {
+	const want = "Tongue Bay first, on the rising tide, then Blue Pearl Bay once the flood eases off."
+	round0 := finalResponse(t, want, "m", usage(80, 30, 0.01))
+
+	doer := &queuedChatDoer{responses: []*http.Response{round0}, errs: []error{nil}}
+	tools := &fakeToolExecutor{}
+	emit, events := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	reply, err := runner.run(context.Background(), "system", "", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if reply.Content != want {
+		t.Fatalf("unexpected content: %q", reply.Content)
+	}
+
+	fragments := deltaTexts(*events)
+	if len(fragments) < 2 {
+		t.Fatalf("expected the long answer to stream as more than one delta fragment, got %+v", fragments)
+	}
+	if got := strings.Join(fragments, ""); got != want {
+		t.Fatalf("expected delta fragments to concatenate to the final content, got %q, want %q", got, want)
+	}
+}
+
+func TestAssistantRunner_ForcedFinalRoundStreamsDeltas(t *testing.T) {
+	const want = "Here is the answer after working through every round of tool calls available to it."
+
+	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
+	errs := make([]error, 0, assistantMaxToolRounds+1)
+	for i := 0; i < assistantMaxToolRounds; i++ {
+		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
+		errs = append(errs, nil)
+	}
+	responses = append(responses, finalResponse(t, want, "m", usage(90, 40, 0.02)))
+	errs = append(errs, nil)
+
+	doer := &queuedChatDoer{responses: responses, errs: errs}
+	tools := &fakeToolExecutor{}
+	emit, events := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	reply, err := runner.run(context.Background(), "system", "", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if reply.Content != want {
+		t.Fatalf("unexpected content: %q", reply.Content)
+	}
+
+	fragments := deltaTexts(*events)
+	if len(fragments) < 2 {
+		t.Fatalf("expected the forced final round to stream more than one delta fragment, got %+v", fragments)
+	}
+	if got := strings.Join(fragments, ""); got != want {
+		t.Fatalf("expected delta fragments to concatenate to the forced final content, got %q, want %q", got, want)
+	}
+}
+
+// TestAssistantRunner_RetractEmittedAfterTextAndToolCallRound builds a
+// round whose message carries both thinking-aloud content and a tool call
+// in the same response - the shape ADR 0093 §2 describes - and checks a
+// "retract" event follows the streamed text, before the tool round's own
+// status events start.
+func TestAssistantRunner_RetractEmittedAfterTextAndToolCallRound(t *testing.T) {
+	round0 := chatResponse(t, http.StatusOK, openRouterChatResponse{
+		Choices: []openRouterChoice{{
+			Message: openRouterMessage{
+				Role:    "assistant",
+				Content: "Let me check the wind forecast for that anchorage.",
+				ToolCalls: []openRouterToolCall{
+					{ID: "call_1", Type: "function", Function: openRouterToolCallFunction{Name: "get_wind_forecast", Arguments: openRouterArguments(`{"lat":1,"lon":2}`)}},
+				},
+			},
+		}},
+	})
+	round1 := finalResponse(t, "Looks comfortable overnight.", "m", openRouterUsage{})
+
+	doer := &queuedChatDoer{responses: []*http.Response{round0, round1}, errs: []error{nil, nil}}
+	tools := &fakeToolExecutor{results: map[string]string{"get_wind_forecast": `{"days":[]}`}}
+	emit, events := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	if _, err := runner.run(context.Background(), "system", "", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	retractIdx := -1
+	toolStatusIdx := -1
+	for i, e := range *events {
+		if e.event == "retract" && retractIdx == -1 {
+			retractIdx = i
+		}
+		if e.event == "status" && strings.Contains(e.text, "wind forecast") && toolStatusIdx == -1 {
+			toolStatusIdx = i
+		}
+	}
+	if retractIdx == -1 {
+		t.Fatalf("expected a retract event after a round that streamed text and ended in a tool call, got %+v", *events)
+	}
+	if toolStatusIdx == -1 {
+		t.Fatalf("expected a tool-call status event, got %+v", *events)
+	}
+	if retractIdx >= toolStatusIdx {
+		t.Fatalf("expected retract (%d) to precede the tool call's status event (%d)", retractIdx, toolStatusIdx)
+	}
+
+	fragments := deltaTexts(*events)
+	if len(fragments) == 0 {
+		t.Fatalf("expected the round's thinking-aloud text to have streamed as delta events before being retracted, got %+v", *events)
+	}
+}
+
+// TestAssistantRunner_NoRetractAfterToolOnlyRound is the negative case: a
+// round with tool calls and no content at all (toolCallResponse, exactly
+// like every other tool-only round elsewhere in this file) never emitted a
+// delta, so there is nothing to retract - and none is emitted.
+func TestAssistantRunner_NoRetractAfterToolOnlyRound(t *testing.T) {
+	round0 := toolCallResponse(t, "call_1", "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{})
+	round1 := finalResponse(t, "No tides needed after all.", "m", openRouterUsage{})
+
+	doer := &queuedChatDoer{responses: []*http.Response{round0, round1}, errs: []error{nil, nil}}
+	tools := &fakeToolExecutor{results: map[string]string{"get_tides": `{"now":{}}`}}
+	emit, events := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	if _, err := runner.run(context.Background(), "system", "", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	for _, e := range *events {
+		if e.event == "retract" {
+			t.Fatalf("expected no retract event after a tool-only round with no streamed text, got %+v", *events)
+		}
+	}
+}
+
+// TestAssistantRunner_MarkerSplitAcrossChunksNeverLeaksIntoDeltas builds a
+// two-chunk stream where a text tool-call marker ("<tool_call>", ADR 0103)
+// straddles the chunk boundary: the first chunk ends with "<tool", an
+// incomplete prefix, and the second chunk supplies the rest. The
+// hold-back window (assistantSafeStreamLen) must keep the safe leading
+// text ahead of "<tool" flowing as delta events while never emitting any
+// part of the marker itself - not even the harmless-looking "<tool"
+// prefix that only becomes recognisable as a problem once "_call>" arrives
+// - and the round must still fail exactly like the single-chunk case
+// (TestAssistantRunner_TextToolCallMarkupInFinalResponseErrorsInsteadOfReturningReply).
+func TestAssistantRunner_MarkerSplitAcrossChunksNeverLeaksIntoDeltas(t *testing.T) {
+	const marker = "<tool_call>"
+	body := `data: {"id":"gen-1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Safe intro text before anything odd. <tool"},"finish_reason":null}]}` + "\n\n" +
+		`data: {"id":"gen-1","model":"m","choices":[{"index":0,"delta":{"content":"_call>{\"name\":\"x\"}</tool_call> trailing text"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"cost":0.0}}` + "\n\n" +
+		"data: [DONE]\n\n"
+
+	round0 := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
+	doer := &queuedChatDoer{responses: []*http.Response{round0}, errs: []error{nil}}
+	tools := &fakeToolExecutor{}
+	emit, events := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	_, err := runner.run(context.Background(), "system", "", nil)
+	if err == nil {
+		t.Fatal("expected an error when the final response contains a text tool-call marker, even split across chunks")
+	}
+
+	joined := strings.Join(deltaTexts(*events), "")
+	if strings.Contains(joined, marker) {
+		t.Fatalf("expected no emitted delta text to contain the marker itself, got %q", joined)
+	}
+	for n := 1; n <= len(marker); n++ {
+		if strings.Contains(joined, marker[:n]) {
+			t.Fatalf("expected no emitted delta text to contain any prefix of the marker (found %q), got %q", marker[:n], joined)
+		}
 	}
 }

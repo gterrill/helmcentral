@@ -102,8 +102,66 @@ describe('EngineProfileDialog', () => {
     renderDialog()
     await screen.findByTestId('engine-profile-preview')
 
+    // Same seeding race the sibling tests below document: the instance
+    // field is seeded from a fetch (useSignalKPaths) separate from the one
+    // the preview above waits on. Waiting for that seed first - rather than
+    // typing over it immediately - means it can't still be in flight when
+    // this test ends, which otherwise left it to resolve during whichever
+    // test ran next.
+    await waitFor(() => {
+      expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.port')
+    })
+
     fireEvent.change(screen.getByLabelText(/engine instance/i), { target: { value: '  ' } })
     expect(screen.getByRole('button', { name: /^Add tile$/ })).toBeDisabled()
+  })
+
+  // Deterministic repro for the race the seeding effect used to lose: the
+  // instance field is seeded from useSignalKPaths, a fetch entirely separate
+  // from the one the preview above waits on. Holding that fetch open lets
+  // the test land a keystroke in the exact window where the real bug used to
+  // fire - the seed arriving *after* the operator has already typed - without
+  // depending on real scheduling luck.
+  test('does not clobber a typed instance once the published-paths seed arrives late', async () => {
+    let releasePaths: (paths: { path: string }[]) => void = () => {}
+    const pathsGate = new Promise<{ path: string }[]>((resolve) => { releasePaths = resolve })
+
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes('/api/equipment-profiles') || String(url).includes('/api/engine-profiles')) {
+        return Promise.resolve({ ok: true, json: async () => ({ profiles: [bundled], problems: [] }) })
+      }
+      return pathsGate.then((paths) => ({ ok: true, json: async () => ({ paths }) }))
+    }))
+
+    renderDialog()
+    await screen.findByTestId('engine-profile-preview')
+
+    // The preview appearing only means `profile` resolved - the seeding
+    // effect is a *separate* effect off that same profile, and with the
+    // profiles fetch resolving outside of any act() the two aren't
+    // guaranteed to land in the same commit. Waiting for the title field
+    // (which that same effect sets to the profile's own name whenever there
+    // is no prefix to seed yet) confirms the effect's first pass, with
+    // seededProfileIdRef primed, has already happened - otherwise a keystroke
+    // landed here could race that first pass instead of the late paths seed
+    // this test means to exercise.
+    await waitFor(() => {
+      expect(screen.getByLabelText(/tile title/i)).toHaveValue(bundled.name)
+    })
+
+    // Nothing has seeded the instance field itself yet - the paths fetch is
+    // still held open. Type into it now, before the seed lands.
+    fireEvent.change(screen.getByLabelText(/engine instance/i), { target: { value: 'propulsion.starboard' } })
+
+    // Now let the seed land.
+    releasePaths([{ path: 'propulsion.port.oilPressure' }])
+    await waitFor(() => {
+      const options = [...document.querySelectorAll('#engine-instance-options option')]
+      expect(options.map((o) => o.getAttribute('value'))).toContain('propulsion.port')
+    })
+
+    // The operator's typed value must survive the late-arriving seed.
+    expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.starboard')
   })
 
   test('applies the composed gauges under the chosen instance', async () => {
@@ -146,6 +204,11 @@ describe('EngineProfileDialog', () => {
 
     const onApply = renderDialog()
     await screen.findByTestId('engine-profile-preview')
+    // The preview appearing only means the profile resolved; the instance
+    // seeding effect is separate and can still be in flight (see the seeding
+    // race documented on the sibling tests above), which would otherwise
+    // leave Add tile disabled here.
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Add tile$/ })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: /^Add tile$/ }))
 
     const [, , , hero] = onApply.mock.calls[0]
@@ -160,8 +223,15 @@ describe('EngineProfileDialog', () => {
       const options = [...container.ownerDocument.querySelectorAll('#engine-instance-options option')]
       expect(options.map((o) => o.getAttribute('value'))).toContain('propulsion.port')
     })
-    // And it seeds the field, so the common case needs no typing at all.
-    expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.port')
+    // And it seeds the field, so the common case needs no typing at all. The
+    // datalist above is a plain useMemo and updates the moment `paths`
+    // lands; the field's own value comes from a separate effect off that
+    // same candidate list, which can still be one commit behind - so this
+    // needs its own wait rather than a bare assertion right after the one
+    // above resolves.
+    await waitFor(() => {
+      expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.port')
+    })
   })
 
   // One bad drop-in file must not be silent.
@@ -207,7 +277,13 @@ describe('applying to a tile that already exists', () => {
     render(<EngineProfileDialog open existingGauges={portGauges} onCancel={vi.fn()} onApply={vi.fn()} />)
     await screen.findByTestId('engine-profile-preview')
 
-    expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.starboard')
+    // The preview appearing only means the profile resolved; the instance
+    // seeding effect (which computes this value from existingGauges) is a
+    // separate effect off that same profile and can still be one commit
+    // behind - see the seeding race documented on the sibling tests above.
+    await waitFor(() => {
+      expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.starboard')
+    })
   })
 
   test('says how many gauges will be updated and how many added', async () => {
@@ -222,7 +298,13 @@ describe('applying to a tile that already exists', () => {
     render(<EngineProfileDialog open existingGauges={[]} onCancel={vi.fn()} onApply={vi.fn()} />)
     await screen.findByTestId('engine-profile-preview')
 
-    expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.port')
+    // Unlike the "seeds from the tile" case above, an empty tile falls
+    // through to the published-paths candidates - a fetch separate from the
+    // one the preview waits on, so the value can still be seeding in when
+    // the preview first appears.
+    await waitFor(() => {
+      expect((screen.getByLabelText(/engine instance/i) as HTMLInputElement).value).toBe('propulsion.port')
+    })
   })
 
   test('shows no update summary when building a new tile', async () => {

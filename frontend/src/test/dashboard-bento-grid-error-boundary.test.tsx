@@ -1,6 +1,6 @@
 /**
  * A widget that throws during render must not take the rest of the grid
- * down with it. React 19 unmounts the whole root on an uncaught render
+ * down with it. React unmounts the whole root on an uncaught render
  * error, which on the unattended wall-display kiosk (ADR 0089) would blank
  * every page of the feed until someone reloads it — dashboard-bento-grid.tsx
  * wraps every renderWidget() call site in a TileErrorBoundary (keyed by

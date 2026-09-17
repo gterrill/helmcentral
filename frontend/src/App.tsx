@@ -2073,9 +2073,7 @@ export function App() {
         role="status"
         aria-live="polite"
         className="anchor-watch-toast left-4 right-4 top-4 m-0 mx-auto max-w-md rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 shadow-lg md:left-auto md:right-4"
-        // @types/react 18 predates the Popover API attribute.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        {...({ popover: 'manual' } as any)}
+        popover="manual"
       >
         {toastMessage}
       </div>
