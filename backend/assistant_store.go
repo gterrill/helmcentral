@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,23 @@ type assistantMessage struct {
 	CostUSD          float64   `json:"cost_usd,omitempty"`
 	ToolRounds       int       `json:"tool_rounds,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
+	// Attachments are the documents (ADR 0106) attached to this message,
+	// position-ordered, populated by AppendMessage (from its input) and
+	// ListMessages (from message_attachments). Always empty on an assistant
+	// row - only a user message can carry attachments (assistant_handlers.go
+	// validates and builds them on the POST path).
+	Attachments []assistantAttachment `json:"attachments,omitempty"`
+}
+
+// assistantAttachment is one row of message_attachments: a document (ADR
+// 0106) attached to a user message. Filename is copied at attach time - not
+// looked up live - so a document deleted after the fact still renders in
+// this conversation's history as "[attachment deleted: x.pdf]"
+// (assistantHistoryMessages, assistant_run.go) rather than silently losing
+// its name.
+type assistantAttachment struct {
+	DocumentID string `json:"document_id"`
+	Filename   string `json:"filename"`
 }
 
 // assistantStore is the SQLite-backed store behind the onboard assistant's
@@ -121,6 +139,27 @@ func newAssistantStore(dbPath string) (*assistantStore, error) {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS messages_conversation_seq ON messages (conversation_id, seq)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("index messages table: %w", err)
+	}
+
+	// message_attachments (ADR 0106): the documents attached to a user
+	// message, position-ordered. No foreign key to messages/documents - this
+	// store has no foreign_keys pragma at all (unlike documentStore), so
+	// AppendMessage and DeleteConversation manage the rows directly rather
+	// than relying on a cascade.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS message_attachments (
+			message_id  TEXT NOT NULL,
+			document_id TEXT NOT NULL,
+			filename    TEXT NOT NULL,
+			position    INTEGER NOT NULL,
+			PRIMARY KEY (message_id, document_id)
+		)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create message_attachments table: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS message_attachments_message ON message_attachments (message_id)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("index message_attachments table: %w", err)
 	}
 
 	return &assistantStore{db: db, now: func() time.Time { return time.Now().UTC() }}, nil
@@ -234,6 +273,13 @@ func (s *assistantStore) DeleteConversation(id string) error {
 	}
 	defer tx.Rollback()
 
+	// Attachment rows first, while messages (and their ids) still exist to
+	// scope the delete by - message_attachments carries no conversation_id
+	// of its own.
+	if _, err := tx.Exec(`DELETE FROM message_attachments WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)`, id); err != nil {
+		return fmt.Errorf("delete conversation message attachments: %w", err)
+	}
+
 	if _, err := tx.Exec(`DELETE FROM messages WHERE conversation_id = ?`, id); err != nil {
 		return fmt.Errorf("delete conversation messages: %w", err)
 	}
@@ -300,6 +346,17 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 		return assistantMessage{}, fmt.Errorf("insert message: %w", err)
 	}
 
+	// Attachments, position-ordered by their index in m.Attachments - same
+	// transaction as the message row itself, so a crash mid-write can never
+	// leave a message with some of its attachments missing.
+	for i, att := range m.Attachments {
+		if _, err := tx.Exec(
+			`INSERT INTO message_attachments (message_id, document_id, filename, position) VALUES (?, ?, ?, ?)`,
+			m.ID, att.DocumentID, att.Filename, i); err != nil {
+			return assistantMessage{}, fmt.Errorf("insert message attachment: %w", err)
+		}
+	}
+
 	if _, err := tx.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now.Unix(), m.ConversationID); err != nil {
 		return assistantMessage{}, fmt.Errorf("bump conversation updated_at: %w", err)
 	}
@@ -334,6 +391,61 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 		}
 		m.CreatedAt = time.Unix(created, 0).UTC()
 		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, len(out))
+	for i, m := range out {
+		ids[i] = m.ID
+	}
+	attachmentsByMessage, err := attachmentsForMessages(s.db, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Attachments = attachmentsByMessage[out[i].ID]
+	}
+
+	return out, nil
+}
+
+// attachmentsForMessages returns every message_attachments row for the
+// given message ids, grouped by message_id and position-ordered - the
+// batch read behind ListMessages, one query rather than one per message.
+// sqlQueryer (documents_store.go) is reused here rather than redeclared:
+// assistant_store.go and documents_store.go are the same package, and the
+// two stores' read helpers share the same *sql.DB/*sql.Tx-compatible shape.
+func attachmentsForMessages(q sqlQueryer, messageIDs []string) (map[string][]assistantAttachment, error) {
+	if len(messageIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(messageIDs))
+	args := make([]any, len(messageIDs))
+	for i, id := range messageIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	rows, err := q.Query(
+		`SELECT message_id, document_id, filename FROM message_attachments
+		 WHERE message_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY message_id, position`,
+		args...)
+	if err != nil {
+		return nil, fmt.Errorf("list message attachments: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string][]assistantAttachment{}
+	for rows.Next() {
+		var messageID string
+		var att assistantAttachment
+		if err := rows.Scan(&messageID, &att.DocumentID, &att.Filename); err != nil {
+			return nil, fmt.Errorf("scan message attachment: %w", err)
+		}
+		out[messageID] = append(out[messageID], att)
 	}
 	return out, rows.Err()
 }

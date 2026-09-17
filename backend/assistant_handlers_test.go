@@ -928,6 +928,185 @@ func TestPostAssistantMessageHandler_UnknownConversationReturns404(t *testing.T)
 	}
 }
 
+// ── attachments (ADR 0106) ───────────────────────────────────────────────
+
+// postAssistantMessageTestSetup wires secrets, an assistant store and a
+// ready settings fixture the same way every attachment test below needs,
+// plus a fresh document store and one conversation - the common prelude
+// factored out so each test states only what it adds.
+func postAssistantMessageTestSetup(t *testing.T) (assistantStore *assistantStore, documentStore *documentStore, conv assistantConversation) {
+	t.Helper()
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	assistantStore = withTestAssistantStore(t)
+	documentStore = withTestDocumentStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	var err error
+	conv, err = assistantStore.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	return assistantStore, documentStore, conv
+}
+
+func TestPostAssistantMessageHandler_UnknownAttachmentReturns400(t *testing.T) {
+	store, _, conv := postAssistantMessageTestSetup(t)
+
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages",
+		`{"content":"see attached","attachments":["does-not-exist"]}`, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["error"] != "unknown document does-not-exist" {
+		t.Fatalf("expected the unknown-document error, got %+v", resp)
+	}
+
+	messages, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected no message persisted before validation fails, got %+v", messages)
+	}
+}
+
+func TestPostAssistantMessageHandler_DuplicateAttachmentReturns400(t *testing.T) {
+	store, docs, conv := postAssistantMessageTestSetup(t)
+	doc, err := docs.Insert(document{SHA256: "sha-dup", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"content":"see attached","attachments":[%q,%q]}`, doc.ID, doc.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	messages, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected no message persisted before validation fails, got %+v", messages)
+	}
+}
+
+func TestPostAssistantMessageHandler_TooManyAttachmentsReturns400(t *testing.T) {
+	_, docs, conv := postAssistantMessageTestSetup(t)
+
+	ids := make([]string, 0, documentAttachmentsPerMessageCap+1)
+	for i := 0; i < documentAttachmentsPerMessageCap+1; i++ {
+		doc, err := docs.Insert(document{SHA256: fmt.Sprintf("sha-cap-%d", i), Filename: fmt.Sprintf("f%d.pdf", i), MIME: "application/pdf"})
+		if err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+		ids = append(ids, doc.ID)
+	}
+	idsJSON, err := json.Marshal(ids)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	body := fmt.Sprintf(`{"content":"see attached","attachments":%s}`, idsJSON)
+
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostAssistantMessageHandler_EmptyContentWithAttachmentAcceptedAndTitlesFromFilename(t *testing.T) {
+	store, docs, conv := postAssistantMessageTestSetup(t)
+	doc, err := docs.Insert(document{SHA256: "sha-title", Filename: "yanmar-4jh-manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Sure, here's what's in it.", Model: "openai/gpt-4o"}}
+	})
+
+	body := fmt.Sprintf(`{"content":"","attachments":[%q]}`, doc.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if ct := rec.Header().Get(echo.HeaderContentType); ct != "text/event-stream" {
+		t.Fatalf("expected text/event-stream, got %d %q: %s", rec.Code, ct, rec.Body.String())
+	}
+
+	messages, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) == 0 || messages[0].Role != "user" {
+		t.Fatalf("expected a persisted user row, got %+v", messages)
+	}
+	if messages[0].Content != "" {
+		t.Fatalf("expected empty content to be preserved, got %q", messages[0].Content)
+	}
+	if len(messages[0].Attachments) != 1 || messages[0].Attachments[0].DocumentID != doc.ID {
+		t.Fatalf("expected the attachment to be persisted, got %+v", messages[0].Attachments)
+	}
+
+	updated, ok, err := store.GetConversation(conv.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetConversation: ok=%v err=%v", ok, err)
+	}
+	if updated.Title != "yanmar-4jh-manual.pdf" {
+		t.Fatalf("expected the conversation to be titled from the attachment's filename, got %q", updated.Title)
+	}
+}
+
+func TestPostAssistantMessageHandler_AttachmentsPersistedWithFilenameFromDocumentStore(t *testing.T) {
+	store, docs, conv := postAssistantMessageTestSetup(t)
+	doc, err := docs.Insert(document{SHA256: "sha-persist", Filename: "impeller-receipt.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Noted.", Model: "openai/gpt-4o"}}
+	})
+
+	body := fmt.Sprintf(`{"content":"here's the receipt","attachments":[%q]}`, doc.ID)
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", body, conv.ID)
+	if err := postAssistantMessageHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	_ = rec
+
+	messages, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) == 0 {
+		t.Fatalf("expected a persisted user row")
+	}
+	if len(messages[0].Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %+v", messages[0].Attachments)
+	}
+	if messages[0].Attachments[0].Filename != "impeller-receipt.pdf" {
+		t.Fatalf("expected the filename to come from the document store, got %q", messages[0].Attachments[0].Filename)
+	}
+}
+
 func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing.T) {
 	secrets := withTestSecretsStore(t)
 	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {

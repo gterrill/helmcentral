@@ -237,6 +237,107 @@ func TestAssistantStore_SetTitleRenamesWithoutBumpingUpdatedAt(t *testing.T) {
 	}
 }
 
+// ── attachments (ADR 0106) ───────────────────────────────────────────────
+
+func TestAssistantStore_AttachmentsRoundTripThroughAppendAndListInOrder(t *testing.T) {
+	store := newTestAssistantStore(t)
+	store.now = sequencedClock(time.Date(2026, 9, 18, 8, 0, 0, 0, time.UTC))
+
+	conv, err := store.CreateConversation("Engine questions")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	attachments := []assistantAttachment{
+		{DocumentID: "doc-2", Filename: "b-receipt.pdf"},
+		{DocumentID: "doc-1", Filename: "a-manual.pdf"},
+	}
+	appended, err := store.AppendMessage(assistantMessage{
+		ConversationID: conv.ID,
+		Role:           "user",
+		Content:        "What's the service interval?",
+		Attachments:    attachments,
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if len(appended.Attachments) != 2 {
+		t.Fatalf("expected AppendMessage to echo back 2 attachments, got %+v", appended.Attachments)
+	}
+
+	messages, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	got := messages[0].Attachments
+	if len(got) != 2 {
+		t.Fatalf("expected 2 attachments round-tripped, got %+v", got)
+	}
+	// Position order, not insertion/document-id order: doc-2 was attached
+	// first (position 0), so it must come back first.
+	if got[0] != attachments[0] || got[1] != attachments[1] {
+		t.Fatalf("expected attachments in position order %+v, got %+v", attachments, got)
+	}
+}
+
+func TestAssistantStore_MessageWithNoAttachmentsRoundTripsEmpty(t *testing.T) {
+	store := newTestAssistantStore(t)
+	store.now = sequencedClock(time.Date(2026, 9, 18, 8, 0, 0, 0, time.UTC))
+
+	conv, err := store.CreateConversation("Plain question")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	if _, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "user", Content: "hi"}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	messages, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	if len(messages[0].Attachments) != 0 {
+		t.Fatalf("expected no attachments, got %+v", messages[0].Attachments)
+	}
+}
+
+func TestAssistantStore_DeleteConversationRemovesAttachmentRows(t *testing.T) {
+	store := newTestAssistantStore(t)
+	store.now = sequencedClock(time.Date(2026, 9, 18, 8, 0, 0, 0, time.UTC))
+
+	conv, err := store.CreateConversation("Engine questions")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	msg, err := store.AppendMessage(assistantMessage{
+		ConversationID: conv.ID,
+		Role:           "user",
+		Content:        "See attached",
+		Attachments:    []assistantAttachment{{DocumentID: "doc-1", Filename: "a.pdf"}},
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	if err := store.DeleteConversation(conv.ID); err != nil {
+		t.Fatalf("DeleteConversation: %v", err)
+	}
+
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM message_attachments WHERE message_id = ?`, msg.ID).Scan(&count); err != nil {
+		t.Fatalf("count message_attachments: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected deleting the conversation to remove its attachment rows, found %d", count)
+	}
+}
+
 func TestAssistantStore_ReopeningSamePathIsIdempotentAndPersists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "assistant.sqlite")

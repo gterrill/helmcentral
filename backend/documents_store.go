@@ -109,12 +109,19 @@ type documentTagCount struct {
 // documentSearchResult is one row of Search's output: the best-scoring
 // chunk for a matched document, not a raw document_chunks row - Search
 // collapses however many chunks of a document matched down to the single
-// best one before this struct is built.
+// best one before this struct is built. FolderID rides along so a caller
+// that wants a folder path (assistant_tools.go's search_documents tool) can
+// resolve it straight from this row - one query per distinct folder, cached
+// across hits - rather than running its own Get per hit just to learn which
+// folder it was already sitting in (a review finding: that used to be an
+// N+1 Get+FolderPath per result, silently swallowing whatever it errored
+// on).
 type documentSearchResult struct {
 	DocumentID string  `json:"document_id"`
 	Filename   string  `json:"filename"`
 	Title      string  `json:"title,omitempty"`
 	Status     string  `json:"status"`
+	FolderID   *string `json:"folder_id,omitempty"`
 	PageStart  int     `json:"page,omitempty"`
 	Heading    string  `json:"heading,omitempty"`
 	Snippet    string  `json:"snippet"`
@@ -935,6 +942,22 @@ func (s *documentStore) List(folderID *string, recursive bool, tag string, limit
 	return docs, nil
 }
 
+// Count returns the total number of documents - a single SELECT count(*),
+// for a caller (collectAssistantPromptContext, assistant_prompt.go) that
+// only ever wanted how many there are, not List(nil, false, "", 0, 0)'s
+// full rows (every column including markdown, plus one tag query per row)
+// just to take len() of the result.
+func (s *documentStore) Count() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var n int
+	if err := s.db.QueryRow(`SELECT count(*) FROM documents`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count documents: %w", err)
+	}
+	return n, nil
+}
+
 // Search runs an already-sanitised FTS5 MATCH string (B2's ftsMatchQuery
 // sanitises operator input into this form) against document_chunks_fts,
 // weighting a heading hit (the meta chunk's title lives in heading) above a
@@ -958,7 +981,7 @@ func (s *documentStore) Search(query string, folderID *string, recursive bool, t
 	}
 
 	sqlQuery := `
-		SELECT d.id, d.filename, d.title, d.status, c.page_start, c.heading,
+		SELECT d.id, d.filename, d.title, d.status, d.folder_id, c.page_start, c.heading,
 		       snippet(document_chunks_fts, 0, char(2), char(3), '…', 16) AS snippet,
 		       bm25(document_chunks_fts, 1.0, 2.0) AS score
 		FROM document_chunks_fts
@@ -1016,8 +1039,13 @@ func (s *documentStore) Search(query string, folderID *string, recursive bool, t
 	var out []documentSearchResult
 	for rows.Next() {
 		var r documentSearchResult
-		if err := rows.Scan(&r.DocumentID, &r.Filename, &r.Title, &r.Status, &r.PageStart, &r.Heading, &r.Snippet, &r.Score); err != nil {
+		var folderID sql.NullString
+		if err := rows.Scan(&r.DocumentID, &r.Filename, &r.Title, &r.Status, &folderID, &r.PageStart, &r.Heading, &r.Snippet, &r.Score); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+		if folderID.Valid {
+			v := folderID.String
+			r.FolderID = &v
 		}
 		if seen[r.DocumentID] {
 			continue
@@ -1843,6 +1871,62 @@ func (s *documentStore) FolderPath(id string) ([]documentFolder, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return folderPath(s.db, id)
+}
+
+// ResolveFolderPath resolves a "/"-separated path such as "Receipts/2026"
+// (the search_documents tool's own folder argument, assistant_tools.go) to
+// a folder id, walking down from the root and matching each segment's name
+// case-insensitively - the same case-insensitive rule folderNameTaken
+// already enforces on create/rename, so a path an operator would actually
+// type always resolves regardless of how the folder's name was cased when
+// it was made. Leading/trailing/doubled slashes and blank segments (e.g. a
+// trailing "/") are skipped rather than rejected. errFolderNotFound if any
+// segment along the way does not exist, or if path resolves to no segments
+// at all (empty, or all-blank).
+func (s *documentStore) ResolveFolderPath(path string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var parentKey string
+	id := ""
+	for _, segment := range strings.Split(path, "/") {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		row := s.db.QueryRow(
+			`SELECT id FROM document_folders WHERE COALESCE(parent_id,'') = ? AND lower(name) = lower(?)`,
+			parentKey, segment)
+		if err := row.Scan(&id); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", errFolderNotFound
+			}
+			return "", fmt.Errorf("resolve folder path: %w", err)
+		}
+		parentKey = id
+	}
+	if id == "" {
+		return "", errFolderNotFound
+	}
+	return id, nil
+}
+
+// TopLevelFolderNames returns the names of every folder directly under the
+// root, alphabetically (the same order ListFolder's own query already
+// returns them in) - shared by the document library's live system-prompt
+// line (assistant_prompt.go) and the search_documents tool's "unknown
+// folder" error (assistant_tools.go), so both name what's actually there
+// from the one query rather than drifting apart.
+func (s *documentStore) TopLevelFolderNames() ([]string, error) {
+	folders, _, err := s.ListFolder(nil)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(folders))
+	for i, f := range folders {
+		names[i] = f.Name
+	}
+	return names, nil
 }
 
 // ── boot sweep ───────────────────────────────────────────────────────────

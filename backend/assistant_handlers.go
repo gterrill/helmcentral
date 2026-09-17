@@ -39,6 +39,13 @@ const assistantMaxMessageChars = 8000
 // panel's truncated row still reads as a sentence rather than a mid-word cut.
 const assistantTitleMaxRunes = 60
 
+// documentAttachmentsPerMessageCap bounds how many documents (ADR 0106) one
+// message may attach. Ten is already more than a single question would
+// plausibly need at once; the cap exists so a malformed or hostile client
+// can't force postAssistantMessageHandler into resolving an unbounded list
+// of document ids (each a database read) before it will even start a run.
+const documentAttachmentsPerMessageCap = 10
+
 // assistantScreenFieldMaxRunes bounds each field of a POST's screen context
 // (panel/section/page). These are short UI identifiers, not operator text,
 // so this is a defensive cap rather than a real limit any legitimate caller
@@ -690,6 +697,71 @@ func deleteAssistantConversationHandler(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// assistantAttachmentError marks a failure in
+// resolveAssistantMessageAttachments as the operator's mistake - too many
+// ids, a duplicate, or one that doesn't name a document in
+// globalDocumentStore - so postAssistantMessageHandler can answer 400
+// rather than the 500 a genuine store failure gets.
+type assistantAttachmentError struct {
+	msg string
+}
+
+func (e *assistantAttachmentError) Error() string { return e.msg }
+
+// resolveAssistantMessageAttachments validates a POST's attachment id list
+// (ADR 0106) - at most documentAttachmentsPerMessageCap ids, none repeated,
+// each naming a document that still exists in globalDocumentStore - and
+// resolves it to the assistantAttachment rows AppendMessage stores,
+// filename copied from the live document exactly once, at attach time
+// (assistant_store.go's own doc comment on why: a later-deleted document
+// must not lose its name from history already written). Called with an
+// empty ids slice, this never touches globalDocumentStore at all - every
+// existing attachment-free call site keeps working with no document store
+// configured.
+func resolveAssistantMessageAttachments(ids []string) ([]assistantAttachment, error) {
+	if len(ids) > documentAttachmentsPerMessageCap {
+		return nil, &assistantAttachmentError{msg: fmt.Sprintf("at most %d attachments are allowed", documentAttachmentsPerMessageCap)}
+	}
+
+	seen := make(map[string]bool, len(ids))
+	out := make([]assistantAttachment, 0, len(ids))
+	for _, raw := range ids {
+		docID := strings.TrimSpace(raw)
+		if seen[docID] {
+			return nil, &assistantAttachmentError{msg: fmt.Sprintf("duplicate attachment %s", docID)}
+		}
+		seen[docID] = true
+
+		if globalDocumentStore == nil {
+			return nil, fmt.Errorf("the document store is not available")
+		}
+		doc, err := globalDocumentStore.Get(docID)
+		if err != nil {
+			if errors.Is(err, errDocumentNotFound) {
+				return nil, &assistantAttachmentError{msg: fmt.Sprintf("unknown document %s", docID)}
+			}
+			return nil, err
+		}
+		out = append(out, assistantAttachment{DocumentID: doc.ID, Filename: doc.Filename})
+	}
+	return out, nil
+}
+
+// assistantDocumentLookup is assistantHistoryMessages' getDocument
+// dependency, reading globalDocumentStore fresh on every call - so a
+// summary that lands after an earlier turn still appears in the preamble
+// built for this one (assistant_run.go). Guarded against a nil store
+// (no upload has ever touched this process, or a test never called
+// withTestDocumentStore) rather than left to panic on s.mu.Lock() through a
+// nil receiver: every existing attachment-free call path must keep working
+// with no document store configured at all.
+func assistantDocumentLookup(id string) (document, error) {
+	if globalDocumentStore == nil {
+		return document{}, fmt.Errorf("the document store is not available")
+	}
+	return globalDocumentStore.Get(id)
+}
+
 // newAssistantRunner builds the production assistantRunnerFace: the shared
 // OpenRouter HTTP client, the live tool dependencies, and emit wired
 // straight through. A package-level var (not a plain function) so tests can
@@ -743,16 +815,34 @@ func postAssistantMessageHandler(c echo.Context) error {
 		// these fields existed.
 		Spoken bool                    `json:"spoken"`
 		Screen *assistantScreenContext `json:"screen"`
+		// Attachments is a list of document ids (ADR 0106), at most
+		// documentAttachmentsPerMessageCap, resolved against
+		// globalDocumentStore below before readiness is even checked - see
+		// resolveAssistantMessageAttachments.
+		Attachments []string `json:"attachments"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 	content := strings.TrimSpace(body.Content)
-	if content == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "content is required"})
-	}
 	if len([]rune(content)) > assistantMaxMessageChars {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("content must be %d characters or fewer", assistantMaxMessageChars)})
+	}
+
+	// Attachments are validated before readiness and before a run starts
+	// (ADR 0106): an unknown or duplicated document id is the operator's
+	// mistake, not something worth an OpenRouter round trip or an in-flight
+	// run to discover.
+	attachments, attachErr := resolveAssistantMessageAttachments(body.Attachments)
+	if attachErr != nil {
+		if ase, ok := attachErr.(*assistantAttachmentError); ok {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": ase.Error()})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": attachErr.Error()})
+	}
+
+	if content == "" && len(attachments) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "content is required"})
 	}
 
 	settingsPath := assistantSettingsPath()
@@ -792,13 +882,21 @@ func postAssistantMessageHandler(c echo.Context) error {
 	}
 	isFirstMessage := len(previousMessages) == 0
 
-	userRow, err := globalAssistantStore.AppendMessage(assistantMessage{ConversationID: id, Role: "user", Content: content})
+	userRow, err := globalAssistantStore.AppendMessage(assistantMessage{ConversationID: id, Role: "user", Content: content, Attachments: attachments})
 	if err != nil {
 		globalAssistantRuns.remove(id, run)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	if isFirstMessage {
-		if err := globalAssistantStore.SetTitle(id, assistantConversationTitle(content)); err != nil {
+		// content titles the conversation as before; an attachment-only
+		// message (content == "", checked above) instead titles it from the
+		// first attachment's filename, so a blank-content upload never
+		// leaves the conversation list showing "New conversation".
+		title := content
+		if title == "" && len(attachments) > 0 {
+			title = attachments[0].Filename
+		}
+		if err := globalAssistantStore.SetTitle(id, assistantConversationTitle(title)); err != nil {
 			globalAssistantRuns.remove(id, run)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
@@ -815,7 +913,11 @@ func postAssistantMessageHandler(c echo.Context) error {
 		}
 	}
 	systemStable, systemLive := assistantSystemPromptParts(pc)
-	history := assistantHistoryMessages(previousMessages)
+	history, err := assistantHistoryMessages(previousMessages, assistantDocumentLookup)
+	if err != nil {
+		globalAssistantRuns.remove(id, run)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
 
 	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, run.append)
 

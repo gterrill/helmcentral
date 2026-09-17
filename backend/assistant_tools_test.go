@@ -1117,6 +1117,8 @@ func TestDescribeAssistantToolCall(t *testing.T) {
 		{"estimate_passage", `{"distance_nm":42,"speed_kts":8.5}`, "Estimating 42 nm at 8.5 kts from the log…"},
 		{"estimate_passage", `{"distance_nm":42}`, "Estimating 42 nm at cruising speed from the log…"},
 		{"read_manual", `{"page":"features/forecast"}`, "Reading the manual: features/forecast…"},
+		{"search_documents", `{"query":"impeller"}`, `Searching documents for "impeller"…`},
+		{"read_document", `{"document_id":"doc-1"}`, "Reading document doc-1…"},
 	}
 	for _, tc := range cases {
 		got := describeAssistantToolCall(tc.name, json.RawMessage(tc.args))
@@ -1152,17 +1154,20 @@ func TestAssistantToolDefinitions_GetWindForecastDescribesCourseDeg(t *testing.T
 	t.Fatal("get_wind_forecast tool definition not found")
 }
 
-func TestAssistantToolDefinitions_FiveToolsIncludingReadManual(t *testing.T) {
+func TestAssistantToolDefinitions_SevenToolsIncludingDocumentTools(t *testing.T) {
 	tools := assistantToolDefinitions()
-	if len(tools) != 5 {
-		t.Fatalf("expected 5 tool definitions, got %d: %+v", len(tools), tools)
+	if len(tools) != 7 {
+		t.Fatalf("expected 7 tool definitions, got %d: %+v", len(tools), tools)
 	}
 
 	var names []string
 	for _, tool := range tools {
 		names = append(names, tool.Function.Name)
 	}
-	for _, want := range []string{"find_places", "get_wind_forecast", "get_tides", "estimate_passage", "read_manual"} {
+	for _, want := range []string{
+		"find_places", "get_wind_forecast", "get_tides", "estimate_passage", "read_manual",
+		"search_documents", "read_document",
+	} {
 		found := false
 		for _, name := range names {
 			if name == want {
@@ -1268,5 +1273,411 @@ func TestAssistantToolDeps_ExecuteReturnsContextErrorWhenAlreadyCancelled(t *tes
 	_, err := deps.execute(ctx, "read_manual", json.RawMessage(`{"page":"features/forecast"}`))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected a cancelled context to short-circuit the tool, got %v", err)
+	}
+}
+
+// ── search_documents / read_document (ADR 0106) ─────────────────────────
+
+// documentToolDeps builds the minimal assistantToolDeps search_documents and
+// read_document need: a real, t.TempDir()-backed *documentStore (these two
+// tools' only real dependency, beyond ctx), the same store construction
+// documents_store_test.go's own tests use.
+func documentToolDeps(t *testing.T) (assistantToolDeps, *documentStore) {
+	t.Helper()
+	store := newTestDocumentStore(t)
+	return assistantToolDeps{documents: func() *documentStore { return store }}, store
+}
+
+func insertSearchableDocument(t *testing.T, store *documentStore, sha, filename string, folderID *string, text string) document {
+	t.Helper()
+	doc, err := store.Insert(document{SHA256: sha, Filename: filename, MIME: "application/pdf", FolderID: folderID})
+	if err != nil {
+		t.Fatalf("Insert(%q): %v", filename, err)
+	}
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", PageStart: 3, Text: text},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(%q): %v", filename, err)
+	}
+	return doc
+}
+
+func TestExecuteSearchDocuments_ReturnsShapeWithFolderPathAndCleanSnippet(t *testing.T) {
+	deps, store := documentToolDeps(t)
+
+	manuals, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	engine, err := store.CreateFolder("Engine", &manuals.ID)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	doc := insertSearchableDocument(t, store, "sha-impeller", "yanmar-4jh.pdf", &engine.ID,
+		"Replace the raw water impeller every 200 hours of running time.")
+
+	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	if err != nil {
+		t.Fatalf("execute search_documents: %v", err)
+	}
+
+	var result assistantSearchDocumentsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", err, raw)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %+v", len(result.Results), result.Results)
+	}
+	hit := result.Results[0]
+	if hit.DocumentID != doc.ID {
+		t.Fatalf("expected document_id %q, got %q", doc.ID, hit.DocumentID)
+	}
+	if hit.Filename != "yanmar-4jh.pdf" {
+		t.Fatalf("expected filename yanmar-4jh.pdf, got %q", hit.Filename)
+	}
+	if hit.FolderPath != "Manuals/Engine" {
+		t.Fatalf("expected folder_path Manuals/Engine, got %q", hit.FolderPath)
+	}
+	if hit.Status != "pending" {
+		t.Fatalf("expected status pending (no SetIndexed called), got %q", hit.Status)
+	}
+	if hit.Page != 3 {
+		t.Fatalf("expected page 3, got %d", hit.Page)
+	}
+	if strings.ContainsAny(hit.Snippet, "\x02\x03") {
+		t.Fatalf("expected the snippet's \\x02/\\x03 markers to be stripped, got %q", hit.Snippet)
+	}
+	if !strings.Contains(hit.Snippet, "impeller") {
+		t.Fatalf("expected the snippet to contain the matched word, got %q", hit.Snippet)
+	}
+}
+
+func TestExecuteSearchDocuments_FolderArgumentScopesRecursively(t *testing.T) {
+	deps, store := documentToolDeps(t)
+
+	manuals, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	engine, err := store.CreateFolder("Engine", &manuals.ID)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	receipts, err := store.CreateFolder("Receipts", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	inFolder := insertSearchableDocument(t, store, "sha-in", "in-manuals.pdf", &engine.ID, "impeller service notes")
+	insertSearchableDocument(t, store, "sha-out", "in-receipts.pdf", &receipts.ID, "impeller purchase receipt")
+
+	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","folder":"manuals"}`))
+	if err != nil {
+		t.Fatalf("execute search_documents: %v", err)
+	}
+	var result assistantSearchDocumentsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Results) != 1 || result.Results[0].DocumentID != inFolder.ID {
+		t.Fatalf("expected only the document under Manuals (case-insensitive path match, recursive into Engine), got %+v", result.Results)
+	}
+}
+
+func TestExecuteSearchDocuments_UnknownFolderNamesTopLevelFolders(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	if _, err := store.CreateFolder("Manuals", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	if _, err := store.CreateFolder("Receipts", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	_, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","folder":"Nope"}`))
+	if err == nil {
+		t.Fatalf("expected an error for an unknown folder")
+	}
+	if !strings.Contains(err.Error(), "Manuals") || !strings.Contains(err.Error(), "Receipts") {
+		t.Fatalf("expected the error to name the top-level folders, got %v", err)
+	}
+}
+
+func TestExecuteSearchDocuments_LimitCappedAtTen(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	for i := 0; i < 15; i++ {
+		insertSearchableDocument(t, store, fmt.Sprintf("sha-limit-%d", i), fmt.Sprintf("doc-%d.pdf", i), nil, "impeller service manual")
+	}
+
+	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","limit":50}`))
+	if err != nil {
+		t.Fatalf("execute search_documents: %v", err)
+	}
+	var result assistantSearchDocumentsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Results) != 10 {
+		t.Fatalf("expected the limit capped at 10, got %d", len(result.Results))
+	}
+}
+
+func TestExecuteSearchDocuments_DefaultLimitIsFive(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	for i := 0; i < 8; i++ {
+		insertSearchableDocument(t, store, fmt.Sprintf("sha-default-%d", i), fmt.Sprintf("doc-%d.pdf", i), nil, "impeller service manual")
+	}
+
+	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	if err != nil {
+		t.Fatalf("execute search_documents: %v", err)
+	}
+	var result assistantSearchDocumentsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Results) != 5 {
+		t.Fatalf("expected the default limit of 5, got %d", len(result.Results))
+	}
+}
+
+// TestExecuteSearchDocuments_TwoHitsInSameNestedFolderResolvePathsCorrectly
+// pins the review finding at assistant_tools.go:1625: documentFolderPathString
+// used to run a Get+FolderPath per search hit; the fix carries FolderID on
+// the search row itself (documentSearchResult) and resolves each distinct
+// folder id once, caching within the call. Two documents sharing the same
+// nested folder is exactly the case that exercises the cache - this asserts
+// on the actual resolved path for both (nested two levels deep), not on an
+// internal call count, so a wrong cache key or an off-by-one in the chain
+// join would still be caught.
+func TestExecuteSearchDocuments_TwoHitsInSameNestedFolderResolvePathsCorrectly(t *testing.T) {
+	deps, store := documentToolDeps(t)
+
+	manuals, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	engine, err := store.CreateFolder("Engine", &manuals.ID)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	docA := insertSearchableDocument(t, store, "sha-nested-a", "impeller-a.pdf", &engine.ID, "impeller service notes A")
+	docB := insertSearchableDocument(t, store, "sha-nested-b", "impeller-b.pdf", &engine.ID, "impeller service notes B")
+
+	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","limit":10}`))
+	if err != nil {
+		t.Fatalf("execute search_documents: %v", err)
+	}
+	var result assistantSearchDocumentsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("expected both documents in the Engine folder, got %d: %+v", len(result.Results), result.Results)
+	}
+	seen := map[string]string{}
+	for _, hit := range result.Results {
+		seen[hit.DocumentID] = hit.FolderPath
+	}
+	if seen[docA.ID] != "Manuals/Engine" {
+		t.Fatalf("expected doc A's folder_path Manuals/Engine, got %q", seen[docA.ID])
+	}
+	if seen[docB.ID] != "Manuals/Engine" {
+		t.Fatalf("expected doc B's folder_path Manuals/Engine, got %q", seen[docB.ID])
+	}
+}
+
+// TestExecuteSearchDocuments_FolderPathStoreErrorSurfacesAsToolError pins
+// the other half of the same finding: a FolderPath failure used to
+// collapse to folder_path="" (documentFolderPathString's old doc comment
+// called this "decoration" not worth failing the search over) - masking a
+// genuine database failure as an empty, silently-wrong result. Dropping
+// document_folders out from under a live search forces FolderPath itself to
+// fail (Search's own query never touches that table when no folder
+// argument is given, so this isolates the failure to path resolution).
+func TestExecuteSearchDocuments_FolderPathStoreErrorSurfacesAsToolError(t *testing.T) {
+	deps, store := documentToolDeps(t)
+
+	manuals, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	insertSearchableDocument(t, store, "sha-broken-folder", "impeller.pdf", &manuals.ID, "impeller service notes")
+
+	// foreign_keys is off only for this one DROP - store.db is capped at a
+	// single pooled connection (newDocumentStore's SetMaxOpenConns(1)), so
+	// this and every query after it on the same *documentStore share it,
+	// same as production would.
+	if _, err := store.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatalf("disable foreign_keys: %v", err)
+	}
+	if _, err := store.db.Exec(`DROP TABLE document_folders`); err != nil {
+		t.Fatalf("drop document_folders: %v", err)
+	}
+
+	_, err = deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	if err == nil {
+		t.Fatalf("expected a store error to surface as a tool error")
+	}
+}
+
+// ── read_document ────────────────────────────────────────────────────────
+
+func TestExecuteReadDocument_DefaultStartsAfterMetaChunk(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	doc, err := store.Insert(document{SHA256: "sha-read-1", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Heading: "Maintenance", Text: "first chunk"},
+		{Seq: 2, Source: "local", Text: "second chunk"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	raw, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
+	if err != nil {
+		t.Fatalf("execute read_document: %v", err)
+	}
+	var result assistantReadDocumentResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", err, raw)
+	}
+	if result.DocumentID != doc.ID || result.Filename != "manual.pdf" {
+		t.Fatalf("unexpected document_id/filename: %+v", result)
+	}
+	if len(result.Chunks) != 2 {
+		t.Fatalf("expected 2 body chunks (meta chunk seq 0 excluded), got %d: %+v", len(result.Chunks), result.Chunks)
+	}
+	if result.Chunks[0].Seq != 1 || result.Chunks[0].Heading != "Maintenance" || result.Chunks[0].Text != "first chunk" {
+		t.Fatalf("unexpected first chunk: %+v", result.Chunks[0])
+	}
+	if result.Truncated {
+		t.Fatalf("expected no truncation when everything fits")
+	}
+	if result.NextChunk != 0 {
+		t.Fatalf("expected no next_chunk when everything fit, got %d", result.NextChunk)
+	}
+}
+
+func TestExecuteReadDocument_FromChunkResumesAtGivenSeq(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	doc, err := store.Insert(document{SHA256: "sha-read-2", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "first"},
+		{Seq: 2, Source: "local", Text: "second"},
+		{Seq: 3, Source: "local", Text: "third"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	raw, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q,"from_chunk":3}`, doc.ID)))
+	if err != nil {
+		t.Fatalf("execute read_document: %v", err)
+	}
+	var result assistantReadDocumentResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Chunks) != 1 || result.Chunks[0].Text != "third" {
+		t.Fatalf("expected only the chunk at seq 3, got %+v", result.Chunks)
+	}
+}
+
+func TestExecuteReadDocument_TruncatesAndReportsNextChunk(t *testing.T) {
+	deps, store := documentToolDeps(t)
+	doc, err := store.Insert(document{SHA256: "sha-read-3", Filename: "big.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	// 10 chunks of 2000 chars each (~20000 bytes of JSON once encoded),
+	// comfortably over assistantMaxToolResultChars (12000) - enough to force
+	// at least one halving.
+	chunks := make([]documentChunk, 10)
+	for i := range chunks {
+		chunks[i] = documentChunk{Seq: i + 1, Source: "local", Text: strings.Repeat("x", 2000)}
+	}
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, chunks); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	raw, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
+	if err != nil {
+		t.Fatalf("execute read_document: %v", err)
+	}
+	if len(raw) > assistantMaxToolResultChars {
+		t.Fatalf("expected the result to fit within %d chars, got %d", assistantMaxToolResultChars, len(raw))
+	}
+	var result assistantReadDocumentResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", err, raw)
+	}
+	if !result.Truncated {
+		t.Fatalf("expected truncated=true, got %+v", result)
+	}
+	if len(result.Chunks) == 0 || len(result.Chunks) >= 10 {
+		t.Fatalf("expected fewer than 10 chunks after truncation, got %d", len(result.Chunks))
+	}
+	if result.NextChunk <= result.Chunks[len(result.Chunks)-1].Seq {
+		t.Fatalf("expected next_chunk to point past the last returned chunk, got next_chunk=%d last=%d", result.NextChunk, result.Chunks[len(result.Chunks)-1].Seq)
+	}
+}
+
+func TestExecuteReadDocument_UnknownDocumentIDIsError(t *testing.T) {
+	deps, _ := documentToolDeps(t)
+	_, err := deps.execute(context.Background(), "read_document", json.RawMessage(`{"document_id":"does-not-exist"}`))
+	if err == nil {
+		t.Fatalf("expected an error for an unknown document id")
+	}
+}
+
+// ── nil dependency func fields report a plain error, not a panic ─────────
+
+// TestExecuteSearchDocuments_UnsetDependencyReturnsErrorNotPanic pins the
+// review finding at assistant_tools.go:1571: d.documents is a func field
+// (assistantToolDeps' zero value leaves it nil, a real possibility per its
+// own doc comment), and calling a nil func panics - the panic used to only
+// be caught by the goroutine recover further up assistant_run.go's call
+// stack, killing the run rather than reporting the plain "not available"
+// error the doc comment promises.
+func TestExecuteSearchDocuments_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
+	deps := assistantToolDeps{}
+	_, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	if err == nil {
+		t.Fatalf("expected an error when d.documents is unset")
+	}
+	if !strings.Contains(err.Error(), "document library") {
+		t.Fatalf("expected a plain \"document library\" error, got %v", err)
+	}
+}
+
+// TestExecuteReadDocument_UnsetDependencyReturnsErrorNotPanic is
+// read_document's half of the same finding - d.documents is called at
+// assistant_tools.go:1702 the same way search_documents calls it at 1571.
+func TestExecuteReadDocument_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
+	deps := assistantToolDeps{}
+	_, err := deps.execute(context.Background(), "read_document", json.RawMessage(`{"document_id":"doc-1"}`))
+	if err == nil {
+		t.Fatalf("expected an error when d.documents is unset")
+	}
+	if !strings.Contains(err.Error(), "document library") {
+		t.Fatalf("expected a plain \"document library\" error, got %v", err)
+	}
+}
+
+// TestExecuteReadManual_UnsetDependencyReturnsErrorNotPanic pins the
+// review finding at assistant_tools.go:1475-1476: d.manual is a func field
+// too, and executeReadManual called it unconditionally before ever checking
+// whether it was set.
+func TestExecuteReadManual_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
+	deps := assistantToolDeps{}
+	_, err := deps.execute(context.Background(), "read_manual", json.RawMessage(`{"page":"features/forecast"}`))
+	if err == nil {
+		t.Fatalf("expected an error when d.manual is unset")
+	}
+	if !strings.Contains(err.Error(), "manual") {
+		t.Fatalf("expected a plain \"manual\" error, got %v", err)
 	}
 }

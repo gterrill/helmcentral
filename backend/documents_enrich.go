@@ -137,6 +137,37 @@ func withChunkSource(chunks []documentChunk, source string) []documentChunk {
 	return out
 }
 
+// ocrMarkdownFromPages flattens pages the same way extractPDF joins its own
+// pages into extractedDocument.Markdown (documents_extract.go): one blank
+// line between pages. Used to give an OCR result the same markdown shape
+// local extraction would have produced, whether pages came from the
+// file-parser plugin's annotations (a scanned PDF) or a single synthetic
+// page built from the JSON reply's own "text" field (an image).
+func ocrMarkdownFromPages(pages []extractedPage) string {
+	parts := make([]string, len(pages))
+	for i, p := range pages {
+		parts[i] = p.Text
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// writeOCRResult replaces doc's OCR chunks and writes their flattened text
+// into documents.markdown, so markdown always holds the best text the
+// system has (B4 review finding, backend/assistant_run.go's
+// assistantAttachmentBlock reads doc.Markdown directly for its excerpt, and
+// otherwise never saw anything OCR produced - documents.markdown is
+// otherwise only ever written by the extract stage's SetExtracted). Page
+// count is left exactly as extraction already found it (doc.PageCount):
+// OCR reads the same already-paginated PDF, or, for an image, extraction's
+// own page_count of 0 - either way it is not this call's to change.
+func (idx *documentIndexer) writeOCRResult(doc document, pages []extractedPage) error {
+	ocrChunks := withChunkSource(chunkDocument(extractedDocument{Pages: pages}, "application/pdf"), "ocr")
+	if err := idx.store.ReplaceChunks(doc.ID, []string{"local", "ocr"}, ocrChunks); err != nil {
+		return err
+	}
+	return idx.store.SetExtracted(doc.ID, ocrMarkdownFromPages(pages), doc.PageCount)
+}
+
 // ocrPagesFromAnnotations turns the file-parser plugin's annotation shape
 // (backend/testdata/openrouter_document_pdf_2p.json) into per-page text:
 // one entry per file (this codebase only ever sends one), whose Content is
@@ -250,6 +281,35 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 	}
 	message := resp.Choices[0].Message
 
+	// Record the cost and the model as soon as the response comes back -
+	// before anything that can still fail (the JSON parse, the OCR switch,
+	// SetSuggested). This is a billed call: a ~$0.30 OCR run must not end as
+	// a failed document with index_cost_usd still 0 just because something
+	// after it went wrong (review finding - AddIndexCost used to run last).
+	if err := idx.store.AddIndexCost(doc.ID, model, resp.Usage.Cost); err != nil {
+		log.Printf("documents: indexer: add index cost %s: %v", doc.ID, err)
+	}
+
+	// enrichKindOCRFile's transcribed text lives in message.Annotations,
+	// entirely independent of whether message.Content parses as the
+	// expected JSON - so it (and the markdown copy - B4 review finding at
+	// assistant_run.go:778) is written before ever touching the JSON reply,
+	// and survives an unparseable reply below. enrichKindImageOCR has no
+	// such independent source (its "text" field lives inside the same JSON
+	// object as title/summary/tags), so that one is handled after a
+	// successful parse instead, further down.
+	if kind == enrichKindOCRFile {
+		pages := ocrPagesFromAnnotations(message.Annotations)
+		if len(pages) == 0 {
+			idx.failDoc(doc.ID, "OCR returned no text")
+			return nil
+		}
+		if err := idx.writeOCRResult(doc, pages); err != nil {
+			idx.failDoc(doc.ID, err.Error())
+			return nil
+		}
+	}
+
 	var reply documentEnrichReply
 	raw := string(message.Content)
 	if err := json.Unmarshal([]byte(stripDocumentEnrichJSONFence(raw)), &reply); err != nil {
@@ -257,27 +317,12 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 		return nil
 	}
 
-	switch kind {
-	case enrichKindOCRFile:
-		pages := ocrPagesFromAnnotations(message.Annotations)
-		if len(pages) == 0 {
-			idx.failDoc(doc.ID, "OCR returned no text")
-			return nil
-		}
-		ocrChunks := withChunkSource(chunkDocument(extractedDocument{Pages: pages}, "application/pdf"), "ocr")
-		if err := idx.store.ReplaceChunks(doc.ID, []string{"local", "ocr"}, ocrChunks); err != nil {
-			idx.failDoc(doc.ID, err.Error())
-			return nil
-		}
-	case enrichKindImageOCR:
+	if kind == enrichKindImageOCR {
 		page := extractedPage{Number: 1, Text: reply.Text}
-		ocrChunks := withChunkSource(chunkDocument(extractedDocument{Pages: []extractedPage{page}}, "application/pdf"), "ocr")
-		if err := idx.store.ReplaceChunks(doc.ID, []string{"local", "ocr"}, ocrChunks); err != nil {
+		if err := idx.writeOCRResult(doc, []extractedPage{page}); err != nil {
 			idx.failDoc(doc.ID, err.Error())
 			return nil
 		}
-	case enrichKindTextOnly:
-		// No OCR fee, no OCR text - the extract stage's local chunks stand.
 	}
 
 	tags := reply.Tags
@@ -287,9 +332,6 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 	if err := idx.store.SetSuggested(doc.ID, reply.Title, reply.Summary, tags); err != nil {
 		idx.failDoc(doc.ID, err.Error())
 		return nil
-	}
-	if err := idx.store.AddIndexCost(doc.ID, model, resp.Usage.Cost); err != nil {
-		log.Printf("documents: indexer: add index cost %s: %v", doc.ID, err)
 	}
 
 	idx.finishIndexed(doc, "mate", doc.Error)

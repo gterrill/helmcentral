@@ -161,6 +161,188 @@ func TestDocumentEnrich_ScannedPDFSendsFilePartAndOCRPluginAndReplacesChunks(t *
 	}
 }
 
+// TestDocumentEnrich_ScannedPDFWritesOCRTextIntoMarkdown pins the review
+// finding at assistant_run.go:778: documents.markdown was only ever written
+// by the extract stage (SetExtracted) - OCR output went into ocr chunks and
+// never back into markdown, so anything reading doc.Markdown directly (the
+// assistant's attachment excerpt) never saw it. scanned_two_page.pdf's own
+// text layer is thin enough to need OCR in the first place (empty, in this
+// fixture's case - see documents_extract_test.go), so markdown holding OCR
+// text after enrichment is the only way it ends up with anything useful in
+// it at all. page_count must stay exactly as extraction found it (2): OCR
+// reads the same already-paginated PDF, it doesn't discover new pages.
+func TestDocumentEnrich_ScannedPDFWritesOCRTextIntoMarkdown(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+	doc := seedTestDocumentFile(t, store, dir, testdataPath("scanned_two_page.pdf"), "scan.pdf", "application/pdf", true)
+
+	fixture, err := os.ReadFile("testdata/openrouter_document_pdf_2p.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(fixture))}}
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.doer = doer
+
+	if _, err := idx.processOne(context.Background()); err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !strings.Contains(got.Markdown, "impeller") {
+		t.Fatalf("expected page 1's OCR text (impeller) in markdown, got %q", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, "pump seal") {
+		t.Fatalf("expected page 2's OCR text (pump seal) in markdown, got %q", got.Markdown)
+	}
+	if got.PageCount != 2 {
+		t.Fatalf("expected page_count to stay at extraction's own 2, got %d", got.PageCount)
+	}
+}
+
+// TestDocumentEnrich_ImageWritesOCRTextIntoMarkdown is the image half of
+// the same finding: the image branch's OCR text comes from the JSON
+// reply's own "text" field rather than message.Annotations, but it must
+// land in documents.markdown exactly the same way.
+func TestDocumentEnrich_ImageWritesOCRTextIntoMarkdown(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+	doc := seedTestDocumentFile(t, store, dir, testdataPath("receipt.png"), "receipt.png", "image/png", true)
+
+	fixture, err := os.ReadFile("testdata/openrouter_document_image.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(fixture))}}
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.doer = doer
+
+	if _, err := idx.processOne(context.Background()); err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !strings.Contains(got.Markdown, "impeller kit") {
+		t.Fatalf("expected the image's transcribed text in markdown, got %q", got.Markdown)
+	}
+}
+
+// TestDocumentEnrich_ScannedPDFAttachmentExcerptShowsOCRTextNotTextLayer is
+// the end-to-end version of the same finding: assistantAttachmentBlock
+// (assistant_run.go) renders its "Excerpt:" line straight from doc.Markdown.
+// Before this fix, scanned_two_page.pdf's own text layer is thin enough to
+// trim to nothing, so the preamble carried no excerpt at all despite Mate
+// having read two pages of real text - the same "no useful excerpt"
+// symptom the review finding describes for an attached photo, just via a
+// different route (an empty text layer rather than no local text stage at
+// all). After the fix, markdown holds what OCR actually read.
+func TestDocumentEnrich_ScannedPDFAttachmentExcerptShowsOCRTextNotTextLayer(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+	doc := seedTestDocumentFile(t, store, dir, testdataPath("scanned_two_page.pdf"), "scan.pdf", "application/pdf", true)
+
+	fixture, err := os.ReadFile("testdata/openrouter_document_pdf_2p.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(fixture))}}
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.doer = doer
+
+	if _, err := idx.processOne(context.Background()); err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	block := assistantAttachmentBlock(got, true)
+	if !strings.Contains(block, "Excerpt:") {
+		t.Fatalf("expected an Excerpt: line now that markdown holds OCR text, got %q", block)
+	}
+	if !strings.Contains(block, "impeller") {
+		t.Fatalf("expected the excerpt to carry the OCR'd text, got %q", block)
+	}
+}
+
+// TestDocumentEnrich_UnparseableReplyAfterOCRStillRecordsCostAndKeepsOCRChunks
+// pins the review finding at documents_enrich.go:291: AddIndexCost used to
+// run after the JSON parse, the OCR switch and SetSuggested, so any failure
+// after the OpenRouter call returns - including an unparseable reply -
+// recorded no cost at all and threw away the OCR text already sitting in
+// message.Annotations, entirely independent of whether message.Content
+// happens to parse as the expected {title,summary,tags} JSON. A billed,
+// successful OCR call must not end as a failed document with index_cost_usd
+// 0 and no searchable text just because the *other* half of the reply was
+// malformed.
+func TestDocumentEnrich_UnparseableReplyAfterOCRStillRecordsCostAndKeepsOCRChunks(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+	doc := seedTestDocumentFile(t, store, dir, testdataPath("scanned_two_page.pdf"), "scan.pdf", "application/pdf", true)
+
+	raw, err := os.ReadFile("testdata/openrouter_document_pdf_2p.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var fixture map[string]any
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	choices, _ := fixture["choices"].([]any)
+	msg, _ := choices[0].(map[string]any)["message"].(map[string]any)
+	// Corrupt only the JSON reply - the OCR annotations and usage.cost stay
+	// exactly as the real capture has them.
+	msg["content"] = "Sorry, I can't help with that request."
+	body, err := json.Marshal(fixture)
+	if err != nil {
+		t.Fatalf("marshal corrupted fixture: %v", err)
+	}
+
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.doer = doer
+
+	if _, err := idx.processOne(context.Background()); err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("expected status failed, got %q", got.Status)
+	}
+	if !strings.Contains(got.Error, "invalid JSON reply") {
+		t.Fatalf("expected the parse error recorded, got %q", got.Error)
+	}
+
+	const wantCost = 0.0046432 // testdata/openrouter_document_pdf_2p.json's usage.cost
+	if diff := got.IndexCostUSD - wantCost; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("expected index_cost_usd %v (the fixture's usage.cost) to survive the parse failure, got %v", wantCost, got.IndexCostUSD)
+	}
+	if got.IndexModel != "google/gemini-2.5-flash" {
+		t.Fatalf("expected index_model to survive the parse failure, got %q", got.IndexModel)
+	}
+
+	q, _ := ftsMatchQuery("seal")
+	results, err := store.Search(q, nil, false, "", 10, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected the OCR text to remain searchable despite the parse failure, got %d hits: %+v", len(results), results)
+	}
+}
+
 func TestDocumentEnrich_ScannedPDFNoAnnotationsFails(t *testing.T) {
 	store := withTestDocumentStore(t)
 	dir := documentsDirPath()

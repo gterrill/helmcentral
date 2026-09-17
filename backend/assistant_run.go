@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -678,14 +679,110 @@ func assistantFindPlacesLogSuffix(name, result string) string {
 	return fmt.Sprintf(" (search=%s, results=%d)", decoded.Search, len(decoded.Results))
 }
 
+// assistantAttachmentExcerptRunes bounds how much of an attached document's
+// markdown assistantAttachmentBlock quotes into the most recent user
+// message's preamble (ADR 0106). 4000 characters is enough to answer most
+// questions about a manual page or a receipt outright; read_document is
+// there for the rest, named explicitly in the preamble so the model knows
+// to reach for it rather than guess from a partial excerpt.
+const assistantAttachmentExcerptRunes = 4000
+
 // assistantHistoryMessages converts a conversation's persisted rows
 // (assistant_store.go, which keeps only user/assistant roles - a tool round
 // trip is live status only, never stored) into the wire shape a new
 // completion request replays as history.
-func assistantHistoryMessages(msgs []assistantMessage) []openRouterMessage {
-	out := make([]openRouterMessage, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, openRouterMessage{Role: m.Role, Content: openRouterContent(m.Content)})
+//
+// getDocument resolves one attachment's live document (ADR 0106) - always
+// assistantDocumentLookup (assistant_handlers.go) in production, reading
+// globalDocumentStore fresh on every call so a summary or a status change
+// that only lands after an earlier turn still shows up when that turn is
+// replayed as history on a later one. A message with no attachments never
+// calls it at all. errDocumentNotFound (the document was deleted since it
+// was attached) is not an error here - see the "[attachment deleted: ...]"
+// placeholder below - but every other error propagates: a database read
+// that fails outright is a genuine failure (AGENTS.md's fallback policy),
+// not something to paper over as "deleted".
+func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id string) (document, error)) ([]openRouterMessage, error) {
+	lastUserIdx := -1
+	for i, m := range msgs {
+		if m.Role == "user" {
+			lastUserIdx = i
+		}
 	}
-	return out
+
+	out := make([]openRouterMessage, 0, len(msgs))
+	for i, m := range msgs {
+		content := m.Content
+		if len(m.Attachments) > 0 {
+			var preamble strings.Builder
+			for _, att := range m.Attachments {
+				doc, err := getDocument(att.DocumentID)
+				if errors.Is(err, errDocumentNotFound) {
+					fmt.Fprintf(&preamble, "[attachment deleted: %s]\n", att.Filename)
+					continue
+				}
+				if err != nil {
+					return nil, fmt.Errorf("read attached document %s: %w", att.DocumentID, err)
+				}
+				preamble.WriteString(assistantAttachmentBlock(doc, i == lastUserIdx))
+			}
+			if content != "" {
+				preamble.WriteString("\n")
+				preamble.WriteString(content)
+			}
+			content = preamble.String()
+		}
+		out = append(out, openRouterMessage{Role: m.Role, Content: openRouterContent(content)})
+	}
+	return out, nil
+}
+
+// assistantAttachmentBlock renders one attached document (ADR 0106) as the
+// text preamble assistantHistoryMessages puts ahead of the message that
+// attached it - v1 sends no image part at all; the enrich stage's vision
+// transcription (B4, documents_enrich.go) already turned a scanned page or
+// a photo into markdown the model can read as plain text here. showExcerpt
+// is true only when this is the most recent user message in the
+// conversation (assistantHistoryMessages' lastUserIdx): earlier references
+// to the same document get the header, and a summary or error if there is
+// one, but never the full excerpt - otherwise a long-lived conversation
+// would re-quote the same 4000 characters into every subsequent turn's
+// context for no benefit, since the model can already call read_document
+// for the rest.
+func assistantAttachmentBlock(doc document, showExcerpt bool) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "[Attached document id=%s %q %s", doc.ID, doc.Filename, doc.MIME)
+	if doc.PageCount > 0 {
+		fmt.Fprintf(&b, ", %d pages", doc.PageCount)
+	}
+	b.WriteString(", status: ")
+	if doc.Status == "pending" {
+		b.WriteString("pending (still being read; no summary yet)")
+	} else {
+		b.WriteString(doc.Status)
+	}
+	b.WriteString("]\n")
+
+	if doc.Summary != "" {
+		fmt.Fprintf(&b, "Summary: %s\n", doc.Summary)
+	}
+	if doc.Status == "failed" {
+		if doc.Error != "" {
+			fmt.Fprintf(&b, "Error: %s\n", doc.Error)
+		}
+		return b.String()
+	}
+
+	if showExcerpt {
+		if excerpt := strings.TrimSpace(doc.Markdown); excerpt != "" {
+			runes := []rune(excerpt)
+			if len(runes) > assistantAttachmentExcerptRunes {
+				runes = runes[:assistantAttachmentExcerptRunes]
+			}
+			fmt.Fprintf(&b, "Excerpt: %s\nUse read_document with this id for the rest.\n", string(runes))
+		}
+	}
+
+	return b.String()
 }

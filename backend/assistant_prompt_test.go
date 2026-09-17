@@ -379,6 +379,60 @@ func TestBuildAssistantSystemPrompt_ReadManualGuidancePresent(t *testing.T) {
 	}
 }
 
+// ── document library (ADR 0106) ──────────────────────────────────────────
+
+func TestBuildAssistantSystemPrompt_DocumentLibraryToolGuidanceInStablePrefix(t *testing.T) {
+	stable, live := assistantSystemPromptParts(basePromptContext())
+	if !strings.Contains(stable, "search_documents") || !strings.Contains(stable, "read_document") {
+		t.Fatalf("expected the document library tool guidance in the stable prefix, got:\n%s", stable)
+	}
+	if strings.Contains(live, "search_documents") {
+		t.Fatalf("expected the tool guidance NOT to be duplicated in the live suffix, got:\n%s", live)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_DocumentLibraryLiveLineOmittedWhenNoDocuments(t *testing.T) {
+	pc := basePromptContext()
+	pc.DocumentCount = 0
+	prompt := buildAssistantSystemPrompt(pc)
+	if strings.Contains(prompt, "Document library:") {
+		t.Fatalf("expected no document library line when the store is empty, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_DocumentLibraryLiveLineListsTopLevelFolders(t *testing.T) {
+	pc := basePromptContext()
+	pc.DocumentCount = 7
+	pc.DocumentFolderNames = []string{"Manuals", "Receipts"}
+	prompt := buildAssistantSystemPrompt(pc)
+	if !strings.Contains(prompt, "Document library: 7 documents in folders: Manuals, Receipts") {
+		t.Fatalf("expected the document library live line, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_DocumentLibraryLiveLineWithNoTopLevelFolders(t *testing.T) {
+	pc := basePromptContext()
+	pc.DocumentCount = 3
+	pc.DocumentFolderNames = nil
+	prompt := buildAssistantSystemPrompt(pc)
+	if !strings.Contains(prompt, "Document library: 3 documents.") {
+		t.Fatalf("expected a folderless document library line, got:\n%s", prompt)
+	}
+}
+
+func TestAssistantSystemPromptParts_DocumentLibraryLineInLiveSuffix(t *testing.T) {
+	pc := basePromptContext()
+	pc.DocumentCount = 2
+	pc.DocumentFolderNames = []string{"Manuals"}
+	stable, live := assistantSystemPromptParts(pc)
+	if strings.Contains(stable, "Document library:") {
+		t.Fatalf("expected the document library line NOT to be in the stable prefix, got:\n%s", stable)
+	}
+	if !strings.Contains(live, "Document library:") {
+		t.Fatalf("expected the document library line in the live suffix, got:\n%s", live)
+	}
+}
+
 // ── collectAssistantPromptContext ──────────────────────────────────────
 
 func writeAssistantPromptSettings(t *testing.T) string {
@@ -465,6 +519,46 @@ func TestCollectAssistantPromptContext_CopiesGlobalManual(t *testing.T) {
 	pc := collectAssistantPromptContext(settingsPath, time.Now())
 	if len(pc.ManualPages) != 1 || pc.ManualPages[0].ID != "features/forecast" {
 		t.Fatalf("expected collectAssistantPromptContext to copy globalManual, got %+v", pc.ManualPages)
+	}
+}
+
+func TestCollectAssistantPromptContext_NilDocumentStoreLeavesZeroDocumentCount(t *testing.T) {
+	settingsPath := writeAssistantPromptSettings(t)
+
+	prev := globalDocumentStore
+	globalDocumentStore = nil
+	t.Cleanup(func() { globalDocumentStore = prev })
+
+	pc := collectAssistantPromptContext(settingsPath, time.Now())
+	if pc.DocumentCount != 0 || len(pc.DocumentFolderNames) != 0 {
+		t.Fatalf("expected no document library context with a nil store, got count=%d folders=%v", pc.DocumentCount, pc.DocumentFolderNames)
+	}
+}
+
+func TestCollectAssistantPromptContext_DocumentLibraryCountsAndTopLevelFolderNames(t *testing.T) {
+	settingsPath := writeAssistantPromptSettings(t)
+	docs := withTestDocumentStore(t)
+
+	manuals, err := docs.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	if _, err := docs.CreateFolder("Receipts", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	if _, err := docs.Insert(document{SHA256: "sha-1", Filename: "a.pdf", MIME: "application/pdf", FolderID: &manuals.ID}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if _, err := docs.Insert(document{SHA256: "sha-2", Filename: "b.pdf", MIME: "application/pdf"}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	pc := collectAssistantPromptContext(settingsPath, time.Now())
+	if pc.DocumentCount != 2 {
+		t.Fatalf("expected DocumentCount 2, got %d", pc.DocumentCount)
+	}
+	if len(pc.DocumentFolderNames) != 2 || pc.DocumentFolderNames[0] != "Manuals" || pc.DocumentFolderNames[1] != "Receipts" {
+		t.Fatalf("expected top-level folder names [Manuals Receipts], got %v", pc.DocumentFolderNames)
 	}
 }
 

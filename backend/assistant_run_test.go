@@ -1079,12 +1079,28 @@ func TestAssistantRunner_ToolCallWithoutIDErrors(t *testing.T) {
 	}
 }
 
+// noDocumentLookup is assistantHistoryMessages' getDocument dependency for
+// every test that has no attachments to resolve - it fails the test if
+// ever called, so a test that forgets to attach something notices
+// immediately rather than silently getting a placeholder or a zero-value
+// document.
+func noDocumentLookup(t *testing.T) func(id string) (document, error) {
+	t.Helper()
+	return func(id string) (document, error) {
+		t.Fatalf("getDocument unexpectedly called with %q", id)
+		return document{}, nil
+	}
+}
+
 func TestAssistantHistoryMessages_ConvertsUserAndAssistantRows(t *testing.T) {
 	msgs := []assistantMessage{
 		{Role: "user", Content: "Tongue Bay or Blue Pearl Bay first?"},
 		{Role: "assistant", Content: "Tongue Bay first, on the rising tide."},
 	}
-	got := assistantHistoryMessages(msgs)
+	got, err := assistantHistoryMessages(msgs, noDocumentLookup(t))
+	if err != nil {
+		t.Fatalf("assistantHistoryMessages: %v", err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(got))
 	}
@@ -1093,6 +1109,200 @@ func TestAssistantHistoryMessages_ConvertsUserAndAssistantRows(t *testing.T) {
 	}
 	if got[1].Role != "assistant" || string(got[1].Content) != msgs[1].Content {
 		t.Fatalf("unexpected second message: %+v", got[1])
+	}
+}
+
+// ── attachment preambles (ADR 0106) ─────────────────────────────────────
+
+func TestAssistantHistoryMessages_IndexedAttachmentOnLatestMessageIncludesExcerpt(t *testing.T) {
+	markdown := strings.Repeat("A", 5000)
+	doc := document{
+		ID: "doc-1", Filename: "manual.pdf", MIME: "application/pdf",
+		PageCount: 12, Status: "indexed", Summary: "Yanmar 4JH diesel manual.",
+		Markdown: markdown,
+	}
+	lookup := func(id string) (document, error) {
+		if id != "doc-1" {
+			t.Fatalf("unexpected document id %q", id)
+		}
+		return doc, nil
+	}
+
+	msgs := []assistantMessage{
+		{Role: "user", Content: "What's the service interval?", Attachments: []assistantAttachment{{DocumentID: "doc-1", Filename: "manual.pdf"}}},
+	}
+	got, err := assistantHistoryMessages(msgs, lookup)
+	if err != nil {
+		t.Fatalf("assistantHistoryMessages: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(got))
+	}
+
+	want := "[Attached document id=doc-1 \"manual.pdf\" application/pdf, 12 pages, status: indexed]\n" +
+		"Summary: Yanmar 4JH diesel manual.\n" +
+		"Excerpt: " + strings.Repeat("A", 4000) + "\n" +
+		"Use read_document with this id for the rest.\n" +
+		"\n" +
+		"What's the service interval?"
+	if string(got[0].Content) != want {
+		t.Fatalf("unexpected preamble:\ngot:  %q\nwant: %q", string(got[0].Content), want)
+	}
+}
+
+func TestAssistantHistoryMessages_IndexedAttachmentOnEarlierMessageOmitsExcerpt(t *testing.T) {
+	doc := document{
+		ID: "doc-1", Filename: "manual.pdf", MIME: "application/pdf",
+		PageCount: 12, Status: "indexed", Summary: "Yanmar 4JH diesel manual.",
+		Markdown: "full body text that must not appear on an earlier turn",
+	}
+	lookup := func(id string) (document, error) { return doc, nil }
+
+	msgs := []assistantMessage{
+		{Role: "user", Content: "What's this?", Attachments: []assistantAttachment{{DocumentID: "doc-1", Filename: "manual.pdf"}}},
+		{Role: "assistant", Content: "It's the engine manual."},
+		{Role: "user", Content: "Thanks."},
+	}
+	got, err := assistantHistoryMessages(msgs, lookup)
+	if err != nil {
+		t.Fatalf("assistantHistoryMessages: %v", err)
+	}
+
+	want := "[Attached document id=doc-1 \"manual.pdf\" application/pdf, 12 pages, status: indexed]\n" +
+		"Summary: Yanmar 4JH diesel manual.\n" +
+		"\n" +
+		"What's this?"
+	if string(got[0].Content) != want {
+		t.Fatalf("unexpected preamble on the earlier message:\ngot:  %q\nwant: %q", string(got[0].Content), want)
+	}
+	if strings.Contains(string(got[0].Content), "full body text") {
+		t.Fatalf("expected no excerpt on the earlier message, got:\n%s", got[0].Content)
+	}
+	if string(got[2].Content) != "Thanks." {
+		t.Fatalf("expected the last (attachment-free) message untouched, got %q", got[2].Content)
+	}
+}
+
+func TestAssistantHistoryMessages_PendingAttachmentPreamble(t *testing.T) {
+	doc := document{
+		ID: "doc-2", Filename: "receipt.jpg", MIME: "image/jpeg", Status: "pending",
+	}
+	lookup := func(id string) (document, error) { return doc, nil }
+
+	msgs := []assistantMessage{
+		{Role: "user", Content: "here's the receipt", Attachments: []assistantAttachment{{DocumentID: "doc-2", Filename: "receipt.jpg"}}},
+	}
+	got, err := assistantHistoryMessages(msgs, lookup)
+	if err != nil {
+		t.Fatalf("assistantHistoryMessages: %v", err)
+	}
+
+	want := "[Attached document id=doc-2 \"receipt.jpg\" image/jpeg, status: pending (still being read; no summary yet)]\n" +
+		"\n" +
+		"here's the receipt"
+	if string(got[0].Content) != want {
+		t.Fatalf("unexpected pending preamble:\ngot:  %q\nwant: %q", string(got[0].Content), want)
+	}
+}
+
+func TestAssistantHistoryMessages_PendingAttachmentWithLocalTextIncludesExcerptOnLatest(t *testing.T) {
+	doc := document{
+		ID: "doc-2", Filename: "receipt.jpg", MIME: "image/jpeg", Status: "pending",
+		Markdown: "partial local text",
+	}
+	lookup := func(id string) (document, error) { return doc, nil }
+
+	msgs := []assistantMessage{
+		{Role: "user", Content: "here's the receipt", Attachments: []assistantAttachment{{DocumentID: "doc-2", Filename: "receipt.jpg"}}},
+	}
+	got, err := assistantHistoryMessages(msgs, lookup)
+	if err != nil {
+		t.Fatalf("assistantHistoryMessages: %v", err)
+	}
+
+	want := "[Attached document id=doc-2 \"receipt.jpg\" image/jpeg, status: pending (still being read; no summary yet)]\n" +
+		"Excerpt: partial local text\n" +
+		"Use read_document with this id for the rest.\n" +
+		"\n" +
+		"here's the receipt"
+	if string(got[0].Content) != want {
+		t.Fatalf("unexpected pending-with-text preamble:\ngot:  %q\nwant: %q", string(got[0].Content), want)
+	}
+}
+
+func TestAssistantHistoryMessages_FailedAttachmentPreambleShowsError(t *testing.T) {
+	doc := document{
+		ID: "doc-3", Filename: "scan.pdf", MIME: "application/pdf", Status: "failed",
+		Error:    "3 of 40 pages unreadable: invalid content stream",
+		Markdown: "whatever local text extraction produced before the failure",
+	}
+	lookup := func(id string) (document, error) { return doc, nil }
+
+	msgs := []assistantMessage{
+		{Role: "user", Content: "what's in this scan?", Attachments: []assistantAttachment{{DocumentID: "doc-3", Filename: "scan.pdf"}}},
+	}
+	got, err := assistantHistoryMessages(msgs, lookup)
+	if err != nil {
+		t.Fatalf("assistantHistoryMessages: %v", err)
+	}
+
+	want := "[Attached document id=doc-3 \"scan.pdf\" application/pdf, status: failed]\n" +
+		"Error: 3 of 40 pages unreadable: invalid content stream\n" +
+		"\n" +
+		"what's in this scan?"
+	if string(got[0].Content) != want {
+		t.Fatalf("unexpected failed preamble:\ngot:  %q\nwant: %q", string(got[0].Content), want)
+	}
+}
+
+func TestAssistantHistoryMessages_DeletedAttachmentShowsPlaceholder(t *testing.T) {
+	lookup := func(id string) (document, error) { return document{}, errDocumentNotFound }
+
+	msgs := []assistantMessage{
+		{Role: "user", Content: "see attached", Attachments: []assistantAttachment{{DocumentID: "doc-gone", Filename: "old-manual.pdf"}}},
+	}
+	got, err := assistantHistoryMessages(msgs, lookup)
+	if err != nil {
+		t.Fatalf("assistantHistoryMessages: %v", err)
+	}
+
+	want := "[attachment deleted: old-manual.pdf]\n" +
+		"\n" +
+		"see attached"
+	if string(got[0].Content) != want {
+		t.Fatalf("unexpected deleted-attachment preamble:\ngot:  %q\nwant: %q", string(got[0].Content), want)
+	}
+}
+
+func TestAssistantHistoryMessages_AttachmentOnlyMessageWithNoContent(t *testing.T) {
+	doc := document{ID: "doc-1", Filename: "manual.pdf", MIME: "application/pdf", Status: "indexed", Summary: "Engine manual."}
+	lookup := func(id string) (document, error) { return doc, nil }
+
+	msgs := []assistantMessage{
+		{Role: "user", Content: "", Attachments: []assistantAttachment{{DocumentID: "doc-1", Filename: "manual.pdf"}}},
+	}
+	got, err := assistantHistoryMessages(msgs, lookup)
+	if err != nil {
+		t.Fatalf("assistantHistoryMessages: %v", err)
+	}
+
+	want := "[Attached document id=doc-1 \"manual.pdf\" application/pdf, status: indexed]\n" +
+		"Summary: Engine manual.\n"
+	if string(got[0].Content) != want {
+		t.Fatalf("unexpected attachment-only preamble:\ngot:  %q\nwant: %q", string(got[0].Content), want)
+	}
+}
+
+func TestAssistantHistoryMessages_LookupFailurePropagates(t *testing.T) {
+	boom := errors.New("database is locked")
+	lookup := func(id string) (document, error) { return document{}, boom }
+
+	msgs := []assistantMessage{
+		{Role: "user", Content: "see attached", Attachments: []assistantAttachment{{DocumentID: "doc-1", Filename: "manual.pdf"}}},
+	}
+	_, err := assistantHistoryMessages(msgs, lookup)
+	if !errors.Is(err, boom) {
+		t.Fatalf("expected the lookup failure to propagate, got %v", err)
 	}
 }
 

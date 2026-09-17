@@ -617,6 +617,39 @@ func TestDocumentStore_ListFiltersByFolderRecursiveAndTag(t *testing.T) {
 	}
 }
 
+// TestDocumentStore_CountReturnsTotalDocumentCount pins the review finding
+// behind collectAssistantPromptContext's DocumentCount line (assistant_prompt.go):
+// it used to call List(nil, false, "", 0, 0) and take len() of the result,
+// loading every document row (markdown column included) and running one tag
+// query per row on a single-connection SQLite store just to learn a count.
+// Count is the single SELECT count(*) that replaces it.
+func TestDocumentStore_CountReturnsTotalDocumentCount(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	n, err := store.Count()
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 documents in a fresh store, got %d", n)
+	}
+
+	receipts, err := store.CreateFolder("Receipts", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	mustInsertDocument(t, store, "sha-count-1", "a.pdf", nil)
+	mustInsertDocument(t, store, "sha-count-2", "b.pdf", &receipts.ID)
+
+	n, err = store.Count()
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 documents, got %d", n)
+	}
+}
+
 // TestDocumentStore_ListRootSentinelFiltersDocumentsWithNoFolder covers the
 // B3 API's "folder=root" query value (documents_handlers.go): List's
 // folderID contract otherwise has no way to say "only documents with no
@@ -914,6 +947,74 @@ func TestDocumentStore_FolderPathReturnsRootToLeaf(t *testing.T) {
 
 	if _, err := store.FolderPath("does-not-exist"); !errors.Is(err, errFolderNotFound) {
 		t.Fatalf("expected errFolderNotFound, got %v", err)
+	}
+}
+
+func TestDocumentStore_ResolveFolderPathWalksSegmentsCaseInsensitively(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	receipts, err := store.CreateFolder("Receipts", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	year, err := store.CreateFolder("2026", &receipts.ID)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	got, err := store.ResolveFolderPath("receipts/2026")
+	if err != nil {
+		t.Fatalf("ResolveFolderPath: %v", err)
+	}
+	if got != year.ID {
+		t.Fatalf("expected %q, got %q", year.ID, got)
+	}
+
+	// Exact case, and a single segment, both still resolve.
+	if got, err := store.ResolveFolderPath("Receipts/2026"); err != nil || got != year.ID {
+		t.Fatalf("ResolveFolderPath(exact case) = %q, %v", got, err)
+	}
+	if got, err := store.ResolveFolderPath("Receipts"); err != nil || got != receipts.ID {
+		t.Fatalf("ResolveFolderPath(single segment) = %q, %v", got, err)
+	}
+}
+
+func TestDocumentStore_ResolveFolderPathUnknownSegmentReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if _, err := store.CreateFolder("Receipts", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	if _, err := store.ResolveFolderPath("Receipts/2026"); !errors.Is(err, errFolderNotFound) {
+		t.Fatalf("expected errFolderNotFound for a missing child segment, got %v", err)
+	}
+	if _, err := store.ResolveFolderPath("Manuals"); !errors.Is(err, errFolderNotFound) {
+		t.Fatalf("expected errFolderNotFound for an unknown top-level folder, got %v", err)
+	}
+}
+
+func TestDocumentStore_TopLevelFolderNamesAlphabeticalRootOnly(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	receipts, err := store.CreateFolder("Receipts", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	if _, err := store.CreateFolder("Manuals", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	// A nested folder must not appear in the top-level listing.
+	if _, err := store.CreateFolder("2026", &receipts.ID); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	names, err := store.TopLevelFolderNames()
+	if err != nil {
+		t.Fatalf("TopLevelFolderNames: %v", err)
+	}
+	want := []string{"Manuals", "Receipts"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("expected %v, got %v", want, names)
 	}
 }
 

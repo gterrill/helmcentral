@@ -77,6 +77,18 @@ type assistantPromptContext struct {
 	// prompt simply omits the index line.
 	ManualPages []manualPage
 
+	// DocumentCount and DocumentFolderNames describe globalDocumentStore
+	// (ADR 0106) at the time this context was collected: how many documents
+	// it holds in total, and the names of the top-level folders (root's
+	// direct children only, alphabetical - documentStore.TopLevelFolderNames).
+	// Both stay at their zero value when globalDocumentStore is nil or a
+	// read fails, the same "leave the sentinel rather than fabricate a
+	// plausible value" rule collectAssistantPromptContext already applies to
+	// settings and vessel state - buildAssistantSystemPrompt renders
+	// DocumentCount==0 as no document-library line at all.
+	DocumentCount       int
+	DocumentFolderNames []string
+
 	// Spoken and Screen are turn-scoped: postAssistantMessageHandler sets
 	// them straight from that one POST's body, after calling
 	// collectAssistantPromptContext, rather than reading them from settings
@@ -167,6 +179,20 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 	}
 
 	pc.ManualPages = globalManual
+
+	if globalDocumentStore != nil {
+		// Count, not List(nil, false, "", 0, 0) merely to take len() of the
+		// result: List with limit<=0 loads every document row (markdown
+		// column included) and runs one tag query per row on a
+		// single-connection SQLite store, all for a number this line never
+		// looks at the rows for (a review finding).
+		if n, err := globalDocumentStore.Count(); err == nil {
+			pc.DocumentCount = n
+		}
+		if names, err := globalDocumentStore.TopLevelFolderNames(); err == nil {
+			pc.DocumentFolderNames = names
+		}
+	}
 
 	return pc
 }
@@ -328,6 +354,13 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"configure it, call read_manual for the relevant page first and answer from it; when it is about the " +
 		"sea, use the forecast, tide and passage tools as usual.\n\n")
 
+	// 2a. Document library (ADR 0106) - fixed wording, identical for every
+	// turn; how many documents there are and what top-level folders exist is
+	// live context (see the "Document library:" line below).
+	b.WriteString("The boat's document library (manuals, receipts, logs, notes, photos) is searchable with " +
+		"search_documents and readable with read_document; a document attached directly to a message appears " +
+		"as a preamble ahead of it in this conversation, so read that first before calling either tool for it.\n\n")
+
 	// Planning horizon: every live-data rule below assumes a departure from
 	// here, now. A trip months away, or from somewhere else, has to be
 	// recognised first or Mate briefs today's weather for a passage that
@@ -464,6 +497,18 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	fmt.Fprintf(&lb, "Weather provider: %s. Wave provider: %s. Tide provider: %s. Configured tide station: %s.\n\n",
 		providerLabelOrNotConfigured(pc.WeatherProvider), providerLabelOrNotConfigured(pc.WaveProvider),
 		providerLabelOrNotConfigured(pc.TideProvider), tideStation)
+
+	// 4c. Document library (ADR 0106): only when the store actually holds
+	// something - collectAssistantPromptContext leaves DocumentCount at 0
+	// for both "no documents yet" and "the store isn't available", and
+	// either way there is nothing useful to tell the model about it.
+	if pc.DocumentCount > 0 {
+		if len(pc.DocumentFolderNames) > 0 {
+			fmt.Fprintf(&lb, "Document library: %d documents in folders: %s.\n\n", pc.DocumentCount, strings.Join(pc.DocumentFolderNames, ", "))
+		} else {
+			fmt.Fprintf(&lb, "Document library: %d documents.\n\n", pc.DocumentCount)
+		}
+	}
 
 	// 5a. Screen context: only present when the POST for this turn carried a
 	// non-empty screen field (postAssistantMessageHandler), so a
