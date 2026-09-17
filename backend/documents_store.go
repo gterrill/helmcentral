@@ -1621,90 +1621,74 @@ func (s *documentStore) CreateFolder(name string, parentID *string) (documentFol
 	return folder, nil
 }
 
-// RenameFolder validates the new name, checks it doesn't collide with a
-// sibling under the same parent, then updates the row and rebuilds the
-// meta chunk of every document in this folder's subtree - a rename changes
-// the folder-path text every one of them carries.
-func (s *documentStore) RenameFolder(id, name string) error {
+// PatchFolder applies patchDocumentFolderHandler's whole PATCH body in ONE
+// transaction, mirroring PatchDocument: a rename (name non-nil) and/or a
+// move (moveParent true, parentID the new parent or nil for root) commit
+// together. Before this method existed, the handler called RenameFolder and
+// MoveFolder as two separate transactions, so a rejected move (a cycle, a
+// name collision, or a missing parent) could return 409/404 with the rename
+// already committed. name is validated and, when moveParent is set, a
+// self-parent is rejected before the transaction opens (matching
+// RenameFolder/MoveFolder's own prior behaviour); everything that needs the
+// row's current state - existence, the name-collision check under the
+// eventual parent, the cycle check - runs inside it, so any failure leaves
+// neither field changed. The meta chunk of every document in id's subtree
+// is rebuilt exactly once, since either a new name or a new parent changes
+// the folder-path text they all carry.
+func (s *documentStore) PatchFolder(id string, name *string, parentID *string, moveParent bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	trimmed, err := validateFolderName(name)
-	if err != nil {
-		return err
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("rename folder: begin: %w", err)
-	}
-	defer tx.Rollback()
-
-	var parentID sql.NullString
-	if err := tx.QueryRow(`SELECT parent_id FROM document_folders WHERE id = ?`, id).Scan(&parentID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errFolderNotFound
+	var trimmedName string
+	if name != nil {
+		var err error
+		trimmedName, err = validateFolderName(*name)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("rename folder: read: %w", err)
-	}
-	var parentPtr *string
-	if parentID.Valid {
-		v := parentID.String
-		parentPtr = &v
 	}
 
-	taken, err := folderNameTaken(tx, parentPtr, trimmed, id)
-	if err != nil {
-		return fmt.Errorf("rename folder: check name: %w", err)
-	}
-	if taken {
-		return errFolderNameTaken
-	}
-
-	now := s.now()
-	if _, err := tx.Exec(`UPDATE document_folders SET name = ?, updated_at = ? WHERE id = ?`, trimmed, now.Unix(), id); err != nil {
-		return fmt.Errorf("rename folder: update: %w", err)
-	}
-
-	if err := s.rebuildMetaChunksUnderFolderTx(tx, id); err != nil {
-		return err
-	}
-
-	return tx.Commit()
-}
-
-// MoveFolder reparents id under parentID (nil for root). Rejects moving a
-// folder into itself or one of its own descendants with errFolderCycle,
-// checked via a recursive CTE walking parentID's ancestor chain looking for
-// id, and rejects a name collision under the destination the same way
-// RenameFolder does. Every document in id's subtree has its meta chunk
-// rebuilt, same reasoning as RenameFolder.
-func (s *documentStore) MoveFolder(id string, parentID *string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if parentID != nil && *parentID == id {
+	if moveParent && parentID != nil && *parentID == id {
 		return errFolderCycle
 	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("move folder: begin: %w", err)
+		return fmt.Errorf("patch folder: begin: %w", err)
 	}
 	defer tx.Rollback()
 
 	var currentName string
-	if err := tx.QueryRow(`SELECT name FROM document_folders WHERE id = ?`, id).Scan(&currentName); err != nil {
+	var currentParent sql.NullString
+	if err := tx.QueryRow(`SELECT name, parent_id FROM document_folders WHERE id = ?`, id).Scan(&currentName, &currentParent); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return errFolderNotFound
 		}
-		return fmt.Errorf("move folder: read: %w", err)
+		return fmt.Errorf("patch folder: read: %w", err)
 	}
 
-	if parentID != nil {
-		ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, *parentID)
+	if name == nil && !moveParent {
+		return tx.Commit()
+	}
+
+	newName := currentName
+	if name != nil {
+		newName = trimmedName
+	}
+
+	targetParent := parentID
+	if !moveParent {
+		targetParent = nil
+		if currentParent.Valid {
+			v := currentParent.String
+			targetParent = &v
+		}
+	}
+
+	if moveParent && targetParent != nil {
+		ok, err := rowExists(tx, `SELECT 1 FROM document_folders WHERE id = ?`, *targetParent)
 		if err != nil {
-			return fmt.Errorf("move folder: check parent: %w", err)
+			return fmt.Errorf("patch folder: check parent: %w", err)
 		}
 		if !ok {
 			return errFolderNotFound
@@ -1716,26 +1700,27 @@ func (s *documentStore) MoveFolder(id string, parentID *string) error {
 				UNION ALL
 				SELECT f.parent_id FROM document_folders f JOIN anc ON f.id = anc.fid WHERE f.parent_id IS NOT NULL
 			)
-			SELECT 1 FROM anc WHERE fid = ? LIMIT 1`, *parentID, id)
+			SELECT 1 FROM anc WHERE fid = ? LIMIT 1`, *targetParent, id)
 		if err != nil {
-			return fmt.Errorf("move folder: check cycle: %w", err)
+			return fmt.Errorf("patch folder: check cycle: %w", err)
 		}
 		if cyclic {
 			return errFolderCycle
 		}
 	}
 
-	taken, err := folderNameTaken(tx, parentID, currentName, id)
+	taken, err := folderNameTaken(tx, targetParent, newName, id)
 	if err != nil {
-		return fmt.Errorf("move folder: check name: %w", err)
+		return fmt.Errorf("patch folder: check name: %w", err)
 	}
 	if taken {
 		return errFolderNameTaken
 	}
 
 	now := s.now()
-	if _, err := tx.Exec(`UPDATE document_folders SET parent_id = ?, updated_at = ? WHERE id = ?`, nullableString(parentID), now.Unix(), id); err != nil {
-		return fmt.Errorf("move folder: update: %w", err)
+	if _, err := tx.Exec(`UPDATE document_folders SET name = ?, parent_id = ?, updated_at = ? WHERE id = ?`,
+		newName, nullableString(targetParent), now.Unix(), id); err != nil {
+		return fmt.Errorf("patch folder: update: %w", err)
 	}
 
 	if err := s.rebuildMetaChunksUnderFolderTx(tx, id); err != nil {
@@ -1743,6 +1728,18 @@ func (s *documentStore) MoveFolder(id string, parentID *string) error {
 	}
 
 	return tx.Commit()
+}
+
+// RenameFolder is a thin wrapper over PatchFolder for callers that only
+// ever rename (documents_store_test.go exercises it directly).
+func (s *documentStore) RenameFolder(id, name string) error {
+	return s.PatchFolder(id, &name, nil, false)
+}
+
+// MoveFolder is a thin wrapper over PatchFolder for callers that only ever
+// reparent (documents_store_test.go exercises it directly).
+func (s *documentStore) MoveFolder(id string, parentID *string) error {
+	return s.PatchFolder(id, nil, parentID, true)
 }
 
 // DeleteFolder removes an empty folder. errFolderNotEmpty if it still has

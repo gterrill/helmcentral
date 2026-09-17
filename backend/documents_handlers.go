@@ -892,6 +892,12 @@ func createDocumentFolderHandler(c echo.Context) error {
 }
 
 // PATCH /api/document-folders/:id
+//
+// A rename and a move in the same body commit together through one call to
+// PatchFolder (documents_store.go): before that method existed, this
+// handler committed RenameFolder in its own transaction and then called
+// MoveFolder, so a move rejected as a cycle, a name collision or a missing
+// parent returned 409/404 with the rename already applied.
 func patchDocumentFolderHandler(c echo.Context) error {
 	id := c.Param("id")
 
@@ -903,18 +909,19 @@ func patchDocumentFolderHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
 	}
 
+	var name *string
 	if v, ok := raw["name"]; ok {
-		var name string
-		if err := json.Unmarshal(v, &name); err != nil {
+		var s string
+		if err := json.Unmarshal(v, &s); err != nil {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid name"})
 		}
-		if err := globalDocumentStore.RenameFolder(id, name); err != nil {
-			return writeDocumentError(c, err)
-		}
+		name = &s
 	}
 
+	var parentID *string
+	var moveParent bool
 	if v, ok := raw["parent_id"]; ok {
-		var parentID *string
+		moveParent = true
 		if string(v) != "null" {
 			var s string
 			if err := json.Unmarshal(v, &s); err != nil {
@@ -922,7 +929,10 @@ func patchDocumentFolderHandler(c echo.Context) error {
 			}
 			parentID = &s
 		}
-		if err := globalDocumentStore.MoveFolder(id, parentID); err != nil {
+	}
+
+	if name != nil || moveParent {
+		if err := globalDocumentStore.PatchFolder(id, name, parentID, moveParent); err != nil {
 			return writeDocumentError(c, err)
 		}
 	}

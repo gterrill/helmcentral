@@ -1118,6 +1118,82 @@ func TestDocumentFolderHandlers_RenamePresenceAware(t *testing.T) {
 	}
 }
 
+// TestDocumentFolderHandlers_RenamePlusInvalidMoveAppliesNeither pins the
+// PATCH's one-transaction contract (matching patchDocumentHandler): a name
+// and an invalid parent_id in the same request must not half-apply. Before
+// the fix, patchDocumentFolderHandler committed RenameFolder in its own
+// transaction before calling MoveFolder, so a rejected move (cycle here)
+// still left the rename committed and the response was 409 with the name
+// already changed.
+func TestDocumentFolderHandlers_RenamePlusInvalidMoveAppliesNeither(t *testing.T) {
+	withTestDocumentStore(t)
+	manuals, err := globalDocumentStore.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder(Manuals): %v", err)
+	}
+	engine, err := globalDocumentStore.CreateFolder("Engine", &manuals.ID)
+	if err != nil {
+		t.Fatalf("CreateFolder(Engine): %v", err)
+	}
+
+	// Renaming Manuals to Powerplant while moving it under its own child
+	// Engine - the name is perfectly valid, the move is a cycle.
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/document-folders/"+manuals.ID,
+		fmt.Sprintf(`{"name":"Powerplant","parent_id":%q}`, engine.ID), manuals.ID)
+	if err := patchDocumentFolderHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for a cyclic move, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	folder, err := fetchDocumentFolder(manuals.ID)
+	if err != nil {
+		t.Fatalf("fetchDocumentFolder: %v", err)
+	}
+	if folder.Name != "Manuals" {
+		t.Fatalf("expected the rename to be rolled back alongside the rejected move, got name %q", folder.Name)
+	}
+	if folder.ParentID != nil {
+		t.Fatalf("expected the folder to remain at the root, got parent %v", folder.ParentID)
+	}
+}
+
+// TestDocumentFolderHandlers_RenamePlusValidMoveAppliesBoth is the positive
+// case alongside the test above: a rename and a valid move in the same
+// request both land.
+func TestDocumentFolderHandlers_RenamePlusValidMoveAppliesBoth(t *testing.T) {
+	withTestDocumentStore(t)
+	manuals, err := globalDocumentStore.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder(Manuals): %v", err)
+	}
+	archive, err := globalDocumentStore.CreateFolder("Archive", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder(Archive): %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/document-folders/"+manuals.ID,
+		fmt.Sprintf(`{"name":"Old Manuals","parent_id":%q}`, archive.ID), manuals.ID)
+	if err := patchDocumentFolderHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var got documentFolder
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Name != "Old Manuals" {
+		t.Fatalf("expected the rename to apply, got name %q", got.Name)
+	}
+	if got.ParentID == nil || *got.ParentID != archive.ID {
+		t.Fatalf("expected the move to apply, got parent %v", got.ParentID)
+	}
+}
+
 // ── route tiers ──────────────────────────────────────────────────────────
 
 // TestBuildAPIRoutes_DocumentRoutesHaveExpectedTiers mirrors
