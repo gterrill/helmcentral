@@ -99,6 +99,18 @@ var noCompressRoutePatterns = map[string]bool{
 	"/api/world-imagery/:z/:x/:y":  true, // tile_proxy.go
 	"/api/sat-charts/:id/:z/:x/:y": true, // sat_charts.go
 
+	// documents_handlers.go: documentContentHandler serves a document's raw
+	// bytes through http.ServeContent, which needs to answer Range requests
+	// against the exact byte offsets of the underlying file (a PDF viewer's
+	// partial fetch, a scrubbed audio/video position). Gzip-wrapping those
+	// bytes would make Range's offsets meaningless, the same reasoning
+	// compressionSkipper already applies to any request carrying a Range
+	// header - this covers the initial, rangeless request for the same
+	// route too, before a client has any ETag to make a ranged follow-up
+	// against. Many of the served MIME types (PDF, JPEG, PNG, WebP) are
+	// already-compressed anyway.
+	"/api/documents/:id/content": true,
+
 	// gshhg.go: gshhgCoastlineHandler gzips its own response once at
 	// startup (gshhgCoastlineGzipped) and negotiates Content-Encoding
 	// itself against the request's Accept-Encoding, exactly like the
