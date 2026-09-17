@@ -11,6 +11,7 @@ require (
 	github.com/influxdata/influxdb-client-go/v2 v2.14.0
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/labstack/echo/v4 v4.11.4
+	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	github.com/tetratelabs/wazero v1.9.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	golang.org/x/crypto v0.31.0
