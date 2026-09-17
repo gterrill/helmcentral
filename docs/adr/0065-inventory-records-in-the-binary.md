@@ -16,6 +16,19 @@ reused by this section's photo-label reading whenever that is built. Every
 other house rule in §5 (BYOK, off by default, key in `knownSecretKeys` only,
 never `coreEnvSecretKeys`) stands as written.
 
+"Behind it document management" is built: [ADR 0106](0106-documents-in-the-binary.md)
+is the document store, its background OCR/summary/tag enrichment, and
+Mate's two document tools. §5.1's blanket rule - no background pass, no
+photo leaves the boat unasked - is narrowed there, not repealed: a
+document's enrichment does run automatically once queued, but only for a
+document uploaded (or explicitly reindexed) while Mate is switched on,
+which ADR 0106 treats as the operator's own ask rather than a default
+baked into the feature. A document uploaded while Mate was off is never
+sent later on its own. See ADR 0106's own Consent section for the rest,
+including the one further narrowing on §5.1.2: a suggested title or tag
+lands live rather than waiting in a form for confirmation, distinguished
+from an operator's own by source rather than held back from view.
+
 ## Context
 
 ADR 0043 drew a line: maintenance and inventory *records* live in a separate

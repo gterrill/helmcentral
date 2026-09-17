@@ -25,6 +25,9 @@ meets your needs.
 - [Mate](features/assistant.md), a chat assistant that answers
   passage-planning questions using the boat's own live data, from any page
   and by voice.
+- [Documents](features/documents.md), a searchable library for manuals,
+  receipts and logs, with OCR, summaries and tags once Mate reads a scan or
+  a photo. Built and working; no Documents panel in the dashboard yet.
 - [Inventory tracking](features/inventory-tracking.md), designed but not yet built.
 
 ## How-to guides

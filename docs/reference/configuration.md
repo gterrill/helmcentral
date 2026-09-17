@@ -28,6 +28,14 @@ credential is unrecoverable**: SignalK login, InfluxDB token, and WeatherKit
 keys must all be re-entered. Back up the whole state directory; at minimum
 back up that file. There is no key-recovery mechanism.
 
+`data/documents/` (every uploaded file's bytes) and `data/documents.sqlite`
+(the document library's titles, folders, tags and search index) are one
+backup unit - the database on its own describes files it can no longer
+produce, and the folder on its own is just anonymous content hashes. Once
+a few manuals and a season's worth of receipts and photos have gone
+through it, expect `data/documents/` to be the largest single thing in the
+state directory.
+
 ## Environment variables
 
 Non-secret settings use standard environment variables. There is no `.env`
@@ -122,6 +130,8 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 | `NEARBY_CONTACTS_DB_PATH` | `data/nearby-contacts.sqlite` |
 | `WEBPUSH_DB_PATH` | `data/webpush-subscriptions.sqlite` |
 | `ASSISTANT_DB_PATH` | `data/assistant.sqlite` |
+| `DOCUMENTS_DB_PATH` | `data/documents.sqlite` |
+| `DOCUMENTS_DIR` | `data/documents` |
 | `TILE_CACHE_PATH` | `data/tile-cache.sqlite` |
 | `SAT_CHARTS_DIR` | `data/sat-charts` |
 | `PLUGINS_TIDES_DIR` | `plugins/tides` |

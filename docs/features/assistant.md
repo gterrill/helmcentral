@@ -96,6 +96,33 @@ shows. Ask "what does the upper air chart on the forecast panel actually
 show" and it reads this manual's own [Forecast](forecast.md) page and quotes
 it back.
 
+## Documents
+
+Mate can read from the boat's own document library: manuals, receipts,
+invoices, service logs, passage notes, photos of a part or a data plate.
+There are two ways it draws on that.
+
+Attach a document to a question and Mate gets a short preamble ahead of
+your question describing it - filename, type, page count, whether it's
+finished indexing yet - plus up to around 4,000 characters of what's
+actually in it, so a question about the file is answered from its real
+content rather than a guess. If the answer needs more than that excerpt,
+Mate reads further into the same document itself.
+
+Mate can also search the whole library on its own, the same way it looks
+up a forecast or a tide station. Ask something like "what's the part
+number for the raw water pump impeller", and if a receipt or a manual
+mentions it, Mate finds it and reads it without first being handed the
+file.
+
+> **Not yet in the composer.** Attaching a file to a question isn't wired
+> into Mate's composer yet, so today that only happens through the API.
+> Mate's own library search already works against whatever's in the
+> library either way.
+
+See [Documents](documents.md) for what gets indexed, what it costs, file
+types and limits, and how folders and tags work.
+
 ## Talking to Mate
 
 Voice is push-to-talk: tap the microphone in the header, or press `Alt+M`
@@ -128,6 +155,14 @@ Every question sends your position, the question text itself, and whatever
 forecast or tide data Mate decided to look up, to OpenRouter and from there
 to whichever model you've chosen. This only happens when you ask something
 and Mate is switched on; nothing is sent in the background.
+
+A document you attach to a question, or one Mate reads through its own
+library search, is sent the same way - as text, since it's already been
+read once when it was indexed. Separately, uploading or reindexing a
+document while Mate is switched on sends that document's own content for
+OCR and summarising, whether or not you go on to ask a question about it;
+see [Documents](documents.md) for what that costs and what leaves the boat
+at that point, not just when you ask Mate about one.
 
 A voice question additionally sends your speech to whichever engine your
 browser uses to turn it into text: Apple's dictation for Safari (on-device on
