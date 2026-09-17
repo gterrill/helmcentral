@@ -59,6 +59,23 @@ A feature normally gets one `features/` page as its entry point, and grows
 `how-to/` and `reference/` pages as it needs them. Do not create empty
 directories or placeholder pages in advance.
 
+#### Target Audience & Persona
+
+- **Audience:** Vessel skippers, navigators, and boat owners monitoring live vessel systems at the helm or remotely over tailscale.
+- **Voice:** Pragmatic, professional marine systems guide. Focus on operational utility, situational awareness, and helm workflows.
+- **Perspective:** Focus on *what the system does for the boat and operator*, never on *how the code or build system was implemented*.
+
+#### User Facing Writing Rules
+
+1. **No Implementation Details in User Docs:** Never mention Go, WebAssembly (WASM), Web Components, WebSocket lifecycles, JSON schemas, or internal data pipelines in user/operator documentation.
+2. **Marine Terminology First:**
+   - Use "vessel telemetry," "live instrument data," or "NMEA network feeds" instead of "Signal K paths / tree."
+   - Use "gauges," "dials," "digital readouts," or "instrument displays" instead of "widgets / components."
+   - Use "operating modes" or "helm profiles" (e.g., Underway, At Anchor, Passage, Refueling) instead of "UI pages / dashboard grids."
+   - Use "alarm thresholds" or "system warnings" instead of "boolean state triggers."
+3. **Operational Context First:** Start every feature doc with 1–2 sentences explaining the physical onboard benefit (e.g., preventing engine overheat, monitoring battery health at anchor, passage navigation).
+4. **Actionable Steps:** Focus how-to instructions strictly on what the user clicks, selects, or toggles on the display.
+
 ### The engineering tree
 
 `docs/adr/` holds architecture decision records and is **not part of the
