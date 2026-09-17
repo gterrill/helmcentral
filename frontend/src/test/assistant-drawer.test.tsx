@@ -78,6 +78,17 @@ function buildAssistantFetch(opts: AssistantServerOptions) {
       return { ok: true, status: 204 }
     }
 
+    // ADR 0105: AssistantThread's rejoin effect GETs .../run for whatever
+    // conversation becomes active - 204 (no run in flight) is the ordinary
+    // answer here, since none of this file's scenarios leave a run actually
+    // going once send() has resolved.
+    if (/\/api\/assistant\/conversations\/[^/]+\/run$/.test(url) && method === 'GET') {
+      return { ok: true, status: 204 }
+    }
+    if (/\/api\/assistant\/conversations\/[^/]+\/run\/cancel$/.test(url) && method === 'POST') {
+      return { ok: true, status: 204 }
+    }
+
     throw new Error(`Unhandled fetch in test: ${method} ${url}`)
   })
 

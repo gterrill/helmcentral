@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { readServerSentEvents } from '@/lib/sse-reader'
+import { registerMateWatch } from '@/lib/mate-watch-store'
 import type { AssistantConversation, AssistantMessage } from '@/hooks/use-assistant-conversations'
 
 interface MessageApi {
@@ -79,29 +80,164 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 /**
- * Posts one message to a conversation and reads the reply back as SSE
- * (ADR 0093): zero or more `status` frames while the assistant works,
- * then exactly one `message` or `error` frame. A second `send` cancels
- * whatever the previous one was still doing, the same way navigating away
- * mid-request should - only the most recent question's outcome ever
- * reaches the caller.
+ * Drives one Mate conversation's live reply, in flight or rejoined
+ * (ADR 0093, streamed per ADR 0105, detached per ADR 0105's "the answer
+ * outlives the page").
+ *
+ * `send` posts one message and reads the reply back as SSE: zero or more
+ * `status` frames while the assistant works, zero or more `delta` frames
+ * carrying the current round's answer text as it is written, an optional
+ * `retract` when a round that streamed text turned into tool calls
+ * instead, then exactly one `message` or `error` frame. `attach` rejoins
+ * whatever reply is already being written server-side - after a navigation
+ * away and back, a reload, or an iPad's screen lock having killed the
+ * original `send`'s fetch outright - by reading the same event shape off
+ * `GET .../run` instead of posting a new question.
+ *
+ * A second call to either `send` or `attach` closes whatever local stream
+ * the previous one was reading (its events are ignored from that point on,
+ * matching the existing "second send supersedes the first" behaviour), but
+ * - unlike before ADR 0105 - this never stops the run itself: the backend
+ * no longer ties a reply's lifetime to the HTTP request that started it, so
+ * closing this tab's connection just means this tab stops watching. Only
+ * `abort()` (the Stop button) actually tells the server to give up, via
+ * `POST .../run/cancel`.
  */
 export function useAssistantChat() {
   const [sending, setSending] = useState(false)
   const [statusText, setStatusText] = useState<string | null>(null)
+  const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // The conversation the current (or most recent) stream belongs to -
+  // abort() needs this to know which run to POST .../run/cancel for.
+  const currentConversationIdRef = useRef<string | null>(null)
+  // ADR 0105: delta text accumulates here, not directly in state, so several
+  // deltas arriving in one animation frame cost one re-render (and one
+  // markdown re-parse) instead of one each.
+  const draftBufferRef = useRef('')
+  const draftRafRef = useRef<number | null>(null)
 
-  const abort = useCallback(() => {
-    abortRef.current?.abort()
-    abortRef.current = null
-    setSending(false)
-    setStatusText(null)
+  const cancelDraftFlush = useCallback(() => {
+    if (draftRafRef.current !== null) {
+      cancelAnimationFrame(draftRafRef.current)
+      draftRafRef.current = null
+    }
   }, [])
 
-  // Unmount cleanup only cancels the request - it must not call any setState
-  // on an unmounted component.
-  useEffect(() => () => { abortRef.current?.abort() }, [])
+  // Discards whatever draft text has been shown (or buffered) so far: used
+  // when a round is retracted, when the authoritative message arrives, and
+  // on error/abort/a superseding send or attach - every case where the
+  // streamed draft must not linger.
+  const clearDraft = useCallback(() => {
+    cancelDraftFlush()
+    draftBufferRef.current = ''
+    setDraft(null)
+  }, [cancelDraftFlush])
+
+  // Schedules (at most once at a time) copying the buffer into `draft`
+  // state on the next animation frame, so a burst of deltas within one
+  // frame flushes once rather than once per token.
+  const scheduleDraftFlush = useCallback(() => {
+    if (draftRafRef.current !== null) return
+    draftRafRef.current = requestAnimationFrame(() => {
+      draftRafRef.current = null
+      setDraft(draftBufferRef.current)
+    })
+  }, [])
+
+  // Reads one SSE body - a send()'s POST response or an attach()'s GET
+  // response, the two only differ in how `body` was obtained - through the
+  // same status/delta/retract/message/error handling. `controller` is the
+  // AbortController this particular call owns; events are ignored once a
+  // later send()/attach() has superseded it (abortRef.current !== controller).
+  const consumeStream = useCallback(async (
+    body: ReadableStream<Uint8Array>,
+    controller: AbortController,
+    onConversation?: (conversation: AssistantConversation) => void,
+  ): Promise<AssistantMessage | null> => {
+    const isCurrent = () => abortRef.current === controller
+    let resolved: AssistantMessage | null = null
+
+    await readServerSentEvents(body, (event) => {
+      if (!isCurrent()) return
+
+      if (event.event === 'status') {
+        const data = JSON.parse(event.data) as { text?: string }
+        setStatusText(typeof data.text === 'string' ? data.text : null)
+      } else if (event.event === 'delta') {
+        const data = JSON.parse(event.data) as { text?: string }
+        if (typeof data.text === 'string' && data.text !== '') {
+          draftBufferRef.current += data.text
+          scheduleDraftFlush()
+        }
+      } else if (event.event === 'retract') {
+        // The round that produced this draft turned into tool calls
+        // instead of an answer (ADR 0093 §2/ADR 0105) - discard it.
+        clearDraft()
+      } else if (event.event === 'message') {
+        const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
+        resolved = mapMessage(data.message)
+        clearDraft()
+        onConversation?.(mapConversation(data.conversation))
+      } else if (event.event === 'error') {
+        const data = JSON.parse(event.data) as { error?: string }
+        setError(typeof data.error === 'string' && data.error !== '' ? data.error : 'assistant error')
+        clearDraft()
+      }
+    }, controller.signal)
+
+    return resolved
+  }, [clearDraft, scheduleDraftFlush])
+
+  // The Stop button (ADR 0105): unlike a superseding send()/attach() or an
+  // unmount, this actually tells the server to give up on the run - POSTing
+  // .../run/cancel. The local stream, status and draft go at once so Stop
+  // feels immediate, but `sending` (which locks the composer) holds until
+  // the cancel has answered: the server answers only once the conversation
+  // is free, and a question sent before then would be refused with 409.
+  const abort = useCallback(async () => {
+    const conversationId = currentConversationIdRef.current
+    abortRef.current?.abort()
+    abortRef.current = null
+    setStatusText(null)
+    clearDraft()
+    if (conversationId === null) {
+      setSending(false)
+      return
+    }
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(conversationId)}/run/cancel`,
+        { method: 'POST' },
+      )
+      if (!response.ok) setError(await readErrorMessage(response))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      // A send()/attach() started while the cancel was in flight owns
+      // `sending` now; leave it alone.
+      if (abortRef.current === null) setSending(false)
+    }
+  }, [clearDraft])
+
+  // Whether this hook's live local stream belongs to conversationId. The
+  // thread uses it to tell "rejoin a different conversation" apart from
+  // "this conversation's own send is already streaming".
+  const isStreamingConversation = useCallback(
+    (conversationId: string) => abortRef.current !== null && currentConversationIdRef.current === conversationId,
+    [],
+  )
+
+  // Unmount cleanup only closes this tab's own stream and cancels any
+  // pending draft flush - it must never cancel the run itself (ADR 0105:
+  // the reply keeps being written server-side, and a later attach() picks
+  // it back up), and it must not call any setState on an unmounted
+  // component.
+  useEffect(() => () => {
+    abortRef.current?.abort()
+    cancelDraftFlush()
+  }, [cancelDraftFlush])
 
   const send = useCallback(async (
     conversationId: string,
@@ -109,15 +245,28 @@ export function useAssistantChat() {
     options?: AssistantSendOptions,
   ): Promise<AssistantMessage | null> => {
     // A send already in flight loses: its events are ignored below and its
-    // request is cancelled, so only this call's outcome updates state.
+    // local stream is closed, the same as a superseding attach() - but,
+    // same as that case, this never stops whatever run it was watching
+    // (ADR 0105).
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
+    currentConversationIdRef.current = conversationId
     const isCurrent = () => abortRef.current === controller
+
+    // mate-answer-toast plan: a question posted from this tab is watched
+    // from the moment it's sent, not just while this hook instance stays
+    // mounted - the whole point is catching an answer that finishes after
+    // the operator has navigated away (App.tsx's use-mate-answer-watcher
+    // reads this store for whatever conversation isn't on screen).
+    // attach() deliberately never calls this: rejoining a run someone else
+    // started isn't "this tab asked a question".
+    registerMateWatch(conversationId)
 
     setSending(true)
     setError(null)
     setStatusText(null)
+    clearDraft()
 
     try {
       // `spoken`/`screen` are included only when the caller actually passed
@@ -149,27 +298,13 @@ export function useAssistantChat() {
         return null
       }
 
-      let resolved: AssistantMessage | null = null
-      await readServerSentEvents(response.body, (event) => {
-        if (!isCurrent()) return
-
-        if (event.event === 'status') {
-          const data = JSON.parse(event.data) as { text?: string }
-          setStatusText(typeof data.text === 'string' ? data.text : null)
-        } else if (event.event === 'message') {
-          const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
-          resolved = mapMessage(data.message)
-          options?.onConversation?.(mapConversation(data.conversation))
-        } else if (event.event === 'error') {
-          const data = JSON.parse(event.data) as { error?: string }
-          setError(typeof data.error === 'string' && data.error !== '' ? data.error : 'assistant error')
-        }
-      }, controller.signal)
-
-      return resolved
+      return await consumeStream(response.body, controller, options?.onConversation)
     } catch (err) {
       if (controller.signal.aborted) return null
-      if (isCurrent()) setError(err instanceof Error ? err.message : String(err))
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : String(err))
+        clearDraft()
+      }
       return null
     } finally {
       if (isCurrent()) {
@@ -178,7 +313,73 @@ export function useAssistantChat() {
         abortRef.current = null
       }
     }
-  }, [])
+  }, [clearDraft, consumeStream])
 
-  return { send, sending, statusText, error, abort }
+  // Rejoins whatever reply is already being written for conversationId
+  // (ADR 0105): GETs .../run, which answers 204 when nothing is in flight
+  // (this resolves to null and touches no state at all - the caller already
+  // has the finished answer, if any, from GET the conversation itself) or
+  // streams the same status/delta/retract/message/error shape send() reads,
+  // starting with whatever the run has already produced and continuing live
+  // from there. A second attach()/send() supersedes this one exactly the
+  // same way a second send() supersedes an earlier one.
+  const attach = useCallback(async (
+    conversationId: string,
+    onConversation?: (conversation: AssistantConversation) => void,
+  ): Promise<AssistantMessage | null> => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    currentConversationIdRef.current = conversationId
+    const isCurrent = () => abortRef.current === controller
+    // Whatever stream this supersedes may belong to another conversation:
+    // its status, draft and error must not carry over to this one.
+    setSending(false)
+    setStatusText(null)
+    setError(null)
+    clearDraft()
+
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(conversationId)}/run`,
+        { signal: controller.signal },
+      )
+
+      if (response.status === 204) {
+        return null
+      }
+
+      if (!response.ok) {
+        if (isCurrent()) setError(await readErrorMessage(response))
+        return null
+      }
+
+      if (response.body === null) {
+        if (isCurrent()) setError('streaming not supported')
+        return null
+      }
+
+      setSending(true)
+      setError(null)
+      setStatusText(null)
+      clearDraft()
+
+      return await consumeStream(response.body, controller, onConversation)
+    } catch (err) {
+      if (controller.signal.aborted) return null
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : String(err))
+        clearDraft()
+      }
+      return null
+    } finally {
+      if (isCurrent()) {
+        setSending(false)
+        setStatusText(null)
+        abortRef.current = null
+      }
+    }
+  }, [clearDraft, consumeStream])
+
+  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation }
 }

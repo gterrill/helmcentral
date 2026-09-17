@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 
 import { MateSheet } from '@/components/mate-sheet'
 
@@ -55,6 +55,13 @@ function buildFetch(
   onSendMessage?: (conversationId: string, body: Record<string, unknown>) => FetchLike,
   initialConversations: ConversationRecord[] = [],
   onCreateConversation?: () => void,
+  // ADR 0105: AssistantThread's rejoin effect calls chat.attach() on mount
+  // for whatever conversation ends up active, which GETs .../run - every
+  // test in this file that reaches a selected conversation hits this route
+  // whether or not it cares about rejoining anything. Undefined means "no
+  // run in flight", the ordinary case: a plain 204, same as the real
+  // backend answers with nothing to rejoin.
+  onAttach?: (conversationId: string) => FetchLike,
 ) {
   const conversations: ConversationRecord[] = [...initialConversations]
   const messagesByConversation = new Map<string, Array<Record<string, unknown>>>()
@@ -86,6 +93,18 @@ function buildFetch(
       return onSendMessage(id, body)
     }
 
+    const cancelMatch = url.match(/\/api\/assistant\/conversations\/([^/]+)\/run\/cancel$/)
+    if (cancelMatch && method === 'POST') {
+      return { ok: true, status: 204 }
+    }
+
+    const runMatch = url.match(/\/api\/assistant\/conversations\/([^/]+)\/run$/)
+    if (runMatch && method === 'GET') {
+      const id = decodeURIComponent(runMatch[1])
+      if (onAttach) return onAttach(id)
+      return { ok: true, status: 204 }
+    }
+
     const conversationMatch = url.match(/\/api\/assistant\/conversations\/([^/]+)$/)
     if (conversationMatch && method === 'GET') {
       const id = decodeURIComponent(conversationMatch[1])
@@ -106,6 +125,24 @@ function sseMessageResponse(message: Record<string, unknown>, conversation: Reco
     },
   })
   return { ok: true, body }
+}
+
+// ADR 0105: a stream this test pushes delta/message frames into by hand, so
+// the "never speaks from the draft" assertion doesn't race a real
+// setTimeout/poll against however many microtask hops the SSE reader needs.
+function controllableStream() {
+  let streamController!: ReadableStreamDefaultController<Uint8Array>
+  const stream = new ReadableStream<Uint8Array>({ start(controller) { streamController = controller } })
+  const encoder = new TextEncoder()
+  return {
+    body: stream,
+    push: (chunk: string) => streamController.enqueue(encoder.encode(chunk)),
+    close: () => streamController.close(),
+  }
+}
+
+async function flushMicrotasks(times = 8) {
+  for (let i = 0; i < times; i++) await Promise.resolve()
 }
 
 describe('MateSheet', () => {
@@ -307,6 +344,15 @@ describe('MateSheet', () => {
   // pushed the composer below the fold. This asserts the unbroken
   // flex/min-h-0 chain from the dialog down to the scrolling message list,
   // which is what has to hold for real layout to bound that height.
+  //
+  // ADR 0105 rebuilt AssistantThread on shadcn's MessageScroller, whose own
+  // root is `size-full min-h-0` (a percentage box, not `flex-1`) - it only
+  // resolves to a real height because AssistantThread wraps it in a
+  // `flex-1 min-h-0` container of its own. "assistant-thread-scroll" now
+  // names MessageScroller's Viewport (the element that actually carries
+  // `overflow-y-auto`), rather than a hand-rolled scrolling `<div>`; the
+  // three assertions below check the same intent as before - bounded height,
+  // scrolls - against that new element.
   it('keeps an unbroken flex/min-h-0 chain from the dialog to the scrolling message list', async () => {
     vi.stubGlobal('fetch', buildFetch())
 
@@ -325,6 +371,13 @@ describe('MateSheet', () => {
     expect(threadRoot.className).toEqual(expect.stringContaining('min-h-0'))
     expect(threadRoot.className).toEqual(expect.stringContaining('flex-1'))
     expect(threadRoot.className).toEqual(expect.stringContaining('flex-col'))
+
+    // The MessageScroller primitive itself, between threadRoot and the
+    // Viewport: it needs its own flex-1/min-h-0 to turn its `size-full`
+    // percentage box into a real, bounded height.
+    const messageScroller = within(threadRoot).getByTestId('assistant-thread-message-scroller')
+    expect(messageScroller.className).toEqual(expect.stringContaining('flex-1'))
+    expect(messageScroller.className).toEqual(expect.stringContaining('min-h-0'))
 
     const scrollList = within(threadRoot).getByTestId('assistant-thread-scroll')
     expect(scrollList.className).toEqual(expect.stringContaining('flex-1'))
@@ -447,6 +500,36 @@ describe('MateSheet', () => {
 
     await screen.findByRole('heading', { name: 'Mate' })
     expect(screen.getByText('--')).toBeInTheDocument()
+  })
+
+  // mate-answer-toast plan: App.tsx needs to know which conversation the
+  // sheet is currently showing, to keep the App-level answer watcher from
+  // opening a background stream (and toasting) for a reply the sheet is
+  // already displaying. Mirrors assistant-drawer.tsx's own prop of the same
+  // name and the same "wait on loading" guard.
+  it('reports the active conversation as it settles, once loading is done', async () => {
+    const onActiveConversationChange = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      buildFetch(undefined, [
+        { id: 'c1', title: 'Hamilton Island to Gloucester Island, 14 Sep', created_at: '', updated_at: '' },
+      ]),
+    )
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud={false}
+        onOpenPanel={vi.fn()}
+        onActiveConversationChange={onActiveConversationChange}
+      />,
+    )
+
+    await screen.findByText('Hamilton Island to Gloucester Island, 14 Sep')
+    await waitFor(() => expect(onActiveConversationChange).toHaveBeenCalledWith('c1'))
   })
 })
 
@@ -683,5 +766,111 @@ describe('MateSheet read-aloud', () => {
     )
 
     expect(cancelSpy).toHaveBeenCalled()
+  })
+
+  // ADR 0105: the sheet's read-aloud effect only ever reads
+  // `reply.content` from chat.send()'s resolved value (the `message` frame),
+  // and never looks at chat.draft - this pins that down against a
+  // regression where a streamed draft happened to carry its own
+  // `## Spoken summary` heading (e.g. before the backend's hold-back window
+  // trims a partial one) and got read aloud before the real, final summary
+  // arrived.
+  it('does not speak from an in-progress draft, only from the resolved message', async () => {
+    installFakeSpeechSynthesis()
+    const stream = controllableStream()
+    let capturedConversationId = ''
+    vi.stubGlobal('fetch', buildFetch((conversationId) => {
+      capturedConversationId = conversationId
+      return { ok: true, body: stream.body }
+    }))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How does tomorrow look?"
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+        onOpenPanel={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(capturedConversationId).not.toBe(''))
+
+    await act(async () => {
+      stream.push('event: delta\ndata: {"text":"## Spoken summary\\n\\nDraft text that must never be read aloud."}\n\n')
+      await flushMicrotasks()
+    })
+    expect(await screen.findByText(/Draft text that must never be read aloud/)).toBeInTheDocument()
+    expect(fakeSynth.spoken).toHaveLength(0)
+
+    await act(async () => {
+      stream.push(`data: ${JSON.stringify({
+        message: {
+          id: 'm1',
+          conversation_id: capturedConversationId,
+          seq: 1,
+          role: 'assistant',
+          content: '## Spoken summary\n\nFine tomorrow, light winds.',
+          created_at: '2026-09-12T00:00:00Z',
+        },
+        conversation: {
+          id: capturedConversationId,
+          title: 'How does tomorrow look?',
+          created_at: '2026-09-12T00:00:00Z',
+          updated_at: '2026-09-12T00:00:01Z',
+        },
+      })}\n\n`)
+      stream.close()
+      await flushMicrotasks()
+    })
+
+    await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
+    expect(fakeSynth.spoken[0].text).toBe('Fine tomorrow, light winds.')
+  })
+
+  // ADR 0105 ("the answer outlives the page"): the sheet only ever reads a
+  // reply aloud after a send it made itself (the initialQuestion flow
+  // above) - a reply that shows up because AssistantThread rejoined a run
+  // still being written elsewhere (GET .../run, via chat.attach()) must
+  // never trigger read-aloud, even with "Read replies aloud" switched on,
+  // even though the reply still lands in the thread with its
+  // "## Spoken summary" section intact.
+  it('does not speak a reply that arrives via attach (a rejoined run), only one from its own send', async () => {
+    installFakeSpeechSynthesis()
+    vi.stubGlobal('fetch', buildFetch(
+      undefined,
+      [{ id: 'c1', title: 'Hook Reef anchorages', created_at: '', updated_at: '' }],
+      undefined,
+      (conversationId) => sseMessageResponse(
+        {
+          id: 'm1',
+          conversation_id: conversationId,
+          seq: 1,
+          role: 'assistant',
+          content: '## Spoken summary\n\nFine tomorrow, light winds.',
+          created_at: '2026-09-12T00:00:00Z',
+        },
+        { id: conversationId, title: 'Hook Reef anchorages', created_at: '2026-09-12T00:00:00Z', updated_at: '2026-09-12T00:00:01Z' },
+      ),
+    ))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        screen={{ panel: 'forecast' }}
+        canWrite
+        readAloud
+        onOpenPanel={vi.fn()}
+      />,
+    )
+
+    // The rejoined reply lands in the thread exactly as a sent one would...
+    expect(await screen.findByText(/Fine tomorrow, light winds\./)).toBeInTheDocument()
+    // ...but since this sheet never sent that question itself, it must
+    // never be read aloud.
+    expect(fakeSynth.spoken).toHaveLength(0)
   })
 })

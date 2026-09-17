@@ -7,12 +7,13 @@
  * alarm for the alarm pill).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
 import type { LampStripWidgetConfig } from '@/lib/dashboard-widgets'
+import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 
 // A configured ribbon (ADR 0082), so "does it render" tests below are
 // actually exercising something: the ribbon is normally null in this test
@@ -423,6 +424,33 @@ describe('App at /kiosk', () => {
     expect(screen.getByTestId('kiosk-anchor-watch-isdark')).toHaveTextContent('true')
     expect(mockToggleDarkMode).not.toHaveBeenCalled()
     expect(globalThis.localStorage?.getItem('ui.darkMode')).toBeNull()
+  })
+
+  // mate-answer-toast plan: the wall display never opens a background
+  // GET .../run stream for a watched conversation, even one already
+  // registered in the (per-tab, in-memory) watch store - the answer watcher
+  // is App.tsx's `enabled: !isKiosk` gate on useMateAnswerWatcher. In real
+  // use, a kiosk tab could never have registered anything itself (no Mate
+  // UI is reachable from /kiosk at all), but this pins the gate down
+  // directly rather than relying on that indirect guarantee.
+  it('never opens a background answer-watch stream for the wall display', async () => {
+    registerMateWatch('c1', Date.now())
+    try {
+      const fetchMock = vi.fn(async (url: string) => (
+        typeof url === 'string' && url.endsWith('/api/health')
+          ? { ok: true, json: async () => ({ status: 'ok', version: 'v0.17.0', revision: 'deadbeef' }) }
+          : { ok: false, json: async () => ({}) }
+      ))
+      vi.stubGlobal('fetch', fetchMock)
+
+      window.history.replaceState({}, '', '/kiosk')
+      render(<App />)
+
+      await waitFor(() => expect(screen.getByTestId('kiosk-root')).toBeInTheDocument())
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/run'))).toBe(false)
+    } finally {
+      removeMateWatch('c1')
+    }
   })
 })
 

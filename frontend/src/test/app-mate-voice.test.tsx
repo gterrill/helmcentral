@@ -247,6 +247,16 @@ function stubFetch() {
       const conversation = conversations.find((c) => c.id === id) ?? { id, title: 'Untitled', created_at: '', updated_at: '' }
       return { ok: true, json: async () => ({ conversation, messages: [] }) }
     }
+    // ADR 0105: AssistantThread's rejoin effect GETs .../run for whatever
+    // conversation becomes active - 204 (no run in flight) is the ordinary
+    // answer, matching the real backend, since nothing in this file's
+    // voice-input/mic-button scenarios ever leaves a run actually going.
+    if (/\/api\/assistant\/conversations\/[^/]+\/run$/.test(url) && method === 'GET') {
+      return { ok: true, status: 204, json: async () => ({}) }
+    }
+    if (/\/api\/assistant\/conversations\/[^/]+\/run\/cancel$/.test(url) && method === 'POST') {
+      return { ok: true, status: 204, json: async () => ({}) }
+    }
     // Everything else (dashboard pages, routes, tanks, ...) reports "not
     // found" rather than being individually stubbed - the hooks behind
     // them tolerate that (App.smoke.test.tsx pins this), and nothing this
@@ -363,6 +373,28 @@ describe('App-wide voice (ADR 0093)', () => {
     // The panel's own hook instance opened the same conversation the sheet
     // had active, not whatever it would otherwise have picked as newest.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations/new-1'))
+  })
+
+  // ADR 0105: the Mate page's thread scrolls inside MessageScroller's own
+  // viewport, which needs a bounded height to scroll at all. The page shell
+  // only sets min-h-svh, so on the Mate panel the inset is capped at the
+  // viewport; otherwise a long conversation grows the page past the screen
+  // and the viewport's overscroll-contain stops the page scrolling too.
+  // jsdom can't measure layout, so this checks the class that bounds it.
+  it('caps the page at the viewport height on the Mate panel only', async () => {
+    stubFetch()
+    render(<App />)
+
+    const main = document.querySelector('main')
+    expect(main).not.toBeNull()
+    expect(main!.className).not.toMatch(/(?:^|\s)h-svh(?:\s|$)/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Mate' }))
+    await screen.findByRole('heading', { name: 'Mate' })
+    fireEvent.click(screen.getByRole('button', { name: 'Open the Mate page' }))
+    await waitFor(() => expect(document.title).toBe('Mate · Helmcentral'))
+
+    expect(document.querySelector('main')!.className).toMatch(/(?:^|\s)h-svh(?:\s|$)/)
   })
 
   // [P1, impeccable critique 2026-09-12] the sheet's overlay used to be a

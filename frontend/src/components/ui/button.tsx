@@ -19,6 +19,13 @@ const buttonVariants = cva(
         sm: 'h-9 rounded-md px-3',
         lg: 'h-11 rounded-md px-8',
         icon: 'h-10 w-10',
+        // Added for @shadcn/react's MessageScrollerButton (ADR 0105), whose
+        // own default size is "icon-sm". DESIGN.md's 40px control floor
+        // (`min-h-10 min-w-10` on every button, for touch use on a moving
+        // boat) applies here too, so this stays the same 40x40 square as
+        // "icon" rather than shrinking to shadcn's own smaller default -
+        // it is a size *name* this dependency needs, not a smaller target.
+        'icon-sm': 'h-10 w-10',
       },
     },
     defaultVariants: {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 
 import { AssistantThread } from '@/components/assistant-thread'
 import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
@@ -37,8 +37,15 @@ function buildChat(overrides: Partial<ReturnType<typeof useAssistantChat>> = {})
     send: vi.fn().mockResolvedValue(null),
     sending: false,
     statusText: null,
+    draft: null,
     error: null,
     abort: vi.fn(),
+    // ADR 0105: every test below either doesn't care about rejoining a run
+    // (the default, a no-op 204-shaped resolution) or overrides this
+    // directly - AssistantThread calls this on mount/switch regardless of
+    // what a given test is checking.
+    attach: vi.fn().mockResolvedValue(null),
+    isStreamingConversation: vi.fn().mockReturnValue(false),
     ...overrides,
   }
 }
@@ -124,8 +131,13 @@ describe('AssistantThread', () => {
   // fix(frontend): put cost first in the Mate reply footer and give the
   // operator's bubble a figure (impeccable critique 2026-09-12, Wertheimer
   // 1923 figure-ground) - bg-muted on bg-background was a 2% step, so the
-  // operator's own words barely registered as a bubble at all.
-  it('gives the user bubble a border and the secondary surface token, so it reads as a figure', () => {
+  // operator's own words barely registered as a bubble at all. ADR 0105
+  // rebuilt the thread on shadcn's Bubble primitive, whose "secondary" vs
+  // "muted"/"ghost" visual difference now lives in bubbleVariants rather
+  // than in literal utility classes this test can read off the content
+  // node directly - so this checks the ancestor Bubble's own `data-variant`
+  // instead of raw class strings.
+  it('gives the user bubble the secondary variant, so it reads as a figure', () => {
     const conversations = buildConversations({
       messages: [
         {
@@ -141,11 +153,12 @@ describe('AssistantThread', () => {
 
     render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
 
-    const bubble = screen.getByText('Tongue Bay or Blue Pearl Bay first?')
-    expect(bubble.className).toEqual(expect.stringContaining('border'))
-    expect(bubble.className).toEqual(expect.stringContaining('border-border'))
-    expect(bubble.className).toEqual(expect.stringContaining('bg-secondary'))
-    expect(bubble.className).not.toEqual(expect.stringContaining('bg-muted'))
+    const content = screen.getByText('Tongue Bay or Blue Pearl Bay first?')
+    const bubble = content.closest('[data-slot="bubble"]')
+    expect(bubble).not.toBeNull()
+    expect(bubble).toHaveAttribute('data-variant', 'secondary')
+    // whitespace-pre-wrap still lives directly on the content node.
+    expect(content.className).toEqual(expect.stringContaining('whitespace-pre-wrap'))
   })
 
   it('Enter sends the composer content through the passed chat.send and appends it locally', async () => {
@@ -297,5 +310,183 @@ describe('AssistantThread', () => {
     expect(screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')).toBeDisabled()
     expect(screen.getByText('Read-only session')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+  })
+
+  // ADR 0105: the streamed draft renders as its own assistant item inside
+  // the message log while a round is still being written, and the status
+  // marker (which otherwise reads "Thinking…"/tool activity) steps aside
+  // for it - reappearing once a retract clears the draft but the run keeps
+  // going (e.g. the round turned into tool calls).
+  describe('streamed draft (ADR 0105)', () => {
+    it('renders the draft inside the message log while sending, and hides the status marker', () => {
+      const conversations = buildConversations({
+        messages: [
+          {
+            id: 'u1',
+            conversationId: 'c1',
+            seq: 0,
+            role: 'user',
+            content: 'In one sentence, what is a bowline used for?',
+            createdAt: '2026-09-17T00:00:00Z',
+          },
+        ],
+      })
+
+      render(
+        <AssistantThread
+          canWrite
+          conversations={conversations}
+          chat={buildChat({ sending: true, statusText: 'Thinking…', draft: 'A bowline forms a fixed loop' })}
+        />,
+      )
+
+      const log = screen.getByRole('log')
+      expect(within(log).getByText(/A bowline forms a fixed loop/)).toBeInTheDocument()
+      // The status text steps aside while the draft itself is on screen, but
+      // Stop stays: a long answer can still be streaming and spending tokens,
+      // and the operator must be able to cut it off mid-sentence.
+      expect(screen.queryByText('Thinking…')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Stop asking' })).toBeInTheDocument()
+    })
+
+    it('shows the status marker again once a retract clears the draft but sending continues', () => {
+      const conversations = buildConversations({ messages: [] })
+
+      const { rerender } = render(
+        <AssistantThread
+          canWrite
+          conversations={conversations}
+          chat={buildChat({ sending: true, statusText: 'Working out the answer…', draft: 'Let me check the wind' })}
+        />,
+      )
+
+      expect(screen.queryByText('Working out the answer…')).not.toBeInTheDocument()
+
+      // A retract clears the draft (use-assistant-chat.ts sets it back to
+      // null) while the run is still going - the loop moved on to tool
+      // calls.
+      rerender(
+        <AssistantThread
+          canWrite
+          conversations={conversations}
+          chat={buildChat({ sending: true, statusText: 'Fetching wind forecast…', draft: null })}
+        />,
+      )
+
+      expect(screen.getByText('Fetching wind forecast…')).toBeInTheDocument()
+      expect(screen.queryByText(/Let me check the wind/)).not.toBeInTheDocument()
+    })
+
+    it('does not render a footer on the in-progress draft item', () => {
+      render(
+        <AssistantThread
+          canWrite
+          conversations={buildConversations({ messages: [] })}
+          chat={buildChat({ sending: true, draft: 'Partial answer, still writing' })}
+        />,
+      )
+
+      const draftText = screen.getByText('Partial answer, still writing')
+      const message = draftText.closest('[data-slot="message"]')
+      expect(message).not.toBeNull()
+      expect(within(message as HTMLElement).queryByText(/·/)).not.toBeInTheDocument()
+    })
+  })
+
+  // ADR 0105 ("the answer outlives the page"): a reply left running when the
+  // operator navigated away must be rejoined, not just left for dead, the
+  // moment this thread is showing that conversation again - whether that's
+  // this component's first mount or the operator switching to a different
+  // thread while the panel stays open.
+  describe('rejoining a run on mount/switch (ADR 0105)', () => {
+    it('calls chat.attach with the active conversation id on mount', () => {
+      const attach = vi.fn().mockResolvedValue(null)
+      render(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={buildChat({ attach })} />)
+
+      expect(attach).toHaveBeenCalledWith('c1')
+    })
+
+    it('calls chat.attach again when the active conversation switches to a different id', () => {
+      const attach = vi.fn().mockResolvedValue(null)
+      const chat = buildChat({ attach })
+      const { rerender } = render(
+        <AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={chat} />,
+      )
+      expect(attach).toHaveBeenCalledWith('c1')
+
+      rerender(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c2' })} chat={chat} />)
+      expect(attach).toHaveBeenCalledWith('c2')
+    })
+
+    it('does not call chat.attach when there is no active conversation yet', () => {
+      const attach = vi.fn().mockResolvedValue(null)
+      render(<AssistantThread canWrite conversations={buildConversations({ activeId: null })} chat={buildChat({ attach })} />)
+
+      expect(attach).not.toHaveBeenCalled()
+    })
+
+    it('does not call chat.attach while a local send for this conversation is already streaming', () => {
+      const attach = vi.fn().mockResolvedValue(null)
+      render(
+        <AssistantThread
+          canWrite
+          conversations={buildConversations({ activeId: 'c1' })}
+          chat={buildChat({ attach, sending: true, isStreamingConversation: (id: string) => id === 'c1' })}
+        />,
+      )
+
+      expect(attach).not.toHaveBeenCalled()
+    })
+
+    // Code review 2026-09-17: the rejoin used to be skipped whenever
+    // anything was streaming, so opening B while A was still answering left
+    // B showing A's draft and status, with Stop cancelling A's run.
+    it('rejoins the newly opened conversation even while another one is still streaming', () => {
+      const attach = vi.fn().mockResolvedValue(null)
+      const chat = buildChat({ attach, sending: true, isStreamingConversation: (id: string) => id === 'c1' })
+      const { rerender } = render(
+        <AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={chat} />,
+      )
+      expect(attach).not.toHaveBeenCalled()
+
+      rerender(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c2' })} chat={chat} />)
+
+      expect(attach).toHaveBeenCalledWith('c2')
+    })
+
+    it("does not append a reply into a conversation other than the one it answers", async () => {
+      let resolveSend!: (message: AssistantMessage | null) => void
+      const send = vi.fn(() => new Promise<AssistantMessage | null>((resolve) => { resolveSend = resolve }))
+      const chat = buildChat({ send })
+      const first = buildConversations({ activeId: 'c1' })
+      const { rerender } = render(<AssistantThread canWrite conversations={first} chat={chat} />)
+
+      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      fireEvent.change(textarea, { target: { value: 'Refuge Cove or Waterloo Bay?' } })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Refuge Cove or Waterloo Bay?'))
+
+      // One conversations hook across renders, as in the app: its
+      // appendLocal always writes into whatever thread is active now.
+      const second = buildConversations({ activeId: 'c2', appendLocal: first.appendLocal, refresh: first.refresh })
+      rerender(<AssistantThread canWrite conversations={second} chat={chat} />)
+
+      await act(async () => {
+        resolveSend(assistantMessage({ id: 'late', conversationId: 'c1' }))
+      })
+      expect(first.appendLocal).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'late' }))
+      expect(first.refresh).not.toHaveBeenCalled()
+    })
+
+    it('appends the rejoined reply and refreshes the conversation once attach resolves a message', async () => {
+      const reply = assistantMessage({ id: 'rejoined-1', content: 'Blue Pearl Bay first, on the flood.' })
+      const attach = vi.fn().mockResolvedValue(reply)
+      const conversations = buildConversations({ activeId: 'c1' })
+
+      render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ attach })} />)
+
+      await waitFor(() => expect(conversations.appendLocal).toHaveBeenCalledWith(reply))
+      await waitFor(() => expect(conversations.refresh).toHaveBeenCalled())
+    })
   })
 })

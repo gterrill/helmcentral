@@ -1,8 +1,19 @@
 import { Loader2, Square } from 'lucide-react'
-import { useCallback, useState, type KeyboardEvent, type Ref } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Ref } from 'react'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
+import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Button } from '@/components/ui/button'
+import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker'
+import { Message, MessageContent, MessageFooter } from '@/components/ui/message'
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '@/components/ui/message-scroller'
 import { Textarea } from '@/components/ui/textarea'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, useAssistantConversations } from '@/hooks/use-assistant-conversations'
@@ -57,10 +68,16 @@ interface AssistantThreadProps {
 
 /**
  * The message list, footer, status/error rows and composer for one Mate
- * conversation (ADR 0093). Extracted from AssistantDrawer so both the full
- * panel (which also owns a conversation-list column) and the quick Mate
- * sheet can host the same thread over whatever page is behind it - neither
- * owns any data itself, both hand it a conversations/chat pair.
+ * conversation (ADR 0093, streamed per ADR 0105). Extracted from
+ * AssistantDrawer so both the full panel (which also owns a
+ * conversation-list column) and the quick Mate sheet can host the same
+ * thread over whatever page is behind it - neither owns any data itself,
+ * both hand it a conversations/chat pair.
+ *
+ * Built on shadcn's chat primitives (MessageScroller/Message/Bubble/
+ * Marker, ADR 0104): MessageScroller owns the scroll position and the
+ * jump-to-latest button, Message/Bubble render one turn each, and Marker
+ * carries the status line and tool activity while a reply is in flight.
  */
 export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef }: AssistantThreadProps) {
   const [content, setContent] = useState('')
@@ -72,6 +89,40 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // first question", and it clears the moment the next question is sent.
   const [stopped, setStopped] = useState(false)
 
+  // ADR 0105 ("the answer outlives the page"): whenever the active
+  // conversation becomes a real id - on mount, or when the operator
+  // switches threads - rejoin whatever reply the server is still writing
+  // for it. The only case to skip is this conversation's own send already
+  // streaming (a brand new thread's first question creates the id and sends
+  // straight away). A stream for a *different* conversation is superseded:
+  // attach() closes it locally (its run carries on server-side) and clears
+  // its status and draft, so this thread never shows, or Stops, another
+  // conversation's run.
+  const activeIdRef = useRef(conversations.activeId)
+  activeIdRef.current = conversations.activeId
+  useEffect(() => {
+    const id = conversations.activeId
+    if (id === null || chat.isStreamingConversation(id)) return
+    let cancelled = false
+    void (async () => {
+      // A second effect run (React StrictMode's mount/cleanup/mount) simply
+      // supersedes this call the same way a second chat.send() would - the
+      // superseded attach resolves null and this local `cancelled` guard
+      // keeps its resolution from doing anything further either way.
+      const reply = await chat.attach(id)
+      if (cancelled || reply === null || activeIdRef.current !== id) return
+      conversations.appendLocal(reply)
+      await conversations.refresh()
+    })()
+    return () => {
+      cancelled = true
+    }
+    // Only an activeId change (including the initial mount) should rejoin a
+    // run; re-running on every `chat`/`conversations` identity change would
+    // loop or race an in-progress send.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations.activeId])
+
   const handleSend = useCallback(async () => {
     const trimmed = content.trim()
     if (trimmed === '' || chat.sending || !canWrite) return
@@ -81,6 +132,9 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     if (conversationId === null) {
       conversationId = await conversations.create()
       if (conversationId === null) return
+      // This thread now shows the new conversation, even before the render
+      // that carries its id lands.
+      activeIdRef.current = conversationId
     }
 
     conversations.appendLocal({
@@ -94,14 +148,16 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     setContent('')
 
     const reply = await chat.send(conversationId, trimmed)
-    if (reply) {
+    // The operator may have opened another thread while this one answered;
+    // appendLocal writes into whichever thread is active now.
+    if (reply && activeIdRef.current === conversationId) {
       conversations.appendLocal(reply)
       await conversations.refresh()
     }
   }, [content, chat, conversations, canWrite])
 
   const handleStop = useCallback(() => {
-    chat.abort()
+    void chat.abort()
     setStopped(true)
   }, [chat])
 
@@ -112,54 +168,106 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     }
   }
 
+  const hasMessages = conversations.messages.length > 0
+  // ADR 0105: the draft is the current round's answer text streaming in.
+  // While it holds text, it is the thing on screen in place of the status
+  // marker below - a retract (the round turned into tool calls) clears it
+  // back to null and the marker returns, even though `sending` is still true.
+  const showDraft = chat.sending && Boolean(chat.draft)
+  const showStatusMarker = chat.sending && !showDraft
+
   return (
     <div
       className="mx-auto flex min-h-0 w-full max-w-3xl min-w-0 flex-1 flex-col gap-3"
       data-testid="assistant-thread-root"
     >
-      <div
-        className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-1 py-2"
-        data-testid="assistant-thread-scroll"
-      >
-        {conversations.messages.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Ask Mate: &ldquo;{EXAMPLE_QUESTION}&rdquo;</p>
-        ) : (
-          conversations.messages.map((message) => (
-            <div key={message.id} className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-              {message.role === 'user' ? (
-                <div className="max-w-[85%] min-w-0 whitespace-pre-wrap rounded-lg border border-border bg-secondary px-4 py-3 text-sm leading-relaxed text-foreground">
-                  {message.content}
-                </div>
+      <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+        <MessageScroller className="min-h-0 flex-1" data-testid="assistant-thread-message-scroller">
+          <MessageScrollerViewport className="min-h-0 flex-1 px-1 py-2" data-testid="assistant-thread-scroll">
+            <MessageScrollerContent className="gap-6">
+              {!hasMessages && !showDraft ? (
+                <p className="text-sm text-muted-foreground">Ask Mate: &ldquo;{EXAMPLE_QUESTION}&rdquo;</p>
               ) : (
-                <div className="w-full min-w-0">
-                  <AssistantMarkdown content={message.content} />
-                  <p
-                    className="mt-4 border-t border-border pt-2 text-[11px] tabular-nums text-muted-foreground"
-                    title={formatMessageFooterTitle(message)}
-                  >
-                    {formatMessageFooter(message)}
-                  </p>
-                </div>
+                <>
+                  {conversations.messages.map((message) => (
+                    <MessageScrollerItem
+                      key={message.id}
+                      messageId={message.id}
+                      scrollAnchor={message.role === 'user'}
+                    >
+                      {message.role === 'user' ? (
+                        <Message align="end">
+                          <MessageContent>
+                            <Bubble variant="secondary" align="end">
+                              <BubbleContent className="whitespace-pre-wrap">{message.content}</BubbleContent>
+                            </Bubble>
+                          </MessageContent>
+                        </Message>
+                      ) : (
+                        <Message>
+                          <MessageContent>
+                            <Bubble variant="ghost">
+                              <BubbleContent>
+                                <AssistantMarkdown content={message.content} />
+                              </BubbleContent>
+                            </Bubble>
+                            <MessageFooter
+                              className="tabular-nums"
+                              title={formatMessageFooterTitle(message)}
+                            >
+                              {formatMessageFooter(message)}
+                            </MessageFooter>
+                          </MessageContent>
+                        </Message>
+                      )}
+                    </MessageScrollerItem>
+                  ))}
+
+                  {showDraft && (
+                    <MessageScrollerItem messageId="draft">
+                      <Message>
+                        <MessageContent>
+                          <Bubble variant="ghost">
+                            <BubbleContent>
+                              <AssistantMarkdown content={chat.draft ?? ''} />
+                            </BubbleContent>
+                          </Bubble>
+                        </MessageContent>
+                      </Message>
+                    </MessageScrollerItem>
+                  )}
+                </>
               )}
-            </div>
-          ))
-        )}
-      </div>
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton />
+        </MessageScroller>
+      </MessageScrollerProvider>
 
       {chat.sending && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>{chat.statusText ?? 'Thinking…'}</span>
+        <Marker role={showStatusMarker ? 'status' : undefined}>
+          {showStatusMarker && (
+            <>
+              <MarkerIcon>
+                <Loader2 className="animate-spin" />
+              </MarkerIcon>
+              <MarkerContent className="shimmer">{chat.statusText ?? 'Thinking…'}</MarkerContent>
+            </>
+          )}
+          {/* Stop outlives the status text: a streaming answer is still
+              spending tokens and can be cut off mid-sentence. */}
           <Button variant="ghost" size="icon" className="ml-auto" aria-label="Stop asking" onClick={handleStop}>
             <Square className="h-4 w-4" />
           </Button>
-        </div>
+        </Marker>
       )}
 
-      {stopped && !chat.sending && <p className="text-[11px] text-muted-foreground">Stopped.</p>}
+      {stopped && !chat.sending && <Marker className="text-[11px]">Stopped.</Marker>}
 
       {(chat.error || conversations.errorMessage) && (
-        <p className="text-sm text-destructive">{chat.error ?? conversations.errorMessage}</p>
+        <Bubble variant="destructive">
+          <BubbleContent>{chat.error ?? conversations.errorMessage}</BubbleContent>
+        </Bubble>
       )}
 
       <div className="flex flex-col gap-1">

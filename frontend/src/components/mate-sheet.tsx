@@ -49,6 +49,12 @@ interface MateSheetProps {
    * it there. The sheet closes itself right after; it does not wait for the
    * panel to actually mount. */
   onOpenPanel: (conversationId: string | null) => void
+  /** Mirrors AssistantDrawer's own prop of the same name (mate-answer-toast
+   * plan): fires whenever the sheet's active conversation settles, so
+   * App.tsx can tell whether a given conversation is the one the sheet is
+   * currently showing - the App-level answer watcher needs this to know
+   * not to toast for a reply the sheet is displaying right now. */
+  onActiveConversationChange?: (id: string | null) => void
 }
 
 /**
@@ -60,11 +66,19 @@ interface MateSheetProps {
  * the sheet's thread survives being closed and reopened the same way the
  * panel's does.
  */
-export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel }: MateSheetProps) {
+export function MateSheet({ open, onOpenChange, initialQuestion, newConversation = false, screen, canWrite, readAloud, onOpenPanel, onActiveConversationChange }: MateSheetProps) {
   const conversations = useAssistantConversations()
   const chat = useAssistantChat()
   const speechOutput = useSpeechOutput()
   const composerRef = useRef<HTMLTextAreaElement>(null)
+
+  // Same pattern as AssistantDrawer's own effect of the same name: waits on
+  // `loading` so a transient null (before the mount fetch has resolved)
+  // never reaches the caller as "no active conversation".
+  useEffect(() => {
+    if (conversations.loading) return
+    onActiveConversationChange?.(conversations.activeId)
+  }, [onActiveConversationChange, conversations.activeId, conversations.loading])
 
   // "New conversation" (ADR 0094): the sheet is one thread plus the
   // composer, and it keeps appending to the current conversation - no

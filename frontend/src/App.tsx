@@ -122,6 +122,7 @@ import { useDarkMode } from '@/hooks/use-dark-mode'
 import { FORECAST_REFRESH_SECONDS, PLACE_NAME_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
 import { useAppConfig } from '@/hooks/use-app-config'
 import { useMateVoice } from '@/hooks/use-mate-voice'
+import { useMateAnswerWatcher } from '@/hooks/use-mate-answer-watcher'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import {
@@ -430,6 +431,13 @@ export function App() {
   // not "start a fresh one" - the panel's own hook falls back to its usual
   // newest-thread behaviour when this is null.
   const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(initialLocation.conversationId ?? null)
+  // The sheet's own active conversation (mate-answer-toast plan): mirrors
+  // matePanelConversationId above, but for the sheet rather than the panel -
+  // MateSheet reports it the same way AssistantDrawer already reports
+  // matePanelConversationId, via onActiveConversationChange below. Needed so
+  // the answer watcher can tell a conversation the sheet is showing right
+  // now apart from one it merely knows about.
+  const [mateSheetConversationId, setMateSheetConversationId] = useState<string | null>(null)
   const openMate = useCallback((question?: string, options?: { newConversation?: boolean }) => {
     setMateSheetQuestion(question)
     setMateSheetNewConversation(Boolean(options?.newConversation))
@@ -439,6 +447,37 @@ export function App() {
     () => screenContextFor({ panel: activePanel, section: settingsSection }, activePage?.name ?? null),
     [activePanel, settingsSection, activePage],
   )
+
+  // mate-answer-toast plan: which conversation(s), if any, are actually on
+  // screen right now - the Mate panel's active thread only counts while the
+  // panel itself is the active one, and likewise the sheet's only while it's
+  // open. Both can in principle be different conversations at once (the
+  // sheet is an overlay over whatever panel is behind it), so this is a set
+  // of up to two ids, not a single one.
+  const viewedMateConversationIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (activePanel === 'assistant' && matePanelConversationId !== null) ids.add(matePanelConversationId)
+    if (mateSheetOpen && mateSheetConversationId !== null) ids.add(mateSheetConversationId)
+    return ids
+  }, [activePanel, matePanelConversationId, mateSheetOpen, mateSheetConversationId])
+
+  // The "Open" action on a Mate-answer toast (mate-answer-toast plan): the
+  // same navigation the sheet's own "Open the Mate page" button already
+  // does (onOpenPanel below) - hand the panel this conversation and
+  // navigate to it, through requestNavigate so a dirty Settings page still
+  // gets to veto it exactly as any other navigation would.
+  const openMateConversationFromToast = useCallback((conversationId: string) => {
+    setMatePanelConversationId(conversationId)
+    requestNavigate('assistant', () => setActivePanel('assistant'))
+  }, [requestNavigate])
+
+  // Mounted unconditionally (rules of hooks) but a no-op on the kiosk route
+  // (`enabled: !isKiosk`) - see the hook's own doc comment. Never on the
+  // kiosk path: no Mate UI is reachable there at all (isKiosk's early
+  // return below is well before MateSheet/the Mate panel), so nothing
+  // could ever be watched from that tab regardless, but this keeps that
+  // explicit rather than incidental.
+  useMateAnswerWatcher(viewedMateConversationIds, openMateConversationFromToast, !isKiosk)
 
   // The in-app manual (ADR 0095): a right-hand sheet, rendered once here
   // beside the Mate sheet, opened by the header's contextual `?`, the
@@ -2155,7 +2194,11 @@ export function App() {
         <SidebarRail />
       </Sidebar>
 
-      <SidebarInset>
+      {/* The shell is min-h-svh, so panels normally grow the page and the
+          window scrolls. Mate's thread scrolls inside its own viewport
+          instead (ADR 0105), which only works if something above it has a
+          bounded height, so the Mate panel caps the inset at the viewport. */}
+      <SidebarInset className={activePanel === 'assistant' ? 'h-svh' : undefined}>
         {/* `min-w-0` on both halves is load-bearing, not cosmetic: without it a flex
             item refuses to shrink below its content width and the right-hand cluster
             gets pushed off a phone screen (AGENTS.md — prevent viewport overflows).
@@ -2400,6 +2443,7 @@ export function App() {
               setMateSheetOpen(false)
               requestNavigate('assistant', () => setActivePanel('assistant'))
             }}
+            onActiveConversationChange={setMateSheetConversationId}
           />
         </Suspense>
       )}

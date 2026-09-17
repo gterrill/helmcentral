@@ -12,6 +12,19 @@ and it looks both places up, checks wind and tide for each, and comes back
 with a short answer and a comparison table, in the units and time zone the
 rest of the dashboard uses.
 
+The answer appears as Mate writes it, rather than sitting on a blank panel
+until the whole reply is ready. While it's still looking something up you
+see what it's doing instead ("Looking up Tongue Bay…"); that swaps for the
+words themselves the moment there's an answer to show.
+
+Mate keeps writing the answer even if you switch to another panel, or the
+sheet closes, while it's still working. Come back and you'll either see it
+still arriving or already finished, footer and all, instead of finding it
+gave up. Only pressing the stop button next to a question actually cancels
+it; leaving the page never does. If you've moved on to something else by the
+time it finishes, a toast tells you Mate answered (or couldn't), with a
+button that takes you straight to that conversation.
+
 ## Asking Mate
 
 There are two ways in. The sidebar's Mate panel is the full conversation

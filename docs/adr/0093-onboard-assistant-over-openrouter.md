@@ -9,6 +9,10 @@ operator-triggered, non-blocking, failure visible) and closed with "if
 outbound LLM calls later become a general capability, that earns its own
 ADR." This is that ADR.
 
+Amended by ADR 0105, which replaces §5's whole-message delivery with
+token-by-token streaming (`delta`/`retract` events) and reverses the
+"Token streaming in v1" rejection below.
+
 ## Context
 
 At Hook Reef the crew wanted to know whether to visit Tongue Bay first, to
