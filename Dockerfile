@@ -21,7 +21,7 @@ RUN npm run build
 # compiles every target natively. Letting buildx pick the target platform here
 # instead would compile Go under QEMU emulation for the two arm legs, which is
 # an order of magnitude slower for an identical binary.
-FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS backend-builder
 
 WORKDIR /app
 
