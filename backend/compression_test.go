@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -363,6 +366,43 @@ func TestCompression_SkipListMatchesRegisteredRoutes(t *testing.T) {
 		if !registered[pattern] {
 			t.Errorf("noCompressRoutePatterns contains %q, which is not a currently registered API route", pattern)
 		}
+	}
+}
+
+// TestCompression_DocumentContentRouteStaysUncompressed is B3's addition to
+// noCompressRoutePatterns (documents_handlers.go's documentContentHandler):
+// a document's raw bytes must survive a Range request's byte offsets
+// untouched, the same reasoning already applied to the tile/mbtiles routes
+// above it in the skip list. Exercised through the real middleware stack,
+// like TestCompression_LargeJSONRouteIsGzipped above, rather than only
+// compressionSkipper in isolation.
+func TestCompression_DocumentContentRouteStaysUncompressed(t *testing.T) {
+	withTestDocumentStore(t)
+	content := bytes.Repeat([]byte("A"), 4096) // over compressionMinLength
+	doc, err := globalDocumentStore.Insert(document{SHA256: "sha-compress-content", Filename: "log.txt", MIME: "text/plain"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(documentsDirPath(), doc.SHA256), content, 0o644); err != nil {
+		t.Fatalf("write fixture file: %v", err)
+	}
+
+	e := newCompressedTestEcho()
+	e.GET("/api/documents/:id/content", documentContentHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/documents/"+doc.ID+"/content", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("Content-Encoding = %q, want empty (documents content is skip-listed)", got)
+	}
+	if rec.Body.String() != string(content) {
+		t.Fatalf("body does not match the stored file")
 	}
 }
 

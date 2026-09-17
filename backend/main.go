@@ -643,6 +643,23 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/logs", tierRead, getLogsHandler},
 		{http.MethodGet, "/api/logs/stream", tierRead, logsStreamHandler},
 
+		// Document library (ADR 0106): metadata, virtual folders, tags,
+		// content bytes and full text, backed by globalDocumentStore
+		// (documents_store.go) and a flat hash-named folder on disk
+		// (documents_handlers.go). The two static routes ("move", "tags")
+		// are listed ahead of the "/:id" routes below purely for
+		// readability - Echo's router already prioritises a static segment
+		// over a param one regardless of registration order (confirmed
+		// against vendored router.go: "Search order/priority is: static >
+		// param > any"), so "GET /api/documents/tags" can never be captured
+		// by "GET /api/documents/:id" either way.
+		{http.MethodGet, "/api/documents", tierRead, listDocumentsHandler},
+		{http.MethodGet, "/api/documents/tags", tierRead, documentTagsHandler},
+		{http.MethodGet, "/api/documents/:id", tierRead, getDocumentHandler},
+		{http.MethodGet, "/api/documents/:id/content", tierRead, documentContentHandler},
+		{http.MethodGet, "/api/documents/:id/text", tierRead, documentTextHandler},
+		{http.MethodGet, "/api/document-folders", tierRead, listDocumentFoldersHandler},
+
 		// ── write: readwrite and above — commands equipment or changes
 		//           stored state that isn't itself a security setting ────
 		{http.MethodPost, "/api/alarms/:id/acknowledge", tierWrite, acknowledgeAlarmHandler},
@@ -693,6 +710,18 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// state (a new message row), which a readonly session must not
 		// trigger (ADR 0093).
 		{http.MethodPost, "/api/assistant/conversations/:id/messages", tierWrite, postAssistantMessageHandler},
+
+		// Document library writes (ADR 0106). "move" and "tags" ahead of the
+		// "/:id" routes purely for readability - see the read-tier comment
+		// above on why Echo's router never needs that ordering.
+		{http.MethodPost, "/api/documents", tierWrite, uploadDocumentHandler},
+		{http.MethodPost, "/api/documents/move", tierWrite, moveDocumentsHandler},
+		{http.MethodPatch, "/api/documents/:id", tierWrite, patchDocumentHandler},
+		{http.MethodDelete, "/api/documents/:id", tierWrite, deleteDocumentHandler},
+		{http.MethodPost, "/api/documents/:id/reindex", tierWrite, reindexDocumentHandler},
+		{http.MethodPost, "/api/document-folders", tierWrite, createDocumentFolderHandler},
+		{http.MethodPatch, "/api/document-folders/:id", tierWrite, patchDocumentFolderHandler},
+		{http.MethodDelete, "/api/document-folders/:id", tierWrite, deleteDocumentFolderHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
