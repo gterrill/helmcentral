@@ -1612,7 +1612,7 @@ export function AnchorWatchMap({
                 {isSelected && (
                   <button
                     onClick={(e) => handleRemovePlacemark(e, pm.id)}
-                    className="mt-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur hover:bg-white/25 active:scale-95"
+                    className="mt-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm hover:bg-white/25 active:scale-95"
                     style={{ transition: 'background-color 150ms ease-out' }}
                   >
                     Remove
@@ -1629,7 +1629,7 @@ export function AnchorWatchMap({
           <Marker latitude={pinCandidate.lat} longitude={pinCandidate.lon} style={{ zIndex: 1200 }}>
             <div className="flex flex-col items-center" data-testid="pin-candidate">
               <MapPin className="h-6 w-6 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" />
-              <div className="mt-1 flex items-center gap-1.5 rounded-full bg-black/80 py-1 pl-2.5 pr-1 backdrop-blur">
+              <div className="mt-1 flex items-center gap-1.5 rounded-full bg-black/80 py-1 pl-2.5 pr-1 backdrop-blur-sm">
                 <span className="whitespace-nowrap font-mono text-[11px] text-white">
                   {formatRange(Math.round(haversineMeters(vesselLat, vesselLon, pinCandidate.lat, pinCandidate.lon)))}
                   {' · '}
@@ -1659,7 +1659,7 @@ export function AnchorWatchMap({
 
       {editMode !== 'none' && (
         <div className="pointer-events-auto absolute inset-x-0 bottom-4 flex justify-center">
-          <div className="flex items-center gap-2 rounded-full bg-black/65 py-2 pl-4 pr-2 backdrop-blur">
+          <div className="flex items-center gap-2 rounded-full bg-black/65 py-2 pl-4 pr-2 backdrop-blur-sm">
             <span className="text-xs text-white/70">
               {editMode === 'reposition' ? 'Tap map to place anchor' : 'Tap map to set radius'}
             </span>
@@ -1692,7 +1692,7 @@ export function AnchorWatchMap({
           is a ground dark enough that it doesn't have to. */}
       <div
         ref={metricsPanelRef}
-        className="pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg bg-black/90 backdrop-blur"
+        className="pointer-events-none absolute left-3 top-3 overflow-hidden rounded-lg bg-black/90 backdrop-blur-sm"
         style={{ zIndex: 2000 }}
         data-testid="anchor-watch-metrics"
       >
@@ -1819,7 +1819,7 @@ export function AnchorWatchMap({
           <button
             onClick={onFullscreen}
             aria-label="Full screen"
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
             style={{ transition: 'background-color 150ms ease-out' }}
           >
             <Expand className="h-4 w-4" />
@@ -1828,7 +1828,7 @@ export function AnchorWatchMap({
         <button
           onClick={handleZoomIn}
           aria-label="Zoom in"
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
           style={{ transition: 'background-color 150ms ease-out' }}
         >
           <Plus className="h-4 w-4" />
@@ -1836,7 +1836,7 @@ export function AnchorWatchMap({
         <button
           onClick={handleZoomOut}
           aria-label="Zoom out"
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
           style={{ transition: 'background-color 150ms ease-out' }}
         >
           <Minus className="h-4 w-4" />
@@ -1847,7 +1847,7 @@ export function AnchorWatchMap({
               onClick={handleImageryToggle}
               aria-label="Toggle satellite imagery"
               className={cn(
-                'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+                'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
                 showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
               )}
               style={{ transition: 'background-color 150ms ease-out' }}
@@ -1860,7 +1860,7 @@ export function AnchorWatchMap({
               disabled={!radarEchoAvailability.available}
               title={radarEchoAvailability.available ? undefined : (radarEchoAvailability.reason ?? undefined)}
               className={cn(
-                'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+                'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
                 showRadarEcho ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
                 !radarEchoAvailability.available && 'cursor-not-allowed opacity-50',
               )}
@@ -1871,7 +1871,7 @@ export function AnchorWatchMap({
             <button
               onClick={handleRecenter}
               aria-label="Re-centre on anchor"
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
               style={{ transition: 'background-color 150ms ease-out' }}
             >
               <Crosshair className="h-4 w-4" />

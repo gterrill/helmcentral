@@ -558,12 +558,12 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                           <div className="font-medium">{model.name}</div>
                           <div className="text-xs text-muted-foreground">{model.id}</div>
                           {isAutoModel && draft.assistantAllowedModels.includes(model.id) ? (
-                            <span className="mt-1 inline-flex rounded-sm bg-secondary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-secondary-foreground">
+                            <span className="mt-1 inline-flex rounded-xs bg-secondary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-secondary-foreground">
                               Allowed
                             </span>
                           ) : null}
                           {isAutoModel && draft.assistantExcludedModels.includes(model.id) ? (
-                            <span className="mt-1 inline-flex rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                            <span className="mt-1 inline-flex rounded-xs bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                               Excluded
                             </span>
                           ) : null}

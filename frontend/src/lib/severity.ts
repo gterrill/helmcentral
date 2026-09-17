@@ -22,7 +22,7 @@ export function severityClass(state: AlarmState | string): string {
     case 'alarm':
       return 'text-red-600'
     case 'emergency':
-      return 'bg-red-700 text-white rounded-sm px-1'
+      return 'bg-red-700 text-white rounded-xs px-1'
     default:
       return 'text-muted-foreground'
   }

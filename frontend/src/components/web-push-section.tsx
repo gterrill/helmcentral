@@ -69,7 +69,7 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
               You are on an http:// address, and browsers only allow push over https. Helmcentral ships no
               certificate of its own — the supported route is Tailscale:
             </p>
-            <pre className="mt-2 overflow-x-auto rounded bg-background/60 p-2 font-mono text-[11px] text-foreground">
+            <pre className="mt-2 overflow-x-auto rounded-sm bg-background/60 p-2 font-mono text-[11px] text-foreground">
               tailscale serve --bg 8080
             </pre>
             <p className="mt-2">

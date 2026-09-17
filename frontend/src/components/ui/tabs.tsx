@@ -10,10 +10,11 @@ const Tabs = TabsPrimitive.Root
 
 /**
  * Follows shadcn's Base UI tabs (ui.shadcn.com/docs/components/base/tabs),
- * translated to this project's Tailwind v3 syntax — `data-[active]:` rather
- * than v4's `data-active:` — and with the vertical-orientation plumbing left
- * out, since nothing here renders tabs vertically. `data-active` is the
- * attribute Base UI actually sets on the selected tab; `data-selected` is not.
+ * with the vertical-orientation plumbing left out, since nothing here
+ * renders tabs vertically. `data-active` is the attribute Base UI actually
+ * sets on the selected tab; `data-selected` is not. Written as `data-active:`
+ * (Tailwind v4's built-in variant, since the Tailwind 4 upgrade); it was
+ * `data-[active]:` under Tailwind 3, which had no such shorthand.
  *
  * The `line` variant is the one that survives the instrument skin. shadcn's
  * default pill assumes a light theme where --muted is darker than
@@ -61,16 +62,16 @@ const TabsTrigger = React.forwardRef<
     className={cn(
       // The border is always present, transparent when inactive, so gaining
       // the active outline doesn't shift the row by a pixel.
-      "relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-sm border border-transparent px-3 py-1.5 text-sm font-medium text-foreground/60 transition-all",
-      "hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+      "relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xs border border-transparent px-3 py-1.5 text-sm font-medium text-foreground/60 transition-all",
+      "hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       "disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50",
-      "data-[active]:border-input data-[active]:bg-background data-[active]:text-foreground data-[active]:shadow-sm",
+      "data-[active]:border-input data-[active]:bg-background data-[active]:text-foreground data-[active]:shadow-xs",
       // line: no pill at all, just full-contrast text over an accent underline
       // that sits on the list's own bottom rule.
       "group-data-[variant=line]/tabs-list:h-full group-data-[variant=line]/tabs-list:flex-1 group-data-[variant=line]/tabs-list:rounded-none",
-      "group-data-[variant=line]/tabs-list:data-[active]:border-transparent group-data-[variant=line]/tabs-list:data-[active]:bg-transparent group-data-[variant=line]/tabs-list:data-[active]:shadow-none",
+      "group-data-[variant=line]/tabs-list:data-active:border-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent group-data-[variant=line]/tabs-list:data-active:shadow-none",
       "after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-primary after:opacity-0 after:transition-opacity",
-      "group-data-[variant=line]/tabs-list:data-[active]:after:opacity-100",
+      "group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
       className
     )}
     {...props}
@@ -85,7 +86,7 @@ const TabsContent = React.forwardRef<
   <TabsPrimitive.Panel
     ref={ref}
     className={cn(
-      "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      "mt-2 ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
       className
     )}
     {...props}

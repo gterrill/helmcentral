@@ -264,7 +264,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           })}
         />
       )}
-      <div className="relative h-[175px] w-full touch-none overflow-hidden rounded bg-muted/15">
+      <div className="relative h-[175px] w-full touch-none overflow-hidden rounded-sm bg-muted/15">
         <ComposedChart width={viewportWidth} height={175} margin={tideChartMargin} data={curvePoints}>
           {/* allowDataOverflow is required here: curvePoints intentionally
               includes samples with t (and, for boundary-straddling segments,
@@ -345,7 +345,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         <svg
           viewBox={`0 0 ${viewportWidth} 175`}
           preserveAspectRatio="none"
-          className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           ref={tideTooltip.svgRef}
           tabIndex={0}
           role="img"

@@ -94,7 +94,7 @@ export function LogsSection({ onAskMate }: LogsSectionProps) {
           <span>{connected ? 'Connected' : 'Disconnected'}</span>
         </div>
 
-        <div className="max-h-80 space-y-2 overflow-y-auto rounded-sm bg-background/40 p-2">
+        <div className="max-h-80 space-y-2 overflow-y-auto rounded-xs bg-background/40 p-2">
           {filteredLogs.length === 0 ? (
             <p className="text-sm text-muted-foreground">No matching log entries.</p>
           ) : (
@@ -131,7 +131,7 @@ export function LogsSection({ onAskMate }: LogsSectionProps) {
           </Button>
         </div>
         {selectedText ? (
-          <p className="whitespace-pre-wrap break-words">{selectedText}</p>
+          <p className="whitespace-pre-wrap wrap-break-word">{selectedText}</p>
         ) : (
           <p className="text-muted-foreground">Select a log line to ask Mate about it.</p>
         )}

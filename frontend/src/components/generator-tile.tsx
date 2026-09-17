@@ -181,12 +181,12 @@ export const GeneratorTile = memo(function GeneratorTile({
             <button
               role="switch"
               aria-checked={timedRunEnabled}
-              className="relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+              className="relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
               style={{ background: timedRunEnabled ? 'hsl(var(--primary))' : 'hsl(var(--muted))' }}
               onClick={() => setTimedRunEnabled((v) => !v)}
             >
               <span
-                className="inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
+                className="inline-block h-4 w-4 rounded-full bg-white shadow-xs transition-transform"
                 style={{ transform: timedRunEnabled ? 'translateX(18px)' : 'translateX(2px)' }}
               />
             </button>
@@ -202,7 +202,7 @@ export const GeneratorTile = memo(function GeneratorTile({
                   onChange={(e) =>
                     setTimerHours(Math.max(0, Math.min(23, parseInt(e.target.value, 10) || 0)))
                   }
-                  className="w-14 rounded-md border bg-background px-2 py-1.5 text-center font-mono text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-14 rounded-md border bg-background px-2 py-1.5 text-center font-mono text-sm tabular-nums focus:outline-hidden focus:ring-2 focus:ring-ring"
                 />
                 <span className="text-sm text-muted-foreground">h</span>
               </div>
@@ -216,7 +216,7 @@ export const GeneratorTile = memo(function GeneratorTile({
                   onChange={(e) =>
                     setTimerMinutes(Math.max(0, Math.min(59, parseInt(e.target.value, 10) || 0)))
                   }
-                  className="w-14 rounded-md border bg-background px-2 py-1.5 text-center font-mono text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-14 rounded-md border bg-background px-2 py-1.5 text-center font-mono text-sm tabular-nums focus:outline-hidden focus:ring-2 focus:ring-ring"
                 />
                 <span className="text-sm text-muted-foreground">m</span>
               </div>

@@ -269,7 +269,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
               <span className={`font-display text-6xl leading-none tabular-nums md:text-5xl lg:text-7xl ${socClass}`}>
                 {socLabel}
               </span>
-              <span className="shrink-0 font-display text-2xl leading-none text-muted-foreground md:text-xl lg:text-2xl">
+              <span className="shrink-0 font-display text-2xl leading-none text-muted-foreground md:text-xl md:leading-7 lg:text-2xl lg:leading-8">
                 %
               </span>
             </div>
@@ -277,7 +277,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
               <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                 {timeToGoLabel}
               </p>
-              <p className={`mt-1 truncate font-display text-2xl leading-none tabular-nums md:text-xl lg:text-3xl ${readoutClass}`}>
+              <p className={`mt-1 truncate font-display text-2xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-3xl lg:leading-9 ${readoutClass}`}>
                 {timeToGoValue}
               </p>
             </div>
@@ -355,7 +355,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
         <div className="grid grid-cols-2 gap-2">
           <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Net</p>
-            <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl lg:text-4xl ${readoutClass}`}>
+            <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}>
               {chargingPowerLabel}
               <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
             </p>
@@ -366,7 +366,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
           </div>
           <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
-            <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl lg:text-4xl ${readoutClass}`}>
+            <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}>
               {solarOutputLabel}
               <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
             </p>
@@ -375,7 +375,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
 
         <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Loads</p>
-          <p className="mt-1 truncate font-display text-4xl leading-none tabular-nums text-foreground md:text-xl lg:text-4xl">
+          <p className="mt-1 truncate font-display text-4xl leading-none tabular-nums text-foreground md:text-xl md:leading-7 lg:text-4xl lg:leading-10">
             {loadsTotalLabel}
             <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
           </p>

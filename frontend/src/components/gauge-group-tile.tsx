@@ -76,7 +76,7 @@ export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, age
       }
     >
       <div
-        className="grid gap-2 [grid-template-columns:repeat(var(--gauge-group-cols),minmax(0,1fr))]"
+        className="grid gap-2 grid-cols-[repeat(var(--gauge-group-cols),minmax(0,1fr))]"
         style={{ '--gauge-group-cols': columns } as React.CSSProperties}
       >
         {config.gauges.map((gauge, index) => {
@@ -110,7 +110,7 @@ export const GaugeGroupTile = memo(function GaugeGroupTile({ config, values, age
                 <span className={`flex min-w-0 items-center gap-1 text-[10px] uppercase ${labelTrackingClass} text-muted-foreground`}>
                   <span className="truncate">{label}</span>
                   {r.stale && (
-                    <span className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
+                    <span className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
                       Stale {formatDataAge(r.age)}
                     </span>
                   )}

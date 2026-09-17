@@ -118,7 +118,7 @@ function CornerCard({ corner, values, ages, style, index }: {
                   staling the whole card: one dead sensor among several must
                   not blank readings that are still live. */}
               {stale && (
-                <span className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
+                <span className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400">
                   Stale {formatDataAge(age)}
                 </span>
               )}

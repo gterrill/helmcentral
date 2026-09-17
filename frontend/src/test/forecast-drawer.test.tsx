@@ -3305,7 +3305,7 @@ describe('ForecastDrawer chart keyboard access', () => {
       // shadcn's focus-ring convention; --ring exists in all three themes.
       expect(overlay.getAttribute('class')).toContain('focus-visible:ring-2')
       expect(overlay.getAttribute('class')).toContain('focus-visible:ring-ring')
-      expect(overlay.getAttribute('class')).toContain('focus-visible:outline-none')
+      expect(overlay.getAttribute('class')).toContain('focus-visible:outline-hidden')
     }
   })
 
@@ -3530,10 +3530,13 @@ describe('ForecastDrawer gauge-primary-label contrast token', () => {
     expect(hero!.className.split(' ')).toContain('text-gauge-primary')
   })
 
-  it('wires gauge-primary-label into the Tailwind config beside the other gauge tokens', () => {
+  it('wires gauge-primary-label into the @theme mapping beside the other gauge tokens', () => {
+    // Tailwind v4 is CSS-first (ADR 0046 addendum) - there's no
+    // tailwind.config.ts anymore, so the colour -> utility wiring this test
+    // is guarding now lives in index.css's @theme inline block instead.
     const testDir = dirname(fileURLToPath(import.meta.url))
-    const config = readFileSync(resolve(testDir, '../../tailwind.config.ts'), 'utf8')
-    expect(config).toMatch(/'gauge-primary-label':\s*'hsl\(var\(--gauge-primary-label\)\)'/)
+    const css = readFileSync(resolve(testDir, '../index.css'), 'utf8')
+    expect(css).toMatch(/--color-gauge-primary-label:\s*hsl\(var\(--gauge-primary-label\)\);/)
   })
 })
 

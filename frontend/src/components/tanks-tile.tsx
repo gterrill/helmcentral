@@ -159,7 +159,7 @@ function FuelFooterStat({ label, value, unit, stale, staleAgeLabel }: FuelFooter
         {stale && (
           <span
             data-testid="fuel-footer-stale-badge"
-            className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400"
+            className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none text-amber-600 dark:text-amber-400"
           >
             Stale {staleAgeLabel}
           </span>

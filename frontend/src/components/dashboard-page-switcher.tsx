@@ -167,7 +167,7 @@ export function DashboardPageSwitcher({
           <span className="hidden sm:inline">{displayName}</span>
           <ChevronDown className="h-3.5 w-3.5" />
         </PopoverTrigger>
-        <PopoverContent className="w-72 max-w-[calc(100vw-1rem)] max-h-[var(--available-height)] overflow-y-auto p-1">
+        <PopoverContent className="w-72 max-w-[calc(100vw-1rem)] max-h-(--available-height) overflow-y-auto p-1">
           {reorderMode && canWrite ? (
             <div className="flex min-w-0 flex-col gap-1">
               <div className="flex min-w-0 items-center justify-between gap-2 px-2">
@@ -180,16 +180,16 @@ export function DashboardPageSwitcher({
               <p className="px-2 text-xs text-muted-foreground">Changes save automatically for all devices.</p>
               <ol role="list" aria-label="Dashboard page order" className="flex flex-col">
                 {pages.map((page, index) => (
-                  <li key={page.id} className="flex min-w-0 items-center gap-2 rounded-sm px-2 py-1">
+                  <li key={page.id} className="flex min-w-0 items-center gap-2 rounded-xs px-2 py-1">
                     <span className="w-4 shrink-0 text-xs tabular-nums text-muted-foreground" aria-hidden="true">{index + 1}</span>
                     <span className="min-w-0 flex-1 truncate text-sm">{page.name}</span>
                     <div className="flex shrink-0 gap-1">
-                      <Button variant="ghost" size="icon" className="data-[disabled]:opacity-50" aria-label={`Move ${page.name} up`}
+                      <Button variant="ghost" size="icon" className="data-disabled:opacity-50" aria-label={`Move ${page.name} up`}
                         disabled={reordering || index === 0} focusableWhenDisabled
                         onClick={() => { void handleMove(index, -1) }}>
                         <ArrowUp size={16} aria-hidden="true" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="data-[disabled]:opacity-50" aria-label={`Move ${page.name} down`}
+                      <Button variant="ghost" size="icon" className="data-disabled:opacity-50" aria-label={`Move ${page.name} down`}
                         disabled={reordering || index === pages.length - 1} focusableWhenDisabled
                         onClick={() => { void handleMove(index, 1) }}>
                         <ArrowDown size={16} aria-hidden="true" />
@@ -207,7 +207,7 @@ export function DashboardPageSwitcher({
             {pages.map((page) => (
               <div
                 key={page.id}
-                className="flex min-w-0 items-center justify-between rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                className="flex min-w-0 items-center justify-between rounded-xs px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 {editing?.id === page.id ? (
                   <input
@@ -218,7 +218,7 @@ export function DashboardPageSwitcher({
                     onBlur={() => handleEditConfirm(page.id, page.name)}
                     autoFocus
                     onFocus={(e) => e.currentTarget.select()}
-                    className="min-w-0 flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="min-w-0 flex-1 rounded-sm border bg-background px-1 py-0.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-primary"
                   />
                 ) : (
                   <>
@@ -235,7 +235,7 @@ export function DashboardPageSwitcher({
                         type="button"
                         disabled={reordering}
                         onClick={() => handleEditStart(page)}
-                        className="inline-flex size-10 items-center justify-center rounded p-0.5 hover:bg-accent"
+                        className="inline-flex size-10 items-center justify-center rounded-sm p-0.5 hover:bg-accent"
                         aria-label={`Rename ${page.name}`}
                       >
                         <Pencil className="h-3.5 w-3.5" />
@@ -245,7 +245,7 @@ export function DashboardPageSwitcher({
                           type="button"
                           disabled={reordering}
                           onClick={() => setPendingDelete({ id: page.id, name: page.name })}
-                          className="inline-flex size-10 items-center justify-center rounded p-0.5 hover:bg-accent hover:text-destructive"
+                          className="inline-flex size-10 items-center justify-center rounded-sm p-0.5 hover:bg-accent hover:text-destructive"
                           aria-label={`Delete ${page.name}`}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -272,7 +272,7 @@ export function DashboardPageSwitcher({
                 type="button"
                 onClick={handleCreatePage}
                 disabled={reordering}
-                className="inline-flex min-h-10 w-full items-center justify-center gap-1 rounded-sm px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                className="inline-flex min-h-10 w-full items-center justify-center gap-1 rounded-xs px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
               >
                 <Plus className="h-3.5 w-3.5" />
                 New Page

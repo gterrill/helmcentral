@@ -93,7 +93,7 @@ function HoldToConfirmButton({ label, ariaLabel, disabled, onConfirm, className 
       onPointerCancel={clear}
       className={cn(
         'relative overflow-hidden rounded-md px-3 py-2 text-center font-display text-xs font-semibold uppercase tracking-[0.14em]',
-        'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        'transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         'disabled:cursor-not-allowed disabled:opacity-40',
         className,
       )}
@@ -128,7 +128,7 @@ function ImmediateButton({ label, ariaLabel, disabled, onClick, className }: Imm
       onClick={onClick}
       className={cn(
         'rounded-md border border-border bg-card px-2 py-2 text-center font-display text-sm font-semibold tabular-nums text-foreground',
-        'transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        'transition-colors hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         'disabled:cursor-not-allowed disabled:opacity-40',
         className,
       )}

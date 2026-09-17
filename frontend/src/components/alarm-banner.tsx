@@ -71,7 +71,7 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen }: AlarmBa
     <div
       role="alert"
       className={cn(
-        'flex min-w-0 items-center gap-3 rounded-lg border px-4 py-3 shadow-sm',
+        'flex min-w-0 items-center gap-3 rounded-lg border px-4 py-3 shadow-xs',
         loud
           ? 'border-destructive bg-destructive/10 text-destructive'
           : 'border-border bg-muted text-muted-foreground',

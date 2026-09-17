@@ -121,7 +121,7 @@ export const SolarTile = memo(function SolarTile({
                       <span
                         data-testid={`controller-stale-${controller.id}`}
                         title={`No update for ${formatDataAge(controller.lastUpdateAgeS)}`}
-                        className="ml-1.5 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[9px] leading-none text-amber-600 dark:text-amber-400"
+                        className="ml-1.5 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[9px] leading-none text-amber-600 dark:text-amber-400"
                       >
                         {formatDataAge(controller.lastUpdateAgeS)}
                       </span>

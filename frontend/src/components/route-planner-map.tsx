@@ -522,7 +522,7 @@ export function RoutePlannerMap({
 
         {legs.map((leg) => (
           <Marker key={leg.key} latitude={leg.midLat} longitude={leg.midLon}>
-            <div className="pointer-events-none whitespace-nowrap rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+            <div className="pointer-events-none whitespace-nowrap rounded-sm bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
               {formatNm(leg.distanceM)} / {leg.bearing}°
             </div>
           </Marker>
@@ -557,7 +557,7 @@ export function RoutePlannerMap({
 
       {selectedIndex !== null && (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-black/70 px-3 py-1.5 text-xs text-white backdrop-blur">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-black/70 px-3 py-1.5 text-xs text-white backdrop-blur-sm">
             <span>Waypoint {selectedIndex + 1}</span>
             <button
               type="button"
@@ -582,14 +582,14 @@ export function RoutePlannerMap({
           <button
             onClick={handleZoomIn}
             aria-label="Zoom in"
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
           >
             <Plus className="h-4 w-4" />
           </button>
           <button
             onClick={handleZoomOut}
             aria-label="Zoom out"
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
           >
             <Minus className="h-4 w-4" />
           </button>
@@ -597,7 +597,7 @@ export function RoutePlannerMap({
             onClick={handleHybridToggle}
             aria-label="Toggle satellite imagery"
             className={cn(
-              'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow backdrop-blur active:scale-95',
+              'flex h-9 w-9 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
               showHybridSatellite ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
             )}
             style={{ transition: 'background-color 150ms ease-out' }}
@@ -608,21 +608,21 @@ export function RoutePlannerMap({
             onClick={handleCacheThisArea}
             disabled={!showHybridSatellite}
             aria-label="Cache this area"
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95 disabled:opacity-30 disabled:hover:bg-black/65"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95 disabled:opacity-30 disabled:hover:bg-black/65"
           >
             <Download className="h-4 w-4" />
           </button>
           <button
             onClick={handleFitBounds}
             aria-label={waypoints.length > 0 ? 'Fit route in view' : 'Center on current position'}
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow backdrop-blur hover:bg-black/80 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
           >
             <Crosshair className="h-4 w-4" />
           </button>
         </div>
 
         {(prefetching || showCachedPill) && progress && (
-          <div className="pointer-events-none rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur">
+          <div className="pointer-events-none rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur-sm">
             {prefetching ? `Caching… ${progress.done}/${progress.total}` : 'Cached'}
           </div>
         )}
@@ -630,7 +630,7 @@ export function RoutePlannerMap({
 
       {waypoints.length === 0 && (
         <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
-          <div className="rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur">
+          <div className="rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur-sm">
             Click the map to add your first waypoint
           </div>
         </div>
@@ -638,7 +638,7 @@ export function RoutePlannerMap({
 
       {showCoastlineFallback && (
         <div className="pointer-events-none absolute bottom-4 left-3" style={{ zIndex: 2000 }}>
-          <div className="rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur">
+          <div className="rounded-full bg-black/55 px-3 py-1.5 text-xs text-white/80 backdrop-blur-sm">
             No chart data — reference coastline only
           </div>
         </div>

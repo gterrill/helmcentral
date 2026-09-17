@@ -49,7 +49,7 @@ export function LoginScreen({ onLogin, error }: LoginScreenProps) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm rounded-xl border bg-card p-6 shadow-sm">
+      <div className="w-full max-w-sm rounded-xl border bg-card p-6 shadow-xs">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <Anchor className="h-8 w-8 text-primary" aria-hidden="true" />
           <h1 className="font-display text-lg font-semibold uppercase tracking-[0.1em] text-foreground">

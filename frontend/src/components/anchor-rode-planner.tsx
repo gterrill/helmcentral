@@ -366,7 +366,7 @@ export function AnchorRodePlanner({
   }
 
   return (
-    <div className="w-full shrink-0 lg:w-[--sidebar-width]" style={{ '--sidebar-width': '20rem' } as CSSProperties}>
+    <div className="w-full shrink-0 lg:w-(--sidebar-width)" style={{ '--sidebar-width': '20rem' } as CSSProperties}>
       <Sidebar side="right" collapsible="none" className="h-full w-full rounded-xl border">
         <SidebarHeader className="flex-row items-center justify-between border-b">
           {/* A chain link, the rode itself — same icon the collapsed rail
@@ -415,7 +415,7 @@ export function AnchorRodePlanner({
                   step={isImperial ? 1 : 0.1}
                   value={depthInputValue}
                   onChange={(e) => handleDepthInputChange(e.target.value)}
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-hidden focus:ring-1 focus:ring-ring"
                 />
                 <p className="mt-1 text-[10px] text-muted-foreground">{depthCaption}</p>
               </label>
@@ -424,7 +424,7 @@ export function AnchorRodePlanner({
                 <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Wind</p>
                 <select
                   aria-label="Forecast wind"
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
                   value={selectedBand?.id ?? ''}
                   onChange={(e) => onWindBandChange(e.target.value)}
                 >
@@ -441,7 +441,7 @@ export function AnchorRodePlanner({
                 <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Sea State</p>
                 <select
                   aria-label="Sea state"
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
                   value={pendingSeaState}
                   onChange={(e) => handleSeaStateChange(e.target.value as SeaState)}
                 >
@@ -456,7 +456,7 @@ export function AnchorRodePlanner({
                 <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Seabed</p>
                 <select
                   aria-label="Seabed"
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
                   value={pendingSeabedType}
                   onChange={(e) => handleSeabedChange(e.target.value as SeabedType)}
                 >
@@ -550,7 +550,7 @@ export function AnchorRodePlanner({
                   value={Number.isFinite(pendingRode) ? pendingRode : 0}
                   onChange={(e) => handleRodeChange(e.target.value)}
                   disabled={isInactive}
-                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                  className="mt-1 w-full rounded-md border bg-background/70 px-2 py-1.5 text-sm font-display tabular-nums focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50"
                 />
               </label>
 

@@ -33,7 +33,7 @@ export function PageSkinSelect({ page, onSetSkin }: PageSkinSelectProps) {
           several and this edits whichever one is on screen. */}
       <select
         aria-label={`Skin for ${page.name}`}
-        className="cursor-pointer bg-transparent text-xs font-semibold uppercase tracking-[0.1em] outline-none"
+        className="cursor-pointer bg-transparent text-xs font-semibold uppercase tracking-[0.1em] outline-hidden"
         value={page.skin ?? 'default'}
         onChange={(e) => onSetSkin(page.id, e.target.value as 'default' | 'instrument')}
       >

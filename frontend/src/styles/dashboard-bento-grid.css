@@ -1,24 +1,34 @@
-.react-grid-item.react-grid-placeholder {
-  background: hsl(var(--primary) / 0.15);
-  border-radius: 0.75rem;
-}
+/* In @layer components (Tailwind v4): native CSS cascade layers make any
+   unlayered rule beat any layered one outright, utilities included, so
+   leaving this file unlayered would make it unbeatable by a utility class
+   applied alongside it on the same element - the opposite of how it
+   behaved under v3, where source order (not real layers) let a later
+   utility win. This file has no third-party stylesheet to out-rank the way
+   the maplibre-gl.css rules below in index.css do, so there's no reason not
+   to move it in. */
+@layer components {
+  .react-grid-item.react-grid-placeholder {
+    background: hsl(var(--primary) / 0.15);
+    border-radius: 0.75rem;
+  }
 
-.react-resizable-handle::after {
-  border-color: hsl(var(--muted-foreground)) !important;
-}
+  .react-resizable-handle::after {
+    border-color: hsl(var(--muted-foreground)) !important;
+  }
 
-/*
- * The hero tile (ADR 0072). .bento-hero-scale is deliberately rendered
- * smaller than its frame (100 / --hero-scale %) and then transform-scaled
- * back up to exactly fill it. That means the widget inside lays itself out
- * at its normal full-width size — no cramped intermediate box — and the
- * whole rendered result, text included, comes out --hero-scale times
- * bigger. overflow-hidden on the frame is a defensive clamp against
- * sub-pixel rounding in the calc(), not a load-bearing crop.
- */
-.bento-hero-scale {
-  transform-origin: top left;
-  transform: scale(var(--hero-scale, 1.15));
-  width: calc(100% / var(--hero-scale, 1.15));
-  height: calc(100% / var(--hero-scale, 1.15));
+  /*
+   * The hero tile (ADR 0072). .bento-hero-scale is deliberately rendered
+   * smaller than its frame (100 / --hero-scale %) and then transform-scaled
+   * back up to exactly fill it. That means the widget inside lays itself out
+   * at its normal full-width size — no cramped intermediate box — and the
+   * whole rendered result, text included, comes out --hero-scale times
+   * bigger. overflow-hidden on the frame is a defensive clamp against
+   * sub-pixel rounding in the calc(), not a load-bearing crop.
+   */
+  .bento-hero-scale {
+    transform-origin: top left;
+    transform: scale(var(--hero-scale, 1.15));
+    width: calc(100% / var(--hero-scale, 1.15));
+    height: calc(100% / var(--hero-scale, 1.15));
+  }
 }

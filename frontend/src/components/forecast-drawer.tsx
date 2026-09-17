@@ -203,7 +203,7 @@ function ForecastStaleBadge({ testId, staleLabel }: { testId?: string; staleLabe
     <span
       data-testid={testId}
       title={staleLabel ? `No update for ${staleLabel}` : 'Source has stopped updating'}
-      className="ml-1 shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-2xs leading-none text-amber-600 dark:text-amber-400"
+      className="ml-1 shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-2xs leading-none text-amber-600 dark:text-amber-400"
     >
       Stale{staleLabel ? ` ${staleLabel}` : ''}
     </span>
@@ -1443,7 +1443,7 @@ export function ForecastDrawer({
                           title="Upper air supports a surface low developing"
                           aria-label="Upper air supports a surface low developing"
                           role="img"
-                          className="rounded bg-gauge-secondary/20 px-1 py-0.5 text-2xs font-semibold uppercase tracking-wide text-gauge-secondary"
+                          className="rounded-sm bg-gauge-secondary/20 px-1 py-0.5 text-2xs font-semibold uppercase tracking-wide text-gauge-secondary"
                         >
                           TROUGH
                         </span>
@@ -1503,9 +1503,9 @@ export function ForecastDrawer({
                 * against and an invented one is worse than none.
                 */}
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
-                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Wind <span data-testid="forecast-selected-wind" className="font-semibold tabular-nums text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
-                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Gusts <span data-testid="forecast-selected-gust" className="font-semibold tabular-nums text-chart-gust">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
-                <span className="rounded bg-muted/80 px-2 py-1 text-sm">Precip <span data-testid="forecast-selected-precip" className={`tabular-nums${precipitationPct !== null && precipitationPct > 20 ? ' font-semibold' : ''}`}>{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
+                <span className="rounded-sm bg-muted/80 px-2 py-1 text-sm">Wind <span data-testid="forecast-selected-wind" className="font-semibold tabular-nums text-gauge-secondary">{selectedDay.windSpeed.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded-sm bg-muted/80 px-2 py-1 text-sm">Gusts <span data-testid="forecast-selected-gust" className="font-semibold tabular-nums text-chart-gust">{selectedDay.windGust.toFixed(1)} {windUnit}</span></span>
+                <span className="rounded-sm bg-muted/80 px-2 py-1 text-sm">Precip <span data-testid="forecast-selected-precip" className={`tabular-nums${precipitationPct !== null && precipitationPct > 20 ? ' font-semibold' : ''}`}>{precipitationPct === null ? '—' : `${Math.round(precipitationPct)}%`}</span></span>
                 <span className="text-2xs text-muted-foreground">Humidity <span data-testid="forecast-selected-humidity" className="font-semibold tabular-nums">{humidityPct === null ? '—' : `${Math.round(humidityPct)}%`}</span></span>
                 <span className="text-2xs text-muted-foreground">Visibility <span data-testid="forecast-selected-visibility" className="font-semibold tabular-nums">{visibilityNm === null ? '—' : `${visibilityNm.toFixed(1)} nm`}</span></span>
                 <span className="text-2xs text-muted-foreground">UV Index <span data-testid="forecast-selected-uv" className="font-semibold tabular-nums text-gauge-secondary">{uvIndex}</span></span>
@@ -1576,7 +1576,7 @@ export function ForecastDrawer({
                   )}
                   <div
                     data-testid="forecast-cloud-chart"
-                    className="relative h-[265px] touch-none overflow-hidden rounded bg-muted/15"
+                    className="relative h-[265px] touch-none overflow-hidden rounded-sm bg-muted/15"
                     style={{ width: forecastChartWidth }}
                   >
                     <ComposedChart width={forecastChartWidth} height={265} data={cloudChartData} margin={cloudChartMargin}>
@@ -1661,7 +1661,7 @@ export function ForecastDrawer({
                       ref={cloudTooltip.svgRef}
                       viewBox={`0 0 ${forecastChartWidth} 265`}
                       preserveAspectRatio="none"
-                      className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                       tabIndex={0}
                       role="img"
                       aria-label={`Cloud, temperature and rain for ${selectedDay.dayName}, hourly. Use arrow keys to read values.`}
@@ -1754,7 +1754,7 @@ export function ForecastDrawer({
                     )}
                     <div
                       data-testid="forecast-wind-chart"
-                      className="relative h-[265px] touch-none overflow-hidden rounded bg-muted/15"
+                      className="relative h-[265px] touch-none overflow-hidden rounded-sm bg-muted/15"
                       style={{ width: forecastChartWidth }}
                     >
                       <ComposedChart width={forecastChartWidth} height={265} margin={windChartMargin}>
@@ -1821,7 +1821,7 @@ export function ForecastDrawer({
                         ref={windTooltip.svgRef}
                         viewBox={`0 0 ${forecastChartWidth} 265`}
                         preserveAspectRatio="none"
-                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                         tabIndex={0}
                         role="img"
                         aria-label={`Wind and gusts for ${selectedDay.dayName}, hourly. Use arrow keys to read values.`}
@@ -1910,7 +1910,7 @@ export function ForecastDrawer({
                     {waveIndicatorMessages.length > 0 ? (
                       <ul
                         data-testid="forecast-wave-indicators"
-                        className="mb-2 space-y-1 rounded border border-gauge-secondary/40 bg-muted/25 p-2 text-sm text-foreground/90"
+                        className="mb-2 space-y-1 rounded-sm border border-gauge-secondary/40 bg-muted/25 p-2 text-sm text-foreground/90"
                       >
                         {waveIndicatorMessages.map((message) => (
                           <li key={message} className="flex items-start gap-1.5">
@@ -1950,7 +1950,7 @@ export function ForecastDrawer({
                       )}
                       <div
                         data-testid="forecast-wave-chart"
-                        className="relative h-[265px] touch-none overflow-hidden rounded bg-muted/15"
+                        className="relative h-[265px] touch-none overflow-hidden rounded-sm bg-muted/15"
                         style={{ width: forecastChartWidth }}
                       >
                         <ComposedChart width={forecastChartWidth} height={265} margin={waveChartMargin}>
@@ -2036,7 +2036,7 @@ export function ForecastDrawer({
                           ref={waveTooltip.svgRef}
                           viewBox={`0 0 ${forecastChartWidth} 265`}
                           preserveAspectRatio="none"
-                          className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                           tabIndex={0}
                           role="img"
                           aria-label={`Wave height for ${selectedDay.dayName}, hourly. Use arrow keys to read values.`}
@@ -2157,7 +2157,7 @@ export function ForecastDrawer({
             )}
             <div
               data-testid="forecast-upper-air-chart"
-              className="relative h-[265px] touch-none overflow-hidden rounded bg-muted/15"
+              className="relative h-[265px] touch-none overflow-hidden rounded-sm bg-muted/15"
               style={{ width: upperAirChartWidth }}
             >
               {/* Bands sit behind the traces rather than on the pointer overlay,
@@ -2229,7 +2229,7 @@ export function ForecastDrawer({
                 ref={upperAirTooltip.svgRef}
                 viewBox={`0 0 ${upperAirChartWidth} 265`}
                 preserveAspectRatio="none"
-                className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="pointer-events-auto absolute inset-0 h-full w-full touch-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                 style={{ zIndex: 2 }}
                 tabIndex={0}
                 role="img"

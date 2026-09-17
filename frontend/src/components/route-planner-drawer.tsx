@@ -247,7 +247,7 @@ export function RoutePlannerDrawer({
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
                     {route.name}
                     {isActive && (
-                      <span className="rounded bg-emerald-600/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600">
+                      <span className="rounded-sm bg-emerald-600/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600">
                         ACTIVE
                       </span>
                     )}

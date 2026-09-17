@@ -350,7 +350,7 @@ export default function PoiMapTileImpl({
               {gnssCriticalAlert && (
                 <div
                   data-testid="poi-map-gnss-badge"
-                  className="absolute left-2 top-2 z-20 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                  className="absolute left-2 top-2 z-20 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"
                 >
                   GNSS
                 </div>
@@ -394,7 +394,7 @@ function PoiListRow({ rank, feature, distanceUnits }: { rank: number; feature: P
   const category = poiCategoryById(feature.category)
   const Icon = category?.icon ?? MapPin
   return (
-    <div className="flex items-start gap-1.5 rounded-sm px-1 py-0.5" data-testid="poi-list-row">
+    <div className="flex items-start gap-1.5 rounded-xs px-1 py-0.5" data-testid="poi-list-row">
       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground">
         {rank}
       </span>

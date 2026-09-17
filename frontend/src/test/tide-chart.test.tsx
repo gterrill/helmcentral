@@ -589,7 +589,7 @@ describe('TideChart keyboard access', () => {
     expect(overlay.getAttribute('aria-label')).toMatch(/arrow keys/i)
     expect(overlay.getAttribute('class')).toContain('focus-visible:ring-2')
     expect(overlay.getAttribute('class')).toContain('focus-visible:ring-ring')
-    expect(overlay.getAttribute('class')).toContain('focus-visible:outline-none')
+    expect(overlay.getAttribute('class')).toContain('focus-visible:outline-hidden')
   })
 
   it('reads a height off the curve with the keyboard alone', () => {

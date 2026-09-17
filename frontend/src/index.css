@@ -1,6 +1,116 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+/* Ships scroll-fade-*, shimmer and the scrollbar utilities the shadcn chat
+   components (Phase 4) need. Nothing in this app uses them yet, but wiring
+   the import in now means Phase 4 doesn't have to touch this file again. */
+@import 'shadcn/tailwind.css';
+@custom-variant dark (&:is(.dark *));
+
+/* v4's automatic content detection skips dot-directories, so the preview
+   stubs design-sync renders for its screenshot pass (not gitignored, unlike
+   ds-bundle/) need an explicit @source or their utility classes never
+   compile. index.css lives in src/, one level down from tailwind.config.ts's
+   old content entry for this same directory. */
+@source '../.design-sync/previews/**/*.tsx';
+
+/*
+ * Every colour, font and radius Tailwind needs to hand out as a utility
+ * (bg-primary, font-display, rounded-lg, ...) used to live in
+ * tailwind.config.ts's `theme.extend`. v4 reads it from here instead.
+ *
+ * `inline` matters: these values are all indirections (hsl(var(--x)),
+ * var(--font-x)) into the plain custom properties :root/.dark/
+ * [data-skin="instrument"] still define below, which is what lets one
+ * utility class repaint across all three themes with no per-component
+ * branching. A non-inline @theme would make Tailwind synthesize its own
+ * --color-primary etc. as a real, separate :root custom property holding
+ * that indirection - one more hop, and a second declaration of the same
+ * name for anyone still reading --primary directly (charts, SVG fills).
+ * `inline` skips that: Tailwind copies the value text straight into each
+ * utility's CSS instead, so var(--primary) keeps resolving against the one
+ * definition below, wherever the cascade currently has it.
+ */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-gauge-primary: hsl(var(--gauge-primary));
+  --color-gauge-primary-label: hsl(var(--gauge-primary-label));
+  --color-gauge-secondary: hsl(var(--gauge-secondary));
+  --color-chart-precip: hsl(var(--chart-precip));
+  --color-chart-uv: hsl(var(--chart-uv));
+  --color-chart-gust: hsl(var(--chart-gust));
+  --color-sidebar: hsl(var(--sidebar-background));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --font-display: var(--font-display), monospace;
+  --font-sans: var(--font-sans), sans-serif;
+
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.875rem;
+
+  /*
+   * v4's default theme (node_modules/tailwindcss/theme.css) redefines every
+   * xs-4xl line-height as a unitless ratio (e.g. `--text-sm--line-height:
+   * calc(1.25 / 0.875)`) instead of v3's absolute rem
+   * (stubs/config.full.js's fontSize scale). A unitless line-height
+   * inherits as a NUMBER and recomputes against each descendant's own
+   * font-size, where an absolute one inherits as that fixed length - so
+   * anything that sets its own font-size under a text-sm (etc.) ancestor
+   * without its own line-height silently shrank (confirmed: compare.mjs
+   * showed lineHeight 20px -> 14.2857px on every such element, moving
+   * dashboard readouts and alarm/log rows by several px). Restoring v3's
+   * absolute values here keeps inheritance identical; 5xl and up were
+   * already the unitless `1` in both versions, so they need no override.
+   */
+  --text-xs--line-height: 1rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
+
+  /*
+   * v3's borderRadius.extend only replaced the lg/md/sm/xl/2xl steps, so
+   * bare `rounded` kept Tailwind's own stock 0.25rem, unrelated to
+   * --radius, while `rounded-sm` was the overridden calc(--radius - 4px).
+   * The upgrade tool's class rename (rounded-sm -> rounded-xs, bare
+   * rounded -> rounded-sm) carries the class names forward a step, so the
+   * pixel value has to move with it: what's now spelled rounded-xs gets
+   * the old rounded-sm formula, and what's now spelled rounded-sm gets the
+   * old bare rounded's constant. Confirmed against the before/after
+   * screenshot diff, not just derived on paper.
+   */
+  --radius-xs: calc(var(--radius) - 4px);
+  --radius-sm: 0.25rem;
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 2);
+  --radius-2xl: calc(var(--radius) * 3);
+}
 
 @layer base {
   :root {
@@ -307,13 +417,29 @@
   }
 
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     margin: 0;
     min-height: 100vh;
+  }
+
+  /* v4's preflight dropped both of these v3 defaults. Every Input/Textarea
+     already sets placeholder:text-muted-foreground itself, so this mostly
+     backstops a bare <input>, but it's what capture.mjs's ::placeholder
+     check is comparing against. */
+  ::placeholder {
+    color: hsl(var(--muted-foreground));
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 }
 
@@ -360,12 +486,20 @@
   docs/adr/0067-carto-basemap-proxy-and-offline-cache.md for why displaying
   this is our obligation now that the backend proxies those tiles).
 
-  Deliberately NOT inside @layer components. Tailwind tree-shakes that layer
-  against the content scan, and these class names only ever exist at runtime
-  because MapLibre builds the control in JS, so they never survive the scan.
-  Plain CSS here is also why each selector is doubled up: maplibre-gl.css is
-  imported from the map components, so it lands after this file in the
-  bundle and wins any tie on equal specificity.
+  Deliberately NOT inside @layer components. The old (v3) reason was that
+  Tailwind tree-shook that layer against the content scan, and these class
+  names only ever exist at runtime because MapLibre builds the control in
+  JS, so they'd never survive the scan - moot under v4, which doesn't purge
+  hand-authored @layer rules that way. The reason that still holds, and now
+  matters more: native CSS cascade layers make ANY unlayered rule beat ANY
+  layered rule regardless of specificity, and maplibre-gl.css's own
+  `.maplibregl-ctrl-attrib{background-color:hsla(0,0%,100%,.5)}` is itself
+  unlayered. Putting our override in @layer components would hand that fight
+  to maplibre's stock light pill even though our selector is more specific -
+  confirmed by reading maplibre-gl.css, not assumed. Each selector here is
+  doubled up for that same specificity contest: maplibre-gl.css is imported
+  from the map components, so it lands after this file in the bundle, and
+  the extra class beats it on specificity since layer membership is tied.
 
   The control sits on map imagery rather than an app surface, so it follows
   the map's own chrome instead of the app's light/dark tokens: the same

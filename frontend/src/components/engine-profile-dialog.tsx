@@ -255,7 +255,7 @@ function GaugeRow({ gauge, instance }: { gauge: EngineProfileGauge; instance: st
         <span className="truncate text-sm">
           {gauge.label}
           {gauge.hero && (
-            <span className="ml-2 rounded-sm border border-border bg-background px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="ml-2 rounded-xs border border-border bg-background px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
               Hero
             </span>
           )}

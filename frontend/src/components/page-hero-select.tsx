@@ -33,7 +33,7 @@ export function PageHeroSelect({ page, onSetHero }: PageHeroSelectProps) {
           several and this edits whichever one is on screen. */}
       <select
         aria-label={`Hero widget for ${page.name}`}
-        className="cursor-pointer bg-transparent text-xs font-semibold uppercase tracking-[0.1em] outline-none"
+        className="cursor-pointer bg-transparent text-xs font-semibold uppercase tracking-[0.1em] outline-hidden"
         value={page.hero ?? ''}
         onChange={(e) => onSetHero(page.id, e.target.value)}
       >

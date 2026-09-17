@@ -54,7 +54,7 @@ export const assistantMarkdownComponents: Components = {
     </a>
   ),
   code: ({ children }) => (
-    <code className="rounded-sm bg-muted px-1 py-0.5 font-display text-xs text-foreground">{children}</code>
+    <code className="rounded-xs bg-muted px-1 py-0.5 font-display text-xs text-foreground">{children}</code>
   ),
   pre: ({ children }) => (
     <pre className="mb-3 overflow-x-auto rounded-md border border-border bg-muted p-3 font-display text-xs leading-relaxed text-foreground last:mb-0">

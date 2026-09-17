@@ -1,6 +1,6 @@
 ## Conventions
 
-This design system is a Tailwind CSS utility-class system with CSS custom-property tokens (HSL channel values, wrapped in `hsl(var(--token))` by the Tailwind color config) — never inline styles or a CSS-in-JS runtime, except where noted below.
+This design system is a Tailwind CSS utility-class system with CSS custom-property tokens (HSL channel values, wrapped in `hsl(var(--token))` by `src/index.css`'s `@theme inline` block) — never inline styles or a CSS-in-JS runtime, except where noted below. Tailwind is v4 and CSS-first: there is no `tailwind.config.ts`, so every token-to-utility mapping lives in that one file.
 
 ### Styling idiom: Tailwind utility classes over semantic color tokens
 
@@ -19,7 +19,7 @@ Every component composes Tailwind utility classes. Colors are never literal (`bg
 | `bg-sidebar` / `text-sidebar-foreground` (+ `-primary`, `-accent`, `-border`, `-ring` variants) | `--sidebar-*` | the Sidebar family only — a separate token namespace from the app's main surface colors |
 | `bg-gauge-primary` / `bg-gauge-secondary` | `--gauge-*` | marine gauge/instrument accents (wind, tide, depth visualizations) |
 
-Border radius: `rounded-lg`/`rounded-md`/`rounded-sm` map to `--radius` (not literal pixel values). Typography: Geist Sans (`--font-sans`) is the automatic base/body font (applied via Tailwind's base layer, not an explicit utility class — never add `font-sans` expecting a visible change). `font-display` → `--font-display` (Geist Mono) is the utility to reach for explicitly, used throughout for numeric/gauge readouts (speed, tank levels, battery %, coordinates) — note this is distinct from Tailwind's built-in `font-mono` utility, which is NOT overridden here and falls back to the default system monospace stack. Both font families ship as real `@font-face` files, never assume a system font fallback is the intended look.
+Border radius: `rounded-lg`/`rounded-md`/`rounded-xs` map to `--radius` (`var(--radius)`, `calc(var(--radius) - 2px)`, `calc(var(--radius) - 4px)`). `rounded-sm` is a flat `0.25rem`, unrelated to `--radius`: it carries forward what bare `rounded` meant in Tailwind 3 (Tailwind's own stock default, never tied to this project's `--radius`), the class having shifted one name over in the Tailwind 4 upgrade. Typography: Geist Sans (`--font-sans`) is the automatic base/body font (applied via Tailwind's base layer, not an explicit utility class — never add `font-sans` expecting a visible change). `font-display` → `--font-display` (Geist Mono) is the utility to reach for explicitly, used throughout for numeric/gauge readouts (speed, tank levels, battery %, coordinates) — note this is distinct from Tailwind's built-in `font-mono` utility, which is NOT overridden here and falls back to the default system monospace stack. Both font families ship as real `@font-face` files, never assume a system font fallback is the intended look.
 
 ### Compound components need their provider/context ancestor
 

@@ -57,14 +57,14 @@ const fieldVariants = cva(
   {
     variants: {
       orientation: {
-        vertical: ["flex-col [&>*]:w-full [&>.sr-only]:w-auto"],
+        vertical: ["flex-col *:w-full [&>.sr-only]:w-auto"],
         horizontal: [
           "flex-row items-center",
-          "[&>[data-slot=field-label]]:flex-auto",
+          "*:data-[slot=field-label]:flex-auto",
           "has-[>[data-slot=field-content]]:[&>[role=checkbox],[role=radio]]:mt-px has-[>[data-slot=field-content]]:items-start",
         ],
         responsive: [
-          "@md/field-group:flex-row @md/field-group:items-center @md/field-group:[&>*]:w-auto flex-col [&>*]:w-full [&>.sr-only]:w-auto",
+          "@md/field-group:flex-row @md/field-group:items-center @md/field-group:[&>*]:w-auto flex-col *:w-full [&>.sr-only]:w-auto",
           "@md/field-group:[&>[data-slot=field-label]]:flex-auto",
           "@md/field-group:has-[>[data-slot=field-content]]:items-start @md/field-group:has-[>[data-slot=field-content]]:[&>[role=checkbox],[role=radio]]:mt-px",
         ],
@@ -141,8 +141,18 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
     <p
       data-slot="field-description"
       className={cn(
-        "text-muted-foreground text-sm font-normal leading-normal group-has-[[data-orientation=horizontal]]/field:text-balance",
-        "nth-last-2:-mt-1 last:mt-0 [[data-variant=legend]+&]:-mt-1.5",
+        "text-muted-foreground text-sm font-normal leading-normal group-has-data-[orientation=horizontal]/field:text-balance",
+        // `nth-last-2:` is a Tailwind v4 variant with no v3 equivalent, so this
+        // rule compiled to nothing before the v4 upgrade and every
+        // FieldDescription's spacing came from whatever "space-y-*" the
+        // caller wrapped it in. Under v4 it comes alive: on a 3-child group
+        // (e.g. security-section.tsx's Field + two FieldDescriptions) the
+        // first FieldDescription is nth-last-child(2), so -mt-1 overrode the
+        // parent's space-y-3 top margin and pulled that paragraph up 16px
+        // (confirmed via a same-moment pixel diff against the pre-upgrade
+        // tree). Dropped to keep today's layout; `last:mt-0` is an ordinary
+        // v3 variant and was already live, so it's unaffected.
+        "last:mt-0 [[data-variant=legend]+&]:-mt-1.5",
         "[&>a:hover]:text-primary [&>a]:underline [&>a]:underline-offset-4",
         className
       )}

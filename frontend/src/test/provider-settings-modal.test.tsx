@@ -202,7 +202,7 @@ describe('ProviderSettingsModal', () => {
     expect(screen.getByLabelText('Allowed Secrets')).not.toHaveAttribute('placeholder')
     const overlay = document.querySelector('[role="presentation"][data-open]')
     expect(overlay).not.toBeNull()
-    expect(overlay!.className).toEqual(expect.stringContaining('z-[70]'))
+    expect(overlay!.className).toEqual(expect.stringContaining('z-70'))
     expect(screen.getByText(/Allowlist changes require a backend restart/i)).toBeTruthy()
   })
 })

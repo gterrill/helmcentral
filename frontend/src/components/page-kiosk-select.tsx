@@ -87,7 +87,7 @@ export function PageKioskSelect({ page, onPatch }: PageKioskSelectProps) {
             defaultValue={page.kiosk_seconds ?? DEFAULT_KIOSK_SECONDS}
             aria-label={`Seconds for ${page.name}`}
             className={cn(
-              'w-14 rounded border bg-transparent px-1 py-0.5 text-xs normal-case tabular-nums outline-none',
+              'w-14 rounded-sm border bg-transparent px-1 py-0.5 text-xs normal-case tabular-nums outline-hidden',
               invalid ? 'border-destructive text-destructive' : 'border-border',
             )}
             onBlur={(e) => commitSeconds(e.target.value)}
@@ -100,7 +100,7 @@ export function PageKioskSelect({ page, onPatch }: PageKioskSelectProps) {
           <span className="lowercase">s</span>
           <select
             aria-label={`Kiosk condition for ${page.name}`}
-            className="cursor-pointer bg-transparent text-xs font-semibold uppercase tracking-[0.1em] outline-none"
+            className="cursor-pointer bg-transparent text-xs font-semibold uppercase tracking-[0.1em] outline-hidden"
             value={page.kiosk_when ?? 'always'}
             onChange={(e) => onPatch(page.id, { kiosk_when: e.target.value as 'always' | 'anchored' | 'motoring' | 'sailing' | 'moored' })}
           >

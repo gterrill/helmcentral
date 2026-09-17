@@ -50,7 +50,7 @@ function ControlRow({ sw, isPending, readOnly, onToggle }: { sw: CZoneSwitch; is
         className={cn(
           'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full',
           'transition-colors duration-200',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+          'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
           'disabled:opacity-50',
           cursorClass,
           // Switches spec (DESIGN.md): --input unchecked, Signal Blue
@@ -100,7 +100,7 @@ function IndicatorRow({ sw }: { sw: CZoneSwitch }) {
       </p>
       <span
         className={cn(
-          'w-10 shrink-0 rounded-sm border px-1.5 py-0.5 text-center font-display text-[10px] uppercase leading-none tracking-[0.08em]',
+          'w-10 shrink-0 rounded-xs border px-1.5 py-0.5 text-center font-display text-[10px] uppercase leading-none tracking-[0.08em]',
           isOn ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground',
         )}
       >

@@ -258,7 +258,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       style={{ height: gridPixelHeight(heroWidget.h) * HERO_SCALE, '--hero-scale': HERO_SCALE } as React.CSSProperties}
     >
       <div className="bento-hero-frame h-full w-full overflow-hidden rounded-xl">
-        <div className="bento-hero-scale [&>*]:h-full">
+        <div className="bento-hero-scale *:h-full">
           <TileErrorBoundary key={heroWidget.id} widget={heroWidget}>
             {renderWidget(heroWidget)}
           </TileErrorBoundary>
@@ -272,7 +272,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               e.stopPropagation()
               onRemoveWidget(heroWidget.id)
             }}
-            className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+            className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
             aria-label={`Remove ${widgetDisplayName(heroWidget)} widget`}
           >
             <X className="h-3.5 w-3.5" />
@@ -284,7 +284,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                 e.stopPropagation()
                 onDuplicateWidget(heroWidget.id)
               }}
-              className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+              className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
               aria-label={`Duplicate ${widgetDisplayName(heroWidget)} widget`}
             >
               <Copy className="h-3 w-3" />
@@ -363,7 +363,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               <div aria-hidden="true" className="h-full w-full" />
             ) : (
               <>
-                <div className="h-full [&>*]:h-full">
+                <div className="h-full *:h-full">
                   <TileErrorBoundary key={w.id} widget={w}>
                     {renderWidget(w)}
                   </TileErrorBoundary>
@@ -376,7 +376,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                         e.stopPropagation()
                         onRemoveWidget(w.id)
                       }}
-                      className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+                      className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
                       aria-label={`Remove ${widgetDisplayName(w)} widget`}
                     >
                       <X className="h-3.5 w-3.5" />
@@ -388,14 +388,14 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                           e.stopPropagation()
                           onDuplicateWidget(w.id)
                         }}
-                        className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-foreground"
+                        className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
                         aria-label={`Duplicate ${widgetDisplayName(w)} widget`}
                       >
                         <Copy className="h-3 w-3" />
                       </button>
                     )}
                     <div
-                      className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
+                      className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
                       role="button"
                       tabIndex={0}
                       aria-label={`Drag handle for ${widgetDisplayName(w)}. Use arrow keys to reposition, or drag with a pointer.`}

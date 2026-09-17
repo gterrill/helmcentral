@@ -19,7 +19,7 @@ export function TideStationPicker({ provider, onSelect }: TideStationPickerProps
         <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
         <input
           type="text"
-          className="min-w-0 w-full bg-transparent text-sm font-semibold normal-case text-foreground outline-none"
+          className="min-w-0 w-full bg-transparent text-sm font-semibold normal-case text-foreground outline-hidden"
           placeholder="Search tide stations (e.g. Sydney)"
           value={query}
           onChange={(event) => setQuery(event.target.value)}

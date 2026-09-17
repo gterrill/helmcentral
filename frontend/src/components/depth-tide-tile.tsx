@@ -68,7 +68,7 @@ export const DepthTideTile = memo(function DepthTideTile({
       onClick={onOpen}
       className={
         onOpen
-          ? 'block w-full rounded-xl text-left transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+          ? 'block w-full rounded-xl text-left transition-opacity hover:opacity-80 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
           : undefined
       }
     >

@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
@@ -12,7 +13,13 @@ export default defineConfig(({ mode }) => ({
   // component state (an open drawer, a half-filled settings form, map pan and
   // zoom) on each edit. The plugin also supplies the automatic JSX runtime, so
   // components no longer need React in scope.
-  plugins: [react()],
+  //
+  // tailwindcss() is Tailwind v4's own Vite plugin (CSS-first config, no
+  // postcss.config.js and no autoprefixer: v4 ships its own vendor-prefixing
+  // and content scanning). It has to run before react() sees any CSS import
+  // so index.css is compiled by Tailwind's Vite plugin rather than passed
+  // through as plain CSS.
+  plugins: [tailwindcss(), react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

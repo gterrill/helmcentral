@@ -188,7 +188,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                 <div key={alarm.rule_id} className="rounded-md border bg-background/60 px-3 py-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
-                      <p className={`break-words font-display text-lg leading-none sm:truncate ${severityClass(alarm.state)}`}>
+                      <p className={`wrap-break-word font-display text-lg leading-none sm:truncate ${severityClass(alarm.state)}`}>
                         {alarm.label}
                       </p>
                       <p className="mt-1.5 text-sm text-foreground/90">{alarmConditionSentence(alarm)}</p>
@@ -225,7 +225,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                           href={collisionTuningUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="mt-1.5 inline-block rounded border px-2 py-1 text-[11px] hover:bg-muted"
+                          className="mt-1.5 inline-block rounded-sm border px-2 py-1 text-[11px] hover:bg-muted"
                         >
                           Adjust thresholds in AIS Target Prioritizer
                         </a>
@@ -252,11 +252,11 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                         {alarm.state}
                       </span>
                       {alarm.phase === 'acknowledged' ? (
-                        <span className="rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        <span className="rounded-xs border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                           Acknowledged · still live
                         </span>
                       ) : alarm.silenced ? (
-                        <span className="rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        <span className="rounded-xs border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                           Silenced · still live
                         </span>
                       ) : null}
@@ -447,12 +447,12 @@ function RuleRow({ rule, unit, firing, onEdit, onDelete }: RuleRowProps) {
             </span>
           )}
           {firing && (
-            <span className="ml-2 rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-amber-700">
+            <span className="ml-2 rounded-xs bg-amber-100 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.16em] text-amber-700">
               firing
             </span>
           )}
         </p>
-        <p className="break-words text-[11px] text-muted-foreground">
+        <p className="wrap-break-word text-[11px] text-muted-foreground">
           <RuleCondition rule={rule} unit={unit} />
         </p>
       </div>

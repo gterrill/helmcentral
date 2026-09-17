@@ -1683,7 +1683,7 @@ export function App() {
                   key={id}
                   type="button"
                   onClick={() => handleAddWidget(id)}
-                  className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                  className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
                 >
                   {DASHBOARD_WIDGET_LABELS[id]}
                 </button>
@@ -1692,49 +1692,49 @@ export function App() {
               <button
                 type="button"
                 onClick={handleAddGauge}
-                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 Gauge…
               </button>
               <button
                 type="button"
                 onClick={handleAddCluster}
-                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 Engine Cluster…
               </button>
               <button
                 type="button"
                 onClick={() => setEngineProfileOpen(true)}
-                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 From equipment profile…
               </button>
               <button
                 type="button"
                 onClick={handleAddLampStrip}
-                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 Indicators…
               </button>
               <button
                 type="button"
                 onClick={handleAddGaugeGroup}
-                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 Gauge Group…
               </button>
               <button
                 type="button"
                 onClick={handleAddEmbed}
-                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 Embed…
               </button>
               <button
                 type="button"
                 onClick={handleAddPoiMap}
-                className="rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
               >
                 Nearby map…
               </button>
@@ -2161,7 +2161,7 @@ export function App() {
             gets pushed off a phone screen (AGENTS.md — prevent viewport overflows).
             The breadcrumb is the designated slack absorber, so it truncates while the
             clock and controls keep their size. */}
-        <header className="relative z-[60] flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16">
+        <header className="relative z-60 flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4 lg:h-16">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="mr-2 hidden h-4 sm:block" />
@@ -2292,12 +2292,12 @@ export function App() {
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
             <ConnectionBanner />
-            {/* z-[55] keeps a live alarm above the Mate sheet's backdrop and
+            {/* z-55 keeps a live alarm above the Mate sheet's backdrop and
                 popup (z-50) while staying under the dashboard header controls.
                 The page selector and other header actions sit at z-[60], so the
                 banner can remain visible without covering the top-level controls.
                 (impeccable critique 2026-09-12, P1) */}
-            <div className="relative z-[55]" data-testid="alarm-banner-stack">
+            <div className="relative z-55" data-testid="alarm-banner-stack">
               <AlarmBanner alarms={alarms} onOpen={openAlarmsPanel} />
             </div>
 

@@ -12,7 +12,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
       className={cn(
         // No shadow: this project's plain Input carries none, and addon fields
         // sit directly beside plain ones in the settings grids.
-        "group/input-group border-input bg-background ring-offset-background relative flex w-full items-center rounded-md border outline-none transition-[color,box-shadow]",
+        "group/input-group border-input bg-background ring-offset-background relative flex w-full items-center rounded-md border outline-hidden transition-[color,box-shadow]",
         "h-10",
         "has-[>[data-align=inline-start]]:[&>input]:pl-2",
         "has-[>[data-align=inline-end]]:[&>input]:pr-2",

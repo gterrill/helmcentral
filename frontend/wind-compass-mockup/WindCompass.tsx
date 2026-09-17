@@ -164,7 +164,7 @@ export default function WindCompass({
       style={{ width: 1024, height: 560 }}
     >
       {/* ===== COMPASS ===== */}
-      <div className="absolute left-[512px] top-[300px] -ml-[180px] -mt-[180px] h-[360px] w-[360px]">
+      <div className="absolute left-[512px] top-[300px] ml-[-180px] mt-[-180px] h-[360px] w-[360px]">
         {/* metallic bezel */}
         <div
           className="absolute inset-0 rounded-full"
@@ -198,7 +198,7 @@ export default function WindCompass({
         </div>
         {/* dark dial face */}
         <div
-          className="absolute left-1/2 top-1/2 -ml-[125px] -mt-[125px] h-[250px] w-[250px] rounded-full"
+          className="absolute left-1/2 top-1/2 ml-[-125px] mt-[-125px] h-[250px] w-[250px] rounded-full"
           style={{
             background: "radial-gradient(circle at 50% 34%,#2b2f34,#16181b 66%,#0d0e10)",
             boxShadow:
@@ -211,7 +211,7 @@ export default function WindCompass({
 
           {/* heading arrow */}
           <div
-            className="absolute left-1/2 top-1/2 -ml-[120px] -mt-[120px] h-[240px] w-[240px]"
+            className="absolute left-1/2 top-1/2 ml-[-120px] mt-[-120px] h-[240px] w-[240px]"
             style={{
               transformOrigin: "50% 50%",
               transition: "transform 0.9s cubic-bezier(.34,1.2,.44,1)",
@@ -241,7 +241,7 @@ export default function WindCompass({
 
           {/* center hub */}
           <div
-            className="absolute left-1/2 top-1/2 -ml-[6.5px] -mt-[6.5px] h-[13px] w-[13px] rounded-full"
+            className="absolute left-1/2 top-1/2 ml-[-6.5px] mt-[-6.5px] h-[13px] w-[13px] rounded-full"
             style={{
               background: "radial-gradient(circle at 40% 35%,#cfd4da,#5a6068 70%,#34383d)",
               boxShadow: "0 1px 2px rgba(0,0,0,0.7)",

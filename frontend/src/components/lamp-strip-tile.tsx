@@ -67,7 +67,7 @@ function Lamp({ label, state, fill, opacity, onClick, ariaLabel }: {
     return <div className={className} aria-label={ariaLabel} data-state={state}>{body}</div>
   }
   return (
-    <button type="button" onClick={onClick} className={`${className} rounded-sm hover:opacity-80`} aria-label={ariaLabel} data-state={state}>
+    <button type="button" onClick={onClick} className={`${className} rounded-xs hover:opacity-80`} aria-label={ariaLabel} data-state={state}>
       {body}
     </button>
   )

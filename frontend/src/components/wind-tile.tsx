@@ -24,7 +24,7 @@ type WindMetricCardProps = {
 function WindMetricCard({ title, value, align = 'left', className = '', valueClassName, style, valueFirst = false, onClick, ariaLabel }: WindMetricCardProps) {
   const alignmentClass = align === 'right' ? 'items-end text-right' : 'items-start text-left'
   const label = <p key="label" className="text-[10px] leading-none uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
-  const reading = <p key="value" className={cn('font-display text-2xl leading-[0.86] text-gauge-primary md:text-3xl', valueClassName)}>{value}</p>
+  const reading = <p key="value" className={cn('font-display text-2xl leading-[0.86] text-gauge-primary md:text-3xl md:leading-9', valueClassName)}>{value}</p>
   // bg-card, not a translucent bg-background/NN: a browser contrast check
   // measured --gauge-primary against this card's ground at 2.6:1 (below the
   // 3:1 large-text bar) because a translucent ground composites onto
@@ -39,7 +39,7 @@ function WindMetricCard({ title, value, align = 'left', className = '', valueCla
         type="button"
         onClick={onClick}
         aria-label={ariaLabel}
-        className={cn(sharedClassName, 'cursor-pointer ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2')}
+        className={cn(sharedClassName, 'cursor-pointer ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2')}
         style={style}
       >
         {valueFirst ? [reading, label] : [label, reading]}

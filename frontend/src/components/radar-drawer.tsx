@@ -171,7 +171,7 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
           <select
             value={overlay}
             onChange={(e) => setOverlay(e.target.value as Overlay)}
-            className="rounded border bg-background px-2 py-1 text-foreground"
+            className="rounded-sm border bg-background px-2 py-1 text-foreground"
           >
             {OVERLAYS.map((value) => (
               <option key={value} value={value}>{value}</option>
@@ -184,7 +184,7 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
           <select
             value={windUnit}
             onChange={(e) => setWindUnit(e.target.value as WindUnit)}
-            className="rounded border bg-background px-2 py-1 text-foreground"
+            className="rounded-sm border bg-background px-2 py-1 text-foreground"
           >
             {WIND_UNITS.map((value) => (
               <option key={value} value={value}>{value}</option>
@@ -197,7 +197,7 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
           <select
             value={tempUnit}
             onChange={(e) => setTempUnit(e.target.value as TempUnit)}
-            className="rounded border bg-background px-2 py-1 text-foreground"
+            className="rounded-sm border bg-background px-2 py-1 text-foreground"
           >
             {TEMP_UNITS.map((value) => (
               <option key={value} value={value}>{value}</option>
@@ -228,7 +228,7 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
         <button
           type="button"
           onClick={handleApply}
-          className="rounded border px-2 py-1 text-foreground hover:bg-muted"
+          className="rounded-sm border px-2 py-1 text-foreground hover:bg-muted"
         >
           Apply
         </button>
@@ -236,7 +236,7 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
         <button
           type="button"
           onClick={handleRecenter}
-          className="rounded border px-2 py-1 text-foreground hover:bg-muted"
+          className="rounded-sm border px-2 py-1 text-foreground hover:bg-muted"
         >
           Recenter
         </button>
@@ -262,7 +262,7 @@ export function RadarDrawer({ latitude, longitude }: RadarDrawerProps) {
           href={iframeSrc ?? '#'}
           target="_blank"
           rel="noreferrer"
-          className="rounded border px-2 py-1 hover:bg-muted"
+          className="rounded-sm border px-2 py-1 hover:bg-muted"
         >
           Open in Windy
         </a>
