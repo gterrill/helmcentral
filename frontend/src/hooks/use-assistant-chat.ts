@@ -4,6 +4,11 @@ import { readServerSentEvents } from '@/lib/sse-reader'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 import type { AssistantConversation, AssistantMessage } from '@/hooks/use-assistant-conversations'
 
+interface MessageAttachmentApi {
+  document_id: string
+  filename: string
+}
+
 interface MessageApi {
   id: string
   conversation_id: string
@@ -16,6 +21,7 @@ interface MessageApi {
   cost_usd?: number
   tool_rounds?: number
   created_at: string
+  attachments?: MessageAttachmentApi[]
 }
 
 interface ConversationApi {
@@ -38,6 +44,7 @@ function mapMessage(api: MessageApi): AssistantMessage {
     costUsd: api.cost_usd,
     toolRounds: api.tool_rounds,
     createdAt: api.created_at,
+    attachments: api.attachments?.map((a) => ({ documentId: a.document_id, filename: a.filename })),
   }
 }
 
@@ -62,6 +69,11 @@ export interface AssistantSendOptions {
    * aloud. Omitted (not just false) when the send didn't come from voice. */
   spoken?: boolean
   screen?: AssistantScreenContext
+  /** Document ids (ADR 0106) staged in the composer, at most 10 - see
+   * use-document-uploads.ts. Omitted (not sent as `[]`) when nothing is
+   * attached, matching how `spoken`/`screen` are only ever included when
+   * the caller actually passed them. */
+  attachments?: string[]
   onConversation?: (conversation: AssistantConversation) => void
 }
 
@@ -282,9 +294,10 @@ export function useAssistantChat() {
       // them - an ordinary panel send (no options at all) posts the same
       // `{ content }` body it always has, so the backend only sees a voice
       // question or a screen context when one genuinely applies.
-      const body: { content: string; spoken?: boolean; screen?: AssistantScreenContext } = { content }
+      const body: { content: string; spoken?: boolean; screen?: AssistantScreenContext; attachments?: string[] } = { content }
       if (options?.spoken !== undefined) body.spoken = options.spoken
       if (options?.screen !== undefined) body.screen = options.screen
+      if (options?.attachments !== undefined) body.attachments = options.attachments
 
       const response = await fetch(
         `${apiBaseUrl}/api/assistant/conversations/${encodeURIComponent(conversationId)}/messages`,

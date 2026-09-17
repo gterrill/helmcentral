@@ -1,5 +1,5 @@
-import { Loader2, Square } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Ref } from 'react'
+import { Loader2, Paperclip, Square, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type Ref } from 'react'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
@@ -16,7 +16,9 @@ import {
 } from '@/components/ui/message-scroller'
 import { Textarea } from '@/components/ui/textarea'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
-import type { AssistantMessage, useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
+import { cn } from '@/lib/utils'
 
 const EXAMPLE_QUESTION =
   "We're at Hook Reef. Should we visit Tongue Bay or Blue Pearl Bay first over the next two days?"
@@ -43,6 +45,23 @@ function formatMessageFooter(message: AssistantMessage): string {
   return parts.join(' · ')
 }
 
+// ADR 0106 F2: a short, human label for a staged attachment's current
+// state, next to its filename. "Reading…" covers `pending` - the backend
+// field is `status`, but the operator never needs to know the difference
+// between still-extracting and still-enriching, only that it isn't done.
+function stagedDocumentStatusLabel(item: StagedDocument): string {
+  switch (item.status) {
+    case 'uploading':
+      return `${item.progress}%`
+    case 'pending':
+      return 'Reading…'
+    case 'indexed':
+      return 'Indexed'
+    case 'failed':
+      return item.error ?? 'Failed'
+  }
+}
+
 function formatMessageFooterTitle(message: AssistantMessage): string {
   const model = message.model && message.model !== '' ? message.model : '--'
   const tokens =
@@ -50,6 +69,26 @@ function formatMessageFooterTitle(message: AssistantMessage): string {
       ? (message.promptTokens + message.completionTokens).toLocaleString()
       : '--'
   return `${model} · ${tokens} tokens`
+}
+
+// ADR 0106 F2: the small filename chips shown under a past user message's
+// bubble. There's no Documents panel yet for these to open (that's F1, a
+// later phase of the same plan) - once it exists, this becomes a link into
+// its viewer instead of inert text.
+function MessageAttachmentChips({ attachments }: { attachments: AssistantMessageAttachment[] }) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      {attachments.map((attachment) => (
+        <span
+          key={attachment.documentId}
+          className="max-w-40 truncate rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground"
+          title={attachment.filename}
+        >
+          {attachment.filename}
+        </span>
+      ))}
+    </div>
+  )
 }
 
 interface AssistantThreadProps {
@@ -89,6 +128,14 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // first question", and it clears the moment the next question is sent.
   const [stopped, setStopped] = useState(false)
 
+  // ADR 0106 F2: the composer's staged attachments. One useDocumentUploads()
+  // instance per AssistantThread - it isn't threaded through as a prop
+  // because nothing outside the composer needs it, the same way `content`
+  // above is local rather than owned by AssistantDrawer/MateSheet.
+  const uploads = useDocumentUploads()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [dragOver, setDragOver] = useState(false)
+
   // ADR 0105 ("the answer outlives the page"): whenever the active
   // conversation becomes a real id - on mount, or when the operator
   // switches threads - rejoin whatever reply the server is still writing
@@ -125,7 +172,16 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
 
   const handleSend = useCallback(async () => {
     const trimmed = content.trim()
-    if (trimmed === '' || chat.sending || !canWrite) return
+    // ADR 0106 F2: a question may now be nothing but an attachment - the
+    // backend accepts empty content as long as at least one document is
+    // attached - so the old "no text, nothing to send" guard has to allow
+    // that case through. `uploads.ready` is what actually gates Send on
+    // upload/indexing state; see use-document-uploads.ts for exactly what
+    // it requires.
+    const attachmentIds = uploads.items
+      .map((item) => item.documentId)
+      .filter((id): id is string => id !== null)
+    if ((trimmed === '' && attachmentIds.length === 0) || chat.sending || !canWrite || !uploads.ready) return
     setStopped(false)
 
     let conversationId = conversations.activeId
@@ -137,6 +193,11 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       activeIdRef.current = conversationId
     }
 
+    const attachmentChips: AssistantMessageAttachment[] = uploads.items.map((item) => ({
+      documentId: item.documentId as string,
+      filename: item.filename,
+    }))
+
     conversations.appendLocal({
       id: `local-${Date.now()}`,
       conversationId,
@@ -144,17 +205,31 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       role: 'user',
       content: trimmed,
       createdAt: new Date().toISOString(),
+      attachments: attachmentChips.length > 0 ? attachmentChips : undefined,
     })
     setContent('')
 
-    const reply = await chat.send(conversationId, trimmed)
+    // Only included when something is actually staged - same
+    // conditional-inclusion `send()` already applies to `spoken`/`screen`,
+    // so a plain text-only question posts exactly the body it always has.
+    const reply =
+      attachmentIds.length > 0
+        ? await chat.send(conversationId, trimmed, { attachments: attachmentIds })
+        : await chat.send(conversationId, trimmed)
+
+    // A successful send has nothing left for the composer to hold onto -
+    // clear() aborts nothing (everything staged already finished
+    // uploading, since uploads.ready gated Send above) and just drops the
+    // now-sent chips. A failed send (reply === null, chat.error is set)
+    // leaves them staged so the operator can retry without re-uploading.
+    if (reply) uploads.clear()
     // The operator may have opened another thread while this one answered;
     // appendLocal writes into whichever thread is active now.
     if (reply && activeIdRef.current === conversationId) {
       conversations.appendLocal(reply)
       await conversations.refresh()
     }
-  }, [content, chat, conversations, canWrite])
+  }, [content, chat, conversations, canWrite, uploads])
 
   const handleStop = useCallback(() => {
     void chat.abort()
@@ -168,6 +243,30 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     }
   }
 
+  // ADR 0106 F2: the paperclip button never touches the DOM file input
+  // directly - it's hidden (getByTestId'd in tests, not a visible control)
+  // and only ever driven by ref.click() here or by a drop below.
+  const handleFilesChosen = useCallback((files: FileList | null) => {
+    if (files && files.length > 0) uploads.add(files)
+    // Clears the input's own value so choosing the exact same file again
+    // later still fires a change event - the browser otherwise treats an
+    // unchanged file list as nothing having changed.
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [uploads])
+
+  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setDragOver(true)
+  }, [])
+
+  const handleDragLeave = useCallback(() => setDragOver(false), [])
+
+  const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setDragOver(false)
+    if (event.dataTransfer.files.length > 0) uploads.add(event.dataTransfer.files)
+  }, [uploads])
+
   const hasMessages = conversations.messages.length > 0
   // ADR 0105: the draft is the current round's answer text streaming in.
   // While it holds text, it is the thing on screen in place of the status
@@ -175,6 +274,22 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   // back to null and the marker returns, even though `sending` is still true.
   const showDraft = chat.sending && Boolean(chat.draft)
   const showStatusMarker = chat.sending && !showDraft
+
+  // ADR 0106 F2: Send's own disabled reasons, beyond the plain "nothing
+  // typed and nothing attached" case. uploads.ready requires every staged
+  // item to be indexed or failed - so this covers both a chip mid-upload
+  // (no document id yet) and one already uploaded but still being read or
+  // enriched (`pending`). Reported as a visible line below, not just a
+  // hover title, since this is exactly the kind of state a touchscreen
+  // operator at the helm would otherwise have no way to discover.
+  const attachmentsNotReady = !uploads.ready
+  const attachmentWaitMessage = uploads.items.some((item) => item.status === 'uploading')
+    ? 'Waiting for attachments to finish uploading…'
+    : attachmentsNotReady
+      ? 'Waiting for attachments to finish reading…'
+      : null
+  const hasContentOrAttachment = content.trim() !== '' || uploads.items.length > 0
+  const sendDisabled = chat.sending || !canWrite || !hasContentOrAttachment || attachmentsNotReady
 
   return (
     <div
@@ -198,9 +313,17 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                       {message.role === 'user' ? (
                         <Message align="end">
                           <MessageContent>
-                            <Bubble variant="secondary" align="end">
-                              <BubbleContent className="whitespace-pre-wrap">{message.content}</BubbleContent>
-                            </Bubble>
+                            {message.content !== '' && (
+                              <Bubble variant="secondary" align="end">
+                                <BubbleContent className="whitespace-pre-wrap">{message.content}</BubbleContent>
+                              </Bubble>
+                            )}
+                            {/* ADR 0106 F2: attachments on a message that was
+                                sent with none, or content-less, still need
+                                somewhere to render - see MessageAttachmentChips. */}
+                            {message.attachments && message.attachments.length > 0 && (
+                              <MessageAttachmentChips attachments={message.attachments} />
+                            )}
                           </MessageContent>
                         </Message>
                       ) : (
@@ -270,7 +393,60 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
         </Bubble>
       )}
 
-      <div className="flex flex-col gap-1">
+      <div
+        className={cn(
+          'flex flex-col gap-1 rounded-md',
+          // ADR 0106 F2: a visible drop state - dragging a file over the
+          // whole composer (not just some narrow drop target) is the
+          // discoverable affordance; the ring makes the target obvious
+          // before the operator commits to releasing the file.
+          dragOver && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+        )}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        data-testid="composer-dropzone"
+      >
+        {uploads.items.length > 0 && (
+          <div className="flex flex-wrap gap-1.5" data-testid="composer-attachments">
+            {uploads.items.map((item) => (
+              <div
+                key={item.key}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]',
+                  item.status === 'failed' ? 'border-destructive/40 bg-destructive/10' : 'border-border bg-muted/50',
+                )}
+              >
+                {item.status === 'uploading' && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+                <span className="max-w-40 truncate" title={item.filename}>
+                  {item.filename}
+                </span>
+                <span
+                  className={cn(
+                    'tabular-nums',
+                    item.status === 'failed' ? 'text-destructive' : 'text-muted-foreground',
+                  )}
+                >
+                  {stagedDocumentStatusLabel(item)}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${item.filename}`}
+                  onClick={() => uploads.remove(item.key)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {uploads.error && (
+          <p className="text-[11px] text-destructive" role="alert">
+            {uploads.error}
+          </p>
+        )}
+
         <Textarea
           ref={composerRef}
           rows={3}
@@ -282,8 +458,34 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
           autoFocus={autoFocus}
         />
         {!canWrite && <p className="text-[11px] text-muted-foreground">Read-only session</p>}
-        <div className="flex justify-end">
-          <Button onClick={() => void handleSend()} disabled={chat.sending || !canWrite || content.trim() === ''}>
+        {/* Send's disabled-attachment reason is a visible line, not just a
+            hover title: the operator most likely to hit this is on the wall
+            kiosk or a touchscreen helm, where nothing hovers. */}
+        {canWrite && attachmentWaitMessage && (
+          <p className="text-[11px] text-muted-foreground">{attachmentWaitMessage}</p>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          aria-label="Choose files to attach"
+          data-testid="composer-file-input"
+          onChange={(event) => handleFilesChosen(event.target.files)}
+        />
+        <div className="flex justify-between">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Attach files"
+            title="Attach files"
+            disabled={!canWrite}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+          <Button onClick={() => void handleSend()} disabled={sendDisabled}>
             Send
           </Button>
         </div>

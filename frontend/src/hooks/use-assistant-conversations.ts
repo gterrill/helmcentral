@@ -13,6 +13,11 @@ interface ConversationApi {
   updated_at: string
 }
 
+interface MessageAttachmentApi {
+  document_id: string
+  filename: string
+}
+
 interface MessageApi {
   id: string
   conversation_id: string
@@ -25,6 +30,7 @@ interface MessageApi {
   cost_usd?: number
   tool_rounds?: number
   created_at: string
+  attachments?: MessageAttachmentApi[]
 }
 
 export interface AssistantConversation {
@@ -32,6 +38,11 @@ export interface AssistantConversation {
   title: string
   createdAt: string
   updatedAt: string
+}
+
+export interface AssistantMessageAttachment {
+  documentId: string
+  filename: string
 }
 
 export interface AssistantMessage {
@@ -46,6 +57,9 @@ export interface AssistantMessage {
   costUsd?: number
   toolRounds?: number
   createdAt: string
+  /** Documents (ADR 0106) attached to this message - only ever present on a
+   * user message; the backend never sets it on an assistant reply. */
+  attachments?: AssistantMessageAttachment[]
 }
 
 function mapConversation(api: ConversationApi): AssistantConversation {
@@ -65,6 +79,7 @@ function mapMessage(api: MessageApi): AssistantMessage {
     costUsd: api.cost_usd,
     toolRounds: api.tool_rounds,
     createdAt: api.created_at,
+    attachments: api.attachments?.map((a) => ({ documentId: a.document_id, filename: a.filename })),
   }
 }
 

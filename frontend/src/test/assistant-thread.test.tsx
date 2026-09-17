@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 
 import { AssistantThread } from '@/components/assistant-thread'
@@ -48,6 +48,50 @@ function buildChat(overrides: Partial<ReturnType<typeof useAssistantChat>> = {})
     isStreamingConversation: vi.fn().mockReturnValue(false),
     ...overrides,
   }
+}
+
+// FakeXHR (ADR 0106 F2): AssistantThread's composer now stages attachments
+// through use-document-uploads.ts, which uploads via XMLHttpRequest (not
+// fetch) so it can report real progress. Mirrors
+// use-document-uploads.test.ts's own fake - see that file for why a fake is
+// needed at all rather than mocking fetch.
+class FakeXHR {
+  static instances: FakeXHR[] = []
+
+  status = 0
+  responseText = ''
+  upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = {
+    onprogress: null,
+  }
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+
+  constructor() {
+    FakeXHR.instances.push(this)
+  }
+
+  open() {}
+  send() {}
+  abort() {}
+}
+
+function resolveUpload(
+  xhr: FakeXHR,
+  overrides: { status?: string; documentId?: string; filename?: string; duplicate?: boolean } = {},
+) {
+  act(() => {
+    xhr.status = 201
+    xhr.responseText = JSON.stringify({
+      document: {
+        id: overrides.documentId ?? 'doc-1',
+        filename: overrides.filename ?? 'manual.pdf',
+        status: overrides.status ?? 'indexed',
+        stage: 'done',
+      },
+      duplicate: overrides.duplicate ?? false,
+    })
+    xhr.onload?.()
+  })
 }
 
 const assistantMessage = (overrides: Partial<AssistantMessage> = {}): AssistantMessage => ({
@@ -487,6 +531,156 @@ describe('AssistantThread', () => {
 
       await waitFor(() => expect(conversations.appendLocal).toHaveBeenCalledWith(reply))
       await waitFor(() => expect(conversations.refresh).toHaveBeenCalled())
+    })
+  })
+
+  // ADR 0106 F2: attaching a document to a question, from the composer.
+  describe('attachments (ADR 0106 F2)', () => {
+    beforeEach(() => {
+      FakeXHR.instances = []
+      vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    })
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('disables Send while an attachment is uploading, with a readable reason, and enables it once indexed', () => {
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+
+      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      fireEvent.change(textarea, { target: { value: 'What does this say about the impeller?' } })
+      expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled()
+
+      const fileInput = screen.getByTestId('composer-file-input')
+      fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
+
+      expect(screen.getByText('manual.pdf')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+      expect(screen.getByText(/Waiting for attachments to finish uploading/)).toBeInTheDocument()
+
+      resolveUpload(FakeXHR.instances[0])
+
+      expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled()
+      expect(screen.queryByText(/Waiting for attachments to finish uploading/)).not.toBeInTheDocument()
+    })
+
+    it('sends the staged attachment ids through chat.send, alongside the typed question', async () => {
+      const send = vi.fn().mockResolvedValue(null)
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+
+      const fileInput = screen.getByTestId('composer-file-input')
+      fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
+      resolveUpload(FakeXHR.instances[0], { documentId: 'doc-1' })
+
+      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      fireEvent.change(textarea, { target: { value: 'What is the impeller part number?' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledWith('c1', 'What is the impeller part number?', { attachments: ['doc-1'] }),
+      )
+    })
+
+    it('sends with an attachment and no text typed', async () => {
+      const send = vi.fn().mockResolvedValue(null)
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+
+      const fileInput = screen.getByTestId('composer-file-input')
+      fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
+      resolveUpload(FakeXHR.instances[0], { documentId: 'doc-1' })
+
+      expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled()
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', '', { attachments: ['doc-1'] }))
+    })
+
+    // Existing thread tests (above) call send with exactly two arguments for
+    // a text-only question - this pins that a staged-but-empty composer
+    // still omits the attachments option entirely rather than sending `{}`
+    // or `{ attachments: [] }`, the same conditional-inclusion rule
+    // spoken/screen already follow in use-assistant-chat.ts.
+    it('omits the attachments option entirely when nothing is staged', async () => {
+      const send = vi.fn().mockResolvedValue(null)
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+
+      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      fireEvent.change(textarea, { target: { value: 'Plain question, no attachment' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Plain question, no attachment'))
+    })
+
+    // ADR 0106 F2 follow-up: uploads dedupe by sha256 server-side, so
+    // attaching the same file twice (or two files with identical content)
+    // can resolve to the same document id. use-document-uploads.ts collapses
+    // the second chip rather than staging a duplicate - this pins that the
+    // composer only ever posts one copy of that id, not [X, X], which the
+    // backend rejects with 400 "duplicate attachment".
+    it('sends one attachment id when the same document is staged twice', async () => {
+      const send = vi.fn().mockResolvedValue(null)
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+
+      const fileInput = screen.getByTestId('composer-file-input')
+      fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
+      resolveUpload(FakeXHR.instances[0], { documentId: 'doc-1' })
+
+      fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
+      resolveUpload(FakeXHR.instances[1], { documentId: 'doc-1', duplicate: true })
+
+      expect(screen.getAllByText('manual.pdf')).toHaveLength(1)
+      expect(screen.getByRole('alert')).toHaveTextContent('"manual.pdf" is already attached.')
+
+      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      fireEvent.change(textarea, { target: { value: 'What is the impeller part number?' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledWith('c1', 'What is the impeller part number?', { attachments: ['doc-1'] }),
+      )
+    })
+
+    it('shows a staged chip and removes it on request', () => {
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+
+      const fileInput = screen.getByTestId('composer-file-input')
+      fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
+
+      expect(screen.getByText('manual.pdf')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Remove manual.pdf' }))
+      expect(screen.queryByText('manual.pdf')).not.toBeInTheDocument()
+    })
+
+    it('uploads a file dropped onto the composer', () => {
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+
+      const dropzone = screen.getByTestId('composer-dropzone')
+      const file = new File(['hello'], 'manual.pdf', { type: 'application/pdf' })
+      fireEvent.drop(dropzone, { dataTransfer: { files: [file] } })
+
+      expect(screen.getByText('manual.pdf')).toBeInTheDocument()
+    })
+
+    it("renders a past user message's attachment filenames as chips", () => {
+      const conversations = buildConversations({
+        messages: [
+          {
+            id: 'u1',
+            conversationId: 'c1',
+            seq: 0,
+            role: 'user',
+            content: 'What about the impeller?',
+            createdAt: '2026-09-17T00:00:00Z',
+            attachments: [{ documentId: 'doc-1', filename: 'manual.pdf' }],
+          },
+        ],
+      })
+
+      render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+
+      expect(screen.getByText('What about the impeller?')).toBeInTheDocument()
+      expect(screen.getByText('manual.pdf')).toBeInTheDocument()
     })
   })
 })
