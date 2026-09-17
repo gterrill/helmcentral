@@ -791,11 +791,13 @@ describe('useAssistantChat', () => {
 
   // mate-answer-toast plan (on top of ADR 0105 "the answer outlives the
   // page"): send() registers the conversation in the module-level watch
-  // store the moment it posts a question, so an App-level watcher can tell
-  // a reply finished while the operator was looking at something else and
-  // toast it. attach() (rejoining an already-running reply, e.g. on mount)
-  // deliberately does not register - only a question this tab itself just
-  // asked counts.
+  // store before it even posts the question, so an App-level watcher can
+  // tell a reply finished while the operator was looking at something else
+  // and toast it - including when the POST itself never came back to this
+  // tab (an unmount, or a superseding send, aborts it) but still reached
+  // the backend and started a run. attach() (rejoining an already-running
+  // reply, e.g. on mount) deliberately does not register - only a question
+  // this tab itself just asked counts.
   describe('mate-watch-store registration', () => {
     beforeEach(() => {
       for (const entry of getMateWatchSnapshot()) removeMateWatch(entry.conversationId)
@@ -812,9 +814,10 @@ describe('useAssistantChat', () => {
       })
 
       // The run has already resolved by the time send() returns in this
-      // test, but registration happens synchronously at the start of
-      // send() - watcher.test.ts covers the "still watched after send
-      // settles" half of removal being the watcher's job, not send()'s.
+      // test, but registration actually happens in send()'s synchronous
+      // prefix, before the POST is even issued - watcher.test.ts covers the
+      // "still watched after send settles" half of removal being the
+      // watcher's job, not send()'s.
       expect(getMateWatchSnapshot().some((entry) => entry.conversationId === 'c1')).toBe(true)
     })
 
@@ -826,6 +829,75 @@ describe('useAssistantChat', () => {
 
       await act(async () => {
         await result.current.attach('c1')
+      })
+
+      expect(getMateWatchSnapshot().some((entry) => entry.conversationId === 'c1')).toBe(false)
+    })
+
+    it('does not register a watch when the send is rejected (e.g. 409)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'the assistant is still answering the previous message' }),
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { result } = renderHook(() => useAssistantChat())
+
+      await act(async () => {
+        await result.current.send('c1', 'hello')
+      })
+
+      // registerMateWatch fires up front, before this 409 comes back - the
+      // !response.ok branch has to take the watch back off again.
+      expect(getMateWatchSnapshot().some((entry) => entry.conversationId === 'c1')).toBe(false)
+    })
+
+    // ADR 0105: the POST may have reached the backend and started a run
+    // even though this tab never saw the response - an unmount (or a
+    // superseding send) aborts the fetch, which makes it reject the same
+    // way a genuine network failure would, but with the controller's own
+    // signal already aborted. That case must keep the watch: the run this
+    // tab can no longer see may still finish and deserve a toast. This is
+    // the gap send() used to leave open, and fails before the registration
+    // point moves ahead of the fetch call.
+    it('leaves the watch registered when the POST is aborted mid-flight (unmount)', async () => {
+      const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          })
+        })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { result, unmount } = renderHook(() => useAssistantChat())
+
+      let sendPromise!: Promise<AssistantMessage | null>
+      act(() => {
+        sendPromise = result.current.send('c1', 'hello')
+      })
+
+      await act(async () => {
+        unmount()
+        await sendPromise
+      })
+
+      expect(getMateWatchSnapshot().some((entry) => entry.conversationId === 'c1')).toBe(true)
+    })
+
+    // The non-abort counterpart: a real fetch/network failure (the request
+    // never reached the backend, or nothing answered) proves no run started
+    // here, so the catch branch has to remove the watch it registered up
+    // front - unlike the abort case above.
+    it('does not leave a watch registered when the fetch fails outright (not an abort)', async () => {
+      const fetchMock = vi.fn().mockRejectedValue(new Error('network error'))
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { result } = renderHook(() => useAssistantChat())
+
+      await act(async () => {
+        await result.current.send('c1', 'hello')
       })
 
       expect(getMateWatchSnapshot().some((entry) => entry.conversationId === 'c1')).toBe(false)

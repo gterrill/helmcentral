@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { readServerSentEvents } from '@/lib/sse-reader'
-import { registerMateWatch } from '@/lib/mate-watch-store'
+import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 import type { AssistantConversation, AssistantMessage } from '@/hooks/use-assistant-conversations'
 
 interface MessageApi {
@@ -254,19 +254,28 @@ export function useAssistantChat() {
     currentConversationIdRef.current = conversationId
     const isCurrent = () => abortRef.current === controller
 
-    // mate-answer-toast plan: a question posted from this tab is watched
-    // from the moment it's sent, not just while this hook instance stays
-    // mounted - the whole point is catching an answer that finishes after
-    // the operator has navigated away (App.tsx's use-mate-answer-watcher
-    // reads this store for whatever conversation isn't on screen).
-    // attach() deliberately never calls this: rejoining a run someone else
-    // started isn't "this tab asked a question".
-    registerMateWatch(conversationId)
-
     setSending(true)
     setError(null)
     setStatusText(null)
     clearDraft()
+
+    // mate-answer-toast plan: registered here, before the fetch below is
+    // even issued, rather than after the response comes back ok. An
+    // interrupted send - the component unmounts, or a newer send
+    // supersedes this one via the abortRef.current?.abort() above - can
+    // still have reached the backend and started a run: ADR 0105 means the
+    // run outlives the request that started it, so a question this tab
+    // never saw answered for may nonetheless finish and deserve a "Mate
+    // answered" toast (App.tsx's use-mate-answer-watcher reads this store
+    // for whatever conversation isn't on screen). Registering early makes
+    // sure that case is covered. The paths below that learn no run started
+    // here - a rejected send (e.g. 409, another tab's run for this
+    // conversation is still going), a body-less response, and a fetch that
+    // failed outright rather than being aborted - remove the watch again,
+    // since this tab has no reason to wait on an answer that will never
+    // come. attach() deliberately never registers at all: rejoining a run
+    // someone else started isn't "this tab asked a question".
+    registerMateWatch(conversationId)
 
     try {
       // `spoken`/`screen` are included only when the caller actually passed
@@ -289,11 +298,13 @@ export function useAssistantChat() {
 
       if (!response.ok) {
         const message = await readErrorMessage(response)
+        removeMateWatch(conversationId)
         if (isCurrent()) setError(message)
         return null
       }
 
       if (response.body === null) {
+        removeMateWatch(conversationId)
         if (isCurrent()) setError('streaming not supported')
         return null
       }
@@ -301,6 +312,7 @@ export function useAssistantChat() {
       return await consumeStream(response.body, controller, options?.onConversation)
     } catch (err) {
       if (controller.signal.aborted) return null
+      removeMateWatch(conversationId)
       if (isCurrent()) {
         setError(err instanceof Error ? err.message : String(err))
         clearDraft()
