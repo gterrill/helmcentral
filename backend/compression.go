@@ -60,6 +60,11 @@ var noCompressRoutePatterns = map[string]bool{
 	// safe.
 	"/api/assistant/conversations/:id/messages": true,
 
+	// GET .../run (ADR 0105) replays a run's event log and then streams live
+	// events the same way the POST above does, over its own connection -
+	// same reasoning, same skip.
+	"/api/assistant/conversations/:id/run": true,
+
 	// WebSocket upgrade (grep for "websocket.Accept" turned up exactly this
 	// one inbound upgrade; signalk_publish.go and signalk_stream.go dial
 	// *outbound* websockets to SignalK and are not HTTP routes at all).

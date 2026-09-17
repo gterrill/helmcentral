@@ -143,23 +143,6 @@ type assistantRunnerFace interface {
 	run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error)
 }
 
-// assistantRunsInFlight guards against two concurrent runs on the same
-// conversation (two browser tabs, or a double-click): a run holds its
-// conversation id in this map for its whole duration, and
-// postAssistantMessageHandler answers a second request for the same id
-// with 409 rather than interleaving two agentic loops writing to the same
-// history.
-var assistantRunsInFlight sync.Map
-
-func beginAssistantRun(conversationID string) bool {
-	_, alreadyRunning := assistantRunsInFlight.LoadOrStore(conversationID, struct{}{})
-	return !alreadyRunning
-}
-
-func endAssistantRun(conversationID string) {
-	assistantRunsInFlight.Delete(conversationID)
-}
-
 // assistantConversationTitle derives a conversation's title from its first
 // user message: the first assistantTitleMaxRunes runes, trimmed back to the
 // last space so the title never ends mid-word. Falling back to a hard cut
@@ -724,6 +707,17 @@ var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter ass
 // this always returns nil - the response has already started, so there is
 // no HTTP status left to change (mirrors telemetryStream's "a write error
 // is an ordinary end to the request" reasoning).
+//
+// ADR 0105 ("the answer outlives the page"): everything above this point
+// happens synchronously, exactly as before. From here on, the actual
+// agentic run happens in a goroutine driven by a context derived from
+// context.Background(), not this request's - see
+// assistantRunRegistry.start's own doc comment. This handler's only job
+// after starting that goroutine is to subscribe to the run's event log from
+// the beginning and stream it to this particular client
+// (streamAssistantRun); if that client disconnects, only this call
+// returns - the run keeps going, and GET .../run is how a page (this tab
+// reopened, or a different one) rejoins it.
 func postAssistantMessageHandler(c echo.Context) error {
 	id := c.Param("id")
 
@@ -774,23 +768,26 @@ func postAssistantMessageHandler(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "conversation not found"})
 	}
 
-	if !beginAssistantRun(id) {
+	runCtx, run, started := globalAssistantRuns.start(id)
+	if !started {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "the assistant is still answering the previous message"})
 	}
-	defer endAssistantRun(id)
 
 	previousMessages, err := globalAssistantStore.ListMessages(id)
 	if err != nil {
+		globalAssistantRuns.remove(id, run)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	isFirstMessage := len(previousMessages) == 0
 
 	userRow, err := globalAssistantStore.AppendMessage(assistantMessage{ConversationID: id, Role: "user", Content: content})
 	if err != nil {
+		globalAssistantRuns.remove(id, run)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	if isFirstMessage {
 		if err := globalAssistantStore.SetTitle(id, assistantConversationTitle(content)); err != nil {
+			globalAssistantRuns.remove(id, run)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 	}
@@ -806,6 +803,72 @@ func postAssistantMessageHandler(c echo.Context) error {
 		}
 	}
 	systemStable, systemLive := assistantSystemPromptParts(pc)
+	history := assistantHistoryMessages(previousMessages)
+
+	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, run.append)
+
+	// runCtx, not c.Request().Context(): this goroutine, and the run it
+	// drives, must outlive this one HTTP request (ADR 0105). Only
+	// run.cancel() (POST .../run/cancel) or assistantRunTimeout, applied
+	// inside runner.run itself, ever ends it early.
+	go func() {
+		defer globalAssistantRuns.remove(id, run)
+
+		reply, runErr := runner.run(runCtx, systemStable, systemLive, history)
+		if runErr != nil {
+			if run.wasCancelled() {
+				log.Printf("assistant: run for conversation %s stopped by the operator", id)
+				run.append("error", map[string]string{"error": "stopped"})
+			} else {
+				log.Printf("assistant: run failed for conversation %s: %v", id, runErr)
+				run.append("error", map[string]string{"error": firstErrorLine(runErr)})
+			}
+			run.finish()
+			return
+		}
+		log.Printf("assistant: conversation %s answered by %s in %d tool rounds, %d prompt + %d completion tokens, $%.4f",
+			id, reply.Model, reply.ToolRounds, reply.PromptTokens, reply.CompletionTokens, reply.CostUSD)
+
+		if summaryTitle := assistantSummaryTitle(reply.Content); summaryTitle != "" {
+			if err := globalAssistantStore.SetTitle(id, summaryTitle); err != nil {
+				log.Printf("assistant: update conversation summary title for %s: %v", id, err)
+				run.append("error", map[string]string{"error": firstErrorLine(err)})
+				run.finish()
+				return
+			}
+		}
+
+		// The assistant row is persisted before "message" is appended, so a
+		// client that finds no run in progress (GET .../run -> 204) can
+		// still read the answer straight from GET the conversation.
+		assistantRow, err := globalAssistantStore.AppendMessage(assistantMessage{
+			ConversationID:   id,
+			Role:             "assistant",
+			Content:          reply.Content,
+			Model:            reply.Model,
+			PromptTokens:     reply.PromptTokens,
+			CompletionTokens: reply.CompletionTokens,
+			CostUSD:          reply.CostUSD,
+			ToolRounds:       reply.ToolRounds,
+		})
+		if err != nil {
+			log.Printf("assistant: persist reply for conversation %s: %v", id, err)
+			run.append("error", map[string]string{"error": firstErrorLine(err)})
+			run.finish()
+			return
+		}
+
+		updatedConv, ok, err := globalAssistantStore.GetConversation(id)
+		if err != nil || !ok {
+			log.Printf("assistant: reload conversation %s after reply: ok=%v err=%v", id, ok, err)
+			run.append("error", map[string]string{"error": "failed to reload the conversation after the reply"})
+			run.finish()
+			return
+		}
+
+		run.append("message", map[string]any{"message": assistantRow, "conversation": updatedConv})
+		run.finish()
+	}()
 
 	header := c.Response().Header()
 	header.Set("Content-Type", "text/event-stream")
@@ -814,57 +877,67 @@ func postAssistantMessageHandler(c echo.Context) error {
 	header.Set("X-Accel-Buffering", "no")
 	c.Response().WriteHeader(http.StatusOK)
 
-	emit := func(event string, payload any) {
-		data, merr := json.Marshal(payload)
-		if merr != nil {
-			log.Printf("assistant: marshal %s event for conversation %s: %v", event, id, merr)
-			return
-		}
-		fmt.Fprintf(c.Response(), "event: %s\ndata: %s\n\n", event, data)
-		c.Response().Flush()
-	}
-
-	runner := newAssistantRunner(apiKey, readiness.Model, settingsPath, autoRouter, emit)
-	reply, runErr := runner.run(c.Request().Context(), systemStable, systemLive, assistantHistoryMessages(previousMessages))
-	if runErr != nil {
-		log.Printf("assistant: run failed for conversation %s: %v", id, runErr)
-		emit("error", map[string]string{"error": firstErrorLine(runErr)})
-		return nil
-	}
-	log.Printf("assistant: conversation %s answered by %s in %d tool rounds, %d prompt + %d completion tokens, $%.4f",
-		id, reply.Model, reply.ToolRounds, reply.PromptTokens, reply.CompletionTokens, reply.CostUSD)
-
-	if summaryTitle := assistantSummaryTitle(reply.Content); summaryTitle != "" {
-		if err := globalAssistantStore.SetTitle(id, summaryTitle); err != nil {
-			log.Printf("assistant: update conversation summary title for %s: %v", id, err)
-			emit("error", map[string]string{"error": firstErrorLine(err)})
-			return nil
-		}
-	}
-
-	assistantRow, err := globalAssistantStore.AppendMessage(assistantMessage{
-		ConversationID:   id,
-		Role:             "assistant",
-		Content:          reply.Content,
-		Model:            reply.Model,
-		PromptTokens:     reply.PromptTokens,
-		CompletionTokens: reply.CompletionTokens,
-		CostUSD:          reply.CostUSD,
-		ToolRounds:       reply.ToolRounds,
-	})
-	if err != nil {
-		log.Printf("assistant: persist reply for conversation %s: %v", id, err)
-		emit("error", map[string]string{"error": firstErrorLine(err)})
-		return nil
-	}
-
-	updatedConv, ok, err := globalAssistantStore.GetConversation(id)
-	if err != nil || !ok {
-		log.Printf("assistant: reload conversation %s after reply: ok=%v err=%v", id, ok, err)
-		emit("error", map[string]string{"error": "failed to reload the conversation after the reply"})
-		return nil
-	}
-
-	emit("message", map[string]any{"message": assistantRow, "conversation": updatedConv})
+	streamAssistantRun(c.Request().Context(), run, 0, c.Response())
 	return nil
+}
+
+// GET /api/assistant/conversations/:id/run
+//
+// ADR 0105: lets a page rejoin whatever reply is still being written after
+// it left and came back - a navigation to another panel, a reload, an
+// iPad's screen lock killing the original POST's fetch outright. If a run
+// is in flight, this replays its whole event log so far and then streams
+// live events exactly like the POST that started it did, until the run
+// finishes or this client disconnects (which, same as the POST, never
+// cancels the run - it only stops this particular subscription). If no run
+// is in flight - the answer already finished, or nothing was ever asked -
+// this responds 204 with no body; the caller already has GET
+// .../conversations/:id for the finished answer, since the assistant row is
+// always persisted before the run's own "message" event is appended.
+func getAssistantRunHandler(c echo.Context) error {
+	id := c.Param("id")
+
+	run, ok := globalAssistantRuns.get(id)
+	if !ok {
+		return c.NoContent(http.StatusNoContent)
+	}
+
+	header := c.Response().Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+	header.Set("X-Accel-Buffering", "no")
+	c.Response().WriteHeader(http.StatusOK)
+
+	streamAssistantRun(c.Request().Context(), run, 0, c.Response())
+	return nil
+}
+
+// POST /api/assistant/conversations/:id/run/cancel
+//
+// ADR 0105: the operator's own Stop button, now a real cancel rather than
+// just closing the local SSE stream (which used to be all "stopping" a
+// question meant, and never actually told the server to stop working). If a
+// run is in flight for id, its context is cancelled; the run then ends with
+// no assistant row persisted, the same outcome Stop already produced before
+// this change, and every subscriber (this tab, and any other GET .../run
+// listener) sees an "error" event with a short "stopped" message rather
+// than the run's own internal cancellation error. Responds 204 whether or
+// not a run was actually running, so this is safe to call more than once -
+// a double click, or a Stop that lands just as the run was already
+// finishing on its own.
+func postAssistantRunCancelHandler(c echo.Context) error {
+	id := c.Param("id")
+	if run, ok := globalAssistantRuns.get(id); ok {
+		run.cancel()
+		// Answer only once the conversation is free: the run can take a
+		// moment to unwind its OpenRouter call, and a question sent before
+		// then would be refused with 409.
+		select {
+		case <-run.released:
+		case <-c.Request().Context().Done():
+			return c.Request().Context().Err()
+		}
+	}
+	return c.NoContent(http.StatusNoContent)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -93,6 +94,95 @@ func (b *blockingAssistantRunner) run(ctx context.Context, systemStable, systemL
 	close(b.started)
 	<-b.proceed
 	return b.reply, nil
+}
+
+// cancelAwareAssistantRunner is a whole-run test double for ADR 0105's
+// cancel path: it signals started, then blocks on ctx itself (the run's own
+// context, not the request's - see assistantRunRegistry.start) until
+// cancel() ends it, and returns ctx.Err() the way a real run's completion
+// call eventually would once its context is cancelled underneath it.
+type cancelAwareAssistantRunner struct {
+	emit    assistantEmitter
+	started chan struct{}
+}
+
+func (c *cancelAwareAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
+	close(c.started)
+	<-ctx.Done()
+	return assistantReply{}, ctx.Err()
+}
+
+// scriptedAssistantRunner is a whole-run test double for ADR 0105's GET
+// .../run replay-then-live test: it emits one status event, signals
+// started, then blocks on proceed before emitting a live delta and
+// returning the final reply - letting a test attach a GET .../run
+// subscriber in the gap between the two and observe both the replayed
+// status and the live delta/message that follow.
+type scriptedAssistantRunner struct {
+	emit    assistantEmitter
+	started chan struct{}
+	proceed chan struct{}
+	reply   assistantReply
+}
+
+func (s *scriptedAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
+	s.emit("status", assistantStatus("Thinking…"))
+	close(s.started)
+	<-s.proceed
+	s.emit("delta", assistantDelta("Tongue Bay first."))
+	return s.reply, nil
+}
+
+// waitForConditionT polls cond until it reports true, failing the test if
+// timeout elapses first. Used only where no channel-based synchronisation
+// is available - here, waiting for a background goroutine to persist a row
+// after a run finishes asynchronously.
+func waitForConditionT(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !cond() {
+		t.Fatal("timed out waiting for condition")
+	}
+}
+
+// sseBodyCollector is a thread-safe io.Writer a test can hand to io.Copy
+// while reading a real HTTP response body in the background, and poll from
+// the test goroutine via String() - mirrors syncBufferSSEWriter
+// (assistant_run_registry_test.go) but only needs io.Writer here, never
+// assistantRunSSEWriter's Flush.
+type sseBodyCollector struct {
+	mu sync.Mutex
+	sb strings.Builder
+}
+
+func (c *sseBodyCollector) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sb.Write(p)
+}
+
+func (c *sseBodyCollector) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sb.String()
+}
+
+func waitForBodyContains(t *testing.T, c *sseBodyCollector, substr string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(c.String(), substr) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %q in:\n%s", substr, c.String())
 }
 
 // swapAssistantRunner replaces newAssistantRunner for the duration of a
@@ -1142,18 +1232,356 @@ func TestPostAssistantMessageHandler_SecondRequestWhileFirstInFlightReturns409(t
 	wg.Wait()
 }
 
+// ── ADR 0105: the answer outlives the page ─────────────────────────────
+
+// TestPostAssistantMessageHandler_ClientDisconnectDoesNotStopTheRun is the
+// central claim of ADR 0105: the operator navigating away (a closed fetch,
+// or an iPad locking its screen) must not cancel a reply already being
+// written. This uses a real HTTP server and a real client whose request
+// context is cancelled mid-run - the same as a browser abandoning a fetch -
+// then proves the run still finishes and the assistant row still gets
+// persisted.
+func TestPostAssistantMessageHandler_ClientDisconnectDoesNotStopTheRun(t *testing.T) {
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	store := withTestAssistantStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	conv, err := store.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		return &blockingAssistantRunner{
+			started: started,
+			proceed: proceed,
+			reply:   assistantReply{Content: "Tongue Bay, on the rising tide.", Model: "openai/gpt-4o"},
+		}
+	})
+
+	e := echo.New()
+	e.POST("/api/assistant/conversations/:id/messages", postAssistantMessageHandler)
+	server := httptest.NewServer(e)
+	t.Cleanup(server.Close)
+
+	reqCtx, cancelRequest := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
+		server.URL+"/api/assistant/conversations/"+conv.ID+"/messages",
+		strings.NewReader(`{"content":"Tongue Bay or Blue Pearl Bay first?"}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	clientDone := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+		clientDone <- err
+	}()
+
+	<-started // the runner has begun; the in-flight guard is now held
+
+	// Simulate the operator navigating away mid-run.
+	cancelRequest()
+	if err := <-clientDone; err == nil {
+		t.Fatal("expected the client request to fail once its own context was cancelled")
+	}
+
+	// The run must be unaffected by that disconnect: releasing the runner
+	// lets it finish and persist the reply exactly as if the client were
+	// still attached.
+	close(proceed)
+
+	waitForConditionT(t, 2*time.Second, func() bool {
+		msgs, err := store.ListMessages(conv.ID)
+		return err == nil && len(msgs) == 2
+	})
+
+	messages, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) != 2 || messages[1].Role != "assistant" || messages[1].Content != "Tongue Bay, on the rising tide." {
+		t.Fatalf("expected the run to complete and persist the assistant reply despite the client disconnecting, got %+v", messages)
+	}
+}
+
+// TestGetAssistantRunHandler_NoRunInFlightReturns204 covers the plain "no
+// run in flight" case: nothing has ever been asked, or the run already
+// finished (and was removed from the registry) before this GET arrived.
+func TestGetAssistantRunHandler_NoRunInFlightReturns204(t *testing.T) {
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/conversations/nope/run", "", "nope")
+	if err := getAssistantRunHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage proves the
+// replay-then-live contract end to end over a real SSE connection: a GET
+// .../run that attaches after a run has already emitted a status event
+// sees that event replayed, then sees the run's later delta and message
+// events live, in that order.
+func TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage(t *testing.T) {
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	store := withTestAssistantStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	conv, err := store.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	started := make(chan struct{})
+	attach := make(chan struct{})
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		return &scriptedAssistantRunner{
+			emit:    emit,
+			started: started,
+			proceed: attach,
+			reply:   assistantReply{Content: "Tongue Bay first.", Model: "openai/gpt-4o"},
+		}
+	})
+
+	e := echo.New()
+	e.POST("/api/assistant/conversations/:id/messages", postAssistantMessageHandler)
+	e.GET("/api/assistant/conversations/:id/run", getAssistantRunHandler)
+	server := httptest.NewServer(e)
+	t.Cleanup(server.Close)
+
+	postCtx, cancelPost := context.WithCancel(context.Background())
+	t.Cleanup(cancelPost)
+	postReq, err := http.NewRequestWithContext(postCtx, http.MethodPost,
+		server.URL+"/api/assistant/conversations/"+conv.ID+"/messages",
+		strings.NewReader(`{"content":"Tongue Bay or Blue Pearl Bay first?"}`))
+	if err != nil {
+		t.Fatalf("build POST request: %v", err)
+	}
+	postReq.Header.Set("Content-Type", "application/json")
+
+	go func() {
+		resp, err := http.DefaultClient.Do(postReq)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		// This tab's own stream is a "stalled subscriber" for the rest of
+		// this test - drained here only so it can never block the run.
+		_, _ = io.Copy(io.Discard, resp.Body)
+	}()
+
+	<-started // the "status" event has been emitted, and only that one so far
+
+	getResp, err := http.Get(server.URL + "/api/assistant/conversations/" + conv.ID + "/run")
+	if err != nil {
+		t.Fatalf("GET .../run: %v", err)
+	}
+	t.Cleanup(func() { getResp.Body.Close() })
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with a run in flight, got %d", getResp.StatusCode)
+	}
+	if ct := getResp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("expected text/event-stream, got %q", ct)
+	}
+
+	collector := &sseBodyCollector{}
+	go io.Copy(collector, getResp.Body)
+
+	// The replayed backlog: "status" was emitted before this GET ever
+	// attached.
+	waitForBodyContains(t, collector, "event: status", 2*time.Second)
+
+	close(attach) // let the runner continue: it emits a live delta, then returns
+
+	waitForBodyContains(t, collector, "event: delta", 2*time.Second)
+	waitForBodyContains(t, collector, "event: message", 2*time.Second)
+
+	body := collector.String()
+	statusIdx := strings.Index(body, "event: status")
+	deltaIdx := strings.Index(body, "event: delta")
+	messageIdx := strings.Index(body, "event: message")
+	if !(statusIdx >= 0 && statusIdx < deltaIdx && deltaIdx < messageIdx) {
+		t.Fatalf("expected replayed status before the live delta and message, got:\n%s", body)
+	}
+}
+
+// TestPostAssistantRunCancelHandler_CancelsRunAndEmitsStoppedError proves
+// the cancel endpoint: cancelling an in-flight run ends it with no
+// assistant row persisted, and every subscriber - here, the original POST's
+// own stream - sees a plain "stopped" error rather than whatever raw error
+// the cancelled context produces underneath. A second cancel afterward is
+// still 204 (idempotent).
+func TestPostAssistantRunCancelHandler_CancelsRunAndEmitsStoppedError(t *testing.T) {
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	store := withTestAssistantStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	conv, err := store.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	started := make(chan struct{})
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		return &cancelAwareAssistantRunner{emit: emit, started: started}
+	})
+
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	postDone := make(chan struct{})
+	go func() {
+		if err := postAssistantMessageHandler(c); err != nil {
+			t.Errorf("handler returned error: %v", err)
+		}
+		close(postDone)
+	}()
+
+	<-started // the runner is now blocked on its own (run) context
+
+	cancelCtx, cancelRec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/run/cancel", "", conv.ID)
+	if err := postAssistantRunCancelHandler(cancelCtx); err != nil {
+		t.Fatalf("cancel handler returned error: %v", err)
+	}
+	if cancelRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", cancelRec.Code, cancelRec.Body.String())
+	}
+
+	select {
+	case <-postDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the cancelled run's own POST stream to end")
+	}
+
+	body := rec.Body.String()
+	data := extractSSEEventData(t, body, "error")
+	var errFrame struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(data), &errFrame); err != nil {
+		t.Fatalf("unmarshal error frame: %v", err)
+	}
+	if errFrame.Error != "stopped" {
+		t.Fatalf("expected a plain \"stopped\" error, got %q", errFrame.Error)
+	}
+
+	messages, err := store.ListMessages(conv.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Role != "user" {
+		t.Fatalf("expected only the user row to persist on a cancelled run, got %+v", messages)
+	}
+
+	// A second cancel, after the run has already ended and been removed
+	// from the registry, is still 204 rather than erroring.
+	cancelCtx2, cancelRec2 := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/run/cancel", "", conv.ID)
+	if err := postAssistantRunCancelHandler(cancelCtx2); err != nil {
+		t.Fatalf("second cancel handler returned error: %v", err)
+	}
+	if cancelRec2.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 on a second cancel, got %d: %s", cancelRec2.Code, cancelRec2.Body.String())
+	}
+}
+
+// slowTeardownAssistantRunner stands in for an OpenRouter call that takes a
+// moment to unwind after its context is cancelled.
+type slowTeardownAssistantRunner struct {
+	started  chan struct{}
+	teardown time.Duration
+}
+
+func (s *slowTeardownAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
+	close(s.started)
+	<-ctx.Done()
+	time.Sleep(s.teardown)
+	return assistantReply{}, ctx.Err()
+}
+
+// Code review 2026-09-17: Stop fired the cancel without waiting and
+// unlocked the composer, but the conversation stays locked until the run
+// has torn down. A question asked in that gap got 409 and was lost. Cancel
+// now answers only once the conversation is free to take the next question.
+func TestPostAssistantRunCancelHandler_RespondsOnlyOnceTheConversationIsFree(t *testing.T) {
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	store := withTestAssistantStore(t)
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, true, "openai/gpt-4o"))
+
+	conv, err := store.CreateConversation("")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+
+	started := make(chan struct{})
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		return &slowTeardownAssistantRunner{started: started, teardown: 300 * time.Millisecond}
+	})
+
+	c, _ := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"content":"hi"}`, conv.ID)
+	postDone := make(chan struct{})
+	go func() {
+		_ = postAssistantMessageHandler(c)
+		close(postDone)
+	}()
+	<-started
+
+	cancelCtx, cancelRec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/run/cancel", "", conv.ID)
+	if err := postAssistantRunCancelHandler(cancelCtx); err != nil {
+		t.Fatalf("cancel handler returned error: %v", err)
+	}
+	if cancelRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", cancelRec.Code, cancelRec.Body.String())
+	}
+	if _, running := globalAssistantRuns.get(conv.ID); running {
+		t.Fatal("cancel returned while the run still held the conversation; the next question would get 409")
+	}
+	<-postDone
+}
+
+// TestPostAssistantRunCancelHandler_NoRunInFlightIsStill204 covers cancel's
+// other idempotence case: a cancel that arrives with no run in flight at
+// all (already finished, or never started) is a no-op 204, not a 404.
+func TestPostAssistantRunCancelHandler_NoRunInFlightIsStill204(t *testing.T) {
+	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/nope/run/cancel", "", "nope")
+	if err := postAssistantRunCancelHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // ── route tiers ─────────────────────────────────────────────────────────
 
 func TestBuildAPIRoutes_AssistantRoutesHaveExpectedTiers(t *testing.T) {
 	sessions := newTestSessionStore(t)
 	want := map[string]apiTier{
-		"GET /api/assistant/status":                      tierRead,
-		"GET /api/assistant/models":                      tierAdmin,
-		"GET /api/assistant/conversations":               tierRead,
-		"GET /api/assistant/conversations/:id":           tierRead,
-		"POST /api/assistant/conversations":              tierWrite,
-		"DELETE /api/assistant/conversations/:id":        tierWrite,
-		"POST /api/assistant/conversations/:id/messages": tierWrite,
+		"GET /api/assistant/status":                        tierRead,
+		"GET /api/assistant/models":                        tierAdmin,
+		"GET /api/assistant/conversations":                 tierRead,
+		"GET /api/assistant/conversations/:id":             tierRead,
+		"GET /api/assistant/conversations/:id/run":         tierRead,
+		"POST /api/assistant/conversations":                tierWrite,
+		"DELETE /api/assistant/conversations/:id":          tierWrite,
+		"POST /api/assistant/conversations/:id/messages":   tierWrite,
+		"POST /api/assistant/conversations/:id/run/cancel": tierWrite,
 	}
 
 	got := map[string]apiTier{}

@@ -612,6 +612,10 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/assistant/models", tierAdmin, assistantModelsHandler},
 		{http.MethodGet, "/api/assistant/conversations", tierRead, listAssistantConversationsHandler},
 		{http.MethodGet, "/api/assistant/conversations/:id", tierRead, getAssistantConversationHandler},
+		// Rejoining a reply still being written (ADR 0105): replay-then-live
+		// SSE if a run is in flight, 204 if not - read-only, same tier as
+		// the conversation read above.
+		{http.MethodGet, "/api/assistant/conversations/:id/run", tierRead, getAssistantRunHandler},
 		// The in-app Manual sheet's page fetch (ADR 0095), same embedded
 		// pages as read_manual above, reached by direct id instead of a tool
 		// call. Wildcard path, not a :id param: page ids contain a slash
@@ -671,6 +675,11 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// state (a new message row), which a readonly session must not
 		// trigger (ADR 0093).
 		{http.MethodPost, "/api/assistant/conversations/:id/messages", tierWrite, postAssistantMessageHandler},
+		// Stop, for real (ADR 0105): cancels the in-flight run itself, not
+		// just this tab's local stream. Write tier: it ends a run that
+		// spent the operator's OpenRouter credit, the same reasoning as the
+		// POST above.
+		{http.MethodPost, "/api/assistant/conversations/:id/run/cancel", tierWrite, postAssistantRunCancelHandler},
 
 		// ── admin: settings, secrets, plugin config, alarm transports ───
 		{http.MethodGet, "/api/settings", tierAdmin, getSettingsHandler},
