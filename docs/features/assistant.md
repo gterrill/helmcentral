@@ -116,7 +116,9 @@ Mate can also search the whole library on its own, the same way it looks
 up a forecast or a tide station, with no attachment needed. Ask something
 like "what's the part number for the raw water pump impeller", and if a
 receipt or a manual mentions it, Mate finds it and reads it without first
-being handed the file.
+being handed the file. That search is the same one the Documents panel's own
+search box runs, words and meaning together, so a question phrased nothing
+like the manual's own wording still lands on the right page.
 
 See [Documents](documents.md) for what gets indexed, what it costs, file
 types and limits, and how folders and tags work.
