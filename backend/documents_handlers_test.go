@@ -908,6 +908,15 @@ func TestDocumentTagsHandler_ReturnsCounts(t *testing.T) {
 
 func TestListDocumentsHandler_SearchReturnsSnippetAndPage(t *testing.T) {
 	withTestDocumentStore(t)
+	withTestSecretsStore(t)
+	// hybridDocumentSearch (E1d) now checks assistant readiness on every
+	// search, so this needs a settings file even though the test itself
+	// only cares about the FTS side - an assistant-disabled fixture keeps
+	// this deterministic regardless of the real settings.yaml one directory
+	// up (assistantSettingsPath's own default), the same reasoning
+	// TestReindexDocumentHandler_AssistantOffReturnsEnrichFalseAndProblem
+	// already applies.
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixture(t, false, "openai/gpt-4o"))
 	doc, err := globalDocumentStore.Insert(document{SHA256: "sha-list-search", Filename: "manual.pdf", MIME: "application/pdf"})
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
@@ -927,7 +936,9 @@ func TestListDocumentsHandler_SearchReturnsSnippetAndPage(t *testing.T) {
 	}
 
 	var resp struct {
-		Results []documentSearchResult `json:"results"`
+		Results         []documentSearchResult `json:"results"`
+		Mode            string                 `json:"mode"`
+		SemanticProblem string                 `json:"semantic_problem"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -940,6 +951,143 @@ func TestListDocumentsHandler_SearchReturnsSnippetAndPage(t *testing.T) {
 	}
 	if !strings.Contains(resp.Results[0].Snippet, "\x02") {
 		t.Fatalf("expected a highlighted snippet, got %q", resp.Results[0].Snippet)
+	}
+	if resp.Mode != "fts" {
+		t.Fatalf("expected mode fts with the assistant disabled, got %q", resp.Mode)
+	}
+	if resp.SemanticProblem != "" {
+		t.Fatalf("expected no semantic_problem when semantic search was never configured, got %q", resp.SemanticProblem)
+	}
+}
+
+// writeAssistantSettingsFixtureWithEmbedding writes a settings.yaml with an
+// embedding_model/embedding_dimensions pair alongside enabled/model -
+// writeAssistantSettingsFixture (assistant_handlers_test.go) predates E1d
+// and knows nothing of either field, so the handler's own "semantic
+// configured" tests below need their own fixture writer, same direct-to-disk
+// reasoning as writeAssistantSettingsFixture's own doc comment.
+func writeAssistantSettingsFixtureWithEmbedding(t *testing.T, model, embeddingModel string, embeddingDimensions int) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.yaml")
+	body := fmt.Sprintf(
+		"assistant:\n    enabled: true\n    model: %q\n    embedding_model: %q\n    embedding_dimensions: %d\n    notes: \"\"\n",
+		model, embeddingModel, embeddingDimensions,
+	)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write settings fixture: %v", err)
+	}
+	return path
+}
+
+// withTestOpenRouterHTTPClient swaps the package-level openRouterHTTPClient
+// (the production doer hybridDocumentSearch's cachedQueryEmbedding falls
+// back to when documentSearchParams.Doer is nil) for fake, for the duration
+// of the test - the same swap-and-restore idiom
+// assistant_handlers_test.go's own tests already use for
+// assistantOpenRouterDoer. listDocumentsHandler builds its own
+// documentSearchParams with no Doer field set, so exercising "mode":"hybrid"
+// through the real HTTP handler (rather than hybridDocumentSearch directly)
+// needs this rather than a params field.
+func withTestOpenRouterHTTPClient(t *testing.T, fake openRouterDoer) {
+	t.Helper()
+	prev := openRouterHTTPClient
+	openRouterHTTPClient = fake
+	t.Cleanup(func() { openRouterHTTPClient = prev })
+}
+
+func TestListDocumentsHandler_SearchWithSemanticConfiguredReturnsModeHybrid(t *testing.T) {
+	resetDocumentQueryEmbedCache(t)
+	withTestDocumentStore(t)
+	store := withTestSecretsStore(t)
+	if err := store.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set OPENROUTER_API_KEY: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixtureWithEmbedding(t, "openai/gpt-4o", "openai/text-embedding-3-small", 4))
+
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{fakeEmbeddingsResponse(t, 4, 1, 0)}}
+	withTestOpenRouterHTTPClient(t, doer)
+
+	doc, err := globalDocumentStore.Insert(document{SHA256: "sha-hybrid-mode", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := globalDocumentStore.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "check the impeller before each season"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/documents?q=impeller", "", "")
+	if err := listDocumentsHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Mode            string `json:"mode"`
+		SemanticProblem string `json:"semantic_problem"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Mode != "hybrid" {
+		t.Fatalf("expected mode hybrid with semantic search configured and working, got %q", resp.Mode)
+	}
+	if resp.SemanticProblem != "" {
+		t.Fatalf("expected no semantic_problem when the embedding call succeeded, got %q", resp.SemanticProblem)
+	}
+	if len(doer.requests) != 1 {
+		t.Fatalf("expected exactly one embeddings request, got %d", len(doer.requests))
+	}
+}
+
+func TestListDocumentsHandler_SearchWithFailedEmbeddingReturnsModeFTSAndSemanticProblem(t *testing.T) {
+	resetDocumentQueryEmbedCache(t)
+	withTestDocumentStore(t)
+	store := withTestSecretsStore(t)
+	if err := store.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set OPENROUTER_API_KEY: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", writeAssistantSettingsFixtureWithEmbedding(t, "openai/gpt-4o", "openai/text-embedding-3-small", 4))
+
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(500, `{"error":{"message":"upstream exploded"}}`)}}
+	withTestOpenRouterHTTPClient(t, doer)
+
+	doc, err := globalDocumentStore.Insert(document{SHA256: "sha-semantic-problem", Filename: "manual.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := globalDocumentStore.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "check the impeller before each season"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/documents?q=impeller", "", "")
+	if err := listDocumentsHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Results         []documentSearchResult `json:"results"`
+		Mode            string                 `json:"mode"`
+		SemanticProblem string                 `json:"semantic_problem"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Mode != "fts" {
+		t.Fatalf("expected mode fts when the embedding call fails, got %q", resp.Mode)
+	}
+	if resp.SemanticProblem == "" {
+		t.Fatalf("expected a non-empty semantic_problem naming the upstream failure")
+	}
+	if len(resp.Results) != 1 {
+		t.Fatalf("expected the FTS result to still come through, got %+v", resp.Results)
 	}
 }
 

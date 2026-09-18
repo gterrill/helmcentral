@@ -284,18 +284,24 @@ func listDocumentsHandler(c echo.Context) error {
 	folderID := resolveDocumentFolderQueryParam(c.QueryParam("folder"))
 
 	if q != "" {
-		matchQuery, ok := ftsMatchQuery(q)
-		if !ok {
-			return c.JSON(http.StatusOK, map[string]any{"results": []documentSearchResult{}})
-		}
-		results, err := globalDocumentStore.Search(matchQuery, folderID, recursive, tag, limit, offset)
+		outcome, err := hybridDocumentSearch(c.Request().Context(), documentSearchParams{
+			Store:     globalDocumentStore,
+			Query:     q,
+			FolderID:  folderID,
+			Recursive: recursive,
+			Tag:       tag,
+			Limit:     limit,
+			Offset:    offset,
+			Readiness: func() (assistantReadiness, string, error) { return checkAssistantReadiness(assistantSettingsPath()) },
+		})
 		if err != nil {
 			return writeDocumentError(c, err)
 		}
-		if results == nil {
-			results = []documentSearchResult{}
+		resp := map[string]any{"results": outcome.Results, "mode": outcome.Mode}
+		if outcome.SemanticProblem != "" {
+			resp["semantic_problem"] = outcome.SemanticProblem
 		}
-		return c.JSON(http.StatusOK, map[string]any{"results": results})
+		return c.JSON(http.StatusOK, resp)
 	}
 
 	docs, err := globalDocumentStore.List(folderID, recursive, tag, limit, offset)

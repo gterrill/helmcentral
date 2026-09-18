@@ -84,6 +84,15 @@ type assistantToolDeps struct {
 	// is, so both tools report a plain error rather than panicking when
 	// it's unset.
 	documents func() *documentStore
+	// documentSearchReadiness is search_documents' seam into
+	// hybridDocumentSearch's semantic side (E1d, documents_hybrid.go) -
+	// checkAssistantReadiness's own signature, mirroring documentIndexer's
+	// readiness field. nil (a test that never sets it, same as every other
+	// field here) means semantic search is simply unavailable to this call:
+	// hybridDocumentSearch treats that exactly like a Problem, not an error,
+	// so every existing search_documents test that predates E1d keeps
+	// working unchanged, keyword-only.
+	documentSearchReadiness func() (assistantReadiness, string, error)
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -111,6 +120,9 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		fuelAboardM3:      fuelAboardM3FromDerivedPaths,
 		manual:            func() []manualPage { return globalManual },
 		documents:         func() *documentStore { return globalDocumentStore },
+		documentSearchReadiness: func() (assistantReadiness, string, error) {
+			return checkAssistantReadiness(settingsPath)
+		},
 	}
 }
 
@@ -1603,8 +1615,7 @@ func (d assistantToolDeps) executeSearchDocuments(ctx context.Context, raw json.
 		return "", fmt.Errorf("parse search_documents arguments: %w", err)
 	}
 
-	matchQuery, ok := ftsMatchQuery(args.Query)
-	if !ok {
+	if _, ok := ftsMatchQuery(args.Query); !ok {
 		return "", fmt.Errorf("search_documents: query must not be empty")
 	}
 
@@ -1633,14 +1644,35 @@ func (d assistantToolDeps) executeSearchDocuments(ctx context.Context, raw json.
 	}
 
 	// recursive=true unconditionally: with no folder given, folderID is nil
-	// and Search treats that as no folder filter at all regardless of this
-	// flag (documentStore.Search's own doc comment), so it only ever takes
-	// effect when a folder path was actually resolved above - where the
-	// tool's contract (assistant_tools.go's own spec) requires it anyway.
-	hits, err := store.Search(matchQuery, folderID, true, strings.TrimSpace(args.Tag), limit, 0)
+	// and hybridDocumentSearch/Search both treat that as no folder filter at
+	// all regardless of this flag (documentStore.Search's own doc comment),
+	// so it only ever takes effect when a folder path was actually resolved
+	// above - where the tool's contract (assistant_tools.go's own spec)
+	// requires it anyway.
+	//
+	// hybridDocumentSearch (E1d, documents_hybrid.go), not a bare
+	// store.Search: semantic search is worth more to a model asking "what
+	// did the marine supplies receipt come to" than to a human typing a
+	// part number, and it's the identical search the HTTP API's own search
+	// box runs. d.documentSearchReadiness nil (a test that never wired it,
+	// same as every field on assistantToolDeps) just means semantic search
+	// never runs here - keyword-only, exactly this tool's behaviour before
+	// E1d. mode/semantic_problem are deliberately not surfaced in this
+	// tool's own result shape (search_documents' spec, this file) - a model
+	// has no use for knowing which retriever found what.
+	outcome, err := hybridDocumentSearch(ctx, documentSearchParams{
+		Store:     store,
+		Query:     args.Query,
+		FolderID:  folderID,
+		Recursive: true,
+		Tag:       strings.TrimSpace(args.Tag),
+		Limit:     limit,
+		Readiness: d.documentSearchReadiness,
+	})
 	if err != nil {
 		return "", fmt.Errorf("search_documents: %w", err)
 	}
+	hits := outcome.Results
 
 	// folderPaths caches one resolved path per distinct folder id across
 	// this call's hits, rather than resolving it again for every hit that
