@@ -1385,6 +1385,33 @@ func (s *documentStore) AddIndexCost(id, model string, cost float64) error {
 	return checkRowsAffected(res, errDocumentNotFound)
 }
 
+// AddEmbedCost adds cost to the document's running index_cost_usd total
+// (E1c's embedding pass) WITHOUT touching index_model - the one difference
+// from AddIndexCost above, and the reason this is a separate method rather
+// than AddIndexCost called with a second model name. index_model records
+// which model performed the enrich stage's OCR/summarise call
+// (documents_enrich.go); the embedding pass is a different model entirely,
+// doing a different job (turning a chunk's text into a vector, not
+// reading the document), and must never overwrite that name with its own -
+// there is only one index_model column, and it belongs to whichever model
+// actually read the document. index_cost_usd, by contrast, is one running
+// total for whatever OpenRouter spend a document has accumulated across
+// both jobs, so it accumulates here exactly the way AddIndexCost's own
+// does.
+func (s *documentStore) AddEmbedCost(id string, cost float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(
+		`UPDATE documents SET index_cost_usd = index_cost_usd + ?, updated_at = ? WHERE id = ?`,
+		cost, s.now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("add embed cost: %w", err)
+	}
+	return checkRowsAffected(res, errDocumentNotFound)
+}
+
 func (s *documentStore) SetStage(id, stage string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

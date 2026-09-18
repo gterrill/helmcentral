@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -29,6 +30,15 @@ const documentsDefaultEnrichTimeout = 2 * time.Minute
 // documentsIndexerErrorBackoff is how long Run waits after a store error
 // before looking at the queue again.
 const documentsIndexerErrorBackoff = time.Minute
+
+// documentsDefaultEmbedTimeout bounds one E1c embeddings-API call: a batch
+// of up to maxOpenRouterEmbeddingsBatch chunk texts embedded in a single
+// request (openrouter_client.go). Plain vector math on OpenRouter's side,
+// nothing like OCR's multi-minute scan of a whole scanned PDF, so this
+// stays as short as the enrich stage's own plain chat-completion timeout
+// (documentsDefaultEnrichTimeout above) rather than needing OCR's much
+// longer one.
+const documentsDefaultEmbedTimeout = 2 * time.Minute
 
 // documentIndexer is the background worker behind B4: the database is the
 // queue (documents.status='pending'), one document processed at a time,
@@ -61,8 +71,42 @@ type documentIndexer struct {
 	extractTimeout time.Duration
 	ocrTimeout     time.Duration
 	enrichTimeout  time.Duration
+	// embedTimeout bounds one processEmbedBatch call's OpenRouter embeddings
+	// request (documents_embed.go, E1c). A struct field initialised from
+	// documentsDefaultEmbedTimeout, the same shape as the three timeouts
+	// above, so a test can shrink it directly on the returned pointer
+	// instead of waiting out the real 2 minutes.
+	embedTimeout time.Duration
 
 	now func() time.Time
+
+	// embedMu guards the backfill fields below - the indexer's only mutex.
+	// It exists because StartBackfill can be called from an HTTP handler's
+	// own goroutine (documentsEmbeddingsBackfillHandler,
+	// documents_handlers.go) while Run's goroutine is concurrently reading
+	// and clearing these same fields inside processEmbedBatch
+	// (documents_embed.go); every other field on this struct is either
+	// read-only after construction or touched only from Run's single
+	// goroutine, so it has never needed one before now.
+	embedMu sync.Mutex
+	// backfillRunning is true from StartBackfill until processEmbedBatch
+	// finds PendingEmbedChunks(model, _, enrichedOnly=false) empty - that
+	// emptiness IS completion. There is deliberately no persisted
+	// counterpart on disk: a reboot mid-backfill simply stops it (this
+	// field, like the rest of the process's memory, is gone), and pressing
+	// the backfill button again resumes exactly where it left off, because
+	// the work itself is found by query (PendingEmbedChunks) rather than
+	// tracked by a flag anywhere durable. See documents_embed.go's
+	// StartBackfill/BackfillStatus doc comments.
+	backfillRunning bool
+	// backfillChunksEmbedded counts chunks embedded by THIS backfill run
+	// only (reset to 0 by StartBackfill) - not a lifetime total.
+	backfillChunksEmbedded int
+	backfillStartedAt      time.Time
+	// backfillLastError is the most recent batch failure during a backfill,
+	// if any - recorded but not fatal to the backfill itself (see
+	// processEmbedBatch's own doc comment).
+	backfillLastError string
 
 	// extract is extractDocumentText by default. Tests substitute a func
 	// that blocks or errors for one document's path, to exercise the
@@ -101,6 +145,7 @@ func newDocumentIndexer(
 		extractTimeout: documentsDefaultExtractTimeout,
 		ocrTimeout:     documentsDefaultOCRTimeout,
 		enrichTimeout:  documentsDefaultEnrichTimeout,
+		embedTimeout:   documentsDefaultEmbedTimeout,
 		now:            func() time.Time { return time.Now().UTC() },
 		extract:        extractDocumentText,
 		ocrPageCap:     documentsDefaultOCRPageCap,
@@ -119,11 +164,23 @@ func (idx *documentIndexer) Wake() {
 	}
 }
 
-// Run loops processOne until ctx is done: pop the oldest pending document,
-// process it fully (extract, then enrich if consent was given), repeat
-// immediately while there is more pending work, and otherwise block on
-// wake or ctx.Done(). Started once at boot (main.go) so any document left
-// pending by a crash or restart resumes without operator action.
+// Run loops two tiers of work until ctx is done. The first tier,
+// processOne, pops the oldest pending document and processes it fully
+// (extract, then enrich if consent was given). The second tier,
+// processEmbedBatch (documents_embed.go, E1c), embeds one batch of chunks -
+// either the automatic pass over already-enriched documents, or an
+// operator-started backfill over everything else. Each iteration tries
+// processOne first and only reaches for processEmbedBatch when there was no
+// pending document to index; Run repeats immediately while either tier
+// reports work done, and otherwise blocks on wake or ctx.Done(). Indexing
+// always wins the race for a reason, not just convention: a document nobody
+// can find by keyword yet (still pending/failed) is a worse state to leave
+// sitting than one that is merely not yet searchable by meaning, so a large
+// backfill can never starve a fresh upload of its own first pass. Started
+// once at boot (main.go) so any document left pending by a crash or restart
+// resumes without operator action, and so does an interrupted backfill (see
+// documents_embed.go's StartBackfill/BackfillStatus doc comments for why
+// that needs no recovery step of its own).
 func (idx *documentIndexer) Run(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
@@ -135,10 +192,7 @@ func (idx *documentIndexer) Run(ctx context.Context) {
 			// A store error can leave the same document pending, so retrying
 			// at once would spin and flood the log. Wait for a wake or a minute.
 			log.Printf("documents: indexer: %v", err)
-			select {
-			case <-idx.wake:
-			case <-time.After(documentsIndexerErrorBackoff):
-			case <-ctx.Done():
+			if !idx.waitForWakeOrBackoff(ctx) {
 				return
 			}
 			continue
@@ -147,11 +201,41 @@ func (idx *documentIndexer) Run(ctx context.Context) {
 			continue
 		}
 
+		embedded, err := idx.processEmbedBatch(ctx)
+		if err != nil {
+			// Same backoff as above - an upstream embeddings failure (or a
+			// store error reading/writing the embed queue) must not spin
+			// the loop, exactly as processOne's own error doesn't.
+			log.Printf("documents: indexer: %v", err)
+			if !idx.waitForWakeOrBackoff(ctx) {
+				return
+			}
+			continue
+		}
+		if embedded {
+			continue
+		}
+
 		select {
 		case <-idx.wake:
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// waitForWakeOrBackoff is Run's shared error-branch wait: a wake, a minute
+// (documentsIndexerErrorBackoff), or ctx ending, whichever comes first.
+// Returns false when ctx ended - the caller's cue to return rather than
+// loop again - and true otherwise.
+func (idx *documentIndexer) waitForWakeOrBackoff(ctx context.Context) bool {
+	select {
+	case <-idx.wake:
+		return true
+	case <-time.After(documentsIndexerErrorBackoff):
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

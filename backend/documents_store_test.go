@@ -472,6 +472,48 @@ func TestDocumentStore_AddIndexCostUnknownIDReturnsNotFound(t *testing.T) {
 	}
 }
 
+// TestDocumentStore_AddEmbedCostAccumulatesWithoutTouchingIndexModel pins
+// the one thing that makes AddEmbedCost a distinct method rather than a
+// second call to AddIndexCost: the embedding pass (E1c) and the enrich
+// stage's OCR/summarise call are two different OpenRouter models doing two
+// different jobs on the same document, so recording the embedding pass's
+// spend must never clobber whichever model name the enrich stage already
+// wrote to index_model - while both still add into the same running
+// index_cost_usd total.
+func TestDocumentStore_AddEmbedCostAccumulatesWithoutTouchingIndexModel(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-embed-cost", "manual.pdf", nil)
+
+	if err := store.AddIndexCost(doc.ID, "google/gemini-2.5-flash", 0.002); err != nil {
+		t.Fatalf("AddIndexCost: %v", err)
+	}
+	if err := store.AddEmbedCost(doc.ID, 0.0000004); err != nil {
+		t.Fatalf("AddEmbedCost: %v", err)
+	}
+	if err := store.AddEmbedCost(doc.ID, 0.0000006); err != nil {
+		t.Fatalf("AddEmbedCost (2nd): %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.IndexModel != "google/gemini-2.5-flash" {
+		t.Fatalf("expected AddEmbedCost to leave index_model untouched, got %q", got.IndexModel)
+	}
+	const want = 0.002 + 0.0000004 + 0.0000006
+	if diff := got.IndexCostUSD - want; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("expected index_cost_usd to accumulate to %v, got %v", want, got.IndexCostUSD)
+	}
+}
+
+func TestDocumentStore_AddEmbedCostUnknownIDReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if err := store.AddEmbedCost("does-not-exist", 0.01); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected errDocumentNotFound, got %v", err)
+	}
+}
+
 func TestDocumentStore_UpdateMetaReplacesOperatorTagsAndRebuildsMetaChunk(t *testing.T) {
 	store := newTestDocumentStore(t)
 	doc := mustInsertDocument(t, store, "sha-meta", "invoice.pdf", nil)

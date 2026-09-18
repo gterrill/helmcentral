@@ -610,6 +610,35 @@ func TestDeleteDocumentHandler_UnknownIDReturns404(t *testing.T) {
 
 // ── PATCH /api/documents/:id ─────────────────────────────────────────────
 
+// TestPatchDocumentHandler_WakesIndexer pins E1c's wake wiring:
+// PatchDocument rebuilds the document's meta chunk (rebuildMetaChunkTx),
+// cascading away its old vector, so the handler must nudge the indexer to
+// re-embed it rather than leaving that to wait for an unrelated upload or
+// reindex.
+func TestPatchDocumentHandler_WakesIndexer(t *testing.T) {
+	withTestDocumentStore(t)
+	doc, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-wake", Filename: "a.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	woken := false
+	prevWake := documentIndexerWake
+	documentIndexerWake = func() { woken = true }
+	t.Cleanup(func() { documentIndexerWake = prevWake })
+
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/documents/"+doc.ID, `{"title":"New Title"}`, doc.ID)
+	if err := patchDocumentHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !woken {
+		t.Fatalf("expected the document PATCH to wake the indexer so its meta chunk gets re-embedded")
+	}
+}
+
 func TestPatchDocumentHandler_TitleChangeUpdatesSearchResults(t *testing.T) {
 	withTestDocumentStore(t)
 	doc, err := globalDocumentStore.Insert(document{SHA256: "sha-patch-title", Filename: "a.pdf", MIME: "application/pdf"})
@@ -1421,5 +1450,206 @@ func TestPatchDocumentHandler_BadFolderIDLeavesTitleUnchanged(t *testing.T) {
 	}
 	if got.Title != "Original Title" {
 		t.Fatalf("expected the title to remain unchanged when folder_id is invalid, got %q", got.Title)
+	}
+}
+
+// ── GET /api/documents/embeddings, POST .../backfill (E1c) ──────────────
+
+// writeDocumentEmbeddingsSettingsFixture writes a settings.yaml with the
+// assistant fully ready (enabled, a chat model, a document model) and
+// embedding_model/embedding_dimensions set exactly as given - unlike
+// writeAssistantSettingsFixture (assistant_handlers_test.go), which never
+// mentions embedding_model at all, so an absent key would default to
+// defaultEmbeddingModel/defaultEmbeddingDimensions (signalk.go's
+// presence-vs-value distinction) rather than the specific value each test
+// below needs to pin.
+func writeDocumentEmbeddingsSettingsFixture(t *testing.T, embeddingModel string, dims int) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.yaml")
+	body := fmt.Sprintf(
+		"assistant:\n    enabled: true\n    model: %q\n    document_model: %q\n    embedding_model: %q\n    embedding_dimensions: %d\n    notes: \"\"\n",
+		"openai/gpt-4o", "openai/gpt-4o", embeddingModel, dims,
+	)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write settings fixture: %v", err)
+	}
+	return path
+}
+
+func TestDocumentsEmbeddingsStatusHandler_SemanticSearchOff(t *testing.T) {
+	withTestDocumentStore(t)
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", writeDocumentEmbeddingsSettingsFixture(t, "", 512))
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/documents/embeddings", "", "")
+	if err := documentsEmbeddingsStatusHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp documentEmbeddingsStatusJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Enabled {
+		t.Fatalf("expected enabled=false with a blank embedding model")
+	}
+	if resp.Problem == "" {
+		t.Fatalf("expected a problem naming why semantic search is off")
+	}
+}
+
+func TestDocumentsEmbeddingsStatusHandler_SemanticSearchOn(t *testing.T) {
+	withTestDocumentStore(t)
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", writeDocumentEmbeddingsSettingsFixture(t, "openai/text-embedding-3-small", 512))
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/documents/embeddings", "", "")
+	if err := documentsEmbeddingsStatusHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp documentEmbeddingsStatusJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.Enabled {
+		t.Fatalf("expected enabled=true, got problem %q", resp.Problem)
+	}
+	if resp.Model != "openai/text-embedding-3-small" || resp.Dimensions != 512 {
+		t.Fatalf("unexpected model/dimensions: %+v", resp)
+	}
+	if resp.Problem != "" {
+		t.Fatalf("expected no problem, got %q", resp.Problem)
+	}
+}
+
+func TestDocumentsEmbeddingsBackfillHandler_DryRunReportsCountsAndStartsNothing(t *testing.T) {
+	store := withTestDocumentStore(t)
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", writeDocumentEmbeddingsSettingsFixture(t, "openai/text-embedding-3-small", 512))
+
+	doc, err := store.Insert(document{SHA256: "sha-backfill-dry", Filename: "a.pdf", MIME: "application/pdf"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	text := strings.Repeat("a", 40) // 40 chars -> 10 tokens at chars/4
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{{Seq: 1, Source: "local", Text: text}}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+
+	startCalled := false
+	prevStart := documentIndexerStartBackfill
+	documentIndexerStartBackfill = func() error { startCalled = true; return nil }
+	t.Cleanup(func() { documentIndexerStartBackfill = prevStart })
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/documents/embeddings/backfill?dry_run=1", "", "")
+	if err := documentsEmbeddingsBackfillHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if startCalled {
+		t.Fatalf("expected a dry run to start no backfill")
+	}
+
+	var resp documentEmbeddingsBackfillDryRunJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// The document's own meta chunk (seq 0, rebuildMetaChunkTx) is pending
+	// too, so 2 chunks/more than 40 chars pending in total - only the
+	// arithmetic (tokens_estimate == chars/4) is what this test pins.
+	if resp.Counts.ChunksPending < 1 {
+		t.Fatalf("expected at least 1 chunk pending, got %+v", resp.Counts)
+	}
+	if resp.TokensEstimate != resp.Counts.CharsPending/4 {
+		t.Fatalf("expected tokens_estimate == chars_pending/4, got estimate=%d counts=%+v", resp.TokensEstimate, resp.Counts)
+	}
+	if resp.Counts.CharsPending < 40 {
+		t.Fatalf("expected at least the 40-char body chunk counted as pending, got %+v", resp.Counts)
+	}
+}
+
+func TestDocumentsEmbeddingsBackfillHandler_StartsABackfillAndReportsRunning(t *testing.T) {
+	store := withTestDocumentStore(t)
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", writeDocumentEmbeddingsSettingsFixture(t, "openai/text-embedding-3-small", 512))
+
+	idx := newDocumentIndexer(store, documentsDirPath(),
+		func() (assistantReadiness, string, error) { return assistantReadiness{}, "", nil },
+		&fakeOpenRouterDoer{}, func() (string, error) { return "", nil })
+	prevStart, prevStatus := documentIndexerStartBackfill, documentIndexerBackfillStatus
+	documentIndexerStartBackfill = idx.StartBackfill
+	documentIndexerBackfillStatus = idx.BackfillStatus
+	t.Cleanup(func() {
+		documentIndexerStartBackfill = prevStart
+		documentIndexerBackfillStatus = prevStatus
+	})
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/documents/embeddings/backfill", "", "")
+	if err := documentsEmbeddingsBackfillHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp documentEmbeddingsBackfillJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.Backfill.Running {
+		t.Fatalf("expected the backfill to report running, got %+v", resp.Backfill)
+	}
+}
+
+func TestDocumentsEmbeddingsBackfillHandler_SecondConcurrentBackfillReturns409(t *testing.T) {
+	store := withTestDocumentStore(t)
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", writeDocumentEmbeddingsSettingsFixture(t, "openai/text-embedding-3-small", 512))
+
+	idx := newDocumentIndexer(store, documentsDirPath(),
+		func() (assistantReadiness, string, error) { return assistantReadiness{}, "", nil },
+		&fakeOpenRouterDoer{}, func() (string, error) { return "", nil })
+	if err := idx.StartBackfill(); err != nil {
+		t.Fatalf("StartBackfill: %v", err)
+	}
+	prevStart, prevStatus := documentIndexerStartBackfill, documentIndexerBackfillStatus
+	documentIndexerStartBackfill = idx.StartBackfill
+	documentIndexerBackfillStatus = idx.BackfillStatus
+	t.Cleanup(func() {
+		documentIndexerStartBackfill = prevStart
+		documentIndexerBackfillStatus = prevStatus
+	})
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/documents/embeddings/backfill", "", "")
+	if err := documentsEmbeddingsBackfillHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for a second concurrent backfill, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

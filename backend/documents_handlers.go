@@ -48,6 +48,25 @@ func wakeDocumentIndexer() {
 	}
 }
 
+// documentIndexerStartBackfill and documentIndexerBackfillStatus wire POST
+// /api/documents/embeddings/backfill and GET /api/documents/embeddings
+// (E1c) to the running indexer's backfill methods, the same nil-until-wired
+// pattern as documentIndexerWake above: nil until main() assigns them once
+// the real documentIndexer exists, so a test that never built one still
+// gets sane, non-panicking handler behaviour (a backfill start is refused,
+// a status read comes back as "never run") rather than a nil-func panic.
+var documentIndexerStartBackfill func() error
+var documentIndexerBackfillStatus func() documentBackfillStatus
+
+// currentDocumentBackfillStatus is documentIndexerBackfillStatus's nil-safe
+// caller.
+func currentDocumentBackfillStatus() documentBackfillStatus {
+	if documentIndexerBackfillStatus != nil {
+		return documentIndexerBackfillStatus()
+	}
+	return documentBackfillStatus{}
+}
+
 // ── per-sha256 locking ───────────────────────────────────────────────────
 
 // documentShaLock is one entry of documentShaLocks: a mutex plus a
@@ -729,6 +748,12 @@ func patchDocumentHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
+	// PatchDocument always rebuilds the document's meta chunk
+	// (rebuildMetaChunkTx, documents_store.go): the DELETE+INSERT cascades
+	// away its old vector (ON DELETE CASCADE on document_chunk_embeddings),
+	// so the meta chunk needs re-embedding - wake the indexer rather than
+	// leaving that to wait for the next unrelated upload/reindex.
+	wakeDocumentIndexer()
 	return c.JSON(http.StatusOK, toDocumentJSON(doc))
 }
 
@@ -822,7 +847,107 @@ func moveDocumentsHandler(c echo.Context) error {
 	if err := globalDocumentStore.MoveDocuments(body.IDs, body.FolderID); err != nil {
 		return writeDocumentError(c, err)
 	}
+	// MoveDocuments rebuilds every moved document's meta chunk (its folder
+	// path text changed), cascading away their old vectors the same way
+	// patchDocumentHandler's PatchDocument call does above - wake the
+	// indexer so re-embedding starts now rather than at the next unrelated
+	// upload/reindex.
+	wakeDocumentIndexer()
 	return c.NoContent(http.StatusNoContent)
+}
+
+// ── GET /api/documents/embeddings, POST .../backfill (E1c) ──────────────
+
+// documentEmbeddingsStatusJSON is GET /api/documents/embeddings' response
+// shape. Enabled is false exactly when Problem is non-empty - a blank
+// assistant.embedding_model or a chat-level readiness Problem
+// (documentEmbedReadinessProblem, documents_embed.go) - so a caller can
+// branch on Enabled alone without also having to check Problem's presence.
+type documentEmbeddingsStatusJSON struct {
+	Enabled    bool                    `json:"enabled"`
+	Model      string                  `json:"model"`
+	Dimensions int                     `json:"dimensions"`
+	Problem    string                  `json:"problem,omitempty"`
+	Counts     documentEmbeddingCounts `json:"counts"`
+	Backfill   documentBackfillStatus  `json:"backfill"`
+}
+
+// GET /api/documents/embeddings
+func documentsEmbeddingsStatusHandler(c echo.Context) error {
+	readiness, _, err := checkAssistantReadiness(assistantSettingsPath())
+	if err != nil {
+		log.Printf("documents: embeddings status: check assistant readiness: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	problem := documentEmbedReadinessProblem(readiness)
+
+	counts, err := globalDocumentStore.EmbeddingCounts(readiness.EmbeddingModel)
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+
+	return c.JSON(http.StatusOK, documentEmbeddingsStatusJSON{
+		Enabled:    problem == "",
+		Model:      readiness.EmbeddingModel,
+		Dimensions: readiness.EmbeddingDimensions,
+		Problem:    problem,
+		Counts:     counts,
+		Backfill:   currentDocumentBackfillStatus(),
+	})
+}
+
+// documentEmbeddingsBackfillDryRunJSON is the ?dry_run=1 response shape:
+// the same library-wide counts the status endpoint reports, plus a token
+// estimate - nothing here starts any work.
+type documentEmbeddingsBackfillDryRunJSON struct {
+	Counts documentEmbeddingCounts `json:"counts"`
+	// TokensEstimate is CharsPending/4 - the usual rough
+	// characters-per-token ratio for English text. It is an estimate to
+	// give the operator a sense of scale before they click the button, not
+	// a quote: the price per token belongs to the model, not to this code,
+	// so no dollar figure is computed here.
+	TokensEstimate int `json:"tokens_estimate"`
+}
+
+// documentEmbeddingsBackfillJSON is the non-dry-run response shape, both on
+// success (200) and on an already-running conflict (409).
+type documentEmbeddingsBackfillJSON struct {
+	Backfill documentBackfillStatus `json:"backfill"`
+}
+
+// POST /api/documents/embeddings/backfill[?dry_run=1]
+func documentsEmbeddingsBackfillHandler(c echo.Context) error {
+	readiness, _, err := checkAssistantReadiness(assistantSettingsPath())
+	if err != nil {
+		log.Printf("documents: embeddings backfill: check assistant readiness: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	if parseDocumentBool(c.QueryParam("dry_run")) {
+		counts, err := globalDocumentStore.EmbeddingCounts(readiness.EmbeddingModel)
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		return c.JSON(http.StatusOK, documentEmbeddingsBackfillDryRunJSON{
+			Counts:         counts,
+			TokensEstimate: counts.CharsPending / 4,
+		})
+	}
+
+	if problem := documentEmbedReadinessProblem(readiness); problem != "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": problem})
+	}
+
+	if documentIndexerStartBackfill == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "document indexer not available"})
+	}
+	if err := documentIndexerStartBackfill(); err != nil {
+		return c.JSON(http.StatusConflict, map[string]any{
+			"error":    err.Error(),
+			"backfill": currentDocumentBackfillStatus(),
+		})
+	}
+	return c.JSON(http.StatusOK, documentEmbeddingsBackfillJSON{Backfill: currentDocumentBackfillStatus()})
 }
 
 // ── document-folders ───────────────────────────────────────────────────────
@@ -935,6 +1060,15 @@ func patchDocumentFolderHandler(c echo.Context) error {
 		if err := globalDocumentStore.PatchFolder(id, name, parentID, moveParent); err != nil {
 			return writeDocumentError(c, err)
 		}
+		// A rename or a move rebuilds the meta chunk of every document in
+		// this folder's subtree (rebuildMetaChunksUnderFolderTx, called
+		// unconditionally once PatchFolder gets this far) - their folder
+		// path text changed, cascading away their old vectors the same way
+		// patchDocumentHandler's own call does. Unlike PatchFolder, plain
+		// CreateFolder/DeleteFolder never rebuild any document's meta chunk
+		// (a new folder starts empty; DeleteFolder refuses a non-empty
+		// one), so neither of those needs this wake.
+		wakeDocumentIndexer()
 	}
 
 	folder, err := fetchDocumentFolder(id)
