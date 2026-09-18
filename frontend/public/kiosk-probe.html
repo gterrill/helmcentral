@@ -262,11 +262,14 @@
 
   // 5b. @layer (cascade layers). Tailwind v4 emits its base/components/
   // utilities split as @layer rules. CSS.supports can't test an at-rule, so
-  // this probes behaviourally: two layers are declared out of order with a
-  // rule in each targeting the same hidden test element, and the later
-  // layer (a) should win regardless of declaration order. An unsupported
-  // browser drops the layered rules entirely, leaving the element's width
-  // at its unstyled default instead of 1px.
+  // this probes behaviourally: `@layer a, b;` declares layer a before layer
+  // b, which makes b the higher-priority layer - then each layer's rule
+  // block (each targeting the same hidden test element) is written in the
+  // opposite order, b's block first and a's block second, so the test only
+  // passes if the browser is going by declared layer order and not by
+  // where each block happens to sit in the source. b's width (1px) should
+  // win. An unsupported browser drops the layered rules entirely, leaving
+  // the element's width at its unstyled default instead of 1px.
   (function checkCascadeLayers() {
     var ok = false;
     var detail = 'width mismatch';
@@ -281,7 +284,7 @@
     try {
       var width = getComputedStyle(el).width;
       ok = width === '1px';
-      detail = "computed width '" + width + "' (want '1px': layer a is declared after b, so a should win)";
+      detail = "computed width '" + width + "' (want '1px': layer b is declared after a in '@layer a, b;', so b should win)";
     } catch (e) {
       ok = false;
       detail = String(e && e.message || e).slice(0, 80);

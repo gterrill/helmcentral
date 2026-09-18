@@ -1018,6 +1018,46 @@ func TestDocumentStore_TopLevelFolderNamesAlphabeticalRootOnly(t *testing.T) {
 	}
 }
 
+// TestDocumentStore_TopLevelFolderNamesIgnoresRootDocuments pins the review
+// finding behind TopLevelFolderNames (documents_store.go): it used to be
+// ListFolder(nil), which - alongside the folder names it actually wanted -
+// also loads every root-filed document's whole row (markdown column
+// included) plus a tag query per row, on every Mate question
+// (collectAssistantPromptContext, assistant_prompt.go), which is exactly
+// the cost Count() was added to avoid (TestDocumentStore_
+// CountReturnsTotalDocumentCount above). The fix is a single query over
+// document_folders; this test pins the same output - folder names only,
+// alphabetical, root documents ignored - now that root documents (with
+// markdown and tags, the two costs the old query paid for nothing) are
+// present to prove they no longer change the answer.
+func TestDocumentStore_TopLevelFolderNamesIgnoresRootDocuments(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	if _, err := store.CreateFolder("Receipts", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	if _, err := store.CreateFolder("Manuals", nil); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	doc := mustInsertDocument(t, store, "sha-root-doc", "engine-manual.pdf", nil)
+	if err := store.SetExtracted(doc.ID, "# Engine Manual\n\nChange the impeller yearly.", 3); err != nil {
+		t.Fatalf("SetExtracted: %v", err)
+	}
+	if err := store.UpdateMeta(doc.ID, nil, nil, []string{"diesel"}); err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
+	}
+
+	names, err := store.TopLevelFolderNames()
+	if err != nil {
+		t.Fatalf("TopLevelFolderNames: %v", err)
+	}
+	want := []string{"Manuals", "Receipts"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("expected %v, got %v", want, names)
+	}
+}
+
 func TestDocumentStore_ListFolderReturnsSubfoldersThenDocuments(t *testing.T) {
 	store := newTestDocumentStore(t)
 

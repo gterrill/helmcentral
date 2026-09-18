@@ -217,6 +217,46 @@ describe('DocumentsPanel', () => {
     expect(onFolderChange).toHaveBeenCalledWith('f1')
   })
 
+  it('browser Back and Forward move the panel between folders', () => {
+    // App.tsx keeps the Suspense key on 'documents' while browsing (it only
+    // remounts the panel on a panel switch), so Back/Forward have to reach
+    // the panel as a changed `initialFolderId` prop on an already-mounted
+    // instance - not a fresh mount - the same way AssistantDrawer picks up
+    // a changed `initialConversationId`. `rerender` with a new prop is
+    // exactly that.
+    mockedUseDocuments.mockImplementation((folderId) => {
+      if (folderId === null) {
+        return makeDocumentsMock({ folders: [{ id: 'f1', name: 'Manuals', parent_id: null }] })
+      }
+      return makeDocumentsMock({ path: [{ id: 'f1', name: 'Manuals', parent_id: null }] })
+    })
+    const onFolderChange = vi.fn()
+
+    const { rerender } = render(<DocumentsPanel initialFolderId={null} onFolderChange={onFolderChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manuals' }))
+    expect(onFolderChange).toHaveBeenCalledWith('f1')
+    expect(mockedUseDocuments).toHaveBeenLastCalledWith('f1')
+    expect(within(screen.getByRole('navigation', { name: /breadcrumb/i })).getByText('Manuals')).toBeInTheDocument()
+
+    // App.tsx's onFolderChange handler mirrors the new folder into its own
+    // documentsFolderId state (and the URL) synchronously, so the panel's
+    // very next render already carries it back down as a prop, not just as
+    // the panel's own internal state.
+    rerender(<DocumentsPanel initialFolderId="f1" onFolderChange={onFolderChange} />)
+
+    // Back: App.tsx's popstate handler re-seeds documentsFolderId from the
+    // URL and hands it back down as a prop, without remounting the panel.
+    rerender(<DocumentsPanel initialFolderId={null} onFolderChange={onFolderChange} />)
+    expect(mockedUseDocuments).toHaveBeenLastCalledWith(null)
+    expect(within(screen.getByRole('navigation', { name: /breadcrumb/i })).queryByText('Manuals')).not.toBeInTheDocument()
+
+    // Forward: back to f1.
+    rerender(<DocumentsPanel initialFolderId="f1" onFolderChange={onFolderChange} />)
+    expect(mockedUseDocuments).toHaveBeenLastCalledWith('f1')
+    expect(within(screen.getByRole('navigation', { name: /breadcrumb/i })).getByText('Manuals')).toBeInTheDocument()
+  })
+
   it('the breadcrumb reflects the folder path reported for the current folder', () => {
     mockedUseDocuments.mockImplementation((folderId) =>
       makeDocumentsMock(
@@ -241,7 +281,11 @@ describe('DocumentsPanel', () => {
 
     render(<DocumentsPanel initialFolderId="f1" />)
 
-    expect(mockedUseDocumentUploads).toHaveBeenCalledWith('f1')
+    // No attachment cap for the panel (review finding, use-document-uploads.ts:173
+    // - MAX_ATTACHMENTS is Mate's per-message limit, not a general uploading
+    // one), and sequential so a large dropped batch doesn't open one XHR per
+    // file at once.
+    expect(mockedUseDocumentUploads).toHaveBeenCalledWith('f1', { maxAttachments: Number.POSITIVE_INFINITY, sequential: true })
 
     const file = new File(['hello'], 'receipt.pdf', { type: 'application/pdf' })
     const input = screen.getByTestId('documents-file-input') as HTMLInputElement
@@ -337,6 +381,74 @@ describe('DocumentsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => expect(deleteDocument).toHaveBeenCalledWith('doc-1'))
+  })
+
+  // ADR 0106 review finding (documents-panel.tsx:723): Download used to
+  // navigate the whole tab with `window.location.href = contentUrlFor(...)`,
+  // so a 401 or the endpoint's 500 "document file missing on disk"
+  // (documentContentHandler, backend/documents_handlers.go) rendered raw
+  // JSON in place of the SPA, with no way back short of a reload. The fix
+  // fetches into a blob instead, so a failure surfaces in the panel's own
+  // actionError banner (same one rename/move/delete already use) and the
+  // app never navigates away.
+  it('a failed download shows the error in the panel and never navigates away', async () => {
+    const hrefBeforeClick = window.location.href
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: 'document file missing on disk' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ filename: 'receipt.pdf' })],
+    }))
+
+    render(<DocumentsPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: /actions for receipt\.pdf/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /download/i }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('document file missing on disk'))
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/documents/doc-1/content?download=1')
+    // The whole point: no window.location.href assignment, so the tab never
+    // left the SPA for the endpoint's raw JSON error response.
+    expect(window.location.href).toBe(hrefBeforeClick)
+  })
+
+  it('a successful download fetches the file into a blob, not a page navigation', async () => {
+    const blob = new Blob(['%PDF-1.4 fake content'], { type: 'application/pdf' })
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => blob,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    // Spies on the real URL statics rather than replacing the global URL
+    // object outright - happy-dom's own anchor-click navigation internals
+    // construct real URLs, and a wholesale stub broke that with an
+    // unrelated "URL is not a constructor" error.
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+      documents: [doc({ filename: 'receipt.pdf' })],
+    }))
+
+    render(<DocumentsPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: /actions for receipt\.pdf/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /download/i }))
+
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledWith(blob))
+    expect(fetchMock).toHaveBeenCalledWith('/api/documents/doc-1/content?download=1')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    // Not asserting window.location.href here: happy-dom's anchor click
+    // simulation navigates on any href regardless of the `download`
+    // attribute (unlike a real browser, where `download` makes the click
+    // save the blob instead of navigating) - the failure-path test above is
+    // what actually pins "never navigates", since that path never creates
+    // or clicks an anchor at all.
   })
 
   it('bulk move sends every selected document id', async () => {

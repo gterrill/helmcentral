@@ -168,6 +168,13 @@ func (idx *documentIndexer) processOne(ctx context.Context) (bool, error) {
 	if !ok {
 		return false, nil
 	}
+	// The reindex_seq this pass believes it's working on, captured before
+	// anything below can re-read (and so silently refresh) doc from a
+	// MarkReindex call that lands while this pass is running - finishIndexed
+	// compares the DB's current reindex_seq against this exact value, not
+	// doc.ReindexSeq's possibly-already-updated one, right before it would
+	// mark the document done (review finding, documents_handlers.go:791).
+	startSeq := doc.ReindexSeq
 
 	// A pending row's stage is only ever "extract" (fresh, or a reindex -
 	// MarkReindex always resets it there) or "enrich" (already through
@@ -198,7 +205,7 @@ func (idx *documentIndexer) processOne(ctx context.Context) (bool, error) {
 		doc = updated
 
 		if !doc.Enrich {
-			if err := idx.finishIndexed(doc, "local", doc.Error); err != nil {
+			if err := idx.finishIndexed(doc, startSeq, "local", doc.Error); err != nil {
 				return true, err
 			}
 			return true, nil
@@ -209,7 +216,7 @@ func (idx *documentIndexer) processOne(ctx context.Context) (bool, error) {
 		}
 	}
 
-	if err := idx.runEnrichStage(ctx, doc); err != nil {
+	if err := idx.runEnrichStage(ctx, doc, startSeq); err != nil {
 		return true, err
 	}
 	return true, nil
@@ -317,9 +324,26 @@ func (idx *documentIndexer) finishExtract(doc document, ex extractedDocument) (b
 // runs, the primary status transition has already committed, so a lost
 // warning doesn't leave the row stuck pending - it just loses a
 // nice-to-have annotation on an already-finished document.
-func (idx *documentIndexer) finishIndexed(doc document, indexedWith, warning string) error {
-	if err := idx.store.SetIndexed(doc.ID, indexedWith); err != nil {
+//
+// expectedSeq is the reindex_seq this pass started with (processOne's
+// startSeq, captured right after NextPending, before anything can refresh
+// it). SetIndexedIfCurrent only applies the write while the document's
+// reindex_seq still matches: a mismatch means MarkReindex ran while this
+// pass was still working (documents_handlers.go:791's review finding), and
+// the row is already back to pending/extract from that call - completing
+// this stale pass over it would silently discard the reindex request, so
+// finishIndexed leaves it alone instead. That's not an error: the fresh
+// generation MarkReindex queued is exactly what should run next, and
+// Run's normal loop (it keeps going while processOne reports work done)
+// picks it straight back up.
+func (idx *documentIndexer) finishIndexed(doc document, expectedSeq int, indexedWith, warning string) error {
+	applied, err := idx.store.SetIndexedIfCurrent(doc.ID, expectedSeq, indexedWith)
+	if err != nil {
 		return fmt.Errorf("documents indexer: set indexed %s: %w", doc.ID, err)
+	}
+	if !applied {
+		log.Printf("documents: indexer: %s was reindexed while this pass was still running; leaving the fresh request queued instead of marking it done", doc.ID)
+		return nil
 	}
 	if warning != "" {
 		if err := idx.store.SetWarning(doc.ID, warning); err != nil {

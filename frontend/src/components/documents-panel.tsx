@@ -58,7 +58,7 @@ import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { apiBaseUrl } from '@/config/api'
-import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
+import { NO_ATTACHMENT_CAP, useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
 import {
   useDocuments,
   type DocumentFolder,
@@ -240,12 +240,36 @@ export interface DocumentsPanelProps {
 export function DocumentsPanel({ initialFolderId = null, onFolderChange, initialDocumentId = null }: DocumentsPanelProps) {
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
   const documents = useDocuments(folderId)
-  const uploads = useDocumentUploads(folderId)
+  // No attachment cap here (review finding, use-document-uploads.ts:173):
+  // MAX_ATTACHMENTS is Mate's per-message limit, and this panel isn't
+  // building a message. `sequential` avoids opening one XMLHttpRequest per
+  // file for a large dropped batch.
+  const uploads = useDocumentUploads(folderId, { maxAttachments: NO_ATTACHMENT_CAP, sequential: true })
 
   const navigate = useCallback((id: string | null) => {
     setFolderId(id)
     onFolderChange?.(id)
   }, [onFolderChange])
+
+  // Re-syncs when `initialFolderId` changes after mount. App.tsx keeps the
+  // Suspense key on 'documents' while browsing (only a panel switch
+  // remounts it - see App.tsx's activePanelContent comment), so browser
+  // Back/Forward can only reach this already-mounted panel by handing it a
+  // new `initialFolderId` prop through its popstate handler and
+  // applyAppLocation, not by remounting it - the `useState` above only
+  // reads that prop once. Mirrors use-assistant-conversations.ts's own
+  // re-select effect for `initialConversationId`, but without that one's
+  // "only when non-null" guard: unlike a conversation id, where null means
+  // "leave whatever's active alone", the root folder (null) is a real
+  // destination Back/Forward can land on.
+  const previousInitialFolderIdRef = useRef(initialFolderId)
+  useEffect(() => {
+    const previous = previousInitialFolderIdRef.current
+    previousInitialFolderIdRef.current = initialFolderId
+    if (initialFolderId !== previous) {
+      setFolderId(initialFolderId)
+    }
+  }, [initialFolderId])
 
   // ── search ────────────────────────────────────────────────────────────
   const [query, setQuery] = useState('')
@@ -476,6 +500,33 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
   const allDocumentsSelected = documentRows.length > 0 && documentRows.every((d) => selectedIds.has(d.id))
 
   const contentUrlFor = (id: string) => `${apiBaseUrl}/api/documents/${encodeURIComponent(id)}/content`
+
+  // Fetches the file into a blob and saves it via a synthetic <a download>
+  // click, rather than navigating the tab there directly (review finding).
+  // A plain `window.location.href = contentUrlFor(id)` turned a 401 or the
+  // endpoint's own 500 "document file missing on disk"
+  // (documentContentHandler, backend/documents_handlers.go) into the SPA
+  // itself being replaced by raw JSON, with no way back short of a reload.
+  // A failure here throws instead, so runAction's existing catch routes it
+  // into actionError - the same banner rename/move/delete already share -
+  // and the app never leaves the page.
+  const downloadDocument = async (id: string, filename: string) => {
+    const response = await fetch(`${contentUrlFor(id)}?download=1`)
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null
+      throw new Error(body?.error && body.error !== '' ? body.error : `Download failed (HTTP ${response.status})`)
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    try {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4">
@@ -720,7 +771,7 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
                       <DocumentRowMenu
                         doc={doc}
                         onOpen={() => setViewerId(doc.id)}
-                        onDownload={() => { window.location.href = `${contentUrlFor(doc.id)}?download=1` }}
+                        onDownload={() => { void runAction(() => downloadDocument(doc.id, doc.filename)) }}
                         onRename={() => { setRenameTarget({ kind: 'document', id: doc.id, name }); setRenameValue(name) }}
                         onMove={() => setMoveTarget({ ids: [doc.id], label: name })}
                         onReindex={() => setReindexTarget({ id: doc.id, name, pageCount: doc.page_count, mime: doc.mime })}
@@ -842,7 +893,7 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
           </SheetHeader>
           {viewerDoc && (
             <div className="flex items-center gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => { window.location.href = `${contentUrlFor(viewerDoc.id)}?download=1` }}>
+              <Button type="button" size="sm" variant="outline" onClick={() => { void runAction(() => downloadDocument(viewerDoc.id, viewerDoc.filename)) }}>
                 <Download className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
                 Download
               </Button>

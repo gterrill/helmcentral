@@ -10,8 +10,19 @@ import { apiBaseUrl } from '@/config/api'
 
 /** At most this many documents may be staged on one message - mirrors the
  * backend's own cap (documentAttachmentsPerMessageCap, assistant_handlers.go)
- * on how many attachment ids POST .../messages accepts. */
+ * on how many attachment ids POST .../messages accepts. This is the
+ * composer's cap, not a general uploading limit - it's the default `add()`
+ * enforces when a caller passes no `maxAttachments` of its own (the
+ * composer's call site, assistant-thread.tsx, never does), not something
+ * every caller of this hook is stuck with (review finding: the Documents
+ * panel shares this hook but isn't building one Mate message, so it passes
+ * its own via UseDocumentUploadsOptions). */
 const MAX_ATTACHMENTS = 10
+
+/** Passed as `maxAttachments` by a caller that has no cap at all - the
+ * Documents panel, notably (documents-panel.tsx): a library, unlike one
+ * Mate message, has no reason to refuse a large batch. */
+export const NO_ATTACHMENT_CAP = Number.POSITIVE_INFINITY
 
 /** Matches documentMaxUploadBytes (backend/documents_handlers.go) - checked
  * client-side before ever opening a connection, so an oversized file never
@@ -71,6 +82,23 @@ function parseJSON<T>(text: string): T | null {
   }
 }
 
+export interface UseDocumentUploadsOptions {
+  /** Caps how many files add() will accept in one call, on top of what's
+   * already staged. Defaults to MAX_ATTACHMENTS, the composer's own
+   * per-message limit - a caller doing something other than building one
+   * Mate message (the Documents panel) passes its own, or NO_ATTACHMENT_CAP
+   * for no limit at all (review finding: this used to be hardcoded to the
+   * composer's cap for every caller). */
+  maxAttachments?: number
+  /** Uploads one file at a time - the next file's XHR doesn't open until
+   * the previous one has loaded or errored - instead of firing every file's
+   * request at once. The composer defaults to false (unchanged: at most 10
+   * attachments, parallel is fine); the Documents panel sets this so a
+   * large dropped batch doesn't open one XMLHttpRequest per file
+   * simultaneously. */
+  sequential?: boolean
+}
+
 /**
  * `folderId` (ADR 0106 F1): the folder a fresh upload files into. Read
  * through a ref, not closed over directly by startUpload, so the Documents
@@ -82,7 +110,9 @@ function parseJSON<T>(text: string): T | null {
  * root exactly as before this parameter existed - documentsRootFolderSentinel
  * is the server's own default for an absent folder_id (documents_store.go).
  */
-export function useDocumentUploads(folderId?: string | null) {
+export function useDocumentUploads(folderId?: string | null, options?: UseDocumentUploadsOptions) {
+  const maxAttachments = options?.maxAttachments ?? MAX_ATTACHMENTS
+  const sequential = options?.sequential ?? false
   const [items, setItems] = useState<StagedDocument[]>([])
   const [error, setError] = useState<string | null>(null)
   // Keyed by the local staged key, not the document id - an item still
@@ -100,82 +130,97 @@ export function useDocumentUploads(folderId?: string | null) {
     setItems((previous) => previous.map((item) => (item.key === key ? { ...item, ...patch } : item)))
   }, [])
 
-  const startUpload = useCallback((file: File) => {
-    const key = nextKey()
-    setItems((previous) => [
-      ...previous,
-      { key, filename: file.name, size: file.size, status: 'uploading', progress: 0, documentId: null, error: null, duplicate: false },
-    ])
+  // Returns a promise that resolves once this file's request has settled
+  // (loaded, however the server answered, or errored) - not rejected, ever:
+  // every outcome here is already recorded on the item/error state, so
+  // there is nothing left for a caller to catch. add() below only awaits
+  // this when `sequential` is set, to open the next file's XHR only once
+  // this one is done rather than firing every file's request at once
+  // (review finding: a 15-file batch dropped on the Documents panel must
+  // not open 15 simultaneous XMLHttpRequests).
+  const startUpload = useCallback((file: File): Promise<void> => {
+    return new Promise((resolve) => {
+      const key = nextKey()
+      setItems((previous) => [
+        ...previous,
+        { key, filename: file.name, size: file.size, status: 'uploading', progress: 0, documentId: null, error: null, duplicate: false },
+      ])
 
-    const xhr = new XMLHttpRequest()
-    xhrsRef.current.set(key, xhr)
+      const xhr = new XMLHttpRequest()
+      xhrsRef.current.set(key, xhr)
 
-    xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable || event.total === 0) return
-      updateItem(key, { progress: Math.round((event.loaded / event.total) * 100) })
-    }
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable || event.total === 0) return
+        updateItem(key, { progress: Math.round((event.loaded / event.total) * 100) })
+      }
 
-    xhr.onload = () => {
-      xhrsRef.current.delete(key)
-      const body = parseJSON<UploadResponseApi>(xhr.responseText)
+      xhr.onload = () => {
+        xhrsRef.current.delete(key)
+        const body = parseJSON<UploadResponseApi>(xhr.responseText)
 
-      if ((xhr.status === 200 || xhr.status === 201) && body?.document) {
-        const doc = body.document
+        if ((xhr.status === 200 || xhr.status === 201) && body?.document) {
+          const doc = body.document
 
-        // Uploads dedupe by sha256 server-side, so two chips can resolve to
-        // the same document id (the same file attached twice, or two files
-        // with identical content). Rather than filter at send time, collapse
-        // it here: drop this chip and tell the operator plainly, instead of
-        // leaving a second chip that would make handleSend post a duplicate
-        // id the backend rejects with 400.
-        const alreadyStaged = itemsRef.current.some((item) => item.key !== key && item.documentId === doc.id)
-        if (alreadyStaged) {
-          setError(`"${file.name}" is already attached.`)
-          setItems((previous) => previous.filter((item) => item.key !== key))
+          // Uploads dedupe by sha256 server-side, so two chips can resolve to
+          // the same document id (the same file attached twice, or two files
+          // with identical content). Rather than filter at send time, collapse
+          // it here: drop this chip and tell the operator plainly, instead of
+          // leaving a second chip that would make handleSend post a duplicate
+          // id the backend rejects with 400.
+          const alreadyStaged = itemsRef.current.some((item) => item.key !== key && item.documentId === doc.id)
+          if (alreadyStaged) {
+            setError(`"${file.name}" is already attached.`)
+            setItems((previous) => previous.filter((item) => item.key !== key))
+            resolve()
+            return
+          }
+
+          updateItem(key, {
+            status: statusFromDocument(doc),
+            progress: 100,
+            documentId: doc.id,
+            duplicate: body.duplicate === true,
+            error: doc.status === 'failed' ? (doc.error ?? null) : null,
+          })
+          resolve()
           return
         }
 
-        updateItem(key, {
-          status: statusFromDocument(doc),
-          progress: 100,
-          documentId: doc.id,
-          duplicate: body.duplicate === true,
-          error: doc.status === 'failed' ? (doc.error ?? null) : null,
-        })
-        return
+        // Upload itself was refused (a validation failure, an over-limit body
+        // that slipped past the client-side check below, or anything else the
+        // backend rejected before a document ever existed) - fail-fast per
+        // AGENTS.md: no document was created, so no chip stays staged for one.
+        setError(body?.error && body.error !== '' ? body.error : `Upload failed (HTTP ${xhr.status})`)
+        setItems((previous) => previous.filter((item) => item.key !== key))
+        resolve()
       }
 
-      // Upload itself was refused (a validation failure, an over-limit body
-      // that slipped past the client-side check below, or anything else the
-      // backend rejected before a document ever existed) - fail-fast per
-      // AGENTS.md: no document was created, so no chip stays staged for one.
-      setError(body?.error && body.error !== '' ? body.error : `Upload failed (HTTP ${xhr.status})`)
-      setItems((previous) => previous.filter((item) => item.key !== key))
-    }
+      xhr.onerror = () => {
+        xhrsRef.current.delete(key)
+        setError(`Upload of "${file.name}" failed: network error.`)
+        setItems((previous) => previous.filter((item) => item.key !== key))
+        resolve()
+      }
 
-    xhr.onerror = () => {
-      xhrsRef.current.delete(key)
-      setError(`Upload of "${file.name}" failed: network error.`)
-      setItems((previous) => previous.filter((item) => item.key !== key))
-    }
-
-    const formData = new FormData()
-    formData.append('file', file)
-    if (folderIdRef.current) formData.append('folder_id', folderIdRef.current)
-    xhr.open('POST', `${apiBaseUrl}/api/documents`)
-    xhr.send(formData)
+      const formData = new FormData()
+      formData.append('file', file)
+      if (folderIdRef.current) formData.append('folder_id', folderIdRef.current)
+      xhr.open('POST', `${apiBaseUrl}/api/documents`)
+      xhr.send(formData)
+    })
   }, [updateItem])
 
   const add = useCallback((files: FileList | File[]) => {
     const incoming = Array.from(files)
     if (incoming.length === 0) return
 
-    if (itemsRef.current.length + incoming.length > MAX_ATTACHMENTS) {
-      setError(`At most ${MAX_ATTACHMENTS} attachments are allowed on one message.`)
+    if (itemsRef.current.length + incoming.length > maxAttachments) {
+      setError(`At most ${maxAttachments} attachments are allowed on one message.`)
       return
     }
 
     setError(null)
+    const valid: File[] = []
     for (const file of incoming) {
       if (file.size === 0) {
         setError(`"${file.name}" is empty.`)
@@ -185,9 +230,20 @@ export function useDocumentUploads(folderId?: string | null) {
         setError(`"${file.name}" is over the 100 MB upload limit.`)
         continue
       }
-      startUpload(file)
+      valid.push(file)
     }
-  }, [startUpload])
+
+    if (!sequential) {
+      for (const file of valid) startUpload(file)
+      return
+    }
+
+    void (async () => {
+      for (const file of valid) {
+        await startUpload(file)
+      }
+    })()
+  }, [startUpload, maxAttachments, sequential])
 
   const remove = useCallback((key: string) => {
     xhrsRef.current.get(key)?.abort()

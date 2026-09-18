@@ -232,7 +232,11 @@ func documentEnrichReadinessProblem(readiness assistantReadiness) string {
 // MIME, an upstream error, an unparseable reply) is a normal, expected
 // outcome recorded via SetFailed and reported as a nil error - a bug in the
 // document or its configuration, not in the indexer.
-func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) error {
+//
+// expectedSeq is processOne's startSeq, passed straight through to both
+// finishIndexed calls below - see that function's own doc comment for what
+// it guards against.
+func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document, expectedSeq int) error {
 	readiness, apiKey, err := idx.readiness()
 	if err != nil {
 		return fmt.Errorf("documents indexer: enrich readiness check for %s: %w", doc.ID, err)
@@ -244,7 +248,7 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 	if doc.MIME == "application/octet-stream" {
 		// Nothing local or paid can be done with an unrecognised type - the
 		// extract stage already left it indexed-worthy with no text.
-		return idx.finishIndexed(doc, "local", doc.Error)
+		return idx.finishIndexed(doc, expectedSeq, "local", doc.Error)
 	}
 	if doc.MIME == "image/heic" {
 		return idx.failDoc(doc.ID, "image/heic is not supported for reading; convert to JPEG")
@@ -334,7 +338,7 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 		return idx.failDoc(doc.ID, err.Error())
 	}
 
-	return idx.finishIndexed(doc, "mate", doc.Error)
+	return idx.finishIndexed(doc, expectedSeq, "mate", doc.Error)
 }
 
 // buildEnrichRequest dispatches on doc.MIME (every value detectDocumentMIME

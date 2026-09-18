@@ -44,6 +44,15 @@ type document struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 	IndexedAt    *time.Time `json:"indexed_at,omitempty"`
 
+	// ReindexSeq is a fencing token, internal only (never serialised):
+	// MarkReindex bumps it every time the operator explicitly requeues this
+	// document, and the indexer records the value it saw when it popped a
+	// document off the queue (NextPending) so its own eventual
+	// SetIndexedIfCurrent call can tell "nobody touched this while I was
+	// working on it" apart from "a fresh reindex landed mid-pass" - review
+	// finding at documents_handlers.go:791.
+	ReindexSeq int `json:"-"`
+
 	// OperatorTags and SuggestedTags are populated by Get/GetBySHA/List/
 	// Search/ListFolder/NextPending from document_tags. As an INPUT to
 	// Insert, OperatorTags seeds the document's initial operator tag set
@@ -288,6 +297,7 @@ var documentStoreSchema = []string{
 		error          TEXT NOT NULL DEFAULT '',
 		index_model    TEXT NOT NULL DEFAULT '',
 		index_cost_usd REAL NOT NULL DEFAULT 0,
+		reindex_seq    INTEGER NOT NULL DEFAULT 0,
 		created_at     INTEGER NOT NULL,
 		updated_at     INTEGER NOT NULL,
 		indexed_at     INTEGER
@@ -350,7 +360,7 @@ func (s *documentStore) Close() error {
 // never drift apart.
 const documentColumns = `id, sha256, folder_id, filename, title, notes, mime, size_bytes, page_count,
 	summary, markdown, status, stage, enrich, force_ocr, indexed_with, error,
-	index_model, index_cost_usd, created_at, updated_at, indexed_at`
+	index_model, index_cost_usd, reindex_seq, created_at, updated_at, indexed_at`
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows, letting
 // scanDocument read either a single QueryRow result or one row of a Query
@@ -369,7 +379,7 @@ func scanDocument(row rowScanner) (document, error) {
 	if err := row.Scan(
 		&d.ID, &d.SHA256, &folderID, &d.Filename, &d.Title, &d.Notes, &d.MIME, &d.SizeBytes, &d.PageCount,
 		&d.Summary, &d.Markdown, &d.Status, &d.Stage, &enrich, &forceOCR, &d.IndexedWith, &d.Error,
-		&d.IndexModel, &d.IndexCostUSD, &createdAt, &updatedAt, &indexedAt,
+		&d.IndexModel, &d.IndexCostUSD, &d.ReindexSeq, &createdAt, &updatedAt, &indexedAt,
 	); err != nil {
 		return document{}, err
 	}
@@ -1350,7 +1360,10 @@ func (s *documentStore) SetStage(id, stage string) error {
 
 // SetIndexed marks a document successfully indexed: status/stage go to
 // indexed/done, indexedWith records how ("local" or "mate"), any previous
-// error is cleared, and indexed_at is stamped.
+// error is cleared, and indexed_at is stamped. Unconditional - callers that
+// need to know whether a concurrent MarkReindex superseded this document
+// while it was being worked on (the indexer's own finishIndexed) want
+// SetIndexedIfCurrent instead.
 func (s *documentStore) SetIndexed(id, indexedWith string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1364,6 +1377,48 @@ func (s *documentStore) SetIndexed(id, indexedWith string) error {
 		return fmt.Errorf("set indexed: %w", err)
 	}
 	return checkRowsAffected(res, errDocumentNotFound)
+}
+
+// SetIndexedIfCurrent is SetIndexed guarded by reindex_seq: the write only
+// applies if id's reindex_seq still equals expectedSeq, the value the
+// indexer read (document.ReindexSeq) when it popped this document off the
+// queue via NextPending. MarkReindex bumps reindex_seq on every explicit
+// reindex request, so a mismatch here means the operator asked for a fresh
+// pass while this one was still running - documents_handlers.go:791's
+// review finding, where the in-flight pass's own SetIndexed used to
+// overwrite the pending/extract row MarkReindex had just written,
+// silently discarding the request. ok=false with a nil error is that race,
+// not a store failure: the row is already exactly where MarkReindex left
+// it (pending/extract, force_ocr set), ready for the next pass, and
+// finishIndexed's own doc comment covers what the caller does with that.
+// ok=false with errDocumentNotFound means id itself no longer exists.
+func (s *documentStore) SetIndexedIfCurrent(id string, expectedSeq int, indexedWith string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now()
+	res, err := s.db.Exec(
+		`UPDATE documents SET status = 'indexed', stage = 'done', indexed_with = ?, error = '', indexed_at = ?, updated_at = ? WHERE id = ? AND reindex_seq = ?`,
+		indexedWith, now.Unix(), now.Unix(), id, expectedSeq,
+	)
+	if err != nil {
+		return false, fmt.Errorf("set indexed if current: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set indexed if current: rows affected: %w", err)
+	}
+	if n > 0 {
+		return true, nil
+	}
+	exists, err := rowExists(s.db, `SELECT 1 FROM documents WHERE id = ?`, id)
+	if err != nil {
+		return false, fmt.Errorf("set indexed if current: check existence: %w", err)
+	}
+	if !exists {
+		return false, errDocumentNotFound
+	}
+	return false, nil
 }
 
 // SetFailed marks a document failed with errMsg, leaving stage as-is (so
@@ -1389,12 +1444,16 @@ func (s *documentStore) SetFailed(id, errMsg string) error {
 // shouldn't linger once a fresh attempt is queued) and force_ocr is always
 // set: a reindex exists specifically to retry OCR even when the original
 // local text looked adequate enough not to need it automatically.
+// reindex_seq is bumped every call, unconditionally - it's the fencing
+// token SetIndexedIfCurrent uses to detect exactly this call landing while
+// the indexer is already mid-pass on id (review finding, same function's
+// doc comment).
 func (s *documentStore) MarkReindex(id string, enrich bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	res, err := s.db.Exec(
-		`UPDATE documents SET status = 'pending', stage = 'extract', error = '', force_ocr = 1, enrich = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE documents SET status = 'pending', stage = 'extract', error = '', force_ocr = 1, enrich = ?, reindex_seq = reindex_seq + 1, updated_at = ? WHERE id = ?`,
 		boolToInt(enrich), s.now().Unix(), id,
 	)
 	if err != nil {
@@ -1909,19 +1968,38 @@ func (s *documentStore) ResolveFolderPath(path string) (string, error) {
 }
 
 // TopLevelFolderNames returns the names of every folder directly under the
-// root, alphabetically (the same order ListFolder's own query already
-// returns them in) - shared by the document library's live system-prompt
-// line (assistant_prompt.go) and the search_documents tool's "unknown
-// folder" error (assistant_tools.go), so both name what's actually there
-// from the one query rather than drifting apart.
+// root, alphabetically (the same order ListFolder's own subfolder query
+// already returns them in) - shared by the document library's live
+// system-prompt line (assistant_prompt.go) and the search_documents tool's
+// "unknown folder" error (assistant_tools.go), so both name what's actually
+// there from the one query rather than drifting apart.
+//
+// This used to be ListFolder(nil), which - besides the folder names this
+// wants - also loads every root-filed document's whole row (markdown
+// column included) plus a tag query per row, on every Mate question
+// (collectAssistantPromptContext runs this on each call), the exact cost
+// Count() above was added to avoid. A single query over document_folders,
+// scoped the same way ListFolder's own subfolder query is, replaces it.
 func (s *documentStore) TopLevelFolderNames() ([]string, error) {
-	folders, _, err := s.ListFolder(nil)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`SELECT name FROM document_folders WHERE COALESCE(parent_id,'') = '' ORDER BY lower(name)`)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("top-level folder names: %w", err)
 	}
-	names := make([]string, len(folders))
-	for i, f := range folders {
-		names[i] = f.Name
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("top-level folder names: scan: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("top-level folder names: %w", err)
 	}
 	return names, nil
 }

@@ -544,7 +544,7 @@ func TestDocumentEnrich_ShutdownMidCallLeavesDocumentPendingNotFailed(t *testing
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // simulate the server shutting down before/during the call
 
-	if err := idx.runEnrichStage(ctx, doc); err != nil {
+	if err := idx.runEnrichStage(ctx, doc, doc.ReindexSeq); err != nil {
 		t.Fatalf("runEnrichStage: %v", err)
 	}
 

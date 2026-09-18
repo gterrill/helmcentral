@@ -437,6 +437,83 @@ describe('useDocumentUploads', () => {
   // twice, or two files with identical content). The hook already records
   // `duplicate` on the response; this pins that a document id already
   // staged never becomes a second chip.
+  // ADR 0106 review finding (use-document-uploads.ts:173): MAX_ATTACHMENTS
+  // is Mate's per-message cap (documentAttachmentsPerMessageCap,
+  // assistant_handlers.go), not a general uploading limit - but add()
+  // enforced it unconditionally, so the Documents panel (which shares this
+  // hook, folderId passed and no message involved) refused a 15-file drop
+  // outright, with a message that talks about "one message" on a screen
+  // that has none. A caller that passes maxAttachments explicitly gets
+  // that cap instead of the composer's default.
+  it('accepts a batch past the composer cap when the caller raises maxAttachments', () => {
+    const { result } = renderHook(() => useDocumentUploads(null, { maxAttachments: Number.POSITIVE_INFINITY }))
+    const files = Array.from({ length: 15 }, (_, i) => new File(['x'], `file-${i}.txt`, { type: 'text/plain' }))
+
+    act(() => {
+      result.current.add(files)
+    })
+
+    expect(result.current.error).toBeNull()
+    expect(result.current.items).toHaveLength(15)
+  })
+
+  // The composer's own call site (useDocumentUploads() with no options)
+  // must still refuse an 11th attachment with its message unchanged.
+  it('still refuses an 11th attachment on the composer default with its own message', () => {
+    const { result } = renderHook(() => useDocumentUploads())
+    const files = Array.from({ length: 11 }, (_, i) => new File(['x'], `file-${i}.txt`, { type: 'text/plain' }))
+
+    act(() => {
+      result.current.add(files)
+    })
+
+    expect(result.current.items).toHaveLength(0)
+    expect(FakeXHR.instances).toHaveLength(0)
+    expect(result.current.error).toBe('At most 10 attachments are allowed on one message.')
+  })
+
+  // Fifteen files dropped on the Documents panel must not open fifteen
+  // simultaneous XHRs - a `sequential` caller uploads one file at a time,
+  // each one's request only opening once the previous file's XHR has
+  // resolved (loaded or errored).
+  it('uploads one at a time when sequential is set, not all at once', async () => {
+    const { result } = renderHook(() => useDocumentUploads(null, { maxAttachments: Number.POSITIVE_INFINITY, sequential: true }))
+    const files = [
+      new File(['a'], 'a.txt', { type: 'text/plain' }),
+      new File(['b'], 'b.txt', { type: 'text/plain' }),
+      new File(['c'], 'c.txt', { type: 'text/plain' }),
+    ]
+
+    act(() => {
+      result.current.add(files)
+    })
+
+    // Only the first file's request has actually opened so far.
+    expect(FakeXHR.instances).toHaveLength(1)
+
+    // Each emitLoad settles startUpload's promise, and add()'s sequential
+    // loop resumes on the next microtask tick - the extra await lets that
+    // continuation (and the next file's XHR opening) actually run before
+    // the following assertion.
+    await act(async () => {
+      FakeXHR.instances[0].emitLoad(201, { document: documentPayload({ id: 'doc-a' }), duplicate: false })
+      await Promise.resolve()
+    })
+    expect(FakeXHR.instances).toHaveLength(2)
+
+    await act(async () => {
+      FakeXHR.instances[1].emitLoad(201, { document: documentPayload({ id: 'doc-b' }), duplicate: false })
+      await Promise.resolve()
+    })
+    expect(FakeXHR.instances).toHaveLength(3)
+
+    await act(async () => {
+      FakeXHR.instances[2].emitLoad(201, { document: documentPayload({ id: 'doc-c' }), duplicate: false })
+      await Promise.resolve()
+    })
+    expect(result.current.items).toHaveLength(3)
+  })
+
   it('collapses a second upload that resolves to an already-staged document id, with a readable message', () => {
     const { result } = renderHook(() => useDocumentUploads())
 

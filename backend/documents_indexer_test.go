@@ -766,6 +766,79 @@ func TestDocumentIndexer_ForceOCRSelectsOCRPathEvenWithAdequateLocalText(t *test
 	}
 }
 
+// ── a reindex mid-pass is never silently lost ──────────────────────────────
+
+// TestDocumentIndexer_ReindexDuringInFlightPassIsNotSilentlyLost pins the
+// review finding at documents_handlers.go:791: MarkReindex requeues a
+// document with no guard against the indexer already working on it, so the
+// in-flight pass's own SetIndexed used to overwrite the fresh
+// pending/extract row MarkReindex had just written - clicking Reindex on a
+// row still showing "Reading…" did nothing. The fake idx.extract below
+// calls store.MarkReindex for the very document processOne is mid-extract
+// on, landing the race at exactly the point the finding describes without
+// needing a real goroutine. The fix must leave the row exactly where
+// MarkReindex put it (pending/extract, force_ocr set) rather than
+// finishing over it, and a later pass must still be able to pick the fresh
+// generation back up and finish clean.
+func TestDocumentIndexer_ReindexDuringInFlightPassIsNotSilentlyLost(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+	doc := seedTestDocumentFile(t, store, dir, testdataPath("two_page.pdf"), "manual.pdf", "application/pdf", false)
+
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.doer = &fakeOpenRouterDoer{}
+	realExtract := idx.extract
+	reindexed := false
+	idx.extract = func(ctx context.Context, path, mimeType string) (extractedDocument, error) {
+		if !reindexed {
+			reindexed = true
+			// The operator clicking Reindex (documents_handlers.go's POST
+			// .../reindex) while the panel still shows this document as
+			// "Reading…" - documents_store.go:1392.
+			if err := store.MarkReindex(doc.ID, false); err != nil {
+				t.Fatalf("MarkReindex mid-pass: %v", err)
+			}
+		}
+		return realExtract(ctx, path, mimeType)
+	}
+
+	processed, err := idx.processOne(context.Background())
+	if err != nil {
+		t.Fatalf("processOne (in-flight pass): %v", err)
+	}
+	if !processed {
+		t.Fatalf("expected processOne to find the pending document")
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "pending" || got.Stage != "extract" {
+		t.Fatalf("expected the mid-pass reindex to survive as pending/extract, got status=%q stage=%q", got.Status, got.Stage)
+	}
+	if !got.ForceOCR {
+		t.Fatalf("expected force_ocr to still be set from the reindex request")
+	}
+
+	// The fresh generation MarkReindex queued is not stuck: the next pass
+	// picks it up and finishes normally.
+	processed, err = idx.processOne(context.Background())
+	if err != nil {
+		t.Fatalf("processOne (requeued pass): %v", err)
+	}
+	if !processed {
+		t.Fatalf("expected the requeued document to be picked up again")
+	}
+	got, err = store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "indexed" || got.Stage != "done" {
+		t.Fatalf("expected the requeued pass to finish indexed/done, got %+v", got)
+	}
+}
+
 // ── operator edits are never overwritten ──────────────────────────────────
 
 func TestDocumentIndexer_OperatorTitleAndTagsAreNotOverwritten(t *testing.T) {
