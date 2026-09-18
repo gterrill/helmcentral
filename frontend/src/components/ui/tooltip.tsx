@@ -18,8 +18,11 @@ const TooltipContent = React.forwardRef<
     React.ComponentProps<typeof TooltipPrimitive.Popup>
 >(({ className, side, sideOffset = 4, align, alignOffset, ...props }, ref) => (
   <TooltipPrimitive.Portal>
+    {/* z-90, the topmost layer: a tooltip can be anchored to a trigger inside
+        a dialog (z-80), sheet (z-70), or popover/dropdown (z-60) and must
+        still draw on top of them. This sits above the entire z-order hierarchy. */}
     <TooltipPrimitive.Positioner
-      className="isolate z-50"
+      className="isolate z-90"
       side={side}
       sideOffset={sideOffset}
       align={align}
@@ -28,7 +31,7 @@ const TooltipContent = React.forwardRef<
       <TooltipPrimitive.Popup
         ref={ref}
         className={cn(
-          "z-50 overflow-hidden rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md transition-[opacity,transform] data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 origin-(--transform-origin)",
+          "z-90 overflow-hidden rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md transition-[opacity,transform] data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 origin-(--transform-origin)",
           className
         )}
         {...props}

@@ -217,6 +217,10 @@ sheet's own panel (`components/ui/sheet.tsx`) is `z-70` — only its backdrop
 is `z-50` — above the banner and ordinary popovers/menus alike, and the
 confirmation and settings dialogs (`components/ui/dialog.tsx`,
 `alert-dialog.tsx`) sit at `z-70`/`z-80`, that same layer again or higher.
+Tooltips were left at `z-50` here and moved to `z-90` on 2026-09-19, once a
+collapsed sidebar's nav tooltip was seen drawing under the header: a tooltip
+can be anchored to a trigger inside a popover, a sheet or a dialog, so it has
+to clear all of them. `z-90` is the ceiling of this table, not `z-80`.
 
 `DropdownMenuContent` ships `max-h-(--available-height) overflow-y-auto` by
 default from the shadcn registry, so the grouped Add Widget list scrolls

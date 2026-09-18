@@ -2380,7 +2380,10 @@ export function App() {
                 (components/ui/sheet.tsx) is z-70, above the banner and
                 ordinary popovers/menus alike — only its backdrop is z-50 —
                 and dialogs (components/ui/dialog.tsx, alert-dialog.tsx) sit
-                at z-70/z-80, that same layer again or higher. */}
+                at z-70/z-80, that same layer again or higher. Tooltips
+                (components/ui/tooltip.tsx) sit at z-90, the topmost layer
+                above all dialogs, because a tooltip can be anchored to a
+                trigger inside any of them and must remain readable. */}
             <div className="relative z-55" data-testid="alarm-banner-stack">
               <AlarmBanner alarms={alarms} onOpen={openAlarmsPanel} />
             </div>
