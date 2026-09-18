@@ -125,6 +125,19 @@ mayara:
 #   # runs unattended on every upload, so it needs to be vision-capable
 #   # (for the image OCR branch) and cheap. Blank falls back to this default.
 #   document_model: google/gemini-2.5-flash
+#   # The model the document library's semantic-search indexer uses to
+#   # vectorise each chunk of a consented document, once Mate is on. A third
+#   # setting, separate from both models above - this one runs over every
+#   # chunk of every document rather than once per upload or per question.
+#   # Blank turns semantic search off entirely, leaving keyword (FTS5)
+#   # search as the library's only retriever.
+#   embedding_model: openai/text-embedding-3-small
+#   # Vector length requested from embedding_model. Smaller than the model's
+#   # native size (1536 for text-embedding-3-small) trades a little
+#   # retrieval accuracy for less work per chunk, since the whole index is
+#   # scanned in Go rather than by a vector database. <= 0 falls back to
+#   # this default; anything above 4096 is capped there.
+#   embedding_dimensions: 512
 #   # Operator standing notes, injected verbatim into every system prompt.
 #   # This is where local knowledge that a general model would not know goes,
 #   # e.g. which anchorage suits which tide or wind:

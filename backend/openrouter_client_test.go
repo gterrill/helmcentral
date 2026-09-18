@@ -905,3 +905,253 @@ func TestOpenRouterHTTPClient_NoHeadersWithinHeaderTimeoutFailsClearly(t *testin
 		t.Fatalf("expected a clear header-timeout error, got: %v", err)
 	}
 }
+
+// ── openRouterEmbeddings (E1b: document semantic search) ──────────────────
+
+// embeddingsFixtureIndex0First / embeddingsFixtureIndex1First are the first
+// float of each vector in backend/testdata/openrouter_embeddings.json, used
+// as a cheap fingerprint to prove a whole 512-float embedding landed at the
+// right position without asserting on all 512 values.
+const (
+	embeddingsFixtureIndex0First = -0.01318359375
+	embeddingsFixtureIndex1First = 0.01427459716796875
+)
+
+func TestOpenRouterEmbeddings_DecodesFixtureThroughFakeDoer(t *testing.T) {
+	body, err := os.ReadFile("testdata/openrouter_embeddings.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(body))}}
+
+	req := openRouterEmbeddingsRequest{
+		Model:      "openai/text-embedding-3-small",
+		Input:      []string{"Impeller replacement on the Yanmar 4JH", "Whitsunday Marine Supplies receipt AUD 205.45"},
+		Dimensions: 512,
+	}
+	resp, err := openRouterEmbeddings(context.Background(), doer, "sk-test", req)
+	if err != nil {
+		t.Fatalf("openRouterEmbeddings: %v", err)
+	}
+
+	if len(doer.requests) != 1 {
+		t.Fatalf("expected exactly one request, got %d", len(doer.requests))
+	}
+	got := doer.requests[0]
+	if got.URL.String() != openRouterEmbeddingsURL {
+		t.Fatalf("unexpected URL: %s", got.URL.String())
+	}
+	if auth := got.Header.Get("Authorization"); auth != "Bearer sk-test" {
+		t.Fatalf("unexpected Authorization header: %q", auth)
+	}
+	if referer := got.Header.Get("HTTP-Referer"); referer != "https://github.com/gterrill/helmcentral" {
+		t.Fatalf("unexpected HTTP-Referer header: %q", referer)
+	}
+	if title := got.Header.Get("X-Title"); title != "Helmcentral" {
+		t.Fatalf("unexpected X-Title header: %q", title)
+	}
+	if ct := got.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("unexpected Content-Type header: %q", ct)
+	}
+	reqBody := string(doer.bodies[0])
+	if !strings.Contains(reqBody, `"dimensions":512`) {
+		t.Fatalf("expected the request body to carry dimensions, got %s", reqBody)
+	}
+
+	if len(resp.Data) != 2 {
+		t.Fatalf("expected 2 vectors, got %d", len(resp.Data))
+	}
+	if len(resp.Data[0].Embedding) != 512 || len(resp.Data[1].Embedding) != 512 {
+		t.Fatalf("expected 512-dimension vectors, got %d and %d", len(resp.Data[0].Embedding), len(resp.Data[1].Embedding))
+	}
+	if resp.Data[0].Index != 0 || resp.Data[0].Embedding[0] != embeddingsFixtureIndex0First {
+		t.Fatalf("expected vector 0 to be the input-0 vector, got index %d first %v", resp.Data[0].Index, resp.Data[0].Embedding[0])
+	}
+	if resp.Data[1].Index != 1 || resp.Data[1].Embedding[0] != embeddingsFixtureIndex1First {
+		t.Fatalf("expected vector 1 to be the input-1 vector, got index %d first %v", resp.Data[1].Index, resp.Data[1].Embedding[0])
+	}
+	if resp.Usage.Cost != 4.4e-07 {
+		t.Fatalf("unexpected cost: %v", resp.Usage.Cost)
+	}
+	if resp.Usage.PromptTokens != 22 || resp.Usage.TotalTokens != 22 {
+		t.Fatalf("unexpected usage: %+v", resp.Usage)
+	}
+}
+
+// TestOpenRouterEmbeddings_OutOfOrderDataStillMatchesInputPosition builds its
+// fixture by reordering the real capture's own "data" array (rather than
+// hand-typing a fixture that might not reflect a real upstream shape) and
+// proves the two vectors still land at the input position their own "index"
+// field names, not the position they happened to arrive in.
+func TestOpenRouterEmbeddings_OutOfOrderDataStillMatchesInputPosition(t *testing.T) {
+	raw, err := os.ReadFile("testdata/openrouter_embeddings.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var generic map[string]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	data, ok := generic["data"].([]any)
+	if !ok || len(data) != 2 {
+		t.Fatalf("expected the fixture's data array to hold exactly 2 entries, got %+v", generic["data"])
+	}
+	data[0], data[1] = data[1], data[0]
+	generic["data"] = data
+	reordered, err := json.Marshal(generic)
+	if err != nil {
+		t.Fatalf("marshal reordered fixture: %v", err)
+	}
+
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, string(reordered))}}
+	req := openRouterEmbeddingsRequest{Model: "openai/text-embedding-3-small", Input: []string{"a", "b"}, Dimensions: 512}
+	resp, err := openRouterEmbeddings(context.Background(), doer, "sk", req)
+	if err != nil {
+		t.Fatalf("openRouterEmbeddings: %v", err)
+	}
+	if resp.Data[0].Index != 0 || resp.Data[0].Embedding[0] != embeddingsFixtureIndex0First {
+		t.Fatalf("expected vector 0 to still be the input-0 vector despite arriving second on the wire, got index %d first %v", resp.Data[0].Index, resp.Data[0].Embedding[0])
+	}
+	if resp.Data[1].Index != 1 || resp.Data[1].Embedding[0] != embeddingsFixtureIndex1First {
+		t.Fatalf("expected vector 1 to still be the input-1 vector despite arriving first on the wire, got index %d first %v", resp.Data[1].Index, resp.Data[1].Embedding[0])
+	}
+}
+
+// TestOpenRouterEmbeddings_400ReturnsUpstreamMessageAndStatus pins the real
+// error envelope an unknown or non-embedding model id returns (verified live
+// against OpenRouter on 2026-09-18: 400 {"error":{"message":"Model x/y does
+// not exist","code":400}}), and that it is reused verbatim from the chat
+// completions path (openRouterNonSuccessError).
+func TestOpenRouterEmbeddings_400ReturnsUpstreamMessageAndStatus(t *testing.T) {
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(400, `{"error":{"message":"Model x/y does not exist","code":400}}`)}}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "x/y", Input: []string{"hello"}})
+	if err == nil {
+		t.Fatalf("expected an error for a 400 response")
+	}
+	if !strings.Contains(err.Error(), "Model x/y does not exist") {
+		t.Fatalf("expected error to contain the upstream message, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "400") {
+		t.Fatalf("expected error to contain the status code, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterEmbeddings_EmbeddedErrorObjectIsAnError(t *testing.T) {
+	body := `{"object":"list","data":[],"model":"m","usage":{"prompt_tokens":0,"total_tokens":0,"cost":0},"error":{"message":"embedding failed for x"}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m", Input: []string{"a"}})
+	if err == nil {
+		t.Fatalf("expected an error when the body carries its own error object")
+	}
+	if !strings.Contains(err.Error(), "embedding failed for x") {
+		t.Fatalf("expected error to contain the upstream message, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterEmbeddings_VectorCountMismatchIsAnError(t *testing.T) {
+	body := `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"model":"m","usage":{"prompt_tokens":1,"total_tokens":1,"cost":0}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m", Input: []string{"a", "b"}})
+	if err == nil {
+		t.Fatalf("expected an error when the vector count does not match the input count")
+	}
+	if !strings.Contains(err.Error(), "2") || !strings.Contains(err.Error(), "1") {
+		t.Fatalf("expected the error to name both counts, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterEmbeddings_DuplicateIndexIsAnError(t *testing.T) {
+	body := `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},{"object":"embedding","index":0,"embedding":[0.3,0.4]}],"model":"m","usage":{"prompt_tokens":1,"total_tokens":1,"cost":0}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m", Input: []string{"a", "b"}})
+	if err == nil {
+		t.Fatalf("expected an error for a repeated vector index")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("expected the error to say duplicate, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterEmbeddings_OutOfRangeIndexIsAnError(t *testing.T) {
+	body := `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},{"object":"embedding","index":5,"embedding":[0.3,0.4]}],"model":"m","usage":{"prompt_tokens":1,"total_tokens":1,"cost":0}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m", Input: []string{"a", "b"}})
+	if err == nil {
+		t.Fatalf("expected an error for an out-of-range vector index")
+	}
+	if !strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("expected the error to say out of range, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterEmbeddings_EmptyEmbeddingIsAnError(t *testing.T) {
+	body := `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},{"object":"embedding","index":1,"embedding":[]}],"model":"m","usage":{"prompt_tokens":1,"total_tokens":1,"cost":0}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m", Input: []string{"a", "b"}})
+	if err == nil {
+		t.Fatalf("expected an error for an empty embedding")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("expected the error to say empty, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterEmbeddings_RaggedLengthsIsAnError(t *testing.T) {
+	body := `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},{"object":"embedding","index":1,"embedding":[0.1,0.2,0.3]}],"model":"m","usage":{"prompt_tokens":1,"total_tokens":1,"cost":0}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m", Input: []string{"a", "b"}})
+	if err == nil {
+		t.Fatalf("expected an error for embeddings of differing lengths within one response")
+	}
+	if !strings.Contains(err.Error(), "inconsistent") {
+		t.Fatalf("expected the error to say inconsistent, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterEmbeddings_WrongDimensionIsAnError(t *testing.T) {
+	body := `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},{"object":"embedding","index":1,"embedding":[0.3,0.4]}],"model":"m","usage":{"prompt_tokens":1,"total_tokens":1,"cost":0}}`
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{openRouterFakeResponse(200, body)}}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m", Input: []string{"a", "b"}, Dimensions: 5})
+	if err == nil {
+		t.Fatalf("expected an error when the response length differs from the requested dimensions")
+	}
+	if !strings.Contains(err.Error(), "5") || !strings.Contains(err.Error(), "2") {
+		t.Fatalf("expected the error to name both the requested and returned dimensions, got %q", err.Error())
+	}
+}
+
+func TestOpenRouterEmbeddings_RejectsOversizedBatchWithoutCallingDoer(t *testing.T) {
+	doer := &fakeOpenRouterDoer{}
+	input := make([]string, maxOpenRouterEmbeddingsBatch+1)
+	for i := range input {
+		input[i] = "x"
+	}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m", Input: input})
+	if err == nil {
+		t.Fatalf("expected an error for a batch over the limit")
+	}
+	if len(doer.requests) != 0 {
+		t.Fatalf("expected the doer to never be called for an oversized batch, got %d requests", len(doer.requests))
+	}
+}
+
+func TestOpenRouterEmbeddings_RejectsEmptyInputWithoutCallingDoer(t *testing.T) {
+	doer := &fakeOpenRouterDoer{}
+
+	_, err := openRouterEmbeddings(context.Background(), doer, "sk", openRouterEmbeddingsRequest{Model: "m"})
+	if err == nil {
+		t.Fatalf("expected an error for an empty batch")
+	}
+	if len(doer.requests) != 0 {
+		t.Fatalf("expected the doer to never be called for an empty batch, got %d requests", len(doer.requests))
+	}
+}

@@ -578,6 +578,183 @@ func TestBuildSettingsPayload_AssistantBlockPredatesDocumentModelKeyDefaults(t *
 	}
 }
 
+// TestSettingsPayloadRoundTripsAssistantEmbeddingSettings mirrors
+// TestSettingsPayloadRoundTripsAssistantDocumentModel above for
+// assistant.embedding_model and assistant.embedding_dimensions (E1b): the
+// document indexer's semantic-search embedding model and vector size, both
+// separate from the chat and document models.
+func TestSettingsPayloadRoundTripsAssistantEmbeddingSettings(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.Model = "openai/gpt-4o"
+		p.Assistant.EmbeddingModel = "openai/text-embedding-3-large"
+		p.Assistant.EmbeddingDimensions = 1024
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	payload := buildSettingsPayload(saved)
+	if payload.Assistant.EmbeddingModel != "openai/text-embedding-3-large" {
+		t.Fatalf("expected assistant.embedding_model to round-trip, got %q", payload.Assistant.EmbeddingModel)
+	}
+	if payload.Assistant.EmbeddingDimensions != 1024 {
+		t.Fatalf("expected assistant.embedding_dimensions to round-trip, got %d", payload.Assistant.EmbeddingDimensions)
+	}
+	if payload.Assistant.Model != "openai/gpt-4o" {
+		t.Fatalf("expected assistant.model to survive untouched, got %q", payload.Assistant.Model)
+	}
+}
+
+// TestNormalizeSettingsPayloadDefaultsEmbeddingModel pins a blank
+// embedding_model to defaultEmbeddingModel, the same "blank means default"
+// pattern defaultDocumentModel uses for the enrich-stage model.
+func TestNormalizeSettingsPayloadDefaultsEmbeddingModel(t *testing.T) {
+	blank := normalizeSettingsPayload(settingsPayload{})
+	if blank.Assistant.EmbeddingModel != defaultEmbeddingModel {
+		t.Fatalf("expected a blank embedding model to default to %q, got %q", defaultEmbeddingModel, blank.Assistant.EmbeddingModel)
+	}
+
+	req := settingsPayload{}
+	req.Assistant.EmbeddingModel = "  openai/text-embedding-3-large  "
+	normalized := normalizeSettingsPayload(req)
+	if normalized.Assistant.EmbeddingModel != "openai/text-embedding-3-large" {
+		t.Fatalf("expected assistant.embedding_model to be trimmed, got %q", normalized.Assistant.EmbeddingModel)
+	}
+}
+
+// TestNormalizeSettingsPayloadDefaultsEmbeddingDimensions pins the embedding
+// dimensions rule: <= 0 defaults to defaultEmbeddingDimensions (there is no
+// sane zero/negative vector size), and anything above 4096 is capped there
+// rather than reset to the default - a larger vector is a configuration
+// mistake, not a preference, and every one of them is scanned in Go on an
+// armv7 box.
+func TestNormalizeSettingsPayloadDefaultsEmbeddingDimensions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dims int
+		want int
+	}{
+		{"zero defaults", 0, defaultEmbeddingDimensions},
+		{"negative defaults", -1, defaultEmbeddingDimensions},
+		{"in range passes through unchanged", 768, 768},
+		{"exactly at the cap passes through unchanged", 4096, 4096},
+		{"above the cap is capped, not defaulted", 8192, 4096},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := settingsPayload{}
+			req.Assistant.EmbeddingDimensions = tc.dims
+			if got := normalizeSettingsPayload(req).Assistant.EmbeddingDimensions; got != tc.want {
+				t.Fatalf("dims %d: got %d, want %d", tc.dims, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesBlankEmbeddingModelFromDisk mirrors
+// TestBuildSettingsPayload_SurfacesBlankDocumentModelFromDisk: an
+// embedding_model explicitly saved as "" on disk must surface as "" (turning
+// semantic search off, per the settings doc comment), not be mistaken for
+// "absent" and papered over with defaultEmbeddingModel.
+func TestBuildSettingsPayload_SurfacesBlankEmbeddingModelFromDisk(t *testing.T) {
+	settings := map[string]any{
+		"assistant": map[string]any{
+			"enabled":         true,
+			"model":           "openai/gpt-4o",
+			"document_model":  "openai/gpt-4o-mini",
+			"embedding_model": "",
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+	if payload.Assistant.EmbeddingModel != "" {
+		t.Fatalf("expected a blank assistant.embedding_model on disk to surface as blank, got %q", payload.Assistant.EmbeddingModel)
+	}
+}
+
+// TestBuildSettingsPayload_AbsentAssistantBlockDefaultsEmbeddingSettings
+// mirrors TestBuildSettingsPayload_AbsentAssistantBlockDefaultsDocumentModel:
+// no assistant key at all must yield the same defaults
+// normalizeSettingsPayload gives an empty payload.
+func TestBuildSettingsPayload_AbsentAssistantBlockDefaultsEmbeddingSettings(t *testing.T) {
+	payload := buildSettingsPayload(map[string]any{})
+	if payload.Assistant.EmbeddingModel != defaultEmbeddingModel {
+		t.Fatalf("expected assistant.embedding_model to default to %q when the block is absent, got %q", defaultEmbeddingModel, payload.Assistant.EmbeddingModel)
+	}
+	if payload.Assistant.EmbeddingDimensions != defaultEmbeddingDimensions {
+		t.Fatalf("expected assistant.embedding_dimensions to default to %d when the block is absent, got %d", defaultEmbeddingDimensions, payload.Assistant.EmbeddingDimensions)
+	}
+}
+
+// TestBuildSettingsPayload_AssistantBlockPredatesEmbeddingModelKeyDefaults
+// mirrors TestBuildSettingsPayload_AssistantBlockPredatesDocumentModelKeyDefaults:
+// a settings.yaml written before embedding_model existed (E1b) has an
+// assistant: block - enabled, model, document_model - but no embedding_model
+// key at all. A naive unconditional coerceString of a missing map key
+// returns "" indistinguishably from an operator-saved blank, and that ""
+// must NOT win over defaultEmbeddingModel, or semantic search silently
+// turns itself off on every install that predates this setting.
+func TestBuildSettingsPayload_AssistantBlockPredatesEmbeddingModelKeyDefaults(t *testing.T) {
+	settings := map[string]any{
+		"assistant": map[string]any{
+			"enabled":        true,
+			"model":          "openai/gpt-4o",
+			"document_model": "google/gemini-2.5-flash",
+		},
+	}
+
+	payload := buildSettingsPayload(settings)
+	if payload.Assistant.EmbeddingModel != defaultEmbeddingModel {
+		t.Fatalf("expected an embedding_model-less assistant block to default to %q, got %q", defaultEmbeddingModel, payload.Assistant.EmbeddingModel)
+	}
+	if payload.Assistant.DocumentModel != "google/gemini-2.5-flash" {
+		t.Fatalf("expected assistant.document_model to survive untouched, got %q", payload.Assistant.DocumentModel)
+	}
+}
+
+// TestBuildSettingsPayload_SurfacesEmbeddingDimensionsFromDisk mirrors
+// TestNormalizeSettingsPayloadDefaultsMayaraPort's clamp table for the
+// read-from-disk path: a valid on-disk value survives, an invalid or absent
+// one falls back to the default, and an above-cap value is capped rather
+// than defaulted.
+func TestBuildSettingsPayload_SurfacesEmbeddingDimensionsFromDisk(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dims any
+		want int
+	}{
+		{"a valid value passes through", 768, 768},
+		{"zero defaults", 0, defaultEmbeddingDimensions},
+		{"negative defaults", -1, defaultEmbeddingDimensions},
+		{"above the cap is capped, not defaulted", 8192, 4096},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := map[string]any{
+				"assistant": map[string]any{
+					"enabled":              true,
+					"embedding_dimensions": tc.dims,
+				},
+			}
+			payload := buildSettingsPayload(settings)
+			if payload.Assistant.EmbeddingDimensions != tc.want {
+				t.Fatalf("embedding_dimensions %v: got %d, want %d", tc.dims, payload.Assistant.EmbeddingDimensions, tc.want)
+			}
+		})
+	}
+
+	// Absent key: no embedding_dimensions at all must default the same way
+	// an absent document_model defaults, not surface as 0.
+	payload := buildSettingsPayload(map[string]any{"assistant": map[string]any{"enabled": true}})
+	if payload.Assistant.EmbeddingDimensions != defaultEmbeddingDimensions {
+		t.Fatalf("expected an absent embedding_dimensions key to default to %d, got %d", defaultEmbeddingDimensions, payload.Assistant.EmbeddingDimensions)
+	}
+}
+
 func TestNormalizeSettingsPayload_AssistantAutoRouterFieldsTrimmedAndValidated(t *testing.T) {
 	req := settingsPayload{}
 	req.Assistant.AllowedModels = []string{"  anthropic/*  ", "", "  openai/gpt-5*"}

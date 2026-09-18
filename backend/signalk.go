@@ -146,14 +146,27 @@ type settingsPayload struct {
 		// (ADR 0106) uses for OCR and suggested title/summary/tags - a
 		// separate setting from Model since it runs unattended on every
 		// upload rather than being picked per conversation.
-		DocumentModel  string   `json:"document_model"`
-		Notes          string   `json:"notes"`
-		AllowedModels  []string `json:"allowed_models"`
-		ExcludedModels []string `json:"excluded_models"`
-		CostTier       string   `json:"cost_tier"`
-		VoiceInput     bool     `json:"voice_input"`
-		ReadAloud      bool     `json:"read_aloud"`
-		WakeWord       bool     `json:"wake_word"`
+		DocumentModel string `json:"document_model"`
+		// EmbeddingModel is the model the document library's semantic-search
+		// embedding stage (E1b) uses to vectorise chunk text - a separate
+		// setting from both Model and DocumentModel, since it runs over
+		// every chunk of every consented document rather than per question
+		// or per upload. A blank value turns semantic search off entirely
+		// (FTS5 stays the only retriever); it does not fall back to either
+		// of the other two models.
+		EmbeddingModel string `json:"embedding_model"`
+		// EmbeddingDimensions is the vector length requested alongside
+		// EmbeddingModel. Smaller than a model's native size trades a
+		// little retrieval accuracy for less work per chunk scanned - the
+		// whole index is scanned in Go, not by a vector database.
+		EmbeddingDimensions int      `json:"embedding_dimensions"`
+		Notes               string   `json:"notes"`
+		AllowedModels       []string `json:"allowed_models"`
+		ExcludedModels      []string `json:"excluded_models"`
+		CostTier            string   `json:"cost_tier"`
+		VoiceInput          bool     `json:"voice_input"`
+		ReadAloud           bool     `json:"read_aloud"`
+		WakeWord            bool     `json:"wake_word"`
 	} `json:"assistant"`
 	Auth struct {
 		Mode string `json:"mode"`
@@ -252,16 +265,18 @@ func updateSettingsHandler(c echo.Context) error {
 		"port":    normalized.Mayara.Port,
 	}
 	settings["assistant"] = map[string]any{
-		"enabled":         normalized.Assistant.Enabled,
-		"model":           normalized.Assistant.Model,
-		"document_model":  normalized.Assistant.DocumentModel,
-		"notes":           normalized.Assistant.Notes,
-		"allowed_models":  normalized.Assistant.AllowedModels,
-		"excluded_models": normalized.Assistant.ExcludedModels,
-		"cost_tier":       normalized.Assistant.CostTier,
-		"voice_input":     normalized.Assistant.VoiceInput,
-		"read_aloud":      normalized.Assistant.ReadAloud,
-		"wake_word":       normalized.Assistant.WakeWord,
+		"enabled":              normalized.Assistant.Enabled,
+		"model":                normalized.Assistant.Model,
+		"document_model":       normalized.Assistant.DocumentModel,
+		"embedding_model":      normalized.Assistant.EmbeddingModel,
+		"embedding_dimensions": normalized.Assistant.EmbeddingDimensions,
+		"notes":                normalized.Assistant.Notes,
+		"allowed_models":       normalized.Assistant.AllowedModels,
+		"excluded_models":      normalized.Assistant.ExcludedModels,
+		"cost_tier":            normalized.Assistant.CostTier,
+		"voice_input":          normalized.Assistant.VoiceInput,
+		"read_aloud":           normalized.Assistant.ReadAloud,
+		"wake_word":            normalized.Assistant.WakeWord,
 	}
 	settings["units"] = normalized.Units
 
@@ -481,6 +496,31 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if raw, ok := assistantMap["document_model"]; ok {
 			payload.Assistant.DocumentModel = strings.TrimSpace(coerceString(raw))
 		}
+		// embedding_model (E1b) is newer still than document_model, so the
+		// same presence-vs-value distinction applies: a settings.yaml
+		// written before it existed has the key genuinely absent, and that
+		// must default (below), not surface as the blank that turns
+		// semantic search off for every installed boat at once.
+		if raw, ok := assistantMap["embedding_model"]; ok {
+			payload.Assistant.EmbeddingModel = strings.TrimSpace(coerceString(raw))
+		}
+		// embedding_dimensions is a number rather than a string, but the
+		// same presence check applies: an absent key must default (below),
+		// not surface as the zero value coercePort already returns for a
+		// missing map entry. A present-but-invalid value (<= 0, or above the
+		// 4096 cap - see normalizeSettingsPayload) is normalised the same
+		// way right here, since buildSettingsPayload never re-runs the
+		// disk-read result back through normalizeSettingsPayload.
+		if raw, ok := assistantMap["embedding_dimensions"]; ok {
+			dims := coercePort(raw)
+			if dims <= 0 {
+				dims = defaultEmbeddingDimensions
+			}
+			if dims > 4096 {
+				dims = 4096
+			}
+			payload.Assistant.EmbeddingDimensions = dims
+		}
 		payload.Assistant.Notes = coerceString(assistantMap["notes"])
 		payload.Assistant.AllowedModels = coerceStringList(assistantMap["allowed_models"])
 		payload.Assistant.ExcludedModels = coerceStringList(assistantMap["excluded_models"])
@@ -619,6 +659,23 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.DocumentModel = strings.TrimSpace(req.Assistant.DocumentModel)
 	if normalized.Assistant.DocumentModel == "" {
 		normalized.Assistant.DocumentModel = defaultDocumentModel
+	}
+	normalized.Assistant.EmbeddingModel = strings.TrimSpace(req.Assistant.EmbeddingModel)
+	if normalized.Assistant.EmbeddingModel == "" {
+		normalized.Assistant.EmbeddingModel = defaultEmbeddingModel
+	}
+	normalized.Assistant.EmbeddingDimensions = req.Assistant.EmbeddingDimensions
+	if normalized.Assistant.EmbeddingDimensions <= 0 {
+		normalized.Assistant.EmbeddingDimensions = defaultEmbeddingDimensions
+	}
+	// A larger vector is a configuration mistake, not a preference: the
+	// whole index is scanned in Go on an armv7 box, and every extra
+	// dimension is work multiplied by however many chunks are in the
+	// library. Capped, not reset to the default, so an operator dialling
+	// dimensions up for accuracy lands at the ceiling rather than being
+	// bounced back down to 512.
+	if normalized.Assistant.EmbeddingDimensions > 4096 {
+		normalized.Assistant.EmbeddingDimensions = 4096
 	}
 	normalized.Assistant.Notes = strings.TrimSpace(req.Assistant.Notes)
 	normalized.Assistant.AllowedModels = normalizeAssistantModelPatterns(req.Assistant.AllowedModels)

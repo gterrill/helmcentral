@@ -23,6 +23,21 @@ import (
 // client, and one POST behind one Do(req) seam is all this needs.
 const openRouterChatCompletionsURL = "https://openrouter.ai/api/v1/chat/completions"
 
+// openRouterEmbeddingsURL is OpenRouter's embeddings endpoint (E1b: document
+// semantic search). It takes the same Authorization/HTTP-Referer/X-Title
+// headers as chat completions - see doOpenRouterRequestBody, which both
+// endpoints now share.
+const openRouterEmbeddingsURL = "https://openrouter.ai/api/v1/embeddings"
+
+// maxOpenRouterEmbeddingsBatch bounds how many strings openRouterEmbeddings
+// will send in one request. OpenRouter's own limit is far higher, but how
+// many chunks to batch into one call is the caller's decision (the document
+// indexer's own batching policy), not something this function should
+// silently split on the caller's behalf - a silent split would hide what
+// could otherwise be a caller bug, such as an entire document's chunks
+// landing in one slice by accident.
+const maxOpenRouterEmbeddingsBatch = 64
+
 // openRouterResponseHeaderTimeout bounds how long the transport will wait
 // for a dead upstream to send response headers at all. It does not bound
 // reading a slow model's body once headers arrive - that is
@@ -477,19 +492,15 @@ type openRouterStreamToolCallAccum struct {
 	arguments          strings.Builder
 }
 
-// doOpenRouterRequest marshals req, builds the POST to
-// openRouterChatCompletionsURL with the standard headers, and executes it
-// through doer - the request-building half shared by openRouterChatCompletion
-// and openRouterChatCompletionOnce, so the two differ only in how they read
-// the response (SSE stream vs. one JSON body). The caller owns closing
+// doOpenRouterRequestBody builds a POST to url carrying body with the
+// standard OpenRouter headers (Authorization bearer, Content-Type,
+// HTTP-Referer, X-Title) and executes it through doer - the
+// header/request-building half shared by every OpenRouter caller in this
+// file: doOpenRouterRequest below (chat completions, both the streaming and
+// non-streaming callers) and openRouterEmbeddings. The caller owns closing
 // resp.Body.
-func doOpenRouterRequest(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest) (*http.Response, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("marshal openrouter request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, openRouterChatCompletionsURL, bytes.NewReader(body))
+func doOpenRouterRequestBody(ctx context.Context, doer openRouterDoer, apiKey, url string, body []byte) (*http.Response, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build openrouter request: %w", err)
 	}
@@ -503,6 +514,19 @@ func doOpenRouterRequest(ctx context.Context, doer openRouterDoer, apiKey string
 		return nil, fmt.Errorf("openrouter request failed: %w", err)
 	}
 	return resp, nil
+}
+
+// doOpenRouterRequest marshals req and posts it to openRouterChatCompletionsURL
+// via doOpenRouterRequestBody - the request-building half shared by
+// openRouterChatCompletion and openRouterChatCompletionOnce, so the two
+// differ only in how they read the response (SSE stream vs. one JSON body).
+// The caller owns closing resp.Body.
+func doOpenRouterRequest(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterChatRequest) (*http.Response, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal openrouter request: %w", err)
+	}
+	return doOpenRouterRequestBody(ctx, doer, apiKey, openRouterChatCompletionsURL, body)
 }
 
 // openRouterNonSuccessError reads resp's body (a non-2xx status is never a
@@ -742,4 +766,129 @@ readLoop:
 		}},
 		Usage: usage,
 	}, nil
+}
+
+// ── embeddings (E1b: document semantic search) ────────────────────────────
+
+// openRouterEmbeddingsRequest is the request body for POST
+// /api/v1/embeddings. Dimensions is honoured by OpenAI's text-embedding-3
+// family via Matryoshka representation learning (a shorter prefix of the
+// native vector is still a usable embedding) but is omitted from the wire
+// entirely when zero, the same "let the model use its native size" meaning
+// omitting Model's own value would have.
+type openRouterEmbeddingsRequest struct {
+	Model      string   `json:"model"`
+	Input      []string `json:"input"`
+	Dimensions int      `json:"dimensions,omitempty"`
+}
+
+// openRouterEmbeddingData is one vector inside an embeddings response.
+// Index is the position of the corresponding Input string in the request -
+// see openRouterEmbeddings's own doc comment for why the response is placed
+// by this field rather than trusted in array order.
+type openRouterEmbeddingData struct {
+	Index     int       `json:"index"`
+	Embedding []float32 `json:"embedding"`
+}
+
+// openRouterEmbeddingsResponse is the response body for POST
+// /api/v1/embeddings (backend/testdata/openrouter_embeddings.json is a real
+// capture, not an assumed shape). Usage.Cost is present here without the
+// usage.include=true option chat completions needs (openRouterUsageOption) -
+// verified live against OpenRouter on 2026-09-18.
+type openRouterEmbeddingsResponse struct {
+	ID       string                    `json:"id"`
+	Object   string                    `json:"object"`
+	Model    string                    `json:"model"`
+	Provider string                    `json:"provider"`
+	Data     []openRouterEmbeddingData `json:"data"`
+	Usage    openRouterUsage           `json:"usage"`
+	Error    *openRouterAPIError       `json:"error,omitempty"`
+}
+
+// openRouterEmbeddings posts one embeddings request and returns its vectors
+// placed at the position each one's own Index field names, not the order
+// they arrived on the wire: OpenRouter documents index as the way to match
+// a vector back to its input, and array order is not a promised part of the
+// contract. It shares request-building (doOpenRouterRequestBody) and
+// non-2xx/embedded-error handling (openRouterNonSuccessError) with the chat-
+// completions calls above, so a 401, a bad key or an upstream error.message
+// surfaces identically.
+//
+// A caller that gets a nil error back can trust the result holds exactly
+// len(req.Input) vectors, one per input position, all the same length.
+// Per AGENTS.md's fallback policy, every one of the following is a fail-fast
+// error rather than a best-effort result: an empty or over-sized Input (the
+// request is never sent - maxOpenRouterEmbeddingsBatch's own doc comment
+// explains why batching is the caller's job, not this function's), an
+// embedded error object in an otherwise-200 body, a vector count that does
+// not match len(req.Input), a vector whose Index is out of range or repeated,
+// an empty embedding, embeddings of differing lengths within one response,
+// and a length that differs from a non-zero req.Dimensions.
+func openRouterEmbeddings(ctx context.Context, doer openRouterDoer, apiKey string, req openRouterEmbeddingsRequest) (openRouterEmbeddingsResponse, error) {
+	if len(req.Input) == 0 {
+		return openRouterEmbeddingsResponse{}, errors.New("openrouter embeddings: empty input")
+	}
+	if len(req.Input) > maxOpenRouterEmbeddingsBatch {
+		return openRouterEmbeddingsResponse{}, fmt.Errorf("openrouter embeddings: %d inputs exceeds the %d-input batch limit", len(req.Input), maxOpenRouterEmbeddingsBatch)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return openRouterEmbeddingsResponse{}, fmt.Errorf("marshal openrouter embeddings request: %w", err)
+	}
+
+	resp, err := doOpenRouterRequestBody(ctx, doer, apiKey, openRouterEmbeddingsURL, body)
+	if err != nil {
+		return openRouterEmbeddingsResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return openRouterEmbeddingsResponse{}, openRouterNonSuccessError(resp)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return openRouterEmbeddingsResponse{}, fmt.Errorf("read openrouter embeddings response: %w", err)
+	}
+
+	var parsed openRouterEmbeddingsResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return openRouterEmbeddingsResponse{}, fmt.Errorf("parse openrouter embeddings response: %w", err)
+	}
+	if parsed.Error != nil && parsed.Error.Message != "" {
+		return openRouterEmbeddingsResponse{}, fmt.Errorf("openrouter error: %s", firstErrorLine(errors.New(parsed.Error.Message)))
+	}
+	if len(parsed.Data) != len(req.Input) {
+		return openRouterEmbeddingsResponse{}, fmt.Errorf("openrouter embeddings: expected %d vectors, got %d", len(req.Input), len(parsed.Data))
+	}
+
+	ordered := make([]openRouterEmbeddingData, len(parsed.Data))
+	seen := make([]bool, len(parsed.Data))
+	dims := 0
+	for _, d := range parsed.Data {
+		if d.Index < 0 || d.Index >= len(ordered) {
+			return openRouterEmbeddingsResponse{}, fmt.Errorf("openrouter embeddings: vector index %d out of range for %d inputs", d.Index, len(req.Input))
+		}
+		if seen[d.Index] {
+			return openRouterEmbeddingsResponse{}, fmt.Errorf("openrouter embeddings: duplicate vector index %d", d.Index)
+		}
+		seen[d.Index] = true
+		if len(d.Embedding) == 0 {
+			return openRouterEmbeddingsResponse{}, fmt.Errorf("openrouter embeddings: empty embedding at index %d", d.Index)
+		}
+		if dims == 0 {
+			dims = len(d.Embedding)
+		} else if len(d.Embedding) != dims {
+			return openRouterEmbeddingsResponse{}, fmt.Errorf("openrouter embeddings: inconsistent embedding length at index %d (%d, expected %d)", d.Index, len(d.Embedding), dims)
+		}
+		ordered[d.Index] = d
+	}
+	if req.Dimensions > 0 && dims != req.Dimensions {
+		return openRouterEmbeddingsResponse{}, fmt.Errorf("openrouter embeddings: requested %d dimensions, got %d", req.Dimensions, dims)
+	}
+
+	parsed.Data = ordered
+	return parsed, nil
 }
