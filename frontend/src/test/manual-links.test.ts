@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest'
 import { PANEL_IDS } from '@/lib/app-location'
 import { SETTINGS_SECTIONS } from '@/components/settings/settings-nav'
 import {
+  CREATE_PAGE_MANUAL_TARGET,
   DASHBOARD_MANUAL_TARGET,
   MANUAL_INDEX,
   PANEL_MANUAL_TARGETS,
@@ -61,7 +62,7 @@ function readDocsFile(pageId: string): string {
 }
 
 function allManualTargets(): ManualTargetLike[] {
-  const targets: ManualTargetLike[] = [DASHBOARD_MANUAL_TARGET, MANUAL_INDEX]
+  const targets: ManualTargetLike[] = [DASHBOARD_MANUAL_TARGET, MANUAL_INDEX, CREATE_PAGE_MANUAL_TARGET]
   for (const id of PANEL_IDS) targets.push(PANEL_MANUAL_TARGETS[id])
   for (const section of SETTINGS_SECTIONS) targets.push(SETTINGS_MANUAL_TARGETS[section.id])
   return targets

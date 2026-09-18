@@ -2,10 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
+import { setViewportWidth } from './viewport'
 
 describe('DashboardPageSwitcher', () => {
   const reorderProps = {
-    onSelect: vi.fn(), onCreate: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+    onSelect: vi.fn(), onCreate: vi.fn(),
     onReorder: vi.fn().mockResolvedValue(true), canWrite: true, reordering: false,
   }
 
@@ -20,7 +21,9 @@ describe('DashboardPageSwitcher', () => {
     expect(screen.getByLabelText('Move Page B down')).toHaveAttribute('aria-disabled', 'true')
     fireEvent.click(screen.getByLabelText('Move Page A up'))
     expect(onReorder).not.toHaveBeenCalled()
-    expect(screen.queryByLabelText('Rename Page A')).not.toBeInTheDocument()
+    // Reorder mode's own list swaps out the ordinary per-row select button:
+    // there's nothing named "Page A" to click while it's showing.
+    expect(screen.queryByRole('button', { name: 'Page A' })).not.toBeInTheDocument()
     const move = screen.getByLabelText('Move Page B up')
     await act(async () => { move.focus(); fireEvent.click(move) })
     expect(onReorder).toHaveBeenCalledWith(['p2', 'p1'])
@@ -33,7 +36,8 @@ describe('DashboardPageSwitcher', () => {
     expect(onReorder).toHaveBeenLastCalledWith(['p1', 'p2'])
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Done' })) })
     expect(screen.getByRole('button', { name: 'Reorder pages' })).toHaveFocus()
-    expect(await screen.findByLabelText('Rename Page A')).toBeInTheDocument()
+    // Back to the ordinary per-row select button once reorder mode ends.
+    expect(await screen.findByRole('button', { name: 'Page A' })).toBeInTheDocument()
   })
 
   it('disables movement while saving and shows saving status', async () => {
@@ -54,7 +58,6 @@ describe('DashboardPageSwitcher', () => {
     expect(screen.queryByRole('button', { name: 'Reorder pages' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'New Page' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Rename Page A')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Delete Page A')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Page B' }))
     expect(onSelect).toHaveBeenCalledWith('p2')
   })
@@ -84,8 +87,6 @@ describe('DashboardPageSwitcher', () => {
     const mockFns = {
       onSelect: vi.fn(),
       onCreate: vi.fn(),
-      onRename: vi.fn(),
-      onDelete: vi.fn(),
       onSetSkin: vi.fn(),
     }
 
@@ -105,8 +106,6 @@ describe('DashboardPageSwitcher', () => {
     const mockFns = {
       onSelect: vi.fn(),
       onCreate: vi.fn(),
-      onRename: vi.fn(),
-      onDelete: vi.fn(),
       onSetSkin: vi.fn(),
     }
 
@@ -127,8 +126,6 @@ describe('DashboardPageSwitcher', () => {
     const mockFns = {
       onSelect,
       onCreate: vi.fn(),
-      onRename: vi.fn(),
-      onDelete: vi.fn(),
       onSetSkin: vi.fn(),
     }
 
@@ -168,200 +165,30 @@ describe('DashboardPageSwitcher', () => {
     })
   })
 
-  it('with only 1 page, no delete button is rendered', () => {
-    const singlePageMock: DashboardPage[] = [
-      { id: 'p1', name: 'Page A', widgets: [], created_at: '', updated_at: '' },
-    ]
-
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onRename: vi.fn(),
-      onDelete: vi.fn(),
-      onSetSkin: vi.fn(),
-    }
-
-    render(
-      <DashboardPageSwitcher
-        pages={singlePageMock}
-        activePageId="p1"
-        {...mockFns}
-      />
-    )
-
-    // Open the popover
-    const trigger = screen.getByLabelText('Switch dashboard page')
-    fireEvent.click(trigger)
-
-    // The trash icon should not be queryable
-    const trashButtons = screen.queryAllByRole('button', { name: /trash|delete/i })
-    expect(trashButtons).toHaveLength(0)
-  })
-
-  it('clicking the trash icon asks for confirmation instead of deleting immediately', async () => {
-    const onDelete = vi.fn()
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onRename: vi.fn(),
-      onDelete,
-      onSetSkin: vi.fn(),
-    }
-
-    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns} />)
+  // Renaming moved to the page-title-field in the layout toolbar (ADR 0107),
+  // and deleting moved to the layout toolbar's own Delete page control
+  // (see layout-toolbar.test.tsx): this popover no longer has a pencil, a
+  // trash icon, an edit state, or a confirmation dialog at all.
+  it('has no Rename control, in this list or anywhere else on the page', async () => {
+    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns()} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
-    const deleteButton = await screen.findByLabelText('Delete Page A')
-    fireEvent.click(deleteButton)
-
-    expect(onDelete).not.toHaveBeenCalled()
-    expect(await screen.findByText('Delete "Page A"?')).toBeInTheDocument()
+    await screen.findByText(/New Page/)
+    expect(screen.queryByRole('button', { name: /rename/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/rename/i)).not.toBeInTheDocument()
+    // No inline edit state exists to fall into either — the row is a plain
+    // button, never a textbox.
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
-  it('confirming the dialog deletes the named page', async () => {
-    const onDelete = vi.fn()
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onRename: vi.fn(),
-      onDelete,
-      onSetSkin: vi.fn(),
-    }
-
-    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns} />)
-    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
-    fireEvent.click(await screen.findByLabelText('Delete Page A'))
-
-    await screen.findByText('Delete "Page A"?')
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-
-    expect(onDelete).toHaveBeenCalledWith('p1')
-  })
-
-  it('cancelling the dialog leaves the page alone', async () => {
-    const onDelete = vi.fn()
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onRename: vi.fn(),
-      onDelete,
-      onSetSkin: vi.fn(),
-    }
-
-    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns} />)
-    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
-    fireEvent.click(await screen.findByLabelText('Delete Page A'))
-
-    await screen.findByText('Delete "Page A"?')
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    expect(onDelete).not.toHaveBeenCalled()
-    await waitFor(() => {
-      expect(screen.queryByText('Delete "Page A"?')).not.toBeInTheDocument()
-    })
-  })
-
-  it('rename flow: click pencil, type new name, press Enter', async () => {
-    const onRename = vi.fn()
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onRename,
-      onDelete: vi.fn(),
-      onSetSkin: vi.fn(),
-    }
-
-    render(
-      <DashboardPageSwitcher
-        pages={mockPages}
-        activePageId="p1"
-        {...mockFns}
-      />
-    )
-
-    // Open the popover
-    const trigger = screen.getByLabelText('Switch dashboard page')
-    fireEvent.click(trigger)
-
-    // Wait for popover content to be in the DOM
-    await waitFor(() => {
-      const allPageTexts = screen.queryAllByText(/Page [AB]/)
-      expect(allPageTexts.length).toBeGreaterThan(1)
-    })
-
-    // Find pencil buttons
-    const allButtons = screen.getAllByRole('button')
-
-    // Find the pencil button for Page A (it should be after "Page A" text in the same div)
-    let pageAPencilButton: HTMLElement | null = null
-    for (const btn of allButtons) {
-      const label = btn.getAttribute('aria-label')
-      if (label?.includes('Rename') && label?.includes('Page A')) {
-        pageAPencilButton = btn
-        break
-      }
-    }
-
-    if (!pageAPencilButton) {
-      throw new Error('Could not find pencil button for Page A')
-    }
-
-    // Click the pencil button
-    fireEvent.click(pageAPencilButton)
-
-    // An input field should appear for editing
-    const input = await screen.findByRole('textbox') as HTMLInputElement
-    expect(input.value).toBe('Page A')
-
-    // Clear and type new name
-    fireEvent.change(input, { target: { value: 'Renamed' } })
-    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
-
-    await waitFor(() => {
-      expect(onRename).toHaveBeenCalledWith('p1', 'Renamed')
-    })
-  })
-
-  it('clearing the name to empty and pressing Enter does not submit, and stays editable', async () => {
-    // Regression test: the rename input selects all text on focus (so typing
-    // immediately replaces it), which means a single Backspace - a completely
-    // natural way to "remove characters" - deletes the whole name in one
-    // keystroke. Confirming that with Enter must not silently close the
-    // field back to the unchanged name with no feedback; it should stay open
-    // so the empty box makes the no-op obvious.
-    const onRename = vi.fn()
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onRename,
-      onDelete: vi.fn(),
-      onSetSkin: vi.fn(),
-    }
-
-    render(
-      <DashboardPageSwitcher
-        pages={mockPages}
-        activePageId="p1"
-        {...mockFns}
-      />
-    )
-
+  it('has no Delete control, with one page or with several', async () => {
+    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns()} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
-    const renameBtn = await screen.findByLabelText('Rename Page A')
-    fireEvent.click(renameBtn)
-
-    const input = (await screen.findByRole('textbox')) as HTMLInputElement
-    expect(input.value).toBe('Page A')
-
-    // Simulate select-all-on-focus followed by one Backspace wiping everything.
-    fireEvent.change(input, { target: { value: '' } })
-    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
-
-    expect(onRename).not.toHaveBeenCalled()
-    // The input must still be present and editable - not silently reverted
-    // to the read-only button showing "Page A" again.
-    expect(screen.getByRole('textbox')).toBeInTheDocument()
+    await screen.findByText(/New Page/)
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/delete/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Delete "/)).not.toBeInTheDocument()
   })
 
   it('"New Page" button calls onCreate', async () => {
@@ -369,8 +196,6 @@ describe('DashboardPageSwitcher', () => {
     const mockFns = {
       onSelect: vi.fn(),
       onCreate,
-      onRename: vi.fn(),
-      onDelete: vi.fn(),
       onSetSkin: vi.fn(),
     }
 
@@ -393,6 +218,37 @@ describe('DashboardPageSwitcher', () => {
     expect(onCreate).toHaveBeenCalled()
   })
 
+  // Rename and Delete page both moved into the layout toolbar (ADR 0107),
+  // and the toolbar only renders in layout mode, which itself only exists
+  // at `lg` and up. A page created below that width would be stuck named
+  // "Untitled page" with no toolbar reachable to fix that or delete it, so
+  // New Page follows the same `canEditLayout` gate `App.tsx` uses — while
+  // selecting and reordering, neither of which needs layout mode, stay
+  // available at every width.
+  describe('New Page availability by width', () => {
+    it('hides New Page below the lg breakpoint but keeps select and reorder', async () => {
+      setViewportWidth(900)
+      const onSelect = vi.fn()
+      render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} onSelect={onSelect} />)
+      fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+
+      expect(await screen.findByRole('button', { name: 'Page B' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Reorder pages' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'New Page' })).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Page B' }))
+      expect(onSelect).toHaveBeenCalledWith('p2')
+    })
+
+    it('shows New Page at the lg breakpoint and above', async () => {
+      setViewportWidth(1024)
+      render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} />)
+      fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+
+      expect(await screen.findByRole('button', { name: 'New Page' })).toBeInTheDocument()
+    })
+  })
+
   /**
    * ADR 0060 put the skin here because the popover was the only place a
    * page-level property lived. It is a layout decision, so it now sits with the
@@ -402,8 +258,6 @@ describe('DashboardPageSwitcher', () => {
   const mockFns = () => ({
     onSelect: vi.fn(),
     onCreate: vi.fn(),
-    onRename: vi.fn(),
-    onDelete: vi.fn(),
   })
 
   it('leaves the skin to the layout controls', async () => {

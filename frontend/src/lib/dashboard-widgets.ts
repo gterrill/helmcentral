@@ -85,6 +85,135 @@ export const DASHBOARD_WIDGET_LABELS: Record<BuiltinWidgetId, string> = {
   'sea-state': 'Sea State',
 }
 
+export type WidgetCategory =
+  | 'navigation'
+  | 'weather'
+  | 'situational'
+  | 'power'
+  | 'engine'
+  | 'systems'
+  | 'at-a-glance'
+  | 'custom'
+
+/**
+ * Groups the Add Widget picker shows built-in widgets under (ADR 0107). An
+ * ordered list, not just the union type, so the picker and this file agree
+ * on display order without either one hard-coding it twice.
+ *
+ * `engine` and `custom` carry no built-in widget at all — Engine Cluster,
+ * the equipment-profile importer, gauges, gauge groups, indicators and
+ * embeds are all multi-instance widgets (App.tsx's own drafts, not entries
+ * in DASHBOARD_WIDGET_IDS), so they reach the picker as
+ * `AddWidgetMultiInstanceEntry` values carrying one of these two categories
+ * rather than through DASHBOARD_WIDGET_CATEGORY below.
+ */
+export const WIDGET_CATEGORIES: { id: WidgetCategory; label: string }[] = [
+  { id: 'navigation', label: 'Navigation' },
+  { id: 'weather', label: 'Weather' },
+  { id: 'situational', label: 'Situational' },
+  { id: 'power', label: 'Power' },
+  { id: 'engine', label: 'Engine' },
+  { id: 'systems', label: 'Systems' },
+  { id: 'at-a-glance', label: 'At a glance' },
+  { id: 'custom', label: 'Custom' },
+]
+
+/**
+ * Every built-in widget's group in the Add Widget picker. A `Record`, like
+ * DASHBOARD_WIDGET_LABELS above, so a new id added to DASHBOARD_WIDGET_IDS
+ * with no category here is a compile error rather than falling through to
+ * an uncategorised item nobody notices.
+ */
+export const DASHBOARD_WIDGET_CATEGORY: Record<BuiltinWidgetId, WidgetCategory> = {
+  'vessel': 'navigation',
+  'position': 'navigation',
+  'depth-tide': 'navigation',
+  'route': 'navigation',
+  'autopilot': 'navigation',
+  'wind': 'weather',
+  'current-conditions': 'weather',
+  'forecast-days': 'weather',
+  'sea-state': 'weather',
+  'anchor-watch': 'situational',
+  'nearby-vessels': 'situational',
+  'radar-targets': 'situational',
+  'battery-power': 'power',
+  'solar': 'power',
+  'alternator': 'power',
+  'generator': 'power',
+  'tanks': 'systems',
+  'czone-switches': 'systems',
+  'hot-water': 'systems',
+  'today-now': 'at-a-glance',
+  'clock': 'at-a-glance',
+}
+
+/**
+ * Every built-in widget's default {w, h} when added from the picker (ADR
+ * 0107). `handleAddWidget` (App.tsx) used to place every widget at a
+ * hard-coded 4x6 regardless of what it actually holds, which cut Battery &
+ * Power's footer off before an operator ever touched a resize handle.
+ *
+ * Numbers are not a guess at "roughly enough room": fifteen of these
+ * (everything except radar-targets and autopilot, which didn't exist when
+ * it was written) come straight from `defaultDashboardLayout` in
+ * backend/dashboard_pages.go, the hand-tuned arrangement that already ships
+ * as a genuinely fresh install's first page — the anchor-watch entry there
+ * even carries its own comment explaining why H:10, not 8, is what the
+ * always-on map plus the rode readout and Drop/Raise button need. Reusing
+ * those rather than inventing new ones keeps the picker and the fresh-install
+ * page agreeing about what each widget needs, instead of drifting apart the
+ * first time someone tunes one number without the other.
+ *
+ * clock/current-conditions/forecast-days/sea-state instead default to their
+ * own WIDGET_CONSTRAINTS minimum (dashboard-bento-grid.tsx): that minimum was
+ * already set to the wall-display's actual per-widget content need at the
+ * kiosk's 7-row fold, not a density-scale floor, so there is no taller
+ * "normal desktop" number to prefer over it.
+ *
+ * radar-targets and autopilot have no backend precedent (both shipped after
+ * that layout was written) — sized here from their own tile content
+ * (radar-targets mirrors nearby-vessels' target-row list; autopilot from its
+ * heading/target readout, mode strip, three button grids and the hold-to-
+ * confirm engage bar) rather than measured live — still needs a check
+ * against the real radar and a live pilot.
+ *
+ * Using `Record`, not a lookup function with a default, makes a new widget
+ * with no entry here a compile error instead of a silent 0x0.
+ */
+export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<BuiltinWidgetId, { w: number; h: number }> = {
+  'vessel': { w: 12, h: 3 },
+  'wind': { w: 4, h: 8 },
+  'depth-tide': { w: 4, h: 7 },
+  'position': { w: 4, h: 5 },
+  'today-now': { w: 4, h: 5 },
+  'anchor-watch': { w: 4, h: 10 },
+  'tanks': { w: 4, h: 4 },
+  'route': { w: 4, h: 4 },
+  'nearby-vessels': { w: 4, h: 5 },
+  // Uncertain: no backend precedent (added after defaultDashboardLayout was
+  // written). Mirrors nearby-vessels' list-of-bordered-rows shape and size —
+  // check against the real radar in the browser.
+  'radar-targets': { w: 4, h: 5 },
+  'battery-power': { w: 4, h: 12 },
+  'solar': { w: 4, h: 6 },
+  'alternator': { w: 4, h: 6 },
+  'generator': { w: 4, h: 5 },
+  'czone-switches': { w: 4, h: 6 },
+  'hot-water': { w: 4, h: 6 },
+  // Uncertain: no backend precedent. Estimated from the heading/target
+  // readout, mode strip and three button grids (adjust, dodge, tack/gybe)
+  // plus the hold-to-confirm engage bar — check against a live pilot.
+  'autopilot': { w: 4, h: 9 },
+  // These four are sized for the kiosk's 7-row fold (WIDGET_CONSTRAINTS'
+  // own comment, dashboard-bento-grid.tsx) — that minimum already is the
+  // content-fit number, so the default is the minimum, not something taller.
+  'clock': { w: 2, h: 6 },
+  'current-conditions': { w: 3, h: 6 },
+  'forecast-days': { w: 3, h: 4 },
+  'sea-state': { w: 4, h: 5 },
+}
+
 export interface EmbedWidgetConfig {
   title: string
   url: string

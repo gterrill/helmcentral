@@ -16,7 +16,11 @@ const AlertDialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Backdrop
     className={cn(
-      "fixed inset-0 z-50 bg-black/80 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0",
+      // z-70, matching dialog.tsx: popovers and menus sit at z-60 (ADR
+      // 0107), and an alert dialog confirming an action started from one
+      // (e.g. layout-toolbar.tsx's Delete page, opened from what used to be
+      // inside the page switcher's popover) must draw above it, not under it.
+      "fixed inset-0 z-70 bg-black/80 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0",
       className
     )}
     {...props}
@@ -36,7 +40,8 @@ const AlertDialogContent = React.forwardRef<
     <AlertDialogPrimitive.Popup
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 shadow-lg transition-[opacity,transform] data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0",
+        // z-80, matching dialog.tsx — see the backdrop's comment above.
+        "fixed left-1/2 top-1/2 z-80 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 shadow-lg transition-[opacity,transform] data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0",
         className
       )}
       {...props}

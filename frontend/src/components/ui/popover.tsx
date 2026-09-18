@@ -16,14 +16,14 @@ const PopoverContent = React.forwardRef<
 >(({ className, children, sideOffset = 4, align = "center", ...props }, ref) => (
   <PopoverPrimitive.Portal>
     <PopoverPrimitive.Positioner
-      className="isolate z-50"
+      className="isolate z-60"
       sideOffset={sideOffset}
       align={align}
     >
       <PopoverPrimitive.Popup
         ref={ref}
         className={cn(
-          "relative z-50 rounded-md border bg-popover text-popover-foreground shadow-md transition-[opacity,transform] data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 origin-(--transform-origin)",
+          "relative z-60 rounded-md border bg-popover text-popover-foreground shadow-md transition-[opacity,transform] data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 origin-(--transform-origin)",
           className
         )}
         {...props}

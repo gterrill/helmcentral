@@ -35,8 +35,6 @@ function renderSwitcher() {
       activePageId="p1"
       onSelect={vi.fn()}
       onCreate={vi.fn()}
-      onRename={vi.fn()}
-      onDelete={vi.fn()}
     />,
   )
 }
@@ -56,8 +54,8 @@ describe('header at phone width', () => {
     renderSwitcher()
 
     // Below `sm` the label is hidden in CSS, so the aria-label is the only
-    // accessible name left — losing it would strand create/rename/delete, which
-    // live nowhere else. That is what this asserts.
+    // accessible name left — losing it would strand New Page, which lives
+    // nowhere else. That is what this asserts.
     expect(screen.getByRole('button', { name: 'Switch dashboard page' })).toBeInTheDocument()
 
     // jsdom applies no CSS, so the label is still in the DOM and still "visible"

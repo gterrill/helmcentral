@@ -65,6 +65,14 @@ export const SETTINGS_MANUAL_TARGETS: Record<SettingsSectionId, ManualTarget> = 
 /** Where the dashboard grid itself (panel === null) opens in the manual. */
 export const DASHBOARD_MANUAL_TARGET: ManualTarget = { page: 'features/dashboard' }
 
+/**
+ * The empty-page prompt's own link (ADR 0107) — a page with nothing on it
+ * yet points straight at the how-to for building one, rather than the
+ * general dashboard feature page DASHBOARD_MANUAL_TARGET above sends the
+ * header `?` to.
+ */
+export const CREATE_PAGE_MANUAL_TARGET: ManualTarget = { page: 'how-to/create-a-dashboard-page' }
+
 /** The contextual `?`'s target for the screen `location` currently shows. */
 export function manualTargetFor(location: AppLocation): ManualTarget {
   if (location.panel === null) return DASHBOARD_MANUAL_TARGET

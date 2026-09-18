@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
-import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
+import { DASHBOARD_WIDGET_DEFAULT_SIZE, type DashboardLayoutItem } from '@/lib/dashboard-widgets'
 import { setViewportWidth } from './viewport'
 
 // ── fetch so components that call it don't throw ──────────────────────────
@@ -238,9 +238,18 @@ function enterEditMode(): void {
   fireEvent.click(screen.getByRole('button', { name: /enter edit mode/i }))
 }
 
+// Add Widget is a grouped DropdownMenu now (ADR 0107), not the plain
+// Popover-of-buttons it used to be — its entries are `menuitem`s, not
+// `button`s.
 async function openGaugeGroupDialogFromAddWidget(): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: /add widget/i }))
-  fireEvent.click(await screen.findByRole('button', { name: /^gauge group/i }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: /^gauge group/i }))
+}
+
+/** Same picker, for a built-in widget rather than a multi-instance draft. */
+async function addBuiltinWidgetFromAddWidget(label: string | RegExp): Promise<void> {
+  fireEvent.click(screen.getByRole('button', { name: /add widget/i }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: label }))
 }
 
 function widgetsFromLastPatch(): DashboardLayoutItem[] {
@@ -339,5 +348,30 @@ describe('duplicating a gauge group from App', () => {
     // Below everything else on the page, same as any other freshly placed
     // widget, rather than stacked directly on its source.
     expect(copy!.y).toBe(original!.y + original!.h)
+  })
+})
+
+/**
+ * Regression coverage for the bug ADR 0107 fixes: every built-in widget used
+ * to land at a hard-coded {w:4, h:6} regardless of what it actually shows,
+ * which cut Battery & Power's Shore line off the bottom of the tile before
+ * an operator ever touched a resize handle.
+ */
+describe('adding a built-in widget from App', () => {
+  it("sends Battery & Power's own default height, not the old hard-coded 6", async () => {
+    render(<App />)
+    await activePageReady()
+    enterEditMode()
+
+    await addBuiltinWidgetFromAddWidget(/^battery & power/i)
+
+    await waitFor(() => expect(patchCalls.length).toBeGreaterThan(0))
+    const widgets = widgetsFromLastPatch()
+    const batteryPower = widgets.find((w) => w.id === 'battery-power')
+
+    expect(batteryPower).toBeDefined()
+    expect(batteryPower!.h).toBe(DASHBOARD_WIDGET_DEFAULT_SIZE['battery-power'].h)
+    expect(batteryPower!.h).toBeGreaterThan(6)
+    expect(batteryPower!.w).toBe(DASHBOARD_WIDGET_DEFAULT_SIZE['battery-power'].w)
   })
 })

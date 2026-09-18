@@ -5,13 +5,11 @@ import {
   CircleHelp,
   CloudSun,
   FileText,
-  LampCeiling,
   LayoutDashboard,
   Map,
   Mic,
   MicOff,
   MonitorPlay,
-  Plus,
   Radar as RadarIcon,
   Route,
   Settings,
@@ -72,9 +70,10 @@ import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { RouteTile } from '@/components/route-tile'
 import { DashboardBentoGrid, WALL_ROW_MARGIN } from '@/components/dashboard-bento-grid'
-import { PageSkinSelect } from '@/components/page-skin-select'
-import { PageHeroSelect } from '@/components/page-hero-select'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
+import { LayoutToolbar } from '@/components/layout-toolbar'
+import { EmptyPagePrompt } from '@/components/empty-page-prompt'
+import type { AddWidgetMultiInstanceEntry } from '@/components/add-widget-picker'
 import { Toaster } from '@/components/ui/sonner'
 import { useRoutes } from '@/hooks/use-routes'
 import { useSatCharts } from '@/hooks/use-sat-charts'
@@ -87,7 +86,6 @@ import { parseKioskOptions, KIOSK_FOLD_PX } from '@/lib/kiosk'
 import { nextWaypoint, etaToWaypoint } from '@/lib/next-waypoint'
 import { KioskShell } from '@/components/kiosk-shell'
 import { KioskFoldGuide } from '@/components/kiosk-fold-guide'
-import { PageKioskSelect } from '@/components/page-kiosk-select'
 import { DashboardPageSwitcher, KioskPageGlyph } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
 import { useElectricalState } from '@/hooks/use-electrical-state'
@@ -128,8 +126,7 @@ import { useMateAnswerWatcher } from '@/hooks/use-mate-answer-watcher'
 import { useSpeechOutput } from '@/hooks/use-speech-output'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 import {
-  DASHBOARD_WIDGET_IDS,
-  DASHBOARD_WIDGET_LABELS,
+  DASHBOARD_WIDGET_DEFAULT_SIZE,
   duplicateWidget,
   isEmbedWidgetId,
   isGaugeGroupWidgetId,
@@ -143,6 +140,7 @@ import {
   newClusterWidgetId,
   newLampStripWidgetId,
   newPoiMapWidgetId,
+  type BuiltinWidgetId,
   type DashboardLayoutItem,
   type DashboardWidgetId,
   type EmbedWidgetConfig,
@@ -170,7 +168,6 @@ import { useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
 import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -266,6 +263,11 @@ export function App() {
   // the toggle that would exit edit mode, so a stored flag would strand the
   // dashboard in a non-interactive state with no way back out.
   const layoutEditing = layoutEditingRequested && canEditLayout
+  // The page a "New Page" click just created (ADR 0107): its name field
+  // starts empty and focused instead of showing "Untitled page", and is the
+  // only page whose field behaves that way. Cleared once that field settles
+  // (Enter/blur that saves, or Escape) — see components/page-title-field.tsx.
+  const [namingPageId, setNamingPageId] = useState<string | null>(null)
   // The embed widget currently open in the config dialog. For a freshly added
   // embed this is the only place it exists until it is given a URL and saved.
   const [embedDraft, setEmbedDraft] = useState<DashboardLayoutItem | null>(null)
@@ -394,6 +396,25 @@ export function App() {
   // activePageId exactly the same way — see useKioskRotation below) actually
   // holds. Otherwise identical to its previous declaration further down.
   const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
+  // namingPageId only means anything for the page it was set on, while
+  // layout mode can actually show that page's name field — stale otherwise.
+  // PageTitleField's own onDone (an Enter/blur that saved, or an Escape)
+  // clears it for the ordinary case, but switching pages without ever
+  // touching the field skips that entirely, and so does narrowing the
+  // window (or toggling Edit off) out of layout mode. Left uncleared, either
+  // one strands the flag on a page that isn't showing right now — returning
+  // to it later re-opens a blank, focus-stealing name field for a page that
+  // already has a real name.
+  useEffect(() => {
+    if (namingPageId !== null && namingPageId !== activePageId) {
+      setNamingPageId(null)
+    }
+  }, [activePageId, namingPageId])
+  useEffect(() => {
+    if (!layoutEditing) {
+      setNamingPageId(null)
+    }
+  }, [layoutEditing])
   // ADR 0089: the wall display at /kiosk. Its query string is its own
   // (rotate, a pinned page for authoring/screenshots) rather than app state,
   // so it's parsed once here the same way initialLocation is, and never
@@ -1027,8 +1048,6 @@ export function App() {
   // separate top-level Secrets entry to hide independently.
   const visiblePanelNavItems = canAdmin ? PANEL_NAV_ITEMS : PANEL_NAV_ITEMS.filter((item) => item.id !== 'settings')
 
-  const unplacedWidgetIds = DASHBOARD_WIDGET_IDS.filter((id) => !effectiveWidgets.some((w) => w.id === id))
-
   const handleLayoutSettle = useCallback((next: DashboardLayoutItem[]) => {
     if (!activePage) return
     void updatePage(activePage.id, { widgets: next })
@@ -1039,10 +1058,15 @@ export function App() {
     void updatePage(activePage.id, { widgets: effectiveWidgets.filter((w) => w.id !== id) })
   }, [activePage, effectiveWidgets, updatePage])
 
-  const handleAddWidget = useCallback((id: DashboardWidgetId) => {
+  // Each built-in widget's footprint comes from DASHBOARD_WIDGET_DEFAULT_SIZE
+  // (ADR 0107) instead of one hard-coded 4x6 for all of them — that was what
+  // let Battery & Power land cut off before an operator ever touched a
+  // resize handle.
+  const handleAddWidget = useCallback((id: BuiltinWidgetId) => {
     if (!activePage) return
     const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    void updatePage(activePage.id, { widgets: [...effectiveWidgets, { id, x: 0, y: maxY, w: 4, h: 6 }] })
+    const { w, h } = DASHBOARD_WIDGET_DEFAULT_SIZE[id]
+    void updatePage(activePage.id, { widgets: [...effectiveWidgets, { id, x: 0, y: maxY, w, h }] })
   }, [activePage, effectiveWidgets, updatePage])
 
   // A new embed is held as an unsaved draft until it has a URL — the backend
@@ -1659,6 +1683,20 @@ export function App() {
     }
   }
 
+  // The Add Widget menu's multi-instance entries (ADR 0107): each opens the
+  // same config dialog/draft flow it always has — App.tsx still owns every
+  // one of those handlers — the picker just offers them grouped alongside
+  // the built-in widgets instead of listed separately underneath them.
+  const addWidgetMultiInstanceEntries: AddWidgetMultiInstanceEntry[] = [
+    { label: 'Gauge…', category: 'custom', onSelect: handleAddGauge },
+    { label: 'Engine Cluster…', category: 'engine', onSelect: handleAddCluster },
+    { label: 'From equipment profile…', category: 'engine', onSelect: () => setEngineProfileOpen(true) },
+    { label: 'Indicators…', category: 'custom', onSelect: handleAddLampStrip },
+    { label: 'Gauge Group…', category: 'custom', onSelect: handleAddGaugeGroup },
+    { label: 'Embed…', category: 'custom', onSelect: handleAddEmbed },
+    { label: 'Nearby map…', category: 'navigation', onSelect: handleAddPoiMap },
+  ]
+
   const dashboardGrid = (
     // ADR 0060: the skin lives on the page, so the attribute sits on this
     // shared root and every tile beneath it re-skins with no component
@@ -1672,10 +1710,33 @@ export function App() {
       className="flex flex-col gap-4 bg-background"
       style={{ padding: 'var(--board-pad)', borderRadius: 'var(--board-radius)' }}
     >
+      {/* The layout toolbar (ADR 0107): page name field, Add Widget, Ribbon,
+          Skin, Hero, Kiosk, in that fixed order. Replaces both the old
+          "Layout Mode — Drag to rearrange" pill that used to sit here and
+          the separate control row that used to sit below the grid. */}
       {layoutEditing && (
-        <div className="inline-flex w-fit items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">
-          Layout Mode — Drag to rearrange
-        </div>
+        <LayoutToolbar
+          page={activePage}
+          namingPageId={namingPageId}
+          onSaveName={(id, name) => updatePage(id, { name }).then((saved) => saved !== null)}
+          onDoneNaming={() => setNamingPageId(null)}
+          placedWidgetIds={effectiveWidgets.map((w) => w.id)}
+          onAddWidget={handleAddWidget}
+          multiInstanceEntries={addWidgetMultiInstanceEntries}
+          onOpenRibbon={() => setRibbonDialogOpen(true)}
+          onSetSkin={(id, skin) => { void updatePage(id, { skin }) }}
+          onSetHero={(id, hero) => { void updatePage(id, { hero }) }}
+          onKioskPatch={(id, patch) => { void updatePage(id, patch) }}
+          onDeletePage={(id) => {
+            void deletePage(id).then((ok) => {
+              if (ok && id === activePageId) {
+                setActivePageId(pages.find((p) => p.id !== id)?.id ?? null)
+              }
+            })
+          }}
+          pageCount={pages.length}
+          canWrite={canWrite}
+        />
       )}
 
       {/* The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip
@@ -1704,129 +1765,44 @@ export function App() {
         </div>
       )}
 
-      {/* relative so KioskFoldGuide (ADR 0089) can position itself against
-          exactly the content the kiosk route shows: the grid alone. The
-          ribbon sits outside this container (above) precisely because it no
-          longer counts against the fold budget — it never reaches the wall
-          at all. */}
-      <div className="relative">
-        <DashboardBentoGrid
-          widgets={effectiveWidgets}
-          editing={layoutEditing}
-          heroId={activePage?.hero}
-          renderWidget={renderWidget}
-          onRemoveWidget={handleRemoveWidget}
-          onDuplicateWidget={handleDuplicateWidget}
-          onLayoutSettle={handleLayoutSettle}
-          // A wall page's height is fixed by the panel, not by a scrolling
-          // viewport, so its rows sit closer together. Taken from the page's
-          // own kiosk flag rather than from the route, so the helm browser
-          // authoring the page lays it out at the same geometry the wall will
-          // render it at and the fold guide stays honest.
-          rowMargin={activePage?.kiosk ? WALL_ROW_MARGIN : undefined}
-        />
+      {/* An empty page shows a prompt instead of an unexplained blank stretch
+          (ADR 0107) — never at /kiosk, where there's nothing to click and no
+          operator watching to click it. A page carrying a hero always shows
+          the grid: the hero row itself is content, even when it's the only
+          widget on the page. Gated on !pagesLoading too: before the initial
+          GET /api/dashboard-pages resolves there is no active page yet
+          either, which reads the same as "empty" — without this the prompt
+          flashed on every load, not just on a genuinely empty page. */}
+      {!pagesLoading && effectiveWidgets.length === 0 && !activePage?.hero ? (
+        <EmptyPagePrompt editing={layoutEditing} canEditLayout={canEditLayout} onOpenManual={openManual} isKiosk={isKiosk} />
+      ) : (
+        // relative so KioskFoldGuide (ADR 0089) can position itself against
+        // exactly the content the kiosk route shows: the grid alone. The
+        // ribbon sits outside this container (above) precisely because it no
+        // longer counts against the fold budget — it never reaches the wall
+        // at all.
+        <div className="relative">
+          <DashboardBentoGrid
+            widgets={effectiveWidgets}
+            editing={layoutEditing}
+            heroId={activePage?.hero}
+            renderWidget={renderWidget}
+            onRemoveWidget={handleRemoveWidget}
+            onDuplicateWidget={handleDuplicateWidget}
+            onLayoutSettle={handleLayoutSettle}
+            // A wall page's height is fixed by the panel, not by a scrolling
+            // viewport, so its rows sit closer together. Taken from the page's
+            // own kiosk flag rather than from the route, so the helm browser
+            // authoring the page lays it out at the same geometry the wall will
+            // render it at and the fold guide stays honest.
+            rowMargin={activePage?.kiosk ? WALL_ROW_MARGIN : undefined}
+          />
 
-        {/* Authoring aid, not a kiosk feature: only shown while editing a
-            page that is itself flagged for the wall display, so laying it
-            out on the ordinary desktop dashboard shows exactly where the
-            360px strip cuts off before saving. */}
-        {layoutEditing && activePage?.kiosk && <KioskFoldGuide topPx={KIOSK_FOLD_PX} />}
-      </div>
-
-      {/* Always available in layout mode: Embed is never "placed", so unlike the
-          builtin widgets it can be added any number of times. */}
-      {layoutEditing && (
-        <div className="flex w-fit flex-wrap items-center gap-2">
-        <PageSkinSelect
-          page={activePage ?? null}
-          onSetSkin={(id, skin) => { void updatePage(id, { skin }) }}
-        />
-        <PageHeroSelect
-          page={activePage ?? null}
-          onSetHero={(id, hero) => { void updatePage(id, { hero }) }}
-        />
-        <PageKioskSelect
-          page={activePage ?? null}
-          onPatch={(id, patch) => { void updatePage(id, patch) }}
-        />
-        <button
-          type="button"
-          onClick={() => setRibbonDialogOpen(true)}
-          className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary"
-        >
-          <LampCeiling className="h-3.5 w-3.5" aria-hidden="true" />
-          Ribbon
-        </button>
-        <Popover>
-          <PopoverTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">
-            <Plus className="h-3.5 w-3.5" />
-            Add Widget
-          </PopoverTrigger>
-          <PopoverContent className="w-56 p-1">
-            <div className="flex flex-col">
-              {unplacedWidgetIds.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => handleAddWidget(id)}
-                  className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                >
-                  {DASHBOARD_WIDGET_LABELS[id]}
-                </button>
-              ))}
-              {unplacedWidgetIds.length > 0 && <div className="my-1 h-px bg-border" />}
-              <button
-                type="button"
-                onClick={handleAddGauge}
-                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                Gauge…
-              </button>
-              <button
-                type="button"
-                onClick={handleAddCluster}
-                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                Engine Cluster…
-              </button>
-              <button
-                type="button"
-                onClick={() => setEngineProfileOpen(true)}
-                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                From equipment profile…
-              </button>
-              <button
-                type="button"
-                onClick={handleAddLampStrip}
-                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                Indicators…
-              </button>
-              <button
-                type="button"
-                onClick={handleAddGaugeGroup}
-                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                Gauge Group…
-              </button>
-              <button
-                type="button"
-                onClick={handleAddEmbed}
-                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                Embed…
-              </button>
-              <button
-                type="button"
-                onClick={handleAddPoiMap}
-                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                Nearby map…
-              </button>
-            </div>
-          </PopoverContent>
-        </Popover>
+          {/* Authoring aid, not a kiosk feature: only shown while editing a
+              page that is itself flagged for the wall display, so laying it
+              out on the ordinary desktop dashboard shows exactly where the
+              360px strip cuts off before saving. */}
+          {layoutEditing && activePage?.kiosk && <KioskFoldGuide topPx={KIOSK_FOLD_PX} />}
         </div>
       )}
 
@@ -2303,18 +2279,14 @@ export function App() {
                   activePageId={activePageId}
                   onSelect={setActivePageId}
                   onCreate={() => {
-                    void createPage(`Page ${pages.length + 1}`, []).then((p) => {
+                    // Named in place, not behind a dialog (ADR 0107): the page
+                    // exists immediately as "Untitled page", and namingPageId
+                    // is what starts its name field empty and focused.
+                    void createPage('Untitled page', []).then((p) => {
                       if (p) {
                         setActivePageId(p.id)
+                        setNamingPageId(p.id)
                         setLayoutEditing(true)
-                      }
-                    })
-                  }}
-                  onRename={(id, name) => { void updatePage(id, { name }) }}
-                  onDelete={(id) => {
-                    void deletePage(id).then((ok) => {
-                      if (ok && id === activePageId) {
-                        setActivePageId(pages.find((p) => p.id !== id)?.id ?? null)
                       }
                     })
                   }}
@@ -2393,11 +2365,22 @@ export function App() {
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="mx-auto flex w-full max-w-[1800px] flex-1 min-h-0 flex-col gap-4">
             <ConnectionBanner />
-            {/* z-55 keeps a live alarm above the Mate sheet's backdrop and
-                popup (z-50) while staying under the dashboard header controls.
-                The page selector and other header actions sit at z-[60], so the
-                banner can remain visible without covering the top-level controls.
-                (impeccable critique 2026-09-12, P1) */}
+            {/* z-55 keeps a live alarm above the Mate sheet's backdrop (z-50)
+                while staying under the dashboard header, which sits at
+                z-60 same as the page selector and every other top-level
+                header control. (impeccable critique 2026-09-12, P1)
+
+                Popovers and dropdown menus are z-60 too (components/ui/
+                popover.tsx, components/ui/dropdown-menu.tsx), so they draw
+                above this banner. That includes one opened inside the Mate
+                sheet: PopoverContent portals out of the sheet's own
+                stacking context rather than nesting inside it, so its z-60
+                is compared against the banner directly and clears it
+                regardless of the sheet (ADR 0107). The sheet's own panel
+                (components/ui/sheet.tsx) is z-70, above the banner and
+                ordinary popovers/menus alike — only its backdrop is z-50 —
+                and dialogs (components/ui/dialog.tsx, alert-dialog.tsx) sit
+                at z-70/z-80, that same layer again or higher. */}
             <div className="relative z-55" data-testid="alarm-banner-stack">
               <AlarmBanner alarms={alarms} onOpen={openAlarmsPanel} />
             </div>

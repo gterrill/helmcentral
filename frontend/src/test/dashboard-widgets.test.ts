@@ -5,12 +5,15 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 
 import {
+  DASHBOARD_WIDGET_CATEGORY,
+  DASHBOARD_WIDGET_DEFAULT_SIZE,
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_WIDGET_LABELS,
   EMBED_WIDGET_ID_PREFIX,
   POI_MAP_RANGE_NM_MAX,
   POI_MAP_RANGE_NM_MIN,
   POI_MAP_WIDGET_ID_PREFIX,
+  WIDGET_CATEGORIES,
   duplicateWidget,
   isEmbedWidgetId,
   isGaugeGroupWidgetId,
@@ -28,6 +31,7 @@ import {
   type DashboardLayoutItem,
   type PoiMapWidgetConfig,
 } from '@/lib/dashboard-widgets'
+import { WIDGET_CONSTRAINTS } from '@/components/dashboard-bento-grid'
 
 describe('isEmbedWidgetId', () => {
   test('recognises embed instance ids', () => {
@@ -340,6 +344,54 @@ describe('DASHBOARD_WIDGET_IDS backend parity', () => {
 
     expect(backendIds.length, 'no widget ids parsed out of validDashboardWidgetIDs - regex or map shape changed').toBeGreaterThan(0)
     expect(new Set(backendIds)).toEqual(new Set(DASHBOARD_WIDGET_IDS))
+  })
+})
+
+/**
+ * ADR 0107: every built-in widget gets a category (for the grouped Add
+ * Widget picker) and a fixed default footprint sized to its own content,
+ * never below the constraints the grid itself enforces — that floor is what
+ * used to let Battery & Power land cut off at the old hard-coded 4x6 default.
+ */
+describe('DASHBOARD_WIDGET_CATEGORY', () => {
+  test('every built-in widget has a category', () => {
+    for (const id of DASHBOARD_WIDGET_IDS) {
+      expect(DASHBOARD_WIDGET_CATEGORY[id], `no category for "${id}"`).toBeDefined()
+    }
+  })
+
+  test('every category used is one of the ordered WIDGET_CATEGORIES', () => {
+    const known = new Set(WIDGET_CATEGORIES.map((c) => c.id))
+    for (const id of DASHBOARD_WIDGET_IDS) {
+      expect(known.has(DASHBOARD_WIDGET_CATEGORY[id]), `"${DASHBOARD_WIDGET_CATEGORY[id]}" is not in WIDGET_CATEGORIES`).toBe(true)
+    }
+  })
+})
+
+describe('DASHBOARD_WIDGET_DEFAULT_SIZE', () => {
+  test('every built-in widget has a default size', () => {
+    for (const id of DASHBOARD_WIDGET_IDS) {
+      expect(DASHBOARD_WIDGET_DEFAULT_SIZE[id], `no default size for "${id}"`).toBeDefined()
+    }
+  })
+
+  test('the default is never below the widget\'s own grid constraints', () => {
+    for (const id of DASHBOARD_WIDGET_IDS) {
+      const size = DASHBOARD_WIDGET_DEFAULT_SIZE[id]
+      const constraints = WIDGET_CONSTRAINTS[id]
+      if (constraints?.minW !== undefined) {
+        expect(size.w, `${id} default w (${size.w}) is below its minW (${constraints.minW})`).toBeGreaterThanOrEqual(constraints.minW)
+      }
+      if (constraints?.minH !== undefined) {
+        expect(size.h, `${id} default h (${size.h}) is below its minH (${constraints.minH})`).toBeGreaterThanOrEqual(constraints.minH)
+      }
+    }
+  })
+
+  // Regression test for the bug this plan fixes: every built-in widget used
+  // to land at a hard-coded 4x6, which cut Battery & Power's content off.
+  test('Battery & Power is clearly taller than the old hard-coded default of 6', () => {
+    expect(DASHBOARD_WIDGET_DEFAULT_SIZE['battery-power'].h).toBeGreaterThan(6)
   })
 })
 
