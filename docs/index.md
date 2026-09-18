@@ -36,6 +36,7 @@ Steps for specific tasks.
 
 - [Installing Helmcentral](how-to/install.md), including Docker and manual binaries.
 - [Upgrading across a breaking release](how-to/upgrading.md)
+- [Create a dashboard page](how-to/create-a-dashboard-page.md)
 - [Reorder dashboard pages](how-to/reorder-dashboard-pages.md)
 - [Pin an indicator ribbon](how-to/pin-an-indicator-ribbon.md)
 - [Set up a wall display](how-to/set-up-a-wall-display.md)

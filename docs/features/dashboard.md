@@ -89,27 +89,44 @@ ribbon](../how-to/pin-an-indicator-ribbon.md).
 ## Arranging it
 
 Toggle layout mode in the header, then drag, resize or remove widgets and add
-them back from a picker.
+them back from a picker. A toolbar opens above the grid the moment you do, in
+a fixed order: the page's name, **Add Widget**, **Ribbon**, **Skin**,
+**Hero**, and **Kiosk**. **Delete page** sits last, set apart from the rest
+by a divider since it is the one destructive control in the row; it is
+absent while only one page exists. See [Create a dashboard
+page](../how-to/create-a-dashboard-page.md) for deleting and renaming.
 
 Layouts are named **pages** you switch between, for example "Anchored" and
-"Underway". Everything is persisted server-side and
-restored next session, so a tablet at the helm and a phone in a bunk see the
-same arrangement.
+"Underway". **New Page** creates one immediately, named "Untitled page", with
+the name field already focused; there is no separate naming dialog. An empty
+page shows a short prompt pointing at Add Widget instead of a blank grid; see
+[Create a dashboard page](../how-to/create-a-dashboard-page.md) for the full
+walkthrough. Everything is persisted server-side and restored next session,
+so a tablet at the helm and a phone in a bunk see the same arrangement.
+
+Add Widget groups the built-ins by what they're for: Navigation, Weather,
+Situational, Power, Engine, Systems, At a glance, and Custom. A widget
+already on the page shows greyed out with an "On page" note; Gauge, Gauge
+Group, Engine Cluster, Indicators, Embed and Nearby map can each be added
+more than once, so those stay selectable regardless. Each widget lands at a
+size chosen for what it actually shows, so a fresh widget rarely needs an
+immediate resize.
 
 Page order is shared too: the sidebar and page dropdown follow the same saved
 sequence. New pages appear at the end. Moving a page keeps it selected and
 does not change its widgets. See [Reorder dashboard pages](../how-to/reorder-dashboard-pages.md).
 
 The layout adapts to screen size, including phones, with three structurally
-different arrangements.
+different arrangements. Layout mode, the toolbar and the picker are all
+desktop-only (1024px and up).
 
 A page can also nominate one placed widget as its **hero**: pick it from the
-select next to the skin picker in layout mode, and it moves to its own
-full-width row above the rest of the grid, enlarged. Everything else on the
-page keeps the position you gave it; picking a different hero, or clearing it
-back to "No hero", never rearranges anything else. Use it to emphasise the
-main reading for a page, such as anchor distance on an anchorage page or
-apparent wind on a passage page.
+toolbar's Hero select, and it moves to its own full-width row above the rest
+of the grid, enlarged. Everything else on the page keeps the position you
+gave it; picking a different hero, or clearing it back to "No hero", never
+rearranges anything else. Use it to emphasise the main reading for a page,
+such as anchor distance on an anchorage page or apparent wind on a passage
+page.
 
 ## The kiosk feed
 
