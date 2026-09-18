@@ -130,10 +130,10 @@ describe('resolveManualHref', () => {
   })
 
   it('resolves a same-directory .md link with a hash to a page and hash', () => {
-    expect(resolveManualHref('dashboard.md#widgets', 'features/forecast')).toEqual({
+    expect(resolveManualHref('dashboard.md#instrument-tiles', 'features/forecast')).toEqual({
       kind: 'page',
       page: 'features/dashboard',
-      hash: 'widgets',
+      hash: 'instrument-tiles',
     })
   })
 

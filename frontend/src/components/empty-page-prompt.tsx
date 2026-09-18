@@ -19,7 +19,7 @@ const PROMPT_CLASSNAME = 'flex min-h-40 flex-col items-center justify-center gap
 /**
  * Stands in for the grid on a page with nothing on it yet (ADR 0107). Before
  * this, an empty page was just a blank stretch of background — nothing told
- * a first-time operator that Add Widget was the way in.
+ * a first-time operator that Add Tile was the way in.
  */
 export function EmptyPagePrompt({ editing, canEditLayout, onOpenManual, isKiosk = false }: EmptyPagePromptProps) {
   if (isKiosk) return null
@@ -28,8 +28,8 @@ export function EmptyPagePrompt({ editing, canEditLayout, onOpenManual, isKiosk 
     return (
       <div className={PROMPT_CLASSNAME}>
         <p>
-          Create your personalized page. Use the Add Widget button to get started.
-          Drag widgets to rearrange.
+          Create your personalized page. Use the Add Tile button to get started.
+          Drag tiles to rearrange.
         </p>
         <button
           type="button"
@@ -45,14 +45,14 @@ export function EmptyPagePrompt({ editing, canEditLayout, onOpenManual, isKiosk 
   if (canEditLayout) {
     return (
       <div className={PROMPT_CLASSNAME}>
-        <p>Nothing on this page yet. Press Edit to add widgets.</p>
+        <p>Nothing on this page yet. Press Edit to add tiles.</p>
       </div>
     )
   }
 
   return (
     <div className={PROMPT_CLASSNAME}>
-      <p>Nothing on this page yet. Widgets are added on a screen at least 1024px wide.</p>
+      <p>Nothing on this page yet. Tiles are added on a screen at least 1024px wide.</p>
     </div>
   )
 }

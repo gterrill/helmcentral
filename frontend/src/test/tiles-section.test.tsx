@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
-import { WidgetsSection } from '@/components/settings/sections/widgets-section'
+import { TilesSection } from '@/components/settings/sections/tiles-section'
 import { SettingsFormProvider } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 import { initialRegularSettingsDraft } from '@/components/settings/settings-draft'
@@ -30,7 +30,7 @@ const mockedUsePlaceNameProviders = vi.mocked(usePlaceNameProviders)
 // (docs/adr/0091) - this guards the tab existing and rendering the
 // registered POI providers, mirroring the existing tide/weather/wave/
 // forecast-warnings tabs' wiring in this same section.
-describe('WidgetsSection Nearby tab', () => {
+describe('TilesSection Nearby tab', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.clearAllMocks()
@@ -57,7 +57,7 @@ describe('WidgetsSection Nearby tab', () => {
     render(
       <SettingsFormProvider>
         <SecretsStatusProvider>
-          <WidgetsSection draft={initialRegularSettingsDraft} onChange={() => {}} />
+          <TilesSection draft={initialRegularSettingsDraft} onChange={() => {}} />
         </SecretsStatusProvider>
       </SettingsFormProvider>,
     )
@@ -74,7 +74,7 @@ describe('WidgetsSection Nearby tab', () => {
 // ui.place_name_provider (ADR 0101) - a separate tab from Nearby, since the
 // operator can point the two at different plugins even though both default
 // to osm-overpass.
-describe('WidgetsSection Place names tab', () => {
+describe('TilesSection Place names tab', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.clearAllMocks()
@@ -108,7 +108,7 @@ describe('WidgetsSection Place names tab', () => {
     render(
       <SettingsFormProvider>
         <SecretsStatusProvider>
-          <WidgetsSection draft={initialRegularSettingsDraft} onChange={() => {}} />
+          <TilesSection draft={initialRegularSettingsDraft} onChange={() => {}} />
         </SecretsStatusProvider>
       </SettingsFormProvider>,
     )

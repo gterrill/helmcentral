@@ -14,11 +14,11 @@ interface PageSkinSelectProps {
 /**
  * The active page's skin (ADR 0060), as a layout control.
  *
- * Sits with Add Widget rather than in the page-switcher popover it started in:
+ * Sits with Add Tile rather than in the page-switcher popover it started in:
  * the skin repaints the whole board, so it belongs where an operator already is
  * when they are deciding what the page looks like, not three clicks away under
  * the list of pages. The trade is that it now lives in layout mode, which is
- * desktop-only — the same gate Add Widget and the grid itself are behind.
+ * desktop-only — the same gate Add Tile and the grid itself are behind.
  */
 export function PageSkinSelect({ page, onSetSkin }: PageSkinSelectProps) {
   if (!page) return null

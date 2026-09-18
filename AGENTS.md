@@ -70,7 +70,7 @@ directories or placeholder pages in advance.
 1. **No Implementation Details in User Docs:** Never mention Go, WebAssembly (WASM), Web Components, WebSocket lifecycles, JSON schemas, or internal data pipelines in user/operator documentation.
 2. **Marine Terminology First:**
    - Use "vessel telemetry," "live instrument data," or "NMEA network feeds" instead of "Signal K paths / tree."
-   - Use "gauges," "dials," "digital readouts," or "instrument displays" instead of "widgets / components."
+   - Use "tile" for a component placed on a dashboard page. One word, every time. Never "widget," and never a synonym picked per sentence: this bullet used to offer four alternatives and no default, which is how the manual ended up carrying both "Widgets" and "Tile state" as peer headings for the same object. "Gauge," "dial" and "lamp" remain correct for the specific kinds of tile that are those things.
    - Use "operating modes" or "helm profiles" (e.g., Underway, At Anchor, Passage, Refueling) instead of "UI pages / dashboard grids."
    - Use "alarm thresholds" or "system warnings" instead of "boolean state triggers."
 3. **Operational Context First:** Start every feature doc with 1–2 sentences explaining the physical onboard benefit (e.g., preventing engine overheat, monitoring battery health at anchor, passage navigation).
@@ -99,6 +99,37 @@ A change affecting architecture or a feature contract needs both: create or
 update the ADR in `docs/adr/`, **and** update the affected page under `docs/`.
 An ADR alone leaves the operator-facing docs silently wrong.
 
+## Tiles And Widgets
+
+The operator has one word for the things on a dashboard page, and it is
+**tile**. That word appears in every UI string, every `aria-label`, every page
+under `docs/`, and in Mate's answers. Nothing an operator can read says
+"widget".
+
+The code keeps both words, because they name different things:
+
+- A **widget** is the config record: an id, its geometry, and its settings.
+  It is what the backend validates against `validDashboardWidgetIDs`, what
+  the `widgets` array persists, and what `dashboard-widgets.ts` types. It has
+  no appearance and the operator never sees it.
+- A **tile** is the rendered surface: what `components/ui/tile.tsx` draws,
+  what `*-tile.tsx` implements, and what the operator places, drags, resizes,
+  promotes to hero and removes.
+
+So `widgetDisplayName(w)` returning a string that ends up inside "Remove Depth
+tile" is correct, not a leftover. A record has a display name; the surface it
+produces is a tile.
+
+Two rules follow. Do not introduce "widget" into anything the operator
+perceives. Do not rename the persisted `widgets` field, the backend's
+`validDashboardWidgetIDs`, or the config types to "tile" either: they are the
+record layer, renaming them buys nothing and costs a coordinated change
+against stored state.
+
+`docs/adr/` is exempt from all of this. Thirty-four ADRs say "widget" because
+that was the word when they were written, and they are the historical record.
+Do not rewrite them.
+
 ## Modern Web Guidance
 
 This project's Baseline target is Baseline 2024.
@@ -110,12 +141,12 @@ Build an inclusive, quietly dense, highly glanceable dashboard interface using T
 ### Strict Tailwind Layout Resiliency
 
 - Prevent viewport overflows. Never let text or elements stretch parent containers. Use `min-w-0` on flex items and `minmax(0, 1fr)` patterns in CSS grids to allow elements to shrink gracefully when screen real estate tightens.
-- Enforce structural grid consistency. Use strict, matching spacing tokens across all widgets to preserve Gestalt grouping principles (e.g., wrap the parent layout in `grid gap-4 p-4` or `gap-6 p-6`). Individual metric containers must share identical inner padding (e.g., `p-4` or `p-6`).
+- Enforce structural grid consistency. Use strict, matching spacing tokens across all tiles to preserve Gestalt grouping principles (e.g., wrap the parent layout in `grid gap-4 p-4` or `gap-6 p-6`). Individual metric containers must share identical inner padding (e.g., `p-4` or `p-6`).
 - Handle truncation boundaries explicitly. When dealing with variable string lengths (like labels or data units), handle text overflow using `truncate` or `line-clamp-1`. Elements must never wrap to a second line and break the vertical grid unless intentionally designed as a historical graph or log.
 
 ### Telemetry & Color Mapping (60-30-10 Rule)
 
-- Base canvas (60%): use the project's semantic surface tokens — `bg-background` for the page and `bg-card` for widget surfaces — rather than a raw Tailwind palette. These are backed by HSL CSS variables in `src/index.css` and already adapt across `.dark` without extra classes. Tailwind is CSS-first (v4, no `tailwind.config.ts`): `src/index.css`'s `@theme inline` block maps every one of these tokens to its `bg-*`/`text-*`/`border-*` utility, so a new semantic colour is wired up there, not in a JS config file.
+- Base canvas (60%): use the project's semantic surface tokens — `bg-background` for the page and `bg-card` for tile surfaces — rather than a raw Tailwind palette. These are backed by HSL CSS variables in `src/index.css` and already adapt across `.dark` without extra classes. Tailwind is CSS-first (v4, no `tailwind.config.ts`): `src/index.css`'s `@theme inline` block maps every one of these tokens to its `bg-*`/`text-*`/`border-*` utility, so a new semantic colour is wired up there, not in a JS config file.
 - Structural text/borders (30%): use `text-muted-foreground` for system labels (e.g., `text-muted-foreground font-medium text-xs tracking-wider uppercase`) and `border-border` for structural lines, again for automatic theme adaptation.
 - Accent telemetry (10%): use `text-primary` / `text-secondary` (the app's blue/neutral interactive-chrome accent — buttons, toggles, selects, focus rings, and other UI chrome) for normal high-contrast chrome accents. For hero-number instrument readouts (KPI/gauge values — depth, tide, wind, battery, AC/DC draw, etc.), use the dedicated `text-gauge-primary` / `text-gauge-secondary` tokens (amber/teal) instead. Reserve raw palette colors (`amber-*`, `red-*`, `emerald-*`) strictly for alert semantics — warning/critical/healthy state — matching existing helpers like `tempClass()` (`alternator-tile.tsx`) / `scopeBadgeClass()` (`anchor-rode-planner.tsx`). Do not use any of these for standard text or decoration.
 - Theming: prefer semantic tokens (`bg-background`, `bg-card`, `text-foreground`, `text-muted-foreground`, `border-border`, `text-primary`, `text-secondary`, `text-gauge-primary`, `text-gauge-secondary`) over raw palette classes — they adapt automatically across light/dark. Only reach for an explicit `dark:` class when a color is intentionally non-token, such as an alert state (e.g. `dark:bg-red-950`).
@@ -123,9 +154,9 @@ Build an inclusive, quietly dense, highly glanceable dashboard interface using T
 ### Micro-Hierarchies for Glanceability
 
 - Standardize KPI stacking. Place the muted uppercase identifier text label on top, followed by a significantly larger, high-contrast, bold data readout using the project's display font and tabular figures (e.g., `font-display text-2xl font-bold text-gauge-primary tabular-nums tracking-tight`, scaling up to `text-4xl` for hero metrics).
-- Follow the density scale. Use `gap-4 p-4` (or `gap-6 p-6`) for the outer dashboard grid, but tighter `gap-2` and `p-2`-`p-3` for nested KPI sub-cards within a widget — matching the density already used inside `components/ui/tile.tsx`-based widgets.
+- Follow the density scale. Use `gap-4 p-4` (or `gap-6 p-6`) for the outer dashboard grid, but tighter `gap-2` and `p-2`-`p-3` for nested KPI sub-cards within a tile, matching the density already used inside `components/ui/tile.tsx`-based tiles.
 - Keep trend presentation secondary. For inline trends or historical data vectors (like depth logs or voltage trends), prioritize clean canvas usage. Keep graphs simple and secondary to the primary real-time digital readouts.
-- Do not introduce new primitives. There is no shared `MetricTile`/`StatCard` component yet — each widget (e.g. `alternator-tile.tsx`, `depth-tide-tile.tsx`) builds its own KPI-stack layout inside the shared `components/ui/tile.tsx` wrapper. Follow that existing bespoke-within-`Tile` pattern rather than inventing a new shared component.
+- Do not introduce new primitives. There is no shared `MetricTile`/`StatCard` component yet. Each tile (e.g. `alternator-tile.tsx`, `depth-tide-tile.tsx`) builds its own KPI-stack layout inside the shared `components/ui/tile.tsx` wrapper. Follow that existing bespoke-within-`Tile` pattern rather than inventing a new shared component.
 
 ### Micro-Typography Scale
 

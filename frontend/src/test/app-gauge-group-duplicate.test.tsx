@@ -238,17 +238,17 @@ function enterEditMode(): void {
   fireEvent.click(screen.getByRole('button', { name: /enter edit mode/i }))
 }
 
-// Add Widget is a grouped DropdownMenu now (ADR 0107), not the plain
+// Add Tile is a grouped DropdownMenu now (ADR 0107), not the plain
 // Popover-of-buttons it used to be — its entries are `menuitem`s, not
 // `button`s.
 async function openGaugeGroupDialogFromAddWidget(): Promise<void> {
-  fireEvent.click(screen.getByRole('button', { name: /add widget/i }))
+  fireEvent.click(screen.getByRole('button', { name: /add tile/i }))
   fireEvent.click(await screen.findByRole('menuitem', { name: /^gauge group/i }))
 }
 
 /** Same picker, for a built-in widget rather than a multi-instance draft. */
 async function addBuiltinWidgetFromAddWidget(label: string | RegExp): Promise<void> {
-  fireEvent.click(screen.getByRole('button', { name: /add widget/i }))
+  fireEvent.click(screen.getByRole('button', { name: /add tile/i }))
   fireEvent.click(await screen.findByRole('menuitem', { name: label }))
 }
 

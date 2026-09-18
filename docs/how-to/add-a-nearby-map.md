@@ -3,7 +3,7 @@
 With write access, in layout mode:
 
 1. Toggle layout mode in the header (desktop widths only).
-2. Choose **Add Widget**, then **Nearby map…**.
+2. Choose **Add Tile**, then **Nearby map…**.
 3. Give it a title, or leave it blank for "Nearby".
 4. Set the range, 0.5 to 25 nautical miles. This is the radius searched
    around the vessel, and roughly what the map zooms to fit.
@@ -17,7 +17,7 @@ With write access, in layout mode:
    can be changed later.
 8. Choose **Save**.
 
-The widget starts polling immediately. The first few points may take a
+The tile starts polling immediately. The first few points may take a
 moment to appear the first time a given area is searched; after that the
 answer is cached for a few hours, so re-opening the same stretch of coast is
 fast.
@@ -28,14 +28,14 @@ page and a tight "Fuel and moorings" map at 3 nm on the anchored page, for
 instance.
 
 To change the settings later, reopen layout mode and choose the gear icon on
-the widget's title bar. To remove it, use the same X every other widget
+the tile's title bar. To remove it, use the same X every other tile
 uses.
 
 ## Choosing a data source
 
 The default provider is OpenStreetMap and needs no setup. If you have a
 Google Places API key, an operator can switch the provider in **Settings →
-Widgets → Nearby**; Google covers marinas and named attractions well but has
+Tiles → Nearby**; Google covers marinas and named attractions well but has
 no equivalent for most of the marine-specific categories such as moorings or
 boat ramps; those categories show up empty rather than pretending Google has
 an answer for them. See [POI categories](../reference/poi-categories.md) for
@@ -55,7 +55,7 @@ a mirror other than that one also needs.
 
 The name shown on the position tile, the anchor pin, and what Mate resolves
 when you ask it about a place by name all come from a different setting:
-**Settings → Widgets → Place names**. It defaults to the same OpenStreetMap
+**Settings → Tiles → Place names**. It defaults to the same OpenStreetMap
 plugin as Nearby, but you can point it at a different installed plugin
 without changing what Nearby uses, or vice versa. Only a plugin that
 supports place-name lookups appears in that list; not every `poi` plugin

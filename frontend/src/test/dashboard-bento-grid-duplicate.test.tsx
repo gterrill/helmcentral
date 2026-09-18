@@ -51,20 +51,20 @@ beforeEach(() => {
 describe('duplicate affordance', () => {
   it('offers duplicate for every multi-instance widget', () => {
     renderGrid(true)
-    expect(screen.getByLabelText('Duplicate Depth widget')).toBeInTheDocument()
-    expect(screen.getByLabelText('Duplicate Grafana widget')).toBeInTheDocument()
-    expect(screen.getByLabelText('Duplicate Port widget')).toBeInTheDocument()
+    expect(screen.getByLabelText('Duplicate Depth tile')).toBeInTheDocument()
+    expect(screen.getByLabelText('Duplicate Grafana tile')).toBeInTheDocument()
+    expect(screen.getByLabelText('Duplicate Port tile')).toBeInTheDocument()
   })
 
   it('offers none for a builtin, which is one per page', () => {
     renderGrid(true)
-    expect(screen.queryByLabelText('Duplicate Apparent Wind widget')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Duplicate Apparent Wind tile')).not.toBeInTheDocument()
     expect(screen.getAllByLabelText(/^Duplicate /)).toHaveLength(3)
   })
 
   it('reports the id that was duplicated', () => {
     const onDuplicateWidget = renderGrid(true)
-    screen.getByLabelText('Duplicate Port widget').click()
+    screen.getByLabelText('Duplicate Port tile').click()
     expect(onDuplicateWidget).toHaveBeenCalledWith('gauge-group:m1x8abcd')
   })
 

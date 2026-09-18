@@ -318,20 +318,20 @@ describe('creating a dashboard page', () => {
     await createNewPage()
 
     expect(screen.getByText(/create your personalized page/i)).toBeInTheDocument()
-    expect(screen.getByText(/use the add widget button to get started/i)).toBeInTheDocument()
+    expect(screen.getByText(/use the add tile button to get started/i)).toBeInTheDocument()
   })
 
-  it('lays the toolbar out in order — name field, Add Widget, Ribbon, Skin, Hero, Kiosk — above the page content', async () => {
+  it('lays the toolbar out in order — name field, Add Tile, Ribbon, Skin, Hero, Kiosk — above the page content', async () => {
     render(<App />)
     await activePageReady()
     await createNewPage()
 
     const toolbar = screen.getByTestId('layout-toolbar')
     const nameField = screen.getByLabelText('Page name')
-    const addWidget = screen.getByRole('button', { name: /add widget/i })
+    const addWidget = screen.getByRole('button', { name: /add tile/i })
     const ribbon = screen.getByRole('button', { name: /^ribbon$/i })
     const skin = screen.getByLabelText(/skin for/i)
-    const hero = screen.getByLabelText(/hero widget for/i)
+    const hero = screen.getByLabelText(/hero tile for/i)
     const kiosk = screen.getByLabelText(/^kiosk for/i)
 
     const positions = [nameField, addWidget, ribbon, skin, hero, kiosk]
@@ -400,6 +400,6 @@ describe('loading the dashboard', () => {
 
     resolveGet({ ok: true, json: async () => ({ pages: currentPages }) })
     await activePageReady()
-    expect(screen.getByText(/press edit to add widgets/i)).toBeInTheDocument()
+    expect(screen.getByText(/press edit to add tiles/i)).toBeInTheDocument()
   })
 })

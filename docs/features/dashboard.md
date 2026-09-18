@@ -100,7 +100,7 @@ ribbon](../how-to/pin-an-indicator-ribbon.md).
 
 Toggle layout mode in the header, then drag, resize or remove tiles and add
 them back from a picker. A toolbar opens above the grid the moment you do, in
-a fixed order: the page's name, **Add Widget**, **Ribbon**, **Skin**,
+a fixed order: the page's name, **Add Tile**, **Ribbon**, **Skin**,
 **Hero**, and **Kiosk**. **Delete page** sits last behind a divider, set
 apart because it is the one destructive control in the row. It is absent
 while only one page exists. See [Create a dashboard
@@ -108,13 +108,13 @@ page](../how-to/create-a-dashboard-page.md) for deleting and renaming.
 
 **New Page** creates a page immediately, named "Untitled page", with the name
 field already focused. There is no separate naming dialog. An empty page
-shows a short prompt pointing at Add Widget rather than a blank grid; see
+shows a short prompt pointing at Add Tile rather than a blank grid; see
 [Create a dashboard page](../how-to/create-a-dashboard-page.md) for the full
 walkthrough. Helmcentral saves everything on the box, not in the browser, so
 a tablet at the helm and a phone in a bunk show the same arrangement and find
 it again next session.
 
-Add Widget groups the built-ins by what they are for: Navigation, Weather,
+Add Tile groups the built-ins by what they are for: Navigation, Weather,
 Situational, Power, Engine, Systems, At a glance, and Custom. A tile already
 on the page greys out with an "On page" note. Gauge, Gauge Group, Engine
 Cluster, Indicators, Embed and Nearby map go on a page more than once, so

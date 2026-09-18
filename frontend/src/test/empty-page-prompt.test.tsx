@@ -11,12 +11,12 @@ import { EmptyPagePrompt } from '@/components/empty-page-prompt'
 import { CREATE_PAGE_MANUAL_TARGET } from '@/lib/manual-links'
 
 describe('EmptyPagePrompt', () => {
-  it('in layout mode, prompts to use Add Widget and links to the how-to', () => {
+  it('in layout mode, prompts to use Add Tile and links to the how-to', () => {
     const onOpenManual = vi.fn()
     render(<EmptyPagePrompt editing canEditLayout onOpenManual={onOpenManual} />)
 
-    expect(screen.getByText(/add widget/i)).toBeInTheDocument()
-    expect(screen.getByText(/drag widgets to rearrange/i)).toBeInTheDocument()
+    expect(screen.getByText(/add tile/i)).toBeInTheDocument()
+    expect(screen.getByText(/drag tiles to rearrange/i)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /how/i }))
     expect(onOpenManual).toHaveBeenCalledWith(CREATE_PAGE_MANUAL_TARGET)
@@ -24,7 +24,7 @@ describe('EmptyPagePrompt', () => {
 
   it('outside layout mode at lg and above, points at Edit', () => {
     render(<EmptyPagePrompt editing={false} canEditLayout onOpenManual={vi.fn()} />)
-    expect(screen.getByText(/press edit to add widgets/i)).toBeInTheDocument()
+    expect(screen.getByText(/press edit to add tiles/i)).toBeInTheDocument()
   })
 
   it('below lg, explains layout mode needs a wider screen', () => {

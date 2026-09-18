@@ -379,6 +379,33 @@ func TestBuildAssistantSystemPrompt_ReadManualGuidancePresent(t *testing.T) {
 	}
 }
 
+// ── product vocabulary (tile, not widget) ───────────────────────────────
+
+// Mate's training prior is heavily weighted toward the old word for a
+// dashboard component, so it keeps using that word in fluent prose even
+// after every string and doc in the product says "tile" instead - a
+// find-and-replace cannot reach a channel that regenerates its own
+// vocabulary every turn, so the term has to be pinned in the prompt itself.
+func TestBuildAssistantSystemPrompt_PinsTileNotWidget(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	if !strings.Contains(prompt, "composable units of a Helmcentral dashboard page are called tiles") {
+		t.Fatalf("expected the prompt to pin \"tile\" as the term for a dashboard component, got:\n%s", prompt)
+	}
+	// The prohibition has to name the word in order to forbid it, so the
+	// prompt cannot be free of "widget" outright. What it must not do is use
+	// the word anywhere else: exactly one mention, and that one inside the
+	// sentence ruling it out. A second occurrence means the term crept back
+	// into the prompt as ordinary vocabulary, which is what ADR 0109 pins it
+	// against.
+	const forbidden = "Widget is not a term this product uses."
+	if got := strings.Count(strings.ToLower(prompt), "widget"); got != 1 {
+		t.Fatalf("expected exactly one mention of the old term, the one ruling it out, got %d in:\n%s", got, prompt)
+	}
+	if !strings.Contains(prompt, forbidden) {
+		t.Fatalf("expected the prompt to rule the old term out with %q, got:\n%s", forbidden, prompt)
+	}
+}
+
 // ── document library (ADR 0106) ──────────────────────────────────────────
 
 func TestBuildAssistantSystemPrompt_DocumentLibraryToolGuidanceInStablePrefix(t *testing.T) {

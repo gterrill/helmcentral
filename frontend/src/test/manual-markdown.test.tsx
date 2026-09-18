@@ -50,12 +50,12 @@ describe('ManualMarkdown links', () => {
 
   it('treats a #hash link as an anchor and calls onNavigate with the anchor kind', async () => {
     const onNavigate = vi.fn()
-    render(<ManualMarkdown content="[Widgets](#widgets)" pageId="features/dashboard" onNavigate={onNavigate} />)
+    render(<ManualMarkdown content="[Tiles](#tiles)" pageId="features/dashboard" onNavigate={onNavigate} />)
 
-    const link = await screen.findByRole('link', { name: 'Widgets' })
+    const link = await screen.findByRole('link', { name: 'Tiles' })
     fireClickReturningWhetherDefaultRan(link)
 
-    expect(onNavigate).toHaveBeenCalledWith({ kind: 'anchor', hash: 'widgets' })
+    expect(onNavigate).toHaveBeenCalledWith({ kind: 'anchor', hash: 'tiles' })
   })
 
   it('keeps target=_blank and rel=noreferrer, and does not call onNavigate, for an external link', async () => {

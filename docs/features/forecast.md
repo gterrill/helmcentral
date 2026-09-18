@@ -195,7 +195,7 @@ tendency table, mostly enabled. See [Alarms](alarms.md).
 ## On the dashboard and the wall display
 
 The forecast panel is the full picture; the dashboard carries condensed
-versions of the same data as ordinary widgets. **Current Conditions** shows
+versions of the same data as ordinary tiles. **Current Conditions** shows
 apparent wind and outside temperature against today's forecast range.
 **Forecast** lists five days ahead with condition, high and low. **Sea
 State** draws the same wind, gust and wave-height series this page does,
@@ -205,7 +205,7 @@ replace this page: none show the warning signs, the largest-wave figure or
 the upper-air outlook. They exist for a glance that doesn't want the
 detail, particularly on a [wall
 display](../how-to/set-up-a-wall-display.md), which has no room for this
-whole page at once. See [The dashboard](dashboard.md#widgets).
+whole page at once. See [The dashboard](dashboard.md#instrument-tiles).
 
 ## Where it stops
 

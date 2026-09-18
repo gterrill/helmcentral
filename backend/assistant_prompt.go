@@ -361,6 +361,15 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"search_documents and readable with read_document; a document attached directly to a message appears " +
 		"as a preamble ahead of it in this conversation, so read that first before calling either tool for it.\n\n")
 
+	// 2b. Product vocabulary - fixed wording, identical for every turn. Mate's
+	// training prior is heavily weighted toward the word this product used to
+	// use for a dashboard component, so left unpinned it keeps using that
+	// word in fluent prose even though every string in Helmcentral, and the
+	// manual read_manual serves, now say "tile" instead. A find-and-replace
+	// cannot reach a channel that regenerates its own vocabulary every turn.
+	b.WriteString("The composable units of a Helmcentral dashboard page are called tiles, and tile is the word " +
+		"to use when talking to the operator about one. Widget is not a term this product uses.\n\n")
+
 	// Planning horizon: every live-data rule below assumes a departure from
 	// here, now. A trip months away, or from somewhere else, has to be
 	// recognised first or Mate briefs today's weather for a passage that

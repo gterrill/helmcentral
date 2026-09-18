@@ -130,7 +130,7 @@ An **Inventory** section in settings holds:
 
 ## On the dashboard
 
-Three widgets track expiry dates, stock levels and stocktakes:
+Three tiles track expiry dates, stock levels and stocktakes:
 
 - **Expiring soon.** Flares, EPIRB battery, liferaft service, fire
   extinguishers, medications, first aid. These dates help identify items that

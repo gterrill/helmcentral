@@ -78,7 +78,7 @@ first sentence of the linked article, for features that carry an OSM
 but does not fill in a category with no OSM tagging in a given area at all.
 
 This plugin queries the public `overpass-api.de` by default. If your
-network refuses it, open its settings (**Settings → Widgets → Nearby →
+network refuses it, open its settings (**Settings → Tiles → Nearby →
 osm-overpass's gear icon**) and point **Overpass server** at a mirror
 instead - see [configuration.md](configuration.md#overpass) and the
 [plugin's own README](../examples/poi-plugins/osm-overpass/README.md#pointing-at-an-overpass-mirror)
@@ -98,7 +98,7 @@ mapping and the cost/billing implications of switching to it.
 Every provider answers the same eleven categories, translated into whatever
 vocabulary its own upstream data source uses, rather than each provider
 exposing its own native category list. This is what lets the operator switch
-providers in Settings without the Nearby widget's category filter changing
+providers in Settings without the Nearby tile's category filter changing
 meaning underneath them, and it is why a provider with no equivalent for a
 category reports it as unsupported instead of inventing a mapping that
 doesn't really fit.

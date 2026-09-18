@@ -57,7 +57,7 @@ export const SETTINGS_MANUAL_TARGETS: Record<SettingsSectionId, ManualTarget> = 
   alarms: { page: 'features/alarms', heading: 'Getting told' },
   assistant: { page: 'how-to/set-up-the-assistant', heading: '2. Configure it in Helmcentral' },
   equipment: { page: 'features/inventory-tracking', heading: 'Settings' },
-  widgets: { page: 'reference/plugins' },
+  tiles: { page: 'reference/plugins' },
   security: { page: 'reference/configuration', heading: 'Security' },
   logs: MANUAL_INDEX,
 }

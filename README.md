@@ -51,7 +51,7 @@ rearrange without editing a config file.
   seconds out to 30 minutes for up to 24 hours, with every attempt logged.
 - **Connection monitoring.** Losing the SignalK connection raises an alarm.
   An external service can also monitor a periodic heartbeat sent off the boat.
-- **Configurable layouts.** 21 built-in widgets, custom gauges bound to
+- **Configurable layouts.** 21 built-in tiles, custom gauges bound to
   any path your server publishes, Nearby maps of the points of interest around
   the vessel, and embed tiles for anything with a URL. Named pages you switch
   between, persisted server-side.
@@ -176,8 +176,8 @@ Every environment variable, state path and startup behaviour:
 
 ## What you get
 
-**[The dashboard](docs/features/dashboard.md).** Twenty-one built-in widgets,
-plus gauge widgets that bind to any path your server publishes and embed tiles
+**[The dashboard](docs/features/dashboard.md).** Twenty-one built-in tiles,
+plus gauge tiles that bind to any path your server publishes and embed tiles
 that put any URL in the grid. Arrange them yourself into named pages you switch
 between, persisted server-side. A gauge's coloured band set into an alarm
 severity defines an alarm rule.
@@ -224,13 +224,13 @@ on any page in layout mode, set its dwell (5 to 3600 seconds) and a condition
 fullscreen with no chrome. It always renders dark, drops an anchored-only page
 out of the rotation mid-lap when the anchor comes up, and shows a compact status
 pill for a lost connection or a live alarm instead of the full banners. Four of
-the built-in widgets (clock, current conditions, forecast, sea state) were sized
+the built-in tiles (clock, current conditions, forecast, sea state) were sized
 for its seven-row fold. `?rotate=180` handles an inverted panel and `&height=`
 constrains the feed to a band for a kiosk browser that reports a framebuffer
 taller than the screen. Setup and probing:
 [Set up a wall display](docs/how-to/set-up-a-wall-display.md).
 
-**[Nearby maps](docs/features/dashboard.md#nearby-map).** A widget showing the
+**[Nearby maps](docs/features/dashboard.md#nearby-map).** A tile showing the
 points of interest around the vessel across eleven categories: anchorages, bays,
 islands, marinas, fuel, boat ramps, moorings, historic landmarks, lookouts, dive
 and snorkel spots, and walking trails. Map only, or map with a ranked list of the

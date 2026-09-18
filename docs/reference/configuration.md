@@ -90,7 +90,7 @@ section, set from the Settings UI.
 
 The Overpass server is the `osm-overpass` POI plugin's own setting, not an
 app-level one. The gear icon on osm-overpass's card, under either **Settings →
-Widgets → Nearby** or **Settings → Widgets → Place names**, opens the same
+Tiles → Nearby** or **Settings → Tiles → Place names**, opens the same
 **Overpass server** field, declared by that plugin's own
 `osm-overpass.config_fields.json` sidecar. There is no environment-variable
 override and no `settings.yaml` entry. A save (`POST

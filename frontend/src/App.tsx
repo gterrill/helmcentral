@@ -73,7 +73,7 @@ import { DashboardBentoGrid, WALL_ROW_MARGIN } from '@/components/dashboard-bent
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
 import { EmptyPagePrompt } from '@/components/empty-page-prompt'
-import type { AddWidgetMultiInstanceEntry } from '@/components/add-widget-picker'
+import type { AddTileMultiInstanceEntry } from '@/components/add-tile-picker'
 import { Toaster } from '@/components/ui/sonner'
 import { useRoutes } from '@/hooks/use-routes'
 import { useSatCharts } from '@/hooks/use-sat-charts'
@@ -1683,11 +1683,11 @@ export function App() {
     }
   }
 
-  // The Add Widget menu's multi-instance entries (ADR 0107): each opens the
+  // The Add Tile menu's multi-instance entries (ADR 0107): each opens the
   // same config dialog/draft flow it always has — App.tsx still owns every
   // one of those handlers — the picker just offers them grouped alongside
   // the built-in widgets instead of listed separately underneath them.
-  const addWidgetMultiInstanceEntries: AddWidgetMultiInstanceEntry[] = [
+  const addWidgetMultiInstanceEntries: AddTileMultiInstanceEntry[] = [
     { label: 'Gauge…', category: 'custom', onSelect: handleAddGauge },
     { label: 'Engine Cluster…', category: 'engine', onSelect: handleAddCluster },
     { label: 'From equipment profile…', category: 'engine', onSelect: () => setEngineProfileOpen(true) },
@@ -1710,7 +1710,7 @@ export function App() {
       className="flex flex-col gap-4 bg-background"
       style={{ padding: 'var(--board-pad)', borderRadius: 'var(--board-radius)' }}
     >
-      {/* The layout toolbar (ADR 0107): page name field, Add Widget, Ribbon,
+      {/* The layout toolbar (ADR 0107): page name field, Add Tile, Ribbon,
           Skin, Hero, Kiosk, in that fixed order. Replaces both the old
           "Layout Mode — Drag to rearrange" pill that used to sit here and
           the separate control row that used to sit below the grid. */}

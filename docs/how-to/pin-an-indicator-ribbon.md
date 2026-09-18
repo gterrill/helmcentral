@@ -36,8 +36,8 @@ currently pinned loads back into the same dialog, ready to change.
 
 To remove it entirely, open the ribbon dialog and choose **Remove ribbon**.
 The row disappears from every page immediately; the grid underneath is
-unaffected, since the ribbon was never one of its widgets.
+unaffected, since the ribbon was never one of its tiles.
 
-The ribbon is separate from a per-page lamp strip widget. Pinning or removing
-it never touches a lamp strip widget you have placed directly on a page, and
+The ribbon is separate from a per-page lamp strip tile. Pinning or removing
+it never touches a lamp strip tile you have placed directly on a page, and
 the reverse is also true.

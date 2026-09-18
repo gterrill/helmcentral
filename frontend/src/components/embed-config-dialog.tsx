@@ -94,7 +94,7 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
               placeholder="Windrose"
               onChange={(event) => setTitle(event.target.value)}
             />
-            <FieldDescription>Shown in the widget header. Optional.</FieldDescription>
+            <FieldDescription>Shown in the tile header. Optional.</FieldDescription>
           </Field>
 
           <Field orientation="horizontal">

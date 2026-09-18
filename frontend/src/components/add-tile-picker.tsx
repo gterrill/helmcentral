@@ -26,34 +26,34 @@ import {
  * picker takes them as plain entries instead of trying to fold them into the
  * built-in list.
  */
-export interface AddWidgetMultiInstanceEntry {
+export interface AddTileMultiInstanceEntry {
   label: string
   category: WidgetCategory
   onSelect: () => void
 }
 
-interface AddWidgetPickerProps {
+interface AddTilePickerProps {
   /** Ids already on the page — these built-ins render disabled (ADR 0107). */
   placedWidgetIds: readonly string[]
   onAddWidget: (id: BuiltinWidgetId) => void
-  multiInstanceEntries: readonly AddWidgetMultiInstanceEntry[]
+  multiInstanceEntries: readonly AddTileMultiInstanceEntry[]
 }
 
 /**
- * The grouped Add Widget menu (ADR 0107). Every built-in widget shows here
+ * The grouped Add Tile menu (ADR 0107). Every built-in widget shows here
  * always, with the ones already on the page greyed out and labelled rather
  * than missing, so it's obvious why a click does nothing. Built on the
  * shadcn/Base UI dropdown menu rather than the plain Popover the old flat
  * list used, for its grouping and keyboard navigation.
  */
-export function AddWidgetPicker({ placedWidgetIds, onAddWidget, multiInstanceEntries }: AddWidgetPickerProps) {
+export function AddTilePicker({ placedWidgetIds, onAddWidget, multiInstanceEntries }: AddTilePickerProps) {
   const placed = new Set(placedWidgetIds)
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">
         <Plus className="h-3.5 w-3.5" />
-        Add Widget
+        Add Tile
       </DropdownMenuTrigger>
       {/* w-64, not the old popover's w-56: "Nearby Vessels" plus a trailing
           "On page" hint needs the extra room to stay on one line. Scrolling

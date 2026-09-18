@@ -5,7 +5,7 @@ export type SettingsSectionId =
   | 'general'
   | 'signalk'
   | 'boat-ui'
-  | 'widgets'
+  | 'tiles'
   | 'influxdb'
   | 'anchor-watch'
   | 'mayara'
@@ -25,7 +25,7 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string }> 
   { id: 'alarms', label: 'Alarms' },
   { id: 'assistant', label: 'Mate' },
   { id: 'equipment', label: 'Equipment' },
-  { id: 'widgets', label: 'Widgets' },
+  { id: 'tiles', label: 'Tiles' },
   { id: 'security', label: 'Security' },
   { id: 'logs', label: 'Logs' },
 ]

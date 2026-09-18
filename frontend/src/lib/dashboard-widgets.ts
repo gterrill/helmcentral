@@ -96,7 +96,7 @@ export type WidgetCategory =
   | 'custom'
 
 /**
- * Groups the Add Widget picker shows built-in widgets under (ADR 0107). An
+ * Groups the Add Tile picker shows built-in widgets under (ADR 0107). An
  * ordered list, not just the union type, so the picker and this file agree
  * on display order without either one hard-coding it twice.
  *
@@ -104,7 +104,7 @@ export type WidgetCategory =
  * the equipment-profile importer, gauges, gauge groups, indicators and
  * embeds are all multi-instance widgets (App.tsx's own drafts, not entries
  * in DASHBOARD_WIDGET_IDS), so they reach the picker as
- * `AddWidgetMultiInstanceEntry` values carrying one of these two categories
+ * `AddTileMultiInstanceEntry` values carrying one of these two categories
  * rather than through DASHBOARD_WIDGET_CATEGORY below.
  */
 export const WIDGET_CATEGORIES: { id: WidgetCategory; label: string }[] = [
@@ -119,7 +119,7 @@ export const WIDGET_CATEGORIES: { id: WidgetCategory; label: string }[] = [
 ]
 
 /**
- * Every built-in widget's group in the Add Widget picker. A `Record`, like
+ * Every built-in widget's group in the Add Tile picker. A `Record`, like
  * DASHBOARD_WIDGET_LABELS above, so a new id added to DASHBOARD_WIDGET_IDS
  * with no category here is a compile error rather than falling through to
  * an uncategorised item nobody notices.

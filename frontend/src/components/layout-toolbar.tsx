@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { LampCeiling, Trash2 } from 'lucide-react'
 
-import { AddWidgetPicker, type AddWidgetMultiInstanceEntry } from '@/components/add-widget-picker'
+import { AddTilePicker, type AddTileMultiInstanceEntry } from '@/components/add-tile-picker'
 import { PageHeroSelect } from '@/components/page-hero-select'
 import { PageKioskSelect, type KioskPatch } from '@/components/page-kiosk-select'
 import { PageSkinSelect } from '@/components/page-skin-select'
@@ -29,7 +29,7 @@ interface LayoutToolbarProps {
   onDoneNaming: () => void
   placedWidgetIds: readonly string[]
   onAddWidget: (id: BuiltinWidgetId) => void
-  multiInstanceEntries: readonly AddWidgetMultiInstanceEntry[]
+  multiInstanceEntries: readonly AddTileMultiInstanceEntry[]
   onOpenRibbon: () => void
   onSetSkin: (id: string, skin: 'default' | 'instrument') => void
   onSetHero: (id: string, hero: string) => void
@@ -47,7 +47,7 @@ interface LayoutToolbarProps {
  * The layout toolbar (ADR 0107): sits where the "Layout Mode — Drag to
  * rearrange" pill used to, above the grid, and replaces the separate control
  * row that used to sit below it. One row, one fixed order — page name field,
- * Add Widget, Ribbon, Skin, Hero, Kiosk, then Delete page.
+ * Add Tile, Ribbon, Skin, Hero, Kiosk, then Delete page.
  *
  * Kiosk stays last among the ordinary controls: it's the one control that
  * grows extra fields (a seconds input and a condition select) the moment you
@@ -96,7 +96,7 @@ export function LayoutToolbar({
             {page.name}
           </span>
         )}
-        <AddWidgetPicker placedWidgetIds={placedWidgetIds} onAddWidget={onAddWidget} multiInstanceEntries={multiInstanceEntries} />
+        <AddTilePicker placedWidgetIds={placedWidgetIds} onAddWidget={onAddWidget} multiInstanceEntries={multiInstanceEntries} />
         <button
           type="button"
           onClick={onOpenRibbon}
@@ -157,4 +157,4 @@ export function LayoutToolbar({
   )
 }
 
-export type { AddWidgetMultiInstanceEntry }
+export type { AddTileMultiInstanceEntry }

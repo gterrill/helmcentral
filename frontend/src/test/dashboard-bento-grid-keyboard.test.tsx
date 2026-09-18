@@ -29,7 +29,7 @@ describe('the drag handle', () => {
   it('is a focusable, meaningfully-announced control', () => {
     setViewportWidth(1280)
     const { getByLabelText } = renderGrid([{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }])
-    const handle = getByLabelText(/Drag handle for Apparent Wind/i)
+    const handle = getByLabelText(/Drag handle for the Apparent Wind tile/i)
     expect(handle).toHaveAttribute('role', 'button')
     expect(handle).toHaveAttribute('tabIndex', '0')
   })
@@ -37,14 +37,14 @@ describe('the drag handle', () => {
   it('shows a visible focus ring', () => {
     setViewportWidth(1280)
     const { getByLabelText } = renderGrid([{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }])
-    const handle = getByLabelText(/Drag handle for Apparent Wind/i)
+    const handle = getByLabelText(/Drag handle for the Apparent Wind tile/i)
     expect(handle.className).toMatch(/focus-visible:ring/)
   })
 
   it('ArrowRight moves the widget one column and commits the change', () => {
     setViewportWidth(1280)
     const { getByLabelText, onLayoutSettle } = renderGrid([{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }])
-    const handle = getByLabelText(/Drag handle for Apparent Wind/i)
+    const handle = getByLabelText(/Drag handle for the Apparent Wind tile/i)
 
     fireEvent.keyDown(handle, { key: 'ArrowRight' })
 
@@ -56,7 +56,7 @@ describe('the drag handle', () => {
   it('ArrowDown moves the widget one row', () => {
     setViewportWidth(1280)
     const { getByLabelText, onLayoutSettle } = renderGrid([{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }])
-    fireEvent.keyDown(getByLabelText(/Drag handle for Apparent Wind/i), { key: 'ArrowDown' })
+    fireEvent.keyDown(getByLabelText(/Drag handle for the Apparent Wind tile/i), { key: 'ArrowDown' })
 
     const [next] = onLayoutSettle.mock.calls[0] as [DashboardLayoutItem[]]
     expect(next.find((w) => w.id === 'wind')).toMatchObject({ x: 0, y: 1 })
@@ -65,21 +65,21 @@ describe('the drag handle', () => {
   it('clamps at the left edge instead of going negative', () => {
     setViewportWidth(1280)
     const { getByLabelText, onLayoutSettle } = renderGrid([{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }])
-    fireEvent.keyDown(getByLabelText(/Drag handle for Apparent Wind/i), { key: 'ArrowLeft' })
+    fireEvent.keyDown(getByLabelText(/Drag handle for the Apparent Wind tile/i), { key: 'ArrowLeft' })
     expect(onLayoutSettle).not.toHaveBeenCalled()
   })
 
   it('clamps at the top edge instead of going negative', () => {
     setViewportWidth(1280)
     const { getByLabelText, onLayoutSettle } = renderGrid([{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }])
-    fireEvent.keyDown(getByLabelText(/Drag handle for Apparent Wind/i), { key: 'ArrowUp' })
+    fireEvent.keyDown(getByLabelText(/Drag handle for the Apparent Wind tile/i), { key: 'ArrowUp' })
     expect(onLayoutSettle).not.toHaveBeenCalled()
   })
 
   it('clamps at the right edge of the 12-column grid', () => {
     setViewportWidth(1280)
     const { getByLabelText, onLayoutSettle } = renderGrid([{ id: 'wind', x: 8, y: 0, w: 4, h: 6 }])
-    fireEvent.keyDown(getByLabelText(/Drag handle for Apparent Wind/i), { key: 'ArrowRight' })
+    fireEvent.keyDown(getByLabelText(/Drag handle for the Apparent Wind tile/i), { key: 'ArrowRight' })
     expect(onLayoutSettle).not.toHaveBeenCalled()
   })
 
@@ -90,7 +90,7 @@ describe('the drag handle', () => {
       { id: 'wind', x: 0, y: 0, w: 4, h: 6 },
       solar,
     ])
-    fireEvent.keyDown(getByLabelText(/Drag handle for Apparent Wind/i), { key: 'ArrowDown' })
+    fireEvent.keyDown(getByLabelText(/Drag handle for the Apparent Wind tile/i), { key: 'ArrowDown' })
 
     const [next] = onLayoutSettle.mock.calls[0] as [DashboardLayoutItem[]]
     expect(next.find((w) => w.id === 'solar')).toEqual(solar)
@@ -99,7 +99,7 @@ describe('the drag handle', () => {
   it('ignores keys other than the arrows', () => {
     setViewportWidth(1280)
     const { getByLabelText, onLayoutSettle } = renderGrid([{ id: 'wind', x: 0, y: 0, w: 4, h: 6 }])
-    fireEvent.keyDown(getByLabelText(/Drag handle for Apparent Wind/i), { key: 'Enter' })
+    fireEvent.keyDown(getByLabelText(/Drag handle for the Apparent Wind tile/i), { key: 'Enter' })
     expect(onLayoutSettle).not.toHaveBeenCalled()
   })
 })

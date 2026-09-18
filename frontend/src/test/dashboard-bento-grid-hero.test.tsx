@@ -64,8 +64,8 @@ describe('at helm width', () => {
   it('offers no edit affordances on the frozen grid slot, only on the hero row', () => {
     setViewportWidth(1280)
     const { getAllByLabelText } = renderGrid('wind', true)
-    // Exactly one Remove control for the hero widget, not two.
-    expect(getAllByLabelText(/Remove Apparent Wind widget/i)).toHaveLength(1)
+    // Exactly one Remove control for the hero tile, not two.
+    expect(getAllByLabelText(/Remove Apparent Wind tile/i)).toHaveLength(1)
   })
 
   it('demoting the hero (heroId undefined) puts the widget straight back in the grid', () => {

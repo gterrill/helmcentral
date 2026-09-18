@@ -41,7 +41,7 @@ describe('at helm width', () => {
     setViewportWidth(1280)
     const { container, getAllByLabelText } = renderGrid(true)
     expect(container.querySelector('.bento-drag-handle')).not.toBeNull()
-    expect(getAllByLabelText(/Remove .* widget/)).toHaveLength(widgets.length)
+    expect(getAllByLabelText(/Remove .* tile/)).toHaveLength(widgets.length)
   })
 })
 
@@ -73,7 +73,7 @@ describe('at phone width', () => {
     setViewportWidth(375)
     const { container, queryByLabelText } = renderGrid(true)
     expect(container.querySelector('.bento-drag-handle')).toBeNull()
-    expect(queryByLabelText(/Remove .* widget/)).toBeNull()
+    expect(queryByLabelText(/Remove .* tile/)).toBeNull()
   })
 })
 

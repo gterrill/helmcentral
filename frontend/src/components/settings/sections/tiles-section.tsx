@@ -11,12 +11,12 @@ import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useWaveProviders } from '@/hooks/use-wave-providers'
 import { useWeatherProviders } from '@/hooks/use-weather-providers'
 
-interface WidgetsSectionProps {
+interface TilesSectionProps {
   draft: RegularSettingsDraft
   onChange: (patch: Partial<RegularSettingsDraft>) => void
 }
 
-export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
+export function TilesSection({ draft, onChange }: TilesSectionProps) {
   const { providers: tideProviders } = useTideProviders()
   const { providers: weatherProviders } = useWeatherProviders()
   const { providers: waveProviders } = useWaveProviders()
@@ -27,7 +27,7 @@ export function WidgetsSection({ draft, onChange }: WidgetsSectionProps) {
   return (
     <div className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-background/60 p-4">
       <FieldSet>
-        <FieldLegend variant="label">Widgets</FieldLegend>
+        <FieldLegend variant="label">Tiles</FieldLegend>
 
         <Tabs defaultValue="tide">
           <TabsList>

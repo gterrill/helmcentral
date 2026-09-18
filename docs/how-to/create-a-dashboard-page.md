@@ -17,7 +17,7 @@ With write access, on a screen at least 1024px wide:
    empty name is never saved.
 3. With nothing on the page yet, the grid shows a short prompt instead of
    sitting blank. Its link opens this same guide, in case you want it again.
-4. Choose **Add Widget**. Tiles are grouped by what they are for: Navigation,
+4. Choose **Add Tile**. Tiles are grouped by what they are for: Navigation,
    Weather, Situational, Power, Engine, Systems, At a glance, and Custom. A
    tile already on the page greys out with an "On page" note. Gauge, Gauge
    Group, Engine Cluster, Indicators, Embed and Nearby map go on a page more

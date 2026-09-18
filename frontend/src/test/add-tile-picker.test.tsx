@@ -1,5 +1,5 @@
 /**
- * The grouped Add Widget picker (ADR 0107): every built-in widget listed
+ * The grouped Add Tile picker (ADR 0107): every built-in widget listed
  * under its category, in category order, placed widgets greyed out rather
  * than removed from the list (so it's obvious why they're missing from a
  * click, not silently absent), and multi-instance entries (Gauge, Engine
@@ -8,16 +8,16 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { AddWidgetPicker } from '@/components/add-widget-picker'
+import { AddTilePicker } from '@/components/add-tile-picker'
 import { DASHBOARD_WIDGET_IDS, DASHBOARD_WIDGET_LABELS, WIDGET_CATEGORIES } from '@/lib/dashboard-widgets'
 
 function openMenu() {
-  fireEvent.click(screen.getByRole('button', { name: /add widget/i }))
+  fireEvent.click(screen.getByRole('button', { name: /add tile/i }))
 }
 
-describe('AddWidgetPicker', () => {
+describe('AddTilePicker', () => {
   it('lists every built-in widget, grouped under a category heading in category order', () => {
-    render(<AddWidgetPicker placedWidgetIds={[]} onAddWidget={vi.fn()} multiInstanceEntries={[]} />)
+    render(<AddTilePicker placedWidgetIds={[]} onAddWidget={vi.fn()} multiInstanceEntries={[]} />)
     openMenu()
 
     const menu = screen.getByRole('menu')
@@ -36,7 +36,7 @@ describe('AddWidgetPicker', () => {
 
   it('disables a widget already on the page and does nothing when it is chosen', () => {
     const onAddWidget = vi.fn()
-    render(<AddWidgetPicker placedWidgetIds={['wind']} onAddWidget={onAddWidget} multiInstanceEntries={[]} />)
+    render(<AddTilePicker placedWidgetIds={['wind']} onAddWidget={onAddWidget} multiInstanceEntries={[]} />)
     openMenu()
 
     const item = screen.getByRole('menuitem', { name: new RegExp(DASHBOARD_WIDGET_LABELS.wind) })
@@ -49,7 +49,7 @@ describe('AddWidgetPicker', () => {
 
   it('calls onAddWidget when an unplaced built-in widget is chosen', () => {
     const onAddWidget = vi.fn()
-    render(<AddWidgetPicker placedWidgetIds={[]} onAddWidget={onAddWidget} multiInstanceEntries={[]} />)
+    render(<AddTilePicker placedWidgetIds={[]} onAddWidget={onAddWidget} multiInstanceEntries={[]} />)
     openMenu()
 
     fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(DASHBOARD_WIDGET_LABELS.wind) }))
@@ -59,7 +59,7 @@ describe('AddWidgetPicker', () => {
   it('always enables a multi-instance entry and calls its own handler when chosen', () => {
     const onSelect = vi.fn()
     render(
-      <AddWidgetPicker
+      <AddTilePicker
         placedWidgetIds={[]}
         onAddWidget={vi.fn()}
         multiInstanceEntries={[{ label: 'Gauge…', category: 'custom', onSelect }]}

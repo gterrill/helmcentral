@@ -273,7 +273,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
               onRemoveWidget(heroWidget.id)
             }}
             className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
-            aria-label={`Remove ${widgetDisplayName(heroWidget)} widget`}
+            aria-label={`Remove ${widgetDisplayName(heroWidget)} tile`}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -285,7 +285,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                 onDuplicateWidget(heroWidget.id)
               }}
               className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
-              aria-label={`Duplicate ${widgetDisplayName(heroWidget)} widget`}
+              aria-label={`Duplicate ${widgetDisplayName(heroWidget)} tile`}
             >
               <Copy className="h-3 w-3" />
             </button>
@@ -377,7 +377,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                         onRemoveWidget(w.id)
                       }}
                       className="absolute -right-2 -top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
-                      aria-label={`Remove ${widgetDisplayName(w)} widget`}
+                      aria-label={`Remove ${widgetDisplayName(w)} tile`}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -389,7 +389,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                           onDuplicateWidget(w.id)
                         }}
                         className="absolute -right-2 top-6 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs hover:text-foreground"
-                        aria-label={`Duplicate ${widgetDisplayName(w)} widget`}
+                        aria-label={`Duplicate ${widgetDisplayName(w)} tile`}
                       >
                         <Copy className="h-3 w-3" />
                       </button>
@@ -398,7 +398,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                       className="bento-drag-handle absolute -left-2 -top-2 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
                       role="button"
                       tabIndex={0}
-                      aria-label={`Drag handle for ${widgetDisplayName(w)}. Use arrow keys to reposition, or drag with a pointer.`}
+                      aria-label={`Drag handle for the ${widgetDisplayName(w)} tile. Use arrow keys to reposition, or drag with a pointer.`}
                       onKeyDown={(e) => handleHandleKeyDown(e, w)}
                     >
                       <GripVertical className="h-3.5 w-3.5" />

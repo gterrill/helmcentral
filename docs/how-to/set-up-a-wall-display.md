@@ -62,7 +62,7 @@ it is real but invisible on the wall.
 The wall display never shows the pinned indicator ribbon, even on a page
 that shows it everywhere else it's viewed, so the dashed line measures from
 the top of your grid, not from the ribbon. If a page needs status lamps on
-the wall, add a lamp-strip widget to that page's own layout in the space the
+the wall, add a lamp-strip tile to that page's own layout in the space the
 line marks as visible, rather than counting on the ribbon to carry it there.
 
 Feed order is page order. To change which page shows first, or where a page

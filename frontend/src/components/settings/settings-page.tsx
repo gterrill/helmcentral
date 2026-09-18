@@ -19,7 +19,7 @@ import { InfluxdbSection } from '@/components/settings/sections/influxdb-section
 import { LogsSection } from '@/components/settings/sections/logs-section'
 import { MayaraSection } from '@/components/settings/sections/mayara-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
-import { WidgetsSection } from '@/components/settings/sections/widgets-section'
+import { TilesSection } from '@/components/settings/sections/tiles-section'
 import {
   buildRegularSettingsPatch,
   draftsEqual,
@@ -205,8 +205,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <SignalKConnectionSection draft={draft} onChange={handleDraftChange} />
       case 'boat-ui':
         return <BoatUiSection draft={draft} onChange={handleDraftChange} />
-      case 'widgets':
-        return <WidgetsSection draft={draft} onChange={handleDraftChange} />
+      case 'tiles':
+        return <TilesSection draft={draft} onChange={handleDraftChange} />
       case 'alarms':
         return <AlarmsSection />
       case 'assistant':

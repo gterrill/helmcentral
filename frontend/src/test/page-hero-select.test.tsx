@@ -17,12 +17,12 @@ describe('PageHeroSelect', () => {
 
   test('shows the page it is editing and the hero that page has', () => {
     render(<PageHeroSelect page={{ id: 'p1', name: 'Underway', hero: 'wind', widgets }} onSetHero={vi.fn()} />)
-    expect(screen.getByLabelText('Hero widget for Underway')).toHaveValue('wind')
+    expect(screen.getByLabelText('Hero tile for Underway')).toHaveValue('wind')
   })
 
   test('treats a page with no hero as "No hero"', () => {
     render(<PageHeroSelect page={{ id: 'p1', name: 'Anchored', widgets }} onSetHero={vi.fn()} />)
-    expect(screen.getByLabelText('Hero widget for Anchored')).toHaveValue('')
+    expect(screen.getByLabelText('Hero tile for Anchored')).toHaveValue('')
   })
 
   test('lists every widget on the page by its display name', () => {
@@ -35,7 +35,7 @@ describe('PageHeroSelect', () => {
     const onSetHero = vi.fn()
     render(<PageHeroSelect page={{ id: 'p2', name: 'Underway', widgets }} onSetHero={onSetHero} />)
 
-    fireEvent.change(screen.getByLabelText('Hero widget for Underway'), { target: { value: 'tanks' } })
+    fireEvent.change(screen.getByLabelText('Hero tile for Underway'), { target: { value: 'tanks' } })
     expect(onSetHero).toHaveBeenCalledWith('p2', 'tanks')
   })
 
@@ -43,7 +43,7 @@ describe('PageHeroSelect', () => {
     const onSetHero = vi.fn()
     render(<PageHeroSelect page={{ id: 'p2', name: 'Underway', hero: 'wind', widgets }} onSetHero={onSetHero} />)
 
-    fireEvent.change(screen.getByLabelText('Hero widget for Underway'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Hero tile for Underway'), { target: { value: '' } })
     expect(onSetHero).toHaveBeenCalledWith('p2', '')
   })
 

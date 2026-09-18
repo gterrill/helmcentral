@@ -28,7 +28,7 @@ Upper air is optional: leave the plugin out and the forecast page simply
 shows no 500mb section. Points of interest is optional in the same way: with
 no `poi` plugin installed, `GET /api/poi` 502s with an actionable message
 rather than any part of the dashboard failing to load. The rest have a
-widget that goes empty without a provider.
+tile that goes empty without a provider.
 
 ## The sandbox
 
@@ -215,8 +215,8 @@ Mate's `find_places` tool. Both exports are optional and both are required
 together: a plugin exporting only one is treated as supporting neither.
 There is no separate plugin kind or directory for this; the operator picks
 which installed, supporting `poi` plugin answers place-name questions via
-`ui.place_name_provider` (Settings -> Widgets -> Place names),
-independently of `ui.poi_provider` (Settings -> Widgets -> Nearby) - the two
+`ui.place_name_provider` (Settings -> Tiles -> Place names),
+independently of `ui.poi_provider` (Settings -> Tiles -> Nearby) - the two
 commonly name the same plugin but need not.
 
 | Export | Input | Returns |

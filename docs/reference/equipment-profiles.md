@@ -16,7 +16,7 @@ Three kinds of equipment are covered, set by the file's `kind` field:
 Profiles live in `plugins/engine-profiles/`. Drop a file in and restart, or
 manage them from **Settings → Equipment**, which can upload, edit, download and
 delete without touching the filesystem. Either way they appear under **Add
-Widget → From equipment profile…**.
+Tile → From equipment profile…**.
 
 Unlike the rest of `plugins/`, profiles are plain JSON rather than compiled
 modules. Because a profile can carry alarm thresholds, you have to be able to

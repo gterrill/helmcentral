@@ -33,7 +33,7 @@ function DropdownMenuContent({
     <MenuPrimitive.Portal>
       {/* z-60, not the usual z-50: a live alarm banner sits at z-55 (ADR
           0107, App.tsx), and a dropdown menu opened while one is showing —
-          the Add Widget menu included — still needs to draw on top of it. */}
+          the Add Tile menu included — still needs to draw on top of it. */}
       <MenuPrimitive.Positioner
         className="isolate z-60 outline-none"
         align={align}
