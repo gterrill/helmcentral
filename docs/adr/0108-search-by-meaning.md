@@ -51,11 +51,20 @@ by re-running the *paid* enrich stage, buying a second OCR pass to get back
 to where it already was.
 
 Instead the work is found by query. A chunk with no `document_chunk_embeddings`
-row for the currently configured model needs embedding. That is idempotent,
-survives a crash untouched, needs no bookkeeping of its own, and is
-automatically right after a re-extract or a metadata edit. Changing
-`assistant.embedding_model` is self-correcting for the same reason: rows
-under the old model stop counting, and the library re-embeds itself.
+row at the currently configured model **and vector length** needs embedding.
+That is idempotent, survives a crash untouched, needs no bookkeeping of its
+own, and is automatically right after a re-extract or a metadata edit.
+Changing `assistant.embedding_model` is self-correcting for the same reason:
+rows under the old model stop counting, and the library re-embeds itself.
+
+The vector length has to be part of that predicate, not just the model name.
+A vector is only usable against a query of its own length, so a row left at
+the old length after the operator raised `assistant.embedding_dimensions` is
+dead weight. Judged on the model alone it would still count as embedded, and
+semantic search would go on reporting hybrid mode while matching nothing at
+all, with a pending count of zero and no way for the automatic pass or a
+backfill to ever put it right. Matching on both makes a dimensions change
+behave exactly like a model change.
 
 ### Vectors, and what they are
 

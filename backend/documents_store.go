@@ -149,7 +149,14 @@ type documentEmbeddingCounts struct {
 	ChunksEmbedded int `json:"chunks_embedded"`
 	ChunksStale    int `json:"chunks_stale"`
 	ChunksPending  int `json:"chunks_pending"`
-	CharsPending   int `json:"chars_pending"`
+	// ChunksPendingAuto is the automatic pass's own queue: pending chunks
+	// belonging to documents that already consented (enrich=1). ChunksPending
+	// above is library-wide, and a library holding anything uploaded while
+	// Mate was off has a non-zero one that no background work will ever
+	// reduce - only an explicit backfill will. A caller watching for
+	// background progress has to watch this one, which does fall to zero.
+	ChunksPendingAuto int `json:"chunks_pending_auto"`
+	CharsPending      int `json:"chars_pending"`
 }
 
 // documentSweepResult is sweepDocumentsDir's report: how many abandoned
@@ -1694,23 +1701,35 @@ func (s *documentStore) PatchDocument(id string, title, notes *string, tags []st
 
 // ── embeddings ───────────────────────────────────────────────────────────
 
-// chunksMissingEmbeddingWhere is the "no document_chunk_embeddings row for
-// this model yet" condition shared by PendingEmbedChunks and
-// EmbeddingCounts - kept as one string, with a single "?" placeholder for
-// the model, so the two queries can never quietly drift apart about what
-// counts as pending. The same reasoning as documentColumns for scanDocument.
+// chunksMissingEmbeddingWhere is the "no usable document_chunk_embeddings row
+// for this chunk yet" condition shared by PendingEmbedChunks and
+// EmbeddingCounts - kept as one string, with placeholders for the model and
+// the dimensions in that order, so the two queries can never quietly drift
+// apart about what counts as pending. The same reasoning as documentColumns
+// for scanDocument.
+//
+// Usable means matching on BOTH model and dims, not the model alone. A
+// vector's length matters as much as which model produced it: SearchVector
+// skips any row whose dims differ from the query vector's, so a row left at
+// an old length after the operator raised assistant.embedding_dimensions is
+// dead weight. Judging staleness on the model alone would leave that row
+// counting as embedded, and semantic search would go on reporting hybrid mode
+// while matching nothing at all, with a pending count of zero and no way for
+// the automatic pass or a backfill to ever put it right.
 const chunksMissingEmbeddingWhere = `NOT EXISTS (
-	SELECT 1 FROM document_chunk_embeddings e WHERE e.chunk_id = c.id AND e.model = ?
+	SELECT 1 FROM document_chunk_embeddings e WHERE e.chunk_id = c.id AND e.model = ? AND e.dims = ?
 )`
 
 // PendingEmbedChunks returns up to limit chunks that still need an
 // embedding under model, oldest document first and then by seq within a
 // document - the same tie-break NextPending itself uses. "Still need one"
-// means no document_chunk_embeddings row exists for that chunk under model;
-// a row under a DIFFERENT model doesn't count; that's what makes a change
-// to assistant.embedding_model self-correcting rather than something the
-// operator has to clean up by hand (see the schema comment on
-// document_chunk_embeddings). enrichedOnly restricts the scan to documents
+// means no document_chunk_embeddings row exists for that chunk at this model
+// AND this vector length; a row under a different model, or at a different
+// length, doesn't count. That is what makes a change to
+// assistant.embedding_model or assistant.embedding_dimensions self-correcting
+// rather than something the operator has to clean up by hand (see the schema
+// comment on document_chunk_embeddings, and chunksMissingEmbeddingWhere's own
+// on why the length has to be part of it). enrichedOnly restricts the scan to documents
 // with enrich=1 - the automatic embed pass only ever touches documents that
 // already consented to leaving the boat for OCR/enrichment; an explicit
 // backfill call passes enrichedOnly=false, and making that call at all is
@@ -1718,7 +1737,7 @@ const chunksMissingEmbeddingWhere = `NOT EXISTS (
 // Reindex. A chunk whose text is empty or whitespace-only is skipped
 // outright - there is nothing to embed, and paying OpenRouter for a blank
 // string is waste. limit<=0 returns no rows.
-func (s *documentStore) PendingEmbedChunks(model string, limit int, enrichedOnly bool) ([]documentChunk, error) {
+func (s *documentStore) PendingEmbedChunks(model string, dims, limit int, enrichedOnly bool) ([]documentChunk, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1731,7 +1750,7 @@ func (s *documentStore) PendingEmbedChunks(model string, limit int, enrichedOnly
 		FROM document_chunks c
 		JOIN documents d ON d.id = c.document_id
 		WHERE ` + chunksMissingEmbeddingWhere
-	args := []any{model}
+	args := []any{model, dims}
 	if enrichedOnly {
 		query += ` AND d.enrich = 1`
 	}
@@ -1837,7 +1856,7 @@ func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[i
 // with what a backfill pass would actually process. Unlike PendingEmbedChunks
 // there is no enrichedOnly split here: this is a whole-library summary, not
 // the automatic pass's own narrower queue.
-func (s *documentStore) EmbeddingCounts(model string) (documentEmbeddingCounts, error) {
+func (s *documentStore) EmbeddingCounts(model string, dims int) (documentEmbeddingCounts, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1845,21 +1864,27 @@ func (s *documentStore) EmbeddingCounts(model string) (documentEmbeddingCounts, 
 	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunks`).Scan(&counts.ChunksTotal); err != nil {
 		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: total: %w", err)
 	}
-	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE model = ?`, model).Scan(&counts.ChunksEmbedded); err != nil {
+	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE model = ? AND dims = ?`, model, dims).Scan(&counts.ChunksEmbedded); err != nil {
 		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: embedded: %w", err)
 	}
-	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE model != ?`, model).Scan(&counts.ChunksStale); err != nil {
+	// Stale is every vector that exists but cannot be searched at the current
+	// setting: the wrong model, or the right model at the wrong length.
+	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE model != ? OR dims != ?`, model, dims).Scan(&counts.ChunksStale); err != nil {
 		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: stale: %w", err)
 	}
 
-	rows, err := s.db.Query(`SELECT c.text FROM document_chunks c WHERE `+chunksMissingEmbeddingWhere, model)
+	rows, err := s.db.Query(`
+		SELECT c.text, d.enrich FROM document_chunks c
+		JOIN documents d ON d.id = c.document_id
+		WHERE `+chunksMissingEmbeddingWhere, model, dims)
 	if err != nil {
 		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: pending: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var text string
-		if err := rows.Scan(&text); err != nil {
+		var enrich bool
+		if err := rows.Scan(&text, &enrich); err != nil {
 			return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: pending: scan: %w", err)
 		}
 		if strings.TrimSpace(text) == "" {
@@ -1867,6 +1892,11 @@ func (s *documentStore) EmbeddingCounts(model string) (documentEmbeddingCounts, 
 		}
 		counts.ChunksPending++
 		counts.CharsPending += utf8.RuneCountInString(text)
+		if enrich {
+			// The same enrich=1 restriction PendingEmbedChunks applies for
+			// the automatic pass, so the two agree on what that queue holds.
+			counts.ChunksPendingAuto++
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: pending: %w", err)

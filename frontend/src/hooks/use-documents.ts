@@ -74,6 +74,13 @@ export interface DocumentEmbeddingCounts {
   chunks_embedded: number
   chunks_stale: number
   chunks_pending: number
+  /** The automatic pass's own queue (enrich=1 documents only).
+   *  chunks_pending above is library-wide and includes documents uploaded
+   *  while Mate was off, which only an explicit backfill will ever reach - so
+   *  it is the right number for the backfill offer and the wrong one for any
+   *  "is something happening right now" gate, because it never falls on its
+   *  own. */
+  chunks_pending_auto: number
   chars_pending: number
 }
 
@@ -303,13 +310,17 @@ export function useDocuments(folderId: string | null) {
   // left to poll for" shape, so one timer serves both rather than running a
   // second one alongside it. Busy is not just a running backfill: the
   // automatic pass over already-consented documents has no flag of its own,
-  // it simply works through whatever chunks are outstanding, so a pending
-  // count above zero is the only signal there is that the row is about to
-  // change.
+  // it simply works through whatever chunks are outstanding, so its own
+  // pending count is the only signal there is that the row is about to
+  // change. That count, not the library-wide one: anything uploaded while
+  // Mate was off is pending library-wide forever, and gating on that would
+  // poll this endpoint every three seconds for as long as the panel is open,
+  // full-scanning the chunk table on every tick for work no background pass
+  // is ever going to do.
   const hasPending = documents.some((d) => d.status === 'pending')
   const backfillRunning = embeddingsStatus?.backfill.running ?? false
   const embeddingsBusy =
-    backfillRunning || ((embeddingsStatus?.enabled ?? false) && (embeddingsStatus?.counts.chunks_pending ?? 0) > 0)
+    backfillRunning || ((embeddingsStatus?.enabled ?? false) && (embeddingsStatus?.counts.chunks_pending_auto ?? 0) > 0)
   useEffect(() => {
     if (!hasPending && !embeddingsBusy) return
     const id = setInterval(() => {
@@ -317,8 +328,14 @@ export function useDocuments(folderId: string | null) {
       // ones as the document finishes, so the filter row has to follow the
       // same poll or it keeps showing the tags from before anything was
       // read.
-      if (hasPending) { void refresh(); void refreshTags() }
-      if (embeddingsBusy) void refreshEmbeddingsStatus()
+      // The embeddings status is refreshed alongside a pending document too,
+      // not only when it already says it is busy: the gate above is derived
+      // from the very value this poll refreshes, so a panel that mounted with
+      // nothing outstanding would otherwise never learn that a document
+      // finishing has given the automatic pass work to do, and the row would
+      // sit on "up to date" until a remount.
+      if (hasPending) { void refresh(); void refreshTags(); void refreshEmbeddingsStatus() }
+      else if (embeddingsBusy) void refreshEmbeddingsStatus()
     }, POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [hasPending, embeddingsBusy, refresh, refreshTags, refreshEmbeddingsStatus])

@@ -134,7 +134,7 @@ func TestDocumentIndexer_ProcessEmbedBatchEmbedsPendingChunksAndWritesVectors(t 
 	if _, err := store.ChunksFrom(doc.ID, 1); err != nil {
 		t.Fatalf("ChunksFrom: %v", err)
 	}
-	pending, err := store.PendingEmbedChunks("openai/text-embedding-3-small", 10, false)
+	pending, err := store.PendingEmbedChunks("openai/text-embedding-3-small", 4, 10, false)
 	if err != nil {
 		t.Fatalf("PendingEmbedChunks: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestDocumentIndexer_ProcessEmbedBatchUpstreamFailureIsAnErrorAndLeavesDocum
 		t.Fatalf("expected the document NOT to be marked failed over a late embedding, got status %q error %q", got.Status, got.Error)
 	}
 
-	pending, err := store.PendingEmbedChunks("m", 10, false)
+	pending, err := store.PendingEmbedChunks("m", 4, 10, false)
 	if err != nil {
 		t.Fatalf("PendingEmbedChunks: %v", err)
 	}
@@ -511,7 +511,7 @@ func TestDocumentIndexer_APermanentlyFailingChunkIsSkippedRatherThanBlockingTheQ
 		}
 	}
 
-	counts, err := store.EmbeddingCounts("test-embed-model")
+	counts, err := store.EmbeddingCounts("test-embed-model", 4)
 	if err != nil {
 		t.Fatalf("EmbeddingCounts: %v", err)
 	}
@@ -531,5 +531,74 @@ func TestDocumentIndexer_APermanentlyFailingChunkIsSkippedRatherThanBlockingTheQ
 		if n != 1 {
 			t.Fatalf("the good document's chunk %d was never embedded past the poison chunk", c.Seq)
 		}
+	}
+}
+
+// TestDocumentIndexer_BatchNarrowingDoesNotRestartOnEverySingleChunkAttempt
+// pins the cost of isolating a poison chunk. Narrowing 64 to 1 takes six
+// failed calls; if the limit springs back to 64 after each single-chunk
+// attempt rather than only once the chunk is actually set aside, those six
+// are paid three times over - around twenty failed upstream calls and twenty
+// minutes of Run's backoff with the whole queue stopped behind them.
+func TestDocumentIndexer_BatchNarrowingDoesNotRestartOnEverySingleChunkAttempt(t *testing.T) {
+	store := newTestDocumentStore(t)
+	idx := newTestEmbedIndexer(store, t.TempDir(), embedTestReadiness("m", 4), &fakeOpenRouterDoer{})
+
+	one := []documentChunk{{ID: 1, DocumentID: "d"}}
+
+	// Narrow all the way down first.
+	for limit := maxOpenRouterEmbeddingsBatch; limit > 1; limit /= 2 {
+		batch := make([]documentChunk, limit)
+		idx.recordEmbedBatchFailure(batch)
+	}
+	if got := idx.currentEmbedBatchLimit(); got != 1 {
+		t.Fatalf("expected the batch to narrow to 1, got %d", got)
+	}
+
+	// The first two attempts of the three are not yet a verdict on the chunk,
+	// so the batch must stay narrow rather than starting the search over.
+	idx.recordEmbedBatchFailure(one)
+	if got := idx.currentEmbedBatchLimit(); got != 1 {
+		t.Fatalf("expected the batch to stay at 1 while the chunk is still being tried, got %d", got)
+	}
+	idx.recordEmbedBatchFailure(one)
+	if got := idx.currentEmbedBatchLimit(); got != 1 {
+		t.Fatalf("expected the batch to stay at 1 on the second attempt, got %d", got)
+	}
+
+	// The third sets it aside, and only then is the full batch right again:
+	// the blame now sits with the skipped chunk, not with the batch size.
+	idx.recordEmbedBatchFailure(one)
+	if idx.skippedEmbedCount() != 1 {
+		t.Fatalf("expected the chunk to be set aside after %d attempts", documentsEmbedChunkAttempts)
+	}
+	if got := idx.currentEmbedBatchLimit(); got != maxOpenRouterEmbeddingsBatch {
+		t.Fatalf("expected the full batch back once the chunk was set aside, got %d", got)
+	}
+}
+
+// TestDocumentIndexer_ASuccessClearsAChunksEarlierFailures covers the other
+// half of the attempt counter. The counts are meant to be consecutive: a
+// chunk that failed twice during an outage and then embedded cleanly must
+// start again from zero, or a single unrelated failure months later sets it
+// aside on what looks like a third strike. The map would also grow without
+// bound, since nothing else ever removes an entry.
+func TestDocumentIndexer_ASuccessClearsAChunksEarlierFailures(t *testing.T) {
+	store := newTestDocumentStore(t)
+	idx := newTestEmbedIndexer(store, t.TempDir(), embedTestReadiness("m", 4), &fakeOpenRouterDoer{})
+
+	one := []documentChunk{{ID: 7, DocumentID: "d"}}
+	idx.recordEmbedBatchFailure(one)
+	idx.recordEmbedBatchFailure(one)
+
+	idx.recordEmbedBatchSuccess(one)
+
+	// One more failure is now the first, not the third.
+	idx.recordEmbedBatchFailure(one)
+	if idx.skippedEmbedCount() != 0 {
+		t.Fatalf("a chunk that succeeded in between was set aside on a single later failure")
+	}
+	if n := idx.embedFailureCount(7); n != 1 {
+		t.Fatalf("expected the failure count to restart at 1, got %d", n)
 	}
 }

@@ -217,6 +217,15 @@ func (idx *documentIndexer) recordEmbedBatchFailure(chunks []documentChunk) {
 		return
 	}
 
+	// A single-chunk batch failed. The limit stays where it is for now:
+	// springing back to the full batch here would restart the whole 64-to-1
+	// narrowing search on every one of this chunk's attempts, paying six
+	// failed upstream calls and six minutes of backoff each time round, with
+	// the rest of the queue stopped behind it. It goes back up below, once
+	// the chunk is actually set aside and the batch size is no longer what
+	// is being blamed.
+	setAside := false
+
 	if idx.embedFailures == nil {
 		idx.embedFailures = map[int64]int{}
 	}
@@ -234,17 +243,37 @@ func (idx *documentIndexer) recordEmbedBatchFailure(chunks []documentChunk) {
 				c.ID, c.DocumentID, documentsEmbedChunkAttempts)
 		}
 		delete(idx.embedFailures, c.ID)
+		setAside = true
 	}
-	// Back to a full batch: the blame now sits with the skipped chunk, not
-	// with the batch size.
-	idx.embedBatchLimit = maxOpenRouterEmbeddingsBatch
+	if setAside {
+		// Back to a full batch: the blame now sits with the skipped chunk,
+		// not with the batch size.
+		idx.embedBatchLimit = maxOpenRouterEmbeddingsBatch
+	}
+}
+
+// embedFailureCount reports how many consecutive failures are currently
+// recorded against a chunk. Test-facing: the counter is otherwise only ever
+// read by recordEmbedBatchFailure itself.
+func (idx *documentIndexer) embedFailureCount(chunkID int64) int {
+	idx.embedMu.Lock()
+	defer idx.embedMu.Unlock()
+	return idx.embedFailures[chunkID]
 }
 
 // recordEmbedBatchSuccess restores the full batch size and clears the failure
-// counts of the chunks that just went through.
-func (idx *documentIndexer) recordEmbedBatchSuccess() {
+// counts of the chunks that just went through. The counts are consecutive
+// failures, not lifetime ones: a chunk that failed twice during an outage and
+// then embedded cleanly has to start again from zero, or an unrelated failure
+// much later sets it aside on what only looks like a third strike. Clearing
+// here is also the only thing that ever removes an entry from the map on a
+// healthy system, so it is what keeps it from growing without bound.
+func (idx *documentIndexer) recordEmbedBatchSuccess(chunks []documentChunk) {
 	idx.embedMu.Lock()
 	idx.embedBatchLimit = maxOpenRouterEmbeddingsBatch
+	for _, c := range chunks {
+		delete(idx.embedFailures, c.ID)
+	}
 	idx.embedMu.Unlock()
 }
 
@@ -327,7 +356,7 @@ func (idx *documentIndexer) processEmbedBatch(ctx context.Context) (bool, error)
 	// Ask for the skipped chunks' worth of extra rows on top of the batch, so
 	// chunks set aside by embedSkip (below) cost the batch nothing rather
 	// than eating slots in it.
-	chunks, err := idx.store.PendingEmbedChunks(model, maxOpenRouterEmbeddingsBatch+idx.skippedEmbedCount(), !backfilling)
+	chunks, err := idx.store.PendingEmbedChunks(model, dims, maxOpenRouterEmbeddingsBatch+idx.skippedEmbedCount(), !backfilling)
 	if err != nil {
 		return false, fmt.Errorf("documents indexer: pending embed chunks: %w", err)
 	}
@@ -386,7 +415,7 @@ func (idx *documentIndexer) processEmbedBatch(ctx context.Context) (bool, error)
 		return false, fmt.Errorf("documents indexer: set chunk embeddings: %w", err)
 	}
 
-	idx.recordEmbedBatchSuccess()
+	idx.recordEmbedBatchSuccess(chunks)
 	idx.splitEmbedCost(chunks, resp.Usage.Cost)
 
 	if backfilling {

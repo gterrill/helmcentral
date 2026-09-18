@@ -1740,7 +1740,7 @@ func TestDocumentStore_PendingEmbedChunksFiltersUnembeddedEnrichedAndBlank(t *te
 		t.Fatalf("SetChunkEmbeddings: %v", err)
 	}
 
-	all, err := store.PendingEmbedChunks("test-model", 100, false)
+	all, err := store.PendingEmbedChunks("test-model", 3, 100, false)
 	if err != nil {
 		t.Fatalf("PendingEmbedChunks(all): %v", err)
 	}
@@ -1765,7 +1765,7 @@ func TestDocumentStore_PendingEmbedChunksFiltersUnembeddedEnrichedAndBlank(t *te
 		t.Fatalf("expected both the enriched and plain documents' body chunks pending with enrichedOnly=false, got %+v", all)
 	}
 
-	enrichedOnly, err := store.PendingEmbedChunks("test-model", 100, true)
+	enrichedOnly, err := store.PendingEmbedChunks("test-model", 3, 100, true)
 	if err != nil {
 		t.Fatalf("PendingEmbedChunks(enrichedOnly): %v", err)
 	}
@@ -1807,7 +1807,7 @@ func TestDocumentStore_PendingEmbedChunksReturnsChunksAgainAfterModelChange(t *t
 		t.Fatalf("SetChunkEmbeddings(old-model): %v", err)
 	}
 
-	stillOld, err := store.PendingEmbedChunks("old-model", 10, false)
+	stillOld, err := store.PendingEmbedChunks("old-model", 3, 10, false)
 	if err != nil {
 		t.Fatalf("PendingEmbedChunks(old-model): %v", err)
 	}
@@ -1817,7 +1817,7 @@ func TestDocumentStore_PendingEmbedChunksReturnsChunksAgainAfterModelChange(t *t
 		}
 	}
 
-	underNewModel, err := store.PendingEmbedChunks("new-model", 10, false)
+	underNewModel, err := store.PendingEmbedChunks("new-model", 3, 10, false)
 	if err != nil {
 		t.Fatalf("PendingEmbedChunks(new-model): %v", err)
 	}
@@ -1936,7 +1936,7 @@ func TestDocumentStore_EmbeddingCountsReportsExpectedTotals(t *testing.T) {
 
 	oracleRows, err := store.db.Query(`
 		SELECT c.text FROM document_chunks c
-		WHERE NOT EXISTS (SELECT 1 FROM document_chunk_embeddings e WHERE e.chunk_id = c.id AND e.model = 'current-model')`)
+		WHERE NOT EXISTS (SELECT 1 FROM document_chunk_embeddings e WHERE e.chunk_id = c.id AND e.model = 'current-model' AND e.dims = 3)`)
 	if err != nil {
 		t.Fatalf("query pending oracle: %v", err)
 	}
@@ -1957,7 +1957,7 @@ func TestDocumentStore_EmbeddingCountsReportsExpectedTotals(t *testing.T) {
 	}
 	oracleRows.Close()
 
-	counts, err := store.EmbeddingCounts("current-model")
+	counts, err := store.EmbeddingCounts("current-model", 3)
 	if err != nil {
 		t.Fatalf("EmbeddingCounts: %v", err)
 	}
@@ -2236,5 +2236,141 @@ func TestDocumentStore_SearchVectorErrorsOnDimsColumnLie(t *testing.T) {
 
 	if _, err := store.SearchVector([]float32{1, 0}, "test-model", nil, false, "", 10); err == nil {
 		t.Fatalf("expected an error for a vector blob shorter than its own dims column, not a panic or a scored row")
+	}
+}
+
+// TestDocumentStore_RaisingDimensionsRequeuesEveryChunk covers the way a
+// settings change could otherwise brick semantic search with no way back.
+// A vector's usefulness depends on its length as much as on which model
+// produced it: SearchVector skips any row whose dims don't match the query's.
+// So if "already embedded" is judged on the model name alone, raising
+// assistant.embedding_dimensions leaves every stored vector at the old
+// length, unusable and invisible - searches keep reporting hybrid mode while
+// matching nothing, the pending count reads zero, and neither the automatic
+// pass nor a backfill ever repairs it, because by that predicate there is
+// nothing left to do.
+func TestDocumentStore_RaisingDimensionsRequeuesEveryChunk(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	doc := mustInsertDocument(t, store, "sha-dims-change", "manual.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "impeller replacement"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	// Every chunk, meta chunk included - this test is about what the pending
+	// predicate considers done, so nothing may be left outstanding for an
+	// unrelated reason.
+	chunks, err := store.ChunksFrom(doc.ID, 0)
+	if err != nil || len(chunks) != 2 {
+		t.Fatalf("ChunksFrom: chunks=%d err=%v", len(chunks), err)
+	}
+	vectors := map[int64][]float32{}
+	for i, c := range chunks {
+		vectors[c.ID] = []float32{float32(i + 1), 1}
+	}
+	if err := store.SetChunkEmbeddings("m", 2, vectors); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	// Same model, same dimensions: nothing to do.
+	same, err := store.PendingEmbedChunks("m", 2, 10, false)
+	if err != nil {
+		t.Fatalf("PendingEmbedChunks(same): %v", err)
+	}
+	if len(same) != 0 {
+		t.Fatalf("expected nothing pending at the dimensions it was embedded at, got %d", len(same))
+	}
+
+	// Same model, a different vector length: every row is stale and has to
+	// come back round.
+	wider, err := store.PendingEmbedChunks("m", 4, 10, false)
+	if err != nil {
+		t.Fatalf("PendingEmbedChunks(wider): %v", err)
+	}
+	if len(wider) != len(chunks) {
+		t.Fatalf("expected every chunk to be requeued after a dimensions change, got %d of %d", len(wider), len(chunks))
+	}
+
+	counts, err := store.EmbeddingCounts("m", 4)
+	if err != nil {
+		t.Fatalf("EmbeddingCounts: %v", err)
+	}
+	if counts.ChunksEmbedded != 0 {
+		t.Fatalf("a vector of the wrong length is not embedded, got ChunksEmbedded=%d", counts.ChunksEmbedded)
+	}
+	if counts.ChunksStale != len(chunks) {
+		t.Fatalf("expected the old-length vectors to count as stale, got %d of %d", counts.ChunksStale, len(chunks))
+	}
+	if counts.ChunksPending != len(chunks) {
+		t.Fatalf("expected every chunk pending after the dimensions change, got %d of %d", counts.ChunksPending, len(chunks))
+	}
+}
+
+// TestDocumentStore_EmbeddingCountsSeparatesAutomaticFromLibraryWide pins the
+// distinction the panel's poll depends on. ChunksPending is library-wide,
+// which is what the backfill offer is about; the automatic pass only ever
+// touches enrich=1 documents, so a library holding anything uploaded while
+// Mate was off has a permanently non-zero ChunksPending that no background
+// work will ever reduce. A poll watching that number never stops. Counting
+// the automatic pass's own queue separately gives it something that actually
+// falls to zero.
+func TestDocumentStore_EmbeddingCountsSeparatesAutomaticFromLibraryWide(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	consented, err := store.Insert(document{SHA256: "sha-auto-yes", Filename: "consented.pdf", Enrich: true})
+	if err != nil {
+		t.Fatalf("Insert(consented): %v", err)
+	}
+	if err := store.ReplaceChunks(consented.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "body text the automatic pass will embed"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(consented): %v", err)
+	}
+
+	withheld, err := store.Insert(document{SHA256: "sha-auto-no", Filename: "withheld.pdf", Enrich: false})
+	if err != nil {
+		t.Fatalf("Insert(withheld): %v", err)
+	}
+	if err := store.ReplaceChunks(withheld.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "body text only a backfill will ever reach"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(withheld): %v", err)
+	}
+
+	before, err := store.EmbeddingCounts("m", 2)
+	if err != nil {
+		t.Fatalf("EmbeddingCounts: %v", err)
+	}
+	if before.ChunksPending != 4 {
+		t.Fatalf("expected 4 chunks pending library-wide (two documents, meta plus body), got %d", before.ChunksPending)
+	}
+	if before.ChunksPendingAuto != 2 {
+		t.Fatalf("expected 2 chunks pending for the automatic pass, got %d", before.ChunksPendingAuto)
+	}
+
+	// Embed everything the automatic pass would: its own queue empties, the
+	// library-wide count does not.
+	chunks, err := store.ChunksFrom(consented.ID, 0)
+	if err != nil {
+		t.Fatalf("ChunksFrom: %v", err)
+	}
+	vectors := map[int64][]float32{}
+	for i, c := range chunks {
+		vectors[c.ID] = []float32{float32(i + 1), 1}
+	}
+	if err := store.SetChunkEmbeddings("m", 2, vectors); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	after, err := store.EmbeddingCounts("m", 2)
+	if err != nil {
+		t.Fatalf("EmbeddingCounts: %v", err)
+	}
+	if after.ChunksPendingAuto != 0 {
+		t.Fatalf("expected the automatic queue to empty, got %d", after.ChunksPendingAuto)
+	}
+	if after.ChunksPending != 2 {
+		t.Fatalf("expected the unconsented document to stay pending library-wide, got %d", after.ChunksPending)
 	}
 }

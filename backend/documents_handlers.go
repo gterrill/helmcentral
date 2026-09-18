@@ -887,7 +887,7 @@ func documentsEmbeddingsStatusHandler(c echo.Context) error {
 	}
 	problem := documentEmbedReadinessProblem(readiness)
 
-	counts, err := globalDocumentStore.EmbeddingCounts(readiness.EmbeddingModel)
+	counts, err := globalDocumentStore.EmbeddingCounts(readiness.EmbeddingModel, readiness.EmbeddingDimensions)
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
@@ -930,7 +930,7 @@ func documentsEmbeddingsBackfillHandler(c echo.Context) error {
 	}
 
 	if parseDocumentBool(c.QueryParam("dry_run")) {
-		counts, err := globalDocumentStore.EmbeddingCounts(readiness.EmbeddingModel)
+		counts, err := globalDocumentStore.EmbeddingCounts(readiness.EmbeddingModel, readiness.EmbeddingDimensions)
 		if err != nil {
 			return writeDocumentError(c, err)
 		}

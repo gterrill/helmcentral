@@ -96,7 +96,7 @@ function embeddingsStatus(overrides: Partial<import('@/hooks/use-documents').Doc
     enabled: true,
     model: 'openai/text-embedding-3-small',
     dimensions: 512,
-    counts: { chunks_total: 10, chunks_embedded: 10, chunks_stale: 0, chunks_pending: 0, chars_pending: 0 },
+    counts: { chunks_total: 10, chunks_embedded: 10, chunks_stale: 0, chunks_pending: 0, chunks_pending_auto: 0, chars_pending: 0 },
     backfill: { running: false, chunks_embedded: 0, started_at: '' },
     ...overrides,
   }
@@ -608,7 +608,7 @@ describe('DocumentsPanel', () => {
     it('shows the pending chunk count and the index action when chunks are pending', () => {
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         embeddingsStatus: embeddingsStatus({
-          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
         }),
       }))
 
@@ -620,13 +620,13 @@ describe('DocumentsPanel', () => {
 
     it('the index action runs the dry run first and waits for confirmation before posting anything', async () => {
       const dryRunEmbeddingsBackfill = vi.fn().mockResolvedValue({
-        counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+        counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
         tokens_estimate: 1200,
       })
       const startEmbeddingsBackfill = vi.fn().mockResolvedValue(undefined)
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         embeddingsStatus: embeddingsStatus({
-          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
         }),
         dryRunEmbeddingsBackfill,
         startEmbeddingsBackfill,
@@ -649,13 +649,13 @@ describe('DocumentsPanel', () => {
 
     it('confirming the index action posts the backfill', async () => {
       const dryRunEmbeddingsBackfill = vi.fn().mockResolvedValue({
-        counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+        counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
         tokens_estimate: 1200,
       })
       const startEmbeddingsBackfill = vi.fn().mockResolvedValue(undefined)
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         embeddingsStatus: embeddingsStatus({
-          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chunks_pending_auto: 12, chars_pending: 4800 },
         }),
         dryRunEmbeddingsBackfill,
         startEmbeddingsBackfill,
@@ -674,7 +674,7 @@ describe('DocumentsPanel', () => {
     it('a running backfill disables the action button and shows progress', () => {
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         embeddingsStatus: embeddingsStatus({
-          counts: { chunks_total: 20, chunks_embedded: 15, chunks_stale: 0, chunks_pending: 5, chars_pending: 2000 },
+          counts: { chunks_total: 20, chunks_embedded: 15, chunks_stale: 0, chunks_pending: 5, chunks_pending_auto: 5, chars_pending: 2000 },
           backfill: { running: true, chunks_embedded: 7, started_at: '2026-09-18T00:00:00Z' },
         }),
       }))
@@ -688,7 +688,7 @@ describe('DocumentsPanel', () => {
     it("shows a running backfill's last_error as a quiet warning, since the backfill keeps retrying rather than stopping", () => {
       mockedUseDocuments.mockReturnValue(makeDocumentsMock({
         embeddingsStatus: embeddingsStatus({
-          counts: { chunks_total: 20, chunks_embedded: 15, chunks_stale: 0, chunks_pending: 5, chars_pending: 2000 },
+          counts: { chunks_total: 20, chunks_embedded: 15, chunks_stale: 0, chunks_pending: 5, chunks_pending_auto: 5, chars_pending: 2000 },
           backfill: { running: true, chunks_embedded: 7, started_at: '2026-09-18T00:00:00Z', last_error: 'OpenRouter: 429 rate limited' },
         }),
       }))

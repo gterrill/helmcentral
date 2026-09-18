@@ -57,7 +57,7 @@ function embeddingsStatusPayload(overrides: Record<string, unknown> = {}) {
     model: '',
     dimensions: 0,
     problem: 'No embedding model is configured. Set one in Settings → Assistant.',
-    counts: { chunks_total: 0, chunks_embedded: 0, chunks_stale: 0, chunks_pending: 0, chars_pending: 0 },
+    counts: { chunks_total: 0, chunks_embedded: 0, chunks_stale: 0, chunks_pending: 0, chunks_pending_auto: 0, chars_pending: 0 },
     backfill: { running: false, chunks_embedded: 0, started_at: '' },
     ...overrides,
   }
@@ -727,7 +727,7 @@ describe('useDocuments', () => {
         model: 'openai/text-embedding-3-small',
         dimensions: 512,
         problem: undefined,
-        counts: { chunks_total: 20, chunks_embedded: 20 - pending, chunks_stale: 0, chunks_pending: pending, chars_pending: pending * 100 },
+        counts: { chunks_total: 20, chunks_embedded: 20 - pending, chunks_stale: 0, chunks_pending: pending, chunks_pending_auto: pending, chars_pending: pending * 100 },
       })),
     })
     vi.stubGlobal('fetch', fn)
@@ -745,6 +745,65 @@ describe('useDocuments', () => {
     calls.length = 0
     await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
     expect(calls.filter((c) => c.url.startsWith('/api/documents/embeddings'))).toHaveLength(0)
+  })
+
+  it('does not poll forever over chunks only a backfill will ever reach', async () => {
+    // chunks_pending is library-wide and includes documents uploaded while
+    // Mate was off, which the automatic pass never touches. Gating the poll
+    // on it means a library holding any of those polls the status endpoint
+    // every 3s for as long as the panel is open, forever, and every tick
+    // full-scans the chunk table under the store's single mutex.
+    const { fn, calls } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({
+        enabled: true,
+        model: 'openai/text-embedding-3-small',
+        dimensions: 512,
+        problem: undefined,
+        counts: { chunks_total: 30, chunks_embedded: 20, chunks_stale: 0, chunks_pending: 10, chunks_pending_auto: 0, chars_pending: 1000 },
+      })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    renderHook(() => useDocuments(null))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    calls.length = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+    expect(calls.filter((c) => c.url.startsWith('/api/documents/embeddings'))).toHaveLength(0)
+  })
+
+  it('picks the embeddings row back up after an upload, without a remount', async () => {
+    // The poll gate is derived from the very value the poll refreshes, so a
+    // panel that mounted with nothing outstanding can never learn that an
+    // upload has since given the automatic pass work to do - the row sits on
+    // "up to date" until the panel is remounted. The pending-document poll
+    // has to refresh the status too.
+    let auto = 0
+    const { fn } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload({ documents: [docPayload({ id: 'd1', status: 'pending' })] })),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({
+        enabled: true,
+        model: 'openai/text-embedding-3-small',
+        dimensions: 512,
+        problem: undefined,
+        counts: { chunks_total: 4, chunks_embedded: 4 - auto, chunks_stale: 0, chunks_pending: auto, chunks_pending_auto: auto, chars_pending: auto * 100 },
+      })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDocuments(null))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.embeddingsStatus?.counts.chunks_pending_auto).toBe(0)
+
+    // The pending document finished indexing and its chunks now need vectors.
+    auto = 3
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    expect(result.current.embeddingsStatus?.counts.chunks_pending_auto).toBe(3)
   })
 
   it('stops polling on unmount', async () => {
