@@ -73,6 +73,11 @@ type documentIndexer struct {
 	// tests lower it so the page-cap failure path is reachable with a small
 	// fixture instead of a real 201-page scan.
 	ocrPageCap int
+
+	// ocrByteCap is documentsOCRPDFMaxBytes by default; tests lower it so
+	// the byte-cap failure path is reachable with a small fixture instead of
+	// a genuine 40 MB+ file.
+	ocrByteCap int64
 }
 
 // newDocumentIndexer builds a documentIndexer with the production timeouts,
@@ -99,6 +104,7 @@ func newDocumentIndexer(
 		now:            func() time.Time { return time.Now().UTC() },
 		extract:        extractDocumentText,
 		ocrPageCap:     documentsDefaultOCRPageCap,
+		ocrByteCap:     documentsOCRPDFMaxBytes,
 	}
 }
 
@@ -172,7 +178,11 @@ func (idx *documentIndexer) processOne(ctx context.Context) (bool, error) {
 	// idx.extractTimeout, and would wrongly fail an already-extracted
 	// document on nothing more than a transient re-extraction hiccup.
 	if doc.Stage == "extract" {
-		if !idx.runExtractStage(ctx, doc) {
+		ok, err := idx.runExtractStage(ctx, doc)
+		if err != nil {
+			return true, err
+		}
+		if !ok {
 			return true, nil
 		}
 
@@ -188,7 +198,9 @@ func (idx *documentIndexer) processOne(ctx context.Context) (bool, error) {
 		doc = updated
 
 		if !doc.Enrich {
-			idx.finishIndexed(doc, "local", doc.Error)
+			if err := idx.finishIndexed(doc, "local", doc.Error); err != nil {
+				return true, err
+			}
 			return true, nil
 		}
 
@@ -211,9 +223,11 @@ func (idx *documentIndexer) processOne(ctx context.Context) (bool, error) {
 // SetExtracted persist the result, and a partial page failure
 // (extractedDocument.FailedPages) is logged and recorded as a warning that
 // survives onto the finished document rather than being silently dropped.
-// Returns false on any failure (already recorded via SetFailed), true once
-// the document is ready for its next stage.
-func (idx *documentIndexer) runExtractStage(ctx context.Context, doc document) bool {
+// Returns (false, nil) on any ordinary, already-recorded failure, (false,
+// non-nil) when failDoc's own write itself failed (review finding - see
+// failDoc's doc comment), and (true, nil) once the document is ready for
+// its next stage.
+func (idx *documentIndexer) runExtractStage(ctx context.Context, doc document) (bool, error) {
 	path := filepath.Join(idx.dir, doc.SHA256)
 
 	type extractOutcome struct {
@@ -232,8 +246,10 @@ func (idx *documentIndexer) runExtractStage(ctx context.Context, doc document) b
 	select {
 	case out := <-done:
 		if out.err != nil {
-			idx.failDoc(doc.ID, out.err.Error())
-			return false
+			if ferr := idx.failDoc(doc.ID, out.err.Error()); ferr != nil {
+				return false, ferr
+			}
+			return false, nil
 		}
 		return idx.finishExtract(doc, out.ex)
 	case <-extractCtx.Done():
@@ -242,11 +258,13 @@ func (idx *documentIndexer) runExtractStage(ctx context.Context, doc document) b
 			// shutdown, not a genuine timeout. Leave the row pending
 			// (status is untouched) for the next boot to pick back up,
 			// rather than mislabel it as timed out.
-			return false
+			return false, nil
 		}
 		log.Printf("documents: indexer: extraction goroutine for %s abandoned after timing out (it may still be running)", doc.ID)
-		idx.failDoc(doc.ID, fmt.Sprintf("text extraction timed out after %s", idx.extractTimeout))
-		return false
+		if ferr := idx.failDoc(doc.ID, fmt.Sprintf("text extraction timed out after %s", idx.extractTimeout)); ferr != nil {
+			return false, ferr
+		}
+		return false, nil
 	}
 }
 
@@ -255,16 +273,25 @@ func (idx *documentIndexer) runExtractStage(ctx context.Context, doc document) b
 // a warning naming how many and the first page's own error, logged and
 // written to documents.error via SetWarning once the document reaches
 // indexed (SetIndexed itself clears error unconditionally, so
-// processOne/runEnrichStage re-apply doc.Error after it, not here).
-func (idx *documentIndexer) finishExtract(doc document, ex extractedDocument) bool {
+// processOne/runEnrichStage re-apply doc.Error after it, not here). Returns
+// (false, non-nil) only when failDoc's own write failed (review finding);
+// (false, nil) for an ordinary, already-recorded failure; (true, nil) on
+// success. The SetWarning call stays log-only, same reasoning as
+// finishIndexed's own SetWarning: the primary write has already committed
+// by then.
+func (idx *documentIndexer) finishExtract(doc document, ex extractedDocument) (bool, error) {
 	chunks := chunkDocument(ex, doc.MIME)
 	if err := idx.store.ReplaceChunks(doc.ID, []string{"local"}, chunks); err != nil {
-		idx.failDoc(doc.ID, err.Error())
-		return false
+		if ferr := idx.failDoc(doc.ID, err.Error()); ferr != nil {
+			return false, ferr
+		}
+		return false, nil
 	}
 	if err := idx.store.SetExtracted(doc.ID, ex.Markdown, ex.PageCount); err != nil {
-		idx.failDoc(doc.ID, err.Error())
-		return false
+		if ferr := idx.failDoc(doc.ID, err.Error()); ferr != nil {
+			return false, ferr
+		}
+		return false, nil
 	}
 
 	if len(ex.FailedPages) > 0 {
@@ -274,7 +301,7 @@ func (idx *documentIndexer) finishExtract(doc document, ex extractedDocument) bo
 			log.Printf("documents: indexer: set warning %s: %v", doc.ID, err)
 		}
 	}
-	return true
+	return true, nil
 }
 
 // finishIndexed marks doc indexed (indexedWith "local" or "mate") and, if
@@ -282,25 +309,36 @@ func (idx *documentIndexer) finishExtract(doc document, ex extractedDocument) bo
 // SetIndexed's own unconditional error=” clear (a clean-finish guarantee
 // pinned by TestDocumentStore_SetStageSetIndexedSetFailedTransitions) would
 // otherwise wipe a FailedPages warning right at the moment it matters most:
-// the document the operator is now looking at as "done".
-func (idx *documentIndexer) finishIndexed(doc document, indexedWith, warning string) {
+// the document the operator is now looking at as "done". A SetIndexed
+// failure is returned (not merely logged) so processOne can propagate it
+// and Run's backoff applies, rather than looping straight back onto the
+// same still-pending document (review finding, same shape as failDoc
+// below). The SetWarning call stays log-only on purpose: by the time it
+// runs, the primary status transition has already committed, so a lost
+// warning doesn't leave the row stuck pending - it just loses a
+// nice-to-have annotation on an already-finished document.
+func (idx *documentIndexer) finishIndexed(doc document, indexedWith, warning string) error {
 	if err := idx.store.SetIndexed(doc.ID, indexedWith); err != nil {
-		log.Printf("documents: indexer: set indexed %s: %v", doc.ID, err)
-		return
+		return fmt.Errorf("documents indexer: set indexed %s: %w", doc.ID, err)
 	}
 	if warning != "" {
 		if err := idx.store.SetWarning(doc.ID, warning); err != nil {
 			log.Printf("documents: indexer: set warning %s: %v", doc.ID, err)
 		}
 	}
+	return nil
 }
 
-// failDoc records msg as doc's failure reason, logging (rather than losing)
-// a failure to even write that - the caller has already decided the
-// document failed; a broken database write on top of that is a second,
-// separate problem worth its own log line rather than a silent no-op.
-func (idx *documentIndexer) failDoc(id, msg string) {
+// failDoc records msg as doc's failure reason. Its own SetFailed error is
+// returned (not merely logged) so callers can propagate it: if SetFailed
+// itself fails (a read-only or full database), the row stays pending, and
+// a caller that swallowed that error would report "handled" back to
+// processOne, which would report "did work" back to Run, which would loop
+// straight back onto the SAME still-pending document with no backoff and
+// no operator-visible failure (review finding).
+func (idx *documentIndexer) failDoc(id, msg string) error {
 	if err := idx.store.SetFailed(id, msg); err != nil {
-		log.Printf("documents: indexer: set failed %s: %v", id, err)
+		return fmt.Errorf("documents indexer: set failed %s: %w", id, err)
 	}
+	return nil
 }

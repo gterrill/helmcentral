@@ -342,6 +342,76 @@ func TestDocumentIndexer_ReadinessReadErrorPropagatesFromProcessOne(t *testing.T
 	}
 }
 
+// ── a failed SetFailed must not spin the loop ────────────────────────────
+
+// TestDocumentIndexer_FailedSetFailedPropagatesFromProcessOne pins the
+// review finding at documents_indexer.go:175: failDoc used to swallow
+// idx.store.SetFailed's own error (logged and dropped), so every caller
+// still returned as if the document had been successfully marked failed. If
+// SetFailed itself fails (a read-only or full database - the two realistic
+// causes), the document's row stays untouched (still pending), but
+// processOne still reported (true, nil) - "I did work" - so Run looped
+// straight back to NextPending, popped the SAME still-pending document, and
+// repeated: no documentsIndexerErrorBackoff wait, no operator-visible
+// failure, just a tight spin. This is the same shape as
+// TestDocumentIndexer_ReadinessReadErrorPropagatesFromProcessOne above, but
+// for a write instead of a read: it chmods the sqlite database's own
+// directory read-only (0o555) so NextPending's SELECT still succeeds but
+// any write - including failDoc's own SetFailed, reached here via a forced
+// extraction error - fails with "attempt to write a readonly database".
+// Chmodding the db FILE itself is not enough to reproduce this: the
+// connection's file descriptor was opened (read-write) before the chmod,
+// and Unix permission checks apply at open(), not at write(), so writes
+// through an already-open fd keep working regardless of the file's mode
+// bits afterward - confirmed empirically against this driver before
+// writing this test.
+func TestDocumentIndexer_FailedSetFailedPropagatesFromProcessOne(t *testing.T) {
+	dbDir := t.TempDir()
+	dbPath := filepath.Join(dbDir, "documents.sqlite")
+	store, err := newDocumentStore(dbPath)
+	if err != nil {
+		t.Fatalf("newDocumentStore: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	docsDir := t.TempDir()
+	t.Setenv("DOCUMENTS_DIR", docsDir)
+	prevStore := globalDocumentStore
+	globalDocumentStore = store
+	t.Cleanup(func() { globalDocumentStore = prevStore })
+
+	doc := seedTestDocumentFile(t, store, docsDir, testdataPath("two_page.pdf"), "manual.pdf", "application/pdf", false)
+
+	idx := newTestDocumentIndexer(t, store, docsDir)
+	idx.extract = func(ctx context.Context, path, mimeType string) (extractedDocument, error) {
+		return extractedDocument{}, errors.New("boom: extraction failed")
+	}
+
+	// Make every WRITE to the sqlite file fail while NextPending's own
+	// SELECT still succeeds - a read-only database, per the finding's own
+	// wording. See the doc comment above for why this chmods the
+	// containing directory rather than the db file itself.
+	if err := os.Chmod(dbDir, 0o555); err != nil {
+		t.Fatalf("chmod db dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dbDir, 0o755) })
+
+	_, err = idx.processOne(context.Background())
+	if err == nil {
+		t.Fatalf("expected processOne to propagate SetFailed's own write error so Run's backoff applies, got nil")
+	}
+
+	if err := os.Chmod(dbDir, 0o755); err != nil {
+		t.Fatalf("chmod db dir writable again: %v", err)
+	}
+	got, getErr := store.Get(doc.ID)
+	if getErr != nil {
+		t.Fatalf("Get: %v", getErr)
+	}
+	if got.Status != "pending" {
+		t.Fatalf("expected the document to remain pending (SetFailed never actually wrote), got %q", got.Status)
+	}
+}
+
 // ── resuming at stage=enrich after a restart skips re-extraction ─────────
 
 // TestDocumentIndexer_ResumedAtEnrichStageSkipsReExtraction pins the review
@@ -550,6 +620,91 @@ func TestDocumentIndexer_ForceOCRBypassesThePageCap(t *testing.T) {
 	}
 	if got.Status != "indexed" || got.IndexedWith != "mate" {
 		t.Fatalf("expected indexed/mate once force_ocr bypasses the cap, got %+v", got)
+	}
+}
+
+// TestDocumentIndexer_ByteCapExceededFailsWithoutAnHTTPCall pins the review
+// finding at documents_enrich.go:377: buildScannedPDFRequest used to
+// os.ReadFile and base64-encode the whole scanned PDF with no byte limit,
+// unlike buildImageRequest's own documentsImageMaxBytes check - a large
+// scanned PDF, still comfortably under the page cap, could peak at roughly
+// 3x its own size in heap (ReadFile + base64 + json.Marshal's own copy),
+// which is an OOM on the armv7 build target. idx.ocrByteCap is set below
+// the fixture's real size so the cap trips well before any file is read or
+// any HTTP call is placed.
+func TestDocumentIndexer_ByteCapExceededFailsWithoutAnHTTPCall(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+	doc := seedTestDocumentFile(t, store, dir, testdataPath("scanned_two_page.pdf"), "scan.pdf", "application/pdf", true)
+
+	doer := &fakeOpenRouterDoer{}
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.doer = doer
+	idx.ocrByteCap = 10 // scanned_two_page.pdf is far larger than this
+
+	if _, err := idx.processOne(context.Background()); err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("expected failed status, got %q", got.Status)
+	}
+	if !strings.Contains(got.Error, fmt.Sprintf("%d bytes", doc.SizeBytes)) {
+		t.Fatalf("expected the document's own byte count in the error, got %q", got.Error)
+	}
+	if !strings.Contains(got.Error, "10 byte OCR cap") {
+		t.Fatalf("expected the configured byte cap in the error, got %q", got.Error)
+	}
+	if len(doer.requests) != 0 {
+		t.Fatalf("expected no HTTP call once the byte cap rejects the document, got %d", len(doer.requests))
+	}
+}
+
+// TestDocumentIndexer_ForceOCRDoesNotBypassTheByteCap pins the deliberate
+// design decision (documentsOCRPDFMaxBytes's own doc comment,
+// documents_enrich.go): unlike the page cap, force_ocr is consent to spend
+// more money on an OCR call that will complete, not permission to crash the
+// process trying to send a file the process cannot safely hold in memory.
+// So, unlike TestDocumentIndexer_ForceOCRBypassesThePageCap above, a
+// ForceOCR document must still fail the byte cap.
+func TestDocumentIndexer_ForceOCRDoesNotBypassTheByteCap(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+	raw, err := os.ReadFile(testdataPath("scanned_two_page.pdf"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	sha := writeTestDocumentBytes(t, dir, raw)
+	doc, err := store.Insert(document{SHA256: sha, Filename: "scan.pdf", MIME: "application/pdf", SizeBytes: int64(len(raw)), Enrich: true, ForceOCR: true})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	doer := &fakeOpenRouterDoer{}
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.doer = doer
+	idx.ocrByteCap = 10 // far smaller than the fixture; force_ocr must not bypass this
+
+	if _, err := idx.processOne(context.Background()); err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("expected force_ocr to still fail the byte cap, got status %q", got.Status)
+	}
+	if !strings.Contains(got.Error, "byte OCR cap") {
+		t.Fatalf("expected the byte cap message in the error, got %q", got.Error)
+	}
+	if len(doer.requests) != 0 {
+		t.Fatalf("expected force_ocr to not bypass the byte cap and place no HTTP call, got %d", len(doer.requests))
 	}
 }
 

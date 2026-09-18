@@ -37,6 +37,18 @@ const documentsEnrichMarkdownCapRunes = 24000
 // sending a multi-ten-megabyte data URL.
 const documentsImageMaxBytes = 20 << 20 // 20 MB
 
+// documentsOCRPDFMaxBytes bounds the whole-file base64 upload the OCR
+// branch of buildScannedPDFRequest sends for a scanned PDF. Unlike
+// documentsDefaultOCRPageCap, this is a hard memory ceiling, not a
+// cost/consent gate: ReadFile plus the base64 encode plus json.Marshal's
+// own copy of the request body peak at roughly 3x the raw file size (a
+// 90 MB scan measured near 300 MB of heap - review finding), which is an
+// OOM on the armv7 target's limited RAM. 40 MB keeps that peak safely
+// under it. Unlike the page cap, force_ocr does NOT lift this one: that
+// flag is consent to spend more money on an OCR call that will complete,
+// not permission to crash the process trying.
+const documentsOCRPDFMaxBytes = 40 << 20 // 40 MB
+
 // documentSuggestedTagsCap bounds how many of Mate's suggested tags
 // SetSuggested records. Real captures (backend/testdata/openrouter_document_*.json)
 // show a model asked for "up to 5 tags" returning 10 anyway; 8 is a
@@ -226,31 +238,26 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 		return fmt.Errorf("documents indexer: enrich readiness check for %s: %w", doc.ID, err)
 	}
 	if problem := documentEnrichReadinessProblem(readiness); problem != "" {
-		idx.failDoc(doc.ID, problem)
-		return nil
+		return idx.failDoc(doc.ID, problem)
 	}
 
 	if doc.MIME == "application/octet-stream" {
 		// Nothing local or paid can be done with an unrecognised type - the
 		// extract stage already left it indexed-worthy with no text.
-		idx.finishIndexed(doc, "local", doc.Error)
-		return nil
+		return idx.finishIndexed(doc, "local", doc.Error)
 	}
 	if doc.MIME == "image/heic" {
-		idx.failDoc(doc.ID, "image/heic is not supported for reading; convert to JPEG")
-		return nil
+		return idx.failDoc(doc.ID, "image/heic is not supported for reading; convert to JPEG")
 	}
 
 	blocks, plugins, timeout, kind, err := idx.buildEnrichRequest(doc)
 	if err != nil {
-		idx.failDoc(doc.ID, err.Error())
-		return nil
+		return idx.failDoc(doc.ID, err.Error())
 	}
 
 	model, err := idx.documentModel()
 	if err != nil {
-		idx.failDoc(doc.ID, fmt.Sprintf("document model setting: %v", err))
-		return nil
+		return idx.failDoc(doc.ID, fmt.Sprintf("document model setting: %v", err))
 	}
 	req := openRouterChatRequest{
 		Model:    model,
@@ -272,12 +279,10 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 			// a shutdown as a failed document a restart can never fix.
 			return nil
 		}
-		idx.failDoc(doc.ID, err.Error())
-		return nil
+		return idx.failDoc(doc.ID, err.Error())
 	}
 	if len(resp.Choices) == 0 {
-		idx.failDoc(doc.ID, "openrouter returned no choices")
-		return nil
+		return idx.failDoc(doc.ID, "openrouter returned no choices")
 	}
 	message := resp.Choices[0].Message
 
@@ -301,27 +306,23 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 	if kind == enrichKindOCRFile {
 		pages := ocrPagesFromAnnotations(message.Annotations)
 		if len(pages) == 0 {
-			idx.failDoc(doc.ID, "OCR returned no text")
-			return nil
+			return idx.failDoc(doc.ID, "OCR returned no text")
 		}
 		if err := idx.writeOCRResult(doc, pages); err != nil {
-			idx.failDoc(doc.ID, err.Error())
-			return nil
+			return idx.failDoc(doc.ID, err.Error())
 		}
 	}
 
 	var reply documentEnrichReply
 	raw := string(message.Content)
 	if err := json.Unmarshal([]byte(stripDocumentEnrichJSONFence(raw)), &reply); err != nil {
-		idx.failDoc(doc.ID, "invalid JSON reply: "+truncateRunes(raw, 200))
-		return nil
+		return idx.failDoc(doc.ID, "invalid JSON reply: "+truncateRunes(raw, 200))
 	}
 
 	if kind == enrichKindImageOCR {
 		page := extractedPage{Number: 1, Text: reply.Text}
 		if err := idx.writeOCRResult(doc, []extractedPage{page}); err != nil {
-			idx.failDoc(doc.ID, err.Error())
-			return nil
+			return idx.failDoc(doc.ID, err.Error())
 		}
 	}
 
@@ -330,12 +331,10 @@ func (idx *documentIndexer) runEnrichStage(ctx context.Context, doc document) er
 		tags = tags[:documentSuggestedTagsCap]
 	}
 	if err := idx.store.SetSuggested(doc.ID, reply.Title, reply.Summary, tags); err != nil {
-		idx.failDoc(doc.ID, err.Error())
-		return nil
+		return idx.failDoc(doc.ID, err.Error())
 	}
 
-	idx.finishIndexed(doc, "mate", doc.Error)
-	return nil
+	return idx.finishIndexed(doc, "mate", doc.Error)
 }
 
 // buildEnrichRequest dispatches on doc.MIME (every value detectDocumentMIME
@@ -371,6 +370,17 @@ func (idx *documentIndexer) buildScannedPDFRequest(doc document) ([]openRouterCo
 		return nil, nil, 0, 0, fmt.Errorf(
 			"scanned PDF has %d pages, over the %d page OCR cap (about $%.2f at $%.3f/page); reindex with force_ocr to proceed anyway",
 			doc.PageCount, pageCap, cost, documentsOCRCostPerPageUSD,
+		)
+	}
+
+	byteCap := idx.ocrByteCap
+	if byteCap <= 0 {
+		byteCap = documentsOCRPDFMaxBytes
+	}
+	if doc.SizeBytes > byteCap {
+		return nil, nil, 0, 0, fmt.Errorf(
+			"scanned PDF is %d bytes, over the %d byte OCR cap",
+			doc.SizeBytes, byteCap,
 		)
 	}
 
