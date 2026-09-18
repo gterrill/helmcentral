@@ -25,6 +25,15 @@ jobs:
         working-directory: backend
         run: go vet ./...
 
+      # govulncheck reports only vulnerabilities on call paths this code
+      # actually reaches, so it stays quiet enough to gate a merge - unlike a
+      # blanket dependency scanner. The first audit (2026-09-19) found 23
+      # reachable vulnerabilities that had accumulated silently because nothing
+      # here scanned; this is what stops that happening again.
+      - name: Vulnerability scan
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       # -short skips the live BOM FTP round-trips in wasm_ftp_*_test.go. Those
       # assert against a third-party server whose files rotate, so they fail for
       # reasons that have nothing to do with a change under review; run them
