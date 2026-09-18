@@ -92,6 +92,18 @@ document failed. A document whose text is already in FTS5 is not broken
 because its vectors are late, and a red badge over that would hide a document
 that searches perfectly well.
 
+A batch that keeps failing halves on each attempt, so whichever chunk the
+upstream will not accept ends up alone, and a chunk that fails three times
+alone is set aside. Without that, one unacceptable input stops every chunk
+behind it from ever being embedded, silently, with nothing but a log line
+every sixty seconds to say so. The set-aside list lives in memory only: a
+restart gives every skipped chunk another go, which is right when the cause
+was a provider having a bad day rather than the chunk itself.
+
+A backfill also has to stop when it cannot continue. Switching Mate off or
+removing the key mid-run ends it with the reason recorded, rather than
+leaving it running forever against a queue nothing will ever drain.
+
 ### Consent, and a backfill that keeps no state
 
 ADR 0106's consent rule carries over unchanged. Automatic embedding covers
@@ -123,7 +135,8 @@ rank fusion at k=60, the constant from the original paper, which flattens the
 gap between a rank-1 and a rank-3 hit so neither retriever's confidence
 dominates the other's.
 
-Each side contributes a 50-document pool, and the caller's offset and limit
+Each side contributes a pool of at least 50 documents, more when the caller
+asked for a page wider or deeper than that, and the caller's offset and limit
 are applied to the fused ranking afterwards, never passed down to either
 retriever. Fusing only `limit` results per side would make page two depend on
 which documents happened to survive page one's cut. A document found by both

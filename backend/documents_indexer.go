@@ -99,6 +99,12 @@ type documentIndexer struct {
 	// tracked by a flag anywhere durable. See documents_embed.go's
 	// StartBackfill/BackfillStatus doc comments.
 	backfillRunning bool
+	// backfillGen is bumped by every StartBackfill. processEmbedBatch
+	// captures it alongside its backfillRunning snapshot so it can only ever
+	// finish the backfill it belongs to - see finishBackfill
+	// (documents_embed.go) for the window that would otherwise let an older
+	// pass cancel a newer backfill.
+	backfillGen int
 	// backfillChunksEmbedded counts chunks embedded by THIS backfill run
 	// only (reset to 0 by StartBackfill) - not a lifetime total.
 	backfillChunksEmbedded int
@@ -107,6 +113,14 @@ type documentIndexer struct {
 	// if any - recorded but not fatal to the backfill itself (see
 	// processEmbedBatch's own doc comment).
 	backfillLastError string
+	// embedBatchLimit, embedFailures and embedSkip are the embed pass's
+	// poison-pill handling (documents_embed.go): the batch narrows on a
+	// failure until one chunk is alone, and a chunk that keeps failing alone
+	// is set aside so it stops holding the rest of the queue. All three are
+	// memory only - a restart gives every set-aside chunk another chance.
+	embedBatchLimit int
+	embedFailures   map[int64]int
+	embedSkip       map[int64]bool
 
 	// extract is extractDocumentText by default. Tests substitute a func
 	// that blocks or errors for one document's path, to exercise the

@@ -713,6 +713,40 @@ describe('useDocuments', () => {
     expect(calls.filter((c) => c.url.startsWith('/api/documents/embeddings'))).toHaveLength(0)
   })
 
+  it('polls the embeddings status while the automatic pass still has chunks to do', async () => {
+    // The automatic (enrich=1) embed pass has no backfill to gate a poll on -
+    // it just runs in the background as documents finish indexing. Without a
+    // poll of its own the row would sit on whatever count it loaded with,
+    // showing work outstanding that is in fact already done, until a reload.
+    let pending = 12
+    const { fn, calls } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({
+        enabled: true,
+        model: 'openai/text-embedding-3-small',
+        dimensions: 512,
+        problem: undefined,
+        counts: { chunks_total: 20, chunks_embedded: 20 - pending, chunks_stale: 0, chunks_pending: pending, chars_pending: pending * 100 },
+      })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDocuments(null))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(12)
+
+    pending = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(0)
+
+    // Nothing left pending and no backfill: the poll must stop.
+    calls.length = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+    expect(calls.filter((c) => c.url.startsWith('/api/documents/embeddings'))).toHaveLength(0)
+  })
+
   it('stops polling on unmount', async () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),

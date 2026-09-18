@@ -34,14 +34,31 @@ import (
 // still a hard error is a failure that makes the whole search meaningless -
 // an FTS error, a bad folder id, a broken settings or secrets read.
 
-// documentsFusionCandidates is the size of the candidate pool each retriever
-// (FTS and vector) contributes to reciprocalRankFusion - not the page size a
-// caller asked for. Fusing only `limit` results from each side would make
-// the second page of a search depend on which documents happened to make
-// the first page's own cut from each retriever; fusing a wide pool once and
-// paging the fused ranking afterward keeps every page consistent with the
-// others.
+// documentsFusionCandidates is the FLOOR on the candidate pool each
+// retriever (FTS and vector) contributes to reciprocalRankFusion - not the
+// page size a caller asked for, and not a ceiling on it either. Fusing only
+// `limit` results from each side would make the second page of a search
+// depend on which documents happened to make the first page's own cut from
+// each retriever; fusing a wide pool once and paging the fused ranking
+// afterward keeps every page consistent with the others. See
+// documentFusionPoolSize for why the pool has to grow past this floor rather
+// than stopping at it.
 const documentsFusionCandidates = 50
+
+// documentFusionPoolSize is how many documents each retriever is asked for,
+// given the page the caller wants. It has to cover offset+limit as well as
+// the fusion floor: a pool fixed at documentsFusionCandidates would truncate
+// a ?limit=200 listing to 50 rows, and return an empty page for every offset
+// past the 50th document - both of which the plain Search(limit, offset)
+// call this replaced got right. Pulling offset+limit from each side keeps
+// the fused ranking long enough to actually contain the requested page.
+func documentFusionPoolSize(limit, offset int) int {
+	want := limit + offset
+	if want < documentsFusionCandidates {
+		return documentsFusionCandidates
+	}
+	return want
+}
 
 // documentsQueryEmbedTimeout bounds one query-embedding call - a single
 // input, so nothing like the indexer's multi-minute OCR timeout
@@ -115,12 +132,14 @@ func hybridDocumentSearch(ctx context.Context, params documentSearchParams) (doc
 		return documentSearchOutcome{Results: []documentSearchResult{}, Mode: "fts"}, nil
 	}
 
-	ftsHits, err := params.Store.Search(matchQuery, params.FolderID, params.Recursive, params.Tag, documentsFusionCandidates, 0)
+	pool := documentFusionPoolSize(params.Limit, params.Offset)
+
+	ftsHits, err := params.Store.Search(matchQuery, params.FolderID, params.Recursive, params.Tag, pool, 0)
 	if err != nil {
 		return documentSearchOutcome{}, err
 	}
 
-	vectorHits, ran, problem, err := documentSemanticSearch(ctx, params)
+	vectorHits, ran, problem, err := documentSemanticSearch(ctx, params, pool)
 	if err != nil {
 		return documentSearchOutcome{}, err
 	}
@@ -148,7 +167,7 @@ func hybridDocumentSearch(ctx context.Context, params documentSearchParams) (doc
 // (nil, false, problem, nil): the FTS half has already answered by then,
 // and see this file's own top-of-file comment for why saying so beats
 // failing the whole request.
-func documentSemanticSearch(ctx context.Context, params documentSearchParams) (results []documentSearchResult, ran bool, problem string, err error) {
+func documentSemanticSearch(ctx context.Context, params documentSearchParams, pool int) (results []documentSearchResult, ran bool, problem string, err error) {
 	if params.Readiness == nil {
 		return nil, false, "", nil
 	}
@@ -170,7 +189,7 @@ func documentSemanticSearch(ctx context.Context, params documentSearchParams) (r
 		return nil, false, firstErrorLine(err), nil
 	}
 
-	vectorHits, err := params.Store.SearchVector(vec, model, params.FolderID, params.Recursive, params.Tag, documentsFusionCandidates)
+	vectorHits, err := params.Store.SearchVector(vec, model, params.FolderID, params.Recursive, params.Tag, pool)
 	if err != nil {
 		// Corrupt vector data, and nothing else: a bad folder id never gets
 		// this far, because Search applies the identical scoping check first

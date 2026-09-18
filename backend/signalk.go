@@ -368,6 +368,11 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 	// overlay below, so an absent key on disk surfaces as true and only an
 	// explicit stored value (true or false) overrides it.
 	payload.Anchor.AutoRaiseOnMotoring = true
+	// Same split, same reason (see normalizeSettingsPayload's own comment on
+	// EmbeddingModel): an absent embedding_model is a settings.yaml written
+	// before the key existed and defaults here, while a key present and blank
+	// is an operator who turned semantic search off and must stay off.
+	payload.Assistant.EmbeddingModel = defaultEmbeddingModel
 
 	if signalkMap, ok := settings["signalk"].(map[string]any); ok {
 		address := coerceString(signalkMap["address"])
@@ -660,10 +665,17 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	if normalized.Assistant.DocumentModel == "" {
 		normalized.Assistant.DocumentModel = defaultDocumentModel
 	}
+	// Trimmed, but deliberately NOT defaulted the way Model and
+	// DocumentModel are just above. A blank embedding model is the
+	// documented off switch for semantic search (ADR 0108), so defaulting it
+	// here would mean an operator could never turn it off through the
+	// settings API, and that the first save after an upgrade would silently
+	// switch paid embedding on for every consented document. The default for
+	// an ABSENT key is applied by buildSettingsPayload instead - the same
+	// split Anchor.AutoRaiseOnMotoring already uses, and for the same reason:
+	// this function also normalises genuine save requests, where it cannot
+	// tell "the operator cleared the field" from "the zero-value baseline".
 	normalized.Assistant.EmbeddingModel = strings.TrimSpace(req.Assistant.EmbeddingModel)
-	if normalized.Assistant.EmbeddingModel == "" {
-		normalized.Assistant.EmbeddingModel = defaultEmbeddingModel
-	}
 	normalized.Assistant.EmbeddingDimensions = req.Assistant.EmbeddingDimensions
 	if normalized.Assistant.EmbeddingDimensions <= 0 {
 		normalized.Assistant.EmbeddingDimensions = defaultEmbeddingDimensions

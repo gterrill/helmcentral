@@ -647,3 +647,46 @@ func TestHybridDocumentSearch_CorruptVectorRowDegradesRatherThanFailingTheSearch
 		t.Fatalf("expected the FTS hit to survive, got %+v", outcome.Results)
 	}
 }
+
+// TestHybridDocumentSearch_PoolGrowsToCoverLargeLimitsAndDeepOffsets pins
+// the relationship between the fusion pool and the page the caller asked
+// for. documentsFusionCandidates is a floor, not a ceiling: a fixed pool of
+// 50 at offset 0 would silently truncate ?limit=200 to 50 results, and make
+// every page past the 50th document come back empty - both regressions from
+// the plain store.Search(limit, offset) this replaced.
+func TestHybridDocumentSearch_PoolGrowsToCoverLargeLimitsAndDeepOffsets(t *testing.T) {
+	resetDocumentQueryEmbedCache(t)
+	store := newTestDocumentStore(t)
+
+	// 60 documents all matching the same word, so FTS alone has more hits
+	// than documentsFusionCandidates.
+	const total = 60
+	for i := 0; i < total; i++ {
+		insertHybridDoc(t, store, fmt.Sprintf("sha-pool-%02d", i), fmt.Sprintf("manual-%02d.pdf", i), nil,
+			fmt.Sprintf("impeller service interval note number %d", i))
+	}
+
+	all, err := hybridDocumentSearch(context.Background(), documentSearchParams{
+		Store: store, Query: "impeller", Limit: 200,
+	})
+	if err != nil {
+		t.Fatalf("limit 200: %v", err)
+	}
+	if len(all.Results) != total {
+		t.Fatalf("expected all %d documents for limit=200, got %d", total, len(all.Results))
+	}
+
+	deep, err := hybridDocumentSearch(context.Background(), documentSearchParams{
+		Store: store, Query: "impeller", Limit: 5, Offset: 55,
+	})
+	if err != nil {
+		t.Fatalf("offset 55: %v", err)
+	}
+	if len(deep.Results) != 5 {
+		t.Fatalf("expected 5 documents at offset 55, got %d", len(deep.Results))
+	}
+	if deep.Results[0].DocumentID != all.Results[55].DocumentID {
+		t.Fatalf("offset 55 should start at the 56th fused result, got %q want %q",
+			deep.Results[0].DocumentID, all.Results[55].DocumentID)
+	}
+}

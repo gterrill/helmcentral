@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -379,5 +380,156 @@ func TestDocumentIndexer_StartBackfillTwiceIsAnErrorTheSecondTime(t *testing.T) 
 	}
 	if err := idx.StartBackfill(); err == nil {
 		t.Fatalf("expected StartBackfill to refuse a second concurrent backfill")
+	}
+}
+
+// openRouterDoerFunc adapts a plain func to openRouterDoer, for a fake
+// upstream whose answer depends on what was actually asked - fakeOpenRouterDoer
+// (openrouter_client_test.go) replays a fixed queue of responses, which
+// cannot express "reject any batch containing this one input".
+type openRouterDoerFunc func(req *http.Request) (*http.Response, error)
+
+func (f openRouterDoerFunc) Do(req *http.Request) (*http.Response, error) { return f(req) }
+
+// ── a backfill that cannot finish on its own ────────────────────────────
+
+// TestDocumentIndexer_BackfillStopsWhenSemanticSearchGoesAwayMidRun covers
+// the one way a running backfill could never end. processEmbedBatch returns
+// early on a readiness Problem, so if that early return skips the backfill
+// bookkeeping, turning Mate off (or pulling the key) mid-backfill leaves
+// Running true forever: a spinner that never stops, a button that stays
+// disabled, and every later start refused with 409 until the process is
+// restarted. The backfill has to stop, and say why.
+func TestDocumentIndexer_BackfillStopsWhenSemanticSearchGoesAwayMidRun(t *testing.T) {
+	store := newTestDocumentStore(t)
+	insertChunkedDocument(t, store, "sha-backfill-lost", "unconsented.pdf", false, "some body text")
+
+	available := true
+	readiness := func() (assistantReadiness, string, error) {
+		if !available {
+			return assistantReadiness{Enabled: false, Problem: "Mate is switched off."}, "", nil
+		}
+		return embedTestReadiness("test-embed-model", 4)()
+	}
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{fakeEmbeddingsResponse(t, 4, 1, 0)}}
+	idx := newTestEmbedIndexer(store, t.TempDir(), readiness, doer)
+
+	if err := idx.StartBackfill(); err != nil {
+		t.Fatalf("StartBackfill: %v", err)
+	}
+	available = false
+
+	if _, err := idx.processEmbedBatch(context.Background()); err != nil {
+		t.Fatalf("processEmbedBatch: %v", err)
+	}
+
+	status := idx.BackfillStatus()
+	if status.Running {
+		t.Fatalf("expected the backfill to stop once semantic search went away, got %+v", status)
+	}
+	if status.LastError == "" {
+		t.Fatalf("expected the backfill to say why it stopped")
+	}
+}
+
+// TestDocumentIndexer_StartBackfillDuringAPassIsNotCancelledByIt is the
+// other end of the same bookkeeping. processEmbedBatch decides whether it is
+// backfilling by snapshotting the flag, then may clear it several store
+// calls later. A StartBackfill that lands in that window would otherwise be
+// cleared by the older pass and report as instantly complete, having
+// embedded nothing.
+func TestDocumentIndexer_StartBackfillDuringAPassIsNotCancelledByIt(t *testing.T) {
+	store := newTestDocumentStore(t)
+	idx := newTestEmbedIndexer(store, t.TempDir(), embedTestReadiness("test-embed-model", 4), &fakeOpenRouterDoer{})
+
+	if err := idx.StartBackfill(); err != nil {
+		t.Fatalf("first StartBackfill: %v", err)
+	}
+	// The pass this generation belongs to, captured the way processEmbedBatch
+	// captures it, before a second StartBackfill supersedes it.
+	stale := idx.currentBackfillGen()
+
+	idx.finishBackfill(stale)
+	if err := idx.StartBackfill(); err != nil {
+		t.Fatalf("second StartBackfill: %v", err)
+	}
+
+	// The older pass finishing now must not clear the newer backfill.
+	idx.finishBackfill(stale)
+	if !idx.BackfillStatus().Running {
+		t.Fatalf("a stale pass cancelled the backfill that superseded it")
+	}
+}
+
+// ── a batch that can never succeed ──────────────────────────────────────
+
+// TestDocumentIndexer_APermanentlyFailingChunkIsSkippedRatherThanBlockingTheQueue
+// covers the poison pill. One chunk the upstream will never accept must not
+// stop every other chunk in the library from ever being embedded: the pass
+// narrows the batch until the bad chunk is alone, gives it a bounded number
+// of tries, then sets it aside (in memory, so a restart gives it another
+// chance) and moves on.
+func TestDocumentIndexer_APermanentlyFailingChunkIsSkippedRatherThanBlockingTheQueue(t *testing.T) {
+	store := newTestDocumentStore(t)
+	// The poison chunk is inserted first so it sorts ahead of the good one
+	// and would otherwise hold the whole queue behind it.
+	poison := insertChunkedDocument(t, store, "sha-poison", "poison.pdf", true, "chunk the upstream always rejects")
+	good := insertChunkedDocument(t, store, "sha-good", "good.pdf", true, "an ordinary chunk")
+
+	poisonChunks, err := store.ChunksFrom(poison.ID, 1)
+	if err != nil || len(poisonChunks) != 1 {
+		t.Fatalf("ChunksFrom: %v", err)
+	}
+	poisonText := poisonChunks[0].Text
+
+	// Rejects any batch containing the poison chunk's text; embeds anything
+	// else. A real upstream refusing one specific input behaves this way.
+	doer := openRouterDoerFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		var parsed openRouterEmbeddingsRequest
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, err
+		}
+		for _, in := range parsed.Input {
+			if in == poisonText {
+				return openRouterFakeResponse(400, `{"error":{"message":"input rejected","code":400}}`), nil
+			}
+		}
+		return fakeEmbeddingsResponse(t, 4, len(parsed.Input), 0), nil
+	})
+
+	idx := newTestEmbedIndexer(store, t.TempDir(), embedTestReadiness("test-embed-model", 4), doer)
+
+	// Run the pass well past the point where a stuck queue would keep
+	// handing back the same doomed batch. It must reach the good document.
+	for i := 0; i < 40; i++ {
+		if _, err := idx.processEmbedBatch(context.Background()); err != nil {
+			continue
+		}
+	}
+
+	counts, err := store.EmbeddingCounts("test-embed-model")
+	if err != nil {
+		t.Fatalf("EmbeddingCounts: %v", err)
+	}
+	if counts.ChunksEmbedded == 0 {
+		t.Fatalf("nothing was embedded: the poison chunk blocked the whole queue")
+	}
+
+	goodChunks, err := store.ChunksFrom(good.ID, 0)
+	if err != nil {
+		t.Fatalf("ChunksFrom(good): %v", err)
+	}
+	for _, c := range goodChunks {
+		var n int
+		if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE chunk_id = ?`, c.ID).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n != 1 {
+			t.Fatalf("the good document's chunk %d was never embedded past the poison chunk", c.Seq)
+		}
 	}
 }

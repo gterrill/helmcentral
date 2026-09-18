@@ -1,5 +1,11 @@
 node_modules/
 dist/
+
+# tsc -b output. vite.config.js in particular is resolved by Vite AHEAD of
+# vite.config.ts, so a committed one silently shadows the real config.
+vite.config.js
+vite.config.d.ts
+*.tsbuildinfo
 .DS_Store
 *.swp
 *.swo

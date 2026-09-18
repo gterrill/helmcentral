@@ -611,20 +611,48 @@ func TestSettingsPayloadRoundTripsAssistantEmbeddingSettings(t *testing.T) {
 	}
 }
 
-// TestNormalizeSettingsPayloadDefaultsEmbeddingModel pins a blank
-// embedding_model to defaultEmbeddingModel, the same "blank means default"
-// pattern defaultDocumentModel uses for the enrich-stage model.
-func TestNormalizeSettingsPayloadDefaultsEmbeddingModel(t *testing.T) {
+// TestNormalizeSettingsPayloadKeepsABlankEmbeddingModelBlank pins the one
+// place embedding_model must NOT follow document_model's "blank means
+// default" rule. A blank embedding model is the documented off switch (ADR
+// 0108, settings.example.yaml, docs/reference/configuration.md): defaulting
+// it on a save would mean the operator can never turn semantic search off
+// through the settings API, and worse, that the first save after an upgrade
+// silently switches paid embedding on for every consented document. The
+// default for an absent key is applied by buildSettingsPayload instead - the
+// same split Anchor.AutoRaiseOnMotoring already uses for exactly this
+// "can't tell absent from explicitly off" reason.
+func TestNormalizeSettingsPayloadKeepsABlankEmbeddingModelBlank(t *testing.T) {
 	blank := normalizeSettingsPayload(settingsPayload{})
-	if blank.Assistant.EmbeddingModel != defaultEmbeddingModel {
-		t.Fatalf("expected a blank embedding model to default to %q, got %q", defaultEmbeddingModel, blank.Assistant.EmbeddingModel)
+	if blank.Assistant.EmbeddingModel != "" {
+		t.Fatalf("expected a blank embedding model to stay blank, got %q", blank.Assistant.EmbeddingModel)
 	}
 
 	req := settingsPayload{}
+	req.Assistant.EmbeddingModel = "   "
+	if got := normalizeSettingsPayload(req).Assistant.EmbeddingModel; got != "" {
+		t.Fatalf("expected a whitespace-only embedding model to normalise to blank, got %q", got)
+	}
+
 	req.Assistant.EmbeddingModel = "  openai/text-embedding-3-large  "
 	normalized := normalizeSettingsPayload(req)
 	if normalized.Assistant.EmbeddingModel != "openai/text-embedding-3-large" {
 		t.Fatalf("expected assistant.embedding_model to be trimmed, got %q", normalized.Assistant.EmbeddingModel)
+	}
+}
+
+// TestBuildSettingsPayloadEmbeddingModelAbsentVsExplicitlyBlank is the other
+// half of the rule above: an absent key is a settings.yaml written before
+// embedding_model existed and must default, while a key present and blank is
+// an operator who turned semantic search off and must stay off.
+func TestBuildSettingsPayloadEmbeddingModelAbsentVsExplicitlyBlank(t *testing.T) {
+	absent := buildSettingsPayload(map[string]any{"assistant": map[string]any{"model": "m"}})
+	if absent.Assistant.EmbeddingModel != defaultEmbeddingModel {
+		t.Fatalf("expected an absent embedding_model to default to %q, got %q", defaultEmbeddingModel, absent.Assistant.EmbeddingModel)
+	}
+
+	off := buildSettingsPayload(map[string]any{"assistant": map[string]any{"model": "m", "embedding_model": ""}})
+	if off.Assistant.EmbeddingModel != "" {
+		t.Fatalf("expected an explicitly blank embedding_model to stay blank, got %q", off.Assistant.EmbeddingModel)
 	}
 }
 

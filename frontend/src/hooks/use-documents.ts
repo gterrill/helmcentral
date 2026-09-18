@@ -296,26 +296,32 @@ export function useDocuments(folderId: string | null) {
   // response that leaves the pending count unchanged doesn't tear down and
   // restart the timer (mirrors use-document-uploads.ts's own hasPending gate).
   //
-  // The same interval also covers an embeddings backfill in progress
-  // (backfillRunning): unrelated to hasPending - a backfill is a
-  // library-wide background pass, not scoped to whichever folder happens to
-  // be open - but it wants the identical "poll every 3s, stop the instant
-  // there's nothing left to poll for" shape, so one timer serves both
-  // rather than running a second one alongside it.
+  // The same interval also covers embedding work in progress
+  // (embeddingsBusy): unrelated to hasPending - embedding is a library-wide
+  // background pass, not scoped to whichever folder happens to be open - but
+  // it wants the identical "poll every 3s, stop the instant there's nothing
+  // left to poll for" shape, so one timer serves both rather than running a
+  // second one alongside it. Busy is not just a running backfill: the
+  // automatic pass over already-consented documents has no flag of its own,
+  // it simply works through whatever chunks are outstanding, so a pending
+  // count above zero is the only signal there is that the row is about to
+  // change.
   const hasPending = documents.some((d) => d.status === 'pending')
   const backfillRunning = embeddingsStatus?.backfill.running ?? false
+  const embeddingsBusy =
+    backfillRunning || ((embeddingsStatus?.enabled ?? false) && (embeddingsStatus?.counts.chunks_pending ?? 0) > 0)
   useEffect(() => {
-    if (!hasPending && !backfillRunning) return
+    if (!hasPending && !embeddingsBusy) return
     const id = setInterval(() => {
       // Tags come back with the document: enrichment writes its suggested
       // ones as the document finishes, so the filter row has to follow the
       // same poll or it keeps showing the tags from before anything was
       // read.
       if (hasPending) { void refresh(); void refreshTags() }
-      if (backfillRunning) void refreshEmbeddingsStatus()
+      if (embeddingsBusy) void refreshEmbeddingsStatus()
     }, POLL_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [hasPending, backfillRunning, refresh, refreshTags, refreshEmbeddingsStatus])
+  }, [hasPending, embeddingsBusy, refresh, refreshTags, refreshEmbeddingsStatus])
 
   // Debouncing is the caller's job (documents-panel.tsx) - this just issues
   // one search per call. An empty/whitespace query clears results locally
