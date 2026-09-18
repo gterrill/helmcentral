@@ -17,7 +17,7 @@ reference material.
 What each feature does and its limits. Start here to see whether Helmcentral
 meets your needs.
 
-- [The dashboard](features/dashboard.md), widgets, gauges, embeds and pages.
+- [The dashboard](features/dashboard.md), instrument tiles, gauges, embeds and pages.
 - [Forecast](features/forecast.md), weather, wind, wave and tide, and the
   heavy-weather warning signs the wave graph watches for.
 - [Anchor watch](features/anchor-watch.md), including the rode planner.
