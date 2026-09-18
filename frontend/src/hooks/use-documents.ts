@@ -65,6 +65,53 @@ export interface DocumentTagCount {
   count: number
 }
 
+// documentEmbeddingCounts, backend/documents_store.go - a one-call snapshot
+// of how much of the chunk library is embedded under the currently
+// configured model, and how much backfill work (and rough OpenRouter spend,
+// via chars_pending) is left.
+export interface DocumentEmbeddingCounts {
+  chunks_total: number
+  chunks_embedded: number
+  chunks_stale: number
+  chunks_pending: number
+  chars_pending: number
+}
+
+// documentBackfillStatus, backend/documents_embed.go - chunks_embedded
+// counts only the CURRENT (or most recent) backfill run, not a lifetime
+// total. last_error is the most recent batch failure, if any: the backfill
+// keeps retrying rather than stopping, so its presence is a warning to
+// show beside the progress, not a reason to treat the run as failed.
+export interface DocumentBackfillStatus {
+  running: boolean
+  chunks_embedded: number
+  started_at: string
+  last_error?: string
+}
+
+// documentEmbeddingsStatusJSON, backend/documents_handlers.go -
+// GET /api/documents/embeddings. `enabled` is false whenever `problem` is
+// set, including the ordinary case of no embedding model configured at all
+// (the operator's own choice to run FTS5-only) - so a caller can branch on
+// `enabled` alone without inspecting `problem` for that case.
+export interface DocumentEmbeddingsStatus {
+  enabled: boolean
+  model: string
+  dimensions: number
+  problem?: string
+  counts: DocumentEmbeddingCounts
+  backfill: DocumentBackfillStatus
+}
+
+// documentEmbeddingsBackfillDryRunJSON, backend/documents_handlers.go -
+// POST .../backfill?dry_run=1. Starts nothing; tokens_estimate is
+// chars_pending/4, a rough scale-setting figure for the confirmation
+// dialog, not a price quote.
+export interface DocumentEmbeddingsBackfillDryRun {
+  counts: DocumentEmbeddingCounts
+  tokens_estimate: number
+}
+
 export interface ReindexOutcome {
   document: DocumentRecord
   enrich: boolean
@@ -121,6 +168,20 @@ export function useDocuments(folderId: string | null) {
   const [searchResults, setSearchResults] = useState<DocumentSearchResult[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+  // A search response's semantic_problem (backend/documents_search.go's
+  // hybridDocumentSearch, surfaced by listDocumentsHandler only when
+  // semantic search was configured and failed to run for THIS query - never
+  // when it's simply switched off) - a quiet, non-fatal companion to
+  // searchResults, not an error: the results themselves are complete,
+  // correct keyword hits. Cleared on the next successful search and on an
+  // explicit clearSearch(), same lifecycle as searchError.
+  const [semanticProblem, setSemanticProblem] = useState<string | null>(null)
+
+  // The library-wide (not folder-scoped) semantic-search/embeddings status -
+  // GET /api/documents/embeddings, ADR 0106 E1c. Loaded once on mount below,
+  // then kept fresh by the same pending-poll effect `hasPending` already
+  // uses (see that effect further down) while a backfill is running.
+  const [embeddingsStatus, setEmbeddingsStatus] = useState<DocumentEmbeddingsStatus | null>(null)
 
   // Ordering guards (review finding): refresh() and search() can each be
   // called again while a previous call of the same kind is still in
@@ -138,6 +199,10 @@ export function useDocuments(folderId: string | null) {
   // the same "does this call still matter" check.
   const refreshSeqRef = useRef(0)
   const searchSeqRef = useRef(0)
+  // Same idiom, for refreshEmbeddingsStatus() below: its poll tick and its
+  // own mount-time call can overlap the same way refresh()'s poll and a
+  // post-write refresh() can.
+  const embeddingsStatusSeqRef = useRef(0)
 
   // The folder-browse endpoint (path/subfolders, and - with no tag filter -
   // the documents directly in this folder) has no `tag` parameter of its
@@ -203,20 +268,60 @@ export function useDocuments(folderId: string | null) {
 
   useEffect(() => { void refreshTags() }, [refreshTags])
 
+  // A convenience overlay, not load-bearing - same reasoning as refreshTags
+  // just above: a failure here (offline, a 500) must not disturb the
+  // folder/search view it sits beside, so it fails silently rather than
+  // populating `error`. embeddingsStatus simply stays at whatever it last
+  // was (null on the very first failure, which renders the same as
+  // enabled:false - no status line at all).
+  const refreshEmbeddingsStatus = useCallback(async () => {
+    const seq = (embeddingsStatusSeqRef.current += 1)
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/documents/embeddings`)
+      if (!res.ok) return
+      const data = (await res.json()) as DocumentEmbeddingsStatus
+      // Same ordering guard as refresh()/search() above.
+      if (seq !== embeddingsStatusSeqRef.current) return
+      setEmbeddingsStatus(data)
+    } catch {
+      // See comment above the function.
+    }
+  }, [])
+
+  useEffect(() => { void refreshEmbeddingsStatus() }, [refreshEmbeddingsStatus])
+
   // Polls the whole folder view (not just search results) every 3s while
   // any document currently shown is `pending`, and stops the instant none
   // are - keyed on the derived boolean, not on `documents` itself, so a poll
   // response that leaves the pending count unchanged doesn't tear down and
   // restart the timer (mirrors use-document-uploads.ts's own hasPending gate).
+  //
+  // The same interval also covers embedding work in progress
+  // (embeddingsBusy): unrelated to hasPending - embedding is a library-wide
+  // background pass, not scoped to whichever folder happens to be open - but
+  // it wants the identical "poll every 3s, stop the instant there's nothing
+  // left to poll for" shape, so one timer serves both rather than running a
+  // second one alongside it. Busy is not just a running backfill: the
+  // automatic pass over already-consented documents has no flag of its own,
+  // it simply works through whatever chunks are outstanding, so a pending
+  // count above zero is the only signal there is that the row is about to
+  // change.
   const hasPending = documents.some((d) => d.status === 'pending')
+  const backfillRunning = embeddingsStatus?.backfill.running ?? false
+  const embeddingsBusy =
+    backfillRunning || ((embeddingsStatus?.enabled ?? false) && (embeddingsStatus?.counts.chunks_pending ?? 0) > 0)
   useEffect(() => {
-    if (!hasPending) return
-    // Tags come back with the document: enrichment writes its suggested ones
-    // as the document finishes, so the filter row has to follow the same poll
-    // or it keeps showing the tags from before anything was read.
-    const id = setInterval(() => { void refresh(); void refreshTags() }, POLL_INTERVAL_MS)
+    if (!hasPending && !embeddingsBusy) return
+    const id = setInterval(() => {
+      // Tags come back with the document: enrichment writes its suggested
+      // ones as the document finishes, so the filter row has to follow the
+      // same poll or it keeps showing the tags from before anything was
+      // read.
+      if (hasPending) { void refresh(); void refreshTags() }
+      if (embeddingsBusy) void refreshEmbeddingsStatus()
+    }, POLL_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [hasPending, refresh, refreshTags])
+  }, [hasPending, embeddingsBusy, refresh, refreshTags, refreshEmbeddingsStatus])
 
   // Debouncing is the caller's job (documents-panel.tsx) - this just issues
   // one search per call. An empty/whitespace query clears results locally
@@ -230,6 +335,7 @@ export function useDocuments(folderId: string | null) {
       searchSeqRef.current += 1
       setSearchResults(null)
       setSearchError(null)
+      setSemanticProblem(null)
       return
     }
     const seq = (searchSeqRef.current += 1)
@@ -241,7 +347,7 @@ export function useDocuments(folderId: string | null) {
       if (tag) params.set('tag', tag)
       const res = await fetch(`${apiBaseUrl}/api/documents?${params.toString()}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { results?: DocumentSearchResult[] }
+      const data = (await res.json()) as { results?: DocumentSearchResult[]; semantic_problem?: string }
 
       // Same ordering guard as refresh() above - an older search's
       // late-arriving result must not clobber a newer one's (or an
@@ -250,9 +356,17 @@ export function useDocuments(folderId: string | null) {
 
       setSearchResults(data.results ?? [])
       setSearchError(null)
+      // Present only when semantic search was configured and could not run
+      // for THIS query (a failed query embedding, a corrupt vector row) -
+      // absent, not empty-string, when semantic search is simply switched
+      // off (listDocumentsHandler, backend/documents_handlers.go), so a
+      // fresh successful search always overwrites whatever the previous one
+      // left here, clearing it the instant semantic search is healthy again.
+      setSemanticProblem(data.semantic_problem ?? null)
     } catch (err) {
       if (seq !== searchSeqRef.current) return
       setSearchError(err instanceof Error ? err.message : String(err))
+      setSemanticProblem(null)
     } finally {
       if (seq === searchSeqRef.current) setSearching(false)
     }
@@ -265,6 +379,7 @@ export function useDocuments(folderId: string | null) {
     searchSeqRef.current += 1
     setSearchResults(null)
     setSearchError(null)
+    setSemanticProblem(null)
   }, [])
 
   const createFolder = useCallback(async (name: string, parentId: string | null) => {
@@ -313,6 +428,38 @@ export function useDocuments(folderId: string | null) {
     await refresh()
   }, [refresh])
 
+  // Starts nothing - the dry run just reports what a real backfill would
+  // do, for the confirmation dialog (documents-panel.tsx) to show the
+  // operator before any text actually goes to OpenRouter. Goes through
+  // submitJSON like every other write here, so a readiness failure (a
+  // broken settings file, a secrets-store read error - the one way this
+  // particular call can fail; the handler itself starts no work either way)
+  // surfaces as the server's own message rather than a generic one.
+  const dryRunEmbeddingsBackfill = useCallback(async () => {
+    return submitJSON<DocumentEmbeddingsBackfillDryRun>(`${apiBaseUrl}/api/documents/embeddings/backfill?dry_run=1`, 'POST')
+  }, [])
+
+  // The real thing - POSTs with no ?dry_run, which is itself the operator's
+  // consent for whatever text is currently unembedded to reach OpenRouter
+  // (documents_embed.go's own comment on StartBackfill). Deliberately does
+  // NOT go through submitJSON: a 409 ("a backfill is already running") is
+  // not a failure the operator caused by clicking the button - it means the
+  // exact state they wanted (a backfill in progress) already holds, so its
+  // response is folded into embeddingsStatus the same as a plain 200 rather
+  // than thrown as an error. Any other non-2xx (400 semantic search off,
+  // 500) still throws the server's own message.
+  const startEmbeddingsBackfill = useCallback(async () => {
+    const response = await fetch(`${apiBaseUrl}/api/documents/embeddings/backfill`, { method: 'POST' })
+    const body = (await response.json().catch(() => ({}))) as { error?: string; backfill?: DocumentBackfillStatus }
+    if (!response.ok && response.status !== 409) {
+      throw new Error(body.error ?? `HTTP ${response.status}`)
+    }
+    if (body.backfill) {
+      const backfill = body.backfill
+      setEmbeddingsStatus((prev) => (prev ? { ...prev, backfill } : prev))
+    }
+  }, [])
+
   return {
     path,
     folders,
@@ -328,8 +475,13 @@ export function useDocuments(folderId: string | null) {
     searchResults,
     searching,
     searchError,
+    semanticProblem,
     search,
     clearSearch,
+
+    embeddingsStatus,
+    dryRunEmbeddingsBackfill,
+    startEmbeddingsBackfill,
 
     createFolder,
     renameFolder,

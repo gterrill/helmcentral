@@ -46,7 +46,9 @@ Settings → Assistant, separate from the model that answers your questions
 and defaulting to a fast, inexpensive one. A document uploaded while Mate
 was switched off is never sent anywhere later on its own: turning Mate on
 afterwards doesn't reach back and enrich what's already in the library. Only
-a document uploaded (or reindexed) while Mate is on ever leaves the boat.
+a document uploaded (or reindexed) while Mate is on ever leaves the boat -
+or one you explicitly index for semantic search, which is the same bargain
+made deliberately rather than at upload time. See Searching, below.
 
 ## Folders, tags, notes and title
 
@@ -82,6 +84,47 @@ default - are accepted and stored, but not read; convert to JPEG first if
 you want Mate to see what's in one. Any other file type is still accepted,
 stored, and downloadable later; it's simply not indexed, since there's no
 text in it to search and nothing for Mate to read.
+
+## Searching: words, and meaning
+
+The search box always searches words. Type a part number, a boat name or an
+invoice number and it finds the documents containing it, instantly, with no
+connection and no account. Titles, filenames, folder paths, tags, summaries
+and notes are searched alongside the document's own text, so a receipt filed
+under `Receipts/2026` and tagged `engine` is findable by any of those.
+
+With Mate on, search also works by meaning. Ask "how often should I service
+the engine's cooling system impeller" and the manual page that says "raw
+water pump: inspect the rubber vanes... replace every 500 hours" comes back,
+even though the two share no useful word. Both searches run, and the results
+are merged: a document both agree on ranks above one only a single side
+found.
+
+This needs each document's text to have been turned into vectors first, which
+happens automatically in the background for anything uploaded while Mate is
+on. Anything already in the library from before waits for you. When there is
+something unindexed, the panel's toolbar says so and offers **Index for
+semantic search**, and the confirmation tells you how many chunks and roughly
+how many tokens are about to be sent to OpenRouter and billed. It runs in the
+background from there, and the same line shows progress. Stopping it is a
+restart; starting again picks up where it left off, so nothing is ever paid
+for twice.
+
+The cost is genuinely small. Embeddings bill around $0.02 per million tokens,
+which works out to fractions of a cent for a whole library, and a search's own
+query costs about two hundredths of a cent - less if you have searched the
+same thing recently, since queries are cached.
+
+If the meaning half of a search can't run - no connection, OpenRouter down -
+the search still answers with its word results and says **Showing keyword
+results only** above them, with the reason. Nothing is silently missing. If
+you have no embedding model configured at all, semantic search is simply off
+and the panel says nothing about it.
+
+The model is `assistant.embedding_model` in settings, alongside
+`assistant.document_model`. Blank turns semantic search off entirely and
+leaves word search as the library's only retriever. See
+[Configuration](../reference/configuration.md).
 
 ## Status and Reindex
 

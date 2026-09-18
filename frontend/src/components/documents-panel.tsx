@@ -61,6 +61,8 @@ import { apiBaseUrl } from '@/config/api'
 import { NO_ATTACHMENT_CAP, useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
 import {
   useDocuments,
+  type DocumentEmbeddingsBackfillDryRun,
+  type DocumentEmbeddingsStatus,
   type DocumentFolder,
   type DocumentRecord,
   type DocumentSearchResult,
@@ -425,6 +427,27 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
     })
   }
 
+  // ── embeddings backfill ("Index for semantic search") ──────────────
+  // ADR 0106 E1c's consent gate: clicking the row's button first runs the
+  // dry run (starts nothing, just reports what a real backfill would send)
+  // and holds its result here to drive the confirmation dialog below -
+  // Cancel (onOpenChange(false)) clears it with no POST ever made; only
+  // Confirm calls startEmbeddingsBackfill, which is the operator's actual
+  // consent for that text to reach OpenRouter.
+  const [backfillDryRun, setBackfillDryRun] = useState<DocumentEmbeddingsBackfillDryRun | null>(null)
+  const handleIndexClick = () => {
+    void runAction(async () => {
+      const dryRun = await documents.dryRunEmbeddingsBackfill()
+      setBackfillDryRun(dryRun)
+    })
+  }
+  const submitBackfill = async () => {
+    await runAction(async () => {
+      await documents.startEmbeddingsBackfill()
+      setBackfillDryRun(null)
+    })
+  }
+
   // ── viewer ───────────────────────────────────────────────────────────
   const [viewerId, setViewerId] = useState<string | null>(initialDocumentId)
   const [viewerDoc, setViewerDoc] = useState<DocumentRecord | null>(null)
@@ -606,6 +629,7 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
             ))}
           </ToggleGroup>
         )}
+        <EmbeddingsStatusRow status={documents.embeddingsStatus} onIndexClick={handleIndexClick} />
       </div>
 
       {uploads.items.length > 0 && (
@@ -665,13 +689,20 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
         onDrop={handleDrop}
       >
         {searching ? (
-          <SearchResultsTable
-            results={documents.searchResults ?? []}
-            searching={documents.searching}
-            searchError={documents.searchError}
-            onOpen={setViewerId}
-            folderLabelFor={folderLabelFor}
-          />
+          <>
+            {documents.semanticProblem && (
+              <p className="border-b border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+                Showing keyword results only. {documents.semanticProblem}
+              </p>
+            )}
+            <SearchResultsTable
+              results={documents.searchResults ?? []}
+              searching={documents.searching}
+              searchError={documents.searchError}
+              onOpen={setViewerId}
+              folderLabelFor={folderLabelFor}
+            />
+          </>
         ) : (
           <Table>
             <TableHeader>
@@ -884,6 +915,25 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── Index for semantic search (embeddings backfill) confirmation ── */}
+      <AlertDialog open={backfillDryRun !== null} onOpenChange={(open) => { if (!open) setBackfillDryRun(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Index for semantic search?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This sends the text of {backfillDryRun?.counts.chunks_pending ?? 0}{' '}
+              {backfillDryRun?.counts.chunks_pending === 1 ? 'pending chunk' : 'pending chunks'} (about{' '}
+              {backfillDryRun?.tokens_estimate ?? 0} tokens) to OpenRouter, which bills for it.
+              Keyword search keeps working either way.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { void submitBackfill() }}>Index</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* ── Viewer ─────────────────────────────────────────────────── */}
       <Sheet open={viewerId !== null} onOpenChange={(open) => { if (!open) setViewerId(null) }}>
         <SheetContent side="right" className="w-full sm:max-w-2xl">
@@ -913,6 +963,54 @@ export function DocumentsPanel({ initialFolderId = null, onFolderChange, initial
           </div>
         </SheetContent>
       </Sheet>
+    </div>
+  )
+}
+
+// ADR 0106 E1c's status row: library-wide, not folder-scoped, so it sits in
+// the toolbar rather than inside the folder/search view below it. Renders
+// nothing at all - not even an empty wrapper - while the status hasn't
+// loaded yet or semantic search is simply off (`enabled:false`, e.g. no
+// embedding model configured): an operator who never turned this on should
+// see no permanent nag about it. `active` (something still needs
+// embedding, or a backfill is already running) is what separates the quiet
+// "up to date" line from the count-plus-button state; the two states never
+// need a shared wrapper since a caller only ever sees one at a time.
+function EmbeddingsStatusRow({
+  status,
+  onIndexClick,
+}: {
+  status: DocumentEmbeddingsStatus | null
+  onIndexClick: () => void
+}) {
+  if (!status || !status.enabled) return null
+  const { counts, backfill } = status
+  const active = backfill.running || counts.chunks_pending > 0
+
+  if (!active) {
+    return (
+      <span data-testid="documents-embeddings-status" className="ml-auto text-xs text-muted-foreground">
+        Semantic search up to date.
+      </span>
+    )
+  }
+
+  return (
+    <div data-testid="documents-embeddings-status" className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {backfill.running && <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />}
+      <span>
+        {backfill.running
+          ? `Indexing for semantic search… ${backfill.chunks_embedded} embedded this run, ${counts.chunks_pending} left`
+          : `${counts.chunks_pending} chunk${counts.chunks_pending === 1 ? '' : 's'} not yet searchable by meaning`}
+      </span>
+      <Button type="button" size="sm" variant="outline" disabled={backfill.running} onClick={onIndexClick}>
+        Index for semantic search
+      </Button>
+      {backfill.last_error && (
+        <span className="rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-amber-600 dark:text-amber-400">
+          {backfill.last_error}
+        </span>
+      )}
     </div>
   )
 }

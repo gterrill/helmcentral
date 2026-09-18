@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -1042,5 +1043,123 @@ func TestDocumentIndexer_UnreadableDocumentModelSettingFailsWithoutACall(t *test
 	}
 	if len(doer.requests) != 0 {
 		t.Fatalf("expected no OpenRouter call, got %d", len(doer.requests))
+	}
+}
+
+// ── Run's two-tier queue (E1c) ───────────────────────────────────────────
+
+// TestDocumentIndexer_RunProcessesPendingDocumentsBeforeEmbedding pins Run's
+// ordering contract: processOne (indexing) always runs before
+// processEmbedBatch (embedding) within one iteration, so a document nobody
+// can find by keyword yet is never left waiting behind embedding work. It
+// seeds one pending document that needs the paid enrich stage's own HTTP
+// call (so its own request is distinguishable from an embeddings request by
+// URL) alongside a separate, already-indexed document whose chunk is
+// pending embedding under the automatic (enrich=1) pass, queues one fake
+// response for each call in order, and lets Run make both calls - then
+// checks the FIRST request Run ever made was the chat completion, not the
+// embeddings call.
+func TestDocumentIndexer_RunProcessesPendingDocumentsBeforeEmbedding(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+
+	// A pending document that needs the enrich stage's own chat-completion
+	// call (two_page.pdf's real text layer takes the no-OCR-fee text
+	// branch - see TestDocumentIndexer_ResumedAtEnrichStageSkipsReExtraction
+	// above for the same reasoning).
+	pendingDoc := seedTestDocumentFile(t, store, dir, testdataPath("two_page.pdf"), "manual.pdf", "application/pdf", true)
+
+	// A separate, already-indexed document whose chunk still needs an
+	// embedding - eligible for the automatic pass (enrich=1).
+	embedDoc, err := store.Insert(document{SHA256: "sha-run-order-embed", Filename: "already-indexed.pdf", MIME: "application/pdf", Enrich: true})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := store.ReplaceChunks(embedDoc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Impeller replacement on the Yanmar 4JH."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	if err := store.SetIndexed(embedDoc.ID, "local"); err != nil {
+		t.Fatalf("SetIndexed: %v", err)
+	}
+
+	enrichBody, err := os.ReadFile("testdata/openrouter_document_pdf.json")
+	if err != nil {
+		t.Fatalf("read enrich fixture: %v", err)
+	}
+	// This test only cares about ORDERING - which call Run makes first -
+	// not about the embed batch actually succeeding, so the vector count
+	// here doesn't need to match the real pending count (which, once
+	// pendingDoc's own enrich finishes, includes its own newly-enriched
+	// chunks too - it's enrich=1 like embedDoc). A mismatch just makes
+	// openRouterEmbeddings itself return an error client-side, still after
+	// exactly one HTTP round trip, which is all the assertions below check.
+	embedBody, err := json.Marshal(openRouterEmbeddingsResponse{
+		Data: []openRouterEmbeddingData{
+			{Index: 0, Embedding: []float32{1, 0, 0, 0}},
+			{Index: 1, Embedding: []float32{0, 1, 0, 0}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal embed response: %v", err)
+	}
+
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{
+		openRouterFakeResponse(200, string(enrichBody)),
+		openRouterFakeResponse(200, string(embedBody)),
+	}}
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.doer = doer
+	idx.readiness = func() (assistantReadiness, string, error) {
+		return assistantReadiness{
+			Enabled: true, Configured: true, Model: "m",
+			DocumentModel:       "google/gemini-2.5-flash",
+			EmbeddingModel:      "test-embed-model",
+			EmbeddingDimensions: 4,
+		}, "sk-test", nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		idx.Run(ctx)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if len(doer.requests) >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for both HTTP calls; got %d", len(doer.requests))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Run did not return after ctx was cancelled")
+	}
+
+	if len(doer.requests) < 2 {
+		t.Fatalf("expected at least 2 HTTP calls, got %d", len(doer.requests))
+	}
+	if doer.requests[0].URL.String() != openRouterChatCompletionsURL {
+		t.Fatalf("expected the first call Run made to be the pending document's own enrich call, got %s", doer.requests[0].URL.String())
+	}
+	if doer.requests[1].URL.String() != openRouterEmbeddingsURL {
+		t.Fatalf("expected the second call Run made to be the embeddings call, got %s", doer.requests[1].URL.String())
+	}
+
+	gotPending, err := store.Get(pendingDoc.ID)
+	if err != nil {
+		t.Fatalf("Get(pendingDoc): %v", err)
+	}
+	if gotPending.Status != "indexed" {
+		t.Fatalf("expected the pending document to finish indexed, got %q", gotPending.Status)
 	}
 }

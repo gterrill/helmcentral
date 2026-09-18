@@ -386,6 +386,13 @@ func main() {
 		},
 	)
 	documentIndexerWake = docIndexer.Wake
+	// documentIndexerStartBackfill/documentIndexerBackfillStatus
+	// (documents_handlers.go, E1c) connect POST
+	// /api/documents/embeddings/backfill and GET /api/documents/embeddings
+	// to this same indexer's backfill state - the same wiring as
+	// documentIndexerWake immediately above.
+	documentIndexerStartBackfill = docIndexer.StartBackfill
+	documentIndexerBackfillStatus = docIndexer.BackfillStatus
 
 	// The assistant's read_manual tool (mate-voice-assistant plan, "App-wide
 	// voice"): docs/features, docs/how-to and docs/reference staged into
@@ -692,6 +699,9 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// by "GET /api/documents/:id" either way.
 		{http.MethodGet, "/api/documents", tierRead, listDocumentsHandler},
 		{http.MethodGet, "/api/documents/tags", tierRead, documentTagsHandler},
+		// E1c: semantic-search status. Also a static segment ahead of
+		// "/:id" for the same reason "tags" is - see the comment above.
+		{http.MethodGet, "/api/documents/embeddings", tierRead, documentsEmbeddingsStatusHandler},
 		{http.MethodGet, "/api/documents/:id", tierRead, getDocumentHandler},
 		{http.MethodGet, "/api/documents/:id/content", tierRead, documentContentHandler},
 		{http.MethodGet, "/api/documents/:id/text", tierRead, documentTextHandler},
@@ -758,6 +768,10 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// above on why Echo's router never needs that ordering.
 		{http.MethodPost, "/api/documents", tierWrite, uploadDocumentHandler},
 		{http.MethodPost, "/api/documents/move", tierWrite, moveDocumentsHandler},
+		// E1c: starts (or dry-runs) the operator's explicit embeddings
+		// backfill. Static segment ahead of "/:id", same reasoning as
+		// "move" above.
+		{http.MethodPost, "/api/documents/embeddings/backfill", tierWrite, documentsEmbeddingsBackfillHandler},
 		{http.MethodPatch, "/api/documents/:id", tierWrite, patchDocumentHandler},
 		{http.MethodDelete, "/api/documents/:id", tierWrite, deleteDocumentHandler},
 		{http.MethodPost, "/api/documents/:id/reindex", tierWrite, reindexDocumentHandler},

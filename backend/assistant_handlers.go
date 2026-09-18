@@ -84,7 +84,17 @@ type assistantReadiness struct {
 	// enforces it, for the document upload/reindex handlers and the
 	// indexer's enrich stage only.
 	DocumentModel string `json:"document_model"`
-	Problem       string `json:"problem,omitempty"`
+	// EmbeddingModel and EmbeddingDimensions are assistant.embedding_model/
+	// embedding_dimensions (E1b): the document library's semantic-search
+	// settings, read here for the same reason DocumentModel is - so a
+	// document-search caller doesn't have to re-read settings on its own.
+	// Like DocumentModel, they play no part in Problem below: chat must
+	// stay ready regardless of whether semantic search is configured, and a
+	// blank embedding model is document search's own concern to report, not
+	// chat's.
+	EmbeddingModel      string `json:"embedding_model"`
+	EmbeddingDimensions int    `json:"embedding_dimensions"`
+	Problem             string `json:"problem,omitempty"`
 }
 
 const openRouterModelsListURL = "https://openrouter.ai/api/v1/models"
@@ -123,9 +133,11 @@ func checkAssistantReadiness(settingsPath string) (assistantReadiness, string, e
 	payload := buildSettingsPayload(settings)
 
 	readiness := assistantReadiness{
-		Enabled:       payload.Assistant.Enabled,
-		Model:         payload.Assistant.Model,
-		DocumentModel: payload.Assistant.DocumentModel,
+		Enabled:             payload.Assistant.Enabled,
+		Model:               payload.Assistant.Model,
+		DocumentModel:       payload.Assistant.DocumentModel,
+		EmbeddingModel:      payload.Assistant.EmbeddingModel,
+		EmbeddingDimensions: payload.Assistant.EmbeddingDimensions,
 	}
 
 	apiKey, ok, err := globalSecretsStore.Get("OPENROUTER_API_KEY")

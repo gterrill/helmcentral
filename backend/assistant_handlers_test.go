@@ -353,6 +353,68 @@ func TestCheckAssistantReadiness_BlankDocumentModelDoesNotBlockChat(t *testing.T
 	}
 }
 
+// TestCheckAssistantReadiness_ReportsEmbeddingSettings mirrors
+// TestCheckAssistantReadiness_BlankDocumentModelDoesNotBlockChat's fixture
+// style for assistant.embedding_model/embedding_dimensions (E1b): both must
+// come back on the readiness struct so a document-search caller can read
+// them from the same settings read checkAssistantReadiness already did,
+// without a second readSettings call of its own.
+func TestCheckAssistantReadiness_ReportsEmbeddingSettings(t *testing.T) {
+	store := withTestSecretsStore(t)
+	if err := store.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.yaml")
+	body := "assistant:\n    enabled: true\n    model: \"openai/gpt-4o\"\n    embedding_model: \"openai/text-embedding-3-large\"\n    embedding_dimensions: 1024\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write settings fixture: %v", err)
+	}
+
+	readiness, _, err := checkAssistantReadiness(path)
+	if err != nil {
+		t.Fatalf("checkAssistantReadiness: %v", err)
+	}
+	if readiness.EmbeddingModel != "openai/text-embedding-3-large" {
+		t.Fatalf("expected the embedding model to be echoed, got %q", readiness.EmbeddingModel)
+	}
+	if readiness.EmbeddingDimensions != 1024 {
+		t.Fatalf("expected the embedding dimensions to be echoed, got %d", readiness.EmbeddingDimensions)
+	}
+}
+
+// TestCheckAssistantReadiness_BlankEmbeddingModelDoesNotBlockChat mirrors
+// TestCheckAssistantReadiness_BlankDocumentModelDoesNotBlockChat: a blank
+// assistant.embedding_model turns semantic search off (the settings doc
+// comment), a document-search concern, and must never make chat itself
+// report not-ready.
+func TestCheckAssistantReadiness_BlankEmbeddingModelDoesNotBlockChat(t *testing.T) {
+	store := withTestSecretsStore(t)
+	if err := store.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.yaml")
+	body := "assistant:\n    enabled: true\n    model: \"openai/gpt-4o\"\n    embedding_model: \"\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write settings fixture: %v", err)
+	}
+
+	readiness, apiKey, err := checkAssistantReadiness(path)
+	if err != nil {
+		t.Fatalf("checkAssistantReadiness: %v", err)
+	}
+	if readiness.Problem != "" {
+		t.Fatalf("expected chat readiness to stay ready despite a blank embedding model, got problem %q", readiness.Problem)
+	}
+	if apiKey == "" {
+		t.Fatalf("expected the api key to be returned once chat itself is ready")
+	}
+	if readiness.EmbeddingModel != "" {
+		t.Fatalf("expected the blank embedding model to surface as blank, got %q", readiness.EmbeddingModel)
+	}
+}
+
 func TestAssistantStatusHandler_AllSetIsReadyWithEchoedModel(t *testing.T) {
 	store := withTestSecretsStore(t)
 	if err := store.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {

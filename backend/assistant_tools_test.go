@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -1349,6 +1350,64 @@ func TestExecuteSearchDocuments_ReturnsShapeWithFolderPathAndCleanSnippet(t *tes
 	}
 	if !strings.Contains(hit.Snippet, "impeller") {
 		t.Fatalf("expected the snippet to contain the matched word, got %q", hit.Snippet)
+	}
+}
+
+// TestExecuteSearchDocuments_SemanticallyConfiguredFindsVectorOnlyDocument
+// is search_documents' own coverage of E1d (documents_hybrid.go): once
+// documentSearchReadiness is wired (assistantProductionToolDeps' own wiring,
+// checkAssistantReadiness under the hood), the tool finds a document only
+// its stored vector matches - the same "a model asking about the marine
+// supplies receipt" case the brief gives for why this tool is worth routing
+// through hybridDocumentSearch at all - while still returning its
+// pre-existing result shape (no mode/semantic_problem field, per
+// search_documents' own spec). executeSearchDocuments never sets
+// documentSearchParams.Doer itself, so hybridDocumentSearch's
+// cachedQueryEmbedding falls back to the package-level openRouterHTTPClient -
+// swapped here for the fake, the same idiom
+// documents_handlers_test.go's withTestOpenRouterHTTPClient uses for the
+// HTTP handler's own equivalent test.
+func TestExecuteSearchDocuments_SemanticallyConfiguredFindsVectorOnlyDocument(t *testing.T) {
+	resetDocumentQueryEmbedCache(t)
+	deps, store := documentToolDeps(t)
+	const model = "openai/text-embedding-3-small"
+	const dims = 4
+
+	keywordHit := insertSearchableDocument(t, store, "sha-tool-kw", "receipt.pdf", nil, "Whitsunday Marine Supplies receipt AUD 205.45")
+	vectorOnly := insertSearchableDocument(t, store, "sha-tool-vec", "notes.txt", nil, "paid at the chandlery on the way south")
+
+	queryVec := []float32{1, 2, 3, 4}
+	embedDocChunk(t, store, vectorOnly.ID, model, dims, queryVec)
+
+	doer := &fakeOpenRouterDoer{responses: []*http.Response{queryEmbeddingResponse(t, queryVec)}}
+	prevDoer := openRouterHTTPClient
+	openRouterHTTPClient = doer
+	t.Cleanup(func() { openRouterHTTPClient = prevDoer })
+	deps.documentSearchReadiness = hybridTestReadiness(model, dims)
+
+	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"receipt"}`))
+	if err != nil {
+		t.Fatalf("execute search_documents: %v", err)
+	}
+	var result assistantSearchDocumentsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v (raw: %s)", err, raw)
+	}
+	ids := map[string]bool{}
+	for _, r := range result.Results {
+		ids[r.DocumentID] = true
+	}
+	if !ids[keywordHit.ID] {
+		t.Fatalf("expected the keyword hit present, got %+v", result.Results)
+	}
+	if !ids[vectorOnly.ID] {
+		t.Fatalf("expected the vector-only hit (no shared keyword with %q) present, got %+v", "receipt", result.Results)
+	}
+	if strings.Contains(raw, `"mode"`) || strings.Contains(raw, `"semantic_problem"`) {
+		t.Fatalf("expected search_documents' own result shape to carry neither mode nor semantic_problem, got %s", raw)
+	}
+	if len(doer.requests) != 1 {
+		t.Fatalf("expected exactly one embeddings request, got %d", len(doer.requests))
 	}
 }
 

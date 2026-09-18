@@ -155,6 +155,15 @@ configuration:
 
 - `enabled`
 - `model`
+- `document_model` (separate model the document library's indexer uses for
+  OCR and suggested title/summary/tags; blank falls back to a default)
+- `embedding_model` (separate model the document library's indexer uses for
+  semantic search, vectorising every chunk of a consented document; blank
+  turns semantic search off entirely, leaving keyword search as the
+  library's only retriever)
+- `embedding_dimensions` (vector length requested from `embedding_model`;
+  `0` or a negative value falls back to a default, and anything above 4096
+  is capped there)
 - `notes`
 - `allowed_models` (list of model patterns for OpenRouter Auto)
 - `excluded_models` (list of model ids to block for OpenRouter Auto)

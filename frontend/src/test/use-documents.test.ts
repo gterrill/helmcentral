@@ -47,6 +47,22 @@ function docPayload(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// Defaults to semantic search switched off (no embedding model configured) -
+// the harmless, no-op default for every test below that isn't specifically
+// about embeddings: `enabled: false` never arms the backfill poll (E1e),
+// same as a real operator who hasn't set one up.
+function embeddingsStatusPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    enabled: false,
+    model: '',
+    dimensions: 0,
+    problem: 'No embedding model is configured. Set one in Settings → Assistant.',
+    counts: { chunks_total: 0, chunks_embedded: 0, chunks_stale: 0, chunks_pending: 0, chars_pending: 0 },
+    backfill: { running: false, chunks_embedded: 0, started_at: '' },
+    ...overrides,
+  }
+}
+
 /** Routes a fetch mock by exact pathname + method, recording every call
  * (queryable by callFor) so assertions can inspect query params without
  * caring what order the hook happens to issue its other requests in. */
@@ -84,6 +100,7 @@ describe('useDocuments', () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload({ documents: [docPayload({ status: 'indexed' })] })),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
     })
     vi.stubGlobal('fetch', fn)
 
@@ -101,6 +118,7 @@ describe('useDocuments', () => {
         return ok(folderPayload({ path: [{ id: 'f1', name: 'Manuals', parent_id: null }] }))
       },
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
     })
     vi.stubGlobal('fetch', fn)
 
@@ -114,6 +132,7 @@ describe('useDocuments', () => {
     const { fn } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([{ tag: 'engine', count: 3 }]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
     })
     vi.stubGlobal('fetch', fn)
 
@@ -126,6 +145,7 @@ describe('useDocuments', () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'GET /api/documents': (url) => {
         expect(url.searchParams.get('q')).toBe('impeller')
         expect(url.searchParams.get('recursive')).toBe('true')
@@ -151,6 +171,7 @@ describe('useDocuments', () => {
     const { fn } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'GET /api/documents': (url) => {
         expect(url.searchParams.get('folder')).toBe('root')
         return ok({ results: [] })
@@ -170,6 +191,7 @@ describe('useDocuments', () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'GET /api/documents': () => ok({ results: [] }),
     })
     vi.stubGlobal('fetch', fn)
@@ -194,6 +216,7 @@ describe('useDocuments', () => {
     const { fn } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload({ documents: [docPayload({ id: 'doc-unfiltered' })] })),
       'GET /api/documents/tags': () => ok([{ tag: 'engine', count: 1 }]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'GET /api/documents': (url) => {
         expect(url.searchParams.get('tag')).toBe('engine')
         expect(url.searchParams.get('folder')).toBe('root')
@@ -219,6 +242,7 @@ describe('useDocuments', () => {
       'GET /api/document-folders': () =>
         ok(folderPayload({ documents: [docPayload({ status: indexed ? 'indexed' : 'pending' })] })),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
     })
     vi.stubGlobal('fetch', fn)
 
@@ -254,6 +278,7 @@ describe('useDocuments', () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'PATCH /api/documents/doc-1': () => ok(docPayload({ title: 'Impeller kit' })),
     })
     vi.stubGlobal('fetch', fn)
@@ -275,6 +300,7 @@ describe('useDocuments', () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'DELETE /api/documents/doc-1': () => ({ ok: true, status: 204, json: async () => ({}) }),
     })
     vi.stubGlobal('fetch', fn)
@@ -293,6 +319,7 @@ describe('useDocuments', () => {
     const { fn } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'POST /api/documents/doc-1/reindex': () => ok({ document: docPayload({ status: 'pending' }), enrich: false, problem: 'Set up the assistant in Settings.' }),
     })
     vi.stubGlobal('fetch', fn)
@@ -312,6 +339,7 @@ describe('useDocuments', () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'POST /api/documents/move': () => ({ ok: true, status: 204, json: async () => ({}) }),
     })
     vi.stubGlobal('fetch', fn)
@@ -331,6 +359,7 @@ describe('useDocuments', () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'POST /api/document-folders': () => ok({ id: 'f2', name: 'Receipts', parent_id: null }, 201),
     })
     vi.stubGlobal('fetch', fn)
@@ -352,6 +381,7 @@ describe('useDocuments', () => {
     const { fn, calls } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'PATCH /api/document-folders/f1': () => ok({ id: 'f1', name: 'Engine manuals', parent_id: null }),
     })
     vi.stubGlobal('fetch', fn)
@@ -374,6 +404,7 @@ describe('useDocuments', () => {
     const { fn } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'DELETE /api/document-folders/f1': () => failed(409, 'folder is not empty'),
     })
     vi.stubGlobal('fetch', fn)
@@ -388,6 +419,7 @@ describe('useDocuments', () => {
     const { fn } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'PATCH /api/document-folders/f1': () => failed(409, 'folder move would create a cycle'),
     })
     vi.stubGlobal('fetch', fn)
@@ -415,6 +447,7 @@ describe('useDocuments', () => {
         return ok(folderPayload())
       },
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
     })
     vi.stubGlobal('fetch', fn)
 
@@ -442,6 +475,7 @@ describe('useDocuments', () => {
     const { fn } = routedFetch({
       'GET /api/document-folders': () => ok(folderPayload()),
       'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
       'GET /api/documents': () => {
         call += 1
         if (call === 1) return new Promise((resolve) => { resolveFirst = resolve })
@@ -483,6 +517,7 @@ describe('useDocuments', () => {
         ok(folderPayload({ documents: [docPayload({ status: indexed ? 'indexed' : 'pending' })] })),
       'GET /api/documents/tags': () =>
         ok(indexed ? [{ tag: 'Receipt', count: 1 }, { tag: 'Johnson', count: 1 }] : [{ tag: 'Receipt', count: 1 }]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
     })
     vi.stubGlobal('fetch', fn)
 
@@ -498,6 +533,301 @@ describe('useDocuments', () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
     expect(result.current.tags.map((t) => t.tag)).toEqual(['Receipt', 'Johnson'])
+  })
+
+  // ── embeddings status and backfill (E1e) ─────────────────────────────
+
+  it('loads the embeddings status on mount', async () => {
+    const { fn } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({
+        enabled: true,
+        model: 'openai/text-embedding-3-small',
+        dimensions: 512,
+        problem: undefined,
+        counts: { chunks_total: 10, chunks_embedded: 4, chunks_stale: 0, chunks_pending: 6, chars_pending: 2400 },
+      })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocuments(null))
+
+    await waitFor(() => expect(result.current.embeddingsStatus?.enabled).toBe(true))
+    expect(result.current.embeddingsStatus).toMatchObject({
+      model: 'openai/text-embedding-3-small',
+      dimensions: 512,
+      counts: { chunks_pending: 6 },
+    })
+  })
+
+  it('a search response\'s semantic_problem is exposed, and clears on the next successful search', async () => {
+    let carrySemanticProblem = true
+    const { fn } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
+      'GET /api/documents': () => ok({
+        results: [],
+        ...(carrySemanticProblem ? { semantic_problem: 'embedding the query failed: rate limited' } : {}),
+      }),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocuments(null))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => { await result.current.search('impeller') })
+    expect(result.current.semanticProblem).toBe('embedding the query failed: rate limited')
+
+    carrySemanticProblem = false
+    await act(async () => { await result.current.search('bilge pump') })
+    expect(result.current.semanticProblem).toBeNull()
+  })
+
+  it('dryRunEmbeddingsBackfill sends dry_run=1 and starts nothing', async () => {
+    const { fn, calls } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
+      'POST /api/documents/embeddings/backfill': (url) => {
+        expect(url.searchParams.get('dry_run')).toBe('1')
+        return ok({
+          counts: { chunks_total: 10, chunks_embedded: 4, chunks_stale: 0, chunks_pending: 6, chars_pending: 2400 },
+          tokens_estimate: 600,
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocuments(null))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let dryRun
+    await act(async () => {
+      dryRun = await result.current.dryRunEmbeddingsBackfill()
+    })
+
+    expect(dryRun).toEqual({
+      counts: { chunks_total: 10, chunks_embedded: 4, chunks_stale: 0, chunks_pending: 6, chars_pending: 2400 },
+      tokens_estimate: 600,
+    })
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
+  })
+
+  it('startEmbeddingsBackfill POSTs with no dry_run and folds the returned backfill status in', async () => {
+    const { fn, calls } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({ enabled: true })),
+      'POST /api/documents/embeddings/backfill': (url) => {
+        expect(url.searchParams.get('dry_run')).toBeNull()
+        return ok({ backfill: { running: true, chunks_embedded: 0, started_at: '2026-09-18T00:00:00Z' } })
+      },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocuments(null))
+    await waitFor(() => expect(result.current.embeddingsStatus?.enabled).toBe(true))
+
+    await act(async () => { await result.current.startEmbeddingsBackfill() })
+
+    expect(result.current.embeddingsStatus?.backfill.running).toBe(true)
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/documents/embeddings/backfill')).toBe(true)
+  })
+
+  // AGENTS.md fallback policy would normally say "surface the server's own
+  // error verbatim" - but a 409 here means a backfill is ALREADY running,
+  // which is exactly the state the operator asked for by clicking the
+  // button (documents_embed.go's StartBackfill), not a failure they caused.
+  // Folding its status in, rather than throwing, is the deliberate
+  // exception: see startEmbeddingsBackfill's own comment.
+  it('a 409 (already running) is folded into embeddingsStatus rather than thrown as an error', async () => {
+    // The 409 fixture carries `backfill` alongside `error`, the way the real
+    // handler's 409 response does (documentsEmbeddingsBackfillHandler,
+    // backend/documents_handlers.go) - startEmbeddingsBackfill reads it off
+    // the same parsed JSON regardless of response.ok.
+    const { fn } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({ enabled: true })),
+      'POST /api/documents/embeddings/backfill': () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: 'a backfill is already running',
+          backfill: { running: true, chunks_embedded: 3, started_at: '2026-09-18T00:00:00Z' },
+        }),
+      }),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocuments(null))
+    await waitFor(() => expect(result.current.embeddingsStatus?.enabled).toBe(true))
+
+    await act(async () => { await result.current.startEmbeddingsBackfill() })
+
+    expect(result.current.embeddingsStatus?.backfill).toMatchObject({ running: true, chunks_embedded: 3 })
+  })
+
+  it('rejects with the server message on a non-409 backfill failure (e.g. semantic search off)', async () => {
+    const { fn } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload()),
+      'POST /api/documents/embeddings/backfill': () => failed(400, 'No embedding model is configured. Set one in Settings → Assistant.'),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useDocuments(null))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await expect(result.current.startEmbeddingsBackfill()).rejects.toThrow('No embedding model is configured')
+  })
+
+  it('polls the embeddings status every 3s while a backfill is running, and stops once it finishes', async () => {
+    let running = true
+    const { fn, calls } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({
+        enabled: true,
+        backfill: { running, chunks_embedded: running ? 2 : 10, started_at: '2026-09-18T00:00:00Z' },
+      })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDocuments(null))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.embeddingsStatus?.backfill.running).toBe(true)
+
+    calls.length = 0
+    running = false
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    expect(result.current.embeddingsStatus?.backfill.running).toBe(false)
+
+    // The backfill just finished - the next tick must not still be polling.
+    calls.length = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+    expect(calls.filter((c) => c.url.startsWith('/api/documents/embeddings'))).toHaveLength(0)
+  })
+
+  it('polls the embeddings status while the automatic pass still has chunks to do', async () => {
+    // The automatic (enrich=1) embed pass has no backfill to gate a poll on -
+    // it just runs in the background as documents finish indexing. Without a
+    // poll of its own the row would sit on whatever count it loaded with,
+    // showing work outstanding that is in fact already done, until a reload.
+    let pending = 12
+    const { fn, calls } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({
+        enabled: true,
+        model: 'openai/text-embedding-3-small',
+        dimensions: 512,
+        problem: undefined,
+        counts: { chunks_total: 20, chunks_embedded: 20 - pending, chunks_stale: 0, chunks_pending: pending, chars_pending: pending * 100 },
+      })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDocuments(null))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(12)
+
+    pending = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(0)
+
+    // Nothing left pending and no backfill: the poll must stop.
+    calls.length = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+    expect(calls.filter((c) => c.url.startsWith('/api/documents/embeddings'))).toHaveLength(0)
+  })
+
+  it('stops polling on unmount', async () => {
+    const { fn, calls } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => ok(embeddingsStatusPayload({
+        enabled: true,
+        backfill: { running: true, chunks_embedded: 2, started_at: '2026-09-18T00:00:00Z' },
+      })),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    const { result, unmount } = renderHook(() => useDocuments(null))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.embeddingsStatus?.backfill.running).toBe(true)
+
+    unmount()
+    calls.length = 0
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+
+    expect(calls).toHaveLength(0)
+  })
+
+  // Review-finding-shaped guard (same idiom as refresh()/search() above): an
+  // older in-flight embeddings-status GET resolving after a newer one must
+  // not clobber the newer, more-correct state. refreshEmbeddingsStatus isn't
+  // itself exposed on the hook (only refresh() and search() are, which is
+  // what the refresh/search versions of this test call directly) - two
+  // overlapping calls are driven here through the poll effect instead: the
+  // mount call arms it (call 1, resolved immediately with running:true), and
+  // two consecutive 3s ticks each start a new call before the first of the
+  // two (call 2) ever resolves, since firing a timer callback bumps the seq
+  // ref synchronously even while its fetch stays pending.
+  it('an older in-flight embeddings status refresh does not overwrite a newer one\'s state', async () => {
+    let callCount = 0
+    let resolveSecond!: (v: unknown) => void
+    let resolveThird!: (v: unknown) => void
+    const { fn } = routedFetch({
+      'GET /api/document-folders': () => ok(folderPayload()),
+      'GET /api/documents/tags': () => ok([]),
+      'GET /api/documents/embeddings': () => {
+        callCount += 1
+        if (callCount === 1) {
+          return ok(embeddingsStatusPayload({ enabled: true, backfill: { running: true, chunks_embedded: 0, started_at: '' } }))
+        }
+        if (callCount === 2) return new Promise((resolve) => { resolveSecond = resolve })
+        if (callCount === 3) return new Promise((resolve) => { resolveThird = resolve })
+        return ok(embeddingsStatusPayload({ enabled: true }))
+      },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDocuments(null))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) }) // flush the mount call (#1)
+    expect(result.current.embeddingsStatus?.backfill.running).toBe(true)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) }) // poll tick -> call #2, left pending
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) }) // poll tick -> call #3, left pending
+    expect(callCount).toBe(3)
+
+    // Resolve the NEWER call (#3) first, with its own data...
+    await act(async () => {
+      resolveThird(ok(embeddingsStatusPayload({
+        enabled: true,
+        counts: { chunks_total: 10, chunks_embedded: 9, chunks_stale: 0, chunks_pending: 1, chars_pending: 100 },
+      })))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(1)
+
+    // ...then the STALE older call (#2) resolves, with different data. It
+    // must not be applied over what the newer call already set.
+    await act(async () => {
+      resolveSecond(ok(embeddingsStatusPayload({
+        enabled: true,
+        counts: { chunks_total: 10, chunks_embedded: 2, chunks_stale: 0, chunks_pending: 8, chars_pending: 800 },
+      })))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.embeddingsStatus?.counts.chunks_pending).toBe(1)
   })
 
 })

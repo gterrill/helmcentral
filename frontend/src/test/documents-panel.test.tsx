@@ -35,8 +35,12 @@ function makeDocumentsMock(overrides: Partial<DocumentsMock> = {}): DocumentsMoc
     searchResults: null,
     searching: false,
     searchError: null,
+    semanticProblem: null,
     search: vi.fn(),
     clearSearch: vi.fn(),
+    embeddingsStatus: null,
+    dryRunEmbeddingsBackfill: vi.fn(),
+    startEmbeddingsBackfill: vi.fn(),
     createFolder: vi.fn(),
     renameFolder: vi.fn(),
     moveFolder: vi.fn(),
@@ -83,6 +87,17 @@ function doc(overrides: Partial<import('@/hooks/use-documents').DocumentRecord> 
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     indexed_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function embeddingsStatus(overrides: Partial<import('@/hooks/use-documents').DocumentEmbeddingsStatus> = {}) {
+  return {
+    enabled: true,
+    model: 'openai/text-embedding-3-small',
+    dimensions: 512,
+    counts: { chunks_total: 10, chunks_embedded: 10, chunks_stale: 0, chunks_pending: 0, chars_pending: 0 },
+    backfill: { running: false, chunks_embedded: 0, started_at: '' },
     ...overrides,
   }
 }
@@ -507,5 +522,181 @@ describe('DocumentsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     expect(await screen.findByText('folder is not empty')).toBeInTheDocument()
+  })
+
+  // ADR 0106 E1c (F1e): a search response's semantic_problem is present
+  // only when semantic search was configured and failed to run for THIS
+  // query - never when it's simply switched off - so it's a quiet notice
+  // beside real, complete keyword results, not an error banner.
+  describe('semantic_problem notice', () => {
+    const oneResult: import('@/hooks/use-documents').DocumentSearchResult[] = [{
+      document_id: 'doc-1',
+      filename: 'manual.pdf',
+      title: '',
+      status: 'indexed',
+      page: 1,
+      snippet: 'the \x02impeller\x03 kit',
+      folder_id: null,
+    }]
+
+    it('shows a quiet notice, not an error, when a search response carries semantic_problem', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        searchResults: oneResult,
+        semanticProblem: 'embedding the query failed: rate limited',
+      }))
+
+      render(<DocumentsPanel />)
+
+      const notice = screen.getByText(/showing keyword results only/i)
+      expect(notice).toHaveTextContent('embedding the query failed: rate limited')
+      // Not the destructive/error styling this panel already uses for a
+      // fatal problem (e.g. a failed document's own error, or searchError)
+      // - a quiet warning, matching forecast-drawer.tsx's own amber
+      // non-fatal-notice language rather than inventing a new one.
+      expect(notice.className).not.toContain('text-destructive')
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('shows no notice when the search response did not carry a semantic_problem', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ searchResults: oneResult, semanticProblem: null }))
+
+      render(<DocumentsPanel />)
+
+      expect(screen.queryByText(/showing keyword results only/i)).not.toBeInTheDocument()
+    })
+
+    it('a second, clean search clears a previously shown notice', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        searchResults: oneResult,
+        semanticProblem: 'no embedding model reachable',
+      }))
+
+      const { rerender } = render(<DocumentsPanel />)
+      expect(screen.getByText(/showing keyword results only/i)).toBeInTheDocument()
+
+      // use-documents.test.ts pins the hook's own clearing behaviour
+      // (search() overwriting semanticProblem from the fresh response); this
+      // only checks the panel actually reacts to that state change.
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ searchResults: oneResult, semanticProblem: null }))
+      rerender(<DocumentsPanel />)
+
+      expect(screen.queryByText(/showing keyword results only/i)).not.toBeInTheDocument()
+    })
+  })
+
+  // ADR 0106 E1c (F1e): the toolbar's semantic-search status line and its
+  // "Index for semantic search" backfill action.
+  describe('embeddings status and backfill', () => {
+    it('renders no status line at all when semantic search is off', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        embeddingsStatus: embeddingsStatus({ enabled: false, model: '', dimensions: 0, problem: 'No embedding model is configured. Set one in Settings → Assistant.' }),
+      }))
+
+      render(<DocumentsPanel />)
+
+      expect(screen.queryByTestId('documents-embeddings-status')).not.toBeInTheDocument()
+    })
+
+    it('renders no status line before the initial status load resolves', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ embeddingsStatus: null }))
+
+      render(<DocumentsPanel />)
+
+      expect(screen.queryByTestId('documents-embeddings-status')).not.toBeInTheDocument()
+    })
+
+    it('shows the pending chunk count and the index action when chunks are pending', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        embeddingsStatus: embeddingsStatus({
+          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+        }),
+      }))
+
+      render(<DocumentsPanel />)
+
+      expect(screen.getByText(/12 chunks not yet searchable by meaning/i)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /index for semantic search/i })).toBeEnabled()
+    })
+
+    it('the index action runs the dry run first and waits for confirmation before posting anything', async () => {
+      const dryRunEmbeddingsBackfill = vi.fn().mockResolvedValue({
+        counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+        tokens_estimate: 1200,
+      })
+      const startEmbeddingsBackfill = vi.fn().mockResolvedValue(undefined)
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        embeddingsStatus: embeddingsStatus({
+          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+        }),
+        dryRunEmbeddingsBackfill,
+        startEmbeddingsBackfill,
+      }))
+
+      render(<DocumentsPanel />)
+
+      fireEvent.click(screen.getByRole('button', { name: /index for semantic search/i }))
+
+      expect(await screen.findByText(/12 pending chunk/i)).toBeInTheDocument()
+      expect(screen.getByText(/1200 tokens/i)).toBeInTheDocument()
+      expect(dryRunEmbeddingsBackfill).toHaveBeenCalledTimes(1)
+      expect(startEmbeddingsBackfill).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+      await waitFor(() => expect(screen.queryByText(/1200 tokens/i)).not.toBeInTheDocument())
+      expect(startEmbeddingsBackfill).not.toHaveBeenCalled()
+    })
+
+    it('confirming the index action posts the backfill', async () => {
+      const dryRunEmbeddingsBackfill = vi.fn().mockResolvedValue({
+        counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+        tokens_estimate: 1200,
+      })
+      const startEmbeddingsBackfill = vi.fn().mockResolvedValue(undefined)
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        embeddingsStatus: embeddingsStatus({
+          counts: { chunks_total: 20, chunks_embedded: 8, chunks_stale: 0, chunks_pending: 12, chars_pending: 4800 },
+        }),
+        dryRunEmbeddingsBackfill,
+        startEmbeddingsBackfill,
+      }))
+
+      render(<DocumentsPanel />)
+
+      fireEvent.click(screen.getByRole('button', { name: /index for semantic search/i }))
+      await screen.findByText(/1200 tokens/i)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Index' }))
+
+      await waitFor(() => expect(startEmbeddingsBackfill).toHaveBeenCalledTimes(1))
+    })
+
+    it('a running backfill disables the action button and shows progress', () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        embeddingsStatus: embeddingsStatus({
+          counts: { chunks_total: 20, chunks_embedded: 15, chunks_stale: 0, chunks_pending: 5, chars_pending: 2000 },
+          backfill: { running: true, chunks_embedded: 7, started_at: '2026-09-18T00:00:00Z' },
+        }),
+      }))
+
+      render(<DocumentsPanel />)
+
+      expect(screen.getByText(/7 embedded this run, 5 left/i)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /index for semantic search/i })).toBeDisabled()
+    })
+
+    it("shows a running backfill's last_error as a quiet warning, since the backfill keeps retrying rather than stopping", () => {
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        embeddingsStatus: embeddingsStatus({
+          counts: { chunks_total: 20, chunks_embedded: 15, chunks_stale: 0, chunks_pending: 5, chars_pending: 2000 },
+          backfill: { running: true, chunks_embedded: 7, started_at: '2026-09-18T00:00:00Z', last_error: 'OpenRouter: 429 rate limited' },
+        }),
+      }))
+
+      render(<DocumentsPanel />)
+
+      expect(screen.getByText('OpenRouter: 429 rate limited')).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
   })
 })

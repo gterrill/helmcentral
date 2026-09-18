@@ -7,13 +7,14 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 // document is one row of the documents table: a file's metadata and
@@ -135,6 +136,20 @@ type documentSearchResult struct {
 	Heading    string  `json:"heading,omitempty"`
 	Snippet    string  `json:"snippet"`
 	Score      float64 `json:"-"`
+}
+
+// documentEmbeddingCounts is EmbeddingCounts' return value: a one-call
+// snapshot of how much of the chunk library is embedded under a given
+// model, and how much backfill work (and rough OpenRouter spend, via
+// CharsPending) is left. ChunksPending/CharsPending apply the same
+// blank-text skip as PendingEmbedChunks, so this summary and the actual
+// backfill queue never disagree about what counts as pending.
+type documentEmbeddingCounts struct {
+	ChunksTotal    int `json:"chunks_total"`
+	ChunksEmbedded int `json:"chunks_embedded"`
+	ChunksStale    int `json:"chunks_stale"`
+	ChunksPending  int `json:"chunks_pending"`
+	CharsPending   int `json:"chars_pending"`
 }
 
 // documentSweepResult is sweepDocumentsDir's report: how many abandoned
@@ -346,6 +361,29 @@ var documentStoreSchema = []string{
 		INSERT INTO document_chunks_fts(document_chunks_fts, rowid, text, heading) VALUES('delete', old.id, old.text, old.heading);
 		INSERT INTO document_chunks_fts(rowid, text, heading) VALUES (new.id, new.text, new.heading);
 	END`,
+
+	// document_chunk_embeddings holds one vector per chunk - PRIMARY KEY
+	// chunk_id, not (chunk_id, model), so a model change replaces the row
+	// rather than accumulating a second vector under every model the
+	// operator has ever configured. That single foreign key, chunk_id
+	// REFERENCES document_chunks(id) ON DELETE CASCADE, is the entire
+	// invalidation story: every path that changes a chunk's text -
+	// ReplaceChunks (a re-extract or a fresh OCR pass) and rebuildMetaChunkTx
+	// (a title/tags/folder/summary/notes edit) - is a DELETE followed by an
+	// INSERT of the document_chunks row itself, never an UPDATE. Deleting the
+	// old chunk id cascades to delete its embedding with it, so a stale
+	// vector can never outlive the text it was computed from; there is no
+	// separate "is this embedding still valid" check anywhere because there
+	// is nothing for it to check - an embedding that exists at all describes
+	// the chunk id it's attached to, or it wouldn't still be there.
+	`CREATE TABLE IF NOT EXISTS document_chunk_embeddings (
+		chunk_id   INTEGER PRIMARY KEY REFERENCES document_chunks(id) ON DELETE CASCADE,
+		model      TEXT NOT NULL,
+		dims       INTEGER NOT NULL,
+		vector     BLOB NOT NULL,
+		created_at INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS document_chunk_embeddings_model ON document_chunk_embeddings (model)`,
 }
 
 func (s *documentStore) Close() error {
@@ -1347,6 +1385,33 @@ func (s *documentStore) AddIndexCost(id, model string, cost float64) error {
 	return checkRowsAffected(res, errDocumentNotFound)
 }
 
+// AddEmbedCost adds cost to the document's running index_cost_usd total
+// (E1c's embedding pass) WITHOUT touching index_model - the one difference
+// from AddIndexCost above, and the reason this is a separate method rather
+// than AddIndexCost called with a second model name. index_model records
+// which model performed the enrich stage's OCR/summarise call
+// (documents_enrich.go); the embedding pass is a different model entirely,
+// doing a different job (turning a chunk's text into a vector, not
+// reading the document), and must never overwrite that name with its own -
+// there is only one index_model column, and it belongs to whichever model
+// actually read the document. index_cost_usd, by contrast, is one running
+// total for whatever OpenRouter spend a document has accumulated across
+// both jobs, so it accumulates here exactly the way AddIndexCost's own
+// does.
+func (s *documentStore) AddEmbedCost(id string, cost float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(
+		`UPDATE documents SET index_cost_usd = index_cost_usd + ?, updated_at = ? WHERE id = ?`,
+		cost, s.now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("add embed cost: %w", err)
+	}
+	return checkRowsAffected(res, errDocumentNotFound)
+}
+
 func (s *documentStore) SetStage(id, stage string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1625,6 +1690,384 @@ func (s *documentStore) PatchDocument(id string, title, notes *string, tags []st
 		return document{}, fmt.Errorf("patch document: commit: %w", err)
 	}
 	return doc, nil
+}
+
+// ── embeddings ───────────────────────────────────────────────────────────
+
+// chunksMissingEmbeddingWhere is the "no document_chunk_embeddings row for
+// this model yet" condition shared by PendingEmbedChunks and
+// EmbeddingCounts - kept as one string, with a single "?" placeholder for
+// the model, so the two queries can never quietly drift apart about what
+// counts as pending. The same reasoning as documentColumns for scanDocument.
+const chunksMissingEmbeddingWhere = `NOT EXISTS (
+	SELECT 1 FROM document_chunk_embeddings e WHERE e.chunk_id = c.id AND e.model = ?
+)`
+
+// PendingEmbedChunks returns up to limit chunks that still need an
+// embedding under model, oldest document first and then by seq within a
+// document - the same tie-break NextPending itself uses. "Still need one"
+// means no document_chunk_embeddings row exists for that chunk under model;
+// a row under a DIFFERENT model doesn't count; that's what makes a change
+// to assistant.embedding_model self-correcting rather than something the
+// operator has to clean up by hand (see the schema comment on
+// document_chunk_embeddings). enrichedOnly restricts the scan to documents
+// with enrich=1 - the automatic embed pass only ever touches documents that
+// already consented to leaving the boat for OCR/enrichment; an explicit
+// backfill call passes enrichedOnly=false, and making that call at all is
+// itself the consent, the same way ADR 0106 already treats an explicit
+// Reindex. A chunk whose text is empty or whitespace-only is skipped
+// outright - there is nothing to embed, and paying OpenRouter for a blank
+// string is waste. limit<=0 returns no rows.
+func (s *documentStore) PendingEmbedChunks(model string, limit int, enrichedOnly bool) ([]documentChunk, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	query := `
+		SELECT c.id, c.document_id, c.seq, c.source, c.page_start, c.page_end, c.heading, c.text
+		FROM document_chunks c
+		JOIN documents d ON d.id = c.document_id
+		WHERE ` + chunksMissingEmbeddingWhere
+	args := []any{model}
+	if enrichedOnly {
+		query += ` AND d.enrich = 1`
+	}
+	query += ` ORDER BY d.created_at ASC, d.id ASC, c.seq ASC`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("pending embed chunks: %w", err)
+	}
+	defer rows.Close()
+
+	var out []documentChunk
+	for rows.Next() {
+		var ch documentChunk
+		if err := rows.Scan(&ch.ID, &ch.DocumentID, &ch.Seq, &ch.Source, &ch.PageStart, &ch.PageEnd, &ch.Heading, &ch.Text); err != nil {
+			return nil, fmt.Errorf("pending embed chunks: scan: %w", err)
+		}
+		if strings.TrimSpace(ch.Text) == "" {
+			continue
+		}
+		out = append(out, ch)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, rows.Err()
+}
+
+// sqliteForeignKeyConstraintCode is SQLITE_CONSTRAINT_FOREIGNKEY, duplicated
+// here as a bare constant (rather than importing modernc.org/sqlite/lib for
+// one number) so isForeignKeyConstraintErr can tell a foreign key violation
+// apart from any other write failure.
+const sqliteForeignKeyConstraintCode = 787
+
+// isForeignKeyConstraintErr reports whether err is modernc/sqlite's foreign
+// key violation - SetChunkEmbeddings' only way to tell "this chunk_id
+// doesn't exist" apart from any other INSERT failure, since chunk_id's own
+// existence is enforced by the foreign key rather than a separate check
+// before the write (a second query would just be a slower way to learn the
+// same thing the write is about to tell us anyway).
+func isForeignKeyConstraintErr(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteForeignKeyConstraintCode
+}
+
+// SetChunkEmbeddings writes vectors (chunk id -> raw embedding, as returned
+// by the embeddings call - not yet normalised) as model/dims rows, all in
+// one transaction so a caller's batch either lands completely or not at
+// all. Every vector's length is checked against dims before any write -
+// rejected outright, not silently skipped, so a caller can't end up with a
+// partially-embedded batch and no indication which entries didn't take.
+// ON CONFLICT(chunk_id) DO UPDATE means re-embedding a chunk (a changed
+// model, or PendingEmbedChunks handing the same chunk back after an earlier
+// partial failure) replaces the old vector in place rather than erroring on
+// the existing row - document_chunk_embeddings' PRIMARY KEY is chunk_id
+// alone, by design (see the table's schema comment). A chunk_id that
+// doesn't exist trips the foreign key; isForeignKeyConstraintErr turns that
+// into a message naming the id rather than surfacing modernc/sqlite's bare
+// "FOREIGN KEY constraint failed".
+func (s *documentStore) SetChunkEmbeddings(model string, dims int, vectors map[int64][]float32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("set chunk embeddings: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := s.now().Unix()
+	for chunkID, vec := range vectors {
+		if len(vec) != dims {
+			return fmt.Errorf("set chunk embeddings: chunk %d: vector has %d dimensions, want %d", chunkID, len(vec), dims)
+		}
+		unit, err := normaliseEmbedding(vec)
+		if err != nil {
+			return fmt.Errorf("set chunk embeddings: chunk %d: %w", chunkID, err)
+		}
+
+		if _, err := tx.Exec(
+			`INSERT INTO document_chunk_embeddings (chunk_id, model, dims, vector, created_at) VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(chunk_id) DO UPDATE SET model = excluded.model, dims = excluded.dims, vector = excluded.vector, created_at = excluded.created_at`,
+			chunkID, model, dims, encodeEmbedding(unit), now,
+		); err != nil {
+			if isForeignKeyConstraintErr(err) {
+				return fmt.Errorf("set chunk embeddings: chunk %d does not exist: %w", chunkID, err)
+			}
+			return fmt.Errorf("set chunk embeddings: chunk %d: %w", chunkID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("set chunk embeddings: commit: %w", err)
+	}
+	return nil
+}
+
+// EmbeddingCounts reports how much of the chunk library is embedded under
+// model, and how much backfill work is left - the settings page's "N of M
+// chunks embedded, ~X characters to go" readout (a later phase).
+// ChunksPending/CharsPending use exactly chunksMissingEmbeddingWhere plus
+// PendingEmbedChunks' own blank-text skip, so this summary can never disagree
+// with what a backfill pass would actually process. Unlike PendingEmbedChunks
+// there is no enrichedOnly split here: this is a whole-library summary, not
+// the automatic pass's own narrower queue.
+func (s *documentStore) EmbeddingCounts(model string) (documentEmbeddingCounts, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var counts documentEmbeddingCounts
+	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunks`).Scan(&counts.ChunksTotal); err != nil {
+		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: total: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE model = ?`, model).Scan(&counts.ChunksEmbedded); err != nil {
+		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: embedded: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE model != ?`, model).Scan(&counts.ChunksStale); err != nil {
+		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: stale: %w", err)
+	}
+
+	rows, err := s.db.Query(`SELECT c.text FROM document_chunks c WHERE `+chunksMissingEmbeddingWhere, model)
+	if err != nil {
+		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: pending: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: pending: scan: %w", err)
+		}
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		counts.ChunksPending++
+		counts.CharsPending += utf8.RuneCountInString(text)
+	}
+	if err := rows.Err(); err != nil {
+		return documentEmbeddingCounts{}, fmt.Errorf("embedding counts: pending: %w", err)
+	}
+
+	return counts, nil
+}
+
+// truncateSnippet returns the first n runes of text - SearchVector's
+// snippet is a plain excerpt of whichever chunk scored best, not an FTS
+// snippet(); there's no matched term to mark with \x02/\x03 the way
+// Search's is. Cutting on []rune rather than raw bytes keeps a multi-byte
+// UTF-8 character from being split mid-sequence.
+func truncateSnippet(text string, n int) string {
+	r := []rune(text)
+	if len(r) <= n {
+		return text
+	}
+	return string(r[:n])
+}
+
+// SearchVector is Search's semantic counterpart: given a raw (not yet
+// normalised) query embedding, it scores every chunk embedded under model
+// by cosine similarity and returns the top limit documents, best chunk per
+// document, highest score first - the same per-document collapsing rule
+// Search itself applies. queryVec is normalised here the same way a stored
+// vector is normalised on write (SetChunkEmbeddings), so dotProduct's
+// unit-vector assumption holds on both sides; a zero or non-finite query
+// vector is therefore a fail-fast error here too, not a silently-empty
+// result. limit<=0 returns no rows, matching Search.
+//
+// The folder/tag filtering matches Search's own branches exactly - the same
+// documentsRootFolderSentinel handling, the same recursive-subtree
+// resolution, the same errFolderNotFound - so a caller offering both a
+// keyword and a semantic search sees identical folder/tag scoping either
+// way.
+//
+// This has to be a full scan of document_chunk_embeddings for model: cosine
+// similarity has no index to narrow it, every candidate has to be scored.
+// But only the current row's vector is ever decoded at a time, and the
+// result container never holds more than limit rows at once - the whole
+// point, since an armv7 box with a large library must not allocate the
+// entire index into memory just to answer one query. A row whose stored
+// dims don't match len(queryVec) is silently skipped, not an error: that is
+// a chunk embedded before the operator changed
+// assistant.embedding_dimensions, and the backfill triggered by that change
+// is what corrects it - not this call. A row whose vector BLOB fails to
+// decode is a different matter entirely, corruption rather than a stale
+// setting, and is returned as an error rather than skipped.
+func (s *documentStore) SearchVector(queryVec []float32, model string, folderID *string, recursive bool, tag string, limit int) ([]documentSearchResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	unitQuery, err := normaliseEmbedding(queryVec)
+	if err != nil {
+		return nil, fmt.Errorf("search vector: query embedding: %w", err)
+	}
+
+	sqlQuery := `
+		SELECT c.id, e.vector, e.dims, d.id, d.filename, d.title, d.status, d.folder_id, c.page_start, c.heading, c.text
+		FROM document_chunk_embeddings e
+		JOIN document_chunks c ON c.id = e.chunk_id
+		JOIN documents d ON d.id = c.document_id
+		WHERE e.model = ?`
+	args := []any{model}
+
+	if folderID != nil {
+		if *folderID == documentsRootFolderSentinel {
+			// See Search's identical branch and the sentinel's own doc
+			// comment: non-recursive root means "no folder at all";
+			// recursive root means "no filter", since root's subtree is
+			// every folder there is.
+			if !recursive {
+				sqlQuery += ` AND d.folder_id IS NULL`
+			}
+		} else if recursive {
+			ids, err := folderSubtreeIDs(s.db, *folderID)
+			if err != nil {
+				return nil, err
+			}
+			placeholders := make([]string, len(ids))
+			for i, fid := range ids {
+				placeholders[i] = "?"
+				args = append(args, fid)
+			}
+			sqlQuery += ` AND d.folder_id IN (` + strings.Join(placeholders, ",") + `)`
+		} else {
+			ok, err := rowExists(s.db, `SELECT 1 FROM document_folders WHERE id = ?`, *folderID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, errFolderNotFound
+			}
+			sqlQuery += ` AND d.folder_id = ?`
+			args = append(args, *folderID)
+		}
+	}
+	if tag != "" {
+		sqlQuery += ` AND EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag = ?)`
+		args = append(args, tag)
+	}
+
+	rows, err := s.db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search vector: %w", err)
+	}
+	defer rows.Close()
+
+	// best is the bounded container: it never holds more than limit entries
+	// once an iteration finishes, so memory is bounded by limit rather than
+	// by how many chunks (or documents) exist. Every new row either updates
+	// its own document's existing entry (only if it scores higher - a
+	// document's best score only ever climbs as more of its chunks are
+	// seen), fills a still-open slot, or - once the container is full -
+	// evicts the current lowest-scoring entry if it scores higher, else is
+	// simply dropped.
+	best := map[string]documentSearchResult{}
+	for rows.Next() {
+		var chunkID int64
+		var vecBlob []byte
+		var dims int
+		var docID, filename, title, status, text string
+		var rowFolderID sql.NullString
+		var pageStart int
+		var heading string
+		if err := rows.Scan(&chunkID, &vecBlob, &dims, &docID, &filename, &title, &status, &rowFolderID, &pageStart, &heading, &text); err != nil {
+			return nil, fmt.Errorf("search vector: scan: %w", err)
+		}
+		if dims != len(unitQuery) {
+			continue
+		}
+		vec, err := decodeEmbedding(vecBlob)
+		if err != nil {
+			return nil, fmt.Errorf("search vector: decode chunk %d: %w", chunkID, err)
+		}
+		// The dims check above compares the column, which is only what the
+		// write claimed. A blob that decodes cleanly but holds a different
+		// number of floats than its own row says is corruption, the same as
+		// one that doesn't decode at all - and it would otherwise reach
+		// dotProduct, which indexes the stored vector by the query's length
+		// and panics mid-search on a short one.
+		if len(vec) != dims {
+			return nil, fmt.Errorf("search vector: chunk %d: vector holds %d dimensions, row says %d", chunkID, len(vec), dims)
+		}
+		score := float64(dotProduct(unitQuery, vec))
+
+		if existing, ok := best[docID]; ok {
+			if score <= existing.Score {
+				continue
+			}
+		} else if len(best) >= limit {
+			minID, minScore := "", 0.0
+			first := true
+			for id, r := range best {
+				if first || r.Score < minScore {
+					minID, minScore = id, r.Score
+					first = false
+				}
+			}
+			if score <= minScore {
+				continue
+			}
+			delete(best, minID)
+		}
+
+		result := documentSearchResult{
+			DocumentID: docID,
+			Filename:   filename,
+			Title:      title,
+			Status:     status,
+			PageStart:  pageStart,
+			Heading:    heading,
+			Snippet:    truncateSnippet(text, 200),
+			Score:      score,
+		}
+		if rowFolderID.Valid {
+			v := rowFolderID.String
+			result.FolderID = &v
+		}
+		best[docID] = result
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("search vector: %w", err)
+	}
+
+	out := make([]documentSearchResult, 0, len(best))
+	for _, r := range best {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].DocumentID < out[j].DocumentID
+	})
+	return out, nil
 }
 
 // ── folders ──────────────────────────────────────────────────────────────

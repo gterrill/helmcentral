@@ -369,7 +369,7 @@ multi-hundred-megabyte PDF in memory, or breaking Range support on it, is
 exactly what that skip list already exists to prevent for other binary
 payloads.
 
-### Embeddings, deferred
+### Embeddings, deferred (landed in ADR 0108)
 
 `sqlite-vec` needs to load as a SQLite extension, which needs CGO, which is
 off. Semantic search is therefore a later phase, not part of this one, but
@@ -385,6 +385,14 @@ library is small enough that scanning a few thousand chunk vectors linearly
 costs nothing worth building an index to avoid. That ranking is merged with
 FTS5's own through reciprocal rank fusion (k=60) rather than either running
 alone.
+
+That is what [ADR 0108](0108-search-by-meaning.md) built, on the same day,
+and it holds to this plan apart from two changes. There is no separate
+`embed` stage on `documents.stage`: the work is found by query instead, since
+a chunk with no vector for the current model is exactly the queue, and a
+stage would have made a crash mid-embed resume by re-running the paid enrich
+step. And OpenRouter turned out to have an embeddings endpoint of its own,
+which this section had not assumed either way.
 
 ## Rejected
 
@@ -452,6 +460,9 @@ Tradeoffs:
 - [ADR 0105](0105-mate-streams-its-answer.md) (Mate streams its answer):
   the reason a second, non-streaming completion path was needed at all -
   the shared client now always streams by default.
+- [ADR 0108](0108-search-by-meaning.md) (search by meaning, not just
+  words): the embeddings phase this ADR deferred, built on this one's chunk
+  table, meta chunk and consent rule.
 - [ADR 0096](0096-in-app-manual.md) (in-app manual): `read_manual`, the
   existing tool whose shape `search_documents` and `read_document` follow -
   shrinking a long result by halving rather than failing it outright, and a
