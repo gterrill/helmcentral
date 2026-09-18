@@ -4,6 +4,7 @@ import {
   BookOpen,
   CircleHelp,
   CloudSun,
+  FileText,
   LampCeiling,
   LayoutDashboard,
   Map,
@@ -42,6 +43,7 @@ import type { SettingsSectionId } from '@/components/settings/settings-nav'
 const AlarmsDrawer = lazy(() => import('@/components/alarms-drawer').then((mod) => ({ default: mod.AlarmsDrawer })))
 const AnchorWatchDrawer = lazy(() => import('@/components/anchor-watch-drawer').then((mod) => ({ default: mod.AnchorWatchDrawer })))
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
+const DocumentsPanel = lazy(() => import('@/components/documents-panel').then((mod) => ({ default: mod.DocumentsPanel })))
 const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((mod) => ({ default: mod.ForecastDrawer })))
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
 const RoutePlannerDrawer = lazy(() => import('@/components/route-planner-drawer').then((mod) => ({ default: mod.RoutePlannerDrawer })))
@@ -212,6 +214,7 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
   { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
   { id: 'alarms', label: 'Alarms', icon: BellRing },
   { id: 'assistant', label: 'Mate', icon: Sparkles },
+  { id: 'documents', label: 'Documents', icon: FileText },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
 
@@ -241,7 +244,8 @@ export function App() {
   // matters for the very first render, and re-parsing it on every render
   // would be wasted work (and wrong besides, once the URL sync effect below
   // starts rewriting the bar to match in-app navigation).
-  const [initialLocation] = useState<AppLocation>(() => parseAppLocation(globalThis.location?.pathname ?? '/'))
+  const [initialLocation] = useState<AppLocation>(() =>
+    parseAppLocation((globalThis.location?.pathname ?? '/') + (globalThis.location?.search ?? '')))
   const [activePanel, setActivePanel] = useState<PanelId | null>(initialLocation.panel)
   // Lives in App, not in SettingsPage/SettingsNav, because App is the one
   // place that also writes it to the URL (`/settings/<id>`) — and it is
@@ -431,6 +435,39 @@ export function App() {
   // not "start a fresh one" - the panel's own hook falls back to its usual
   // newest-thread behaviour when this is null.
   const [matePanelConversationId, setMatePanelConversationId] = useState<string | null>(initialLocation.conversationId ?? null)
+  // ADR 0106 F1: the Documents panel's current folder, mirrored into the URL
+  // (?folder=) the same way matePanelConversationId mirrors Mate's active
+  // thread - see applyAppLocation and the URL sync effect below. Unlike
+  // conversationId, initialLocation.documentId (which document to open in
+  // the viewer, e.g. from a Mate attachment chip's link) is handed to the
+  // panel once as an initial prop rather than tracked in App state at all:
+  // nothing here needs to know which document is open, only which folder.
+  const [documentsFolderId, setDocumentsFolderId] = useState<string | null>(initialLocation.documentFolderId ?? null)
+  // Ditto latch pattern (mateSheetHasOpenedRef/manualSheetHasOpenedRef
+  // above), but the opposite direction - tracking that the operator has
+  // left Documents at least once, rather than that something has opened. A
+  // Mate attachment chip's link should open its document once, for the
+  // navigation it names, not every time the Documents panel remounts (it
+  // unmounts completely on every panel switch - see the Suspense
+  // key={activePanel} below). initialLocation.documentId itself never
+  // changes for the whole session (initialLocation is captured once, at the
+  // very first render), so without this the same document would reopen on
+  // every return to Documents.
+  //
+  // Mutated directly off `activePanel` here (same as the sheets above),
+  // NOT by a flag set only inside the 'documents' switch case below:
+  // DocumentsPanel is lazy-loaded (`const DocumentsPanel = lazy(...)`), and
+  // activePanelContent's switch is a plain per-render computation, not a
+  // per-mount one - several renders of App can happen while the panel is
+  // still suspended and before it actually commits. A flag flipped as soon
+  // as the 'documents' case is first evaluated would already read
+  // "consumed" by the render that follows, well before DocumentsPanel ever
+  // received the id it was meant to be handed. Tying the latch to the
+  // actual panel-switch signal instead means it only ever flips on a real
+  // departure from Documents, independent of how many times React
+  // re-renders while the operator stays on it.
+  const documentsLeftOnceRef = useRef(false)
+  if (activePanel !== 'documents') documentsLeftOnceRef.current = true
   // The sheet's own active conversation (mate-answer-toast plan): mirrors
   // matePanelConversationId above, but for the sheet rather than the panel -
   // MateSheet reports it the same way AssistantDrawer already reports
@@ -584,6 +621,9 @@ export function App() {
     if (loc.panel === 'assistant') {
       setMatePanelConversationId(loc.conversationId ?? null)
     }
+    if (loc.panel === 'documents') {
+      setDocumentsFolderId(loc.documentFolderId ?? null)
+    }
   }, [pages, pagesLoading, setActivePageId])
 
   // The single writer of window.location (ADR 0074). Chosen over pushing at
@@ -618,8 +658,13 @@ export function App() {
       pageId: activePageId,
       section: settingsSection,
       conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
+      documentFolderId: activePanel === 'documents' ? documentsFolderId : null,
     }, ctx)
-    const path = window.location.pathname
+    // documents is the one panel whose canonical URL can carry a query
+    // string (?folder=) - pathname alone is never enough to tell it apart
+    // from a bare /documents, so this compares against pathname+search
+    // (harmless everywhere else: no other panel/location ever has one).
+    const path = window.location.pathname + window.location.search
     if (next === path) return // popstate, or a clean deep link, already put us here
 
     // Normalise (replace) rather than add a history entry for a path this
@@ -628,7 +673,7 @@ export function App() {
     // current bar non-canonical.
     const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
-  }, [shellVisible, isKiosk, activePanel, activePageId, settingsSection, matePanelConversationId, pages, pagesLoading, canAdmin])
+  }, [shellVisible, isKiosk, activePanel, activePageId, settingsSection, matePanelConversationId, documentsFolderId, pages, pagesLoading, canAdmin])
 
   // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
   // page still gets to veto the navigation exactly as a sidebar click
@@ -644,7 +689,9 @@ export function App() {
       // means the device's own back/forward gestures, if it has any, don't
       // fight the fixed URL it was launched with.
       if (isKiosk) return
-      const path = window.location.pathname
+      // Documents (?folder=) is the one location whose canonical form needs
+      // the query string too - see the sync effect above's own comment.
+      const path = window.location.pathname + window.location.search
       const ctx = { firstPageId: pages[0]?.id ?? null, knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
       const parsed = parseAppLocation(path)
       if (!isCanonicalAppPath(path, ctx)) {
@@ -1858,6 +1905,7 @@ export function App() {
       case 'assistant': return 'Mate'
       case 'settings': return 'settings'
       case 'anchor-watch': return 'anchor watch'
+      case 'documents': return 'documents'
       default: return panel
     }
   }
@@ -1958,6 +2006,16 @@ export function App() {
             onActiveConversationChange={setMatePanelConversationId}
           />
         )
+      case 'documents': {
+        const documentDeepLinkId = documentsLeftOnceRef.current ? null : (initialLocation.documentId ?? null)
+        return (
+          <DocumentsPanel
+            initialFolderId={documentsFolderId}
+            onFolderChange={setDocumentsFolderId}
+            initialDocumentId={documentDeepLinkId}
+          />
+        )
+      }
       case 'settings':
         return (
           <SettingsPage

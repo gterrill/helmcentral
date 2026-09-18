@@ -7,12 +7,12 @@ in it and indexes that for search. If Mate is switched on, it goes further:
 a scan or a photo gets OCR'd properly, and the document gets a short
 summary and a few suggested tags.
 
-> **Status: not yet reachable from the dashboard.** The document store,
-> search, OCR and Mate's two document tools are built and working. What's
-> missing is the dashboard side: a Documents panel to browse, upload and
-> search from, and an attach control in Mate's composer. This page
-> describes the finished feature; today, getting a file into the library
-> means calling the API directly rather than using a screen in Helmcentral.
+The sidebar's **Documents** panel is where this happens day to day: browse
+folders, upload by button or drag-and-drop, search, and open, download,
+rename, move or reindex anything already in the library. A file can also be
+attached straight from Mate's composer - see
+[Documents](assistant.md#documents) on the Mate page - and a chip on a past
+message opens the same viewer this panel uses.
 
 ## What gets indexed, and what it costs
 

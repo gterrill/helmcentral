@@ -36,6 +36,7 @@ export const PANEL_MANUAL_TARGETS: Record<PanelId, ManualTarget> = {
   'anchor-watch': { page: 'features/anchor-watch' },
   alarms: { page: 'features/alarms' },
   assistant: { page: 'features/assistant' },
+  documents: { page: 'features/documents' },
   // Unreachable (see above) - set to General's target for totality.
   settings: { page: 'index' },
   // Unreachable (see above) - the manual index, for totality.

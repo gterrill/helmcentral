@@ -7,7 +7,7 @@ import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings
 // Pure and React-free so it can be unit tested without mounting anything,
 // and so PANEL_IDS can be validated here without importing App.tsx (which
 // would create a cycle: App needs the parser, the parser must not need App).
-export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'kiosk'] as const
+export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'kiosk', 'documents'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface AppLocation {
@@ -15,6 +15,16 @@ export interface AppLocation {
   pageId?: string | null
   section?: SettingsSectionId
   conversationId?: string | null
+  /** ADR 0106 F1: the Documents panel's current folder, null for the root.
+   * Absent (undefined) on every other panel/location. */
+  documentFolderId?: string | null
+  /** ADR 0106 F1: a document to open in the viewer on mount - how a Mate
+   * attachment chip's link opens straight to that document. formatAppLocation
+   * serializes it like any other field (round-tripping a deep link exactly);
+   * App.tsx's own sync effect is what chooses to read it only once, from
+   * initialLocation, rather than feeding it back in on every render the way
+   * it does documentFolderId - see that effect's own comment. */
+  documentId?: string | null
 }
 
 export interface LocationContext {
@@ -47,7 +57,11 @@ function decodePageId(segment: string): string | null {
 // ancestor (the dashboard, first page) rather than surfacing a parse error —
 // a mistyped or stale link should degrade gracefully, not break the app.
 export function parseAppLocation(pathname: string): AppLocation {
-  const segments = pathname.split('/').filter(Boolean)
+  // Split off the query string before segmenting on '/' - only the
+  // Documents panel (below) has one; every other branch never looks at
+  // `search` at all, same as before this existed.
+  const [path, search = ''] = pathname.split('?', 2)
+  const segments = path.split('/').filter(Boolean)
   const [first, second] = segments
 
   if (!first || first === 'dashboard') {
@@ -68,6 +82,18 @@ export function parseAppLocation(pathname: string): AppLocation {
   // tolerated legacy alias, but canonicalize to /mate via formatAppLocation.
   if (first === 'mate' || first === 'assistant') {
     return { panel: 'assistant', conversationId: second !== undefined ? decodePageId(second) : null }
+  }
+
+  // ADR 0106 F1: the current folder and, on a deep link from a Mate
+  // attachment chip, a document to open in the viewer - both optional and
+  // independent of each other, so query params rather than a path segment.
+  if (first === 'documents') {
+    const params = new URLSearchParams(search)
+    return {
+      panel: 'documents',
+      documentFolderId: params.get('folder'),
+      documentId: params.get('document'),
+    }
   }
 
   if (PANEL_ID_SET.has(first)) {
@@ -96,6 +122,14 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
   if (loc.panel === 'assistant') {
     if (!loc.conversationId) return '/mate'
     return `/mate/${encodeURIComponent(loc.conversationId)}`
+  }
+
+  if (loc.panel === 'documents') {
+    const params = new URLSearchParams()
+    if (loc.documentFolderId) params.set('folder', loc.documentFolderId)
+    if (loc.documentId) params.set('document', loc.documentId)
+    const qs = params.toString()
+    return qs ? `/documents?${qs}` : '/documents'
   }
 
   return `/${loc.panel}`

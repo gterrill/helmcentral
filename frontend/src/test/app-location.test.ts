@@ -38,6 +38,33 @@ describe('parseAppLocation', () => {
     },
   )
 
+  // ADR 0106 F1: the Documents panel carries its current folder (and, on a
+  // deep link from a Mate attachment chip, which document to open in the
+  // viewer) as query params rather than path segments, since either can be
+  // absent independently and neither has a natural path position the way
+  // /mate/<conversationId> does.
+  it('parses /documents with no query as the Documents panel at the root', () => {
+    expect(parseAppLocation('/documents')).toEqual({ panel: 'documents', documentFolderId: null, documentId: null })
+  })
+
+  it('parses /documents?folder=<id> as that folder', () => {
+    expect(parseAppLocation('/documents?folder=f1')).toEqual({
+      panel: 'documents', documentFolderId: 'f1', documentId: null,
+    })
+  })
+
+  it('parses /documents?document=<id> as a viewer deep link, root folder', () => {
+    expect(parseAppLocation('/documents?document=d1')).toEqual({
+      panel: 'documents', documentFolderId: null, documentId: 'd1',
+    })
+  })
+
+  it('parses /documents?folder=<id>&document=<id> as both together', () => {
+    expect(parseAppLocation('/documents?folder=f1&document=d1')).toEqual({
+      panel: 'documents', documentFolderId: 'f1', documentId: 'd1',
+    })
+  })
+
   it('parses /mate as the Mate panel', () => {
     expect(parseAppLocation('/mate')).toEqual({ panel: 'assistant', conversationId: null })
   })
@@ -127,12 +154,32 @@ describe('formatAppLocation', () => {
   it('formats settings, Assistant section as /settings/mate', () => {
     expect(formatAppLocation({ panel: 'settings', section: 'assistant' }, ctx)).toBe('/settings/mate')
   })
+
+  it('formats the Documents panel with no folder/document as /documents', () => {
+    expect(formatAppLocation({ panel: 'documents' }, ctx)).toBe('/documents')
+    expect(formatAppLocation({ panel: 'documents', documentFolderId: null, documentId: null }, ctx)).toBe('/documents')
+  })
+
+  it('formats a Documents folder as /documents?folder=<id>', () => {
+    expect(formatAppLocation({ panel: 'documents', documentFolderId: 'f1' }, ctx)).toBe('/documents?folder=f1')
+  })
+
+  it('formats a Documents viewer deep link as /documents?document=<id>', () => {
+    expect(formatAppLocation({ panel: 'documents', documentId: 'd1' }, ctx)).toBe('/documents?document=d1')
+  })
+
+  it('formats a Documents folder plus viewer deep link together', () => {
+    expect(formatAppLocation({ panel: 'documents', documentFolderId: 'f1', documentId: 'd1' }, ctx)).toBe(
+      '/documents?folder=f1&document=d1',
+    )
+  })
 })
 
 describe('parse/format fixed point', () => {
   const paths = [
     '/', '/dashboard/p2', '/dashboard/a%20b', '/forecast', '/routes', '/charts',
     '/radar', '/anchor-watch', '/alarms', '/mate', '/mate/12345', '/settings', '/settings/signalk', '/kiosk',
+    '/documents', '/documents?folder=f1', '/documents?document=d1', '/documents?folder=f1&document=d1',
   ]
 
   it.each(paths)('format(parse(%s)) === %s', (path) => {
@@ -172,6 +219,8 @@ describe('isCanonicalAppPath', () => {
     expect(isCanonicalAppPath('/mate', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/mate/12345', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/kiosk', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/documents', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/documents?folder=f1', baseCtx)).toBe(true)
   })
 
   it('is false for the legacy /assistant alias because canonical is /mate', () => {

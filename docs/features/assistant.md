@@ -102,23 +102,21 @@ Mate can read from the boat's own document library: manuals, receipts,
 invoices, service logs, passage notes, photos of a part or a data plate.
 There are two ways it draws on that.
 
-Attach a document to a question and Mate gets a short preamble ahead of
-your question describing it - filename, type, page count, whether it's
-finished indexing yet - plus up to around 4,000 characters of what's
-actually in it, so a question about the file is answered from its real
-content rather than a guess. If the answer needs more than that excerpt,
-Mate reads further into the same document itself.
+Attach a document to a question - the paperclip in the composer, or drop a
+file straight onto it - and Mate gets a short preamble ahead of your
+question describing it: filename, type, page count, whether it's finished
+indexing yet, plus up to around 4,000 characters of what's actually in it,
+so a question about the file is answered from its real content rather than
+a guess. If the answer needs more than that excerpt, Mate reads further
+into the same document itself. A message's attachments stay on it
+afterwards, shown as small chips that open the Documents panel's viewer for
+that file.
 
 Mate can also search the whole library on its own, the same way it looks
-up a forecast or a tide station. Ask something like "what's the part
-number for the raw water pump impeller", and if a receipt or a manual
-mentions it, Mate finds it and reads it without first being handed the
-file.
-
-> **Not yet in the composer.** Attaching a file to a question isn't wired
-> into Mate's composer yet, so today that only happens through the API.
-> Mate's own library search already works against whatever's in the
-> library either way.
+up a forecast or a tide station, with no attachment needed. Ask something
+like "what's the part number for the raw water pump impeller", and if a
+receipt or a manual mentions it, Mate finds it and reads it without first
+being handed the file.
 
 See [Documents](documents.md) for what gets indexed, what it costs, file
 types and limits, and how folders and tags work.

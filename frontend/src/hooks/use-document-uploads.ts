@@ -71,7 +71,18 @@ function parseJSON<T>(text: string): T | null {
   }
 }
 
-export function useDocumentUploads() {
+/**
+ * `folderId` (ADR 0106 F1): the folder a fresh upload files into. Read
+ * through a ref, not closed over directly by startUpload, so the Documents
+ * panel can navigate to a different folder mid-upload (a slow file still in
+ * flight) without that change retroactively altering which request is about
+ * to fire for the NEXT file - each startUpload call reads whatever folder is
+ * current at the moment it fires. Left undefined/null (the composer's own
+ * call site, assistant-thread.tsx, never passes one), uploads land in the
+ * root exactly as before this parameter existed - documentsRootFolderSentinel
+ * is the server's own default for an absent folder_id (documents_store.go).
+ */
+export function useDocumentUploads(folderId?: string | null) {
   const [items, setItems] = useState<StagedDocument[]>([])
   const [error, setError] = useState<string | null>(null)
   // Keyed by the local staged key, not the document id - an item still
@@ -82,6 +93,8 @@ export function useDocumentUploads() {
   // latest staged list without re-subscribing the effect on every update.
   const itemsRef = useRef<StagedDocument[]>(items)
   itemsRef.current = items
+  const folderIdRef = useRef(folderId)
+  folderIdRef.current = folderId
 
   const updateItem = useCallback((key: string, patch: Partial<StagedDocument>) => {
     setItems((previous) => previous.map((item) => (item.key === key ? { ...item, ...patch } : item)))
@@ -148,6 +161,7 @@ export function useDocumentUploads() {
 
     const formData = new FormData()
     formData.append('file', file)
+    if (folderIdRef.current) formData.append('folder_id', folderIdRef.current)
     xhr.open('POST', `${apiBaseUrl}/api/documents`)
     xhr.send(formData)
   }, [updateItem])

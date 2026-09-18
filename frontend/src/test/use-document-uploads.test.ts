@@ -122,6 +122,33 @@ describe('useDocumentUploads', () => {
     expect(result.current.ready).toBe(true)
   })
 
+  // ADR 0106 F1: the Documents panel uploads into whichever folder is open,
+  // reusing this same hook rather than a second uploader - the composer
+  // (assistant-thread.tsx) keeps calling useDocumentUploads() with no
+  // argument, which must still land in the root exactly as before.
+  it('includes folder_id in the upload body when a target folder is given', () => {
+    const { result } = renderHook(() => useDocumentUploads('folder-abc'))
+
+    act(() => {
+      result.current.add([new File(['hello'], 'manual.pdf', { type: 'application/pdf' })])
+    })
+
+    const xhr = FakeXHR.instances[0]
+    expect(xhr.url).toBe('/api/documents')
+    expect(xhr.body?.get('folder_id')).toBe('folder-abc')
+  })
+
+  it('omits folder_id when no target folder is given, landing in the root', () => {
+    const { result } = renderHook(() => useDocumentUploads())
+
+    act(() => {
+      result.current.add([new File(['hello'], 'manual.pdf', { type: 'application/pdf' })])
+    })
+
+    const xhr = FakeXHR.instances[0]
+    expect(xhr.body?.has('folder_id')).toBe(false)
+  })
+
   it('reuses the existing document on a duplicate response without polling', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

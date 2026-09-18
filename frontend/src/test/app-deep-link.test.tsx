@@ -10,8 +10,10 @@
  *    instead of a literal factory, so `pages`/`loading` can vary per test.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, within, waitFor } from '@testing-library/react'
 import { App } from '../App'
+import { useDocuments, type DocumentRecord } from '@/hooks/use-documents'
+import { useDocumentUploads } from '@/hooks/use-document-uploads'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 
@@ -265,6 +267,85 @@ vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, vi.fn()],
 }))
 
+// ADR 0106 F1: DocumentsPanel's own data hooks, mocked the same way
+// documents-panel.test.tsx does it (trimmed to what the deep-link test below
+// actually needs) - no other existing test in this file ever navigates to
+// /documents, so mocking these two hooks file-wide can't affect them.
+vi.mock('@/hooks/use-documents')
+vi.mock('@/hooks/use-document-uploads')
+
+const mockedUseDocuments = vi.mocked(useDocuments)
+const mockedUseDocumentUploads = vi.mocked(useDocumentUploads)
+
+type DocumentsMock = ReturnType<typeof useDocuments>
+type UploadsMock = ReturnType<typeof useDocumentUploads>
+
+function makeDocumentsMock(overrides: Partial<DocumentsMock> = {}): DocumentsMock {
+  return {
+    path: [],
+    folders: [],
+    documents: [],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    tags: [],
+    selectedTag: null,
+    setSelectedTag: vi.fn(),
+    searchResults: null,
+    searching: false,
+    searchError: null,
+    search: vi.fn(),
+    clearSearch: vi.fn(),
+    createFolder: vi.fn(),
+    renameFolder: vi.fn(),
+    moveFolder: vi.fn(),
+    deleteFolder: vi.fn(),
+    patchDocument: vi.fn(),
+    deleteDocument: vi.fn(),
+    reindexDocument: vi.fn(),
+    moveDocuments: vi.fn(),
+    ...overrides,
+  }
+}
+
+function makeUploadsMock(overrides: Partial<UploadsMock> = {}): UploadsMock {
+  return {
+    items: [],
+    add: vi.fn(),
+    remove: vi.fn(),
+    clear: vi.fn(),
+    ready: true,
+    error: null,
+    ...overrides,
+  }
+}
+
+function doc(overrides: Partial<DocumentRecord> = {}): DocumentRecord {
+  return {
+    id: 'doc-1',
+    sha256: 'abc123',
+    folder_id: null,
+    filename: 'manual.pdf',
+    title: '',
+    notes: '',
+    mime: 'application/pdf',
+    size_bytes: 123456,
+    page_count: 5,
+    summary: '',
+    status: 'indexed',
+    stage: 'done',
+    indexed_with: 'local',
+    error: '',
+    index_model: '',
+    index_cost_usd: 0,
+    tags: [],
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    indexed_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
 const DEPTH_TIDE_WIDGET: DashboardLayoutItem = { id: 'depth-tide', x: 0, y: 0, w: 4, h: 7 }
@@ -410,5 +491,46 @@ describe('App deep links', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Anchored' }))
     expect(window.location.pathname).toBe('/')
+  })
+})
+
+describe('App deep links — Documents', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    globalThis.localStorage?.clear()
+    mockPagesState.pages = [page('p1', 'Page 1', [DEPTH_TIDE_WIDGET])]
+    mockPagesState.loading = false
+    mockedUseDocuments.mockReturnValue(makeDocumentsMock({ documents: [doc({ id: 'doc-1', filename: 'manual.pdf' })] }))
+    mockedUseDocumentUploads.mockReturnValue(makeUploadsMock())
+  })
+
+  // Finding 2 (ADR 0106 F1 review): initialLocation is parsed once, at the
+  // very first render of the whole app, and never changes - so without a
+  // consumed-once latch, a Mate attachment chip's ?document= link would
+  // reopen its document every single time the operator returns to
+  // Documents (DocumentsPanel fully unmounts/remounts on every panel
+  // switch, per Suspense key={activePanel}), not just the once, for the
+  // navigation the link was actually for.
+  it("opens a Mate attachment chip's linked document once, not again on a later remount", async () => {
+    window.history.replaceState({}, '', '/documents?document=doc-1')
+    render(<App />)
+
+    // the viewer (Sheet) should be open, showing manual.pdf - since the
+    // filename ALSO appears in the plain folder table underneath, scope the
+    // assertion to the dialog itself.
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('manual.pdf')).toBeInTheDocument()
+
+    // close it - SheetContent's close button has accessible name "Close".
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // navigate away (unmounts DocumentsPanel - Suspense key={activePanel})
+    // and back (remounts it fresh, with the exact same initialLocation)
+    fireEvent.click(screen.getByRole('button', { name: /forecast/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Documents' }))
+
+    // must NOT reopen this time
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

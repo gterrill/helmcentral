@@ -680,7 +680,10 @@ describe('AssistantThread', () => {
       render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
 
       expect(screen.getByText('What about the impeller?')).toBeInTheDocument()
-      expect(screen.getByText('manual.pdf')).toBeInTheDocument()
+      // ADR 0106 F1: the chip is a real link into the Documents panel's
+      // viewer for this document, not inert text.
+      const chip = screen.getByText('manual.pdf')
+      expect(chip.closest('a')).toHaveAttribute('href', '/documents?document=doc-1')
     })
   })
 })

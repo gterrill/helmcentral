@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
+import { formatAppLocation } from '@/lib/app-location'
 import { cn } from '@/lib/utils'
 
 const EXAMPLE_QUESTION =
@@ -71,21 +72,33 @@ function formatMessageFooterTitle(message: AssistantMessage): string {
   return `${model} · ${tokens} tokens`
 }
 
-// ADR 0106 F2: the small filename chips shown under a past user message's
-// bubble. There's no Documents panel yet for these to open (that's F1, a
-// later phase of the same plan) - once it exists, this becomes a link into
-// its viewer instead of inert text.
+// ADR 0106 F1: the small filename chips shown under a past user message's
+// bubble, now a plain link into the Documents panel's viewer for that
+// document (F1's own deep-link query param - app-location.ts's
+// documentId/formatAppLocation) rather than inert text. An ordinary <a
+// href>, not a client-side navigate: this component has no reach into
+// App.tsx's panel state, and "keep it simple" (the plan's own words for
+// this wiring) means a real link the browser handles on its own, the same
+// as the collision-tuning link (lib/collision-tuning.ts) does for an
+// external URL. firstPageId is irrelevant to a 'documents' location
+// (formatAppLocation only reads it for the dashboard panel===null case), so
+// null is passed rather than threading the real one down through props.
+function documentViewerHref(documentId: string): string {
+  return formatAppLocation({ panel: 'documents', documentId }, { firstPageId: null })
+}
+
 function MessageAttachmentChips({ attachments }: { attachments: AssistantMessageAttachment[] }) {
   return (
     <div className="flex flex-wrap justify-end gap-1">
       {attachments.map((attachment) => (
-        <span
+        <a
           key={attachment.documentId}
-          className="max-w-40 truncate rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground"
+          href={documentViewerHref(attachment.documentId)}
+          className="max-w-40 truncate rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary/40 hover:text-primary"
           title={attachment.filename}
         >
           {attachment.filename}
-        </span>
+        </a>
       ))}
     </div>
   )
