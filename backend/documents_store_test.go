@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func newTestDocumentStore(t *testing.T) *documentStore {
@@ -1492,3 +1493,706 @@ func TestDocumentStore_TagCountsCountsDistinctDocumentsPerTag(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// ── embeddings ───────────────────────────────────────────────────────────
+
+// TestDocumentStore_ChunkEmbeddingsCascadeOnDocumentDelete guards the
+// invalidation story documentStoreSchema's comment on
+// document_chunk_embeddings describes: chunk_id REFERENCES document_chunks
+// (id) ON DELETE CASCADE, so deleting a document's chunks (here via
+// Delete's own cascade from documents to document_chunks) takes the
+// embedding with it.
+func TestDocumentStore_ChunkEmbeddingsCascadeOnDocumentDelete(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-embed-delete", "impeller.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Replace the impeller every 500 hours."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	chunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(chunks) != 1 {
+		t.Fatalf("ChunksFrom: chunks=%+v err=%v", chunks, err)
+	}
+	chunkID := chunks[0].ID
+
+	if err := store.SetChunkEmbeddings("test-model", 3, map[int64][]float32{chunkID: {1, 0, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+	var before int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE chunk_id = ?`, chunkID).Scan(&before); err != nil {
+		t.Fatalf("count before: %v", err)
+	}
+	if before != 1 {
+		t.Fatalf("expected the embedding row to exist before delete, got count %d", before)
+	}
+
+	if _, err := store.Delete(doc.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	var after int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE chunk_id = ?`, chunkID).Scan(&after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+	if after != 0 {
+		t.Fatalf("expected ON DELETE CASCADE to remove the embedding when its document is deleted, got count %d", after)
+	}
+}
+
+// TestDocumentStore_ChunkEmbeddingsCascadeOnReplaceChunks covers the more
+// common invalidation path than a delete: a re-extract. ReplaceChunks is
+// always DELETE+INSERT, never UPDATE, so the old chunk row (and its
+// embedding, via cascade) is gone even though the document itself, and a
+// chunk at the same seq, both still exist.
+func TestDocumentStore_ChunkEmbeddingsCascadeOnReplaceChunks(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-embed-replace", "impeller.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Replace the impeller every 500 hours."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks (initial): %v", err)
+	}
+	chunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(chunks) != 1 {
+		t.Fatalf("ChunksFrom: chunks=%+v err=%v", chunks, err)
+	}
+	oldChunkID := chunks[0].ID
+
+	if err := store.SetChunkEmbeddings("test-model", 3, map[int64][]float32{oldChunkID: {1, 0, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Re-extracted text, a different chunk row entirely."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks (re-extract): %v", err)
+	}
+
+	var count int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE chunk_id = ?`, oldChunkID).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected the old chunk's embedding to be gone once ReplaceChunks deleted its row, got count %d", count)
+	}
+}
+
+// TestDocumentStore_MetaChunkEmbeddingDroppedOnMetadataEdit proves the
+// subtle case the brief calls out: rebuildMetaChunkTx (called by
+// UpdateMeta) deletes and reinserts the meta chunk (seq 0, source 'meta'),
+// exactly like any other chunk replacement, and an embedding computed
+// against the old title/tags/notes text must not silently go on describing
+// the new text.
+//
+// This can't be proven by just checking "the new meta chunk has a different
+// id than the old one": SQLite's ROWID allocation is free to reuse a
+// just-freed id once the table (or, in production, just this document's
+// slice of it) has no lower id outstanding, and in this single-document
+// test that is exactly what happens - the rebuilt meta chunk comes back as
+// the SAME integer id as the one that was just deleted. So the only way to
+// actually prove the point is to check the current, post-edit meta chunk's
+// embedding row regardless of whether its id happens to match the old one:
+// there must be none, because rebuildMetaChunkTx's INSERT never carries an
+// embedding forward, whatever integer the new row landed on.
+func TestDocumentStore_MetaChunkEmbeddingDroppedOnMetadataEdit(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-meta-embed", "manual.pdf", nil)
+
+	metaChunks, err := store.ChunksFrom(doc.ID, 0)
+	if err != nil || len(metaChunks) != 1 || metaChunks[0].Source != "meta" {
+		t.Fatalf("ChunksFrom(0): expected exactly the meta chunk, got %+v err=%v", metaChunks, err)
+	}
+	oldMetaChunkID := metaChunks[0].ID
+
+	if err := store.SetChunkEmbeddings("test-model", 3, map[int64][]float32{oldMetaChunkID: {1, 0, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+	var before int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE chunk_id = ?`, oldMetaChunkID).Scan(&before); err != nil {
+		t.Fatalf("count before: %v", err)
+	}
+	if before != 1 {
+		t.Fatalf("expected the meta chunk's embedding to exist before the edit, got count %d", before)
+	}
+
+	if err := store.UpdateMeta(doc.ID, strPtr("New Title"), nil, nil); err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
+	}
+
+	newMetaChunks, err := store.ChunksFrom(doc.ID, 0)
+	if err != nil || len(newMetaChunks) != 1 {
+		t.Fatalf("ChunksFrom(0) after edit: chunks=%+v err=%v", newMetaChunks, err)
+	}
+	newMetaChunkID := newMetaChunks[0].ID
+
+	var after int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings WHERE chunk_id = ?`, newMetaChunkID).Scan(&after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+	if after != 0 {
+		t.Fatalf("expected the rebuilt meta chunk (id %d, was %d before the edit) to carry no embedding of its own, got count %d", newMetaChunkID, oldMetaChunkID, after)
+	}
+
+	var total int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings`).Scan(&total); err != nil {
+		t.Fatalf("count total: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("expected no embedding rows to remain anywhere after the edit, got %d", total)
+	}
+}
+
+// TestDocumentStore_PendingEmbedChunksFiltersUnembeddedEnrichedAndBlank
+// covers PendingEmbedChunks' three filtering rules together: only chunks
+// with no document_chunk_embeddings row for the given model are returned,
+// enrichedOnly restricts that to documents with enrich=1, and a
+// whitespace-only chunk is skipped regardless of either.
+func TestDocumentStore_PendingEmbedChunksFiltersUnembeddedEnrichedAndBlank(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	enrichedDoc, err := store.Insert(document{SHA256: "sha-pending-enriched", Filename: "enriched.pdf", MIME: "application/pdf", Enrich: true})
+	if err != nil {
+		t.Fatalf("Insert(enriched): %v", err)
+	}
+	if err := store.ReplaceChunks(enrichedDoc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Impeller replacement on the Yanmar 4JH."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(enriched): %v", err)
+	}
+
+	plainDoc, err := store.Insert(document{SHA256: "sha-pending-plain", Filename: "plain.pdf", MIME: "application/pdf", Enrich: false})
+	if err != nil {
+		t.Fatalf("Insert(plain): %v", err)
+	}
+	if err := store.ReplaceChunks(plainDoc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Whitsunday Marine Supplies receipt."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(plain): %v", err)
+	}
+
+	blankDoc, err := store.Insert(document{SHA256: "sha-pending-blank", Filename: "blank.pdf", MIME: "application/pdf", Enrich: true})
+	if err != nil {
+		t.Fatalf("Insert(blank): %v", err)
+	}
+	if err := store.ReplaceChunks(blankDoc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "   \n\t  "},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(blank): %v", err)
+	}
+
+	embeddedDoc, err := store.Insert(document{SHA256: "sha-pending-embedded", Filename: "embedded.pdf", MIME: "application/pdf", Enrich: true})
+	if err != nil {
+		t.Fatalf("Insert(embedded): %v", err)
+	}
+	if err := store.ReplaceChunks(embeddedDoc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Already embedded chunk."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(embedded): %v", err)
+	}
+	embeddedChunks, err := store.ChunksFrom(embeddedDoc.ID, 1)
+	if err != nil || len(embeddedChunks) != 1 {
+		t.Fatalf("ChunksFrom(embedded): chunks=%+v err=%v", embeddedChunks, err)
+	}
+	if err := store.SetChunkEmbeddings("test-model", 3, map[int64][]float32{embeddedChunks[0].ID: {1, 0, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	all, err := store.PendingEmbedChunks("test-model", 100, false)
+	if err != nil {
+		t.Fatalf("PendingEmbedChunks(all): %v", err)
+	}
+	for _, c := range all {
+		if strings.TrimSpace(c.Text) == "" {
+			t.Fatalf("expected PendingEmbedChunks to skip blank/whitespace-only chunks, got %+v", c)
+		}
+		if c.ID == embeddedChunks[0].ID {
+			t.Fatalf("expected the already-embedded chunk to be excluded, got it in %+v", all)
+		}
+	}
+	foundEnrichedBody, foundPlainBody := false, false
+	for _, c := range all {
+		if c.DocumentID == enrichedDoc.ID && c.Source == "local" {
+			foundEnrichedBody = true
+		}
+		if c.DocumentID == plainDoc.ID && c.Source == "local" {
+			foundPlainBody = true
+		}
+	}
+	if !foundEnrichedBody || !foundPlainBody {
+		t.Fatalf("expected both the enriched and plain documents' body chunks pending with enrichedOnly=false, got %+v", all)
+	}
+
+	enrichedOnly, err := store.PendingEmbedChunks("test-model", 100, true)
+	if err != nil {
+		t.Fatalf("PendingEmbedChunks(enrichedOnly): %v", err)
+	}
+	foundEnrichedBody = false
+	for _, c := range enrichedOnly {
+		if c.DocumentID == plainDoc.ID {
+			t.Fatalf("expected enrichedOnly to exclude the non-enriched document entirely, got %+v", c)
+		}
+		if c.DocumentID == enrichedDoc.ID && c.Source == "local" {
+			foundEnrichedBody = true
+		}
+	}
+	if !foundEnrichedBody {
+		t.Fatalf("expected the enriched document's body chunk in the enrichedOnly result, got %+v", enrichedOnly)
+	}
+}
+
+// TestDocumentStore_PendingEmbedChunksReturnsChunksAgainAfterModelChange is
+// the "the setting changed" half of PendingEmbedChunks' contract: a chunk
+// already embedded under one model is not pending under that model, but is
+// pending again under a different model name - no backfill bookkeeping
+// required, since "pending" is defined purely by the absence of a row for
+// the model asked about.
+func TestDocumentStore_PendingEmbedChunksReturnsChunksAgainAfterModelChange(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-model-change", "manual.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Impeller replacement on the Yanmar 4JH."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	chunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(chunks) != 1 {
+		t.Fatalf("ChunksFrom: chunks=%+v err=%v", chunks, err)
+	}
+	chunkID := chunks[0].ID
+
+	if err := store.SetChunkEmbeddings("old-model", 3, map[int64][]float32{chunkID: {1, 0, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings(old-model): %v", err)
+	}
+
+	stillOld, err := store.PendingEmbedChunks("old-model", 10, false)
+	if err != nil {
+		t.Fatalf("PendingEmbedChunks(old-model): %v", err)
+	}
+	for _, c := range stillOld {
+		if c.ID == chunkID {
+			t.Fatalf("expected the body chunk to already be embedded under old-model, got it pending: %+v", c)
+		}
+	}
+
+	underNewModel, err := store.PendingEmbedChunks("new-model", 10, false)
+	if err != nil {
+		t.Fatalf("PendingEmbedChunks(new-model): %v", err)
+	}
+	found := false
+	for _, c := range underNewModel {
+		if c.ID == chunkID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the chunk to be pending again under a new model name, got %+v", underNewModel)
+	}
+}
+
+func TestDocumentStore_SetChunkEmbeddingsRejectsWrongLengthVector(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "sha-wrong-length", "manual.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Some body text."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	chunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(chunks) != 1 {
+		t.Fatalf("ChunksFrom: chunks=%+v err=%v", chunks, err)
+	}
+
+	err = store.SetChunkEmbeddings("test-model", 512, map[int64][]float32{chunks[0].ID: {1, 2, 3}})
+	if err == nil {
+		t.Fatalf("expected an error for a 3-dimensional vector against dims=512")
+	}
+
+	var count int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunk_embeddings`).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected the rejected write to leave no row behind, got %d", count)
+	}
+}
+
+// TestDocumentStore_SetChunkEmbeddingsUnknownChunkIDReturnsLegibleError
+// covers the foreign key path: chunk_id has no existence check of its own
+// before the INSERT, so a bogus id trips document_chunk_embeddings' own
+// foreign key. isForeignKeyConstraintErr's whole job is turning that into a
+// message naming the id rather than surfacing modernc/sqlite's bare
+// "FOREIGN KEY constraint failed" - this pins that the wrapped error still
+// mentions the id so an operator (or a caller's own error log) isn't left
+// staring at an opaque SQLite string.
+func TestDocumentStore_SetChunkEmbeddingsUnknownChunkIDReturnsLegibleError(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	const bogusChunkID int64 = 999999
+	err := store.SetChunkEmbeddings("test-model", 3, map[int64][]float32{bogusChunkID: {1, 0, 0}})
+	if err == nil {
+		t.Fatalf("expected an error for a chunk id that doesn't exist")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d", bogusChunkID)) {
+		t.Fatalf("expected the error to name the offending chunk id %d, got %q", bogusChunkID, err.Error())
+	}
+}
+
+// TestDocumentStore_EmbeddingCountsReportsExpectedTotals builds one
+// document embedded under the model being asked about, one embedded under a
+// different (stale) model, and one left entirely unembedded (with one
+// blank chunk among its chunks, which must not count as pending), then
+// checks EmbeddingCounts' five numbers against directly-queried oracles
+// rather than hand-computed constants - the meta chunk's exact text is an
+// implementation detail of rebuildMetaChunkTx this test has no business
+// assuming.
+func TestDocumentStore_EmbeddingCountsReportsExpectedTotals(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	embedAllChunks := func(docID, model string) {
+		chunks, err := store.ChunksFrom(docID, 0)
+		if err != nil {
+			t.Fatalf("ChunksFrom(%s): %v", docID, err)
+		}
+		vectors := make(map[int64][]float32, len(chunks))
+		for _, c := range chunks {
+			vectors[c.ID] = []float32{1, 0, 0}
+		}
+		if err := store.SetChunkEmbeddings(model, 3, vectors); err != nil {
+			t.Fatalf("SetChunkEmbeddings(%s, %s): %v", docID, model, err)
+		}
+	}
+
+	current := mustInsertDocument(t, store, "sha-counts-current", "current.pdf", nil)
+	if err := store.ReplaceChunks(current.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "current model body text"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(current): %v", err)
+	}
+	embedAllChunks(current.ID, "current-model")
+
+	stale := mustInsertDocument(t, store, "sha-counts-stale", "stale.pdf", nil)
+	if err := store.ReplaceChunks(stale.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "stale model body text"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(stale): %v", err)
+	}
+	embedAllChunks(stale.ID, "old-model")
+
+	pending := mustInsertDocument(t, store, "sha-counts-pending", "pending.pdf", nil)
+	if err := store.ReplaceChunks(pending.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "0123456789"},
+		{Seq: 2, Source: "local", Text: "   "}, // blank: must not count as pending
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(pending): %v", err)
+	}
+
+	var wantTotal int
+	if err := store.db.QueryRow(`SELECT count(*) FROM document_chunks`).Scan(&wantTotal); err != nil {
+		t.Fatalf("count chunks: %v", err)
+	}
+
+	oracleRows, err := store.db.Query(`
+		SELECT c.text FROM document_chunks c
+		WHERE NOT EXISTS (SELECT 1 FROM document_chunk_embeddings e WHERE e.chunk_id = c.id AND e.model = 'current-model')`)
+	if err != nil {
+		t.Fatalf("query pending oracle: %v", err)
+	}
+	var wantPending, wantChars int
+	for oracleRows.Next() {
+		var text string
+		if err := oracleRows.Scan(&text); err != nil {
+			t.Fatalf("scan pending oracle: %v", err)
+		}
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		wantPending++
+		wantChars += utf8.RuneCountInString(text)
+	}
+	if err := oracleRows.Err(); err != nil {
+		t.Fatalf("pending oracle: %v", err)
+	}
+	oracleRows.Close()
+
+	counts, err := store.EmbeddingCounts("current-model")
+	if err != nil {
+		t.Fatalf("EmbeddingCounts: %v", err)
+	}
+
+	if counts.ChunksTotal != wantTotal {
+		t.Fatalf("ChunksTotal: expected %d, got %d", wantTotal, counts.ChunksTotal)
+	}
+	if counts.ChunksEmbedded != 2 {
+		t.Fatalf("ChunksEmbedded: expected 2 (current's meta+body chunk), got %d", counts.ChunksEmbedded)
+	}
+	if counts.ChunksStale != 2 {
+		t.Fatalf("ChunksStale: expected 2 (stale's meta+body chunk under old-model), got %d", counts.ChunksStale)
+	}
+	if counts.ChunksPending != wantPending {
+		t.Fatalf("ChunksPending: expected %d, got %d", wantPending, counts.ChunksPending)
+	}
+	if counts.CharsPending != wantChars {
+		t.Fatalf("CharsPending: expected %d, got %d", wantChars, counts.CharsPending)
+	}
+}
+
+func TestDocumentStore_SearchVectorRanksNearerVectorFirst(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	near := mustInsertDocument(t, store, "sha-vec-near", "near.pdf", nil)
+	if err := store.ReplaceChunks(near.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Impeller replacement on the Yanmar 4JH."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(near): %v", err)
+	}
+	far := mustInsertDocument(t, store, "sha-vec-far", "far.pdf", nil)
+	if err := store.ReplaceChunks(far.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "Whitsunday Marine Supplies receipt."},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(far): %v", err)
+	}
+
+	nearChunks, err := store.ChunksFrom(near.ID, 1)
+	if err != nil || len(nearChunks) != 1 {
+		t.Fatalf("ChunksFrom(near): chunks=%+v err=%v", nearChunks, err)
+	}
+	farChunks, err := store.ChunksFrom(far.ID, 1)
+	if err != nil || len(farChunks) != 1 {
+		t.Fatalf("ChunksFrom(far): chunks=%+v err=%v", farChunks, err)
+	}
+	if err := store.SetChunkEmbeddings("test-model", 2, map[int64][]float32{
+		nearChunks[0].ID: {1, 0},
+		farChunks[0].ID:  {0, 1},
+	}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	results, err := store.SearchVector([]float32{1, 0}, "test-model", nil, false, "", 10)
+	if err != nil {
+		t.Fatalf("SearchVector: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected both documents, got %+v", results)
+	}
+	if results[0].DocumentID != near.ID {
+		t.Fatalf("expected the near document (cosine 1.0) ranked first, got %+v", results)
+	}
+	if results[0].Score <= results[1].Score {
+		t.Fatalf("expected the near document's score to exceed the far document's, got %v vs %v", results[0].Score, results[1].Score)
+	}
+}
+
+func TestDocumentStore_SearchVectorRespectsFolderFilter(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	manuals, err := store.CreateFolder("Manuals", nil)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	inFolder := mustInsertDocument(t, store, "sha-vec-folder-in", "in.pdf", &manuals.ID)
+	if err := store.ReplaceChunks(inFolder.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "impeller torque spec"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(inFolder): %v", err)
+	}
+	outFolder := mustInsertDocument(t, store, "sha-vec-folder-out", "out.pdf", nil)
+	if err := store.ReplaceChunks(outFolder.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "impeller torque spec too"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(outFolder): %v", err)
+	}
+
+	inChunks, err := store.ChunksFrom(inFolder.ID, 1)
+	if err != nil || len(inChunks) != 1 {
+		t.Fatalf("ChunksFrom(inFolder): chunks=%+v err=%v", inChunks, err)
+	}
+	outChunks, err := store.ChunksFrom(outFolder.ID, 1)
+	if err != nil || len(outChunks) != 1 {
+		t.Fatalf("ChunksFrom(outFolder): chunks=%+v err=%v", outChunks, err)
+	}
+	if err := store.SetChunkEmbeddings("test-model", 2, map[int64][]float32{
+		inChunks[0].ID:  {1, 0},
+		outChunks[0].ID: {1, 0},
+	}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	results, err := store.SearchVector([]float32{1, 0}, "test-model", &manuals.ID, false, "", 10)
+	if err != nil {
+		t.Fatalf("SearchVector: %v", err)
+	}
+	if len(results) != 1 || results[0].DocumentID != inFolder.ID {
+		t.Fatalf("expected only the document inside Manuals, got %+v", results)
+	}
+}
+
+func TestDocumentStore_SearchVectorRespectsTagFilter(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	tagged := mustInsertDocument(t, store, "sha-vec-tag-yes", "tagged.pdf", nil)
+	if err := store.UpdateMeta(tagged.ID, nil, nil, []string{"engine"}); err != nil {
+		t.Fatalf("UpdateMeta(tagged): %v", err)
+	}
+	if err := store.ReplaceChunks(tagged.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "impeller torque spec"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(tagged): %v", err)
+	}
+	untagged := mustInsertDocument(t, store, "sha-vec-tag-no", "untagged.pdf", nil)
+	if err := store.ReplaceChunks(untagged.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "impeller torque spec too"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(untagged): %v", err)
+	}
+
+	taggedChunks, err := store.ChunksFrom(tagged.ID, 1)
+	if err != nil || len(taggedChunks) != 1 {
+		t.Fatalf("ChunksFrom(tagged): chunks=%+v err=%v", taggedChunks, err)
+	}
+	untaggedChunks, err := store.ChunksFrom(untagged.ID, 1)
+	if err != nil || len(untaggedChunks) != 1 {
+		t.Fatalf("ChunksFrom(untagged): chunks=%+v err=%v", untaggedChunks, err)
+	}
+	if err := store.SetChunkEmbeddings("test-model", 2, map[int64][]float32{
+		taggedChunks[0].ID:   {1, 0},
+		untaggedChunks[0].ID: {1, 0},
+	}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	results, err := store.SearchVector([]float32{1, 0}, "test-model", nil, false, "engine", 10)
+	if err != nil {
+		t.Fatalf("SearchVector: %v", err)
+	}
+	if len(results) != 1 || results[0].DocumentID != tagged.ID {
+		t.Fatalf("expected only the tagged document, got %+v", results)
+	}
+}
+
+func TestDocumentStore_SearchVectorUnknownFolderReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	_, err := store.SearchVector([]float32{1, 0}, "test-model", strPtr("does-not-exist"), false, "", 10)
+	if !errors.Is(err, errFolderNotFound) {
+		t.Fatalf("expected errFolderNotFound, got %v", err)
+	}
+}
+
+// TestDocumentStore_SearchVectorSkipsWrongDimsRow covers a library mid
+// model-change: one chunk still carries a vector from the old
+// assistant.embedding_dimensions setting, one carries a vector at the
+// current setting. SearchVector must silently skip the mismatched row
+// (PendingEmbedChunks/the backfill is what fixes it) rather than erroring
+// the whole search or crashing on a length mismatch inside dotProduct.
+func TestDocumentStore_SearchVectorSkipsWrongDimsRow(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	wrongDims := mustInsertDocument(t, store, "sha-vec-wrong-dims", "wrong.pdf", nil)
+	if err := store.ReplaceChunks(wrongDims.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "old dimensionality chunk"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(wrongDims): %v", err)
+	}
+	wrongChunks, err := store.ChunksFrom(wrongDims.ID, 1)
+	if err != nil || len(wrongChunks) != 1 {
+		t.Fatalf("ChunksFrom(wrongDims): chunks=%+v err=%v", wrongChunks, err)
+	}
+	if err := store.SetChunkEmbeddings("test-model", 3, map[int64][]float32{wrongChunks[0].ID: {1, 0, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings(3-dim): %v", err)
+	}
+
+	rightDims := mustInsertDocument(t, store, "sha-vec-right-dims", "right.pdf", nil)
+	if err := store.ReplaceChunks(rightDims.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "current dimensionality chunk"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks(rightDims): %v", err)
+	}
+	rightChunks, err := store.ChunksFrom(rightDims.ID, 1)
+	if err != nil || len(rightChunks) != 1 {
+		t.Fatalf("ChunksFrom(rightDims): chunks=%+v err=%v", rightChunks, err)
+	}
+	if err := store.SetChunkEmbeddings("test-model", 2, map[int64][]float32{rightChunks[0].ID: {1, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings(2-dim): %v", err)
+	}
+
+	results, err := store.SearchVector([]float32{1, 0}, "test-model", nil, false, "", 10)
+	if err != nil {
+		t.Fatalf("SearchVector: %v", err)
+	}
+	if len(results) != 1 || results[0].DocumentID != rightDims.ID {
+		t.Fatalf("expected the wrong-dims row silently skipped and only the matching-dims document returned, got %+v", results)
+	}
+}
+
+// TestDocumentStore_SearchVectorErrorsOnCorruptBlob covers the other side
+// of the same coin: a dims mismatch is a stale setting and is skipped, but
+// a vector blob that doesn't even decode is corruption, and SearchVector
+// must surface that as an error rather than skip it the same way.
+func TestDocumentStore_SearchVectorErrorsOnCorruptBlob(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	doc := mustInsertDocument(t, store, "sha-vec-corrupt", "corrupt.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "some body text"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	chunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(chunks) != 1 {
+		t.Fatalf("ChunksFrom: chunks=%+v err=%v", chunks, err)
+	}
+	if err := store.SetChunkEmbeddings("test-model", 2, map[int64][]float32{chunks[0].ID: {1, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	// Corrupt the stored blob directly, modelling on-disk bit rot or a
+	// truncated write - not anything SetChunkEmbeddings itself could ever
+	// produce, which is exactly why this has to be provoked by hand.
+	if _, err := store.db.Exec(`UPDATE document_chunk_embeddings SET vector = ? WHERE chunk_id = ?`, []byte{1, 2, 3}, chunks[0].ID); err != nil {
+		t.Fatalf("corrupt blob: %v", err)
+	}
+
+	if _, err := store.SearchVector([]float32{1, 0}, "test-model", nil, false, "", 10); err == nil {
+		t.Fatalf("expected an error for a corrupt (non-multiple-of-4) vector blob, not a silently skipped row")
+	}
+}
+
+// TestDocumentStore_SearchVectorErrorsOnDimsColumnLie covers the gap
+// between the two tests above: a row whose dims column says 2 while its
+// blob holds only one float32 passes the dims check (which compares the
+// column, not the blob) and then reaches dotProduct, which indexes the
+// decoded vector by the query's length. Left unguarded that is an
+// out-of-range panic in the middle of a search, taking the request down
+// with it; the row is corrupt, so it has to surface as an error the same
+// way a blob that fails to decode at all does.
+func TestDocumentStore_SearchVectorErrorsOnDimsColumnLie(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	doc := mustInsertDocument(t, store, "sha-vec-dims-lie", "dims-lie.pdf", nil)
+	if err := store.ReplaceChunks(doc.ID, []string{"local"}, []documentChunk{
+		{Seq: 1, Source: "local", Text: "some body text"},
+	}); err != nil {
+		t.Fatalf("ReplaceChunks: %v", err)
+	}
+	chunks, err := store.ChunksFrom(doc.ID, 1)
+	if err != nil || len(chunks) != 1 {
+		t.Fatalf("ChunksFrom: chunks=%+v err=%v", chunks, err)
+	}
+	if err := store.SetChunkEmbeddings("test-model", 2, map[int64][]float32{chunks[0].ID: {1, 0}}); err != nil {
+		t.Fatalf("SetChunkEmbeddings: %v", err)
+	}
+
+	// A well-formed one-dimension blob under a dims column still claiming
+	// two: decodable, so the corrupt-blob path never fires, but a dimension
+	// short of what the query expects.
+	if _, err := store.db.Exec(
+		`UPDATE document_chunk_embeddings SET vector = ? WHERE chunk_id = ?`,
+		encodeEmbedding([]float32{1}), chunks[0].ID,
+	); err != nil {
+		t.Fatalf("shorten blob: %v", err)
+	}
+
+	if _, err := store.SearchVector([]float32{1, 0}, "test-model", nil, false, "", 10); err == nil {
+		t.Fatalf("expected an error for a vector blob shorter than its own dims column, not a panic or a scored row")
+	}
+}
