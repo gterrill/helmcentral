@@ -197,12 +197,50 @@ func updateSettingsHandler(c echo.Context) error {
 	}
 
 	normalized := normalizeSettingsPayload(req)
+	current := buildSettingsPayload(settings)
 
-	if invalid := validateSettingsChange(buildSettingsPayload(settings), normalized); invalid != nil {
+	if invalid := validateSettingsChange(current, normalized); invalid != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{
 			"field": invalid.Field,
 			"error": invalid.Message,
 		})
+	}
+
+	// E-1 (2026-09-19 security audit, ADR 0111 amendment): influxdb.url and
+	// signalk.address/port are free text naming where INFLUXDB_TOKEN and the
+	// SignalK credential pair get sent. Repointing either at a destination
+	// you control is enough to have the credential handed to it on the next
+	// query or auth login - see influx.go's Authorization header and
+	// signalk.go's acquireSignalKToken, which sends username/password in a
+	// cleartext JSON body. Clearing the bound secret the moment its
+	// destination changes (Option B) means the new destination gets nothing
+	// until the credential is re-entered.
+	//
+	// This runs after validateSettingsChange (so a rejected save, e.g. an
+	// unreachable new address, clears nothing - the old destination and old
+	// secret stay paired) and before settings is written below (so a clear
+	// failure aborts the save rather than ever persisting a new destination
+	// next to a secret that should have gone with the old one).
+	if destinationChanged(current.Influxdb.URL, normalized.Influxdb.URL) {
+		reason := fmt.Sprintf("influxdb.url changed from %q to %q", current.Influxdb.URL, normalized.Influxdb.URL)
+		if err := clearBoundSecret("INFLUXDB_TOKEN", reason); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to clear a secret bound to the previous destination; settings not saved"})
+		}
+	}
+	if destinationChanged(current.Signalk.Address, normalized.Signalk.Address) || current.Signalk.Port != normalized.Signalk.Port {
+		reason := fmt.Sprintf("signalk address changed from %s:%d to %s:%d",
+			current.Signalk.Address, current.Signalk.Port, normalized.Signalk.Address, normalized.Signalk.Port)
+		if err := clearBoundSecret("SIGNALK_USERNAME", reason); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to clear a secret bound to the previous destination; settings not saved"})
+		}
+		// Two separate clears rather than one call for the pair: if this one
+		// fails after SIGNALK_USERNAME already cleared above, the save still
+		// aborts below and the username stays cleared - safe-biased (an
+		// over-cleared secret, never a leaked one), and worth the small
+		// inconsistency it can leave in the secrets store.
+		if err := clearBoundSecret("SIGNALK_PASSWORD", reason); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to clear a secret bound to the previous destination; settings not saved"})
+		}
 	}
 
 	settings["signalk"] = map[string]any{

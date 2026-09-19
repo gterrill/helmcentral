@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -206,5 +207,219 @@ func TestNotifyHTTPClientRefusesRedirectIntoLoopback(t *testing.T) {
 	_, err := notifyHTTPClient().Get(redirector.URL)
 	if err == nil {
 		t.Fatal("expected the redirect into loopback to be refused, got no error")
+	}
+}
+
+// ── E-1: a repointed transport destination must not hand over the secret
+// bound to the old one ─────────────────────────────────────────────────────
+//
+// Every alarm transport sends its secret to whatever destination the
+// matching setting currently names, and that setting is free text: point
+// ntfy.server or smtp.host at a server you control, save, and the next send
+// (or an /api/alarm-transports/test click) hands NTFY_TOKEN or SMTP_PASSWORD
+// to it in the clear. setAlarmTransports closes this with Option B from the
+// 2026-09-19 audit (ADR 0111 amendment): clear the secret bound to a
+// destination the instant that destination changes. An attacker who
+// repoints a host gets nothing; the operator gets one extra paste at exactly
+// the moment they would expect one.
+
+// withCleanAlarmTransportsState points ALARM_TRANSPORTS_FILE at a scratch
+// file and resets the in-memory alarmTransportsState to its zero value for
+// the test, restoring both afterward. setAlarmTransports both persists to
+// disk (writeJSONFileAtomic) and mutates this package var directly - no
+// existing test exercised setAlarmTransports itself before this block (the
+// tests above it drive validateAlarmTransports directly, a pure function),
+// so this locks the same way setAlarmTransportsForTest above does, for the
+// same reason: setAlarmTransports takes alarmTransportsMu itself, and a bare
+// assignment here would race against it under -race.
+func withCleanAlarmTransportsState(t *testing.T) {
+	t.Helper()
+	t.Setenv("ALARM_TRANSPORTS_FILE", filepath.Join(t.TempDir(), "alarm-transports.json"))
+	alarmTransportsMu.Lock()
+	prev := alarmTransportsState
+	alarmTransportsState = alarmTransportConfig{}
+	alarmTransportsMu.Unlock()
+	t.Cleanup(func() {
+		alarmTransportsMu.Lock()
+		alarmTransportsState = prev
+		alarmTransportsMu.Unlock()
+	})
+}
+
+func TestSetAlarmTransports_ChangingNtfyServerClearsNtfyToken(t *testing.T) {
+	withCleanAlarmTransportsState(t)
+	store := withTestSecretsStore(t)
+
+	if _, err := setAlarmTransports(alarmTransportConfig{Ntfy: ntfyConfig{Enabled: true, Server: "https://ntfy.sh", Topic: "boat"}}); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if err := store.Set("NTFY_TOKEN", "tk-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	if _, err := setAlarmTransports(alarmTransportConfig{Ntfy: ntfyConfig{Enabled: true, Server: "https://attacker.example", Topic: "boat"}}); err != nil {
+		t.Fatalf("repointing save: %v", err)
+	}
+
+	if has, err := store.Has("NTFY_TOKEN"); err != nil || has {
+		t.Fatalf("expected NTFY_TOKEN cleared when ntfy.server changes, has=%v err=%v", has, err)
+	}
+}
+
+func TestSetAlarmTransports_UnchangedNtfyServerLeavesTokenAlone(t *testing.T) {
+	withCleanAlarmTransportsState(t)
+	store := withTestSecretsStore(t)
+
+	if _, err := setAlarmTransports(alarmTransportConfig{Ntfy: ntfyConfig{Enabled: true, Server: "https://ntfy.sh", Topic: "boat"}}); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if err := store.Set("NTFY_TOKEN", "tk-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// Only the topic changes; the server (the destination) does not.
+	if _, err := setAlarmTransports(alarmTransportConfig{Ntfy: ntfyConfig{Enabled: true, Server: "https://ntfy.sh", Topic: "boat-renamed"}}); err != nil {
+		t.Fatalf("unrelated-field save: %v", err)
+	}
+
+	if has, err := store.Has("NTFY_TOKEN"); err != nil || !has {
+		t.Fatalf("expected NTFY_TOKEN to survive an unrelated field edit, has=%v err=%v", has, err)
+	}
+}
+
+func smtpConfigFor(host, username string) alarmTransportConfig {
+	return alarmTransportConfig{SMTP: smtpConfig{
+		Enabled:  true,
+		Host:     host,
+		Port:     587,
+		Username: username,
+		From:     "boat@example.com",
+		To:       []string{"me@example.com"},
+	}}
+}
+
+func TestSetAlarmTransports_ChangingSmtpHostClearsSmtpPassword(t *testing.T) {
+	withCleanAlarmTransportsState(t)
+	store := withTestSecretsStore(t)
+
+	if _, err := setAlarmTransports(smtpConfigFor("smtp.example.com", "boat@example.com")); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if err := store.Set("SMTP_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	if _, err := setAlarmTransports(smtpConfigFor("attacker.example", "boat@example.com")); err != nil {
+		t.Fatalf("repointing save: %v", err)
+	}
+
+	if has, err := store.Has("SMTP_PASSWORD"); err != nil || has {
+		t.Fatalf("expected SMTP_PASSWORD cleared when smtp.host changes, has=%v err=%v", has, err)
+	}
+}
+
+func TestSetAlarmTransports_UnchangedSmtpHostLeavesPasswordAlone(t *testing.T) {
+	withCleanAlarmTransportsState(t)
+	store := withTestSecretsStore(t)
+
+	if _, err := setAlarmTransports(smtpConfigFor("smtp.example.com", "boat@example.com")); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if err := store.Set("SMTP_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// Re-save with the recipient list changed; host and username untouched.
+	changed := smtpConfigFor("smtp.example.com", "boat@example.com")
+	changed.SMTP.To = []string{"someone-else@example.com"}
+	if _, err := setAlarmTransports(changed); err != nil {
+		t.Fatalf("unrelated-field save: %v", err)
+	}
+
+	if has, err := store.Has("SMTP_PASSWORD"); err != nil || !has {
+		t.Fatalf("expected SMTP_PASSWORD to survive an unrelated field edit, has=%v err=%v", has, err)
+	}
+}
+
+// Username is bound to Password the same way Host is: AUTH PLAIN sends them
+// together, and a password captured for one username has no defined meaning
+// under a different one. Cleared on either changing, not just Host, so a
+// username-only edit cannot leave a stale password bound to an identity it
+// was never issued for.
+func TestSetAlarmTransports_ChangingSmtpUsernameClearsSmtpPassword(t *testing.T) {
+	withCleanAlarmTransportsState(t)
+	store := withTestSecretsStore(t)
+
+	if _, err := setAlarmTransports(smtpConfigFor("smtp.example.com", "boat@example.com")); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if err := store.Set("SMTP_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	if _, err := setAlarmTransports(smtpConfigFor("smtp.example.com", "someone-else@example.com")); err != nil {
+		t.Fatalf("username change save: %v", err)
+	}
+
+	if has, err := store.Has("SMTP_PASSWORD"); err != nil || has {
+		t.Fatalf("expected SMTP_PASSWORD cleared when smtp.username changes, has=%v err=%v", has, err)
+	}
+}
+
+// A hostname re-typed in different case is the same destination - DNS names
+// are case-insensitive - and must not cost the operator a working password
+// on a save that changed nothing meaningful.
+func TestSetAlarmTransports_CaseOnlyDifferenceInSmtpHostIsNotAChange(t *testing.T) {
+	withCleanAlarmTransportsState(t)
+	store := withTestSecretsStore(t)
+
+	if _, err := setAlarmTransports(smtpConfigFor("smtp.example.com", "boat@example.com")); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if err := store.Set("SMTP_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	if _, err := setAlarmTransports(smtpConfigFor("SMTP.Example.COM", "boat@example.com")); err != nil {
+		t.Fatalf("re-cased save: %v", err)
+	}
+
+	if has, err := store.Has("SMTP_PASSWORD"); err != nil || !has {
+		t.Fatalf("expected SMTP_PASSWORD to survive a case-only hostname edit, has=%v err=%v", has, err)
+	}
+}
+
+// A settings edit that never touches ntfy.server, smtp.host or smtp.username
+// must not clear anything - the point of Option B is that ONLY the
+// destination fields are load-bearing here.
+func TestSetAlarmTransports_UnrelatedFieldChangeClearsNoSecrets(t *testing.T) {
+	withCleanAlarmTransportsState(t)
+	store := withTestSecretsStore(t)
+
+	initial := alarmTransportConfig{
+		Ntfy: ntfyConfig{Enabled: true, Server: "https://ntfy.sh", Topic: "boat"},
+		SMTP: smtpConfigFor("smtp.example.com", "boat@example.com").SMTP,
+	}
+	if _, err := setAlarmTransports(initial); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if err := store.Set("NTFY_TOKEN", "tk-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := store.Set("SMTP_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	changed := initial
+	changed.Watchdog.HeartbeatMinutes = 30
+	if _, err := setAlarmTransports(changed); err != nil {
+		t.Fatalf("unrelated save: %v", err)
+	}
+
+	if has, err := store.Has("NTFY_TOKEN"); err != nil || !has {
+		t.Fatalf("expected NTFY_TOKEN to survive an unrelated watchdog edit, has=%v err=%v", has, err)
+	}
+	if has, err := store.Has("SMTP_PASSWORD"); err != nil || !has {
+		t.Fatalf("expected SMTP_PASSWORD to survive an unrelated watchdog edit, has=%v err=%v", has, err)
 	}
 }

@@ -128,6 +128,41 @@ func setAlarmTransports(config alarmTransportConfig) (alarmTransportConfig, erro
 	defer alarmTransportsMu.Unlock()
 
 	previous := alarmTransportsState
+
+	// E-1 (2026-09-19 security audit, ADR 0111 amendment): ntfy.server and
+	// smtp.host are free text, and every transport sends its secret to
+	// whatever they currently name. Repointing one at a server you control
+	// and clicking "test" is enough to read NTFY_TOKEN or SMTP_PASSWORD out
+	// of your own logs. Clearing the bound secret the moment its destination
+	// changes (Option B, chosen over gating these routes behind auth) means
+	// a repointed host gets nothing until the credential is re-entered.
+	//
+	// These checks run against `previous` (the config in memory before this
+	// call) and `config` (already normalized by validateAlarmTransports
+	// above, so whitespace/trailing-slash differences from a resubmitted
+	// form never reach destinationChanged as a false change) - and BEFORE
+	// alarmTransportsState is overwritten below, so a clear failure aborts
+	// the save with the old destination and old secret still paired, never
+	// the new destination next to a secret that should have gone with it.
+	if destinationChanged(previous.Ntfy.Server, config.Ntfy.Server) {
+		reason := fmt.Sprintf("ntfy.server changed from %q to %q", previous.Ntfy.Server, config.Ntfy.Server)
+		if err := clearBoundSecret("NTFY_TOKEN", reason); err != nil {
+			return alarmTransportConfig{}, err
+		}
+	}
+	// SMTP_PASSWORD is bound to Host AND Username: AUTH PLAIN sends them
+	// together, so a password captured for one username has no defined
+	// meaning under a different one. Clearing on either changing (not just
+	// Host) means a username-only edit can't leave a stale password bound
+	// to an identity it was never issued for.
+	if destinationChanged(previous.SMTP.Host, config.SMTP.Host) || destinationChanged(previous.SMTP.Username, config.SMTP.Username) {
+		reason := fmt.Sprintf("smtp host/username changed (host %q -> %q, user %q -> %q)",
+			previous.SMTP.Host, config.SMTP.Host, previous.SMTP.Username, config.SMTP.Username)
+		if err := clearBoundSecret("SMTP_PASSWORD", reason); err != nil {
+			return alarmTransportConfig{}, err
+		}
+	}
+
 	alarmTransportsState = config
 	if err := writeJSONFileAtomic(alarmTransportsFilePath(), config); err != nil {
 		alarmTransportsState = previous

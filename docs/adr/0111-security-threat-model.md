@@ -64,9 +64,8 @@ they are the trigger for revisiting this ADR:
 - **E-1**: a configured transport destination receives the secret bound to
   it, so anyone who can edit settings can walk off with `NTFY_TOKEN`,
   `SMTP_PASSWORD`, `INFLUXDB_TOKEN` or the SignalK password. This is the one
-  finding whose blast radius extends off the boat, and it is deferred to its
-  own cycle because pinning destinations breaks the feature - the design
-  options are written up separately.
+  finding whose blast radius extends off the boat. **Fixed** - see the
+  amendment below.
 - **F-1**: dashboard embeds render in an iframe with `allow-scripts` and
   `allow-same-origin`. Same-origin URLs are now rejected by both validators,
   so the grant only ever applies to a genuinely foreign origin - but the
@@ -82,3 +81,43 @@ scanned dependencies. `/security-review` reviews pending changes on a branch,
 so it is a per-branch gate and cannot replace an audit like this one; it is
 worth running on branches that touch input parsing, uploads, the assistant's
 tool surface or the secrets store.
+
+---
+
+## Amendment, 2026-09-19: E-1 fixed
+
+Pinning destinations (rejecting a settings save unless the new host was
+already known) was the option considered and rejected: it breaks the
+feature, since self-hosted ntfy, a personal SMTP relay, or an InfluxDB box
+elsewhere are all ordinary things to point Helmcentral at, not attacks.
+Requiring auth on these routes was also considered and rejected as a bigger
+change to the auth model than this finding warrants on its own.
+
+The fix shipped is Option B: clear the secret bound to a destination the
+moment that destination changes. `setAlarmTransports`
+(`backend/alarm_transports.go`) clears `NTFY_TOKEN` when `ntfy.server`
+changes and `SMTP_PASSWORD` when `smtp.host` or `smtp.username` changes;
+`updateSettingsHandler` (`backend/signalk.go`) clears `INFLUXDB_TOKEN` when
+`influxdb.url` changes and both SignalK credentials when the SignalK address
+or port changes. A repointed destination gets nothing until the credential
+is re-entered - an attacker who repoints a host gets an empty token, and the
+operator pays for it with one extra paste at exactly the moment they would
+expect one.
+
+Comparison is normalized (trimmed, trailing slash on a URL ignored, case
+folded) before deciding whether a destination actually changed, so a
+resubmitted form or a re-typed hostname in different case does not cost a
+working credential for no reason. A clear that cannot complete - store
+unavailable, or the underlying write fails - aborts the whole settings save
+rather than persisting the new destination next to a secret that should
+have gone with the old one; see `clearBoundSecret`'s doc comment
+(`backend/secrets_store.go`) for the reasoning.
+
+One subtlety worth recording: `SIGNALK_USERNAME`, `SIGNALK_PASSWORD` and
+`INFLUXDB_TOKEN` are copied into the process environment once at boot
+(`LoadIntoEnv`), because trusted host code reads them via
+`getEnv`/`os.Getenv` rather than asking the store fresh each call. Deleting
+the store row alone would leave that cached copy live in the running
+process until its next restart, which is the leak this fix exists to close,
+merely delayed. `clearBoundSecret` also `os.Unsetenv`s these three so the
+clear takes effect immediately.

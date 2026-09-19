@@ -174,6 +174,14 @@ func TestUpdateSettings_RejectedSavePersistsNothingAtAll(t *testing.T) {
 }
 
 func TestUpdateSettings_AcceptsReachableNewSignalKAddress(t *testing.T) {
+	// A changed signalk address is now also a clearBoundSecret call (E-1,
+	// ADR 0111 amendment): globalSecretsStore must be non-nil for that to
+	// succeed, matching production, where it is opened in main() before any
+	// route is registered. See secrets_store.go's clearBoundSecret doc
+	// comment for why a nil store fails the save instead of skipping the
+	// clear.
+	withTestSecretsStore(t)
+
 	oldSrv := trustedSignalKPayloadServer(t, -21.1, 149.2)
 	defer oldSrv.Close()
 	newSrv := trustedSignalKPayloadServer(t, -21.2, 149.3)
@@ -475,5 +483,259 @@ units: metric
 	uiMap, _ := after["ui"].(map[string]any)
 	if _, present := uiMap["vessel_state_refresh_seconds"]; present {
 		t.Fatalf("save must purge the retired vessel_state_refresh_seconds key, still present: %+v", uiMap)
+	}
+}
+
+// ── E-1: a repointed influxdb.url or signalk address must not hand the
+// bound credential to the new destination ──────────────────────────────────
+//
+// See alarm_transports_test.go's equivalent block for the ntfy/SMTP half of
+// this fix (POST /api/alarm-transports); this covers the two secrets bound
+// to POST /api/settings instead: INFLUXDB_TOKEN and the SignalK credential
+// pair.
+
+func TestUpdateSettings_ChangingInfluxdbURLClearsInfluxdbToken(t *testing.T) {
+	store := withTestSecretsStore(t)
+	srv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer srv.Close()
+	host, port := hostPort(t, srv.URL)
+	settingsPath := writeTestSettings(t, host, port)
+
+	if err := store.Set("INFLUXDB_TOKEN", "tok-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Influxdb.Enabled = true
+		p.Influxdb.URL = "http://attacker.example:8086"
+		p.Influxdb.Org = "myorg"
+		p.Influxdb.Bucket = "mybucket"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	if has, err := store.Has("INFLUXDB_TOKEN"); err != nil || has {
+		t.Fatalf("expected INFLUXDB_TOKEN cleared when influxdb.url changes, has=%v err=%v", has, err)
+	}
+}
+
+func TestUpdateSettings_UnchangedInfluxdbURLLeavesTokenAlone(t *testing.T) {
+	store := withTestSecretsStore(t)
+	srv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer srv.Close()
+	host, port := hostPort(t, srv.URL)
+	settingsPath := writeTestSettings(t, host, port)
+
+	// Establish a baseline influxdb section first, so the save below really
+	// is unchanged rather than a first-time save from blank.
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Influxdb.Enabled = true
+		p.Influxdb.URL = "http://192.168.50.20:8086"
+		p.Influxdb.Org = "myorg"
+		p.Influxdb.Bucket = "mybucket"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("baseline save: expected 200, got %d (body %v)", code, body)
+	}
+
+	if err := store.Set("INFLUXDB_TOKEN", "tok-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// Re-save with only the bucket changed; the URL (the destination) is
+	// untouched.
+	code, body = postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Influxdb.Enabled = true
+		p.Influxdb.URL = "http://192.168.50.20:8086"
+		p.Influxdb.Org = "myorg"
+		p.Influxdb.Bucket = "renamed-bucket"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	if has, err := store.Has("INFLUXDB_TOKEN"); err != nil || !has {
+		t.Fatalf("expected INFLUXDB_TOKEN to survive an unrelated influxdb field edit, has=%v err=%v", has, err)
+	}
+}
+
+// A trailing slash names the same InfluxDB API root, not a new destination -
+// re-saving with one must not cost the operator a working token.
+func TestUpdateSettings_TrailingSlashOnInfluxdbURLIsNotAChange(t *testing.T) {
+	store := withTestSecretsStore(t)
+	srv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer srv.Close()
+	host, port := hostPort(t, srv.URL)
+	settingsPath := writeTestSettings(t, host, port)
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Influxdb.Enabled = true
+		p.Influxdb.URL = "http://192.168.50.20:8086"
+		p.Influxdb.Org = "myorg"
+		p.Influxdb.Bucket = "mybucket"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("baseline save: expected 200, got %d (body %v)", code, body)
+	}
+
+	if err := store.Set("INFLUXDB_TOKEN", "tok-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	code, body = postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Influxdb.Enabled = true
+		p.Influxdb.URL = "http://192.168.50.20:8086/"
+		p.Influxdb.Org = "myorg"
+		p.Influxdb.Bucket = "mybucket"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	if has, err := store.Has("INFLUXDB_TOKEN"); err != nil || !has {
+		t.Fatalf("a trailing slash must not read as a destination change, expected INFLUXDB_TOKEN to survive, has=%v err=%v", has, err)
+	}
+}
+
+func TestUpdateSettings_ChangingSignalKAddressClearsSignalKCredentials(t *testing.T) {
+	store := withTestSecretsStore(t)
+	oldSrv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer oldSrv.Close()
+	newSrv := trustedSignalKPayloadServer(t, -21.2, 149.3)
+	defer newSrv.Close()
+	oldHost, oldPort := hostPort(t, oldSrv.URL)
+	newHost, newPort := hostPort(t, newSrv.URL)
+	settingsPath := writeTestSettings(t, oldHost, oldPort)
+
+	if err := store.Set("SIGNALK_USERNAME", "admin"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := store.Set("SIGNALK_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Signalk.Address = newHost
+		p.Signalk.Port = newPort
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 for reachable new address, got %d (body %v)", code, body)
+	}
+
+	if has, err := store.Has("SIGNALK_USERNAME"); err != nil || has {
+		t.Fatalf("expected SIGNALK_USERNAME cleared when signalk address changes, has=%v err=%v", has, err)
+	}
+	if has, err := store.Has("SIGNALK_PASSWORD"); err != nil || has {
+		t.Fatalf("expected SIGNALK_PASSWORD cleared when signalk address changes, has=%v err=%v", has, err)
+	}
+}
+
+// Port is half the address (validateSettingsChange already treats it that
+// way for the reachability probe); a port-only change points at a different
+// server just the same and must clear the same way.
+func TestUpdateSettings_ChangingSignalKPortAloneClearsSignalKCredentials(t *testing.T) {
+	store := withTestSecretsStore(t)
+	oldSrv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer oldSrv.Close()
+	newSrv := trustedSignalKPayloadServer(t, -21.2, 149.3)
+	defer newSrv.Close()
+	oldHost, oldPort := hostPort(t, oldSrv.URL)
+	_, newPort := hostPort(t, newSrv.URL)
+	settingsPath := writeTestSettings(t, oldHost, oldPort)
+
+	if err := store.Set("SIGNALK_USERNAME", "admin"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := store.Set("SIGNALK_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// Same host, but the newSrv's own port -- still genuinely reachable, so
+	// the probe passes, and it's still a different server underneath.
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Signalk.Port = newPort
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 for reachable new port, got %d (body %v)", code, body)
+	}
+
+	if has, err := store.Has("SIGNALK_USERNAME"); err != nil || has {
+		t.Fatalf("expected SIGNALK_USERNAME cleared when signalk port changes, has=%v err=%v", has, err)
+	}
+	if has, err := store.Has("SIGNALK_PASSWORD"); err != nil || has {
+		t.Fatalf("expected SIGNALK_PASSWORD cleared when signalk port changes, has=%v err=%v", has, err)
+	}
+}
+
+func TestUpdateSettings_UnchangedSignalKAddressLeavesCredentialsAlone(t *testing.T) {
+	store := withTestSecretsStore(t)
+	srv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer srv.Close()
+	host, port := hostPort(t, srv.URL)
+	settingsPath := writeTestSettings(t, host, port)
+
+	if err := store.Set("SIGNALK_USERNAME", "admin"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := store.Set("SIGNALK_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Boat.Model = "Renamed While Testing"
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	if has, err := store.Has("SIGNALK_USERNAME"); err != nil || !has {
+		t.Fatalf("expected SIGNALK_USERNAME to survive an unrelated edit, has=%v err=%v", has, err)
+	}
+	if has, err := store.Has("SIGNALK_PASSWORD"); err != nil || !has {
+		t.Fatalf("expected SIGNALK_PASSWORD to survive an unrelated edit, has=%v err=%v", has, err)
+	}
+}
+
+// SIGNALK_USERNAME/PASSWORD (and INFLUXDB_TOKEN) are copied into the process
+// environment once at boot (secretsStore.LoadIntoEnv), because
+// loadSignalKCredentials (signalk.go) reads them via getEnv/os.Getenv on
+// every call rather than asking the store fresh. Simulate that boot-time
+// copy here: a clear that only deletes the store row and forgets this
+// cached copy leaves the running process still leaking the old credential
+// to the new address until its next restart -- which is the exact hole this
+// test pins shut.
+func TestUpdateSettings_ChangingSignalKAddressAlsoUnsetsLiveProcessEnv(t *testing.T) {
+	store := withTestSecretsStore(t)
+	oldSrv := trustedSignalKPayloadServer(t, -21.1, 149.2)
+	defer oldSrv.Close()
+	newSrv := trustedSignalKPayloadServer(t, -21.2, 149.3)
+	defer newSrv.Close()
+	oldHost, oldPort := hostPort(t, oldSrv.URL)
+	newHost, newPort := hostPort(t, newSrv.URL)
+	settingsPath := writeTestSettings(t, oldHost, oldPort)
+
+	if err := store.Set("SIGNALK_USERNAME", "admin"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := store.Set("SIGNALK_PASSWORD", "hunter2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("SIGNALK_USERNAME", "admin")
+	t.Setenv("SIGNALK_PASSWORD", "hunter2")
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Signalk.Address = newHost
+		p.Signalk.Port = newPort
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+
+	if got := os.Getenv("SIGNALK_USERNAME"); got != "" {
+		t.Errorf("expected SIGNALK_USERNAME unset from the live process env, got %q", got)
+	}
+	if got := os.Getenv("SIGNALK_PASSWORD"); got != "" {
+		t.Errorf("expected SIGNALK_PASSWORD unset from the live process env, got %q", got)
 	}
 }

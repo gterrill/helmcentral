@@ -511,3 +511,144 @@ func TestSecretsStore_All_ReflectsSetKeys(t *testing.T) {
 		t.Errorf("expected INFLUXDB_TOKEN=false in All(), got %+v", all)
 	}
 }
+
+// ── E-1 support: destinationChanged and clearBoundSecret ────────────────────
+//
+// setAlarmTransports (alarm_transports.go) and updateSettingsHandler
+// (signalk.go) are covered end-to-end in alarm_transports_test.go and
+// settings_validation_test.go respectively. These pin the two shared
+// helpers those call sites lean on, in isolation from the HTTP/probe
+// machinery around them.
+
+func TestDestinationChanged_IdenticalStringsIsNotAChange(t *testing.T) {
+	if destinationChanged("https://ntfy.sh", "https://ntfy.sh") {
+		t.Fatal("expected identical strings to not be a change")
+	}
+}
+
+func TestDestinationChanged_TrailingSlashIsNotAChange(t *testing.T) {
+	if destinationChanged("http://192.168.50.20:8086", "http://192.168.50.20:8086/") {
+		t.Fatal("expected a trailing slash to not be a change")
+	}
+}
+
+func TestDestinationChanged_SurroundingWhitespaceIsNotAChange(t *testing.T) {
+	if destinationChanged("smtp.example.com", "  smtp.example.com  ") {
+		t.Fatal("expected surrounding whitespace to not be a change")
+	}
+}
+
+// DNS hostnames are case-insensitive, so a value re-typed in different case
+// names the same destination.
+func TestDestinationChanged_CaseDifferenceIsNotAChange(t *testing.T) {
+	if destinationChanged("boat.local", "Boat.Local") {
+		t.Fatal("expected a case-only difference to not be a change")
+	}
+	if destinationChanged("smtp.example.com", "SMTP.EXAMPLE.COM") {
+		t.Fatal("expected a case-only difference to not be a change")
+	}
+}
+
+func TestDestinationChanged_GenuinelyDifferentHostIsAChange(t *testing.T) {
+	if !destinationChanged("https://ntfy.sh", "https://attacker.example") {
+		t.Fatal("expected a genuinely different host to be a change")
+	}
+}
+
+func TestDestinationChanged_EmptyToNonEmptyIsAChange(t *testing.T) {
+	if !destinationChanged("", "http://192.168.50.20:8086") {
+		t.Fatal("expected a first-time value (blank -> set) to be a change")
+	}
+}
+
+func TestIsCoreEnvSecretKey(t *testing.T) {
+	for _, key := range coreEnvSecretKeys {
+		if !isCoreEnvSecretKey(key) {
+			t.Errorf("expected %s (a coreEnvSecretKeys entry) to report true", key)
+		}
+	}
+	// NTFY_TOKEN and SMTP_PASSWORD are knownSecretKeys but never copied into
+	// the process environment - they're read fresh from the store on every
+	// send (secretOrEmpty, alarm_notify.go), so isCoreEnvSecretKey must say
+	// no for them.
+	if isCoreEnvSecretKey("NTFY_TOKEN") {
+		t.Error("expected NTFY_TOKEN to not be a coreEnvSecretKeys entry")
+	}
+	if isCoreEnvSecretKey("SMTP_PASSWORD") {
+		t.Error("expected SMTP_PASSWORD to not be a coreEnvSecretKeys entry")
+	}
+}
+
+func TestClearBoundSecret_NilStoreReturnsErrorRatherThanSilentlySucceeding(t *testing.T) {
+	prev := globalSecretsStore
+	globalSecretsStore = nil
+	t.Cleanup(func() { globalSecretsStore = prev })
+
+	// A nil store means clearBoundSecret cannot prove the secret is gone,
+	// and the fallback policy forbids proceeding as if it had succeeded -
+	// see its doc comment. The caller (setAlarmTransports/
+	// updateSettingsHandler) is required to abort the whole save on this
+	// error rather than persist a new destination next to an unclearable
+	// secret.
+	if err := clearBoundSecret("SIGNALK_USERNAME", "test"); err == nil {
+		t.Fatal("expected an error when globalSecretsStore is nil, got nil")
+	}
+}
+
+func TestClearBoundSecret_DeletesStoreRow(t *testing.T) {
+	store := withTestSecretsStore(t)
+	if err := store.Set("NTFY_TOKEN", "tk-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	if err := clearBoundSecret("NTFY_TOKEN", "test"); err != nil {
+		t.Fatalf("clearBoundSecret: %v", err)
+	}
+
+	if has, err := store.Has("NTFY_TOKEN"); err != nil || has {
+		t.Fatalf("expected NTFY_TOKEN row deleted, has=%v err=%v", has, err)
+	}
+}
+
+// The subtle half of this fix: SIGNALK_USERNAME/PASSWORD and INFLUXDB_TOKEN
+// are copied into the process environment once at boot (LoadIntoEnv)
+// because trusted host code reads them via getEnv/os.Getenv, not the store,
+// on every call. Deleting only the store row would leave that cached copy
+// live in the running process until its next restart - clearBoundSecret
+// must also os.Unsetenv a coreEnvSecretKeys entry for the clear to take
+// effect immediately rather than on the next reboot.
+func TestClearBoundSecret_UnsetsProcessEnvForCoreEnvSecretKey(t *testing.T) {
+	store := withTestSecretsStore(t)
+	if err := store.Set("SIGNALK_USERNAME", "admin"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("SIGNALK_USERNAME", "admin")
+
+	if err := clearBoundSecret("SIGNALK_USERNAME", "test"); err != nil {
+		t.Fatalf("clearBoundSecret: %v", err)
+	}
+
+	if got := os.Getenv("SIGNALK_USERNAME"); got != "" {
+		t.Fatalf("expected SIGNALK_USERNAME unset from the process env, got %q", got)
+	}
+}
+
+// NTFY_TOKEN and SMTP_PASSWORD are never copied into the process env in the
+// first place (isKnownSecretKey true, isCoreEnvSecretKey false), so clearing
+// one must not touch os.Unsetenv at all - pinned here by proving an
+// unrelated env var of the same non-core key survives the clear untouched.
+func TestClearBoundSecret_DoesNotTouchProcessEnvForNonCoreEnvSecretKey(t *testing.T) {
+	store := withTestSecretsStore(t)
+	if err := store.Set("NTFY_TOKEN", "tk-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("NTFY_TOKEN", "leftover-from-somewhere-else")
+
+	if err := clearBoundSecret("NTFY_TOKEN", "test"); err != nil {
+		t.Fatalf("clearBoundSecret: %v", err)
+	}
+
+	if got := os.Getenv("NTFY_TOKEN"); got != "leftover-from-somewhere-else" {
+		t.Fatalf("expected NTFY_TOKEN's process env to be left untouched (it is never core-env), got %q", got)
+	}
+}

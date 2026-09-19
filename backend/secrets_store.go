@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -50,6 +51,95 @@ func isKnownSecretKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// isCoreEnvSecretKey reports whether key is one of coreEnvSecretKeys, the
+// subset LoadIntoEnv copies into the process environment at boot. Mirrors
+// isKnownSecretKey above; clearBoundSecret is the only caller, and needs
+// this to know whether deleting the store row is the whole job or whether a
+// live os.Unsetenv is also required (see its own doc comment).
+func isCoreEnvSecretKey(key string) bool {
+	for _, k := range coreEnvSecretKeys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+// destinationChanged reports whether a destination-identifying value (a
+// hostname, address, or bare URL with no case- or slash-significant path -
+// never used for anything else) has meaningfully changed between two saves.
+// Comparison is on a normalized form so cosmetic differences that name the
+// same place don't count: surrounding whitespace (a resubmitted form field),
+// a trailing slash on a URL (validateAlarmTransports already strips this
+// for ntfy.Server; influxdb.url gets no such normalization on its way to
+// disk, so it needs it here), and a hostname typed in different case (DNS
+// names are case-insensitive, so "Boat.Local" and "boat.local" are the same
+// destination). This stays deliberately conservative toward NOT clearing:
+// callers use it to decide whether to wipe a working credential
+// (clearBoundSecret below), and a spurious clear costs an operator a working
+// alarm path for no reason - see the E-1 fix in alarm_transports.go and
+// signalk.go's updateSettingsHandler for what calls this and why.
+func destinationChanged(previous, next string) bool {
+	normalize := func(s string) string {
+		return strings.ToLower(strings.TrimRight(strings.TrimSpace(s), "/"))
+	}
+	return normalize(previous) != normalize(next)
+}
+
+// clearBoundSecret deletes key from the encrypted store because the
+// destination it is sent to (an ntfy/SMTP host, an InfluxDB URL, a SignalK
+// address) just changed - this is the E-1 fix from the 2026-09-19 security
+// audit (ADR 0111 amendment). Every alarm transport sends its secret to
+// whatever destination the matching setting currently names, and that
+// setting is free text: point ntfy.server at a server you control, save,
+// and NTFY_TOKEN arrives in its Authorization header on the next send. The
+// fix is Option B: repointing a destination clears the secret bound to it,
+// so the new destination gets nothing until the credential is re-entered.
+//
+// reason is a short human-readable description of what changed (e.g. "ntfy
+// server https://ntfy.sh -> https://attacker.example"), logged alongside the
+// key. This is deliberately loud, not a quiet background action: an
+// operator whose alarms have gone silent needs to see why in the log,
+// exactly as they'd expect after repointing a destination.
+//
+// globalSecretsStore is checked for nil the way wasm_plugin.go's
+// configForWasmPlugin checks it before a read, but the failure mode here is
+// the opposite of that read path's. A plugin that can't read a secret just
+// runs without it - fail-closed costs nothing there. A destination change
+// that can't CLEAR a bound secret would otherwise save the new destination
+// next to the old credential, sight unseen - exactly the exfiltration this
+// function exists to prevent. So this returns an error instead of
+// swallowing it, and every caller must abort the whole settings save on it
+// rather than persist the new destination with the old secret still bound
+// to it. In production this is unreachable in practice: main() opens
+// globalSecretsStore and fails fast (log.Fatalf) if that fails, before any
+// route is registered, so by the time a request reaches here the store is
+// always open. It is reachable in a test that exercises a destination
+// change without first setting up a store - see withTestSecretsStore
+// (secrets_settings_handlers_test.go).
+func clearBoundSecret(key, reason string) error {
+	if globalSecretsStore == nil {
+		return fmt.Errorf("secrets store unavailable, cannot clear %s (%s)", key, reason)
+	}
+	if err := globalSecretsStore.Set(key, ""); err != nil {
+		return fmt.Errorf("clearing %s (%s): %w", key, reason, err)
+	}
+	// SIGNALK_USERNAME, SIGNALK_PASSWORD and INFLUXDB_TOKEN are copied into
+	// the process environment once, at boot (LoadIntoEnv), because trusted
+	// host code reads them via getEnv/os.Getenv on every call
+	// (loadSignalKCredentials, loadInfluxSettings) rather than asking the
+	// store fresh each time. Deleting the store row alone would leave that
+	// cached copy live in THIS process until its next restart - the exact
+	// leak this function exists to close, merely delayed rather than
+	// prevented. Unsetting it here closes it immediately instead of on the
+	// next reboot.
+	if isCoreEnvSecretKey(key) {
+		os.Unsetenv(key)
+	}
+	log.Printf("secrets: cleared %s — %s", key, reason)
+	return nil
 }
 
 // globalSecretsStore is the process-wide encrypted secrets store, opened
