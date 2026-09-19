@@ -333,6 +333,11 @@ cd backend && go test -short ./...
 cd frontend && npm test && npm run lint
 ```
 
+Working on this repo in two sessions at once, `make worktree NAME=<short-name>`
+gives the second one its own checkout alongside this directory, with
+`frontend/node_modules` symlinked so tests run straight away. Only one checkout
+can run the dev stack, since the ports are fixed.
+
 Docker workflows, the isolated E2E stack and release builds:
 [docs/how-to/development.md](docs/how-to/development.md).
 

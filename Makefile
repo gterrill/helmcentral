@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage worktree
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -15,6 +15,33 @@ help-stage:
 	cp -R docs/features docs/how-to docs/reference backend/help/
 	cp docs/index.md backend/help/index.md
 	touch backend/help/.gitkeep
+
+# A second checkout for a second concurrent session, so two sessions editing
+# at once cannot race in one working tree. `make worktree NAME=ux-tweaks`
+# creates ../helmcentral-ux-tweaks on a new branch of the same name, matching
+# the ../helmcentral-security layout already in use.
+#
+# frontend/node_modules is 453MB and is not tracked, so a fresh worktree would
+# need its own `npm ci` before vitest or tsc would run at all. It gets a
+# symlink to this checkout's copy instead, which is correct as long as the
+# branch does not change frontend/package-lock.json, and makes the worktree
+# usable a second after it is created rather than a few minutes.
+#
+# That symlink points at shared state: `npm install` run inside the worktree
+# writes into THIS checkout's node_modules, for every session using it. If the
+# branch does change dependencies, replace the link with a real install
+# (rm frontend/node_modules && npm ci) in the worktree before touching them.
+#
+# The dev stack is not duplicated. docker-compose.dev.yml binds fixed host
+# ports (8080, 5173, 8090, 5174), so only one checkout can run it; a worktree
+# session uses the stack the main checkout is already running. Run
+# `make help-stage` in the worktree if it needs a local `go build` to embed
+# the help pages.
+worktree:
+	@if [ -z "$(NAME)" ]; then echo "usage: make worktree NAME=<short-name>"; exit 1; fi
+	git worktree add -b "$(NAME)" "../$(notdir $(CURDIR))-$(NAME)"
+	ln -s "$(CURDIR)/frontend/node_modules" "../$(notdir $(CURDIR))-$(NAME)/frontend/node_modules"
+	@echo "worktree: ../$(notdir $(CURDIR))-$(NAME)  (branch $(NAME), node_modules symlinked)"
 
 dev:
 	# --force-recreate: frontend-dev only runs `npm install` once at container

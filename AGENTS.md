@@ -15,6 +15,22 @@
 - Check each finding against the code before acting on it. `high` and above report uncertain findings.
 - Findings applied with `--fix` still have to follow the Fallback and Test-First policies below.
 
+## Shared Working Tree
+
+- This repo is often open in more than one session at once. Before your first
+  edit, run `git status`. If the tree already holds changes you did not make,
+  say so and ask before editing any file they touch.
+- Stage by path. Never `git add -A`, `git add .` or `git commit -a` in this
+  repo: they commit other sessions' unfinished work along with your own, and
+  the resulting commit cannot be split once it is pushed.
+- Never commit, stash, revert or check out a file you did not change. If your
+  work genuinely needs a change another session is mid-way through, ask rather
+  than resolving it yourself.
+- For anything more than a small edit, work in your own checkout:
+  `make worktree NAME=<short-name>` creates one alongside this directory with
+  `frontend/node_modules` symlinked, so tests run immediately. Only one
+  checkout can run the dev stack; use the one that is already up.
+
 ## Fallback Policy
 
 - Prefer fail-fast behavior for correctness and diagnostics paths.
