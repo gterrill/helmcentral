@@ -8,8 +8,10 @@
 
 ## Checks Before Commit And Release
 
-- Run `/code-review medium` and `/security-review' on the working tree before committing a batch of changes.
+- Run `/code-review medium` on the working tree before committing a batch of changes.
 - Run `/code-review high` on the commits since the last tag before creating a release tag. For large migrations (framework or major dependency upgrades), use `/code-review ultra` instead.
+- Run `/security-review` once the changes are committed, before merging a branch or creating a release tag. It diffs `origin/HEAD...`, so it sees committed work only, and reports nothing on an uncommitted working tree.
+- `/security-review` takes no arguments and never edits code. It returns a markdown report of HIGH/MEDIUM findings only and filters anything below 8/10 confidence.
 - Check each finding against the code before acting on it. `high` and above report uncertain findings.
 - Findings applied with `--fix` still have to follow the Fallback and Test-First policies below.
 
