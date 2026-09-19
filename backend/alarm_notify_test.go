@@ -816,3 +816,28 @@ func TestAlarmDispatcherRunStopsWithoutDrainingTheEntireBacklog(t *testing.T) {
 		t.Fatalf("expected items to remain queued after an early cancellation, got 0")
 	}
 }
+
+// Retention only matters if something calls it. K-2 from the 2026-09-19
+// security audit added DropLogOlderThan; this asserts drain actually runs it,
+// so an unbounded alarm_log cannot come back by the store method quietly
+// losing its only caller.
+func TestDispatcherDrainExpiresOldAlarmLogRows(t *testing.T) {
+	transport := &stubTransport{id: transportWebhook}
+	dispatcher, store := testDispatcher(t, transport)
+
+	store.RecordRaised(raisedEntry("rule-ancient", alarmNow.Add(-2*alarmLogRetention)))
+	store.RecordRaised(raisedEntry("rule-recent", alarmNow))
+
+	dispatcher.drain(context.Background())
+
+	entries, err := store.Recent(10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected drain to expire the row past retention, got %d row(s)", len(entries))
+	}
+	if entries[0].RuleID != "rule-recent" {
+		t.Fatalf("drain expired the wrong row, kept %q", entries[0].RuleID)
+	}
+}

@@ -36,6 +36,18 @@ const radarSpokeReadLimit = 4 << 20
 // rather than blocking or growing the buffer, is the deliberate choice here.
 const radarSpokeClientBufferFrames = 4
 
+// radarSpokeRelayMaxClients bounds how many browser clients may watch one
+// radar's spoke stream concurrently. Each client retains up to
+// radarSpokeClientBufferFrames buffered frames (4 x ~232KB measured frames,
+// radarSpokeReadLimit's own comment), so with nothing capping the client
+// count, "a handful of tablets on the boat" (the compression comment on
+// radarSpokeRelayHandler, below) becomes unbounded memory -- ten idle
+// browser tabs left open is already 160MB held for data nobody is looking
+// at (K-5, backend security audit). 8 is comfortably above every helm
+// display, tablet and phone this boat has ever run at once, with headroom
+// to spare.
+const radarSpokeRelayMaxClients = 8
+
 // radarSpokeWriteTimeout bounds each frame write to a browser client. Without
 // it a client that goes silent -- asleep, backgrounded, a dead radio -- but
 // never closes its socket holds this handler's goroutine, its slot in
@@ -128,13 +140,22 @@ func newRadarSpokeRelay(radarID, settingsPath string) *radarSpokeRelay {
 	}
 }
 
-// addClient registers a new browser client and returns its fan-out handle.
-func (r *radarSpokeRelay) addClient() *radarSpokeClient {
-	client := &radarSpokeClient{frames: make(chan []byte, radarSpokeClientBufferFrames)}
+// addClient registers a new browser client and returns its fan-out handle,
+// or ok=false if radarSpokeRelayMaxClients concurrent clients are already
+// watching this radar -- see that constant's doc comment for why this is
+// capped at all. The check and the add happen under the same lock so two
+// concurrent callers can never both slip in over the cap.
+func (r *radarSpokeRelay) addClient() (client *radarSpokeClient, ok bool) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.clients) >= radarSpokeRelayMaxClients {
+		return nil, false
+	}
+
+	client = &radarSpokeClient{frames: make(chan []byte, radarSpokeClientBufferFrames)}
 	r.clients[client] = struct{}{}
-	r.mu.Unlock()
-	return client
+	return client, true
 }
 
 func (r *radarSpokeRelay) removeClient(client *radarSpokeClient) {
@@ -402,6 +423,19 @@ func radarSpokeRelayHandler(c echo.Context) error {
 	relay := globalRadarSpokeRelays.acquire(radarID, settingsPath)
 	defer globalRadarSpokeRelays.release(radarID)
 
+	// Reserve this client's slot before upgrading to a WebSocket: once
+	// Accept succeeds there is no way back to a JSON error body, so the cap
+	// (K-5, backend security audit) has to be enforced here, the same
+	// "visibly unavailable, not silently dropped" shape as the unconfigured-
+	// address refusal above.
+	client, ok := relay.addClient()
+	if !ok {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": fmt.Sprintf("radar %s already has the maximum %d viewers connected; close another radar view and try again", radarID, radarSpokeRelayMaxClients),
+		})
+	}
+	defer relay.removeClient(client)
+
 	// CompressionContextTakeover is only negotiated if the browser's own
 	// handshake offers permessage-deflate (selectDeflate, coder/websocket's
 	// accept.go) -- a client that doesn't gets exactly today's uncompressed
@@ -427,9 +461,6 @@ func radarSpokeRelayHandler(c echo.Context) error {
 	// goes away — the correct way to detect a browser disconnect on a
 	// send-only connection.
 	ctx := conn.CloseRead(context.Background())
-
-	client := relay.addClient()
-	defer relay.removeClient(client)
 
 	serveSpokeClient(ctx, conn, client, radarSpokeWriteTimeout)
 	return nil

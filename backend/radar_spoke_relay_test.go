@@ -331,12 +331,18 @@ func TestRadarSpokeRelaySlowClientDoesNotBlockFastClient(t *testing.T) {
 func TestRadarSpokeRelayBroadcastDropsForFullClientWithoutBlocking(t *testing.T) {
 	relay := newRadarSpokeRelay("unit-backpressure", "")
 
-	full := relay.addClient()
+	full, ok := relay.addClient()
+	if !ok {
+		t.Fatalf("addClient: expected success under the cap")
+	}
 	for i := 0; i < radarSpokeClientBufferFrames; i++ {
 		full.frames <- []byte("filler")
 	}
 
-	open := relay.addClient()
+	open, ok := relay.addClient()
+	if !ok {
+		t.Fatalf("addClient: expected success under the cap")
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -361,6 +367,68 @@ func TestRadarSpokeRelayBroadcastDropsForFullClientWithoutBlocking(t *testing.T)
 
 	if n := len(full.frames); n != radarSpokeClientBufferFrames {
 		t.Fatalf("full client's buffer length = %d, want unchanged at %d (the frame must be dropped, not appended)", n, radarSpokeClientBufferFrames)
+	}
+}
+
+// TestRadarSpokeRelayAddClientRejectsBeyondMaxClients reproduces K-5: with
+// no cap, an unbounded number of browser clients could watch one radar's
+// spoke stream, each retaining up to radarSpokeClientBufferFrames buffered
+// frames -- ten idle tabs alone is already 160MB of frames nobody is
+// looking at (radarSpokeRelayMaxClients's own doc comment). The
+// radarSpokeRelayMaxClients-th client is accepted; the next must be
+// refused, and releasing a slot must let a new client back in.
+func TestRadarSpokeRelayAddClientRejectsBeyondMaxClients(t *testing.T) {
+	relay := newRadarSpokeRelay("unit-capacity", "")
+
+	var clients []*radarSpokeClient
+	for i := 0; i < radarSpokeRelayMaxClients; i++ {
+		client, ok := relay.addClient()
+		if !ok {
+			t.Fatalf("client %d: expected addClient to succeed under radarSpokeRelayMaxClients=%d", i, radarSpokeRelayMaxClients)
+		}
+		clients = append(clients, client)
+	}
+
+	if _, ok := relay.addClient(); ok {
+		t.Fatalf("expected addClient to refuse a client beyond radarSpokeRelayMaxClients=%d", radarSpokeRelayMaxClients)
+	}
+
+	// Freeing a slot must let a new client back in -- the cap is on
+	// concurrent clients, not a one-shot budget.
+	relay.removeClient(clients[0])
+	if _, ok := relay.addClient(); !ok {
+		t.Fatalf("expected addClient to succeed again once a slot was freed")
+	}
+}
+
+// TestRadarSpokeRelayHandlerRefusesBeyondMaxClients is the end-to-end half
+// of K-5: the HTTP handler itself must refuse the client beyond the cap with
+// a clear error, the same "visibly unavailable, not silently dropped" shape
+// as TestRadarSpokeRelayHandlerRefusesWhenMayaraAddressUnset uses for an
+// unconfigured mayara address.
+func TestRadarSpokeRelayHandlerRefusesBeyondMaxClients(t *testing.T) {
+	stub := newMayaraSpokeStub(func(ctx context.Context, c *websocket.Conn, _ int) {
+		<-ctx.Done()
+	})
+	defer stub.close()
+	t.Setenv("SETTINGS_FILE", mayaraSettingsFileForServer(t, stub.url()))
+	wsURL := newSpokeRelayTestServer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var conns []*websocket.Conn
+	for i := 0; i < radarSpokeRelayMaxClients; i++ {
+		conns = append(conns, dialSpokeClient(t, ctx, wsURL, "at-capacity"))
+	}
+	defer func() {
+		for _, conn := range conns {
+			conn.CloseNow()
+		}
+	}()
+
+	if _, _, err := websocket.Dial(ctx, wsURL+"/api/radar/spokes?radar=at-capacity", nil); err == nil {
+		t.Fatalf("expected the client beyond radarSpokeRelayMaxClients=%d to be refused", radarSpokeRelayMaxClients)
 	}
 }
 
@@ -586,7 +654,10 @@ func TestRadarSpokeRelayRegistry_AcquireReleaseInterleavingDoesNotOrphanARelay(t
 	// buggy len(clients)==0 teardown this relay would already be gone from
 	// the registry (and its run() exited), so this client would receive
 	// nothing until it reconnected.
-	client := relayA.addClient()
+	client, ok := relayA.addClient()
+	if !ok {
+		t.Fatalf("addClient: expected success under the cap")
+	}
 	defer relayA.removeClient(client)
 
 	select {

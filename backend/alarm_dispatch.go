@@ -218,6 +218,15 @@ func (d *alarmDispatcher) drain(ctx context.Context) {
 		log.Printf("alarm notify: discarded %d notification(s) undeliverable for over %s", dropped, notifyMaxAge)
 	}
 
+	// The queue above has always been bounded; alarm_log never was. Anything
+	// that can publish a notifications.* path onto the bus could grow that
+	// table without limit, so it gets the same treatment on the same sweep.
+	if dropped, err := d.store.DropLogOlderThan(now.Add(-alarmLogRetention)); err != nil {
+		log.Printf("alarm notify: could not expire alarm log: %v", err)
+	} else if dropped > 0 {
+		log.Printf("alarm notify: discarded %d alarm log row(s) older than %s", dropped, alarmLogRetention)
+	}
+
 	due, err := d.store.DueNotifications(now, 20)
 	if err != nil {
 		log.Printf("alarm notify: could not read queue: %v", err)

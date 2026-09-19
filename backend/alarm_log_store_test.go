@@ -216,6 +216,61 @@ func TestOpenOccurrenceNilStoreIsInert(t *testing.T) {
 	}
 }
 
+// ── retention (K-2 adjacent finding, backend security audit) ───────────────
+//
+// notification_queue already had DropQueuedOlderThan bounding queued
+// deliveries (see alarm_dispatch.go's notifyMaxAge); alarm_log had no
+// equivalent at all, so a flood of injected bus notifications --
+// alarm_bus_watch.go records one row per raise, source=alarmSourceSignalK,
+// and anything on the SignalK bus can raise one -- grew this table forever.
+
+func TestAlarmLogDropOlderThanRemovesOnlyEntriesRaisedBeforeCutoff(t *testing.T) {
+	store := newTestAlarmLog(t)
+
+	store.RecordRaised(raisedEntry("rule-old", alarmNow.Add(-2*alarmLogRetention)))
+	store.RecordRaised(raisedEntry("rule-new", alarmNow))
+
+	dropped, err := store.DropLogOlderThan(alarmNow.Add(-alarmLogRetention))
+	if err != nil {
+		t.Fatalf("DropLogOlderThan: %v", err)
+	}
+	if dropped != 1 {
+		t.Fatalf("expected 1 row dropped, got %d", dropped)
+	}
+
+	entries, err := store.Recent(10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(entries) != 1 || entries[0].RuleID != "rule-new" {
+		t.Fatalf("expected only the recent entry to survive retention, got %+v", entries)
+	}
+}
+
+func TestAlarmLogDropOlderThanKeepsEverythingUnderRetention(t *testing.T) {
+	store := newTestAlarmLog(t)
+	store.RecordRaised(raisedEntry("rule-1", alarmNow))
+	store.RecordRaised(raisedEntry("rule-2", alarmNow.Add(-time.Hour)))
+
+	dropped, err := store.DropLogOlderThan(alarmNow.Add(-alarmLogRetention))
+	if err != nil {
+		t.Fatalf("DropLogOlderThan: %v", err)
+	}
+	if dropped != 0 {
+		t.Fatalf("expected nothing dropped well within retention, got %d", dropped)
+	}
+}
+
+// A nil store is inert, matching every other method on this type.
+func TestAlarmLogDropOlderThanNilStoreIsInert(t *testing.T) {
+	var store *alarmLogStore
+
+	dropped, err := store.DropLogOlderThan(alarmNow)
+	if dropped != 0 || err != nil {
+		t.Fatalf("nil store DropLogOlderThan: dropped=%d err=%v", dropped, err)
+	}
+}
+
 // A nil store is what tests and any not-yet-wired code path see; it must be
 // inert rather than panic, matching how globalSecretsStore is handled.
 func TestAlarmLogNilStoreIsInert(t *testing.T) {

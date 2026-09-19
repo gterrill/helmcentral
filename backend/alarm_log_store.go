@@ -245,6 +245,37 @@ func (s *alarmLogStore) Recent(limit int) ([]alarmLogEntry, error) {
 	return entries, rows.Err()
 }
 
+// alarmLogRetention bounds how long an alarm_log row is kept. Unlike
+// notification_queue (a delivery-attempt queue, retained only notifyMaxAge
+// before a late send is deemed as-good-as-lost) this table is a diagnostic
+// history a boat owner reads back to see how often a condition has recurred
+// (RecordRaised's own doc comment), so the window is generous -- a year,
+// comfortably longer than any legitimate looking-back a live-aboard
+// actually does. Its purpose is not freshness, it is bounding what was
+// previously UNBOUNDED growth: nothing ever deleted from this table before,
+// so a flood of injected bus notifications (alarm_bus_watch.go records one
+// row per raise, source=alarmSourceSignalK, and anything on the SignalK bus
+// can raise one) grew it forever (K-2 adjacent finding, backend security
+// audit).
+const alarmLogRetention = 365 * 24 * time.Hour
+
+// DropLogOlderThan discards alarm_log rows raised before cutoff, the same
+// retention shape as DropQueuedOlderThan below for the notification queue.
+// The caller logs what was dropped, matching that pattern too.
+func (s *alarmLogStore) DropLogOlderThan(cutoff time.Time) (int64, error) {
+	if s == nil {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(`DELETE FROM alarm_log WHERE raised_at < ?`, cutoff.UTC().Unix())
+	if err != nil {
+		return 0, fmt.Errorf("drop stale alarm log rows: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 // ── delivery queue ────────────────────────────────────────────────────────────
 
 // A boat's internet comes and goes, so a notification that fails to send is
