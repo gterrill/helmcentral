@@ -43,8 +43,8 @@ describe('manualTargetFor', () => {
     expect(PANEL_MANUAL_TARGETS.settings).toEqual(SETTINGS_MANUAL_TARGETS.general)
   })
 
-  it('gives the kiosk panel-table entry the manual index, unreachable but total', () => {
-    expect(PANEL_MANUAL_TARGETS.kiosk).toEqual(MANUAL_INDEX)
+  it('gives the display panel-table entry the manual index, unreachable but total', () => {
+    expect(PANEL_MANUAL_TARGETS.display).toEqual(MANUAL_INDEX)
   })
 })
 

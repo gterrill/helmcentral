@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { LampCeiling, Trash2 } from 'lucide-react'
+import { Copy, LampCeiling, Trash2 } from 'lucide-react'
 
 import { AddTilePicker, type AddTileMultiInstanceEntry } from '@/components/add-tile-picker'
 import { PageHeroSelect } from '@/components/page-hero-select'
-import { PageKioskSelect, type KioskPatch } from '@/components/page-kiosk-select'
+import { PageDisplaySelect, type DisplayPatch, type PageDisplayOption } from '@/components/page-display-select'
 import { PageSkinSelect } from '@/components/page-skin-select'
 import { PageTitleField } from '@/components/page-title-field'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Separator } from '@/components/ui/separator'
 import {
   AlertDialog,
@@ -33,7 +34,23 @@ interface LayoutToolbarProps {
   onOpenRibbon: () => void
   onSetSkin: (id: string, skin: 'default' | 'instrument') => void
   onSetHero: (id: string, hero: string) => void
-  onKioskPatch: (id: string, patch: KioskPatch) => void
+  /** The wall displays a page can be assigned to (ADR 0110) — feeds both
+   * PageDisplaySelect's own `<select>` and the "Duplicate to…" popover
+   * below. */
+  displays: PageDisplayOption[]
+  onDisplayPatch: (id: string, patch: DisplayPatch) => void
+  /** Opens the displays-management dialog (displays-dialog.tsx) — passed
+   * straight through to PageDisplaySelect, whose "No displays yet" option
+   * calls it as its only way out of an otherwise dead-end control. */
+  onManageDisplays: () => void
+  /**
+   * Duplicates `page` onto another display, or onto the plain Dashboard
+   * list when `displayId` is null (ADR 0110 plan §6). App.tsx owns the
+   * actual `POST /api/dashboard-pages`, the switch to the new page, and
+   * putting it into naming mode (ADR 0107's new-page flow) — this toolbar
+   * only offers the choice of where the copy lands.
+   */
+  onDuplicateToDisplay: (pageId: string, displayId: string | null) => void
   /** Deletes `page`. Same App.tsx handler the page switcher used to call,
    * just rewired to this toolbar (see the Delete control below). */
   onDeletePage: (id: string) => void
@@ -47,15 +64,15 @@ interface LayoutToolbarProps {
  * The layout toolbar (ADR 0107): sits where the "Layout Mode — Drag to
  * rearrange" pill used to, above the grid, and replaces the separate control
  * row that used to sit below it. One row, one fixed order — page name field,
- * Add Tile, Ribbon, Skin, Hero, Kiosk, then Delete page.
+ * Add Tile, Ribbon, Skin, Hero, Wall display, Duplicate to…, then Delete page.
  *
- * Kiosk stays last among the ordinary controls: it's the one control that
- * grows extra fields (a seconds input and a condition select) the moment you
- * tick it, so it never pushes anything after it around. Delete page sits
- * after it, separated by a divider — it is the one destructive control in
- * this row and the popover it used to live in put the same clear space
- * around it (a Separator before "New Page"), so this keeps that same
- * distance rather than sitting flush against Kiosk.
+ * The wall-display select stays last among the ordinary controls: it's the
+ * one control that grows extra fields (a seconds input and a condition
+ * select) the moment a display is picked, so it never pushes anything after
+ * it around. Delete page sits after it, separated by a divider — it is the
+ * one destructive control in this row and the popover it used to live in put
+ * the same clear space around it (a Separator before "New Page"), so this
+ * keeps that same distance rather than sitting flush against it.
  */
 export function LayoutToolbar({
   page,
@@ -68,7 +85,10 @@ export function LayoutToolbar({
   onOpenRibbon,
   onSetSkin,
   onSetHero,
-  onKioskPatch,
+  displays,
+  onDisplayPatch,
+  onManageDisplays,
+  onDuplicateToDisplay,
   onDeletePage,
   pageCount,
   canWrite = true,
@@ -77,6 +97,7 @@ export function LayoutToolbar({
   // confirms before it does anything (moved here, with the same wording,
   // from the page switcher's old per-row trash icon — ADR 0107 follow-up).
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null)
+  const [duplicateOpen, setDuplicateOpen] = useState(false)
 
   if (!page) return null
 
@@ -106,8 +127,46 @@ export function LayoutToolbar({
           Ribbon
         </button>
         <PageSkinSelect page={page} onSetSkin={onSetSkin} />
-        <PageHeroSelect page={page} onSetHero={onSetHero} />
-        <PageKioskSelect page={page} onPatch={onKioskPatch} />
+        {/* No hero on a page that's on a wall display (ADR 0110): the
+            server rejects setting one, since the hero eats the vertical
+            budget the fold guide measures. Hiding the control rather than
+            disabling it — there's nothing to configure until the page comes
+            off the wall. */}
+        {!page.display_id && <PageHeroSelect page={page} onSetHero={onSetHero} />}
+        <PageDisplaySelect page={page} displays={displays} onPatch={onDisplayPatch} onManageDisplays={onManageDisplays} />
+        <Popover open={duplicateOpen} onOpenChange={setDuplicateOpen}>
+          <PopoverTrigger className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:border-primary/40 hover:text-primary">
+            <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+            Duplicate to…
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-1" align="start">
+            <div className="flex flex-col">
+              <button
+                type="button"
+                onClick={() => {
+                  onDuplicateToDisplay(page.id, null)
+                  setDuplicateOpen(false)
+                }}
+                className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                Dashboard (no display)
+              </button>
+              {displays.map((display) => (
+                <button
+                  key={display.id}
+                  type="button"
+                  onClick={() => {
+                    onDuplicateToDisplay(page.id, display.id)
+                    setDuplicateOpen(false)
+                  }}
+                  className="rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                >
+                  {display.name}
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
         {canDelete && (
           <>
             <Separator orientation="vertical" className="h-6" />

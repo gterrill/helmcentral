@@ -10,12 +10,13 @@
      not depend on anything the probe itself is checking for (no :has(),
      no structuredClone, nothing from the build).
 
-     Laid out as a fixed 7x2 grid so the whole report fits inside a
+     Laid out as a fixed 10x2 grid so the whole report fits inside a
      1920x360 wall strip with no scrolling - the device has no keyboard or
-     mouse to scroll with. Sized for the worst case (all checks plus the
-     rotated helmcam cell); widen this if more checks are added. The full
+     mouse to scroll with. Sized for the worst case (all checks, the
+     3-wide key readout, and the rotated helmcam cell); widen this if more
+     checks are added. The full
      detail of each check still goes to the backend log (POST
-     /api/kiosk-probe); the on-screen grid only needs to be glanceable, not
+     /api/display-probe); the on-screen grid only needs to be glanceable, not
      exhaustive. */
   html, body {
     margin: 0;
@@ -72,7 +73,7 @@
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(10, 1fr);
     grid-template-rows: repeat(2, 1fr);
     gap: 8px;
     padding: 8px;
@@ -111,6 +112,23 @@
   .pass { color: #2ecc71; }
   .fail { color: #e74c3c; }
   .info { color: #f1c40f; }
+  /* The key readout is the one cell an operator reads on the screen
+     itself rather than out of the backend log: you press a button on the
+     remote and look up. Three columns wide so a full key/code/keyCode
+     triple fits without ellipsis. */
+  .cell.keys {
+    grid-column: span 3;
+    justify-content: flex-start;
+  }
+  .cell.keys .keylist {
+    margin-top: 2px;
+    font-size: 15px;
+    line-height: 1.35;
+    color: #d0d0d0;
+    white-space: pre;
+    overflow: hidden;
+  }
+  .cell.keys .keylist .waiting { color: #888; }
   .cell.helmcam {
     padding: 0;
   }
@@ -134,7 +152,7 @@
 (function () {
   // Checks 1-8 are Phase 0's device checks (plan: delightful-drifting-
   // anchor); check 9 ("Report POST") is new - it reflects whether the most
-  // recent POST to /api/kiosk-probe itself succeeded, since the operator
+  // recent POST to /api/display-probe itself succeeded, since the operator
   // now reads results from the backend log rather than this screen. Check
   // 9's status necessarily lags one report cycle behind: its own outcome
   // isn't known until after it has been sent, so each report includes the
@@ -339,6 +357,155 @@
     addCheck('css color-mix()', ok, "CSS.supports('color', 'color-mix(in oklab, red, blue)')");
   })();
 
+  // 5e. Screen Wake Lock. Asynchronous: presence of the API is not the
+  // question, whether an actual request('screen') is granted is, and a
+  // browser can expose navigator.wakeLock and still refuse. Seeded pending
+  // and updated when the request settles, the same shape reportCheck uses.
+  // Note this cannot defeat a television's own auto-power-off or energy
+  // saving; those are menu settings on the set, not things a page can hold
+  // off. See the wall-display how-to.
+  var wakeLockCheck = { name: 'wake lock', pass: false, detail: 'pending', display: 'info' };
+  (function checkWakeLock() {
+    if (typeof navigator === 'undefined' || !navigator.wakeLock || typeof navigator.wakeLock.request !== 'function') {
+      wakeLockCheck.pass = false;
+      wakeLockCheck.display = 'fail';
+      wakeLockCheck.detail = 'navigator.wakeLock absent';
+      return;
+    }
+    try {
+      navigator.wakeLock.request('screen').then(function (sentinel) {
+        wakeLockCheck.pass = true;
+        wakeLockCheck.display = 'pass';
+        wakeLockCheck.detail = 'granted, held';
+        // Keep it held for the life of the probe: releasing immediately
+        // would not tell us whether the set actually stays awake, which is
+        // the thing worth learning by leaving this page up.
+        if (sentinel && typeof sentinel.addEventListener === 'function') {
+          sentinel.addEventListener('release', function () {
+            wakeLockCheck.detail = 'granted, then released by the browser';
+            wakeLockCheck.display = 'info';
+          });
+        }
+        renderGrid();
+      }).catch(function (err) {
+        wakeLockCheck.pass = false;
+        wakeLockCheck.display = 'fail';
+        wakeLockCheck.detail = 'refused: ' + truncate(err && err.name ? err.name : err, 40);
+        renderGrid();
+      });
+    } catch (e) {
+      wakeLockCheck.pass = false;
+      wakeLockCheck.display = 'fail';
+      wakeLockCheck.detail = String(e && e.message || e).slice(0, 60);
+    }
+  })();
+
+  // 5f. transform: scale() without a layout change. A display's scale
+  // factor is applied as a CSS transform rather than as zoom precisely
+  // because react-grid-layout measures its container's LAYOUT width to
+  // decide column widths, and a transform must leave that alone. So this
+  // checks both halves: that the painted box really is 1.5x (bounding
+  // rect), and that the laid-out box is not (offsetWidth unchanged). A
+  // browser that failed the second half would lay the grid out against an
+  // already-scaled width and then scale it again.
+  (function checkTransformScale() {
+    var supported = false;
+    try { supported = CSS.supports('transform', 'scale(1.5)'); } catch (e) { supported = false; }
+
+    var host = document.createElement('div');
+    host.style.position = 'absolute';
+    host.style.visibility = 'hidden';
+    host.style.left = '0';
+    host.style.top = '0';
+    host.style.width = '200px';
+    var inner = document.createElement('div');
+    inner.style.width = '200px';
+    inner.style.height = '20px';
+    inner.style.transformOrigin = 'top left';
+    inner.style.transform = 'scale(1.5)';
+    host.appendChild(inner);
+    document.body.appendChild(host);
+
+    var painted = 0, laidOut = 0, ok = false, detail = '';
+    try {
+      painted = Math.round(inner.getBoundingClientRect().width);
+      laidOut = inner.offsetWidth;
+      ok = supported && painted === 300 && laidOut === 200;
+      detail = 'painted ' + painted + 'px (want 300), layout ' + laidOut + 'px (want 200)';
+    } catch (e) {
+      ok = false;
+      detail = String(e && e.message || e).slice(0, 60);
+    } finally {
+      document.body.removeChild(host);
+    }
+    addCheck('transform scale', ok, detail);
+  })();
+
+  // 5g. What the browser thinks its viewport is, against what the panel
+  // actually is. Informational, because only the operator standing in front
+  // of the set can say whether these numbers match the panel: a browser
+  // reporting 1920x1080 on a 1920x360 strip is the known ODROID case, and a
+  // television reporting 1280x720 CSS px on a 4K panel is the case this
+  // line exists to catch before a display record is created with the wrong
+  // canvas in it. These are the numbers to enter as the display's size.
+  (function checkViewport() {
+    var probe = document.createElement('div');
+    probe.style.position = 'fixed';
+    probe.style.visibility = 'hidden';
+    probe.style.left = '0';
+    probe.style.top = '0';
+    probe.style.width = '100vw';
+    probe.style.height = '1px';
+    document.body.appendChild(probe);
+    var vw = 0;
+    try { vw = Math.round(probe.getBoundingClientRect().width); } finally { document.body.removeChild(probe); }
+
+    var dpr = (typeof devicePixelRatio === 'number') ? devicePixelRatio : 1;
+    var scr = (typeof screen !== 'undefined' && screen) ? (screen.width + 'x' + screen.height) : 'unknown';
+    addCheck(
+      'viewport',
+      true,
+      'inner ' + window.innerWidth + 'x' + window.innerHeight + ', 100vw=' + vw + ', screen ' + scr + ', dpr ' + dpr,
+      'info'
+    );
+  })();
+
+  // 5h. Live key readout. What an LG Magic Remote (or any other remote)
+  // actually emits is not knowable off the device, and the wall display's
+  // step/pause keys have to be written against real codes rather than an
+  // assumed table. This cell updates in place on every press: renderGrid
+  // re-appends this same node rather than building a new one, so pressing a
+  // key never rebuilds the helmcam iframe and never restarts its stream.
+  var keyEvents = [];
+  var keysCell = document.createElement('div');
+  keysCell.className = 'cell keys';
+  (function buildKeysCell() {
+    var name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = 'keys (last 4)';
+    var list = document.createElement('div');
+    list.className = 'keylist';
+    var waiting = document.createElement('span');
+    waiting.className = 'waiting';
+    waiting.textContent = 'press a remote or keyboard key';
+    list.appendChild(waiting);
+    keysCell.appendChild(name);
+    keysCell.appendChild(list);
+
+    window.addEventListener('keydown', function (e) {
+      keyEvents.unshift({
+        key: String(e.key),
+        code: String(e.code),
+        keyCode: e.keyCode,
+        at: nowHHMMSS()
+      });
+      if (keyEvents.length > 4) keyEvents.length = 4;
+      list.textContent = keyEvents.map(function (k) {
+        return k.at + '  key=' + k.key + '  code=' + k.code + '  keyCode=' + k.keyCode;
+      }).join('\n');
+    });
+  })();
+
   // 9. Whether the last report POST succeeded. Seeded as pending until the
   // first report() call resolves.
   var reportCheck = { name: 'Report POST', pass: false, detail: 'pending', display: 'info' };
@@ -359,7 +526,7 @@
 
   function renderGrid() {
     grid.innerHTML = '';
-    checks.concat([reportCheck]).forEach(function (chk) {
+    checks.concat([wakeLockCheck, reportCheck]).forEach(function (chk) {
       var cell = document.createElement('div');
       cell.className = 'cell';
 
@@ -381,6 +548,10 @@
       grid.appendChild(cell);
     });
 
+    // Re-appended, not rebuilt: keysCell holds live state (and its own
+    // keydown listener) that must survive a re-render.
+    grid.appendChild(keysCell);
+
     // 6. Rotation + helmcam embed, only when ?rotate=180 is present - sized
     // as one grid cell (not full width) so every check stays visible
     // alongside it. The manual part (stop helmcam for 60s, confirm frames
@@ -401,13 +572,14 @@
       user_agent: navigator.userAgent,
       viewport: { w: window.innerWidth, h: window.innerHeight },
       rotate: rotated ? 180 : 0,
-      checks: checks.concat([reportCheck]).map(function (c) {
+      checks: checks.concat([wakeLockCheck, reportCheck]).map(function (c) {
         return { name: c.name, pass: c.pass, detail: c.detail };
-      })
+      }),
+      keys: keyEvents.slice()
     };
     if (height !== null) payload.height = height;
 
-    fetch('/api/kiosk-probe', {
+    fetch('/api/display-probe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

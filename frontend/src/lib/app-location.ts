@@ -7,7 +7,7 @@ import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings
 // Pure and React-free so it can be unit tested without mounting anything,
 // and so PANEL_IDS can be validated here without importing App.tsx (which
 // would create a cycle: App needs the parser, the parser must not need App).
-export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'kiosk', 'documents'] as const
+export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface AppLocation {
@@ -25,6 +25,13 @@ export interface AppLocation {
    * initialLocation, rather than feeding it back in on every render the way
    * it does documentFolderId - see that effect's own comment. */
   documentId?: string | null
+  /** ADR 0110: the wall display route's `/display/<slug>` segment. null on
+   * a bare `/display` (and absent everywhere else). Never validated against
+   * the configured displays here — an unknown or absent slug is a distinct,
+   * explicit shape the wall shell renders a diagnostic for; this module has
+   * no fallback to "the first display", which would silently put one
+   * display's geometry on another screen. */
+  displaySlug?: string | null
 }
 
 export interface LocationContext {
@@ -42,10 +49,12 @@ function isSettingsSectionId(id: string): id is SettingsSectionId {
 }
 
 // decodeURIComponent throws on a malformed escape (`%E0%A4%A`), and a pasted
-// or truncated link is exactly where one turns up. That is "no page named",
-// not a crash: the caller then lands on the first page and the sync effect
-// rewrites the bar, which is the same outcome as any other unknown id.
-function decodePageId(segment: string): string | null {
+// or truncated link is exactly where one turns up. Returning null here means
+// "nothing named" rather than a crash: every caller treats a null segment
+// the same way it treats an unknown id, landing on its own fallback (the
+// first page, no thread, no slug) rather than surfacing a parse error - a
+// mistyped or stale link should degrade gracefully, not break the app.
+function decodeSegment(segment: string): string | null {
   try {
     return decodeURIComponent(segment)
   } catch {
@@ -65,7 +74,7 @@ export function parseAppLocation(pathname: string): AppLocation {
   const [first, second] = segments
 
   if (!first || first === 'dashboard') {
-    return { panel: null, pageId: second !== undefined ? decodePageId(second) : null }
+    return { panel: null, pageId: second !== undefined ? decodeSegment(second) : null }
   }
 
   if (first === 'settings') {
@@ -81,7 +90,7 @@ export function parseAppLocation(pathname: string): AppLocation {
   // ADR 0094 named the assistant "Mate" in the UI. Keep /assistant as a
   // tolerated legacy alias, but canonicalize to /mate via formatAppLocation.
   if (first === 'mate' || first === 'assistant') {
-    return { panel: 'assistant', conversationId: second !== undefined ? decodePageId(second) : null }
+    return { panel: 'assistant', conversationId: second !== undefined ? decodeSegment(second) : null }
   }
 
   // ADR 0106 F1: the current folder and, on a deep link from a Mate
@@ -94,6 +103,12 @@ export function parseAppLocation(pathname: string): AppLocation {
       documentFolderId: params.get('folder'),
       documentId: params.get('document'),
     }
+  }
+
+  // ADR 0110: the wall display route. Kept ahead of the generic PANEL_ID_SET
+  // branch because it carries an extra segment none of those panels do.
+  if (first === 'display') {
+    return { panel: 'display', displaySlug: second !== undefined ? decodeSegment(second) : null }
   }
 
   if (PANEL_ID_SET.has(first)) {
@@ -130,6 +145,11 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
     if (loc.documentId) params.set('document', loc.documentId)
     const qs = params.toString()
     return qs ? `/documents?${qs}` : '/documents'
+  }
+
+  if (loc.panel === 'display') {
+    if (!loc.displaySlug) return '/display'
+    return `/display/${encodeURIComponent(loc.displaySlug)}`
   }
 
   return `/${loc.panel}`

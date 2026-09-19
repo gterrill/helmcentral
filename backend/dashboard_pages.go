@@ -141,40 +141,50 @@ var validPoiMapLayouts = map[string]bool{"map": true, "split": true}
 
 var validPageSkins = map[string]bool{"": true, "default": true, "instrument": true}
 
-// Kiosk fields (ADR 0089) turn an ordinary page into one that can appear in
-// the wall-display rotation at /kiosk: a bool flag, how long it shows, and
-// an optional condition. kioskSecondsMin/Max bound the duration to something
-// a human will actually notice cycle; 5s is fast but visible, 3600s (an
-// hour) is long enough that "kiosk" without a duration would just mean
+// Display assignment fields (ADR 0089, superseded in part by ADR 0110) turn
+// an ordinary page into one that can appear in a wall display's rotation at
+// /display/<slug>: a display id, how long the page shows, and an optional
+// condition. dwellSecondsMin/Max bound the duration to something a human
+// will actually notice cycle; 5s is fast but visible, 3600s (an hour) is
+// long enough that a page on a display with no duration would just mean
 // "forever" by another name, which is what the zero value already means.
 const (
-	kioskSecondsMin = 5
-	kioskSecondsMax = 3600
+	dwellSecondsMin = 5
+	dwellSecondsMax = 3600
 )
 
 // Empty means "always" - an unset page needs no value, matching skin and
 // hero's own empty-string-means-default convention. The explicit values
 // mirror signalk-autostate's navigation.state vocabulary.
-var validKioskWhen = map[string]bool{"": true, "always": true, "anchored": true, "motoring": true, "sailing": true, "moored": true}
+var validShowWhen = map[string]bool{"": true, "always": true, "anchored": true, "motoring": true, "sailing": true, "moored": true}
 
-// validateKioskFields holds the rules for the three kiosk fields together,
-// shared by create (an all-at-once body) and patch (a field-by-field
-// rebuild, see patchDashboardPageHandler) so both fail closed the same way.
+// validatePageDisplayFields holds the rules for the three display-assignment
+// fields together, shared by create (an all-at-once body) and patch (a
+// field-by-field rebuild, see patchDashboardPageHandler) so both fail closed
+// the same way. displayExists is threaded through rather than read from
+// package state directly so this function needs no lock of its own -
+// callers already hold dashboardPagesMu (read or write) when they call it.
 //
-// seconds is validated whenever it is non-zero, independent of the kiosk
-// flag: a stored duration that survives an untick (see patch's carry-forward
-// comment) must already have been a valid one, and a caller setting seconds
-// without also setting kiosk in the same request should not be able to smuggle
-// in a value that would be rejected the moment kiosk actually flips on.
-func validateKioskFields(kiosk bool, seconds int, when string) string {
-	if !validKioskWhen[when] {
-		return "unknown kiosk condition: " + when
+// dwell is validated whenever it is non-zero, independent of displayID: a
+// stored duration that survives clearing the display (see patch's
+// carry-forward comment) must already have been a valid one, and a caller
+// setting dwell without also setting display_id in the same request should
+// not be able to smuggle in a value that would be rejected the moment the
+// page actually lands on a display.
+func validatePageDisplayFields(displayID string, dwell int, when string, displayExists func(string) bool) string {
+	if !validShowWhen[when] {
+		return "unknown show_when condition: " + when
 	}
-	if seconds != 0 && (seconds < kioskSecondsMin || seconds > kioskSecondsMax) {
-		return fmt.Sprintf("kiosk_seconds must be between %d and %d", kioskSecondsMin, kioskSecondsMax)
+	if dwell != 0 && (dwell < dwellSecondsMin || dwell > dwellSecondsMax) {
+		return fmt.Sprintf("dwell_seconds must be between %d and %d", dwellSecondsMin, dwellSecondsMax)
 	}
-	if kiosk && seconds == 0 {
-		return "kiosk requires kiosk_seconds"
+	if displayID != "" {
+		if dwell == 0 {
+			return "a page on a display requires dwell_seconds"
+		}
+		if !displayExists(displayID) {
+			return "unknown display_id: " + displayID
+		}
 	}
 	return ""
 }
@@ -384,16 +394,17 @@ type dashboardPageData struct {
 	// automatically rather than failing an otherwise-ordinary widget removal
 	// (see patchDashboardPageHandler).
 	Hero string `json:"hero,omitempty"`
-	// Kiosk fields (ADR 0089): Kiosk marks this page as part of the wall
-	// display rotation at /kiosk; KioskSeconds is how long it shows before
-	// the rotation advances; KioskWhen is an optional condition ("anchored"
-	// restricts the page to while the anchor watch is active, empty means
-	// always). omitempty on all three keeps existing files byte-identical -
-	// an unflagged page never gains any of these keys just because the
-	// struct grew them.
-	Kiosk        bool                  `json:"kiosk,omitempty"`
-	KioskSeconds int                   `json:"kiosk_seconds,omitempty"`
-	KioskWhen    string                `json:"kiosk_when,omitempty"`
+	// Display assignment (ADR 0089, superseded in part by ADR 0110): DisplayID
+	// names the wall display this page appears on, or "" for an ordinary
+	// dashboard page; DwellSeconds is how long it shows before the rotation
+	// advances; ShowWhen is an optional condition ("anchored" restricts the
+	// page to while the anchor watch is active, empty means always).
+	// omitempty on all three keeps existing files byte-identical - a page
+	// with no display never gains any of these keys just because the struct
+	// grew them.
+	DisplayID    string                `json:"display_id,omitempty"`
+	DwellSeconds int                   `json:"dwell_seconds,omitempty"`
+	ShowWhen     string                `json:"show_when,omitempty"`
 	Widgets      []dashboardLayoutItem `json:"widgets"`
 	CreatedAt    time.Time             `json:"created_at"`
 	UpdatedAt    time.Time             `json:"updated_at"`
@@ -407,6 +418,22 @@ type dashboardPagesFile struct {
 	// operator has not pinned one. omitempty keeps a file with no ribbon
 	// byte-identical to one written before this field existed.
 	Ribbon *dashboardLampStripConfig `json:"ribbon,omitempty"`
+	// Displays are the wall screens a page can be assigned to (ADR 0110), a
+	// third sibling key under the same lock and the same file rather than a
+	// separate file — deleting a display has to clear DisplayID on every
+	// page that referenced it in one atomic write, and a second file would
+	// make that two writes to keep in sync. omitempty keeps a file with no
+	// displays byte-identical to one written before this field existed.
+	Displays []*displayData `json:"displays,omitempty"`
+}
+
+// dashboardPagesListResponse is the wire shape for GET /api/dashboard-pages
+// and the reorder response — deliberately distinct from dashboardPagesFile
+// (the on-disk shape) so Displays can never leak into a page listing by a
+// careless reuse of the file struct, nor be silently dropped from disk by a
+// handler built against this narrower one.
+type dashboardPagesListResponse struct {
+	Pages []*dashboardPageData `json:"pages"`
 }
 
 var (
@@ -440,11 +467,23 @@ func orderedDashboardPagesLocked() []*dashboardPageData {
 	return list
 }
 
+// dashboardPagesSnapshotLocked assembles the complete on-disk shape — pages,
+// ribbon and displays — from the three package-level states that share
+// dashboardPagesMu. It is the one place that convention is spelled out;
+// every writer of dashboard-pages.json (saveDashboardPagesLocked and the two
+// handlers below that bypass it for their own reasons) starts from this
+// snapshot and mutates a copy, so none of them can forget a sibling key the
+// way reorder used to have to carry the ribbon forward by hand.
+func dashboardPagesSnapshotLocked() dashboardPagesFile {
+	return dashboardPagesFile{
+		Pages:    orderedDashboardPagesLocked(),
+		Ribbon:   dashboardRibbonState,
+		Displays: orderedDisplaysLocked(),
+	}
+}
+
 func saveDashboardPagesLocked() error {
-	return writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{
-		Pages:  orderedDashboardPagesLocked(),
-		Ribbon: dashboardRibbonState,
-	})
+	return writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesSnapshotLocked())
 }
 
 // validateEmbedWidget guards the one widget whose content is operator-supplied.
@@ -586,6 +625,130 @@ func stripRetiredWidgets(widgets []dashboardLayoutItem) ([]dashboardLayoutItem, 
 	return kept, changed
 }
 
+// kioskPageProbe reads a page's legacy kiosk fields (ADR 0089) straight off
+// the wire, independently of dashboardPageData - which must never carry
+// "kiosk"/"kiosk_seconds"/"kiosk_when" again once the ADR 0110 rename lands,
+// so the only way to still learn what a v1 file said is a second, narrower
+// unmarshal of the same bytes (plan §1 step 1).
+type kioskPageProbe struct {
+	ID           string `json:"id"`
+	Kiosk        bool   `json:"kiosk"`
+	KioskSeconds int    `json:"kiosk_seconds"`
+	KioskWhen    string `json:"kiosk_when"`
+}
+
+// convertKioskPagesToFlybridgeDisplayLocked absorbs a v1 file's kiosk fields
+// into the display model (plan §1, ADR 0110), reporting whether it changed
+// anything the caller must now persist. Called with dashboardPagesMu held
+// and dashboardPagesState/displaysState already populated from loaded.
+func convertKioskPagesToFlybridgeDisplayLocked(data []byte, loaded dashboardPagesFile) bool {
+	var probe struct {
+		Pages []kioskPageProbe `json:"pages"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		// The bytes already parsed once into dashboardPagesFile above; a
+		// second, narrower parse of the same bytes failing at all means a
+		// legacy kiosk field is present but the wrong JSON type (e.g.
+		// "kiosk": "true"). Surfacing this rather than silently skipping
+		// it is the fail-loud stance AGENTS.md asks for, short of refusing
+		// to boot over one hand-edited field.
+		log.Printf("dashboard pages: could not read legacy kiosk fields for conversion: %v", err)
+		return false
+	}
+
+	changed := false
+	anyKiosk := false
+	for _, kp := range probe.Pages {
+		if kp.Kiosk {
+			anyKiosk = true
+		}
+		page, ok := dashboardPagesState[kp.ID]
+		if !ok {
+			continue
+		}
+		// Runs for every page that carries a stale dwell/condition,
+		// flagged or not: an unflagged page can still carry a duration
+		// from a past un-ticking, and dropping it would lose the
+		// carry-forward the patch handler deliberately preserves.
+		if kp.KioskSeconds != 0 {
+			page.DwellSeconds = kp.KioskSeconds
+			changed = true
+		}
+		if kp.KioskWhen != "" {
+			page.ShowWhen = kp.KioskWhen
+			changed = true
+		}
+	}
+
+	if !anyKiosk || len(loaded.Displays) != 0 {
+		return changed
+	}
+
+	now := time.Now().UTC()
+	flybridge := &displayData{
+		ID:        uuid.NewString(),
+		Name:      "Flybridge",
+		Slug:      "flybridge",
+		Width:     1920,
+		Height:    360,
+		Rotate:    180,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	displaysState[flybridge.ID] = flybridge
+	changed = true
+
+	assigned, heroCleared, skipped := 0, 0, 0
+	for _, kp := range probe.Pages {
+		if !kp.Kiosk {
+			continue
+		}
+		page, ok := dashboardPagesState[kp.ID]
+		if !ok {
+			continue
+		}
+		if page.DwellSeconds == 0 {
+			// Validation forbade a kiosk page with no duration; one should
+			// never exist. Inventing a duration here would be guessing, so
+			// this page is left off the display and named in the log
+			// instead (plan §1 step 4).
+			skipped++
+			log.Printf("dashboard pages: page %q (%s) was flagged kiosk with no stored duration; leaving it off the synthesized Flybridge display", page.Name, page.ID)
+			continue
+		}
+		page.DisplayID = flybridge.ID
+		assigned++
+		if page.Hero != "" {
+			page.Hero = ""
+			heroCleared++
+		}
+	}
+	log.Printf("dashboard pages: synthesized the Flybridge display (1920x360, rotate 180) for %d kiosk page(s), %d hero(es) cleared, %d left unassigned for missing duration",
+		assigned, heroCleared, skipped)
+	return changed
+}
+
+// repairDanglingDisplayReferencesLocked clears a display_id naming no
+// display, and a hero on any page that has a display_id, reporting whether
+// it changed anything. Independent of the kiosk conversion above - this is
+// what makes a hand-edited file safe, the same repair-on-load stance
+// stripRetiredWidgets and the hero-orphan patch rule already take (plan §1
+// step 5).
+func repairDanglingDisplayReferencesLocked() bool {
+	changed := false
+	for _, page := range dashboardPagesState {
+		if page.DisplayID != "" && !displayExistsLocked(page.DisplayID) {
+			page.DisplayID = ""
+			changed = true
+		}
+		if page.DisplayID != "" && page.Hero != "" {
+			page.Hero = ""
+			changed = true
+		}
+	}
+	return changed
+}
+
 // loadDashboardPages loads pages from the new format, or migrates from the legacy single-layout format.
 // Migration logic:
 // 1. Try reading the new pages file. If it exists and parses, use it. Done.
@@ -597,6 +760,7 @@ func loadDashboardPages() {
 
 	dashboardPagesState = make(map[string]*dashboardPageData)
 	dashboardRibbonState = nil
+	displaysState = make(map[string]*displayData)
 
 	// Try loading new format first
 	data, err := os.ReadFile(dashboardPagesFilePath())
@@ -605,6 +769,9 @@ func loadDashboardPages() {
 		var loaded dashboardPagesFile
 		if err := json.Unmarshal(data, &loaded); err == nil {
 			dashboardRibbonState = loaded.Ribbon
+			for _, d := range loaded.Displays {
+				displaysState[d.ID] = d
+			}
 			anyStripped := false
 			for _, p := range loaded.Pages {
 				if kept, changed := stripRetiredWidgets(p.Widgets); changed {
@@ -612,6 +779,14 @@ func loadDashboardPages() {
 					anyStripped = true
 				}
 				dashboardPagesState[p.ID] = p
+			}
+			// Absorb a v1 file's kiosk fields into the display model (ADR
+			// 0110), then repair any display reference a hand edit could
+			// have left dangling - independently of whether the file ever
+			// had kiosk fields at all.
+			conversionChanged := convertKioskPagesToFlybridgeDisplayLocked(data, loaded)
+			if repairDanglingDisplayReferencesLocked() {
+				conversionChanged = true
 			}
 			// Normalize legacy creation order and gaps left by page deletion.
 			// Existing explicit positions take precedence over creation time.
@@ -622,7 +797,7 @@ func loadDashboardPages() {
 					orderChanged = true
 				}
 			}
-			if anyStripped || orderChanged {
+			if anyStripped || orderChanged || conversionChanged {
 				if err := saveDashboardPagesLocked(); err != nil {
 					log.Printf("Failed to persist migrated dashboard pages: %v", err)
 				}
@@ -693,7 +868,7 @@ func listDashboardPagesHandler(c echo.Context) error {
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
 
-	return c.JSON(http.StatusOK, dashboardPagesFile{Pages: orderedDashboardPagesLocked()})
+	return c.JSON(http.StatusOK, dashboardPagesListResponse{Pages: orderedDashboardPagesLocked()})
 }
 
 // PUT /api/dashboard-pages/order replaces the complete shared order. Requiring
@@ -730,17 +905,21 @@ func reorderDashboardPagesHandler(c echo.Context) error {
 
 	// Publish only after the entire order is durable. A failed write must not
 	// leave readers seeing an order that will vanish at the next restart.
-	// Ribbon rides along explicitly: this handler writes the pages file
-	// directly rather than through saveDashboardPagesLocked, so it is exactly
-	// the "other code path" that has to remember to carry the ribbon forward
-	// or silently drop it from disk on the next restart.
-	if err := writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{Pages: list, Ribbon: dashboardRibbonState}); err != nil {
+	// This handler writes the pages file directly rather than through
+	// saveDashboardPagesLocked (the page order isn't reflected in
+	// dashboardPagesState until after the write succeeds), so it starts from
+	// the same snapshot every other writer does and only swaps in the new
+	// order — the ribbon and displays ride along by construction rather than
+	// by a comment reminding the next editor to carry them forward by hand.
+	snap := dashboardPagesSnapshotLocked()
+	snap.Pages = list
+	if err := writeJSONFileAtomic(dashboardPagesFilePath(), snap); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist page order"})
 	}
 	for _, page := range list {
 		dashboardPagesState[page.ID] = page
 	}
-	return c.JSON(http.StatusOK, dashboardPagesFile{Pages: list})
+	return c.JSON(http.StatusOK, dashboardPagesListResponse{Pages: list})
 }
 
 // POST /api/dashboard-pages
@@ -749,9 +928,9 @@ func createDashboardPageHandler(c echo.Context) error {
 		Name         string                `json:"name"`
 		Skin         string                `json:"skin"`
 		Hero         string                `json:"hero"`
-		Kiosk        bool                  `json:"kiosk"`
-		KioskSeconds int                   `json:"kiosk_seconds"`
-		KioskWhen    string                `json:"kiosk_when"`
+		DisplayID    string                `json:"display_id"`
+		DwellSeconds int                   `json:"dwell_seconds"`
+		ShowWhen     string                `json:"show_when"`
 		Widgets      []dashboardLayoutItem `json:"widgets"`
 	}
 	if err := c.Bind(&body); err != nil {
@@ -764,9 +943,6 @@ func createDashboardPageHandler(c echo.Context) error {
 	}
 	if !validPageSkins[body.Skin] {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown page skin: " + body.Skin})
-	}
-	if msg := validateKioskFields(body.Kiosk, body.KioskSeconds, body.KioskWhen); msg != "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 
 	// Handle nil slice: ensure it's an empty slice for consistency
@@ -781,6 +957,13 @@ func createDashboardPageHandler(c echo.Context) error {
 	if !heroWidgetExists(body.Hero, body.Widgets) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "hero must name a widget on this page: " + body.Hero})
 	}
+	// Hero and display are mutually exclusive (plan §1): unlike a patch,
+	// create has no prior state to silently repair, so a caller asking for
+	// both in the same request is a caller error, not something to guess
+	// about by picking one field to win.
+	if body.Hero != "" && body.DisplayID != "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "a page cannot have both a hero and a display; a page on a wall display has no hero"})
+	}
 
 	now := time.Now().UTC()
 	page := &dashboardPageData{
@@ -788,15 +971,24 @@ func createDashboardPageHandler(c echo.Context) error {
 		Name:         name,
 		Skin:         body.Skin,
 		Hero:         body.Hero,
-		Kiosk:        body.Kiosk,
-		KioskSeconds: body.KioskSeconds,
-		KioskWhen:    body.KioskWhen,
+		DisplayID:    body.DisplayID,
+		DwellSeconds: body.DwellSeconds,
+		ShowWhen:     body.ShowWhen,
 		Widgets:      body.Widgets,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
 
 	dashboardPagesMu.Lock()
+	// The display-exists check reads shared state, so it has to happen
+	// inside the lock even though every other create validation above runs
+	// against the request body alone (plan §1: "consequence: createDashboard
+	// PageHandler validates before taking the lock; the existence check
+	// moves inside").
+	if msg := validatePageDisplayFields(page.DisplayID, page.DwellSeconds, page.ShowWhen, displayExistsLocked); msg != "" {
+		dashboardPagesMu.Unlock()
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
+	}
 	for _, existing := range dashboardPagesState {
 		if existing.Position >= page.Position {
 			page.Position = existing.Position + 1
@@ -835,16 +1027,16 @@ func patchDashboardPageHandler(c echo.Context) error {
 		Name         *string                `json:"name"`
 		Skin         *string                `json:"skin"`
 		Hero         *string                `json:"hero"`
-		Kiosk        *bool                  `json:"kiosk"`
-		KioskSeconds *int                   `json:"kiosk_seconds"`
-		KioskWhen    *string                `json:"kiosk_when"`
+		DisplayID    *string                `json:"display_id"`
+		DwellSeconds *int                   `json:"dwell_seconds"`
+		ShowWhen     *string                `json:"show_when"`
 		Widgets      *[]dashboardLayoutItem `json:"widgets"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 	if body.Name == nil && body.Skin == nil && body.Hero == nil && body.Widgets == nil &&
-		body.Kiosk == nil && body.KioskSeconds == nil && body.KioskWhen == nil {
+		body.DisplayID == nil && body.DwellSeconds == nil && body.ShowWhen == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no patch fields provided"})
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
@@ -876,6 +1068,19 @@ func patchDashboardPageHandler(c echo.Context) error {
 	if body.Hero != nil && !heroWidgetExists(*body.Hero, finalWidgets) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "hero must name a widget on this page: " + *body.Hero})
 	}
+	// Hero and display are mutually exclusive (plan §1). This is the
+	// direction that rejects rather than repairs: an explicit non-empty hero
+	// landing on a page that has (or is gaining, in this same patch) a
+	// display is the caller asking for two things that cannot both render,
+	// so the caller has to take the page off the wall first rather than the
+	// server silently picking one.
+	finalDisplayID := current.DisplayID
+	if body.DisplayID != nil {
+		finalDisplayID = *body.DisplayID
+	}
+	if body.Hero != nil && *body.Hero != "" && finalDisplayID != "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "this page is on a wall display; clear display_id before setting a hero"})
+	}
 
 	updated := &dashboardPageData{
 		ID:           current.ID,
@@ -883,9 +1088,9 @@ func patchDashboardPageHandler(c echo.Context) error {
 		Position:     current.Position,
 		Skin:         current.Skin,
 		Hero:         current.Hero,
-		Kiosk:        current.Kiosk,
-		KioskSeconds: current.KioskSeconds,
-		KioskWhen:    current.KioskWhen,
+		DisplayID:    current.DisplayID,
+		DwellSeconds: current.DwellSeconds,
+		ShowWhen:     current.ShowWhen,
 		Widgets:      current.Widgets,
 		CreatedAt:    current.CreatedAt,
 		UpdatedAt:    time.Now().UTC(),
@@ -899,25 +1104,25 @@ func patchDashboardPageHandler(c echo.Context) error {
 	if body.Hero != nil {
 		updated.Hero = *body.Hero
 	}
-	if body.Kiosk != nil {
-		updated.Kiosk = *body.Kiosk
+	if body.DisplayID != nil {
+		updated.DisplayID = *body.DisplayID
 	}
-	if body.KioskSeconds != nil {
-		updated.KioskSeconds = *body.KioskSeconds
+	if body.DwellSeconds != nil {
+		updated.DwellSeconds = *body.DwellSeconds
 	}
-	if body.KioskWhen != nil {
-		updated.KioskWhen = *body.KioskWhen
+	if body.ShowWhen != nil {
+		updated.ShowWhen = *body.ShowWhen
 	}
 	if body.Widgets != nil {
 		updated.Widgets = *body.Widgets
 	}
-	// Validated on the merged triple, not the raw patch fields: {"kiosk":true}
-	// alone must succeed when seconds are already on record from an earlier
-	// save, and {"kiosk":false} alone must leave seconds and condition alone
-	// so re-ticking the box remembers them (see the carry-forward above) -
-	// neither of those is visible from body.Kiosk/body.KioskSeconds/body.KioskWhen
-	// in isolation.
-	if msg := validateKioskFields(updated.Kiosk, updated.KioskSeconds, updated.KioskWhen); msg != "" {
+	// Validated on the merged triple, not the raw patch fields:
+	// {"display_id":"<id>"} alone must succeed when dwell is already on
+	// record from an earlier save, and {"display_id":""} alone must leave
+	// dwell and condition alone so re-assigning the page remembers them (see
+	// the carry-forward above) - neither of those is visible from
+	// body.DisplayID/body.DwellSeconds/body.ShowWhen in isolation.
+	if msg := validatePageDisplayFields(updated.DisplayID, updated.DwellSeconds, updated.ShowWhen, displayExistsLocked); msg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 	// A hero not named explicitly in this patch can still be orphaned by it,
@@ -928,6 +1133,13 @@ func patchDashboardPageHandler(c echo.Context) error {
 	// takes on load: a dangling reference is corrected on write, not treated
 	// as the caller's error.
 	if body.Hero == nil && !heroWidgetExists(updated.Hero, updated.Widgets) {
+		updated.Hero = ""
+	}
+	// Assigning a display clears a pre-existing hero rather than rejecting
+	// the patch (plan §1): a page-widgets-only kind of repair, not a caller
+	// error, since the caller who explicitly asked for a hero in this same
+	// patch was already rejected above.
+	if body.Hero == nil && updated.DisplayID != "" {
 		updated.Hero = ""
 	}
 
@@ -992,11 +1204,11 @@ func putDashboardRibbonHandler(c echo.Context) error {
 	// Publish only after the write is durable, the same stance
 	// reorderDashboardPagesHandler takes on the page order: a failed write
 	// must not leave memory holding a ribbon that will vanish at the next
-	// restart.
-	if err := writeJSONFileAtomic(dashboardPagesFilePath(), dashboardPagesFile{
-		Pages:  orderedDashboardPagesLocked(),
-		Ribbon: body.Ribbon,
-	}); err != nil {
+	// restart. Starts from the snapshot for the same reason reorder does:
+	// displays ride along without this handler needing to know they exist.
+	snap := dashboardPagesSnapshotLocked()
+	snap.Ribbon = body.Ribbon
+	if err := writeJSONFileAtomic(dashboardPagesFilePath(), snap); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist"})
 	}
 	dashboardRibbonState = body.Ribbon

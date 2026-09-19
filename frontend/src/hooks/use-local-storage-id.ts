@@ -6,12 +6,21 @@ import { useEffect, useState } from 'react'
 // stored, then persist so the linked page becomes the remembered one for
 // next time. Omitted (the overwhelmingly common case), this is unchanged:
 // the stored id, or null.
-export function useLocalStorageId(key: string, initialId?: string | null): [string | null, (id: string | null) => void] {
+// `persist: false` keeps the value in memory and never touches
+// localStorage. The wall display route uses it: the rotation advances the
+// active page every few seconds, and the sidebar opens a wall in a new tab
+// of the SAME browser, so persisting those writes would leave the
+// operator's own dashboard remembering a wall page.
+export function useLocalStorageId(key: string, initialId?: string | null, persist = true): [string | null, (id: string | null) => void] {
   const [id, setIdState] = useState<string | null>(
     () => initialId ?? globalThis.localStorage?.getItem(key) ?? null,
   )
 
   function setId(next: string | null) {
+    if (!persist) {
+      setIdState(next)
+      return
+    }
     if (next === null) {
       globalThis.localStorage?.removeItem(key)
     } else {
@@ -25,7 +34,7 @@ export function useLocalStorageId(key: string, initialId?: string | null): [stri
   // page, e.g. `/forecast` or `/`) must both leave whatever's already stored
   // alone, or this would wipe the remembered page on every ordinary mount.
   useEffect(() => {
-    if (initialId != null) {
+    if (persist && initialId != null) {
       globalThis.localStorage?.setItem(key, initialId)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

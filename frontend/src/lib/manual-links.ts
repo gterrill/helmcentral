@@ -22,11 +22,12 @@ export const MANUAL_INDEX: ManualTarget = { page: 'index' }
  * app-location.ts without adding a row here is a compile error rather than a
  * silent fallback to the index.
  *
- * `settings` and `kiosk` are never actually read through this table -
+ * `settings` and `display` are never actually read through this table -
  * manualTargetFor branches settings off to SETTINGS_MANUAL_TARGETS before
- * consulting this one, and the kiosk shell mounts no Manual affordance at
- * all (App.tsx's isKiosk early return precedes the header, sidebar and every
- * sheet). Both rows exist purely so the Record stays total.
+ * consulting this one, and the wall display route (ADR 0110) mounts no
+ * Manual affordance at all (App.tsx's kiosk-route early return precedes the
+ * header, sidebar and every sheet). Both rows exist purely so the Record
+ * stays total.
  */
 export const PANEL_MANUAL_TARGETS: Record<PanelId, ManualTarget> = {
   forecast: { page: 'features/forecast' },
@@ -40,7 +41,7 @@ export const PANEL_MANUAL_TARGETS: Record<PanelId, ManualTarget> = {
   // Unreachable (see above) - set to General's target for totality.
   settings: { page: 'index' },
   // Unreachable (see above) - the manual index, for totality.
-  kiosk: MANUAL_INDEX,
+  display: MANUAL_INDEX,
 }
 
 /** Every Settings section's manual target, keyed by SettingsSectionId. Same

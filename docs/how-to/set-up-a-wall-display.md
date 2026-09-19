@@ -1,119 +1,171 @@
 # Set up a wall display
 
-This turns an existing dashboard page into a screen on the wall that cycles
-on its own, with no interaction. See [The dashboard: the kiosk
-feed](../features/dashboard.md#the-kiosk-feed) for what the rotation does and
-does not do.
+This puts dashboard pages on a screen somewhere on the boat that cycles on
+its own, with no interaction. See [The dashboard: wall
+displays](../features/dashboard.md#wall-displays) for what a display is and
+what the rotation does and does not do.
+
+You can have several. The steps below are the same whether this is the first
+screen or the fourth.
 
 ## 1. Check the device first
 
-Before wiring anything up, load `/kiosk-probe.html` on the actual browser and
-device you plan to run the wall display on, not on a desktop. The screen is
-only 360px tall, so the page itself just shows a compact PASS/FAIL grid at a
-glance; read the actual results from the backend log instead, on the boat
-box:
+Before configuring anything, load `/display-probe.html` on the actual browser
+and device that will drive the screen, not on a desktop. Results go to the
+backend log, since the narrowest screen here is 360px tall and cannot show a
+long report:
 
 ```
-docker compose logs helmcentral | grep 'kiosk probe'
+docker compose logs helmcentral | grep 'display probe'
 ```
 
-A white screen on the wall also lands in that log: the app shell posts the first startup error as a `kiosk probe: [FAIL] boot error` line naming the message and the script position, so a browser that cannot parse the bundle explains itself without a keyboard.
+A white screen on the wall also lands in that log: the app posts its first
+startup error as a `display probe: [FAIL] boot error` line naming the message
+and the script position, so a browser that cannot parse the app explains
+itself without a keyboard.
 
-That prints a header line (user agent, viewport, rotation), one line per
-check, and a footer with the pass count. The checks are: a hardware WebGL2
-context (a software renderer, such as SwiftShader or llvmpipe, is reported
-as a failure), `:has()` selector support, `structuredClone`,
-`EventSource`/`ResizeObserver`/`matchMedia`/timezone resolution, and a final
-`Report POST` check confirming the page's own report reached the backend.
-The page POSTs this report as soon as the checks finish and again every 60
-seconds, so leaving it open keeps a fresh record in the log.
+The log prints a header line (browser, reported screen size, orientation),
+one line per check, and a footer with the pass count. Two of the checks are
+the ones you are really there for:
 
-If everything passes, proceed. If only the informational `100svh` check
-fails, proceed anyway; the kiosk root doesn't use that unit. If WebGL2,
-`:has()` or `structuredClone` fails, the browser is too old for this
-dashboard's baseline (Baseline 2024); a Chromium-based kiosk browser is the
-usual fix on a small ARM board that ships an older WebKit by default.
+- **viewport** reports the screen size the browser thinks it has, next to
+  what the panel actually is. These are the numbers to enter as the
+  display's screen size in step 2. They are often not the panel's
+  advertised resolution: the flybridge strip's browser reports 1920x1080
+  against a panel that is physically 1920x360, and a television may report
+  1280x720 against a 4K panel.
+- **keys** is a live readout, on screen rather than in the log, of the last
+  four keys pressed. Point the remote at the screen and press the direction
+  keys, OK, and back; each press shows its name and code. The same lines go
+  to the log so you can read them off later. This is how you confirm the
+  remote drives the rotation before relying on it.
 
-Add `?rotate=180` to the probe URL to also check a physically inverted
-screen: it rotates the page and embeds a camera feed, sized as one cell of
-the grid, if you have one configured, so you can confirm the feed keeps
-updating through an interruption without a page reload. If the browser's
-own viewport is taller than the panel (see step 3's note on `height`), add
-`&height=<px>` too, for example `/kiosk-probe.html?rotate=180&height=360`:
-the probe constrains its grid to that band the same way `/kiosk` does, so
-you're checking the layout the panel will actually show rather than one
-spread across the browser's oversized framebuffer.
+The rest are capability checks: a hardware graphics context (a software
+renderer such as SwiftShader or llvmpipe counts as a failure, because the
+chart and radar tiles need real hardware), modern CSS support, magnification
+without a layout shift, and whether the screen can be asked to stay awake.
 
-## 2. Flag the pages you want on the wall
+If everything passes, go on. If only the informational `100svh` check fails,
+go on anyway; nothing uses that. If the graphics context, `:has()`,
+`structuredClone` or the CSS checks fail, the browser is too old for this
+dashboard. On a television that usually means driving it from a small HDMI
+box running a current Chromium instead of using the set's built-in browser,
+which is also the fix on an ARM board that ships an older browser by default.
+
+Add `?rotate=180` to the probe URL to check a physically inverted screen. If
+the browser reports a screen taller than the panel, add `&height=<px>` too,
+for example `/display-probe.html?rotate=180&height=360`, so you are checking
+the band the panel will actually show.
+
+## 2. Add the display
+
+Open **Wall displays** in the sidebar and choose **New display**. Fill in:
+
+- **Name**, what you call the screen: "Flybridge", "Saloon TV".
+- **Address**, the last part of its web address. `flybridge` gives
+  `/display/flybridge`.
+- **Screen size**, from the probe's viewport line in step 1.
+- **Magnification**, how much larger to draw everything. Start at 1 for a
+  screen you read close up, and 1.5 for a television across a cabin. You can
+  change it after you have looked at it from where you will actually sit.
+- **Upside down**, for a panel mounted inverted.
+- **OLED panel**, for an OLED television, so a board left up all season does
+  not burn in.
+- **Keep awake**, to ask the screen not to sleep.
+
+For a television, prefer a smaller screen size with more magnification over a
+larger one at 1. Setting a saloon television to 1280x720 at 1.5 rather than
+1920x1080 at 1 gives you the same picture with tiles you can lay out the way
+you lay out every other page.
+
+## 3. Put pages on it
 
 With write access, in layout mode on each page you want cycling:
 
-1. Toggle layout mode in the header (desktop widths only).
-2. Tick **Kiosk** next to the page's skin and hero controls.
-3. Set how long it shows, in seconds (5 to 3600).
-4. Choose a condition: **Always**, or **While anchored** to only show the
-   page while the anchor watch is active.
+1. Toggle layout mode in the header (needs a screen 1024px wide or more).
+2. Pick the display from the toolbar's display select.
+3. Set how long the page shows, in seconds (5 to 3600).
+4. Choose a condition: **Always**, or a vessel state such as **While
+   anchored** to show the page only then.
 
-While editing a flagged page, an amber dashed line marks where a 360px-tall
-screen would cut the page off, so you can see what fits before saving. Every
-row above that line is what a 1920x360 strip actually shows; anything below
-it is real but invisible on the wall.
+An amber dashed line marks where that screen cuts the page off, measured for
+that screen. Everything above it is what the screen shows.
 
-The wall display never shows the pinned indicator ribbon, even on a page
-that shows it everywhere else it's viewed, so the dashed line measures from
-the top of your grid, not from the ribbon. If a page needs status lamps on
-the wall, add a lamp-strip tile to that page's own layout in the space the
-line marks as visible, rather than counting on the ribbon to carry it there.
+Putting a page on a wall display clears its hero tile, because the hero's
+extra row spends the vertical room the screen is measuring.
 
-Feed order is page order. To change which page shows first, or where a page
-falls in the rotation, reorder pages the same way you always do (see
-[Reorder dashboard pages](reorder-dashboard-pages.md)).
+The wall never shows the pinned indicator ribbon. If a page needs status
+lamps there, put a lamp strip tile on that page's own layout, in the space
+the dashed line marks as visible.
 
-## 3. Point the wall display's browser at `/kiosk`
+Feed order is page order. To change which page shows first, reorder pages the
+way you always do (see [Reorder dashboard
+pages](reorder-dashboard-pages.md)). Pages on a display keep their place in
+that order even though they no longer appear in the ordinary page list.
 
-Open `http://<your-helmcentral-host>:<port>/kiosk` in the browser that will
-run unattended. Add `?rotate=180` if the physical screen is mounted upside
-down. There is nothing to click; the screen has no sidebar, no header, and
-does not respond to Back or Forward.
+## 4. Point the screen's browser at it
 
-Some kiosk browsers report a viewport taller than the physical panel and
-just clip the rest, showing only the top of that oversized framebuffer. If
-that's what you're running (the probe step's header line prints the
-viewport it saw, so check that against the panel's actual pixel height),
-add `?height=<px>` set to the panel's real height, for example
-`/kiosk?rotate=180&height=360` for a 1920x360 strip. This constrains the
-feed, and the rotation, to that band at the top of the viewport instead of
-laying content out over the whole oversized one.
+Open `http://<your-helmcentral-host>:<port>/display/<address>` in the browser
+that will run unattended, for example `/display/flybridge`. There is nothing
+to click: no sidebar, no header, and no response to Back or Forward. Size and
+orientation come from the display's own record, so there is nothing to add to
+the address.
 
-To preview one specific page without waiting through the rotation, for
-example while you're still deciding whether it fits, add `?page=<page id>`
+To hold one page while you decide whether it fits, add `?page=<page id>`
 (find the id in the address bar after selecting that page normally, at
-`/dashboard/<page id>`). A pinned page never advances, which also makes this
-useful for a screenshot.
+`/dashboard/<page id>`). A held page never advances, which also makes this
+the way to take a screenshot.
 
-A dropped connection to the server or a live alarm shows as a small pill in
-the bottom corner rather than the dashboard's usual full-width banner; both
-are silent otherwise.
+### If you are running the wpe-webkit kiosk snap
 
-### If you're running the wpe-webkit kiosk snap
-
-For a small ARM board running Ubuntu Core's `wpe-webkit-mir-kiosk` snap
-(what this project uses), point it at the dashboard and restart it to pick
-up the change:
+For a small ARM board running Ubuntu Core's `wpe-webkit-mir-kiosk` snap, what
+the flybridge strip uses, point it at the display and restart it:
 
 ```
-sudo snap set wpe-webkit-mir-kiosk url="http://<helmcentral-host>:<port>/kiosk?rotate=180&height=360"
+sudo snap set wpe-webkit-mir-kiosk url="http://<helmcentral-host>:<port>/display/flybridge"
 sudo snap restart wpe-webkit-mir-kiosk
 ```
 
-Drop `?rotate=180` if the screen isn't mounted upside down, and drop
-`&height=360` if the browser's own viewport already matches the panel.
+## 5. Driving the rotation by hand
 
-## 4. Leave it running
+If the screen has a remote or a keyboard:
 
-The dashboard shell is served with `Cache-Control: no-cache`, so a reload
-(after a restart, a power cut, or just because the browser felt like it)
-always picks up the current build rather than one that might reference asset
-files a later deploy has already removed. There is nothing else to maintain;
-flagging or unflagging a page, or changing its duration or condition,
-applies at the wall display's next lap without touching the device itself.
+| Key | What it does |
+| --- | --- |
+| Left, right | Previous and next page. The timer restarts. |
+| OK, space | Pause and resume. |
+| Back | Resume, if paused. |
+
+A brief caption names the page and its place in the feed. Confirm the codes
+against the probe's key readout from step 1 before relying on a particular
+remote.
+
+## 6. Add a second screen
+
+Repeat steps 1, 2 and 4 for the new screen, then use **Duplicate to** in the
+layout toolbar to copy a page you already like onto it. You get a copy, not a
+shared page, so rearranging it for the new shape leaves the original alone.
+This is the intended way to build a television version of a strip page: start
+from the same tiles, then spread them out.
+
+## 7. Television settings that matter
+
+Three things on a television set will undo the work above, and none of them
+can be overridden from the dashboard:
+
+- **Energy saving**, which dims a mostly dark picture until it is unreadable.
+  Turn it off, or the wall will look broken at night.
+- **Auto power off** after a few hours with no input. On LG sets this is four
+  hours by default. Keep awake cannot defeat it; turn it off in the set's own
+  menu.
+- **Screen shift and pixel refresh**, the set's own burn-in protection. Leave
+  these on. They work alongside the OLED panel option, which moves the
+  dashboard's own image rather than the panel's.
+
+## 8. Leave it running
+
+The dashboard is served so that a reload, after a restart, a power cut, or
+just because the browser felt like it, always picks up the current build.
+There is nothing else to maintain. Adding or removing a page, changing a
+duration or a condition, or editing the screen's size or magnification all
+apply at the wall's next lap without touching the device.

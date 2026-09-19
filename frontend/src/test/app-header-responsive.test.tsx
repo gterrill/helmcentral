@@ -32,6 +32,7 @@ function renderSwitcher() {
   return render(
     <DashboardPageSwitcher
       pages={pages}
+      allPages={pages}
       activePageId="p1"
       onSelect={vi.fn()}
       onCreate={vi.fn()}

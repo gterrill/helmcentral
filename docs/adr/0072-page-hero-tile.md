@@ -158,3 +158,12 @@ with no toast or confirmation calling that out. This was a deliberate trade
 against breaking ordinary widget removal; if it proves confusing in practice,
 the fix is a toast on the frontend when a remove happens to take the hero
 with it, not a change to the backend's repair behaviour.
+
+## Related
+
+ADR 0110 (wall displays are records) excludes the hero from any page assigned
+to a wall display, and clears it when a page is assigned. The hero's row is
+additional height above the grid while its promoted tile also keeps its grid
+slot, so on a page authored against a measured vertical budget it spends that
+budget showing one tile twice. Assigning a display clears the hero; setting a
+hero on a page that already has a display is refused.

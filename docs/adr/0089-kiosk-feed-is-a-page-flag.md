@@ -1,7 +1,15 @@
 # ADR 0089: Kiosk Feed Is a Page Flag
 
 ## Status
-Accepted
+
+Accepted. Sections 1, 3 and 7 superseded by ADR 0110 (wall displays are
+records), which turns a display into a record a page points at, moves the
+rotation and viewport onto that record, and takes wall pages out of the one
+sidebar page list. Sections 2, 4, 5, 8, 9 and 10 stand unchanged: the route
+still drives `activePageId` through the same shell-less grid, the feed is
+still recomputed at every advance, the shell is still `no-cache`, the status
+pills are still the compact ones, the ribbon still does not render, and a
+wall still always renders dark.
 
 ## Context
 

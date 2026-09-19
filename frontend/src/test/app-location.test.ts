@@ -31,12 +31,32 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/dashboard/%E0%A4%A')).toEqual({ panel: null, pageId: null })
   })
 
-  it.each(['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'kiosk'] as const)(
+  it.each(['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms'] as const)(
     'parses /%s as that panel',
     (panel) => {
       expect(parseAppLocation(`/${panel}`)).toEqual({ panel })
     },
   )
+
+  // ADR 0110: the wall display route. No fallback to "the first display" —
+  // an absent or unrecognised slug is a distinct, explicit shape
+  // (displaySlug: null) that the caller renders a diagnostic for, never a
+  // silently-chosen display.
+  it('parses /display with no slug', () => {
+    expect(parseAppLocation('/display')).toEqual({ panel: 'display', displaySlug: null })
+  })
+
+  it('parses /display/<slug> as that display', () => {
+    expect(parseAppLocation('/display/flybridge')).toEqual({ panel: 'display', displaySlug: 'flybridge' })
+  })
+
+  it('decodes a percent-encoded display slug', () => {
+    expect(parseAppLocation('/display/saloon%20tv')).toEqual({ panel: 'display', displaySlug: 'saloon tv' })
+  })
+
+  it('treats a malformed percent-escape in the display slug as no slug rather than throwing', () => {
+    expect(parseAppLocation('/display/%E0%A4%A')).toEqual({ panel: 'display', displaySlug: null })
+  })
 
   // ADR 0106 F1: the Documents panel carries its current folder (and, on a
   // deep link from a Mate attachment chip, which document to open in the
@@ -126,12 +146,25 @@ describe('formatAppLocation', () => {
     expect(formatAppLocation({ panel: null, pageId: 'a b' }, ctx)).toBe('/dashboard/a%20b')
   })
 
-  it.each(['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'kiosk'] as const)(
+  it.each(['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms'] as const)(
     'formats a panel as /%s',
     (panel) => {
       expect(formatAppLocation({ panel }, ctx)).toBe(`/${panel}`)
     },
   )
+
+  it('formats the display panel with no slug as /display', () => {
+    expect(formatAppLocation({ panel: 'display' }, ctx)).toBe('/display')
+    expect(formatAppLocation({ panel: 'display', displaySlug: null }, ctx)).toBe('/display')
+  })
+
+  it('formats a display slug as /display/<slug>', () => {
+    expect(formatAppLocation({ panel: 'display', displaySlug: 'flybridge' }, ctx)).toBe('/display/flybridge')
+  })
+
+  it('encodes the display slug', () => {
+    expect(formatAppLocation({ panel: 'display', displaySlug: 'saloon tv' }, ctx)).toBe('/display/saloon%20tv')
+  })
 
   it('formats the Mate panel as /mate', () => {
     expect(formatAppLocation({ panel: 'assistant' }, ctx)).toBe('/mate')
@@ -178,7 +211,8 @@ describe('formatAppLocation', () => {
 describe('parse/format fixed point', () => {
   const paths = [
     '/', '/dashboard/p2', '/dashboard/a%20b', '/forecast', '/routes', '/charts',
-    '/radar', '/anchor-watch', '/alarms', '/mate', '/mate/12345', '/settings', '/settings/signalk', '/kiosk',
+    '/radar', '/anchor-watch', '/alarms', '/mate', '/mate/12345', '/settings', '/settings/signalk',
+    '/display', '/display/flybridge',
     '/documents', '/documents?folder=f1', '/documents?document=d1', '/documents?folder=f1&document=d1',
   ]
 
@@ -218,7 +252,8 @@ describe('isCanonicalAppPath', () => {
     expect(isCanonicalAppPath('/forecast', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/mate', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/mate/12345', baseCtx)).toBe(true)
-    expect(isCanonicalAppPath('/kiosk', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/display', baseCtx)).toBe(true)
+    expect(isCanonicalAppPath('/display/flybridge', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/documents', baseCtx)).toBe(true)
     expect(isCanonicalAppPath('/documents?folder=f1', baseCtx)).toBe(true)
   })

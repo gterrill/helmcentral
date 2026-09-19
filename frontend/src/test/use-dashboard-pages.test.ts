@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { toast } from 'sonner'
-import { useDashboardPages } from '@/hooks/use-dashboard-pages'
+import { useDashboardPages, type DashboardPage } from '@/hooks/use-dashboard-pages'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
@@ -133,7 +133,7 @@ describe('useDashboardPages', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     await act(async () => {
-      await result.current.createPage('New Page', [])
+      await result.current.createPage('New Page', { widgets: [] })
     })
 
     expect(fetchMock).toHaveBeenCalledWith('/api/dashboard-pages', expect.objectContaining({ method: 'POST' }))
@@ -158,26 +158,116 @@ describe('useDashboardPages', () => {
     expect(result.current.pages[0].name).toBe('Renamed')
   })
 
-  it('updatePage sends and applies the kiosk fields (ADR 0089)', async () => {
+  it('updatePage sends and applies the display fields (ADR 0110)', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '1', name: 'Page A', widgets: [], created_at: '', updated_at: '' }] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '1', name: 'Page A', widgets: [], kiosk: true, kiosk_seconds: 30, kiosk_when: 'anchored', created_at: '', updated_at: '' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '1', name: 'Page A', widgets: [], display_id: 'd1', dwell_seconds: 30, show_when: 'anchored', created_at: '', updated_at: '' }) })
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useDashboardPages())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     await act(async () => {
-      await result.current.updatePage('1', { kiosk: true, kiosk_seconds: 30, kiosk_when: 'anchored' })
+      await result.current.updatePage('1', { display_id: 'd1', dwell_seconds: 30, show_when: 'anchored' })
     })
 
     expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages/1', expect.objectContaining({
       method: 'PATCH',
-      body: JSON.stringify({ kiosk: true, kiosk_seconds: 30, kiosk_when: 'anchored' }),
+      body: JSON.stringify({ display_id: 'd1', dwell_seconds: 30, show_when: 'anchored' }),
     }))
-    expect(result.current.pages[0].kiosk).toBe(true)
-    expect(result.current.pages[0].kiosk_seconds).toBe(30)
-    expect(result.current.pages[0].kiosk_when).toBe('anchored')
+    expect(result.current.pages[0].display_id).toBe('d1')
+    expect(result.current.pages[0].dwell_seconds).toBe(30)
+    expect(result.current.pages[0].show_when).toBe('anchored')
+  })
+
+  it('updatePage can clear the display assignment on its own, leaving dwell/condition untouched (ADR 0110)', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [{ id: '1', name: 'Page A', widgets: [], display_id: 'd1', dwell_seconds: 30, show_when: 'anchored', created_at: '', updated_at: '' }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: '1', name: 'Page A', widgets: [], display_id: '', dwell_seconds: 30, show_when: 'anchored', created_at: '', updated_at: '' }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.updatePage('1', { display_id: '' })
+    })
+
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages/1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ display_id: '' }),
+    }))
+    expect(result.current.pages[0].display_id).toBe('')
+    expect(result.current.pages[0].dwell_seconds).toBe(30)
+  })
+
+  it('createPage widens to an init object carrying display fields, for the duplicate-to-display action', async () => {
+    const created = {
+      id: '2', name: 'New Page', widgets: [], display_id: 'd1', dwell_seconds: 45, show_when: 'always',
+      created_at: '', updated_at: '',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => created })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.createPage('New Page', { display_id: 'd1', dwell_seconds: 45, show_when: 'always' })
+    })
+
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'New Page', display_id: 'd1', dwell_seconds: 45, show_when: 'always' }),
+    })
+    expect(result.current.pages).toEqual([created])
+  })
+
+  it('createPage sends the init object as-is, e.g. widgets alone with no other fields', async () => {
+    const widgets = [{ id: 'w1', x: 0, y: 0, w: 2, h: 2 }] as unknown as DashboardPage['widgets']
+    const created = { id: '2', name: 'New Page', widgets, created_at: '', updated_at: '' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => created })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.createPage('New Page', { widgets })
+    })
+
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'New Page', widgets }),
+    })
+    expect(result.current.pages).toEqual([created])
+  })
+
+  it('createPage defaults to an empty widgets array with no second argument', async () => {
+    const created = { id: '2', name: 'New Page', widgets: [], created_at: '', updated_at: '' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pages: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => created })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.createPage('New Page')
+    })
+
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard-pages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'New Page', widgets: [] }),
+    })
   })
 
   it('deletePage issues a DELETE request and removes the page locally', async () => {

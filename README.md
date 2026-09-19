@@ -55,9 +55,11 @@ rearrange without editing a config file.
   any path your server publishes, Nearby maps of the points of interest around
   the vessel, and embed tiles for anything with a URL. Named pages you switch
   between, persisted server-side.
-- **A wall display, from pages you already have.** Tick **Kiosk** on any page and
-  `/kiosk` cycles through the flagged ones fullscreen with no chrome, on its own,
-  with rotation and viewport options for a panel mounted upside down.
+- **Wall displays, from pages you already have.** Name a screen, give it a size,
+  a magnification and an orientation, then assign pages to it; `/display/<name>`
+  cycles through them fullscreen with no chrome, on its own. Several screens,
+  each with its own pages: a strip at the helm and a television in the saloon
+  are both wall displays.
 - **Every screen has a URL.** `/forecast`, `/alarms`, `/settings/alarms`,
   `/dashboard/<page id>`. Send someone a link and it opens where you meant.
   Back and Forward work, and a tapped alarm notification lands on the Alarms
@@ -91,7 +93,7 @@ Every panel has its own address, so once it is up you can link straight to one:
 ```
 http://<this-machine>:8080/forecast          # the forecast drawer
 http://<this-machine>:8080/anchor-watch      # anchor watch
-http://<this-machine>:8080/kiosk?rotate=180  # the wall display, upside-down panel
+http://<this-machine>:8080/display/flybridge # a wall display, by its name
 ```
 
 Docker, manual binaries and upgrade instructions:
@@ -136,7 +138,7 @@ Docker, manual binaries and upgrade instructions:
 - **A browser on Baseline 2024 or newer**: Chrome/Edge 111+, Firefox 111+,
   Safari 16.4+, which means iPadOS/iOS 16.4+ on a helm tablet. Older devices are
   out of support, since the shipped CSS is not downlevelled past that floor.
-  A wall panel should be checked with `/kiosk-probe.html` before you mount it;
+  A wall panel should be checked with `/display-probe.html` before you mount it;
   see [Set up a wall display](docs/how-to/set-up-a-wall-display.md).
 
 Telemetry history is in-memory by default. InfluxDB is optional for longer
@@ -218,16 +220,21 @@ choose the model; each reply's footer shows what that reply cost. It is
 read-only: it can look things up and explain, and it cannot start, change or
 steer anything.
 
-**[A wall display](docs/features/dashboard.md#the-kiosk-feed).** Tick **Kiosk**
-on any page in layout mode, set its dwell (5 to 3600 seconds) and a condition
-(always, or only while anchored), and `/kiosk` cycles through the flagged pages
-fullscreen with no chrome. It always renders dark, drops an anchored-only page
-out of the rotation mid-lap when the anchor comes up, and shows a compact status
-pill for a lost connection or a live alarm instead of the full banners. Four of
-the built-in tiles (clock, current conditions, forecast, sea state) were sized
-for its seven-row fold. `?rotate=180` handles an inverted panel and `&height=`
-constrains the feed to a band for a kiosk browser that reports a framebuffer
-taller than the screen. Setup and probing:
+**[Wall displays](docs/features/dashboard.md#wall-displays).** A display is a
+named screen with its own size, magnification and orientation. Assign a page to
+one in layout mode, set its dwell (5 to 3600 seconds) and a condition (always,
+or a vessel state such as anchored), and `/display/<name>` cycles through that
+screen's pages fullscreen with no chrome. A page belongs to one display, since
+the layout is the page and a 1920x360 strip is not a 55 inch television;
+**Duplicate to** copies one onto another screen to diverge from there. Wall
+pages leave the ordinary page list for their own sidebar group, so the list you
+scan at the helm stays short. A display always renders dark, drops a
+conditional page out of the rotation mid-lap when its condition stops being
+true, and shows a compact status pill for a lost connection or a live alarm
+instead of the full banners. It can shift its own pixels on a slow cycle to
+spare an OLED panel, and a remote or keyboard can step and pause the rotation.
+Four of the built-in tiles (clock, current conditions, forecast, sea state)
+were sized for the narrowest strip's fold. Setup and probing:
 [Set up a wall display](docs/how-to/set-up-a-wall-display.md).
 
 **[Nearby maps](docs/features/dashboard.md#nearby-map).** A tile showing the

@@ -43,8 +43,8 @@ The last four suit the wall display: a clock with sunrise, sunset, moon phase
 and a route's ETA to its next waypoint; depth, apparent wind and outside
 temperature each read against today's forecast range; five days of condition,
 high and low; and a five-day wind-and-wave chart. Nothing stops you putting
-them on a phone or tablet page too, but they were sized for the kiosk's
-seven-row fold first. See [Set up a wall
+them on a phone or tablet page too, but they were sized for the flybridge
+strip's fold first, which is the narrowest wall this boat has. See [Set up a wall
 display](../how-to/set-up-a-wall-display.md).
 
 Three more tile types you configure yourself:
@@ -74,9 +74,9 @@ dashboard page, inside whatever skin that page uses. The strip belongs to the
 vessel, not to the page: same lamps, same order, wherever you look, so a
 glance always means the same thing. It stays off the Forecast, Routes,
 Charts, Radar, Anchor Watch and Settings panels, which rely on the alarm
-banner instead. It stays off the wall display (`/kiosk`) too: on a 360px-tall
-strip it eats about a third of the height for the least page-specific
-information on screen.
+banner instead. It stays off wall displays too: on a 360px-tall strip it eats
+about a third of the height for the least page-specific information on
+screen.
 
 Its order never changes on its own. A lamp that trips does not jump to the
 front, and a lamp that clears does not vanish, because a ribbon earns its
@@ -86,8 +86,8 @@ that same order.
 
 If one page wants status lamps beyond the vessel-wide set, add a lamp-strip
 tile to that page in layout mode. It configures the same way and leaves the
-pinned ribbon alone. A wall page does the same, since `/kiosk` never draws
-the pinned ribbon.
+pinned ribbon alone. A wall page does the same, since a wall display never
+draws the pinned ribbon.
 
 Open the ribbon dialog for the first time and it fills with lamps drawn from
 what your own boat publishes right now, such as each engine's revolutions and
@@ -137,43 +137,93 @@ picking a different hero, or clearing it back to "No hero", rearranges
 nothing. Use it for the reading a page exists for, such as anchor distance on
 an anchorage page or apparent wind on a passage page.
 
-## The kiosk feed
+## Wall displays
 
-Any page can join the wall display's rotation. In layout mode, tick **Kiosk**
-next to the skin and hero controls, set how many seconds it shows (5 to
-3600), and choose a condition: **Always**, or **While anchored** to show the
-page only while the anchor watch is running. Unticking the box keeps the
-duration and condition it had, so re-ticking it later remembers both.
+A wall display is a screen somewhere on the boat that shows the dashboard and
+nothing else: no sidebar, no header, no way to click into anything. It cycles
+through the pages you have given it, in page order, and runs unattended. You
+can have several, and they do not have to be alike: a 1920 by 360 strip at
+the flybridge helm and a 55 inch television in the saloon are both wall
+displays, each with its own pages.
 
-A flagged page keeps its place in the ordinary page list. Nothing moves, and
-nothing about how it draws changes outside the wall display itself. It gains
-a small monitor glyph beside its name showing its duration, in the sidebar
-and the page switcher alike, plus an anchor glyph if its condition is "While
-anchored".
+Each one is a record you create and name, holding what is particular to that
+screen: how big it is, how much to magnify it, and whether it is mounted
+upside down. Open **Wall displays** in the sidebar to add or edit one. The
+fields are:
 
-**Wall display** in the sidebar opens `/kiosk` in a new tab: fullscreen,
-chromeless, cycling through every flagged page in page order, in the exact
-arrangement each already has. A page set to "While anchored" drops out of the
-rotation the moment the anchor comes up and rejoins when it goes down again,
-mid-lap rather than at the next reload. An empty rotation, whether nothing is
-flagged or nothing currently qualifies, checks again every 15 seconds instead
-of sitting on a blank screen.
+| Field | What it is for |
+| --- | --- |
+| Name | What you call the screen. "Flybridge", "Saloon TV". |
+| Address | The last part of the screen's web address, so `flybridge` gives `/display/flybridge`. |
+| Screen size | The size the screen's own browser reports, which is not always the size of the panel. The device check below tells you what to enter. |
+| Magnification | How much larger to draw everything. A television read from across the saloon needs more than a strip read at arm's length. |
+| Upside down | For a panel mounted inverted, as the flybridge strip is. |
+| OLED panel | Shifts the image a few pixels on a slow cycle, so a board left up all season does not burn into the screen. |
+| Keep awake | Asks the screen not to sleep. It cannot override the set's own power-saving menu. |
 
-For a lost connection or an active alarm the wall display shows a compact
+Magnification is the field worth understanding, because it is what makes a
+television readable. Rather than building a page out of enormous tiles, set
+the screen size to the size you want to *design* against and let the
+magnification do the rest: a saloon television is usually 1280 by 720 at 1.5
+times, not 1920 by 1080 at 1. Every tile then means on the television what it
+means everywhere else.
+
+### Putting pages on a display
+
+In layout mode, the toolbar's display select holds every screen you have
+configured. Pick one, set how many seconds the page shows (5 to 3600), and
+choose a condition: **Always**, or one of the vessel's own states, such as
+**While anchored**, to show the page only then. Setting it back to "Not on a
+wall" keeps the duration and condition, so putting it back later remembers
+both.
+
+A page belongs to one display. That is deliberate: a board laid out for a
+1920 by 360 strip is not a board you want filling a 55 inch television, and
+the layout is the page. To start a television version of a page you already
+like, use **Duplicate to** in the toolbar and pick the other screen; you get
+a copy you can then rearrange for its new shape.
+
+Pages on a display leave the ordinary page list and appear under their screen
+in the sidebar instead, so the list you scan at the helm stays short. They are
+still ordinary pages in every other way: click one to edit it exactly as
+before.
+
+A page on a wall display has no hero tile. The hero draws an extra row above
+the grid, which spends the vertical room the wall is measuring and shows the
+same tile twice. Putting a page on a display clears its hero.
+
+Deleting a display never deletes its pages. They lose their place on that
+screen and return to the ordinary page list, keeping their duration.
+
+### While it is running
+
+Feed order is page order. Reorder pages the way you always do and the
+rotation follows. A page whose condition stops being true finishes the slot
+it is already showing and then drops out until it is true again, rather than
+waiting for the next lap. A rotation with nothing to show, whether the
+display has no pages or none currently qualify, checks again every 15 seconds
+instead of sitting blank.
+
+While editing a page that belongs to a display, an amber dashed line marks
+where that screen cuts the page off, measured for that screen in particular.
+Everything above the line is what the screen shows. Anything below it is real
+and invisible there.
+
+If the screen has a remote or a keyboard, four keys drive it: left and right
+step to the previous and next page, and either **OK** or the space bar pauses
+and resumes the rotation. A brief caption names the page and its place in the
+feed. Nothing else on a wall display responds to input.
+
+For a lost connection or an active alarm a wall display shows a compact
 status pill where the ordinary dashboard shows a full banner. Both stay
-hidden while the feed is connected and quiet. The screen is meant to run
-unattended, so there is nothing to click: no way into a page from `/kiosk`,
-and no part in the app's normal back and forward navigation.
+hidden while the feed is connected and quiet. A wall display always draws in
+the dark theme, whatever this browser has stored for the ordinary dashboard,
+and leaving it never changes that stored preference. The pinned indicator
+ribbon never draws on a wall display; a page that wants status lamps there
+carries its own lamp strip tile.
 
-`/kiosk` always draws in the dark theme, whatever this browser has stored for
-the ordinary dashboard, and leaving it never changes that stored preference.
-
-Some kiosk browsers report a screen taller than the panel really is, and the
-panel shows only the top of it. The wall display's `height` option pins the
-feed to a band of that size at the top of the screen and rotates that band
-rather than the whole thing. See [Set up a wall
-display](../how-to/set-up-a-wall-display.md) for mounting, orientation and
-this option.
+See [Set up a wall display](../how-to/set-up-a-wall-display.md) for the
+device check, mounting and orientation.
 
 ## Linking to a page
 
@@ -191,9 +241,7 @@ The address bar follows the panel you are on, so you can link straight to it.
 | `/alarms` | The alarms panel. |
 | `/settings` | Settings, General section. |
 | `/settings/<section id>` | Settings, that section. |
-| `/kiosk` | The wall display: fullscreen, no sidebar, cycling through every kiosk-flagged page. |
-| `/kiosk?rotate=180` | The wall display, rotated 180 degrees for a screen mounted upside down. |
-| `/kiosk?rotate=180&height=360` | The wall display, rotated, and pinned to a 360px band at the top for a kiosk browser reporting a taller screen than the panel. |
+| `/display/<address>` | That wall display: fullscreen, no sidebar, cycling through the pages assigned to it, at the size and orientation set on the screen's own record. |
 
 The first page answers to `/` as its canonical address. Reorder the pages so
 that a different one comes first and the address follows, without switching

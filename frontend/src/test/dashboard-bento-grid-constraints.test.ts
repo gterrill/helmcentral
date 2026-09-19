@@ -10,7 +10,7 @@ import {
   WIDGET_CONSTRAINTS,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
-import { KIOSK_FOLD_PX } from '@/lib/kiosk'
+import { NARROW_STRIP_FOLD_PX } from '@/lib/displays'
 
 /**
  * A widget's minimum row count is the only thing standing between an operator
@@ -65,7 +65,7 @@ describe('the fuel rail', () => {
 
 /**
  * The four wall-display tiles (ADR 0092). Each minH is small enough to fit
- * inside the kiosk's seven-row, 344px fold budget on its own - a tile sized
+ * inside the narrow strip's seven-row, 344px fold budget on its own - a tile sized
  * past that could never appear on the wall at all, only ever on the ordinary
  * dashboard, which would defeat the point of building it for the wall.
  */
@@ -80,10 +80,10 @@ describe('the wall-display tiles', () => {
   })
 
   test.each(['clock', 'current-conditions', 'forecast-days', 'sea-state'] as const)(
-    '%s fits inside the kiosk fold on its own',
+    '%s fits inside the narrow-strip fold on its own',
     (id) => {
       const minH = WIDGET_CONSTRAINTS[id]!.minH!
-      expect(gridPixelHeight(minH)).toBeLessThanOrEqual(KIOSK_FOLD_PX)
+      expect(gridPixelHeight(minH)).toBeLessThanOrEqual(NARROW_STRIP_FOLD_PX)
     },
   )
 })

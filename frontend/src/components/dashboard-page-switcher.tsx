@@ -1,36 +1,40 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Anchor, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, MonitorPlay, Plus } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Plus } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
+import { mergeVisibleOrder } from '@/lib/page-order'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 
-/**
- * A page flagged for the wall display (ADR 0089) stays in this same list -
- * there is no separate kiosk page list - so it needs a glyph rather than a
- * different location. MonitorPlay plus its duration; an Anchor glyph on top
- * for a page that only shows while anchored, since "conditional" is the one
- * fact a bare duration can't convey.
- */
-export function KioskPageGlyph({ page }: { page: DashboardPage }) {
-  if (!page.kiosk || !page.kiosk_seconds) return null
-  const whenSuffix = page.kiosk_when && page.kiosk_when !== 'always' ? `, while ${page.kiosk_when}` : ''
-  return (
-    <span
-      className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
-      title={`On the wall display, ${page.kiosk_seconds}s${whenSuffix}`}
-    >
-      <MonitorPlay className="h-3 w-3" aria-hidden="true" />
-      {page.kiosk_seconds}s
-      {page.kiosk_when === 'anchored' && <Anchor className="h-3 w-3" aria-hidden="true" />}
-    </span>
-  )
-}
-
 interface DashboardPageSwitcherProps {
+  /**
+   * Every dashboard page. A wall page (one with a `display_id`, ADR 0110)
+   * can never appear as a row here — its nav moved to the sidebar's display
+   * group — so this filters to `!page.display_id` internally rather than
+   * trusting the caller to have done it, the same fail-closed stance the
+   * rest of this codebase takes for a property a caller could forget to
+   * apply.
+   */
   pages: DashboardPage[]
+  /**
+   * The full page list, wall pages included. `PATCH /api/dashboard-pages/order`
+   * rejects a partial list, so a reorder of the *visible* pages above has to
+   * be merged back into every page's absolute slot (`mergeVisibleOrder`,
+   * ADR 0110 plan §6 trap 1) before `onReorder` is ever called — otherwise a
+   * dashboard reorder silently 400s the moment one wall page exists.
+   * Pass the same array as `pages` when there are no wall pages yet.
+   */
+  allPages: DashboardPage[]
   activePageId: string | null
+  /**
+   * The active page's display name, for callers where it may not be one of
+   * `pages` — e.g. while authoring a wall page, whose row now lives in the
+   * sidebar's display group instead of this popover (trap 2). Without this,
+   * the trigger falls back to `pages.find(...)?.name ?? 'Dashboard'`, which
+   * reads "Dashboard" the whole time a wall page is being edited.
+   */
+  activePageName?: string
   onSelect: (id: string) => void
   onCreate: () => void
   onReorder?: (ids: string[]) => Promise<boolean>
@@ -40,7 +44,9 @@ interface DashboardPageSwitcherProps {
 
 export function DashboardPageSwitcher({
   pages,
+  allPages,
   activePageId,
+  activePageName,
   onSelect,
   onCreate,
   onReorder,
@@ -60,6 +66,9 @@ export function DashboardPageSwitcher({
   // reorder need no toolbar, so neither is gated here.
   const canEditLayout = useMinWidth(BREAKPOINTS.lg)
 
+  // See the `pages` prop doc above: a wall page can never be a row here.
+  const visiblePages = pages.filter((page) => !page.display_id)
+
   useLayoutEffect(() => {
     if (!reorderMode && restoreReorderFocus.current) {
       restoreReorderFocus.current = false
@@ -67,8 +76,7 @@ export function DashboardPageSwitcher({
     }
   }, [reorderMode])
 
-  const activePage = pages.find((p) => p.id === activePageId)
-  const displayName = activePage?.name ?? 'Dashboard'
+  const displayName = activePageName ?? visiblePages.find((p) => p.id === activePageId)?.name ?? 'Dashboard'
 
   const handleSelectPage = (pageId: string) => {
     onSelect(pageId)
@@ -82,13 +90,14 @@ export function DashboardPageSwitcher({
 
   const handleMove = async (index: number, direction: -1 | 1) => {
     const destination = index + direction
-    if (!canWrite || !onReorder || reordering || destination < 0 || destination >= pages.length) return
-    const ids = pages.map((page) => page.id)
-    ;[ids[index], ids[destination]] = [ids[destination], ids[index]]
+    if (!canWrite || !onReorder || reordering || destination < 0 || destination >= visiblePages.length) return
+    const visibleIds = visiblePages.map((page) => page.id)
+    ;[visibleIds[index], visibleIds[destination]] = [visibleIds[destination], visibleIds[index]]
+    const fullOrder = mergeVisibleOrder(allPages, visibleIds)
     setOrderMessage('')
-    const saved = await onReorder(ids)
+    const saved = await onReorder(fullOrder)
     setOrderMessage(saved
-      ? `${pages[index].name} moved to position ${destination + 1} of ${pages.length}.`
+      ? `${visiblePages[index].name} moved to position ${destination + 1} of ${visiblePages.length}.`
       : 'Order not saved. Try again; reload if the page list has changed.')
   }
 
@@ -123,7 +132,7 @@ export function DashboardPageSwitcher({
             </div>
             <p className="px-2 text-xs text-muted-foreground">Changes save automatically for all devices.</p>
             <ol role="list" aria-label="Dashboard page order" className="flex flex-col">
-              {pages.map((page, index) => (
+              {visiblePages.map((page, index) => (
                 <li key={page.id} className="flex min-w-0 items-center gap-2 rounded-xs px-2 py-1">
                   <span className="w-4 shrink-0 text-xs tabular-nums text-muted-foreground" aria-hidden="true">{index + 1}</span>
                   <span className="min-w-0 flex-1 truncate text-sm">{page.name}</span>
@@ -134,7 +143,7 @@ export function DashboardPageSwitcher({
                       <ArrowUp size={16} aria-hidden="true" />
                     </Button>
                     <Button variant="ghost" size="icon" className="data-disabled:opacity-50" aria-label={`Move ${page.name} down`}
-                      disabled={reordering || index === pages.length - 1} focusableWhenDisabled
+                      disabled={reordering || index === visiblePages.length - 1} focusableWhenDisabled
                       onClick={() => { void handleMove(index, 1) }}>
                       <ArrowDown size={16} aria-hidden="true" />
                     </Button>
@@ -148,7 +157,7 @@ export function DashboardPageSwitcher({
           </div>
         ) : (
         <div className="flex flex-col">
-          {pages.map((page) => (
+          {visiblePages.map((page) => (
             <div
               key={page.id}
               className="flex min-w-0 items-center justify-between rounded-xs px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
@@ -159,7 +168,6 @@ export function DashboardPageSwitcher({
                 className="flex min-h-10 min-w-0 flex-1 items-center gap-1.5 text-left"
               >
                 <span className="min-w-0 flex-1 truncate">{page.name}</span>
-                <KioskPageGlyph page={page} />
               </button>
               {/* Renaming and deleting both live in the layout toolbar now
                   (ADR 0107), not here — no pencil, no trash, no inline edit
@@ -169,7 +177,7 @@ export function DashboardPageSwitcher({
           ))}
           {canWrite && <div className="mt-1 flex flex-col gap-1 pt-1">
             <Separator />
-            {onReorder && pages.length > 1 && (
+            {onReorder && visiblePages.length > 1 && (
               <Button variant="ghost" className="w-full" ref={reorderButtonRef} onClick={() => {
                 setOrderMessage('')
                 setReorderMode(true)

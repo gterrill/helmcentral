@@ -586,12 +586,12 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPost, "/api/auth/logout", tierPublic, logoutHandler(sessions)},
 		{http.MethodGet, "/api/auth/me", tierPublic, meHandler(sessions)},
 		{http.MethodGet, "/api/auth/mode", tierPublic, authModeHandler},
-		// The wall-display kiosk browser's capability probe
-		// (frontend/public/kiosk-probe.html) reports into the backend log
+		// The wall display browser's capability probe
+		// (frontend/public/display-probe.html) reports into the backend log
 		// rather than rendering on a 1920x360 screen with no keyboard or
-		// mouse. Public tier: the kiosk may never sign in, and the only
+		// mouse. Public tier: the screen may never sign in, and the only
 		// effect is a log line.
-		{http.MethodPost, "/api/kiosk-probe", tierPublic, kioskProbeHandler},
+		{http.MethodPost, "/api/display-probe", tierPublic, displayProbeHandler},
 
 		// ── read: readonly and above ────────────────────────────────────
 		{http.MethodGet, "/api/vessel-state", tierRead, vesselState},
@@ -651,6 +651,12 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip,
 		// promoted out of the per-page widget above.
 		{http.MethodGet, "/api/dashboard-ribbon", tierRead, getDashboardRibbonHandler},
+		// Wall displays (ADR 0110): the physical screens a page can be
+		// assigned to, a sibling of dashboard pages in the same locked file
+		// (displays.go). No get-by-id or lookup-by-slug — the list is one
+		// small array the wall fetches on mount and slug resolution is a
+		// client-side find.
+		{http.MethodGet, "/api/displays", tierRead, listDisplaysHandler},
 		{http.MethodGet, "/api/routes", tierRead, listRoutesHandler},
 		{http.MethodGet, "/api/routes/:id", tierRead, getRouteHandler},
 		{http.MethodGet, "/api/routes/active", tierRead, getActiveRouteHandler},
@@ -734,6 +740,9 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodPatch, "/api/dashboard-pages/:id", tierWrite, patchDashboardPageHandler},
 		{http.MethodDelete, "/api/dashboard-pages/:id", tierWrite, deleteDashboardPageHandler},
 		{http.MethodPut, "/api/dashboard-ribbon", tierWrite, putDashboardRibbonHandler},
+		{http.MethodPost, "/api/displays", tierWrite, createDisplayHandler},
+		{http.MethodPatch, "/api/displays/:id", tierWrite, patchDisplayHandler},
+		{http.MethodDelete, "/api/displays/:id", tierWrite, deleteDisplayHandler},
 		{http.MethodPost, "/api/routes", tierWrite, createRouteHandler},
 		{http.MethodPatch, "/api/routes/:id", tierWrite, patchRouteHandler},
 		{http.MethodDelete, "/api/routes/:id", tierWrite, deleteRouteHandler},

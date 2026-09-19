@@ -1,29 +1,38 @@
-import { TriangleAlert, WifiOff } from 'lucide-react'
+import { Lock, TriangleAlert, WifiOff } from 'lucide-react'
 import { useTelemetryStatus } from '@/hooks/use-telemetry-stream'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
+import type { ScreenWakeLockStatus } from '@/hooks/use-screen-wake-lock'
 import { cn } from '@/lib/utils'
 
-interface KioskStatusBadgeProps {
+interface DisplayStatusBadgeProps {
   alarms: ActiveAlarm[]
+  /** useScreenWakeLock's status (ADR 0110 §5c). Anything other than
+   * `'off'`/`'held'` means the best-effort wake lock isn't actually holding -
+   * shown here per AGENTS.md's fallback policy: a best-effort feature has to
+   * say when it isn't working rather than quietly doing nothing. Optional so
+   * this stays usable without a display record (e.g. this component's own
+   * unit tests, and any future non-wall caller). */
+  wakeLockStatus?: ScreenWakeLockStatus
 }
 
 /**
  * The wall display has no room for the full ConnectionBanner (about 40px of
- * the 344px fold budget) or the full AlarmBanner, but hiding either outright
+ * a 344px fold budget) or the full AlarmBanner, but hiding either outright
  * is wrong for an alarm product: a crew glancing at the wall has to be able
  * to tell "the feed is stale" or "something needs attention" without
- * walking to a screen with more room. Two compact pills instead, bottom
- * right, absent while everything is fine.
+ * walking to a screen with more room. Compact pills instead, bottom right,
+ * absent while everything is fine.
  *
- * Rendered inside kiosk-shell.tsx's rotated root, not as a sibling of it, so
- * it flips upright along with the rest of the content under ?rotate=180.
+ * Rendered inside display-shell.tsx's inner box, not as a sibling of it, so
+ * it rotates, scales and pixel-shifts along with the rest of the board.
  */
-export function KioskStatusBadge({ alarms }: KioskStatusBadgeProps) {
+export function DisplayStatusBadge({ alarms, wakeLockStatus }: DisplayStatusBadgeProps) {
   const status = useTelemetryStatus()
   const connected = status === 'connected'
   const unacknowledged = alarms.filter((alarm) => alarm.phase !== 'acknowledged')
+  const wakeLockTrouble = wakeLockStatus === 'unsupported' || wakeLockStatus === 'denied'
 
-  if (connected && alarms.length === 0) return null
+  if (connected && alarms.length === 0 && !wakeLockTrouble) return null
 
   return (
     <div className="pointer-events-none fixed bottom-2 right-2 z-10 flex items-center gap-1.5">
@@ -32,7 +41,7 @@ export function KioskStatusBadge({ alarms }: KioskStatusBadgeProps) {
         // automatically"), condensed to a pill: amber, not destructive red,
         // because a dropped feed is not itself an alarm condition.
         <span
-          data-testid="kiosk-signal-pill"
+          data-testid="display-signal-pill"
           className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-500"
         >
           <WifiOff className="h-3 w-3" aria-hidden="true" />
@@ -45,7 +54,7 @@ export function KioskStatusBadge({ alarms }: KioskStatusBadgeProps) {
         // muted once everything showing has been acked but is still live —
         // the same "acknowledged, still live" distinction AlarmBanner draws.
         <span
-          data-testid="kiosk-alarm-pill"
+          data-testid="display-alarm-pill"
           className={cn(
             'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em]',
             unacknowledged.length > 0
@@ -55,6 +64,15 @@ export function KioskStatusBadge({ alarms }: KioskStatusBadgeProps) {
         >
           <TriangleAlert className="h-3 w-3" aria-hidden="true" />
           {alarms.length} {alarms.length === 1 ? 'alarm' : 'alarms'}
+        </span>
+      )}
+      {wakeLockTrouble && (
+        <span
+          data-testid="display-wake-lock-pill"
+          className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-500"
+        >
+          <Lock className="h-3 w-3" aria-hidden="true" />
+          {wakeLockStatus === 'unsupported' ? 'Wake lock unsupported' : 'Wake lock denied'}
         </span>
       )}
     </div>

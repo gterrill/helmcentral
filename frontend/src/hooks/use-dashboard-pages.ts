@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
+import { readErrorMessage } from '@/lib/api-error'
 
 export interface DashboardPage {
   id: string
@@ -14,17 +15,26 @@ export interface DashboardPage {
    * hero treatment, or empty/absent for none (ADR 0072). Always a widget id
    * present in `widgets` — the backend clears it automatically if that widget
    * is ever removed, so a stale reference can't persist here.
+   *
+   * Mutually exclusive with `display_id` (ADR 0110): a page on a wall
+   * display has no hero, since the hero eats the vertical budget the fold
+   * guide measures. Assigning a display clears this; the backend rejects
+   * setting both.
    */
   hero?: string
   /**
-   * Kiosk fields (ADR 0089): `kiosk` marks this page as part of the wall
-   * display rotation at /kiosk; `kiosk_seconds` is how long it shows before
-   * the rotation advances; `kiosk_when` restricts it to a condition
-   * ("anchored"), or shows it always when absent.
+   * Wall display fields (ADR 0110, superseding ADR 0089's `kiosk`/
+   * `kiosk_seconds`/`kiosk_when`): `display_id` names the display this page
+   * belongs to (empty/absent for an ordinary dashboard page — not on any
+   * wall); `dwell_seconds` is how long it shows before the rotation
+   * advances; `show_when` restricts it to a condition ("anchored"), or shows
+   * it always when absent. Dwell and condition are preserved by the backend
+   * across a display re-assignment or clear, so re-assigning a page
+   * remembers its dwell.
    */
-  kiosk?: boolean
-  kiosk_seconds?: number
-  kiosk_when?: 'always' | 'anchored' | 'motoring' | 'sailing' | 'moored'
+  display_id?: string
+  dwell_seconds?: number
+  show_when?: 'always' | 'anchored' | 'motoring' | 'sailing' | 'moored'
   created_at: string
   updated_at: string
 }
@@ -33,19 +43,17 @@ interface DashboardPagesListResponse {
   pages?: DashboardPage[]
 }
 
-// Reads the server's `{"error": "<message>"}` body off a failed response for
-// use in a toast description. Parsing must never throw: a non-JSON or empty
-// body (e.g. a 500 from a proxy/load balancer) falls back to `HTTP <status>`.
-async function readErrorMessage(res: Response): Promise<string> {
-  try {
-    const data = (await res.json()) as { error?: string }
-    if (data && typeof data.error === 'string' && data.error.length > 0) {
-      return data.error
-    }
-  } catch {
-    // body missing or not JSON — fall through to the status-based message
-  }
-  return `HTTP ${res.status}`
+/** Everything `createPage` can carry beyond the required `name` — the
+ * duplicate-to-display action (ADR 0110 §6) needs to seed a new page with a
+ * copied skin/dwell/condition and a target display in the same POST that
+ * creates it. */
+export interface CreatePageInit {
+  widgets?: DashboardLayoutItem[]
+  skin?: DashboardPage['skin']
+  hero?: string
+  display_id?: string
+  dwell_seconds?: number
+  show_when?: DashboardPage['show_when']
 }
 
 export function useDashboardPages() {
@@ -76,11 +84,22 @@ export function useDashboardPages() {
     void fetchPages()
   }, [fetchPages])
 
-  const createPage = useCallback(async (name: string, widgets: DashboardLayoutItem[] = []): Promise<DashboardPage | null> => {
+  // Object-form only (ADR 0110 §6 follow-up): App.tsx's one call site now
+  // passes `{ widgets: [] }` explicitly rather than a bare array, so the
+  // union this carried only for that call site's original shape has nothing
+  // left to serve.
+  const createPage = useCallback(async (
+    name: string,
+    init?: CreatePageInit,
+  ): Promise<DashboardPage | null> => {
+    // No second argument at all defaults to an empty page (widgets: []).
+    const body = init === undefined
+      ? { name, widgets: [] as DashboardLayoutItem[] }
+      : { name, ...init }
     const res = await fetch('/api/dashboard-pages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, widgets }),
+      body: JSON.stringify(body),
     })
     if (!res.ok) {
       const message = await readErrorMessage(res)
@@ -95,7 +114,7 @@ export function useDashboardPages() {
 
   const updatePage = useCallback(async (
     id: string,
-    patch: Partial<Pick<DashboardPage, 'name' | 'widgets' | 'skin' | 'hero' | 'kiosk' | 'kiosk_seconds' | 'kiosk_when'>>,
+    patch: Partial<Pick<DashboardPage, 'name' | 'widgets' | 'skin' | 'hero' | 'display_id' | 'dwell_seconds' | 'show_when'>>,
   ): Promise<DashboardPage | null> => {
     const res = await fetch(`/api/dashboard-pages/${id}`, {
       method: 'PATCH',

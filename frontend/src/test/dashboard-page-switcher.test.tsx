@@ -13,7 +13,7 @@ describe('DashboardPageSwitcher', () => {
   it('moves pages without selecting them, disables boundaries, and retains focus after moving', async () => {
     const onSelect = vi.fn()
     const onReorder = vi.fn().mockResolvedValue(true)
-    const { rerender } = render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} onReorder={onReorder} onSelect={onSelect} />)
+    const { rerender } = render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...reorderProps} onReorder={onReorder} onSelect={onSelect} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reorder pages' })) })
     expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus()
@@ -28,7 +28,7 @@ describe('DashboardPageSwitcher', () => {
     await act(async () => { move.focus(); fireEvent.click(move) })
     expect(onReorder).toHaveBeenCalledWith(['p2', 'p1'])
     expect(onSelect).not.toHaveBeenCalled()
-    rerender(<DashboardPageSwitcher pages={[mockPages[1], mockPages[0]]} activePageId="p1" {...reorderProps} onReorder={onReorder} onSelect={onSelect} />)
+    rerender(<DashboardPageSwitcher pages={[mockPages[1], mockPages[0]]} allPages={[mockPages[1], mockPages[0]]} activePageId="p1" {...reorderProps} onReorder={onReorder} onSelect={onSelect} />)
     expect(within(screen.getByRole('list', { name: 'Dashboard page order' })).getAllByRole('listitem')[0]).toHaveTextContent('Page B')
     expect(screen.getByLabelText('Switch dashboard page')).toHaveTextContent('Page A')
     expect(screen.getByLabelText('Move Page B up')).toHaveFocus()
@@ -41,10 +41,10 @@ describe('DashboardPageSwitcher', () => {
   })
 
   it('disables movement while saving and shows saving status', async () => {
-    const { rerender } = render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} />)
+    const { rerender } = render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...reorderProps} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
     fireEvent.click(await screen.findByRole('button', { name: 'Reorder pages' }))
-    rerender(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} reordering />)
+    rerender(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...reorderProps} reordering />)
     expect(screen.getByLabelText('Move Page A down')).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByLabelText('Move Page B up')).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByText('Saving order…')).toBeInTheDocument()
@@ -52,7 +52,7 @@ describe('DashboardPageSwitcher', () => {
 
   it('read-only users can select pages but cannot manage or reorder them', async () => {
     const onSelect = vi.fn()
-    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} canWrite={false} onSelect={onSelect} />)
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...reorderProps} canWrite={false} onSelect={onSelect} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
     expect(await screen.findByRole('button', { name: 'Page B' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reorder pages' })).not.toBeInTheDocument()
@@ -63,7 +63,7 @@ describe('DashboardPageSwitcher', () => {
   })
 
   it('keeps reorder mode open and shows a failed save without changing order', async () => {
-    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} onReorder={vi.fn().mockResolvedValue(false)} />)
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...reorderProps} onReorder={vi.fn().mockResolvedValue(false)} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
     fireEvent.click(await screen.findByRole('button', { name: 'Reorder pages' }))
     fireEvent.click(screen.getByLabelText('Move Page B up'))
@@ -72,7 +72,7 @@ describe('DashboardPageSwitcher', () => {
   })
 
   it('does not offer reordering for a single page', async () => {
-    render(<DashboardPageSwitcher pages={[mockPages[0]]} activePageId="p1" {...reorderProps} />)
+    render(<DashboardPageSwitcher pages={[mockPages[0]]} allPages={[mockPages[0]]} activePageId="p1" {...reorderProps} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
     await screen.findByRole('button', { name: 'New Page' })
     expect(screen.queryByRole('button', { name: 'Reorder pages' })).not.toBeInTheDocument()
@@ -84,38 +84,14 @@ describe('DashboardPageSwitcher', () => {
   ]
 
   it('trigger button text shows the active page name', () => {
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onSetSkin: vi.fn(),
-    }
-
-    render(
-      <DashboardPageSwitcher
-        pages={mockPages}
-        activePageId="p1"
-        {...mockFns}
-      />
-    )
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...mockFns()} />)
 
     const trigger = screen.getByLabelText('Switch dashboard page')
     expect(trigger).toHaveTextContent('Page A')
   })
 
   it('fallback to "Dashboard" when activePageId is null', () => {
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate: vi.fn(),
-      onSetSkin: vi.fn(),
-    }
-
-    render(
-      <DashboardPageSwitcher
-        pages={mockPages}
-        activePageId={null}
-        {...mockFns}
-      />
-    )
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId={null} {...mockFns()} />)
 
     const trigger = screen.getByLabelText('Switch dashboard page')
     expect(trigger).toHaveTextContent('Dashboard')
@@ -123,19 +99,7 @@ describe('DashboardPageSwitcher', () => {
 
   it('clicking a page name calls onSelect and closes the popover', async () => {
     const onSelect = vi.fn()
-    const mockFns = {
-      onSelect,
-      onCreate: vi.fn(),
-      onSetSkin: vi.fn(),
-    }
-
-    render(
-      <DashboardPageSwitcher
-        pages={mockPages}
-        activePageId="p1"
-        {...mockFns}
-      />
-    )
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...mockFns()} onSelect={onSelect} />)
 
     // Open the popover
     const trigger = screen.getByLabelText('Switch dashboard page')
@@ -170,7 +134,7 @@ describe('DashboardPageSwitcher', () => {
   // (see layout-toolbar.test.tsx): this popover no longer has a pencil, a
   // trash icon, an edit state, or a confirmation dialog at all.
   it('has no Rename control, in this list or anywhere else on the page', async () => {
-    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns()} />)
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...mockFns()} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
     await screen.findByText(/New Page/)
@@ -182,7 +146,7 @@ describe('DashboardPageSwitcher', () => {
   })
 
   it('has no Delete control, with one page or with several', async () => {
-    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns()} />)
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...mockFns()} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
     await screen.findByText(/New Page/)
@@ -193,19 +157,7 @@ describe('DashboardPageSwitcher', () => {
 
   it('"New Page" button calls onCreate', async () => {
     const onCreate = vi.fn()
-    const mockFns = {
-      onSelect: vi.fn(),
-      onCreate,
-      onSetSkin: vi.fn(),
-    }
-
-    render(
-      <DashboardPageSwitcher
-        pages={mockPages}
-        activePageId="p1"
-        {...mockFns}
-      />
-    )
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...mockFns()} onCreate={onCreate} />)
 
     // Open the popover
     const trigger = screen.getByLabelText('Switch dashboard page')
@@ -229,7 +181,7 @@ describe('DashboardPageSwitcher', () => {
     it('hides New Page below the lg breakpoint but keeps select and reorder', async () => {
       setViewportWidth(900)
       const onSelect = vi.fn()
-      render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} onSelect={onSelect} />)
+      render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...reorderProps} onSelect={onSelect} />)
       fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
       expect(await screen.findByRole('button', { name: 'Page B' })).toBeInTheDocument()
@@ -242,7 +194,7 @@ describe('DashboardPageSwitcher', () => {
 
     it('shows New Page at the lg breakpoint and above', async () => {
       setViewportWidth(1024)
-      render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...reorderProps} />)
+      render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...reorderProps} />)
       fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
       expect(await screen.findByRole('button', { name: 'New Page' })).toBeInTheDocument()
@@ -261,55 +213,68 @@ describe('DashboardPageSwitcher', () => {
   })
 
   it('leaves the skin to the layout controls', async () => {
-    render(<DashboardPageSwitcher pages={mockPages} activePageId="p1" {...mockFns()} />)
+    render(<DashboardPageSwitcher pages={mockPages} allPages={mockPages} activePageId="p1" {...mockFns()} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
     await screen.findByText(/New Page/)
     expect(screen.queryByLabelText(/skin/i)).not.toBeInTheDocument()
   })
 
-  // ADR 0089: a page flagged for the wall display stays in this same list -
-  // there is no separate kiosk page list - so it gets a small glyph instead.
-  // The trigger button also renders the active page's own name (hidden below
-  // `sm`, but present in the DOM), so the active page in each of these is a
-  // third, differently-named page - otherwise getByText would match both the
-  // trigger and the row it's meant to isolate.
-  it('marks a kiosk-flagged row with its duration, and an unflagged row with no glyph', () => {
-    const flagged: DashboardPage[] = [
-      { id: 'p1', name: 'Kiosk Page', widgets: [], created_at: '', updated_at: '', kiosk: true, kiosk_seconds: 30 },
+  // ADR 0110: a page assigned to a wall display can never appear as a row
+  // here at all — not even with a glyph, as the old kiosk-flagged rows used
+  // to render (that glyph moved to display-sidebar-group.tsx's
+  // WallPageGlyph). This is the switcher's own defensive filter (the `pages`
+  // prop doc): even a caller that forgets to filter gets the correct result.
+  it('never renders a page that has a display_id, even if the caller passes one in', () => {
+    const withWallPage: DashboardPage[] = [
+      { id: 'p1', name: 'Wall: Engines', widgets: [], created_at: '', updated_at: '', display_id: 'd1', dwell_seconds: 30 },
       { id: 'p2', name: 'Plain Page', widgets: [], created_at: '', updated_at: '' },
       { id: 'p3', name: 'Active Page', widgets: [], created_at: '', updated_at: '' },
     ]
-    render(<DashboardPageSwitcher pages={flagged} activePageId="p3" {...mockFns()} />)
+    render(<DashboardPageSwitcher pages={withWallPage} allPages={withWallPage} activePageId="p3" {...mockFns()} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
-    const rowA = screen.getByText('Kiosk Page').closest('button') as HTMLElement
-    const rowB = screen.getByText('Plain Page').closest('button') as HTMLElement
-    expect(within(rowA).getByText('30s')).toBeInTheDocument()
-    expect(within(rowB).queryByText(/\ds$/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Wall: Engines')).not.toBeInTheDocument()
+    expect(screen.getByText('Plain Page')).toBeInTheDocument()
   })
 
-  it('adds an anchor glyph for a page whose kiosk condition is "anchored"', () => {
-    const pages: DashboardPage[] = [
-      { id: 'p1', name: 'Wall: Anchor', widgets: [], created_at: '', updated_at: '', kiosk: true, kiosk_seconds: 30, kiosk_when: 'anchored' },
-      { id: 'p2', name: 'Active Page', widgets: [], created_at: '', updated_at: '' },
+  // Trap 1 (ADR 0110 plan §6): the reorder endpoint rejects a partial page
+  // list, so moving the two *visible* pages here has to submit every page id
+  // — the wall page keeps its own absolute slot untouched.
+  it('reorder submits every page id, keeping a wall page in its own slot', async () => {
+    const onReorder = vi.fn().mockResolvedValue(true)
+    const allPages: DashboardPage[] = [
+      { id: 'p1', name: 'Page A', widgets: [], created_at: '', updated_at: '' },
+      { id: 'wall', name: 'Wall: Engines', widgets: [], created_at: '', updated_at: '', display_id: 'd1', dwell_seconds: 30 },
+      { id: 'p2', name: 'Page B', widgets: [], created_at: '', updated_at: '' },
     ]
-    render(<DashboardPageSwitcher pages={pages} activePageId="p2" {...mockFns()} />)
+    render(<DashboardPageSwitcher pages={allPages} allPages={allPages} activePageId="p1" {...reorderProps} onReorder={onReorder} />)
     fireEvent.click(screen.getByLabelText('Switch dashboard page'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Reorder pages' }))
+    await act(async () => { fireEvent.click(screen.getByLabelText('Move Page B up')) })
 
-    const row = screen.getByText('Wall: Anchor').closest('button') as HTMLElement
-    expect(within(row).getByTitle(/while anchored/)).toBeInTheDocument()
+    // Visible order becomes [p2, p1]; the wall page keeps its own slot
+    // (index 1) rather than being pushed to the end or dropped.
+    expect(onReorder).toHaveBeenCalledWith(['p2', 'wall', 'p1'])
   })
 
-  it('shows motoring in the kiosk glyph tooltip for motoring pages', () => {
-    const pages: DashboardPage[] = [
-      { id: 'p1', name: 'Wall: Engines', widgets: [], created_at: '', updated_at: '', kiosk: true, kiosk_seconds: 30, kiosk_when: 'motoring' },
-      { id: 'p2', name: 'Active Page', widgets: [], created_at: '', updated_at: '' },
+  // Trap 2 (ADR 0110 plan §6): without the override, the trigger falls back
+  // to the *visible* list, so an active wall page (absent from it) reads
+  // "Dashboard" — exactly the bug the prop exists to fix.
+  describe('activePageName', () => {
+    const withWallPage: DashboardPage[] = [
+      { id: 'wall', name: 'Wall: Engines', widgets: [], created_at: '', updated_at: '', display_id: 'd1', dwell_seconds: 30 },
+      { id: 'p2', name: 'Plain Page', widgets: [], created_at: '', updated_at: '' },
     ]
-    render(<DashboardPageSwitcher pages={pages} activePageId="p2" {...mockFns()} />)
-    fireEvent.click(screen.getByLabelText('Switch dashboard page'))
 
-    const row = screen.getByText('Wall: Engines').closest('button') as HTMLElement
-    expect(within(row).getByTitle(/while motoring/)).toBeInTheDocument()
+    it('falls back to "Dashboard" for an active wall page when omitted', () => {
+      render(<DashboardPageSwitcher pages={withWallPage} allPages={withWallPage} activePageId="wall" {...mockFns()} />)
+      expect(screen.getByLabelText('Switch dashboard page')).toHaveTextContent('Dashboard')
+    })
+
+    it('overrides the trigger label when supplied', () => {
+      render(<DashboardPageSwitcher pages={withWallPage} allPages={withWallPage} activePageId="wall" activePageName="Wall: Engines" {...mockFns()} />)
+      expect(screen.getByLabelText('Switch dashboard page')).toHaveTextContent('Wall: Engines')
+    })
   })
 })

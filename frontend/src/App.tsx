@@ -9,7 +9,6 @@ import {
   Map,
   Mic,
   MicOff,
-  MonitorPlay,
   Radar as RadarIcon,
   Route,
   Settings,
@@ -69,7 +68,7 @@ import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { RouteTile } from '@/components/route-tile'
-import { DashboardBentoGrid, WALL_ROW_MARGIN } from '@/components/dashboard-bento-grid'
+import { DashboardBentoGrid } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
 import { EmptyPagePrompt } from '@/components/empty-page-prompt'
@@ -78,15 +77,21 @@ import { Toaster } from '@/components/ui/sonner'
 import { useRoutes } from '@/hooks/use-routes'
 import { useSatCharts } from '@/hooks/use-sat-charts'
 import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
-import { useDashboardPages } from '@/hooks/use-dashboard-pages'
+import { useDashboardPages, type DashboardPage, type CreatePageInit } from '@/hooks/use-dashboard-pages'
 import { useDashboardRibbon } from '@/hooks/use-dashboard-ribbon'
 import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
-import { useKioskRotation } from '@/hooks/use-kiosk-rotation'
-import { parseKioskOptions, KIOSK_FOLD_PX } from '@/lib/kiosk'
+import { useDisplayRotation, type UseDisplayRotationResult } from '@/hooks/use-display-rotation'
+import { useDisplayRemote } from '@/hooks/use-display-remote'
+import { useDisplays } from '@/hooks/use-displays'
+import { parseDisplayOptions, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
 import { nextWaypoint, etaToWaypoint } from '@/lib/next-waypoint'
-import { KioskShell } from '@/components/kiosk-shell'
-import { KioskFoldGuide } from '@/components/kiosk-fold-guide'
-import { DashboardPageSwitcher, KioskPageGlyph } from '@/components/dashboard-page-switcher'
+import { DisplayShell } from '@/components/display-shell'
+import { DisplayFoldGuide } from '@/components/display-fold-guide'
+import { DisplayRemoteToast } from '@/components/display-remote-toast'
+import { DisplaySidebarGroup } from '@/components/display-sidebar-group'
+import { DisplaysDialog } from '@/components/displays-dialog'
+import type { DisplayPatch } from '@/components/page-display-select'
+import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
 import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useSolarState } from '@/hooks/use-solar-state'
@@ -217,6 +222,50 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
 
 const ANCHOR_IMAGERY_ENABLED_KEY = 'anchorWatch.imagery.enabled'
 const ANCHOR_RADAR_ECHO_ENABLED_KEY = 'anchorWatch.radarEcho.enabled'
+
+/**
+ * ADR 0110: `/` (and every other collapse-to-first-page case — an unknown
+ * deep-linked page id, a page that just got deleted) has to land on the
+ * first ordinary dashboard page, never a wall page. A wall page sitting at
+ * position 0 used to mean `/` opened it directly, defeating the entire
+ * point of moving wall pages out of the Dashboard list. Pure, so
+ * app-location.ts's isCanonicalAppPath check (fed the same value as
+ * `firstPageId`) and every call site here agree on exactly one page.
+ */
+function firstDashboardPageId(pages: readonly DashboardPage[]): string | null {
+  return pages.find((p) => !p.display_id)?.id ?? null
+}
+
+interface DisplayRemoteControllerProps {
+  rotation: Pick<UseDisplayRotationResult, 'next' | 'previous' | 'pause' | 'resume' | 'paused'>
+  onAction: () => void
+}
+
+/**
+ * Mounted only while the wall route is actually showing a resolved display -
+ * as one of DisplayShell's children below, never as a top-level App() hook
+ * call. That's deliberate, not incidental: use-display-remote.ts's global
+ * keydown listener has no `enabled` flag of its own (its own doc comment:
+ * arrow keys/Space/Enter do nothing on a wall page, so an always-on listener
+ * costs nothing THERE), and that assumption only holds while this component
+ * is actually mounted. Calling the hook unconditionally from App() itself
+ * would intercept Enter/Space/arrows everywhere else too — Space while
+ * naming a display "Saloon TV", Enter inside any other dialog — which is
+ * exactly what mounting/unmounting this small wrapper with the route avoids.
+ */
+function DisplayRemoteController({ rotation, onAction }: DisplayRemoteControllerProps) {
+  useDisplayRemote({
+    next: () => { rotation.next(); onAction() },
+    previous: () => { rotation.previous(); onAction() },
+    togglePause: () => {
+      if (rotation.paused) rotation.resume()
+      else rotation.pause()
+      onAction()
+    },
+    resume: () => { rotation.resume(); onAction() },
+  })
+  return null
+}
 
 export function App() {
   // Called before every other hook, and unconditionally on every render
@@ -350,24 +399,24 @@ export function App() {
     globalThis.localStorage?.setItem(ANCHOR_RADAR_ECHO_ENABLED_KEY, String(showRadarEcho))
   }, [showRadarEcho])
 
-  // Hoisted ahead of useDarkMode (rather than left beside kioskOptions below,
-  // where it used to live) so the kiosk dark-theme override just below has
-  // it in scope. isKiosk depends only on activePanel, which is already set
-  // by this point, so nothing about moving it changes what it means.
-  const isKiosk = activePanel === 'kiosk'
+  // Hoisted ahead of useDarkMode (rather than left beside displayOptions
+  // below, where it used to live) so the wall dark-theme override just below
+  // has it in scope. isDisplay depends only on activePanel, which is already
+  // set by this point, so nothing about moving it changes what it means.
+  const isDisplay = activePanel === 'display'
   const [storedIsDarkTheme, toggleDarkMode] = useDarkMode()
   // The wall display always renders dark (operator decision, ADR 0089
-  // phase 2), regardless of what this browser has stored — a fresh kiosk
-  // profile otherwise defaults to light, which is how a light basemap ended
-  // up inside dark instrument-skin tiles on the 1920x360 strip. The override
-  // lives here, at the one place isDarkTheme is established, so every
-  // consumer (the root `dark` class effect right below, and every tile/map
-  // isDarkTheme prop threaded from this same variable) agrees without
-  // special-casing any one of them. toggleDarkMode is left untouched: it
-  // still reads and writes the real stored preference, so leaving /kiosk
-  // resumes whatever the operator last chose on this browser rather than
-  // whatever the wall display happened to force.
-  const isDarkTheme = isKiosk || storedIsDarkTheme
+  // phase 2, carried into ADR 0110), regardless of what this browser has
+  // stored — a fresh profile otherwise defaults to light, which is how a
+  // light basemap ended up inside dark instrument-skin tiles on the
+  // 1920x360 strip. The override lives here, at the one place isDarkTheme is
+  // established, so every consumer (the root `dark` class effect right
+  // below, and every tile/map isDarkTheme prop threaded from this same
+  // variable) agrees without special-casing any one of them. toggleDarkMode
+  // is left untouched: it still reads and writes the real stored preference,
+  // so leaving /display resumes whatever the operator last chose on this
+  // browser rather than whatever the wall display happened to force.
+  const isDarkTheme = isDisplay || storedIsDarkTheme
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDarkTheme)
   }, [isDarkTheme])
@@ -389,11 +438,17 @@ export function App() {
     deactivate: deactivateRoute,
   } = useRouteActivation()
   const { pages, loading: pagesLoading, error: pagesError, refetch: refetchPages, createPage, updatePage, deletePage, reorderPages, reordering } = useDashboardPages()
-  const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId)
+  // ADR 0110: the wall display records themselves. Fetched here (not inside
+  // the wall branch further down) because the ordinary shell needs the list
+  // too — the sidebar's display group, the layout toolbar's display picker
+  // and duplicate-to-display popover, and the displays-management dialog all
+  // render regardless of which route is active.
+  const { displays, loading: displaysLoading, error: displaysError, refetch: refetchDisplays, createDisplay, updateDisplay, deleteDisplay } = useDisplays()
+  const [activePageId, setActivePageId] = useActiveDashboardPageId(pages, initialLocation.pageId, !isDisplay)
   const activePage = pages.find((p) => p.id === activePageId) ?? null
   // Hoisted ahead of the polling hooks below (item B) that gate themselves on
-  // which widgets the active page (or the kiosk's current page, which drives
-  // activePageId exactly the same way — see useKioskRotation below) actually
+  // which widgets the active page (or the wall's current page, which drives
+  // activePageId exactly the same way — see useDisplayRotation below) actually
   // holds. Otherwise identical to its previous declaration further down.
   const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
   // namingPageId only means anything for the page it was set on, while
@@ -415,18 +470,32 @@ export function App() {
       setNamingPageId(null)
     }
   }, [layoutEditing])
-  // ADR 0089: the wall display at /kiosk. Its query string is its own
-  // (rotate, a pinned page for authoring/screenshots) rather than app state,
-  // so it's parsed once here the same way initialLocation is, and never
-  // written back to the URL — see the early returns in the sync effect and
-  // the popstate handler below. isKiosk itself is declared earlier, beside
-  // useDarkMode, so the kiosk dark-theme override there can read it.
-  const [kioskOptions] = useState(() => parseKioskOptions(globalThis.location?.search ?? ''))
+  // ADR 0110 (superseding ADR 0089): the wall display at /display/<slug>.
+  // Its query string is its own (just `?page=`, for authoring/screenshots)
+  // rather than app state, so it's parsed once here the same way
+  // initialLocation is, and never written back to the URL — see the early
+  // returns in the sync effect and the popstate handler below. isDisplay
+  // itself is declared earlier, beside useDarkMode, so the wall dark-theme
+  // override there can read it.
+  const [displayOptions] = useState(() => parseDisplayOptions(globalThis.location?.search ?? ''))
+  // Read off initialLocation, not activePanel/the live location bar, for the
+  // same reason displayOptions is parsed once: the wall never navigates, so
+  // its slug can only ever be the one it was loaded with. Deliberately no
+  // fallback to "the first display" when the slug is missing or unknown —
+  // that would silently put one display's geometry on another screen, the
+  // masking fallback AGENTS.md forbids. The wall branch below renders an
+  // explicit diagnostic instead.
+  const wallDisplay = isDisplay ? displays.find((d) => d.slug === initialLocation.displaySlug) ?? null : null
   // The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip, not
   // tied to any page, so it lives beside the page hooks rather than inside
   // effectiveWidgets below.
   const { ribbon, saveRibbon } = useDashboardRibbon()
   const [ribbonDialogOpen, setRibbonDialogOpen] = useState(false)
+  // The displays-management dialog (ADR 0110 §6): opened from the sidebar's
+  // "Wall displays" group and from PageDisplaySelect's "no displays yet"
+  // dead-end, not a route - same precedent as the ribbon dialog above
+  // (ADR 0074: dialogs carry no URL).
+  const [displaysDialogOpen, setDisplaysDialogOpen] = useState(false)
 
   // The Mate sheet (ADR 0093 voice phase): a quick channel over whatever
   // page is on screen, opened by the header's "Ask Mate" button (and later
@@ -529,13 +598,13 @@ export function App() {
     requestNavigate('assistant', () => setActivePanel('assistant'))
   }, [requestNavigate])
 
-  // Mounted unconditionally (rules of hooks) but a no-op on the kiosk route
-  // (`enabled: !isKiosk`) - see the hook's own doc comment. Never on the
-  // kiosk path: no Mate UI is reachable there at all (isKiosk's early
+  // Mounted unconditionally (rules of hooks) but a no-op on the wall route
+  // (`enabled: !isDisplay`) - see the hook's own doc comment. Never on the
+  // wall path: no Mate UI is reachable there at all (isDisplay's early
   // return below is well before MateSheet/the Mate panel), so nothing
   // could ever be watched from that tab regardless, but this keeps that
   // explicit rather than incidental.
-  useMateAnswerWatcher(viewedMateConversationIds, openMateConversationFromToast, !isKiosk)
+  useMateAnswerWatcher(viewedMateConversationIds, openMateConversationFromToast, !isDisplay)
 
   // The in-app manual (ADR 0095): a right-hand sheet, rendered once here
   // beside the Mate sheet, opened by the header's contextual `?`, the
@@ -560,13 +629,13 @@ export function App() {
   // speechSynthesis from push-to-talk's own tap (a user gesture); the actual
   // speaking of a reply happens in MateSheet, which owns its own
   // useSpeechOutput instance. Both voiceInput and wakeWord are anded with
-  // `!isKiosk` here rather than in the hook itself - the wall display has no
-  // microphone and isn't a control surface, and this is the one place that
-  // already knows which shell is rendering.
+  // `!isDisplay` here rather than in the hook itself - the wall display has
+  // no microphone and isn't a control surface, and this is the one place
+  // that already knows which shell is rendering.
   const mateSpeechOutput = useSpeechOutput()
   const mateVoice = useMateVoice({
-    voiceInput: assistantVoiceConfig.voiceInput && !isKiosk,
-    wakeWord: assistantVoiceConfig.wakeWord && !isKiosk,
+    voiceInput: assistantVoiceConfig.voiceInput && !isDisplay,
+    wakeWord: assistantVoiceConfig.wakeWord && !isDisplay,
     readAloud: assistantVoiceConfig.readAloud,
     canWrite,
     prime: mateSpeechOutput.prime,
@@ -576,7 +645,7 @@ export function App() {
   // Drives the header mic's small dot and its title while wake mode is
   // actually running - mirrors the same condition useMateVoice itself gates
   // wake mode on, so the dot never claims to be listening when it isn't.
-  const mateWakeActive = assistantVoiceConfig.wakeWord && assistantVoiceConfig.voiceInput && mateVoice.supported && canWrite && !isKiosk
+  const mateWakeActive = assistantVoiceConfig.wakeWord && assistantVoiceConfig.voiceInput && mateVoice.supported && canWrite && !isDisplay
 
   // A recognition error (blocked mic, no speech, offline) surfaces once as a
   // toast rather than a persistent banner - voice is a convenience on top of
@@ -589,7 +658,7 @@ export function App() {
   // while listening - both ignored while typing into a field, so they don't
   // fight ordinary text entry (a settings field, the Mate composer itself).
   useEffect(() => {
-    if (!assistantVoiceConfig.voiceInput || isKiosk) return
+    if (!assistantVoiceConfig.voiceInput || isDisplay) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -608,7 +677,7 @@ export function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [assistantVoiceConfig.voiceInput, isKiosk, mateVoicePushToTalk, mateVoiceCancel, mateVoiceListening])
+  }, [assistantVoiceConfig.voiceInput, isDisplay, mateVoicePushToTalk, mateVoiceCancel, mateVoiceListening])
 
   // Gates the two URL-writing effects below on the shell actually being
   // shown (mirrors the render gate further down): while auth is still
@@ -634,7 +703,7 @@ export function App() {
     setActivePanel(loc.panel)
     if (loc.panel === null && !pagesLoading) {
       const knownPageId = loc.pageId != null && pages.some((p) => p.id === loc.pageId) ? loc.pageId : null
-      setActivePageId(knownPageId ?? pages[0]?.id ?? null)
+      setActivePageId(knownPageId ?? firstDashboardPageId(pages))
     }
     if (loc.panel === 'settings') {
       setSettingsSection(loc.section ?? 'general')
@@ -654,11 +723,11 @@ export function App() {
   // changes too (e.g. the active page disappearing out from under a user).
   useEffect(() => {
     if (!shellVisible) return
-    // /kiosk owns its own query string (rotate, a pinned page) rather than
+    // /display/<slug> owns its own query string (just `?page=`) rather than
     // app state, and never navigates anywhere else - writing to history here
     // would fight the device's fixed URL for no benefit to anyone looking at
     // a screen with no back button.
-    if (isKiosk) return
+    if (isDisplay) return
     // Page structure not yet known: leave whatever deep link brought us
     // here alone rather than guessing at a page id that might still turn
     // out valid once the list loads.
@@ -671,7 +740,7 @@ export function App() {
     const first = !locationInitialisedRef.current
     locationInitialisedRef.current = true
 
-    const ctx = { firstPageId: pages[0]?.id ?? null, knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
+    const ctx = { firstPageId: firstDashboardPageId(pages), knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
     const firstPageChanged = previousFirstPageIdRef.current !== ctx.firstPageId
     previousFirstPageIdRef.current = ctx.firstPageId
     const next = formatAppLocation({
@@ -694,7 +763,7 @@ export function App() {
     // current bar non-canonical.
     const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
-  }, [shellVisible, isKiosk, activePanel, activePageId, settingsSection, matePanelConversationId, documentsFolderId, pages, pagesLoading, canAdmin])
+  }, [shellVisible, isDisplay, activePanel, activePageId, settingsSection, matePanelConversationId, documentsFolderId, pages, pagesLoading, canAdmin])
 
   // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
   // page still gets to veto the navigation exactly as a sidebar click
@@ -705,15 +774,15 @@ export function App() {
   useEffect(() => {
     const handlePopState = () => {
       if (!shellVisible) return
-      // /kiosk never pushes or replaces history (see the sync effect above),
-      // so there is nothing here for it to react to; a bare `return` also
-      // means the device's own back/forward gestures, if it has any, don't
-      // fight the fixed URL it was launched with.
-      if (isKiosk) return
+      // /display/<slug> never pushes or replaces history (see the sync
+      // effect above), so there is nothing here for it to react to; a bare
+      // `return` also means the device's own back/forward gestures, if it
+      // has any, don't fight the fixed URL it was launched with.
+      if (isDisplay) return
       // Documents (?folder=) is the one location whose canonical form needs
       // the query string too - see the sync effect above's own comment.
       const path = window.location.pathname + window.location.search
-      const ctx = { firstPageId: pages[0]?.id ?? null, knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
+      const ctx = { firstPageId: firstDashboardPageId(pages), knownPageIds: pagesLoading ? null : pages.map((p) => p.id), canAdmin }
       const parsed = parseAppLocation(path)
       if (!isCanonicalAppPath(path, ctx)) {
         // So the sync effect's own equality check holds once it runs off
@@ -729,7 +798,7 @@ export function App() {
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [shellVisible, isKiosk, requestNavigate, applyAppLocation, settingsSection, pages, pagesLoading, canAdmin])
+  }, [shellVisible, isDisplay, requestNavigate, applyAppLocation, settingsSection, pages, pagesLoading, canAdmin])
 
   // If admin access ends (or was never established) while Settings happens
   // to be open, drop back to the dashboard. The sync effect above then sees
@@ -960,7 +1029,7 @@ export function App() {
   // Item B: only the anchor-watch tile/drawer and the Nearby/POI map tile
   // read getSelfTrail/getAisTrails (AnchorWatchTile, AnchorWatchDrawer and
   // PoiMapTile below all take them as props) — every other page, including
-  // most of the kiosk rotation, has nowhere for a trail to go. Gate the poll
+  // most of the wall rotation, has nowhere for a trail to go. Gate the poll
   // on whichever of those is actually on screen, rather than running it
   // app-wide regardless.
   const activePageHasTrailConsumerWidget = effectiveWidgets.some(
@@ -986,7 +1055,7 @@ export function App() {
   }, [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts])
   const depthTrend = useDepthTrend('3h', 60)
   // Item B: only the czone-switches widget reads this; poll it only while
-  // the active page (or the kiosk's current page) actually has one placed.
+  // the active page (or the wall's current page) actually has one placed.
   const activePageHasCZoneWidget = effectiveWidgets.some((w) => w.id === 'czone-switches')
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5, activePageHasCZoneWidget)
   const autopilot = useAutopilot()
@@ -1005,18 +1074,30 @@ export function App() {
   const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
 
   // Drives activePageId exactly the way a sidebar click or a deep link
-  // does (ADR 0089), so activePage/effectiveWidgets/dashboardGrid/renderWidget
-  // all keep working unchanged whether the page came from a click or from
-  // the rotation timer. Called unconditionally (rules of hooks); `enabled`
-  // is what actually turns it off outside kiosk mode.
-  const { feedEmpty: kioskFeedEmpty } = useKioskRotation({
-    enabled: isKiosk,
+  // does (ADR 0089, superseded by ADR 0110), so activePage/effectiveWidgets/
+  // dashboardGrid/renderWidget all keep working unchanged whether the page
+  // came from a click or from the rotation timer. Called unconditionally
+  // (rules of hooks); `enabled` is what actually turns it off outside the
+  // wall route, and it also gates on `wallDisplay` having resolved - every
+  // wall boot briefly has `isDisplay` true and `wallDisplay` still null,
+  // before the displays fetch and the slug match land.
+  const displayRotation = useDisplayRotation({
+    enabled: isDisplay && wallDisplay !== null,
+    displayId: wallDisplay?.id ?? null,
     pages,
     navigationState,
-    pinnedPageId: kioskOptions.pageId,
+    pinnedPageId: displayOptions.pageId,
     refetch: refetchPages,
     onShow: setActivePageId,
   })
+  const { feedEmpty: displayFeedEmpty } = displayRotation
+  // ADR 0110 §5b: bumped by DisplayRemoteController (rendered only on the
+  // wall route, below) on every actual remote action - a step, a pause, a
+  // resume - so DisplayRemoteToast flashes only for that, never for the
+  // ordinary dwell-driven page change that also moves displayRotation's
+  // own position.
+  const [remoteAnnouncementId, setRemoteAnnouncementId] = useState(0)
+  const bumpRemoteAnnouncement = useCallback(() => setRemoteAnnouncementId((n) => n + 1), [])
 
   // See sessionPlanningDepth's own comment above for why this has to be
   // cleared on every transition rather than left to go stale.
@@ -1438,7 +1519,7 @@ export function App() {
           isDarkTheme={isDarkTheme}
           forceDark={activePage?.skin === 'instrument'}
           distanceUnits={uiConfig.distanceUnits}
-          interactive={!isKiosk}
+          interactive={!isDisplay}
         />
       )
     }
@@ -1569,7 +1650,7 @@ export function App() {
             selectedWindBandId={windBandId}
             planningDepthM={resolvedPlanningDepthM}
             planningTideHeightFt={resolvedPlanningTideHeightFt}
-            interactive={!isKiosk}
+            interactive={!isDisplay}
           />
         )
       case 'tanks':
@@ -1697,6 +1778,78 @@ export function App() {
     { label: 'Nearby map…', category: 'navigation', onSelect: handleAddPoiMap },
   ]
 
+  // The display the active page is actually assigned to (ADR 0110), not
+  // wallDisplay - this is the ordinary authoring case (any page, on any
+  // screen this session happens to be viewing), while wallDisplay only ever
+  // means "the screen the wall route itself resolved to".
+  const activePageDisplay = displays.find((d) => d.id === activePage?.display_id) ?? null
+
+  const handleDisplayPatch = (id: string, patch: DisplayPatch) => {
+    const page = pages.find((p) => p.id === id)
+    void updatePage(id, patch).then((saved) => {
+      // The server clears a page's hero the instant a display is assigned
+      // (ADR 0110) - correct, and left alone here (AGENTS.md's fallback
+      // policy is about not masking that, not about second-guessing it).
+      // But a silent clear an operator only discovers later by reopening
+      // the page reads as a bug, so this names what happened once the save
+      // actually lands. Only for an assignment (a non-empty display_id) on
+      // a page that had a hero to lose - never on a clear, and never when
+      // there was nothing to clear in the first place.
+      if (saved && patch.display_id && page?.hero) {
+        const targetName = displays.find((d) => d.id === patch.display_id)?.name ?? 'the display'
+        toast(`${page.name} is now on ${targetName}. Its hero tile was cleared.`)
+      }
+    })
+  }
+
+  // ADR 0110 §6: the "Duplicate to…" toolbar action. Client-side, through
+  // the same POST /api/dashboard-pages createPage already wraps - widgets
+  // are deep-cloned (multi-instance widget ids need no re-minting;
+  // validateDashboardWidgets only enforces uniqueness within a page), skin/
+  // dwell/condition copy unconditionally, and hero copies only onto a
+  // plain Dashboard copy - the server rejects a hero on a page carrying a
+  // display_id, so sending one for a display target would just fail the
+  // create outright. Finishes with ADR 0107's exact new-page flow (switch
+  // to it, start naming, force layout editing), same as "New Page" below.
+  // An unattended wall that loses the displays fetch at boot - a transient
+  // network blip, a backend still starting - would otherwise sit on the
+  // "no display configured" card forever with nobody there to reload it.
+  // The rotation already polls its way out of an empty feed; this is the
+  // same recovery one level up, and it stops as soon as a fetch succeeds.
+  useEffect(() => {
+    if (!isDisplay || displaysError === null) return
+    const timer = setInterval(() => { void refetchDisplays() }, DISPLAY_RECOVERY_POLL_MS)
+    return () => clearInterval(timer)
+  }, [isDisplay, displaysError, refetchDisplays])
+
+  const handleDuplicateToDisplay = (pageId: string, displayId: string | null) => {
+    const source = pages.find((p) => p.id === pageId)
+    if (!source) return
+    const init: CreatePageInit = {
+      widgets: structuredClone(source.widgets),
+      skin: source.skin,
+      dwell_seconds: source.dwell_seconds,
+      show_when: source.show_when,
+    }
+    if (displayId) {
+      init.display_id = displayId
+      // An ordinary Dashboard page has no dwell to copy, and the server
+      // rejects a page that arrives on a display without one. Default it
+      // the same way PageDisplaySelect does when it first assigns a page,
+      // so duplicating a normal page onto a screen works at all.
+      init.dwell_seconds = source.dwell_seconds || DEFAULT_DWELL_SECONDS
+    } else if (source.hero) {
+      init.hero = source.hero
+    }
+    void createPage('Untitled page', init).then((created) => {
+      if (created) {
+        setActivePageId(created.id)
+        setNamingPageId(created.id)
+        setLayoutEditing(true)
+      }
+    })
+  }
+
   const dashboardGrid = (
     // ADR 0060: the skin lives on the page, so the attribute sits on this
     // shared root and every tile beneath it re-skins with no component
@@ -1711,9 +1864,10 @@ export function App() {
       style={{ padding: 'var(--board-pad)', borderRadius: 'var(--board-radius)' }}
     >
       {/* The layout toolbar (ADR 0107): page name field, Add Tile, Ribbon,
-          Skin, Hero, Kiosk, in that fixed order. Replaces both the old
-          "Layout Mode — Drag to rearrange" pill that used to sit here and
-          the separate control row that used to sit below the grid. */}
+          Skin, Hero, Wall display, Duplicate to…, Delete page, in that fixed
+          order. Replaces both the old "Layout Mode — Drag to rearrange" pill
+          that used to sit here and the separate control row that used to
+          sit below the grid. */}
       {layoutEditing && (
         <LayoutToolbar
           page={activePage}
@@ -1726,7 +1880,10 @@ export function App() {
           onOpenRibbon={() => setRibbonDialogOpen(true)}
           onSetSkin={(id, skin) => { void updatePage(id, { skin }) }}
           onSetHero={(id, hero) => { void updatePage(id, { hero }) }}
-          onKioskPatch={(id, patch) => { void updatePage(id, patch) }}
+          displays={displays}
+          onDisplayPatch={handleDisplayPatch}
+          onManageDisplays={() => setDisplaysDialogOpen(true)}
+          onDuplicateToDisplay={handleDuplicateToDisplay}
           onDeletePage={(id) => {
             void deletePage(id).then((ok) => {
               if (ok && id === activePageId) {
@@ -1745,13 +1902,13 @@ export function App() {
           slot ADR 0072 gave the hero row. Not part of effectiveWidgets, so it
           never enters react-grid-layout's managed array.
 
-          Never rendered at /kiosk (ADR 0089): on a 1920x360 strip it ran
-          about a third of the height and pushed a seven-row page below the
-          fold. The wall display gets nothing here for free; a page that
-          wants lamps on the wall adds its own lamp-strip widget, sized and
-          placed like any other tile, same as it would for any other
-          page-specific status row. */}
-      {!isKiosk && ribbon && (
+          Never rendered on the wall (ADR 0089, carried into ADR 0110): on a
+          1920x360 strip it ran about a third of the height and pushed a
+          seven-row page below the fold. The wall display gets nothing here
+          for free; a page that wants lamps on the wall adds its own
+          lamp-strip widget, sized and placed like any other tile, same as
+          it would for any other page-specific status row. */}
+      {!isDisplay && ribbon && (
         <div data-testid="dashboard-ribbon" className="w-full min-w-0">
           <LampStripTile
             config={ribbon}
@@ -1766,43 +1923,59 @@ export function App() {
       )}
 
       {/* An empty page shows a prompt instead of an unexplained blank stretch
-          (ADR 0107) — never at /kiosk, where there's nothing to click and no
-          operator watching to click it. A page carrying a hero always shows
-          the grid: the hero row itself is content, even when it's the only
-          widget on the page. Gated on !pagesLoading too: before the initial
-          GET /api/dashboard-pages resolves there is no active page yet
-          either, which reads the same as "empty" — without this the prompt
-          flashed on every load, not just on a genuinely empty page. */}
+          (ADR 0107) — never on the wall, where there's nothing to click and
+          no operator watching to click it. A page carrying a hero always
+          shows the grid: the hero row itself is content, even when it's the
+          only widget on the page. Gated on !pagesLoading too: before the
+          initial GET /api/dashboard-pages resolves there is no active page
+          yet either, which reads the same as "empty" — without this the
+          prompt flashed on every load, not just on a genuinely empty page. */}
       {!pagesLoading && effectiveWidgets.length === 0 && !activePage?.hero ? (
-        <EmptyPagePrompt editing={layoutEditing} canEditLayout={canEditLayout} onOpenManual={openManual} isKiosk={isKiosk} />
+        <EmptyPagePrompt editing={layoutEditing} canEditLayout={canEditLayout} onOpenManual={openManual} isKiosk={isDisplay} />
       ) : (
-        // relative so KioskFoldGuide (ADR 0089) can position itself against
-        // exactly the content the kiosk route shows: the grid alone. The
-        // ribbon sits outside this container (above) precisely because it no
-        // longer counts against the fold budget — it never reaches the wall
-        // at all.
-        <div className="relative">
+        // relative so DisplayFoldGuide (ADR 0110, superseding ADR 0089) can
+        // position itself against exactly the content the wall route shows:
+        // the grid alone. The ribbon sits outside this container (above)
+        // precisely because it no longer counts against the fold budget —
+        // it never reaches the wall at all. minHeight guarantees the guide's
+        // own `absolute` line (drawn at foldPx from the top of this box) has
+        // something behind it even on a tall canvas whose content doesn't
+        // reach that far down yet.
+        <div className="relative" style={activePageDisplay ? { minHeight: displayFoldPx(activePageDisplay) ?? undefined } : undefined}>
           <DashboardBentoGrid
             widgets={effectiveWidgets}
             editing={layoutEditing}
-            heroId={activePage?.hero}
+            // The server rejects a hero on a page that carries a display_id
+            // (ADR 0110) - undefined here, not activePage?.hero, so the grid
+            // never renders a hero row the backend would have refused to
+            // persist in the first place.
+            heroId={activePage?.display_id ? undefined : activePage?.hero}
             renderWidget={renderWidget}
             onRemoveWidget={handleRemoveWidget}
             onDuplicateWidget={handleDuplicateWidget}
             onLayoutSettle={handleLayoutSettle}
             // A wall page's height is fixed by the panel, not by a scrolling
-            // viewport, so its rows sit closer together. Taken from the page's
-            // own kiosk flag rather than from the route, so the helm browser
-            // authoring the page lays it out at the same geometry the wall will
-            // render it at and the fold guide stays honest.
-            rowMargin={activePage?.kiosk ? WALL_ROW_MARGIN : undefined}
+            // viewport, so its rows sit closer together on a narrow strip.
+            // Taken from the page's own assigned display, not the route, so
+            // the helm browser authoring the page lays it out at the same
+            // geometry the wall will render it at and the fold guide stays
+            // honest.
+            rowMargin={activePageDisplay ? displayRowMargin(activePageDisplay) : undefined}
           />
 
-          {/* Authoring aid, not a kiosk feature: only shown while editing a
-              page that is itself flagged for the wall display, so laying it
-              out on the ordinary desktop dashboard shows exactly where the
-              360px strip cuts off before saving. */}
-          {layoutEditing && activePage?.kiosk && <KioskFoldGuide topPx={KIOSK_FOLD_PX} />}
+          {/* Authoring aid, not a wall-display feature: only shown while
+              editing a page that is itself assigned to a display with a
+              measured canvas (a zero-canvas display has no fold to guide
+              against - lib/displays.ts's displayFoldPx), so laying it out on
+              the ordinary desktop dashboard shows exactly where that
+              screen's canvas cuts off before saving. */}
+          {layoutEditing && activePageDisplay && displayFoldPx(activePageDisplay) !== null && (
+            <DisplayFoldGuide
+              topPx={displayFoldPx(activePageDisplay) as number}
+              heightPx={activePageDisplay.height}
+              displayName={activePageDisplay.name}
+            />
+          )}
         </div>
       )}
 
@@ -2114,30 +2287,88 @@ export function App() {
     return <LoginScreen onLogin={auth.login} error={auth.error} />
   }
 
-  // The wall display (ADR 0089) reuses dashboardGrid directly rather than
-  // the ordinary shell: no sidebar, no header, no SidebarProvider. toastRef
-  // already null-checks everywhere it's read and no tile calls useSidebar,
-  // so nothing downstream depends on SidebarProvider being mounted. This
-  // also means the manual (ADR 0095) needs no separate kiosk gating - the
-  // header `?`, the sidebar Manual item and <ManualSheet> itself are all
-  // declared below this return and never reached on an unattended screen.
-  if (isKiosk) {
+  // The wall display (ADR 0110, superseding ADR 0089) reuses dashboardGrid
+  // directly rather than the ordinary shell: no sidebar, no header, no
+  // SidebarProvider. toastRef already null-checks everywhere it's read and
+  // no tile calls useSidebar, so nothing downstream depends on
+  // SidebarProvider being mounted. This also means the manual (ADR 0095)
+  // needs no separate wall gating - the header `?`, the sidebar Manual item
+  // and <ManualSheet> itself are all declared below this return and never
+  // reached on an unattended screen.
+  if (isDisplay) {
+    // Still resolving which displays exist at all - a beat before the slug
+    // can even be checked, never long enough to need more than a quiet
+    // placeholder.
+    if (displaysLoading) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+          Loading…
+        </div>
+      )
+    }
+
+    // No slug (bare /display) or a slug naming no configured display: an
+    // explicit diagnostic, never a fallback to "the first display" - that
+    // would silently put one screen's geometry on another (AGENTS.md's
+    // fallback policy). Names every configured display and its URL so
+    // fixing a stale or mistyped snap command is a matter of reading this
+    // screen, not guessing.
+    if (!wallDisplay) {
+      return (
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+          <p className="text-sm font-semibold text-foreground">
+            {initialLocation.displaySlug
+              ? `No display is configured at "${initialLocation.displaySlug}".`
+              : 'This address needs a display slug: /display/<slug>.'}
+          </p>
+          {displays.length > 0 ? (
+            <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+              {displays.map((d) => (
+                <li key={d.id}>{d.name}: /display/{d.slug}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {displaysError
+                ? 'Could not load the configured displays. Retrying…'
+                : 'No displays are configured yet. Add one from the Wall displays dialog.'}
+            </p>
+          )}
+        </div>
+      )
+    }
+
     return (
-      <KioskShell rotate={kioskOptions.rotate} height={kioskOptions.height} alarms={alarms}>
+      <DisplayShell display={wallDisplay} alarms={alarms}>
         {pagesError ? (
+          // Distinct from the empty-feed message below: a failed fetch is a
+          // wall that cannot see its pages, not a wall with none assigned,
+          // and the rotation is already polling its way back.
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Could not load dashboard pages. Retrying…
           </div>
-        ) : kioskFeedEmpty && !kioskOptions.pageId ? (
+        ) : displayFeedEmpty && !displayOptions.pageId ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            No pages are flagged for the wall display yet.
+            No pages are assigned to {wallDisplay.name} yet.
           </div>
         ) : (
           dashboardGrid
         )}
-      </KioskShell>
+        <DisplayRemoteController rotation={displayRotation} onAction={bumpRemoteAnnouncement} />
+        <DisplayRemoteToast
+          announcementId={remoteAnnouncementId}
+          pageName={activePage?.name ?? ''}
+          position={displayRotation.position}
+          paused={displayRotation.paused}
+        />
+      </DisplayShell>
     )
   }
+
+  // ADR 0110: a page assigned to a display leaves the Dashboard sub-list
+  // (and the header's DashboardPageSwitcher below) for the sidebar's own
+  // "Wall displays" group, nested under the display it's actually on.
+  const dashboardSubListPages = pages.filter((p) => !p.display_id)
 
   return (
     <SidebarProvider>
@@ -2160,9 +2391,12 @@ export function App() {
                 <span>Dashboard</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-            {pages.length > 0 && (
+            {/* A page assigned to a display (ADR 0110) has its own row in
+                the "Wall displays" group below, nested under its display -
+                it never appears here too. */}
+            {dashboardSubListPages.length > 0 && (
               <SidebarMenuSub>
-                {pages.map((page) => (
+                {dashboardSubListPages.map((page) => (
                   <SidebarMenuSubItem key={page.id}>
                     <SidebarMenuSubButton
                       render={<button type="button" />}
@@ -2173,7 +2407,6 @@ export function App() {
                       })}
                     >
                       <span className="min-w-0 flex-1 truncate">{page.name}</span>
-                      <KioskPageGlyph page={page} />
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
                 ))}
@@ -2196,20 +2429,25 @@ export function App() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
-            {/* Opens in its own tab (ADR 0089): the wall display is a
-                separate, unattended screen, not a place this operator's own
-                session navigates to and back from. A plain top-level item,
-                not a sub-item of Dashboard, so it survives collapsing the
-                sidebar to its icon rail. */}
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                render={<a href="/kiosk" target="_blank" rel="noopener noreferrer" />}
-                tooltip="Wall display"
-              >
-                <MonitorPlay />
-                <span>Wall display</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {/* ADR 0110 (superseding ADR 0089's single "Wall display" link):
+                one row per configured display, each opening its own
+                `/display/<slug>` in a new tab - a wall is a separate,
+                unattended screen, not a place this operator's own session
+                navigates to and back from - with that display's own pages
+                nested underneath. The group header always renders (even
+                with zero displays) since it's also how the management
+                dialog is reached. */}
+            <DisplaySidebarGroup
+              displays={displays}
+              pages={pages}
+              activePageId={activePageId}
+              dashboardActive={activePanel === null}
+              onSelectPage={(id) => requestNavigate(null, () => {
+                setActivePanel(null)
+                setActivePageId(id)
+              })}
+              onOpenDisplaysDialog={() => setDisplaysDialogOpen(true)}
+            />
             {/* ADR 0095: opens the contents page of the in-app manual. Never
                 `isActive` (it's a sheet over whatever's on screen, not a
                 panel of its own) and carries no PanelId or URL - ADR 0074
@@ -2272,7 +2510,9 @@ export function App() {
             {activePanel === null && !pagesError && (
               <>
                 <DashboardPageSwitcher
-                  pages={pages}
+                  pages={dashboardSubListPages}
+                  allPages={pages}
+                  activePageName={activePage?.name}
                   canWrite={canWrite}
                   onReorder={reorderPages}
                   reordering={reordering}
@@ -2282,7 +2522,7 @@ export function App() {
                     // Named in place, not behind a dialog (ADR 0107): the page
                     // exists immediately as "Untitled page", and namingPageId
                     // is what starts its name field empty and focused.
-                    void createPage('Untitled page', []).then((p) => {
+                    void createPage('Untitled page', { widgets: [] }).then((p) => {
                       if (p) {
                         setActivePageId(p.id)
                         setNamingPageId(p.id)
@@ -2414,6 +2654,24 @@ export function App() {
           vesselStateSource={vesselStateSource}
         />
       )}
+
+      <DisplaysDialog
+        open={displaysDialogOpen}
+        onOpenChange={setDisplaysDialogOpen}
+        displays={displays}
+        pages={pages}
+        onCreate={createDisplay}
+        onUpdate={updateDisplay}
+        onDelete={async (id) => {
+          const released = await deleteDisplay(id)
+          // The released pages keep a stale display_id in local state
+          // otherwise, which renders them in neither the Dashboard
+          // sub-list nor the sidebar group until a reload.
+          if (released) await refetchPages()
+          return released
+        }}
+        canWrite={canWrite}
+      />
 
       <AlertDialog
         open={pendingNavigation !== null}

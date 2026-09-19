@@ -30,16 +30,20 @@ func setupDashboardPagesTest(t *testing.T) {
 	dashboardPagesState = make(map[string]*dashboardPageData)
 	dashboardPagesMu.Unlock()
 
-	// dashboardRibbonState is package-level state guarded by the same mutex
-	// (ADR 0082), and a test that PUTs a ribbon through the real handler has
-	// no per-test file to isolate it the way DASHBOARD_PAGES_FILE isolates
-	// pages. Without this, a ribbon set by one test leaks into whichever test
-	// runs next and does not call this helper — in particular the
-	// gaugeBoundPaths tests, which manipulate dashboardPagesState directly
-	// and would otherwise pick up a stray ribbon's paths.
+	// dashboardRibbonState and displaysState are package-level state guarded
+	// by the same mutex (ADR 0082, ADR 0110), and a test that sets either
+	// through the real handlers (or, for displaysState, by writing to the map
+	// directly, since displays_test.go's helpers do that before the CRUD
+	// handlers exist) has no per-test file to isolate it the way
+	// DASHBOARD_PAGES_FILE isolates pages. Without this, state set by one
+	// test leaks into whichever test runs next and does not call this
+	// helper — in particular the gaugeBoundPaths tests, which manipulate
+	// dashboardPagesState directly and would otherwise pick up a stray
+	// ribbon's paths.
 	t.Cleanup(func() {
 		dashboardPagesMu.Lock()
 		dashboardRibbonState = nil
+		displaysState = nil
 		dashboardPagesMu.Unlock()
 	})
 }
@@ -1130,6 +1134,272 @@ func TestDashboardPages_RetiredWidgetIDStrippedOnLoad(t *testing.T) {
 	}
 }
 
+// ── the kiosk -> display load-time conversion (multiple-wall-displays plan §1) ─
+//
+// A v1 file's "kiosk"/"kiosk_seconds"/"kiosk_when" keys are absorbed into
+// the display model exactly once, on the first load that finds them and no
+// existing displays. dashboardPageData no longer has fields for them, so the
+// fixtures below are written as raw JSON (mirroring
+// TestDashboardPages_RetiredWidgetIDStrippedOnLoad's own pattern of writing
+// the file directly rather than through the current struct shape).
+
+func TestLoadDashboardPages_ConvertsKioskFlaggedPagesToFlybridgeDisplay(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	fixture := map[string]any{
+		"pages": []map[string]any{
+			{
+				"id": "p1", "name": "Wall: Engines",
+				"kiosk": true, "kiosk_seconds": 30,
+				"widgets":    []any{},
+				"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
+			},
+			{
+				"id": "p2", "name": "Wall: Anchor",
+				"kiosk": true, "kiosk_seconds": 45, "kiosk_when": "anchored", "hero": "wind",
+				"widgets":    []map[string]any{{"id": "wind", "x": 0, "y": 0, "w": 4, "h": 8}},
+				"created_at": "2024-01-01T00:00:01Z", "updated_at": "2024-01-01T00:00:01Z",
+			},
+			{
+				"id": "p3", "name": "Ordinary",
+				"kiosk_seconds": 20,
+				"widgets":       []any{},
+				"created_at":    "2024-01-01T00:00:02Z", "updated_at": "2024-01-01T00:00:02Z",
+			},
+		},
+		"ribbon": map[string]any{
+			"title": "Status",
+			"lamps": []map[string]any{{"path": "electrical.generator.state", "label": "GEN"}},
+		},
+	}
+	fixtureBytes, err := json.Marshal(fixture)
+	if err != nil {
+		t.Fatalf("failed to marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, fixtureBytes, 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	displays := orderedDisplaysLocked()
+	p1 := dashboardPagesState["p1"]
+	p2 := dashboardPagesState["p2"]
+	p3 := dashboardPagesState["p3"]
+	ribbon := dashboardRibbonState
+	dashboardPagesMu.RUnlock()
+
+	if len(displays) != 1 {
+		t.Fatalf("expected exactly one synthesized display, got %d: %+v", len(displays), displays)
+	}
+	display := displays[0]
+	if display.Name != "Flybridge" || display.Slug != "flybridge" {
+		t.Fatalf("expected the synthesized display to be named/slugged Flybridge, got %+v", display)
+	}
+	if display.Width != 1920 || display.Height != 360 || display.Rotate != 180 {
+		t.Fatalf("expected the synthesized display's geometry to match the ODROID strip, got %+v", display)
+	}
+
+	if p1 == nil || p1.DisplayID != display.ID || p1.DwellSeconds != 30 || p1.ShowWhen != "" {
+		t.Fatalf("expected p1 to carry the display id and duration, got %+v", p1)
+	}
+	if p2 == nil || p2.DisplayID != display.ID || p2.DwellSeconds != 45 || p2.ShowWhen != "anchored" {
+		t.Fatalf("expected p2 to carry the display id, duration and condition, got %+v", p2)
+	}
+	if p2.Hero != "" {
+		t.Fatalf("expected p2's hero to be cleared on assignment to a display, got %q", p2.Hero)
+	}
+	if p3 == nil || p3.DisplayID != "" {
+		t.Fatalf("expected p3 (never flagged kiosk) to stay off the display, got %+v", p3)
+	}
+	if p3.DwellSeconds != 20 {
+		t.Fatalf("expected p3's stale kiosk_seconds to still be copied to dwell_seconds even though it was never flagged, got %d", p3.DwellSeconds)
+	}
+	if ribbon == nil || ribbon.Title != "Status" || len(ribbon.Lamps) != 1 {
+		t.Fatalf("expected the ribbon to survive the conversion untouched, got %+v", ribbon)
+	}
+
+	onDisk, err := os.ReadFile(pagesPath)
+	if err != nil {
+		t.Fatalf("failed to read rewritten file: %v", err)
+	}
+	if strings.Contains(string(onDisk), "kiosk") {
+		t.Fatalf("expected no kiosk* key in the rewritten file, got %s", onDisk)
+	}
+}
+
+func TestLoadDashboardPages_DoesNotReconvertWhenDisplaysExist(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	fixture := map[string]any{
+		"pages": []map[string]any{
+			{
+				"id": "p1", "name": "Wall: Engines", "kiosk": true, "kiosk_seconds": 30,
+				"widgets": []any{}, "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
+			},
+		},
+	}
+	fixtureBytes, err := json.Marshal(fixture)
+	if err != nil {
+		t.Fatalf("failed to marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, fixtureBytes, 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	loadDashboardPages()
+	dashboardPagesMu.RLock()
+	firstDisplays := orderedDisplaysLocked()
+	dashboardPagesMu.RUnlock()
+	if len(firstDisplays) != 1 {
+		t.Fatalf("expected the first load to synthesize one display, got %d", len(firstDisplays))
+	}
+	firstID := firstDisplays[0].ID
+
+	// A second load reads back the already-converted file - no "kiosk" key
+	// survives the rewrite, so a second synthesis has nothing to trigger on
+	// even before checking loaded.Displays.
+	loadDashboardPages()
+	dashboardPagesMu.RLock()
+	secondDisplays := orderedDisplaysLocked()
+	p1 := dashboardPagesState["p1"]
+	dashboardPagesMu.RUnlock()
+	if len(secondDisplays) != 1 || secondDisplays[0].ID != firstID {
+		t.Fatalf("expected the second load to be idempotent, got %+v", secondDisplays)
+	}
+	if p1.DisplayID != firstID || p1.DwellSeconds != 30 {
+		t.Fatalf("expected the page's assignment to survive a second load unchanged, got %+v", p1)
+	}
+}
+
+func TestLoadDashboardPages_ClearsDanglingDisplayID(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	now := time.Now().UTC()
+	saved := dashboardPagesFile{
+		Pages: []*dashboardPageData{
+			{ID: "p1", Name: "Wall: Ghost", DisplayID: "ghost-id", DwellSeconds: 30, Widgets: []dashboardLayoutItem{}, CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	savedBytes, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatalf("failed to marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, savedBytes, 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	p1 := dashboardPagesState["p1"]
+	dashboardPagesMu.RUnlock()
+	if p1.DisplayID != "" {
+		t.Fatalf("expected a display_id naming no display to be cleared, got %q", p1.DisplayID)
+	}
+	if p1.DwellSeconds != 30 {
+		t.Fatalf("expected dwell_seconds to survive the repair untouched, got %d", p1.DwellSeconds)
+	}
+
+	onDisk, err := os.ReadFile(pagesPath)
+	if err != nil {
+		t.Fatalf("failed to read rewritten file: %v", err)
+	}
+	var reloaded dashboardPagesFile
+	if err := json.Unmarshal(onDisk, &reloaded); err != nil {
+		t.Fatalf("failed to parse rewritten file: %v", err)
+	}
+	if reloaded.Pages[0].DisplayID != "" {
+		t.Fatal("expected the repair to be persisted to disk, not just held in memory")
+	}
+}
+
+func TestLoadDashboardPages_ClearsHeroOnDisplayPages(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	now := time.Now().UTC()
+	saved := dashboardPagesFile{
+		Pages: []*dashboardPageData{
+			{
+				ID: "p1", Name: "Wall: Engines", DisplayID: "d1", DwellSeconds: 30, Hero: "wind",
+				Widgets:   []dashboardLayoutItem{{ID: "wind", X: 0, Y: 0, W: 4, H: 8}},
+				CreatedAt: now, UpdatedAt: now,
+			},
+		},
+		Displays: []*displayData{
+			{ID: "d1", Name: "Flybridge", Slug: "flybridge", Width: 1920, Height: 360, Rotate: 180, CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	savedBytes, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatalf("failed to marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, savedBytes, 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	p1 := dashboardPagesState["p1"]
+	dashboardPagesMu.RUnlock()
+	if p1.Hero != "" {
+		t.Fatalf("expected hero to be cleared on a hand-edited page that also has a display_id, got %q", p1.Hero)
+	}
+	if p1.DisplayID != "d1" {
+		t.Fatalf("expected display_id to survive the repair, got %q", p1.DisplayID)
+	}
+}
+
+// Plan §1 step 4: inventing a duration is guessing, so a kiosk-flagged page
+// with no stored duration (validation forbids this combination; one should
+// never exist) is left off the synthesized display rather than assigned an
+// arbitrary one.
+func TestLoadDashboardPages_LeavesKioskFlagWithNoDwellUnassigned(t *testing.T) {
+	tempDir := t.TempDir()
+	pagesPath := filepath.Join(tempDir, "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", pagesPath)
+
+	fixture := map[string]any{
+		"pages": []map[string]any{
+			{
+				"id": "p1", "name": "Wall: No Duration", "kiosk": true,
+				"widgets": []any{}, "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
+			},
+		},
+	}
+	fixtureBytes, err := json.Marshal(fixture)
+	if err != nil {
+		t.Fatalf("failed to marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(pagesPath, fixtureBytes, 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	loadDashboardPages()
+
+	dashboardPagesMu.RLock()
+	displays := orderedDisplaysLocked()
+	p1 := dashboardPagesState["p1"]
+	dashboardPagesMu.RUnlock()
+
+	if len(displays) != 1 {
+		t.Fatalf("expected the display to still be synthesized, got %d", len(displays))
+	}
+	if p1.DisplayID != "" {
+		t.Fatalf("expected the page with no stored duration to be left unassigned, got %q", p1.DisplayID)
+	}
+}
+
 // --- Embed widget instances (ADR 0031) ---------------------------------------
 
 func embedWidget(token, title, url string) dashboardLayoutItem {
@@ -2135,6 +2405,338 @@ func TestDashboardRibbon_SurvivesReorderingPages(t *testing.T) {
 	}
 }
 
+// ── the snapshot refactor (multiple-wall-displays plan §1) ─────────────────
+//
+// Three call sites used to write dashboard-pages.json directly, each one
+// more thing to remember to carry forward by hand. These two tests are the
+// regression guard for collapsing that convention into
+// dashboardPagesSnapshotLocked(): they fail before displaysState/displayData
+// exist at all, and would fail again if a future direct writer forgot to
+// start from the snapshot.
+
+func TestReorderDashboardPages_CarriesDisplaysForward(t *testing.T) {
+	setupDashboardPagesTest(t)
+	first := createTestDashboardPage(t, "First", sampleDashboardWidgets())
+	second := createTestDashboardPage(t, "Second", sampleDashboardWidgets())
+
+	now := time.Now().UTC()
+	dashboardPagesMu.Lock()
+	displaysState["d1"] = &displayData{
+		ID:        "d1",
+		Name:      "Flybridge",
+		Slug:      "flybridge",
+		Width:     1920,
+		Height:    360,
+		Rotate:    180,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	dashboardPagesMu.Unlock()
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPut, "/api/dashboard-pages/order", map[string]any{
+		"page_ids": []string{second.ID, first.ID},
+	})
+	if err := reorderDashboardPagesHandler(c); err != nil {
+		t.Fatalf("reorderDashboardPagesHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	raw, err := os.ReadFile(dashboardPagesFilePath())
+	if err != nil {
+		t.Fatalf("failed to read pages file: %v", err)
+	}
+	var onDisk dashboardPagesFile
+	if err := json.Unmarshal(raw, &onDisk); err != nil {
+		t.Fatalf("failed to parse pages file: %v", err)
+	}
+	if len(onDisk.Displays) != 1 || onDisk.Displays[0].Slug != "flybridge" {
+		t.Fatalf("expected the display to survive reordering pages, got %+v", onDisk.Displays)
+	}
+}
+
+func TestPutDashboardRibbon_CarriesDisplaysForward(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	now := time.Now().UTC()
+	dashboardPagesMu.Lock()
+	displaysState["d1"] = &displayData{
+		ID:        "d1",
+		Name:      "Flybridge",
+		Slug:      "flybridge",
+		Width:     1920,
+		Height:    360,
+		Rotate:    180,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	dashboardPagesMu.Unlock()
+
+	if rec, body := putDashboardRibbon(t, validLampStripConfig()); rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, body)
+	}
+
+	raw, err := os.ReadFile(dashboardPagesFilePath())
+	if err != nil {
+		t.Fatalf("failed to read pages file: %v", err)
+	}
+	var onDisk dashboardPagesFile
+	if err := json.Unmarshal(raw, &onDisk); err != nil {
+		t.Fatalf("failed to parse pages file: %v", err)
+	}
+	if len(onDisk.Displays) != 1 || onDisk.Displays[0].Slug != "flybridge" {
+		t.Fatalf("expected the display to survive a ribbon PUT, got %+v", onDisk.Displays)
+	}
+}
+
+// TestListDashboardPages_DoesNotCarryDisplays pins the wire/file split: the
+// GET list response must never gain a "displays" key just because the file
+// struct grew one, since dashboardPagesFile is the on-disk shape and
+// dashboardPagesListResponse is what the handler actually serves.
+func TestListDashboardPages_DoesNotCarryDisplays(t *testing.T) {
+	setupDashboardPagesTest(t)
+	createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	now := time.Now().UTC()
+	dashboardPagesMu.Lock()
+	displaysState["d1"] = &displayData{ID: "d1", Name: "Flybridge", Slug: "flybridge", CreatedAt: now, UpdatedAt: now}
+	dashboardPagesMu.Unlock()
+
+	c, rec := newDashboardPagesRequest(t, http.MethodGet, "/api/dashboard-pages", nil)
+	if err := listDashboardPagesHandler(c); err != nil {
+		t.Fatalf("listDashboardPagesHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), `"displays"`) {
+		t.Fatalf("expected the page list response to never carry displays, got %s", rec.Body.String())
+	}
+}
+
+// ── page <-> display assignment (multiple-wall-displays plan §1, §3) ───────
+//
+// DisplayID replaces the old Kiosk bool: a page belongs to at most one
+// display, named by id rather than flagged true/false. Dwell and condition
+// keep their old validate-together shape (see validatePageDisplayFields),
+// with the added rule that a non-empty DisplayID must name a display
+// actually on record — the same fail-closed stance heroWidgetExists already
+// takes for hero. Hero and display are mutually exclusive (plan §1): a
+// patch that assigns a display clears Hero, and a patch that sets a
+// non-empty Hero on a page that has a DisplayID is rejected.
+
+// seedTestDisplay inserts a display straight into displaysState rather than
+// going through the CRUD handler — displays.go's create/patch/delete
+// handlers do not exist yet at this point in the plan's build order, and
+// these page-assignment tests only need a display to exist, not to exercise
+// how it got there.
+func seedTestDisplay(t *testing.T, id, slug string) *displayData {
+	t.Helper()
+	now := time.Now().UTC()
+	d := &displayData{ID: id, Name: slug, Slug: slug, CreatedAt: now, UpdatedAt: now}
+	dashboardPagesMu.Lock()
+	if displaysState == nil {
+		displaysState = make(map[string]*displayData)
+	}
+	displaysState[id] = d
+	dashboardPagesMu.Unlock()
+	return d
+}
+
+func TestCreateDashboardPageHandler_RejectsUnknownDisplayID(t *testing.T) {
+	setupDashboardPagesTest(t)
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Wall: Engines",
+		"widgets":       sampleDashboardWidgets(),
+		"display_id":    "no-such-display",
+		"dwell_seconds": 30,
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateDashboardPageHandler_DisplayRequiresDwell(t *testing.T) {
+	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":       "Wall: Engines",
+		"widgets":    sampleDashboardWidgets(),
+		"display_id": display.ID,
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateDashboardPageHandler_CreateAcceptsDisplayAssignment(t *testing.T) {
+	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Wall: Engines",
+		"widgets":       sampleDashboardWidgets(),
+		"display_id":    display.ID,
+		"dwell_seconds": 30,
+		"show_when":     "anchored",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+	if page.DisplayID != display.ID || page.DwellSeconds != 30 || page.ShowWhen != "anchored" {
+		t.Fatalf("expected display assignment to round-trip on create, got display_id=%q dwell=%d when=%q", page.DisplayID, page.DwellSeconds, page.ShowWhen)
+	}
+}
+
+func TestCreateDashboardPageHandler_RejectsHeroAndDisplayTogether(t *testing.T) {
+	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Wall: Engines",
+		"widgets":       sampleDashboardWidgets(),
+		"hero":          "wind",
+		"display_id":    display.ID,
+		"dwell_seconds": 30,
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestPatchDashboardPageHandler_ClearingDisplayKeepsDwellAndCondition(t *testing.T) {
+	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Wall: Engines",
+		"widgets":       sampleDashboardWidgets(),
+		"display_id":    display.ID,
+		"dwell_seconds": 45,
+		"show_when":     "anchored",
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"display_id": "",
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
+	}
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.DisplayID != "" {
+		t.Fatalf("expected display_id to clear, got %q", updated.DisplayID)
+	}
+	if updated.DwellSeconds != 45 || updated.ShowWhen != "anchored" {
+		t.Fatalf("expected clearing the display to leave dwell and condition alone, got dwell=%d when=%q", updated.DwellSeconds, updated.ShowWhen)
+	}
+}
+
+func TestPatchDashboardPageHandler_AssigningDisplayClearsHero(t *testing.T) {
+	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
+	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"hero": "wind",
+	})
+	c.SetParamNames("id")
+	c.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"display_id":    display.ID,
+		"dwell_seconds": 30,
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
+	}
+	var updated dashboardPageData
+	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to parse patch response: %v", err)
+	}
+	if updated.Hero != "" {
+		t.Fatalf("expected assigning a display to clear hero, got %q", updated.Hero)
+	}
+	if updated.DisplayID != display.ID {
+		t.Fatalf("expected display_id to be set, got %q", updated.DisplayID)
+	}
+}
+
+func TestPatchDashboardPageHandler_RejectsHeroOnDisplayPage(t *testing.T) {
+	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
+
+	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
+		"name":          "Wall: Engines",
+		"widgets":       sampleDashboardWidgets(),
+		"display_id":    display.ID,
+		"dwell_seconds": 30,
+	})
+	if err := createDashboardPageHandler(c); err != nil {
+		t.Fatalf("createDashboardPageHandler returned error: %v", err)
+	}
+	var page dashboardPageData
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("failed to parse created page: %v", err)
+	}
+
+	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
+		"hero": "wind",
+	})
+	c2.SetParamNames("id")
+	c2.SetParamValues(page.ID)
+	if err := patchDashboardPageHandler(c2); err != nil {
+		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec2.Code, rec2.Body.String())
+	}
+}
+
 // The walker's fourth widget kind to learn (ADR 0052, 0049, and twice for
 // clusters), and the first that is not itself a widget: the ribbon is
 // vessel-level, so it has no widget id and no page, but its lamps are bound
@@ -2645,24 +3247,28 @@ func TestClusterFuelRailRoundTripsEveryRenderedField(t *testing.T) {
 	}
 }
 
-// ── kiosk fields (ADR 0089) ──────────────────────────────────────────────
+// ── display assignment fields (ADR 0089, superseded in part by ADR 0110) ───
 //
-// Kiosk fields turn an ordinary page into one that can appear in the wall
-// display rotation at /kiosk: a bool flag, a duration and an optional
-// condition. They follow the same validate-fail-closed pattern ADR 0060
-// established for skin and ADR 0072 established for hero, with the added
-// wrinkle that the three fields are validated together (see
-// validateKioskFields and its call sites).
+// A page belongs to at most one wall display, named by display_id rather
+// than a bool flag. They follow the same validate-fail-closed pattern ADR
+// 0060 established for skin and ADR 0072 established for hero, with the
+// added wrinkle that the three fields are validated together (see
+// validatePageDisplayFields and its call sites). RejectsUnknownDisplayID,
+// DisplayRequiresDwell, ClearingDisplayKeepsDwellAndCondition,
+// AssigningDisplayClearsHero, RejectsHeroOnDisplayPage and
+// CreateAcceptsDisplayAssignment live earlier in this file, next to
+// seedTestDisplay.
 
-func TestDashboardPages_KioskRoundTripsThroughPostAndGet(t *testing.T) {
+func TestDashboardPages_DisplayAssignmentRoundTripsThroughPostAndGet(t *testing.T) {
 	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
 
 	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
 		"name":          "Wall: Engines",
 		"widgets":       sampleDashboardWidgets(),
-		"kiosk":         true,
-		"kiosk_seconds": 30,
-		"kiosk_when":    "anchored",
+		"display_id":    display.ID,
+		"dwell_seconds": 30,
+		"show_when":     "anchored",
 	})
 	if err := createDashboardPageHandler(c); err != nil {
 		t.Fatalf("createDashboardPageHandler returned error: %v", err)
@@ -2674,8 +3280,8 @@ func TestDashboardPages_KioskRoundTripsThroughPostAndGet(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("failed to parse created page: %v", err)
 	}
-	if !page.Kiosk || page.KioskSeconds != 30 || page.KioskWhen != "anchored" {
-		t.Fatalf("expected kiosk fields to round-trip on create, got kiosk=%v seconds=%d when=%q", page.Kiosk, page.KioskSeconds, page.KioskWhen)
+	if page.DisplayID != display.ID || page.DwellSeconds != 30 || page.ShowWhen != "anchored" {
+		t.Fatalf("expected display fields to round-trip on create, got display_id=%q dwell=%d when=%q", page.DisplayID, page.DwellSeconds, page.ShowWhen)
 	}
 
 	c2, rec2 := newDashboardPagesRequest(t, http.MethodGet, "/api/dashboard-pages/"+page.ID, nil)
@@ -2688,55 +3294,41 @@ func TestDashboardPages_KioskRoundTripsThroughPostAndGet(t *testing.T) {
 	if err := json.Unmarshal(rec2.Body.Bytes(), &fetched); err != nil {
 		t.Fatalf("failed to parse get response: %v", err)
 	}
-	if !fetched.Kiosk || fetched.KioskSeconds != 30 || fetched.KioskWhen != "anchored" {
-		t.Fatalf("expected kiosk fields to round-trip through GET, got kiosk=%v seconds=%d when=%q", fetched.Kiosk, fetched.KioskSeconds, fetched.KioskWhen)
+	if fetched.DisplayID != display.ID || fetched.DwellSeconds != 30 || fetched.ShowWhen != "anchored" {
+		t.Fatalf("expected display fields to round-trip through GET, got display_id=%q dwell=%d when=%q", fetched.DisplayID, fetched.DwellSeconds, fetched.ShowWhen)
 	}
 }
 
-func TestCreateDashboardPageHandler_RejectsKioskWithoutSeconds(t *testing.T) {
+func TestCreateDashboardPageHandler_RejectsDwellSecondsOutOfRange(t *testing.T) {
 	setupDashboardPagesTest(t)
-
-	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
-		"name":    "No Duration",
-		"widgets": sampleDashboardWidgets(),
-		"kiosk":   true,
-	})
-	if err := createDashboardPageHandler(c); err != nil {
-		t.Fatalf("createDashboardPageHandler returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
-	}
-}
-
-func TestCreateDashboardPageHandler_RejectsKioskSecondsOutOfRange(t *testing.T) {
-	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
 
 	for _, seconds := range []int{4, 3601} {
 		c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
 			"name":          "Bad Duration",
 			"widgets":       sampleDashboardWidgets(),
-			"kiosk":         true,
-			"kiosk_seconds": seconds,
+			"display_id":    display.ID,
+			"dwell_seconds": seconds,
 		})
 		if err := createDashboardPageHandler(c); err != nil {
 			t.Fatalf("createDashboardPageHandler returned error: %v", err)
 		}
 		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("kiosk_seconds=%d: expected status %d, got %d: %s", seconds, http.StatusBadRequest, rec.Code, rec.Body.String())
+			t.Fatalf("dwell_seconds=%d: expected status %d, got %d: %s", seconds, http.StatusBadRequest, rec.Code, rec.Body.String())
 		}
 	}
 }
 
-func TestCreateDashboardPageHandler_RejectsUnknownKioskWhen(t *testing.T) {
+func TestCreateDashboardPageHandler_RejectsUnknownShowWhen(t *testing.T) {
 	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
 
 	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
 		"name":          "Bad Condition",
 		"widgets":       sampleDashboardWidgets(),
-		"kiosk":         true,
-		"kiosk_seconds": 30,
-		"kiosk_when":    "underway",
+		"display_id":    display.ID,
+		"dwell_seconds": 30,
+		"show_when":     "underway",
 	})
 	if err := createDashboardPageHandler(c); err != nil {
 		t.Fatalf("createDashboardPageHandler returned error: %v", err)
@@ -2746,34 +3338,36 @@ func TestCreateDashboardPageHandler_RejectsUnknownKioskWhen(t *testing.T) {
 	}
 }
 
-func TestCreateDashboardPageHandler_AcceptsAutoStateKioskWhen(t *testing.T) {
+func TestCreateDashboardPageHandler_AcceptsAutoStateShowWhen(t *testing.T) {
 	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
 
 	for _, when := range []string{"motoring", "sailing", "moored"} {
 		c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
 			"name":          "Wall: " + when,
 			"widgets":       sampleDashboardWidgets(),
-			"kiosk":         true,
-			"kiosk_seconds": 30,
-			"kiosk_when":    when,
+			"display_id":    display.ID,
+			"dwell_seconds": 30,
+			"show_when":     when,
 		})
 		if err := createDashboardPageHandler(c); err != nil {
 			t.Fatalf("createDashboardPageHandler returned error: %v", err)
 		}
 		if rec.Code != http.StatusCreated {
-			t.Fatalf("kiosk_when=%q: expected status %d, got %d: %s", when, http.StatusCreated, rec.Code, rec.Body.String())
+			t.Fatalf("show_when=%q: expected status %d, got %d: %s", when, http.StatusCreated, rec.Code, rec.Body.String())
 		}
 	}
 }
 
-func TestPatchDashboardPageHandler_KioskOnlyPatchSucceedsAndReusesStoredSeconds(t *testing.T) {
+func TestPatchDashboardPageHandler_DisplayOnlyPatchSucceedsAndReusesStoredDwell(t *testing.T) {
 	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
 
 	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
 		"name":          "Cluster preview",
 		"widgets":       sampleDashboardWidgets(),
-		"kiosk":         true,
-		"kiosk_seconds": 45,
+		"display_id":    display.ID,
+		"dwell_seconds": 45,
 	})
 	if err := createDashboardPageHandler(c); err != nil {
 		t.Fatalf("createDashboardPageHandler returned error: %v", err)
@@ -2783,12 +3377,13 @@ func TestPatchDashboardPageHandler_KioskOnlyPatchSucceedsAndReusesStoredSeconds(
 		t.Fatalf("failed to parse created page: %v", err)
 	}
 
-	// Untick, then re-tick with no seconds in the body at all - a kiosk-only
-	// patch has neither name, skin, hero nor widgets, so it must not trip the
-	// "no patch fields provided" guard, and it must reuse the 45s already on
-	// record rather than requiring the caller to resend it.
+	// Clear, then re-assign with no dwell in the body at all - a
+	// display-only patch has neither name, skin, hero nor widgets, so it
+	// must not trip the "no patch fields provided" guard, and it must reuse
+	// the 45s already on record rather than requiring the caller to resend
+	// it.
 	c1, rec1 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
-		"kiosk": false,
+		"display_id": "",
 	})
 	c1.SetParamNames("id")
 	c1.SetParamValues(page.ID)
@@ -2800,7 +3395,7 @@ func TestPatchDashboardPageHandler_KioskOnlyPatchSucceedsAndReusesStoredSeconds(
 	}
 
 	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
-		"kiosk": true,
+		"display_id": display.ID,
 	})
 	c2.SetParamNames("id")
 	c2.SetParamValues(page.ID)
@@ -2814,17 +3409,18 @@ func TestPatchDashboardPageHandler_KioskOnlyPatchSucceedsAndReusesStoredSeconds(
 	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("failed to parse patch response: %v", err)
 	}
-	if !updated.Kiosk || updated.KioskSeconds != 45 {
-		t.Fatalf("expected kiosk to reuse the stored 45s duration, got kiosk=%v seconds=%d", updated.Kiosk, updated.KioskSeconds)
+	if updated.DisplayID != display.ID || updated.DwellSeconds != 45 {
+		t.Fatalf("expected re-assignment to reuse the stored 45s dwell, got display_id=%q dwell=%d", updated.DisplayID, updated.DwellSeconds)
 	}
 }
 
-func TestPatchDashboardPageHandler_RejectsKioskTrueWithNoStoredSeconds(t *testing.T) {
+func TestPatchDashboardPageHandler_RejectsDisplayWithNoStoredDwell(t *testing.T) {
 	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
 	page := createTestDashboardPage(t, "Test Page", sampleDashboardWidgets())
 
 	c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
-		"kiosk": true,
+		"display_id": display.ID,
 	})
 	c.SetParamNames("id")
 	c.SetParamValues(page.ID)
@@ -2836,15 +3432,16 @@ func TestPatchDashboardPageHandler_RejectsKioskTrueWithNoStoredSeconds(t *testin
 	}
 }
 
-func TestPatchDashboardPageHandler_WidgetsOnlyPatchPreservesKioskFields(t *testing.T) {
+func TestPatchDashboardPageHandler_WidgetsOnlyPatchPreservesDisplayFields(t *testing.T) {
 	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
 
 	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
 		"name":          "Cluster preview",
 		"widgets":       sampleDashboardWidgets(),
-		"kiosk":         true,
-		"kiosk_seconds": 30,
-		"kiosk_when":    "anchored",
+		"display_id":    display.ID,
+		"dwell_seconds": 30,
+		"show_when":     "anchored",
 	})
 	if err := createDashboardPageHandler(c); err != nil {
 		t.Fatalf("createDashboardPageHandler returned error: %v", err)
@@ -2869,61 +3466,21 @@ func TestPatchDashboardPageHandler_WidgetsOnlyPatchPreservesKioskFields(t *testi
 	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("failed to parse patch response: %v", err)
 	}
-	if !updated.Kiosk || updated.KioskSeconds != 30 || updated.KioskWhen != "anchored" {
-		t.Fatalf("expected kiosk fields to survive a widgets-only patch, got kiosk=%v seconds=%d when=%q", updated.Kiosk, updated.KioskSeconds, updated.KioskWhen)
+	if updated.DisplayID != display.ID || updated.DwellSeconds != 30 || updated.ShowWhen != "anchored" {
+		t.Fatalf("expected display fields to survive a widgets-only patch, got display_id=%q dwell=%d when=%q", updated.DisplayID, updated.DwellSeconds, updated.ShowWhen)
 	}
 }
 
-func TestPatchDashboardPageHandler_UntickKeepsSecondsAndCondition(t *testing.T) {
+func TestPatchDashboardPageHandler_AcceptsAutoStateShowWhen(t *testing.T) {
 	setupDashboardPagesTest(t)
-
-	c, rec := newDashboardPagesRequest(t, http.MethodPost, "/api/dashboard-pages", map[string]any{
-		"name":          "Cluster preview",
-		"widgets":       sampleDashboardWidgets(),
-		"kiosk":         true,
-		"kiosk_seconds": 60,
-		"kiosk_when":    "anchored",
-	})
-	if err := createDashboardPageHandler(c); err != nil {
-		t.Fatalf("createDashboardPageHandler returned error: %v", err)
-	}
-	var page dashboardPageData
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatalf("failed to parse created page: %v", err)
-	}
-
-	c2, rec2 := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
-		"kiosk": false,
-	})
-	c2.SetParamNames("id")
-	c2.SetParamValues(page.ID)
-	if err := patchDashboardPageHandler(c2); err != nil {
-		t.Fatalf("patchDashboardPageHandler returned error: %v", err)
-	}
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec2.Code, rec2.Body.String())
-	}
-	var updated dashboardPageData
-	if err := json.Unmarshal(rec2.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("failed to parse patch response: %v", err)
-	}
-	if updated.Kiosk {
-		t.Fatal("expected kiosk to be false after untick")
-	}
-	if updated.KioskSeconds != 60 || updated.KioskWhen != "anchored" {
-		t.Fatalf("expected untick to remember seconds and condition, got seconds=%d when=%q", updated.KioskSeconds, updated.KioskWhen)
-	}
-}
-
-func TestPatchDashboardPageHandler_AcceptsAutoStateKioskWhen(t *testing.T) {
-	setupDashboardPagesTest(t)
+	display := seedTestDisplay(t, "d1", "flybridge")
 	page := createTestDashboardPage(t, "Cluster preview", sampleDashboardWidgets())
 
 	for _, when := range []string{"motoring", "sailing", "moored"} {
 		c, rec := newDashboardPagesRequest(t, http.MethodPatch, "/api/dashboard-pages/"+page.ID, map[string]any{
-			"kiosk":         true,
-			"kiosk_seconds": 30,
-			"kiosk_when":    when,
+			"display_id":    display.ID,
+			"dwell_seconds": 30,
+			"show_when":     when,
 		})
 		c.SetParamNames("id")
 		c.SetParamValues(page.ID)
@@ -2931,23 +3488,23 @@ func TestPatchDashboardPageHandler_AcceptsAutoStateKioskWhen(t *testing.T) {
 			t.Fatalf("patchDashboardPageHandler returned error: %v", err)
 		}
 		if rec.Code != http.StatusOK {
-			t.Fatalf("kiosk_when=%q: expected status %d, got %d: %s", when, http.StatusOK, rec.Code, rec.Body.String())
+			t.Fatalf("show_when=%q: expected status %d, got %d: %s", when, http.StatusOK, rec.Code, rec.Body.String())
 		}
 	}
 }
 
-// omitempty keeps existing dashboard-pages.json files byte-identical: an
-// unflagged page must not gain "kiosk"/"kiosk_seconds"/"kiosk_when" keys
-// just because the struct grew them, mirroring
+// omitempty keeps existing dashboard-pages.json files byte-identical: a page
+// with no display must not gain "display_id"/"dwell_seconds"/"show_when"
+// keys just because the struct grew them, mirroring
 // TestDashboardLayoutItem_OmitsEmbedKeyWhenAbsent.
-func TestDashboardPageData_OmitsKioskKeysWhenUnset(t *testing.T) {
+func TestDashboardPageData_OmitsDisplayKeysWhenUnset(t *testing.T) {
 	encoded, err := json.Marshal(dashboardPageData{ID: "p1", Name: "Anchored", Widgets: []dashboardLayoutItem{}})
 	if err != nil {
 		t.Fatalf("failed to marshal page: %v", err)
 	}
-	for _, key := range []string{"kiosk", "kiosk_seconds", "kiosk_when"} {
+	for _, key := range []string{"display_id", "dwell_seconds", "show_when"} {
 		if strings.Contains(string(encoded), `"`+key+`"`) {
-			t.Fatalf("expected no %q key for an unflagged page, got %s", key, encoded)
+			t.Fatalf("expected no %q key for a page with no display, got %s", key, encoded)
 		}
 	}
 }

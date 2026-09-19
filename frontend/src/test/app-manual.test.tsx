@@ -240,9 +240,9 @@ describe('the in-app manual (ADR 0095)', () => {
     expect(manualNavButton).toHaveAttribute('data-active', 'false')
   })
 
-  it('/kiosk shows neither the header ? nor a sidebar Manual item', () => {
+  it('/display/<slug> shows neither the header ? nor a sidebar Manual item', () => {
     stubFetch()
-    window.history.replaceState({}, '', '/kiosk')
+    window.history.replaceState({}, '', '/display/flybridge')
     render(<App />)
 
     expect(screen.queryByRole('button', { name: 'Open the manual' })).not.toBeInTheDocument()

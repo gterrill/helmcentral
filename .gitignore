@@ -22,6 +22,7 @@ backend/data/plugin_overrides.sqlite
 backend/data/alarm-rules.json
 backend/data/alarm-log.sqlite
 backend/data/assistant.sqlite
+backend/data/documents.sqlite
 backend/data/webpush-subscriptions.sqlite
 backend/data/alarm-transports.json
 # WAL mode (tile-cache.sqlite, and nearby-contacts.sqlite as of the backend

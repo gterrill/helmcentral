@@ -207,6 +207,23 @@ beforeEach(() => {
       return Promise.resolve({ ok: true, json: async () => ({ authenticated: false }) })
     }
 
+    // ADR 0110: one wall display, so PageDisplaySelect renders its ordinary
+    // <select> (the toolbar-order test below needs that, not the "no
+    // displays yet" dead-end button).
+    if (url === '/api/displays' && method === 'GET') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          displays: [{
+            id: 'd1', name: 'Flybridge', slug: 'flybridge',
+            width: 1920, height: 360, scale: 1, rotate: 0,
+            pixel_shift: false, wake_lock: false,
+            created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+          }],
+        }),
+      })
+    }
+
     const patchMatch = /^\/api\/dashboard-pages\/([^/]+)$/.exec(url)
     if (patchMatch && method === 'PATCH') {
       const patch = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
@@ -321,7 +338,7 @@ describe('creating a dashboard page', () => {
     expect(screen.getByText(/use the add tile button to get started/i)).toBeInTheDocument()
   })
 
-  it('lays the toolbar out in order — name field, Add Tile, Ribbon, Skin, Hero, Kiosk — above the page content', async () => {
+  it('lays the toolbar out in order — name field, Add Tile, Ribbon, Skin, Hero, Wall display — above the page content', async () => {
     render(<App />)
     await activePageReady()
     await createNewPage()
@@ -332,9 +349,9 @@ describe('creating a dashboard page', () => {
     const ribbon = screen.getByRole('button', { name: /^ribbon$/i })
     const skin = screen.getByLabelText(/skin for/i)
     const hero = screen.getByLabelText(/hero tile for/i)
-    const kiosk = screen.getByLabelText(/^kiosk for/i)
+    const wallDisplay = await screen.findByLabelText(/^wall display for/i)
 
-    const positions = [nameField, addWidget, ribbon, skin, hero, kiosk]
+    const positions = [nameField, addWidget, ribbon, skin, hero, wallDisplay]
     for (let i = 0; i < positions.length - 1; i += 1) {
       // DOCUMENT_POSITION_FOLLOWING (4): positions[i] comes before positions[i + 1].
       expect(positions[i].compareDocumentPosition(positions[i + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
