@@ -26,6 +26,29 @@ func newTestSecretsStore(t *testing.T) *secretsStore {
 	return store
 }
 
+// withSeededSecretsStore installs a fresh store as globalSecretsStore (see
+// withTestSecretsStore, secrets_settings_handlers_test.go), pre-populated
+// with values. Tests that used to configure SIGNALK_USERNAME,
+// SIGNALK_PASSWORD or INFLUXDB_TOKEN via t.Setenv use this instead, now
+// that loadSignalKCredentials and loadInfluxSettings read the store
+// directly rather than the process environment (ADR 0023 amendment,
+// 2026-09-19). An empty value is skipped rather than Set (which would
+// delete the row) so a caller can pass "" for a key it wants left unset -
+// "a store with nothing in it" for that key, not a store that errors.
+func withSeededSecretsStore(t *testing.T, values map[string]string) *secretsStore {
+	t.Helper()
+	store := withTestSecretsStore(t)
+	for key, value := range values {
+		if value == "" {
+			continue
+		}
+		if err := store.Set(key, value); err != nil {
+			t.Fatalf("Set(%s): %v", key, err)
+		}
+	}
+	return store
+}
+
 func TestSecretsStore_SetThenGetRoundTrips(t *testing.T) {
 	store := newTestSecretsStore(t)
 
@@ -227,36 +250,42 @@ func TestSecretsStore_HELMCENTRAL_MASTER_KEY_WrongLengthFailsFast(t *testing.T) 
 	}
 }
 
-func TestSecretsStore_LoadIntoEnv_SetsOnlyCoreEnvSecretKeys(t *testing.T) {
-	store := newTestSecretsStore(t)
+// TestLoadSignalKCredentials_ProcessEnvIsNotConsulted pins the ADR 0023
+// amendment (2026-09-19) directly: loadSignalKCredentials used to read
+// SIGNALK_USERNAME/SIGNALK_PASSWORD straight from the process environment
+// (and, before that, from a boot-time copy of the store into that same
+// environment via the now-deleted LoadIntoEnv). Neither exists any more -
+// a credential set ONLY in the process environment, with nothing in the
+// store, must be invisible to it.
+func TestLoadSignalKCredentials_ProcessEnvIsNotConsulted(t *testing.T) {
+	withTestSecretsStore(t)
+	t.Setenv("SIGNALK_USERNAME", "admin")
+	t.Setenv("SIGNALK_PASSWORD", "hunter2")
 
-	for _, key := range knownSecretKeys {
-		if err := store.Set(key, "value-for-"+key); err != nil {
-			t.Fatalf("Set(%s): %v", key, err)
-		}
+	username, password, err := loadSignalKCredentials("unused")
+	if err != nil {
+		t.Fatalf("loadSignalKCredentials: %v", err)
 	}
-	for _, key := range knownSecretKeys {
-		t.Setenv(key, "")
-		os.Unsetenv(key)
+	if username != "" || password != "" {
+		t.Fatalf("expected a credential set only in the process environment to be ignored, got username=%q password=%q", username, password)
 	}
+}
 
-	if err := store.LoadIntoEnv(); err != nil {
-		t.Fatalf("LoadIntoEnv: %v", err)
-	}
+// TestLoadSignalKCredentials_ReadsFromTheStore is the positive half of the
+// above: a credential actually saved to the store (not the environment) is
+// what loadSignalKCredentials must return.
+func TestLoadSignalKCredentials_ReadsFromTheStore(t *testing.T) {
+	withSeededSecretsStore(t, map[string]string{
+		"SIGNALK_USERNAME": "admin",
+		"SIGNALK_PASSWORD": "hunter2",
+	})
 
-	for _, key := range coreEnvSecretKeys {
-		got := os.Getenv(key)
-		want := "value-for-" + key
-		if got != want {
-			t.Errorf("expected coreEnvSecretKeys %s to be set to %q, got %q", key, want, got)
-		}
+	username, password, err := loadSignalKCredentials("unused")
+	if err != nil {
+		t.Fatalf("loadSignalKCredentials: %v", err)
 	}
-
-	weatherKitKeys := []string{"WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY"}
-	for _, key := range weatherKitKeys {
-		if got := os.Getenv(key); got != "" {
-			t.Errorf("expected WEATHERKIT_* key %s to NOT be set into the process env by LoadIntoEnv, got %q", key, got)
-		}
+	if username != "admin" || password != "hunter2" {
+		t.Fatalf("expected the stored credential, got username=%q password=%q", username, password)
 	}
 }
 
@@ -334,17 +363,11 @@ func TestIsKnownSecretKey(t *testing.T) {
 
 // TestIsKnownSecretKey_OpenRouterAPIKey pins OPENROUTER_API_KEY (ADR 0065 §5,
 // ADR 0093) as a stored secret that trusted host code reads directly from
-// globalSecretsStore rather than through LoadIntoEnv/coreEnvSecretKeys - see
-// coreEnvSecretKeys's own doc comment for why WEATHERKIT_* is excluded the
-// same way.
+// globalSecretsStore at point of use, the same way every other secret is
+// read since the ADR 0023 amendment retired the process-environment shim.
 func TestIsKnownSecretKey_OpenRouterAPIKey(t *testing.T) {
 	if !isKnownSecretKey("OPENROUTER_API_KEY") {
 		t.Errorf("expected OPENROUTER_API_KEY to be a known secret key")
-	}
-	for _, key := range coreEnvSecretKeys {
-		if key == "OPENROUTER_API_KEY" {
-			t.Fatalf("OPENROUTER_API_KEY must never appear in coreEnvSecretKeys: it must not enter the process environment where a WASM plugin's ${VAR} config expansion could reach it")
-		}
 	}
 }
 
@@ -561,24 +584,6 @@ func TestDestinationChanged_EmptyToNonEmptyIsAChange(t *testing.T) {
 	}
 }
 
-func TestIsCoreEnvSecretKey(t *testing.T) {
-	for _, key := range coreEnvSecretKeys {
-		if !isCoreEnvSecretKey(key) {
-			t.Errorf("expected %s (a coreEnvSecretKeys entry) to report true", key)
-		}
-	}
-	// NTFY_TOKEN and SMTP_PASSWORD are knownSecretKeys but never copied into
-	// the process environment - they're read fresh from the store on every
-	// send (secretOrEmpty, alarm_notify.go), so isCoreEnvSecretKey must say
-	// no for them.
-	if isCoreEnvSecretKey("NTFY_TOKEN") {
-		t.Error("expected NTFY_TOKEN to not be a coreEnvSecretKeys entry")
-	}
-	if isCoreEnvSecretKey("SMTP_PASSWORD") {
-		t.Error("expected SMTP_PASSWORD to not be a coreEnvSecretKeys entry")
-	}
-}
-
 func TestClearBoundSecret_NilStoreReturnsErrorRatherThanSilentlySucceeding(t *testing.T) {
 	prev := globalSecretsStore
 	globalSecretsStore = nil
@@ -607,48 +612,5 @@ func TestClearBoundSecret_DeletesStoreRow(t *testing.T) {
 
 	if has, err := store.Has("NTFY_TOKEN"); err != nil || has {
 		t.Fatalf("expected NTFY_TOKEN row deleted, has=%v err=%v", has, err)
-	}
-}
-
-// The subtle half of this fix: SIGNALK_USERNAME/PASSWORD and INFLUXDB_TOKEN
-// are copied into the process environment once at boot (LoadIntoEnv)
-// because trusted host code reads them via getEnv/os.Getenv, not the store,
-// on every call. Deleting only the store row would leave that cached copy
-// live in the running process until its next restart - clearBoundSecret
-// must also os.Unsetenv a coreEnvSecretKeys entry for the clear to take
-// effect immediately rather than on the next reboot.
-func TestClearBoundSecret_UnsetsProcessEnvForCoreEnvSecretKey(t *testing.T) {
-	store := withTestSecretsStore(t)
-	if err := store.Set("SIGNALK_USERNAME", "admin"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	t.Setenv("SIGNALK_USERNAME", "admin")
-
-	if err := clearBoundSecret("SIGNALK_USERNAME", "test"); err != nil {
-		t.Fatalf("clearBoundSecret: %v", err)
-	}
-
-	if got := os.Getenv("SIGNALK_USERNAME"); got != "" {
-		t.Fatalf("expected SIGNALK_USERNAME unset from the process env, got %q", got)
-	}
-}
-
-// NTFY_TOKEN and SMTP_PASSWORD are never copied into the process env in the
-// first place (isKnownSecretKey true, isCoreEnvSecretKey false), so clearing
-// one must not touch os.Unsetenv at all - pinned here by proving an
-// unrelated env var of the same non-core key survives the clear untouched.
-func TestClearBoundSecret_DoesNotTouchProcessEnvForNonCoreEnvSecretKey(t *testing.T) {
-	store := withTestSecretsStore(t)
-	if err := store.Set("NTFY_TOKEN", "tk-secret"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	t.Setenv("NTFY_TOKEN", "leftover-from-somewhere-else")
-
-	if err := clearBoundSecret("NTFY_TOKEN", "test"); err != nil {
-		t.Fatalf("clearBoundSecret: %v", err)
-	}
-
-	if got := os.Getenv("NTFY_TOKEN"); got != "leftover-from-somewhere-else" {
-		t.Fatalf("expected NTFY_TOKEN's process env to be left untouched (it is never core-env), got %q", got)
 	}
 }

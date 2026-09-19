@@ -2346,11 +2346,42 @@ type cachedToken struct {
 var skTokenMu sync.Mutex
 var skTokenCache *cachedToken
 
-// loadSignalKCredentials reads username/password from environment variables.
-func loadSignalKCredentials(_ string) (username, password string) {
-	username = getEnv("SIGNALK_USERNAME", "")
-	password = getEnv("SIGNALK_PASSWORD", "")
-	return
+// loadSignalKCredentials reads SIGNALK_USERNAME/SIGNALK_PASSWORD from
+// globalSecretsStore at point of use (ADR 0023 amendment, 2026-09-19) - the
+// boot-time copy into the process environment (LoadIntoEnv) is retired, so
+// there is no cache here to go stale when an operator rotates the
+// credential from the Secrets panel.
+//
+// A nil store is treated the same as "no credential configured", not an
+// error: it mirrors wasm_plugin.go's configForWasmPlugin, whose own doc
+// comment draws this exact distinction for a READ (as opposed to
+// clearBoundSecret's WRITE, where a nil store must fail loudly) - a caller
+// that cannot reach a secrets store at all simply proceeds unauthenticated,
+// which acquireSignalKToken already treats as a supported, legitimate mode.
+// A store that IS open but fails to read or decrypt a row is a different,
+// worse case: an operator may have a real credential configured, and
+// silently discarding it here would degrade SignalK auth to anonymous with
+// nothing to show it happened - "a working boat with no alarm writes". That
+// case is returned as an error instead, per this repo's fallback policy.
+func loadSignalKCredentials(_ string) (username, password string, err error) {
+	// A nil store is a programming error, never a deployment state: main()
+	// opens it and log.Fatalf's on failure long before anything that reads a
+	// credential is started. Reporting it as "no credentials configured"
+	// would let SignalK quietly fall back to unauthenticated on a boot
+	// ordering mistake - a boat that looks healthy while every notifications.*
+	// write is silently refused. Surface it instead.
+	if globalSecretsStore == nil {
+		return "", "", fmt.Errorf("secrets store unavailable, cannot read SignalK credentials")
+	}
+	username, _, err = globalSecretsStore.Get("SIGNALK_USERNAME")
+	if err != nil {
+		return "", "", fmt.Errorf("reading SIGNALK_USERNAME: %w", err)
+	}
+	password, _, err = globalSecretsStore.Get("SIGNALK_PASSWORD")
+	if err != nil {
+		return "", "", fmt.Errorf("reading SIGNALK_PASSWORD: %w", err)
+	}
+	return username, password, nil
 }
 
 // acquireSignalKToken returns a cached JWT or fetches a fresh one.

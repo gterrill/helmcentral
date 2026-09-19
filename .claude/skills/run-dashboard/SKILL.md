@@ -142,12 +142,13 @@ sips -c <height> <width> --cropOffset <y> <x> /tmp/shot.png --out /tmp/shot-crop
   Its address/port come from the `signalk:` stanza of `settings.yaml`.
   Credentials, if the server requires auth, come from the encrypted
   secrets store (`backend/data/secrets.sqlite`, managed via Settings →
-  SignalK or `GET`/`POST /api/settings/secrets`) — the backend pushes
-  `SIGNALK_USERNAME`/`SIGNALK_PASSWORD` into its own environment at
-  startup. There is no `.env` file: `backend/.env` was retired in
-  favour of the store, and nothing loads one. Non-secret knobs
-  (`PORT`, `SETTINGS_FILE`, `HELMCENTRAL_STATE_DIR`, …) are real
-  environment variables — see `backend/README.md`.
+  SignalK or `GET`/`POST /api/settings/secrets`) — the backend reads
+  `SIGNALK_USERNAME`/`SIGNALK_PASSWORD` from that store directly each
+  time it authenticates, not from the process environment. There is no
+  `.env` file: `backend/.env` was retired in favour of the store, and
+  nothing loads one. Non-secret knobs (`PORT`, `SETTINGS_FILE`,
+  `HELMCENTRAL_STATE_DIR`, …) are real environment variables — see
+  `backend/README.md`.
 - **`npm run dev` on the bare host** (no Docker) also works standalone
   for frontend-only checks, but then `/api` calls fail unless
   `VITE_API_PROXY_TARGET` points at a reachable backend — expect all

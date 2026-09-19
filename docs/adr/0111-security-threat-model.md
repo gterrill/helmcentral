@@ -113,11 +113,15 @@ rather than persisting the new destination next to a secret that should
 have gone with the old one; see `clearBoundSecret`'s doc comment
 (`backend/secrets_store.go`) for the reasoning.
 
-One subtlety worth recording: `SIGNALK_USERNAME`, `SIGNALK_PASSWORD` and
-`INFLUXDB_TOKEN` are copied into the process environment once at boot
-(`LoadIntoEnv`), because trusted host code reads them via
+One subtlety worth recording, though it since changed underneath this fix:
+at the time E-1 was fixed, `SIGNALK_USERNAME`, `SIGNALK_PASSWORD` and
+`INFLUXDB_TOKEN` were copied into the process environment once at boot
+(`LoadIntoEnv`), because trusted host code read them via
 `getEnv`/`os.Getenv` rather than asking the store fresh each call. Deleting
-the store row alone would leave that cached copy live in the running
-process until its next restart, which is the leak this fix exists to close,
-merely delayed. `clearBoundSecret` also `os.Unsetenv`s these three so the
-clear takes effect immediately.
+the store row alone would have left that cached copy live in the running
+process until its next restart, so `clearBoundSecret` also `os.Unsetenv`'d
+these three so the clear took effect immediately. The ADR 0023 amendment
+(2026-09-19) retired that boot-time copy entirely — `loadSignalKCredentials`
+and `loadInfluxSettings` now read `globalSecretsStore` directly at point of
+use, so there is no cached process-environment copy left for
+`clearBoundSecret` to unset, and it no longer tries.

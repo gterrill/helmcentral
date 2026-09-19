@@ -468,8 +468,13 @@ var internalDenylistedEnvVars = map[string]bool{
 // process environment, and ONLY if the plugin's companion
 // <name>.allowed_secrets.json explicitly lists it - this is the actual
 // security boundary that keeps secrets like WEATHERKIT_PRIVATE_KEY from
-// being globally visible to every plugin via os.Setenv (LoadIntoEnv
-// deliberately never sets WEATHERKIT_* into the process env at all).
+// being globally visible to every plugin via os.Setenv. None of
+// knownSecretKeys is ever copied into the process environment by
+// Helmcentral's own code (the ADR 0023 amendment retired the boot-time
+// os.Setenv shim this comment used to describe for the SignalK/InfluxDB
+// subset; trusted host code now reads those from globalSecretsStore at
+// point of use too), so this allowlist is what determines whether a plugin
+// sees a secret at all, not merely whether it sees it early or late.
 // Non-secret names are entirely unaffected and keep today's raw
 // os.LookupEnv behavior.
 func configForWasmPlugin(wasmPath string) (map[string]string, error) {

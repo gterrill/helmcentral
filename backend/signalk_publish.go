@@ -71,7 +71,10 @@ func publishSignalKValue(path string, value any, confirm func(context.Context, s
 	}
 
 	httpBaseURL := buildSignalKURL(address, port)
-	username, password := loadSignalKCredentials(settingsPath)
+	username, password, err := loadSignalKCredentials(settingsPath)
+	if err != nil {
+		return fmt.Errorf("could not read the SignalK credentials: %w", err)
+	}
 	token, err := acquireSignalKToken(httpBaseURL, username, password)
 	if err != nil {
 		return fmt.Errorf("could not authenticate to publish %s: %w", path, err)

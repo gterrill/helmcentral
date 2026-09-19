@@ -13,8 +13,7 @@ import (
 func setupRouteActivationTest(t *testing.T) {
 	t.Helper()
 	setupRoutesTest(t)
-	t.Setenv("SIGNALK_USERNAME", "")
-	t.Setenv("SIGNALK_PASSWORD", "")
+	withTestSecretsStore(t) // a store with nothing in it: no credential configured
 	invalidateSignalKToken()
 	t.Cleanup(invalidateSignalKToken)
 }
@@ -414,8 +413,10 @@ func TestGetActiveRouteHandler_SignalKUnreachable(t *testing.T) {
 
 func TestSignalkRequestJSONWithAuth_RetriesOnAuthFailure(t *testing.T) {
 	setupRouteActivationTest(t)
-	t.Setenv("SIGNALK_USERNAME", "u")
-	t.Setenv("SIGNALK_PASSWORD", "p")
+	withSeededSecretsStore(t, map[string]string{
+		"SIGNALK_USERNAME": "u",
+		"SIGNALK_PASSWORD": "p",
+	})
 
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()

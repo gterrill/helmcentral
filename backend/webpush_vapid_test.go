@@ -85,12 +85,4 @@ func TestVAPIDKeysAreRegisteredSecrets(t *testing.T) {
 			t.Fatalf("%s must be a known secret key or the settings handlers will reject it", key)
 		}
 	}
-
-	// The private key must never reach the process environment, where a WASM
-	// guest's config path could brush against it. Same reasoning as WEATHERKIT_*.
-	for _, key := range coreEnvSecretKeys {
-		if key == "VAPID_PRIVATE_KEY" {
-			t.Fatalf("VAPID_PRIVATE_KEY must not be a core env secret")
-		}
-	}
 }

@@ -18,7 +18,7 @@ func TestNewInfluxClient_ReusesSameClientAcrossCalls(t *testing.T) {
 	resetInfluxClientCache(t)
 	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://127.0.0.1:1\n  org: myorg\n  bucket: mybucket\n")
 	t.Setenv("SETTINGS_FILE", path)
-	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
 
 	first, _, _, ok := newInfluxClient()
 	if !ok {
@@ -41,7 +41,7 @@ func TestNewInfluxClient_RebuildsWhenSettingsChange(t *testing.T) {
 	resetInfluxClientCache(t)
 	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://127.0.0.1:1\n  org: myorg\n  bucket: mybucket\n")
 	t.Setenv("SETTINGS_FILE", path)
-	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
 
 	first, _, _, ok := newInfluxClient()
 	if !ok {
@@ -67,7 +67,7 @@ func TestNewInfluxClient_UnconfiguredReleasesCachedClient(t *testing.T) {
 	resetInfluxClientCache(t)
 	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://127.0.0.1:1\n  org: myorg\n  bucket: mybucket\n")
 	t.Setenv("SETTINGS_FILE", path)
-	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
 
 	if _, _, _, ok := newInfluxClient(); !ok {
 		t.Fatalf("expected a configured client")
@@ -97,7 +97,7 @@ func TestNewInfluxClient_ConcurrentCallsAreRaceFree(t *testing.T) {
 	resetInfluxClientCache(t)
 	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://127.0.0.1:1\n  org: myorg\n  bucket: mybucket\n")
 	t.Setenv("SETTINGS_FILE", path)
-	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
 
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {

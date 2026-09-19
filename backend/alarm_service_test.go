@@ -60,8 +60,10 @@ func TestAcknowledgeAlarmHandlerAcknowledgesABusSourcedNotification(t *testing.T
 	invalidateSignalKToken()
 	t.Cleanup(invalidateSignalKToken)
 
-	t.Setenv("SIGNALK_USERNAME", "helmcentral-service")
-	t.Setenv("SIGNALK_PASSWORD", "service-secret")
+	withSeededSecretsStore(t, map[string]string{
+		"SIGNALK_USERNAME": "helmcentral-service",
+		"SIGNALK_PASSWORD": "service-secret",
+	})
 
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
@@ -140,8 +142,10 @@ func TestAlarmActionHandlerInvalidatesTheNotificationSyncOnAnUpstreamFailure(t *
 	invalidateSignalKToken()
 	t.Cleanup(invalidateSignalKToken)
 
-	t.Setenv("SIGNALK_USERNAME", "helmcentral-service")
-	t.Setenv("SIGNALK_PASSWORD", "service-secret")
+	withSeededSecretsStore(t, map[string]string{
+		"SIGNALK_USERNAME": "helmcentral-service",
+		"SIGNALK_PASSWORD": "service-secret",
+	})
 
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
@@ -214,8 +218,10 @@ func TestAcknowledgeAlarmRouteDecodesTheNamespacedNotificationID(t *testing.T) {
 	invalidateSignalKToken()
 	t.Cleanup(invalidateSignalKToken)
 
-	t.Setenv("SIGNALK_USERNAME", "helmcentral-service")
-	t.Setenv("SIGNALK_PASSWORD", "service-secret")
+	withSeededSecretsStore(t, map[string]string{
+		"SIGNALK_USERNAME": "helmcentral-service",
+		"SIGNALK_PASSWORD": "service-secret",
+	})
 
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()
@@ -245,8 +251,10 @@ func TestSilenceAlarmHandlerSilencesWithoutAcknowledging(t *testing.T) {
 	invalidateSignalKToken()
 	t.Cleanup(invalidateSignalKToken)
 
-	t.Setenv("SIGNALK_USERNAME", "helmcentral-service")
-	t.Setenv("SIGNALK_PASSWORD", "service-secret")
+	withSeededSecretsStore(t, map[string]string{
+		"SIGNALK_USERNAME": "helmcentral-service",
+		"SIGNALK_PASSWORD": "service-secret",
+	})
 
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()

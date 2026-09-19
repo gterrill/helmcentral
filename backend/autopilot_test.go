@@ -17,8 +17,7 @@ import (
 
 func setupAutopilotTest(t *testing.T) {
 	t.Helper()
-	t.Setenv("SIGNALK_USERNAME", "")
-	t.Setenv("SIGNALK_PASSWORD", "")
+	withTestSecretsStore(t) // a store with nothing in it: no credential configured
 	invalidateSignalKToken()
 	invalidateAutopilotIDCache()
 	t.Cleanup(invalidateSignalKToken)
@@ -566,8 +565,10 @@ func TestAutopilotControlHandler_NotFoundWhenNoAutopilotPresent(t *testing.T) {
 
 func TestAutopilotControlHandler_RetriesTokenExactlyOnce(t *testing.T) {
 	setupAutopilotTest(t)
-	t.Setenv("SIGNALK_USERNAME", "u")
-	t.Setenv("SIGNALK_PASSWORD", "p")
+	withSeededSecretsStore(t, map[string]string{
+		"SIGNALK_USERNAME": "u",
+		"SIGNALK_PASSWORD": "p",
+	})
 
 	srv, rs := newRecordingServer(t)
 	defer srv.Close()

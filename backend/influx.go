@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"sync"
@@ -18,38 +19,77 @@ type depthTrendPoint struct {
 }
 
 // loadInfluxSettings reads the "influxdb" section of settings.yaml
-// (url/org/bucket, only used if enabled: true) plus INFLUXDB_TOKEN from the
-// environment. ok is true only when enabled and all four values are
-// non-empty.
-func loadInfluxSettings(settingsPath string) (url, org, bucket, token string, ok bool) {
-	settings, err := readSettings(settingsPath)
-	if err != nil {
-		return "", "", "", "", false
+// (url/org/bucket, only used if enabled: true) plus INFLUXDB_TOKEN from
+// globalSecretsStore at point of use (ADR 0023 amendment, 2026-09-19) - the
+// boot-time copy into the process environment (LoadIntoEnv) is retired, so
+// there is no cache here to go stale when an operator rotates the token
+// from the Secrets panel. ok is true only when enabled and all four values
+// are non-empty.
+//
+// err is reserved for a real secrets-store read failure (a decrypt error, a
+// SQLite error) - never for Influx simply being disabled, which is the
+// overwhelmingly common case and returns ok=false, err=nil the same as
+// before. A nil store is likewise not an error here: mirrors
+// loadSignalKCredentials' own reasoning (signalk.go) for why a READ treats
+// an unreachable store as "not configured" rather than failing. The token
+// is read only once the settings say Influx is enabled, so a disabled
+// Influx never touches the store at all.
+func loadInfluxSettings(settingsPath string) (url, org, bucket, token string, ok bool, err error) {
+	settings, readErr := readSettings(settingsPath)
+	if readErr != nil {
+		return "", "", "", "", false, nil
 	}
 
 	influxMap, isMap := settings["influxdb"].(map[string]any)
 	if !isMap {
-		return "", "", "", "", false
+		return "", "", "", "", false, nil
 	}
 
 	enabled, _ := influxMap["enabled"].(bool)
 	if !enabled {
-		return "", "", "", "", false
+		return "", "", "", "", false, nil
 	}
 
 	url = trimEnvValue(coerceString(influxMap["url"]))
 	org = trimEnvValue(coerceString(influxMap["org"]))
 	bucket = trimEnvValue(coerceString(influxMap["bucket"]))
-	token = trimEnvValue(getEnv("INFLUXDB_TOKEN", ""))
+
+	// Reached only once settings say Influx is enabled, so a nil store here
+	// is a programming error rather than "Influx is off" - treat it as one.
+	// See loadSignalKCredentials for the same reasoning.
+	if globalSecretsStore == nil {
+		return "", "", "", "", false, fmt.Errorf("secrets store unavailable, cannot read INFLUXDB_TOKEN")
+	}
+	storedToken, _, getErr := globalSecretsStore.Get("INFLUXDB_TOKEN")
+	if getErr != nil {
+		return "", "", "", "", false, fmt.Errorf("reading INFLUXDB_TOKEN: %w", getErr)
+	}
+	token = trimEnvValue(storedToken)
 
 	ok = url != "" && org != "" && bucket != "" && token != ""
-	return url, org, bucket, token, ok
+	return url, org, bucket, token, ok, nil
 }
 
 // influxTelemetryConfigured wraps loadInfluxSettings with the default
-// settings path.
+// settings path. A real secrets-store read error is logged loudly rather
+// than folded silently into the same false returned for every other
+// not-configured case - see loadInfluxSettings' own doc comment for why a
+// store failure must not look identical to Influx simply being disabled.
+// influxTelemetryConfigured stays a bare bool, not an (bool, error) pair:
+// it and newInfluxClient below are the only two callers of
+// loadInfluxSettings, and the false they already return for "not
+// configured" already fans out, by design, to every Influx-backed query
+// function and HTTP handler in this codebase as "fall back to the
+// in-memory/sentinel path" - see e.g. telemetry_influx_cache.go's refresh
+// doc comment. Re-plumbing a distinct error through that whole fan-out
+// for one already-rare failure mode was judged not worth the blast radius;
+// the log line is what keeps it from being silent.
 func influxTelemetryConfigured() bool {
-	_, _, _, _, ok := loadInfluxSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	_, _, _, _, ok, err := loadInfluxSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		log.Printf("influx: %v; telemetry unavailable this call", err)
+		return false
+	}
 	return ok
 }
 
@@ -109,7 +149,15 @@ func (c *sharedInfluxClient) reset() {
 }
 
 func newInfluxClient() (influxdb2.Client, string, string, bool) {
-	influxURL, org, bucket, token, ok := loadInfluxSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	influxURL, org, bucket, token, ok, err := loadInfluxSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		// See influxTelemetryConfigured's doc comment: a real store read
+		// failure is logged loudly rather than silently treated as "not
+		// configured", even though the caller-facing result is the same.
+		log.Printf("influx: %v; telemetry unavailable this call", err)
+		globalInfluxClient.reset()
+		return nil, org, bucket, false
+	}
 	if !ok {
 		globalInfluxClient.reset()
 		return nil, org, bucket, false

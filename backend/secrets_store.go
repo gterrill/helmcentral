@@ -27,39 +27,16 @@ var knownSecretKeys = []string{
 	"SMTP_PASSWORD", "NTFY_TOKEN", "WEATHERKIT_KEY_ID", "WEATHERKIT_TEAM_ID", "WEATHERKIT_SERVICE_ID", "WEATHERKIT_PRIVATE_KEY",
 	"VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "GOOGLE_PLACES_API_KEY",
 	// OPENROUTER_API_KEY backs the onboard assistant's outbound LLM calls
-	// (ADR 0065 §5, ADR 0093). It belongs in knownSecretKeys only, never in
-	// coreEnvSecretKeys: the assistant handlers read it directly from
-	// globalSecretsStore, the same way ADR 0065 §5 required for the
-	// inventory vision call, so it never enters the process environment
-	// where a WASM plugin's ${VAR} config expansion could reach it.
+	// (ADR 0065 §5, ADR 0093). The assistant handlers read it directly from
+	// globalSecretsStore at point of use, the same way every other secret
+	// is read since the ADR 0023 amendment retired the process-environment
+	// shim - it never enters the process environment where a WASM plugin's
+	// ${VAR} config expansion could reach it.
 	"OPENROUTER_API_KEY",
-}
-
-// coreEnvSecretKeys is the subset of knownSecretKeys trusted, non-sandboxed
-// host Go code reads directly via getEnv/os.Getenv. LoadIntoEnv sets ONLY
-// these into the process environment. WEATHERKIT_* are deliberately
-// excluded - they are plugin-only and must never become globally visible
-// via os.Setenv; see the wasm_plugin.go allowlist gate instead.
-var coreEnvSecretKeys = []string{
-	"SIGNALK_USERNAME", "SIGNALK_PASSWORD", "INFLUXDB_TOKEN",
 }
 
 func isKnownSecretKey(key string) bool {
 	for _, k := range knownSecretKeys {
-		if k == key {
-			return true
-		}
-	}
-	return false
-}
-
-// isCoreEnvSecretKey reports whether key is one of coreEnvSecretKeys, the
-// subset LoadIntoEnv copies into the process environment at boot. Mirrors
-// isKnownSecretKey above; clearBoundSecret is the only caller, and needs
-// this to know whether deleting the store row is the whole job or whether a
-// live os.Unsetenv is also required (see its own doc comment).
-func isCoreEnvSecretKey(key string) bool {
-	for _, k := range coreEnvSecretKeys {
 		if k == key {
 			return true
 		}
@@ -125,18 +102,6 @@ func clearBoundSecret(key, reason string) error {
 	}
 	if err := globalSecretsStore.Set(key, ""); err != nil {
 		return fmt.Errorf("clearing %s (%s): %w", key, reason, err)
-	}
-	// SIGNALK_USERNAME, SIGNALK_PASSWORD and INFLUXDB_TOKEN are copied into
-	// the process environment once, at boot (LoadIntoEnv), because trusted
-	// host code reads them via getEnv/os.Getenv on every call
-	// (loadSignalKCredentials, loadInfluxSettings) rather than asking the
-	// store fresh each time. Deleting the store row alone would leave that
-	// cached copy live in THIS process until its next restart - the exact
-	// leak this function exists to close, merely delayed rather than
-	// prevented. Unsetting it here closes it immediately instead of on the
-	// next reboot.
-	if isCoreEnvSecretKey(key) {
-		os.Unsetenv(key)
 	}
 	log.Printf("secrets: cleared %s — %s", key, reason)
 	return nil
@@ -513,28 +478,6 @@ func (s *secretsStore) All() (map[string]bool, error) {
 		result[key] = has
 	}
 	return result, nil
-}
-
-// LoadIntoEnv sets each coreEnvSecretKeys entry found in the store into the
-// process environment via os.Setenv, so trusted host Go code that reads
-// secrets via getEnv/os.Getenv (SignalK, InfluxDB) keeps working
-// unchanged. WEATHERKIT_* (and any other knownSecretKeys not
-// in coreEnvSecretKeys) are deliberately never set here - they are
-// plugin-only and reach guests exclusively through the
-// allowed_secrets.json-gated path in wasm_plugin.go's configForWasmPlugin.
-func (s *secretsStore) LoadIntoEnv() error {
-	for _, key := range coreEnvSecretKeys {
-		value, ok, err := s.Get(key)
-		if err != nil {
-			return err
-		}
-		if ok {
-			if err := os.Setenv(key, value); err != nil {
-				return fmt.Errorf("secrets store: setenv %s: %w", key, err)
-			}
-		}
-	}
-	return nil
 }
 
 // ImportFromEnv is the explicit, one-time migration path from the old
