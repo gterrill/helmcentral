@@ -41,7 +41,6 @@ func TestCacheFilePathStateDirCoversEveryStatePath(t *testing.T) {
 		"data/dashboard-pages.json",
 		"data/secrets.sqlite",
 		"data/secrets.key",
-		"data/sat-charts",
 		"data/tile-cache.sqlite",
 	} {
 		want := filepath.Join(stateDir, fallback)

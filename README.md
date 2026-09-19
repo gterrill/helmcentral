@@ -254,8 +254,8 @@ and a tapped alarm notification opens the Alarms panel rather than the
 dashboard.
 
 Other features include route planning that pushes an active route to SignalK for your
-autopilot, satellite charts from your own MBTiles, autopilot control on
-SignalK's v2 API, ARPA radar targets, and an embedded weather radar.
+autopilot, autopilot control on SignalK's v2 API, ARPA radar targets, and an
+embedded weather radar.
 
 Out of scope: hazard avoidance, weather routing, live
 navigation, or anything requiring a chart licence.

@@ -255,7 +255,6 @@ func assistantHullTypePhrase(hullType string) string {
 var assistantPanelLabels = map[string]string{
 	"forecast":     "Forecast",
 	"routes":       "Routes",
-	"charts":       "Charts",
 	"radar":        "Radar",
 	"anchor-watch": "Anchor Watch",
 	"alarms":       "Alarms",

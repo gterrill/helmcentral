@@ -185,10 +185,6 @@ vi.mock('@/hooks/use-routes', () => ({
   useRoutes: () => ({ routes: [], loading: false, error: null, refetch: vi.fn(), createRoute: vi.fn(), updateRoute: vi.fn(), deleteRoute: vi.fn() }),
 }))
 
-vi.mock('@/hooks/use-sat-charts', () => ({
-  useSatCharts: () => ({ charts: [], loading: false, error: null, uploadChart: vi.fn(), deleteChart: vi.fn() }),
-}))
-
 vi.mock('@/hooks/use-dashboard-route', () => ({
   useDashboardRouteId: () => [null, vi.fn()],
 }))

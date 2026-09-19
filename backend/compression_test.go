@@ -318,7 +318,6 @@ func TestCompression_SkipperExcludesStreamingAndBinaryRoutes(t *testing.T) {
 		{"/api/assistant/conversations/:id/messages", true},
 		{"/api/radar/spokes", true},
 		{"/api/world-imagery/:z/:x/:y", true},
-		{"/api/sat-charts/:id/:z/:x/:y", true},
 		// Off the skip list since Tier 3: fetchBasemapUpstream's plain
 		// http.Client transparently decompresses upstream, so the JSON/PBF
 		// bytes cached and served here are genuinely plain and benefit from
@@ -372,8 +371,8 @@ func TestCompression_SkipListMatchesRegisteredRoutes(t *testing.T) {
 // TestCompression_DocumentContentRouteStaysUncompressed is B3's addition to
 // noCompressRoutePatterns (documents_handlers.go's documentContentHandler):
 // a document's raw bytes must survive a Range request's byte offsets
-// untouched, the same reasoning already applied to the tile/mbtiles routes
-// above it in the skip list. Exercised through the real middleware stack,
+// untouched, the same reasoning already applied to the tile route above
+// it in the skip list. Exercised through the real middleware stack,
 // like TestCompression_LargeJSONRouteIsGzipped above, rather than only
 // compressionSkipper in isolation.
 func TestCompression_DocumentContentRouteStaysUncompressed(t *testing.T) {

@@ -15,7 +15,7 @@ Group=helmcentral
 WorkingDirectory=/var/lib/helmcentral
 
 # Every piece of runtime state — the four SQLite stores, routes, dashboard
-# pages, plugin caches, uploaded MBTiles and the reference plugins — resolves
+# pages, plugin caches and the reference plugins — resolves
 # through cacheFilePath() in backend/weather_tide.go, which roots relative
 # paths at HELMCENTRAL_STATE_DIR. Without this the binary would scatter state
 # through its working directory.

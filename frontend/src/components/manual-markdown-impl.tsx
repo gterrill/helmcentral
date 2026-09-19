@@ -30,7 +30,7 @@ function headingText(node: unknown): string {
 const HEADING_STYLE: Record<'h1' | 'h2' | 'h3' | 'h4', { tag: 'h3' | 'h4'; className: string }> = {
   h1: { tag: 'h3', className: 'mb-2 mt-6 text-lg font-semibold leading-snug text-foreground first:mt-0' },
   h2: { tag: 'h3', className: 'mb-2 mt-6 text-base font-semibold leading-snug text-foreground first:mt-0' },
-  // h3 matters as much as h2 here: every "routes/charts/radar" lookup-table
+  // h3 matters as much as h2 here: every "routes/radar" lookup-table
   // target lands on a ### heading (a subsection under dashboard.md's
   // "Beyond the grid"), so it needs a scrollable id exactly like a ##
   // section does.

@@ -24,8 +24,7 @@ import (
 // t.TempDir()-backed store, and DOCUMENTS_DIR at a second, empty
 // t.TempDir(), for the duration of the test - the same package-level-var
 // swap idiom as withTestAssistantStore (assistant_handlers_test.go), plus
-// the env-var override sat_charts_test.go's setupSatChartsTest uses for its
-// own on-disk directory.
+// an env-var override for its own on-disk directory.
 func withTestDocumentStore(t *testing.T) *documentStore {
 	t.Helper()
 	store := newTestDocumentStore(t)
@@ -71,8 +70,7 @@ type documentUploadField struct {
 }
 
 // newDocumentUploadContext builds a POST /api/documents multipart request,
-// the same CreateFormFile-based builder sat_charts_test.go's
-// newMultipartUploadRequest uses, extended with plain fields (title, tags,
+// a CreateFormFile-based builder extended with plain fields (title, tags,
 // folder_id) uploadDocumentHandler reads via MultipartReader rather than
 // FormFile.
 func newDocumentUploadContext(t *testing.T, fields []documentUploadField) (echo.Context, *httptest.ResponseRecorder) {

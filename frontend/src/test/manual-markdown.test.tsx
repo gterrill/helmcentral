@@ -23,9 +23,9 @@ describe('ManualMarkdown heading ids', () => {
     expect(heading).toHaveAttribute('id', 'the-kiosk-feed')
   })
 
-  // routes/charts/radar targets in the lookup table are all ### headings, so
+  // routes/radar targets in the lookup table are all ### headings, so
   // h3 (not just h2) has to gain an id too, or the sheet's scroll-to-heading
-  // silently lands nowhere for exactly those three panels.
+  // silently lands nowhere for exactly those panels.
   it('gives an h3 (### in the markdown) the GitHub slug id too', async () => {
     render(<ManualMarkdown content="### Route planning" pageId="features/dashboard" onNavigate={vi.fn()} />)
 

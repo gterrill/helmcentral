@@ -196,9 +196,10 @@ func (p *wasmTideProvider) fetchFromPlugin(stationID string) (tideChartResult, e
 
 // loadWasmTideProviders scans dir once at startup for .wasm plugins, via the
 // shared loadWasmPluginsFromDir. A file that fails to load as a valid plugin
-// is logged and skipped - discovery continues for the remaining files,
-// mirroring sat_charts.go's listSatChartsHandler "skip corrupt, keep going"
-// idiom. Tides are WASM-plugin-only - there is no native provider to shadow,
+// is logged and skipped - discovery continues for the remaining files, a
+// "skip corrupt, keep going" idiom used wherever a directory of individually
+// fallible items is scanned at startup. Tides are WASM-plugin-only - there
+// is no native provider to shadow,
 // so first-registered-wins here only matters between plugins themselves.
 func loadWasmTideProviders(dir string) {
 	loadWasmPluginsFromDir(dir, "plugins/tides",

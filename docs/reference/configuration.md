@@ -133,7 +133,6 @@ when one is set (see `cacheFilePath` in `backend/weather_tide.go`).
 | `DOCUMENTS_DB_PATH` | `data/documents.sqlite` |
 | `DOCUMENTS_DIR` | `data/documents` |
 | `TILE_CACHE_PATH` | `data/tile-cache.sqlite` |
-| `SAT_CHARTS_DIR` | `data/sat-charts` |
 | `PLUGINS_TIDES_DIR` | `plugins/tides` |
 | `PLUGINS_WEATHER_DIR` | `plugins/weather` |
 | `PLUGINS_WAVES_DIR` | `plugins/waves` |

@@ -186,8 +186,7 @@ type tileFetcher interface {
 
 // tileCache is a SQLite-backed cache-through store for proxied map tiles.
 // There is no TTL/expiry - satellite basemap imagery doesn't change on
-// human timescales (the same reasoning sat_charts.go already applies to
-// uploaded MBTiles packages), so a tile is cached forever once fetched.
+// human timescales, so a tile is cached forever once fetched.
 // The DELETE /api/world-imagery/cache endpoint is the explicit escape
 // hatch if a cached result ever needs to be cleared (e.g. once Esri adds
 // coverage where a blank/degraded result was previously cached).

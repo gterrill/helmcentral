@@ -241,8 +241,7 @@ func TestLoadWasmTideProviders_SkipsInvalidPluginWithoutFailingOthers(t *testing
 	}
 
 	// A corrupt/truncated .wasm alongside a real one should be skipped and
-	// logged, not take down discovery of the good plugin (mirrors
-	// TestListSatChartsHandler_SkipsCorruptFileWithoutFailing's idiom).
+	// logged, not take down discovery of the good plugin.
 	if err := os.WriteFile(filepath.Join(dir, "bad.wasm"), []byte("not a real wasm module"), 0o644); err != nil {
 		t.Fatalf("write corrupt fixture: %v", err)
 	}

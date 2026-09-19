@@ -359,17 +359,6 @@ func main() {
 			sweep.RemovedTemp, sweep.OrphanFiles, sweep.MissingFiles)
 	}
 
-	// Satellite chart uploads (ADR 0011): same abandoned-temp-file sweep as
-	// documents above (U-5). sweepSatChartsDir tolerates a missing
-	// directory on its own (a brand new install that has never taken an
-	// upload yet), so unlike the documents store above there's no MkdirAll
-	// needed first.
-	if sweep, err := sweepSatChartsDir(satChartsDirPath()); err != nil {
-		log.Fatalf("failed to sweep sat charts directory: %v", err)
-	} else if sweep.RemovedTemp > 0 {
-		log.Printf("sat-charts: swept %d abandoned upload(s)", sweep.RemovedTemp)
-	}
-
 	// Document indexer (ADR 0106, B4): local extraction always, Mate's paid
 	// OCR/summarise-and-tag enrichment only when a document's own consent
 	// flag says so. Its own *http.Client, not openRouterHTTPClient (the
@@ -673,8 +662,6 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/world-imagery/:z/:x/:y", tierRead, proxyWorldImageryTileHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/world-imagery/prefetch/:jobId", tierRead, prefetchStatusHandler()},
 		{http.MethodGet, "/api/gshhg-coastline", tierRead, gshhgCoastlineHandler},
-		{http.MethodGet, "/api/sat-charts", tierRead, listSatChartsHandler},
-		{http.MethodGet, "/api/sat-charts/:id/:z/:x/:y", tierRead, satChartTileHandler},
 		// Carto vector basemap proxy + offline cache (ADR 0067) - same
 		// tierRead as world-imagery above: read-only, no session write
 		// implied by fetching a map tile/style/font/sprite.
@@ -767,8 +754,6 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodDelete, "/api/autopilot/dodge", tierWrite, deleteAutopilotDodgeHandler},
 		{http.MethodPost, "/api/world-imagery/prefetch", tierWrite, prefetchWorldImageryHandler(globalTileCache, tileFetchClient)},
 		{http.MethodDelete, "/api/world-imagery/cache", tierWrite, deleteWorldImageryCacheHandler(globalTileCache)},
-		{http.MethodPost, "/api/sat-charts", tierWrite, uploadSatChartHandler},
-		{http.MethodDelete, "/api/sat-charts/:id", tierWrite, deleteSatChartHandler},
 		{http.MethodPost, "/api/assistant/conversations", tierWrite, createAssistantConversationHandler},
 		{http.MethodDelete, "/api/assistant/conversations/:id", tierWrite, deleteAssistantConversationHandler},
 		// Every tool the assistant can call is read-only, but this is write

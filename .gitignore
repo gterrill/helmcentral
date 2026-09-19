@@ -12,6 +12,9 @@ backend/helmcentral
 backend/data/routes.json
 backend/data/dashboard-layout.json
 backend/data/dashboard-pages.json
+# Removed feature (ADR 0113), but an instance that took an upload
+# before the removal still has the files on disk. Keep ignoring them
+# so a stray `git add -A` can't stage multi-GiB MBTiles.
 backend/data/sat-charts/
 backend/data/tile-cache.sqlite
 backend/data/nearby-contacts.sqlite

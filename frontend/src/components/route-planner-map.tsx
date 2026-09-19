@@ -11,7 +11,6 @@ import { computeWorldImageryOpacity } from '@/components/anchor-watch-map'
 import type { RouteWaypoint } from '@/hooks/use-routes'
 import { useGshhgCoastline } from '@/hooks/use-gshhg-coastline'
 import { isChartAvailable } from '@/lib/chart-availability'
-import type { SatChart } from '@/hooks/use-sat-charts'
 import { useImageryPrefetch } from '@/hooks/use-imagery-prefetch'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -109,8 +108,6 @@ export interface RoutePlannerMapProps {
    * See docs/adr/0009-gshhg-coastline-fallback.md.
    */
   chartAvailable?: boolean
-  /** User-uploaded MBTiles satellite charts to render, if any. */
-  satCharts?: SatChart[]
 }
 
 export function RoutePlannerMap({
@@ -121,7 +118,6 @@ export function RoutePlannerMap({
   vesselLon = null,
   className,
   chartAvailable = isChartAvailable(),
-  satCharts = [],
 }: RoutePlannerMapProps) {
   const mapRef = useRef<MapRef | null>(null)
   const collapseAttribution = useCollapsedMapAttribution(mapRef)
@@ -399,8 +395,8 @@ export function RoutePlannerMap({
         // the browser fetching them from CARTO directly, showing that credit
         // is our obligation, not the CDN's. MapLibre's own control collects
         // the attribution string every active source declares - Carto/OSM
-        // through the proxied TileJSON, plus OpenSeaMap, Esri and any
-        // uploaded chart - so it stays correct as layers come and go.
+        // through the proxied TileJSON, plus OpenSeaMap and Esri - so it
+        // stays correct as layers come and go.
         // Compact keeps it to a single small "i" until tapped, which suits a
         // dense helm display better than a permanent strip of credits.
         attributionControl={{ compact: true }}
@@ -411,10 +407,9 @@ export function RoutePlannerMap({
         {/*
           Invisible, sourceless anchor layer. react-map-gl's addLayer call
           has no awareness of JSX sibling order, so a layer that mounts
-          later (e.g. world-imagery toggled on mid-session, or a satellite
-          chart uploaded after the route line is already showing) is
-          otherwise appended on top of the whole stack, covering the route
-          line and coastline fallback outright. Unlike anchor-watch-map.tsx,
+          later (e.g. world-imagery toggled on mid-session) is otherwise
+          appended on top of the whole stack, covering the route line and
+          coastline fallback outright. Unlike anchor-watch-map.tsx,
           this map has no vector layer that's unconditionally present (route
           line needs 2+ waypoints, the coastline fallback needs chart data
           loaded) to anchor against, so this dedicated layer exists purely
@@ -429,11 +424,11 @@ export function RoutePlannerMap({
           see docs/adr/0066-basemap-place-name-labels.md) mount here,
           unconditionally and with no beforeId, so they land right above
           raster-overlay-anchor - and therefore above the OpenSeaMap seamark
-          raster and any sat chart below, both of which pin
-          beforeId="raster-overlay-anchor" onto themselves. The route line
-          and GSHHG coastline fallback further down mount with no beforeId
-          of their own, so they draw on top of this component's labels in
-          turn - text under safety-critical geometry, above raster imagery.
+          raster below, which pins beforeId="raster-overlay-anchor" onto
+          itself. The route line and GSHHG coastline fallback further down
+          mount with no beforeId of their own, so they draw on top of this
+          component's labels in turn - text under safety-critical geometry,
+          above raster imagery.
         */}
         <MapPlaceLabels isDarkTheme={isDarkTheme} overImagery={showHybridSatellite} />
 
@@ -461,27 +456,6 @@ export function RoutePlannerMap({
         <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
           <Layer id="openseamap-layer" type="raster" beforeId="raster-overlay-anchor" paint={{ 'raster-opacity': 0.85 }} />
         </Source>
-
-        {satCharts.map((chart) => (
-          <Source
-            key={chart.id}
-            id={`sat-chart-${chart.id}`}
-            type="raster"
-            tiles={[`/api/sat-charts/${chart.id}/{z}/{x}/{y}`]}
-            tileSize={256}
-            bounds={chart.bounds}
-            minzoom={chart.minzoom}
-            maxzoom={chart.maxzoom}
-            attribution="User-supplied satellite chart"
-          >
-            <Layer
-              id={`sat-chart-${chart.id}-layer`}
-              type="raster"
-              beforeId="raster-overlay-anchor"
-              paint={{ 'raster-opacity': 1, 'raster-fade-duration': 250 }}
-            />
-          </Source>
-        ))}
 
         {waypoints.length >= 2 && (
           <Source id="route-line" type="geojson" data={routeGeoJSON}>

@@ -6,7 +6,6 @@ import {
   CloudSun,
   FileText,
   LayoutDashboard,
-  Map,
   Mic,
   MicOff,
   Radar as RadarIcon,
@@ -45,7 +44,6 @@ const DocumentsPanel = lazy(() => import('@/components/documents-panel').then((m
 const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((mod) => ({ default: mod.ForecastDrawer })))
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
 const RoutePlannerDrawer = lazy(() => import('@/components/route-planner-drawer').then((mod) => ({ default: mod.RoutePlannerDrawer })))
-const SatChartsDrawer = lazy(() => import('@/components/sat-charts-drawer').then((mod) => ({ default: mod.SatChartsDrawer })))
 const SettingsPage = lazy(() => import('@/components/settings/settings-page').then((mod) => ({ default: mod.SettingsPage })))
 // MateSheet and ManualSheet (unlike the panels above) fetch nothing and run
 // no effects until they've actually been opened - see the `hasOpened` latches
@@ -76,7 +74,6 @@ import { EmptyPagePrompt } from '@/components/empty-page-prompt'
 import type { AddTileMultiInstanceEntry } from '@/components/add-tile-picker'
 import { Toaster } from '@/components/ui/sonner'
 import { useRoutes } from '@/hooks/use-routes'
-import { useSatCharts } from '@/hooks/use-sat-charts'
 import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
 import { useDashboardPages, type DashboardPage, type CreatePageInit } from '@/hooks/use-dashboard-pages'
 import { useDashboardRibbon } from '@/hooks/use-dashboard-ribbon'
@@ -212,7 +209,6 @@ import { cn } from '@/lib/utils'
 const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
   { id: 'routes', label: 'Routes', icon: Route },
-  { id: 'charts', label: 'Charts', icon: Map },
   { id: 'radar', label: 'Radar', icon: RadarIcon },
   { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
   { id: 'alarms', label: 'Alarms', icon: BellRing },
@@ -423,13 +419,6 @@ export function App() {
     document.documentElement.classList.toggle('dark', isDarkTheme)
   }, [isDarkTheme])
   const { routes, loading: routesLoading, error: routesError, createRoute, updateRoute, deleteRoute } = useRoutes()
-  const {
-    charts: satCharts,
-    loading: satChartsLoading,
-    error: satChartsError,
-    uploadChart,
-    deleteChart: deleteSatChart,
-  } = useSatCharts()
   const [dashboardRouteId, setDashboardRouteId] = useDashboardRouteId()
   const {
     status: routeActivationStatus,
@@ -1412,7 +1401,7 @@ export function App() {
   // still resolves to the current widget when it's eventually called.
   const effectiveWidgetsRef = useRef(effectiveWidgets)
   useEffect(() => { effectiveWidgetsRef.current = effectiveWidgets }, [effectiveWidgets])
-  // globalThis.Map, not the lucide-react `Map` icon this file imports above.
+  // globalThis.Map, the builtin collection - not a lucide-react icon.
   const configureHandlersRef = useRef(new globalThis.Map<DashboardWidgetId, () => void>())
   const configureHandlerFor = useCallback((id: DashboardWidgetId, apply: (widget: DashboardLayoutItem) => void): () => void => {
     let handler = configureHandlersRef.current.get(id)
@@ -2079,7 +2068,6 @@ export function App() {
       case 'forecast': return 'forecast'
       case 'alarms': return 'alarms'
       case 'routes': return 'routes'
-      case 'charts': return 'charts'
       case 'radar': return 'radar'
       case 'assistant': return 'Mate'
       case 'settings': return 'settings'
@@ -2158,17 +2146,6 @@ export function App() {
             activateError={routeActivateError}
             onActivate={activateRoute}
             onDeactivate={deactivateRoute}
-            satCharts={satCharts}
-          />
-        )
-      case 'charts':
-        return (
-          <SatChartsDrawer
-            charts={satCharts}
-            loading={satChartsLoading}
-            error={satChartsError}
-            uploadChart={uploadChart}
-            deleteChart={deleteSatChart}
           />
         )
       case 'radar':

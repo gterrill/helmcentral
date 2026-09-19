@@ -13,4 +13,7 @@ backend/data/secrets.key
 backend/data/routes.json
 backend/data/dashboard-layout.json
 backend/data/dashboard-pages.json
+# Removed feature (ADR 0113). Dockerfile does `COPY backend/. .`, so
+# leftover uploads on a dev machine would stream into the build
+# context and bake into the builder layer. Keep ignoring them.
 backend/data/sat-charts/

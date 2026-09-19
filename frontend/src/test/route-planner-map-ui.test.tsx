@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { RoutePlannerMap, HYBRID_HIDDEN_LAYER_IDS, HYBRID_LABEL_LAYER_IDS } from '@/components/route-planner-map'
 import { PLACE_LABEL_LAYER_IDS } from '@/components/map-place-labels'
-import type { SatChart } from '@/hooks/use-sat-charts'
 
 vi.mock('maplibre-gl', () => ({
   default: {},
@@ -488,77 +487,23 @@ describe('RoutePlannerMap', () => {
     expect(infoSpy).not.toHaveBeenCalled()
   })
 
-  it('renders no sat-chart sources when satCharts is empty', () => {
-    render(
-      <RoutePlannerMap waypoints={[]} onWaypointsChange={() => undefined} isDarkTheme={false} satCharts={[]} />,
-    )
-    expect(screen.queryByTestId('source-sat-chart-abc')).not.toBeInTheDocument()
-  })
-
-  it('renders a bounds-scoped raster source per uploaded chart', () => {
-    const satCharts: SatChart[] = [
-      { id: 'abc', name: 'Reef A', bounds: [150, -25, 151, -24], minzoom: 10, maxzoom: 18, format: 'png', size_bytes: 1000 },
-      { id: 'def', name: 'Reef B', bounds: [152, -26, 153, -25], minzoom: 10, maxzoom: 18, format: 'png', size_bytes: 2000 },
-    ]
-    render(
-      <RoutePlannerMap
-        waypoints={[]}
-        onWaypointsChange={() => undefined}
-        isDarkTheme={false}
-        satCharts={satCharts}
-      />,
-    )
-
-    const sourceA = screen.getByTestId('source-sat-chart-abc')
-    expect(sourceA).toBeInTheDocument()
-    expect(sourceA.getAttribute('data-tiles')).toBe('/api/sat-charts/abc/{z}/{x}/{y}')
-    expect(sourceA.getAttribute('data-bounds')).toBe('150,-25,151,-24')
-
-    expect(screen.getByTestId('source-sat-chart-def')).toBeInTheDocument()
-    expect(screen.getByTestId('layer-sat-chart-abc-layer')).toBeInTheDocument()
-    expect(screen.getByTestId('layer-sat-chart-def-layer')).toBeInTheDocument()
-  })
-
-  it('renders uploaded sat charts even when chartAvailable is true', () => {
-    const satCharts: SatChart[] = [
-      { id: 'abc', name: 'Reef A', bounds: [150, -25, 151, -24], minzoom: 10, maxzoom: 18, format: 'png', size_bytes: 1000 },
-    ]
-    render(
-      <RoutePlannerMap
-        waypoints={[]}
-        onWaypointsChange={() => undefined}
-        isDarkTheme={false}
-        chartAvailable={true}
-        satCharts={satCharts}
-      />,
-    )
-
-    expect(screen.getByTestId('source-sat-chart-abc')).toBeInTheDocument()
-  })
-
-  it('anchors imagery, seamark, and sat-chart raster layers below the invisible overlay anchor', () => {
+  it('anchors imagery and seamark raster layers below the invisible overlay anchor', () => {
     // react-map-gl's addLayer call has no awareness of JSX sibling order - a
-    // raster layer added later (e.g. world-imagery toggled on mid-session,
-    // or a satellite chart uploaded after the route line is already
-    // showing) is otherwise appended on top of the whole stack, covering
-    // the route line and coastline fallback. beforeId pins each raster
-    // layer below the always-present anchor layer instead of relying on
-    // mount-order luck.
-    const satCharts: SatChart[] = [
-      { id: 'abc', name: 'Reef A', bounds: [150, -25, 151, -24], minzoom: 10, maxzoom: 18, format: 'png', size_bytes: 1000 },
-    ]
+    // raster layer added later (e.g. world-imagery toggled on mid-session)
+    // is otherwise appended on top of the whole stack, covering the route
+    // line and coastline fallback. beforeId pins each raster layer below
+    // the always-present anchor layer instead of relying on mount-order
+    // luck.
     render(
       <RoutePlannerMap
         waypoints={[]}
         onWaypointsChange={() => undefined}
         isDarkTheme={false}
-        satCharts={satCharts}
       />,
     )
 
     expect(screen.getByTestId('layer-raster-overlay-anchor')).toBeInTheDocument()
     expect(screen.getByTestId('layer-openseamap-layer').dataset.beforeId).toBe('raster-overlay-anchor')
-    expect(screen.getByTestId('layer-sat-chart-abc-layer').dataset.beforeId).toBe('raster-overlay-anchor')
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle satellite imagery' }))
     mockZoom = 12

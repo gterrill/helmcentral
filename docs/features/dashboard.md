@@ -72,11 +72,10 @@ Three more tile types you configure yourself:
 One strip of status lamps and a CHK rollup, pinned above the grid on every
 dashboard page, inside whatever skin that page uses. The strip belongs to the
 vessel, not to the page: same lamps, same order, wherever you look, so a
-glance always means the same thing. It stays off the Forecast, Routes,
-Charts, Radar, Anchor Watch and Settings panels, which rely on the alarm
-banner instead. It stays off wall displays too: on a 360px-tall strip it eats
-about a third of the height for the least page-specific information on
-screen.
+glance always means the same thing. It stays off the Forecast, Routes, Radar,
+Anchor Watch and Settings panels, which rely on the alarm banner instead. It
+stays off wall displays too: on a 360px-tall strip it eats about a third of
+the height for the least page-specific information on screen.
 
 Its order never changes on its own. A lamp that trips does not jump to the
 front, and a lamp that clears does not vanish, because a ribbon earns its
@@ -241,7 +240,6 @@ The address bar follows the panel you are on, so you can link straight to it.
 | `/dashboard/<page id>` | The dashboard, that page. |
 | `/forecast` | The forecast drawer. |
 | `/routes` | Route planning. |
-| `/charts` | Satellite charts. |
 | `/radar` | Radar targets. |
 | `/anchor-watch` | Anchor watch. |
 | `/alarms` | The alarms panel. |
@@ -470,12 +468,6 @@ autopilots and MFDs to follow.
 
 You plan the waypoints yourself. Helmcentral offers no hazard avoidance, no
 weather routing and no live navigation, and it needs no chart licence.
-
-### Satellite charts
-
-Upload your own MBTiles and Helmcentral serves them. It never fetches or
-bulk-caches tiles from a live provider, which keeps it clear of the licensing
-terms that make redistributing somebody else's imagery a problem.
 
 ### Autopilot
 

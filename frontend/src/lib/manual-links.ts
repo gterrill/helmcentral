@@ -32,7 +32,6 @@ export const MANUAL_INDEX: ManualTarget = { page: 'index' }
 export const PANEL_MANUAL_TARGETS: Record<PanelId, ManualTarget> = {
   forecast: { page: 'features/forecast' },
   routes: { page: 'features/dashboard', heading: 'Route planning' },
-  charts: { page: 'features/dashboard', heading: 'Satellite charts' },
   radar: { page: 'features/dashboard', heading: 'Radar targets' },
   'anchor-watch': { page: 'features/anchor-watch' },
   alarms: { page: 'features/alarms' },

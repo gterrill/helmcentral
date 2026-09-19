@@ -85,7 +85,7 @@ Shipped:
   lost. An external service can monitor a periodic off-boat heartbeat.
 - Route planning that pushes an active route to SignalK for the autopilot,
   autopilot control on SignalK's v2 API, ARPA radar targets, embedded weather
-  radar, satellite charts from the operator's own MBTiles.
+  radar.
 - Tides, weather, waves and forecast warnings as sandboxed WASM plugins loaded
   from a directory (Extism/wazero, no filesystem or process access, per-plugin
   host allowlist). Adding a region means dropping in a `.wasm` file. Weather and

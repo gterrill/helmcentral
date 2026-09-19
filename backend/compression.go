@@ -73,10 +73,9 @@ var noCompressRoutePatterns = map[string]bool{
 	// hijack/upgrade path coder/websocket relies on.
 	"/api/radar/spokes": true, // radar_spoke_relay.go: radarSpokeRelayHandler
 
-	// Already-compressed raster tile proxy endpoints (tile_proxy.go and the
-	// tile half of sat_charts.go): PNG/JPEG/WebP map tiles gain nothing from
-	// a second compression pass, and it would spend CPU on every proxied
-	// fetch for no smaller a response.
+	// Already-compressed raster tile proxy endpoint (tile_proxy.go): PNG/
+	// JPEG/WebP map tiles gain nothing from a second compression pass, and
+	// it would spend CPU on every proxied fetch for no smaller a response.
 	//
 	// basemap_proxy.go's style/tilejson/vector-tile/glyph routes used to
 	// sit here too, on the same "already compressed" assumption - but they
@@ -96,8 +95,7 @@ var noCompressRoutePatterns = map[string]bool{
 	// and sprite.png (still skipped, but by the noCompressExtensions
 	// ".png" check below, on the resolved request path - one route
 	// pattern can't otherwise tell the two apart).
-	"/api/world-imagery/:z/:x/:y":  true, // tile_proxy.go
-	"/api/sat-charts/:id/:z/:x/:y": true, // sat_charts.go
+	"/api/world-imagery/:z/:x/:y": true, // tile_proxy.go
 
 	// documents_handlers.go: documentContentHandler serves a document's raw
 	// bytes through http.ServeContent, which needs to answer Range requests

@@ -29,7 +29,7 @@ const POLL_INTERVAL_MS = 1000
 /**
  * Drives the "cache this area" prefetch flow: POSTs a bbox/zoom-range
  * prefetch request, then polls the job's status endpoint every ~1s until
- * it completes. Mirrors use-sat-charts.ts's fetch/mutate shape.
+ * it completes.
  */
 export function useImageryPrefetch() {
   const [prefetching, setPrefetching] = useState(false)
