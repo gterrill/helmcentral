@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
 	"os"
 	"path/filepath"
@@ -392,4 +394,203 @@ func pad10(n int) string {
 		s = "0" + s
 	}
 	return s
+}
+
+// ── PDF panic safety: lazy object resolution (U-1) ────────────────────────
+//
+// github.com/ledongthuc/pdf resolves indirect objects LAZILY: pdf.Open only
+// validates the file's outer framing (header, xref table, trailer) - it
+// never looks at what's actually sitting at the byte offsets the xref table
+// records. reader.NumPage() (Root -> Pages -> Count) is the first call that
+// actually walks the page tree, and therefore the first call that can panic
+// on a malformed one - a gap openPDFReader's recover, wrapped only around
+// pdf.Open, cannot cover. The two tests below reproduce that gap directly:
+// a /Count that is syntactically fine but negative, and a Root object whose
+// recorded offset points at garbage.
+
+func TestExtractDocumentText_PDFNegativePageCountErrorsWithoutPanicking(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("extractDocumentText panicked on a negative /Count: %v", r)
+		}
+	}()
+
+	// NumPage() itself does no validation beyond int(Count.Int64()) - a
+	// negative /Count sails straight past extractPDF's "numPages >
+	// maxPDFPages" check (false when numPages is negative) and would
+	// otherwise reach make([]extractedPage, 0, numPages) as an instant
+	// "makeslice: cap out of range" panic.
+	body := buildMinimalPDFWithPagesDict(t,
+		"<< /Type /Pages /Kids [4 0 R] /Count -5 >>",
+	)
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "negative-count.pdf", body)
+
+	_, err := extractDocumentText(context.Background(), path, "application/pdf")
+	if err == nil {
+		t.Fatalf("expected an error for a PDF declaring a negative page count")
+	}
+}
+
+// buildPDFWithBadRootOffset assembles a well-formed xref table (correct
+// entry count, correctly formatted offsets, correct trailer/startxref) -
+// pdf.Open validates none of that against the objects the offsets actually
+// point at, so it opens cleanly - except object 1 (the Catalog/Root)'s
+// recorded offset is deliberately wrong: it points 3 bytes into object 2's
+// own offset, landing mid-"2 0 obj" (on the bare "obj" keyword) rather than
+// at "1 0 obj". Hand-confirmed against this exact library version
+// (github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0): pdf.Open
+// succeeds cleanly, and reader.NumPage() panics with `unexpected keyword
+// "obj" parsing object` the moment it tries to resolve Root.
+func buildPDFWithBadRootOffset(t *testing.T) []byte {
+	t.Helper()
+	var buf strings.Builder
+	offsets := make(map[int]int)
+
+	writeObj := func(num int, body string) {
+		offsets[num] = buf.Len()
+		buf.WriteString(strconv.Itoa(num))
+		buf.WriteString(" 0 obj\n")
+		buf.WriteString(body)
+		buf.WriteString("\nendobj\n")
+	}
+
+	buf.WriteString("%PDF-1.4\n")
+	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObj(2, "<< /Type /Pages /Kids [4 0 R] /Count 1 >>")
+	writeObj(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	writeObj(4, "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 3 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>")
+	writeObj(5, "<< /Length 0 >>\nstream\n\nendstream")
+
+	xrefStart := buf.Len()
+	buf.WriteString("xref\n0 6\n")
+	buf.WriteString("0000000000 65535 f \n")
+	buf.WriteString(pad10(offsets[2] + 3))
+	buf.WriteString(" 00000 n \n")
+	for i := 2; i <= 5; i++ {
+		buf.WriteString(pad10(offsets[i]))
+		buf.WriteString(" 00000 n \n")
+	}
+	buf.WriteString("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n")
+	buf.WriteString(strconv.Itoa(xrefStart))
+	buf.WriteString("\n%%EOF")
+
+	return []byte(buf.String())
+}
+
+func TestExtractDocumentText_PDFPanicsOnFirstLazyResolveErrorsWithoutPanicking(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("extractDocumentText panicked reading a pdf whose Root object offset is wrong: %v", r)
+		}
+	}()
+
+	body := buildPDFWithBadRootOffset(t)
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "bad-root-offset.pdf", body)
+
+	_, err := extractDocumentText(context.Background(), path, "application/pdf")
+	if err == nil {
+		t.Fatalf("expected an error for a pdf whose Root object offset points at garbage")
+	}
+	// Confirms this actually went through readPDFPageCount's recover
+	// (the gap this test targets), not some unrelated failure path.
+	if !strings.Contains(err.Error(), "panic") {
+		t.Fatalf("expected the error to say it recovered from a panic, got %q", err.Error())
+	}
+}
+
+// ── PDF text extraction: bounded against a flate bomb (U-3) ───────────────
+
+// buildFlateBombPDF assembles a single-page PDF whose /Contents is one
+// FlateDecode stream: repeats copies of a short, highly-compressible
+// "(AAAA...)Tj" content-stream line. github.com/ledongthuc/pdf decompresses
+// and tokenises a content stream LAZILY as Interpret reads it (compress/zlib
+// under the hood - see that library's read.go applyFilter), so the on-disk
+// PDF built here stays a few tens of KB while the text it would extract,
+// left uncapped, is roughly 33*repeats bytes (a 1-byte "\n" from each BT
+// plus each Tj's 32-byte operand).
+func buildFlateBombPDF(t *testing.T, repeats int) []byte {
+	t.Helper()
+	const line = "BT /F1 12 Tf (AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA) Tj ET\n"
+	var raw strings.Builder
+	for i := 0; i < repeats; i++ {
+		raw.WriteString(line)
+	}
+
+	var compressed bytes.Buffer
+	zw := zlib.NewWriter(&compressed)
+	if _, err := zw.Write([]byte(raw.String())); err != nil {
+		t.Fatalf("flate-compress fixture content stream: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close flate writer: %v", err)
+	}
+
+	var buf strings.Builder
+	offsets := make(map[int]int)
+
+	writeObj := func(num int, body string) {
+		offsets[num] = buf.Len()
+		buf.WriteString(strconv.Itoa(num))
+		buf.WriteString(" 0 obj\n")
+		buf.WriteString(body)
+		buf.WriteString("\nendobj\n")
+	}
+	writeStreamObj := func(num int) {
+		offsets[num] = buf.Len()
+		buf.WriteString(strconv.Itoa(num))
+		buf.WriteString(" 0 obj\n<< /Length ")
+		buf.WriteString(strconv.Itoa(compressed.Len()))
+		buf.WriteString(" /Filter /FlateDecode >>\nstream\n")
+		buf.Write(compressed.Bytes())
+		buf.WriteString("\nendstream\nendobj\n")
+	}
+
+	buf.WriteString("%PDF-1.4\n")
+	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObj(2, "<< /Type /Pages /Kids [4 0 R] /Count 1 >>")
+	writeObj(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	writeObj(4, "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 3 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>")
+	writeStreamObj(5)
+
+	xrefStart := buf.Len()
+	buf.WriteString("xref\n0 6\n")
+	buf.WriteString("0000000000 65535 f \n")
+	for i := 1; i <= 5; i++ {
+		buf.WriteString(pad10(offsets[i]))
+		buf.WriteString(" 00000 n \n")
+	}
+	buf.WriteString("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n")
+	buf.WriteString(strconv.Itoa(xrefStart))
+	buf.WriteString("\n%%EOF")
+
+	return []byte(buf.String())
+}
+
+func TestExtractDocumentText_PDFTextBudgetExceededFailsDocumentWithoutOOM(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("extractDocumentText panicked on a flate-bomb pdf: %v", r)
+		}
+	}()
+
+	// Comfortably over maxPDFExtractedTextBytes well before all repeats are
+	// read - the point being that extraction must stop partway through this
+	// single page's content stream, not after decompressing and
+	// accumulating the whole thing (a real bomb would make "the whole
+	// thing" gigabytes; this fixture just needs to cross the budget, not
+	// demonstrate the OOM itself).
+	repeats := int(maxPDFExtractedTextBytes/33) + 100000
+	body := buildFlateBombPDF(t, repeats)
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "flate-bomb.pdf", body)
+
+	_, err := extractDocumentText(context.Background(), path, "application/pdf")
+	if err == nil {
+		t.Fatalf("expected an error once extracted PDF text exceeds the budget")
+	}
+	if !strings.Contains(err.Error(), "budget") {
+		t.Fatalf("expected the error to name the text budget, got %q", err.Error())
+	}
 }

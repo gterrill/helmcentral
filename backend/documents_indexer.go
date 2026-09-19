@@ -332,6 +332,18 @@ func (idx *documentIndexer) processOne(ctx context.Context) (bool, error) {
 // non-nil) when failDoc's own write itself failed (review finding - see
 // failDoc's doc comment), and (true, nil) once the document is ready for
 // its next stage.
+//
+// The goroutine below carries its own recover, deliberately defensive
+// rather than evidence of a known gap: extractDocumentText's own extractors
+// (documents_extract.go) already recover everything they know how to, but
+// Go aborts the WHOLE PROCESS on an unrecovered panic from ANY goroutine,
+// and Echo's middleware.Recover() (main.go) only wraps HTTP handlers - it
+// cannot reach into a goroutine this package spawns itself. Without this,
+// one extractor bug (present or future - any MIME, not just PDF) would kill
+// navigation, alarms and the kiosk feed for the whole boat over a single
+// uploaded document, and since the document is left pending, the indexer
+// would pick it straight back up on the next restart and crash again: a
+// persistent crash loop, not a one-off.
 func (idx *documentIndexer) runExtractStage(ctx context.Context, doc document) (bool, error) {
 	path := filepath.Join(idx.dir, doc.SHA256)
 
@@ -344,6 +356,18 @@ func (idx *documentIndexer) runExtractStage(ctx context.Context, doc document) (
 	defer cancel()
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Converted into the same extractOutcome shape as an
+				// ordinary extraction error, so it flows through the select
+				// below exactly like any other failure (failDoc, right
+				// there) - the panic detail is preserved in the error text,
+				// not swallowed, and lands in documents.error the same way
+				// every other failure reason does.
+				log.Printf("documents: indexer: extraction goroutine for %s panicked: %v", doc.ID, r)
+				done <- extractOutcome{extractedDocument{}, fmt.Errorf("panic during text extraction: %v", r)}
+			}
+		}()
 		ex, err := idx.extract(extractCtx, path, doc.MIME)
 		done <- extractOutcome{ex, err}
 	}()

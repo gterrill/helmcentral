@@ -523,6 +523,55 @@ func TestDocumentIndexer_ExtractionTimeoutFailsAndNextDocumentStillProcessed(t *
 	}
 }
 
+// ── extraction goroutine panic (U-1) ───────────────────────────────────────
+
+// TestDocumentIndexer_ExtractionGoroutinePanicFailsDocumentInsteadOfCrashing
+// pins the goroutine half of U-1: runExtractStage runs idx.extract in a bare
+// goroutine (so a pathological PDF that never returns can be abandoned via
+// extractTimeout without blocking the queue forever - see that constant's
+// own doc comment), but Go aborts the WHOLE PROCESS on an unrecovered panic
+// from any goroutine, and Echo's middleware.Recover() (main.go) only wraps
+// HTTP handlers - it cannot reach into a goroutine the indexer spawned
+// itself. Before this defensive recover existed, any extractor panicking
+// here (a malformed PDF that slips past extractDocumentText's own recover
+// boundaries, a bug in some other MIME's extractor added later, anything)
+// would kill navigation, alarms and the kiosk feed for one uploaded
+// document - and since the document is left pending, the indexer would pick
+// it straight back up on the next restart and crash again: a persistent
+// crash loop, not a one-off. This never runs the real extractDocumentText -
+// it substitutes idx.extract with a func that panics outright, so the test
+// exercises runExtractStage's own goroutine boundary directly rather than
+// relying on a specific pathological PDF to reach it.
+func TestDocumentIndexer_ExtractionGoroutinePanicFailsDocumentInsteadOfCrashing(t *testing.T) {
+	store := withTestDocumentStore(t)
+	dir := documentsDirPath()
+	doc := seedTestDocumentFile(t, store, dir, testdataPath("two_page.pdf"), "manual.pdf", "application/pdf", false)
+
+	idx := newTestDocumentIndexer(t, store, dir)
+	idx.extract = func(ctx context.Context, path, mimeType string) (extractedDocument, error) {
+		panic("boom: simulated extractor panic")
+	}
+
+	processed, err := idx.processOne(context.Background())
+	if err != nil {
+		t.Fatalf("processOne: %v", err)
+	}
+	if !processed {
+		t.Fatalf("expected processOne to report the pending document as processed")
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("expected the document to be marked failed rather than left pending or crashing the process, got status %q", got.Status)
+	}
+	if !strings.Contains(got.Error, "panic") || !strings.Contains(got.Error, "boom") {
+		t.Fatalf("expected the failure reason to carry the panic detail, got %q", got.Error)
+	}
+}
+
 // ── FailedPages: partial extraction failure stays visible ─────────────────
 
 func TestDocumentIndexer_FailedPagesMessageStaysVisibleOnAnIndexedDocument(t *testing.T) {
