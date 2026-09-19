@@ -409,6 +409,40 @@ func pluginConfigFieldsForWasmPlugin(wasmPath string) ([]pluginConfigFieldSpec, 
 	return fields, nil
 }
 
+// internalDenylistedEnvVars are Helmcentral-internal environment variables
+// that a WASM plugin's ${VAR} config expansion must NEVER resolve, even
+// though they are not "secrets" in the knownSecretKeys/allowed_secrets.json
+// sense (secrets_store.go). An operator could never grant a plugin access to
+// one of these via allowed_secrets.json, because they are not stored
+// secrets a plugin author would ever legitimately ask for by that mechanism
+// - so the only gate that can stop them is a denylist checked before the
+// ordinary os.LookupEnv fallback below runs.
+//
+// HELMCENTRAL_MASTER_KEY is the one entry today (S-2, security audit
+// 2026-09): it is the AES-256-GCM key that decrypts every row in
+// secrets_store.go, including WEATHERKIT_PRIVATE_KEY and OPENROUTER_API_KEY
+// - both of which this same expansion mechanism goes out of its way to keep
+// out of a plugin's reach via the allowed_secrets.json gate just below. ADR
+// 0023 §2 documents HELMCENTRAL_MASTER_KEY as a supported way to set the
+// master key from the container environment (e.g. a secrets manager
+// injecting it at container start), so it WILL be present in os.Environ()
+// on some installs; without this denylist, any plugin whose config.json
+// wrote "${HELMCENTRAL_MASTER_KEY}" would receive it silently, no
+// allowed_secrets.json entry required, no denial logged - defeating the
+// entire allowlist mechanism in one step.
+//
+// This is deliberately a separate denylist, not an addition to
+// knownSecretKeys: knownSecretKeys is the set of secrets the store's
+// Settings UI lists and lets an operator save/rotate through
+// GET/POST /api/settings/secrets, and HELMCENTRAL_MASTER_KEY is never
+// stored there (it resolves the encryption key itself, see
+// secrets_store.go's resolveMasterKey) - adding it to knownSecretKeys would
+// misrepresent it as one more storable secret alongside SIGNALK_PASSWORD
+// rather than the key that unlocks all of them.
+var internalDenylistedEnvVars = map[string]bool{
+	"HELMCENTRAL_MASTER_KEY": true,
+}
+
 // configForWasmPlugin reads the companion <name>.config.json file next to a
 // .wasm plugin (via wasmPluginConfigFields): a flat JSON object of string
 // values. Each value is expanded against the process environment via
@@ -434,8 +468,13 @@ func pluginConfigFieldsForWasmPlugin(wasmPath string) ([]pluginConfigFieldSpec, 
 // process environment, and ONLY if the plugin's companion
 // <name>.allowed_secrets.json explicitly lists it - this is the actual
 // security boundary that keeps secrets like WEATHERKIT_PRIVATE_KEY from
-// being globally visible to every plugin via os.Setenv (LoadIntoEnv
-// deliberately never sets WEATHERKIT_* into the process env at all).
+// being globally visible to every plugin via os.Setenv. None of
+// knownSecretKeys is ever copied into the process environment by
+// Helmcentral's own code (the ADR 0023 amendment retired the boot-time
+// os.Setenv shim this comment used to describe for the SignalK/InfluxDB
+// subset; trusted host code now reads those from globalSecretsStore at
+// point of use too), so this allowlist is what determines whether a plugin
+// sees a secret at all, not merely whether it sees it early or late.
 // Non-secret names are entirely unaffected and keep today's raw
 // os.LookupEnv behavior.
 func configForWasmPlugin(wasmPath string) (map[string]string, error) {
@@ -455,6 +494,11 @@ func configForWasmPlugin(wasmPath string) (map[string]string, error) {
 
 	sawUnset := false
 	mapping := func(name string) string {
+		if internalDenylistedEnvVars[name] {
+			log.Printf("wasm plugin %q: %q is a Helmcentral-internal variable, never exposed to plugins, denied", strings.TrimSuffix(filepath.Base(wasmPath), ".wasm"), name)
+			sawUnset = true
+			return ""
+		}
 		if isKnownSecretKey(name) {
 			if !allowedSecretsSet[name] {
 				log.Printf("wasm plugin %q: secret %q not in allowed_secrets.json, denied", strings.TrimSuffix(filepath.Base(wasmPath), ".wasm"), name)

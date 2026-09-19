@@ -47,8 +47,24 @@ type notificationTransport interface {
 
 // notifyHTTPClient is shared by the HTTP transports. The timeout is generous
 // relative to the read paths: a notification is worth waiting for.
+//
+// CheckRedirect re-runs the address check on every hop. validateWebhookURL
+// vets a URL when it is saved, but that only settles where the first request
+// goes: a host that passed then is free to answer a real alarm with a 302
+// into loopback or link-local, and Go follows redirects by default. Since
+// the whole point of the save-time check is that Helmcentral should not be
+// made to originate requests into ranges only it can reach, the check has to
+// hold for wherever the chain actually ends up, not just its first hop.
 func notifyHTTPClient() *http.Client {
-	return &http.Client{Timeout: 10 * time.Second}
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after %d redirects", len(via))
+			}
+			return validateWebhookURL(req.URL.String())
+		},
+	}
 }
 
 // ── ntfy ──────────────────────────────────────────────────────────────────────

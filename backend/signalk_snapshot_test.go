@@ -1114,6 +1114,203 @@ func TestApplyDeltaDropsRadarTargetNodesFromTheSnapshot(t *testing.T) {
 	}
 }
 
+// ── delta ingestion depth guard (K-1, backend security audit) ─────────────
+
+// TestApplyDeltaRejectsExcessivePathNesting reproduces K-1: an unbounded
+// segment count in a delta's path let applyDelta build an arbitrarily deep
+// nested tree, which every recursive walker over the snapshot
+// (deepCopyMap/deepCopyValue here, freshestTimestampAge and
+// flattenNotificationLeaves elsewhere) would later blow Go's goroutine
+// stack walking -- a FATAL runtime error recover() cannot catch. The fix
+// rejects the value outright at ingestion, before the deep tree is ever
+// built, so this test only needs to prove the value never reaches the tree
+// -- actually reproducing the stack overflow itself would crash the test
+// binary, which is exactly the bug this guards against.
+func TestApplyDeltaRejectsExcessivePathNesting(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+
+	segments := make([]string, 5000)
+	for i := range segments {
+		segments[i] = "a"
+	}
+	hostile := strings.Join(segments, ".")
+	if len(segments) <= signalKDeltaMaxPathSegments {
+		t.Fatalf("test setup broken: hostile path has %d segments, not more than the cap %d", len(segments), signalKDeltaMaxPathSegments)
+	}
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{
+			{
+				Timestamp: "2026-08-12T10:00:00.000Z",
+				Values: []signalKValue{
+					{Path: hostile, Value: 1.0},
+					// A legitimate sibling value in the same delta must still be
+					// stored: rejection is per-value, not per-delta.
+					{Path: "environment.depth.belowTransducer", Value: 2.0},
+				},
+			},
+		},
+	}, testNow)
+
+	tree := snapshot.treeFor("vessels.self")
+	if depth := lookupNumber(tree, "environment", "depth", "belowTransducer", "value"); depth != 2.0 {
+		t.Fatalf("legitimate sibling value in the same delta: got %v, want 2.0", depth)
+	}
+	if _, ok := tree["a"]; ok {
+		t.Fatalf("rejected path must not partially build the tree, found top-level key %q", "a")
+	}
+	if _, present := snapshot.pathSeen["vessels.self|"+hostile]; present {
+		t.Fatalf("rejected path must not be recorded in pathSeen either")
+	}
+}
+
+// ── empty-path merge safety (K-4, backend security audit) ─────────────────
+
+// TestApplyDeltaEmptyPathDoesNotOverwriteExistingBranch reproduces K-4: an
+// empty-path delta whose value object happens to share a key with an
+// existing branch (built up by ordinary dotted-path deltas) must not
+// replace that whole branch with a bare scalar. The empty-path merge exists
+// to carry unwrapped top-level scalars like "name" (see the comment on
+// applyDelta's empty-path handling), never to destroy a subtree.
+func TestApplyDeltaEmptyPathDoesNotOverwriteExistingBranch(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: "2026-08-12T10:00:00.000Z",
+			Values:    []signalKValue{{Path: "navigation.state", Value: "moored"}},
+		}},
+	}, testNow)
+
+	// {"path":"","value":{"navigation":0}} -- the exact repro from the
+	// finding -- landing in the same delta as a genuine top-level scalar.
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: "2026-08-12T10:00:01.000Z",
+			Values:    []signalKValue{{Path: "", Value: map[string]any{"navigation": 0.0, "name": "Pikorua"}}},
+		}},
+	}, testNow.Add(time.Second))
+
+	tree := snapshot.treeFor("vessels.self")
+	if got := lookupString(tree, "navigation", "state", "value"); got != "moored" {
+		t.Fatalf("navigation branch was destroyed by an empty-path merge: lookupString(...) = %q, want %q", got, "moored")
+	}
+	// A genuine top-level scalar in the same delta must still merge normally.
+	if got := lookupString(tree, "name"); got != "Pikorua" {
+		t.Fatalf("expected name to merge normally alongside the refused navigation key, got %q", got)
+	}
+}
+
+// ── excess path eviction (K-2, backend security audit) ─────────────────────
+
+// TestEvictExcessPathsCapsDistinctPathsIncludingSelf reproduces K-2: nothing
+// ever bounded how many distinct paths one context's tree could hold, and
+// evictStaleVesselContexts deliberately never touches self (a vessel's own
+// data must not disappear just because it is stationary) -- so a device
+// publishing an ever-growing set of distinct paths under self (no context
+// key at all files a sender under self, signalKDelta.Context's own doc
+// comment) grew unbounded, with nothing anywhere to catch it.
+func TestEvictExcessPathsCapsDistinctPathsIncludingSelf(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	for i := 0; i < signalKContextMaxDistinctPaths+1; i++ {
+		path := "environment.sensor.s" + strconv.Itoa(i)
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{Values: []signalKValue{{Path: path, Value: float64(i)}}}},
+		}, testNow.Add(time.Duration(i)*time.Millisecond))
+	}
+
+	evicted := snapshot.evictExcessPaths()
+	if got := evicted["vessels.self"]; got != 1 {
+		t.Fatalf("expected 1 path evicted over the cap, got %d (%v)", got, evicted)
+	}
+
+	count := 0
+	for key := range snapshot.pathSeen {
+		if strings.HasPrefix(key, "vessels.self|") {
+			count++
+		}
+	}
+	if count != signalKContextMaxDistinctPaths {
+		t.Fatalf("pathSeen entries for vessels.self after eviction: got %d, want %d", count, signalKContextMaxDistinctPaths)
+	}
+}
+
+// TestEvictExcessPathsEvictsLeastRecentlySeenFirst proves eviction order:
+// when a context is over the cap, the path that has gone longest without an
+// update goes first -- the least likely thing anyone is actually looking at
+// right now -- and the path just touched survives.
+func TestEvictExcessPathsEvictsLeastRecentlySeenFirst(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	for i := 0; i < signalKContextMaxDistinctPaths+1; i++ {
+		path := "environment.sensor.s" + strconv.Itoa(i)
+		snapshot.applyDelta(signalKDelta{
+			Context: "vessels.self",
+			Updates: []signalKUpdate{{Values: []signalKValue{{Path: path, Value: float64(i)}}}},
+		}, testNow.Add(time.Duration(i)*time.Millisecond))
+	}
+
+	snapshot.evictExcessPaths()
+
+	if _, present := snapshot.pathSeen["vessels.self|environment.sensor.s0"]; present {
+		t.Fatalf("expected the least-recently-seen path (s0) evicted first, but it survived")
+	}
+	newest := "environment.sensor.s" + strconv.Itoa(signalKContextMaxDistinctPaths)
+	if _, present := snapshot.pathSeen["vessels.self|"+newest]; !present {
+		t.Fatalf("expected the most recently seen path (%s) to survive eviction", newest)
+	}
+
+	tree := snapshot.treeFor("vessels.self")
+	sensor := lookupAnyMap(tree, "environment", "sensor")
+	if _, ok := sensor["s0"]; ok {
+		t.Fatalf("evicted path's tree node must be gone too, not just its pathSeen entry")
+	}
+}
+
+// TestEvictExcessPathsNoOpUnderCap proves the common case -- an ordinary
+// boat's tree, nowhere near the cap -- is left completely untouched.
+func TestEvictExcessPathsNoOpUnderCap(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	snapshot.applyDelta(depthDelta("vessels.self", 5.0), testNow)
+
+	evicted := snapshot.evictExcessPaths()
+	if len(evicted) != 0 {
+		t.Fatalf("expected no eviction well under the cap, got %v", evicted)
+	}
+	if depth := lookupNumber(snapshot.treeFor("vessels.self"), "environment", "depth", "belowTransducer", "value"); depth != 5.0 {
+		t.Fatalf("untouched path should be unaffected: got %v, want 5.0", depth)
+	}
+}
+
+// TestEvictExcessPathsAppliesToNonVesselContextsToo guards against the fix
+// accidentally scoping itself to only self or only "vessels."-prefixed
+// contexts -- the cap is per context, whatever the context is.
+func TestEvictExcessPathsAppliesToNonVesselContextsToo(t *testing.T) {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+
+	for i := 0; i < signalKContextMaxDistinctPaths+1; i++ {
+		path := "notifications.n" + strconv.Itoa(i)
+		snapshot.applyDelta(signalKDelta{
+			Context: "atons",
+			Updates: []signalKUpdate{{Values: []signalKValue{{Path: path, Value: "x"}}}},
+		}, testNow.Add(time.Duration(i)*time.Millisecond))
+	}
+
+	evicted := snapshot.evictExcessPaths()
+	if got := evicted["atons"]; got != 1 {
+		t.Fatalf("expected 1 path evicted for the atons context, got %d (%v)", got, evicted)
+	}
+}
+
 // ── vessel context eviction (backend-perf-audit.md Tier 1 #3) ─────────────────
 
 func TestEvictStaleVesselContextsDropsAContextQuietPastTheThreshold(t *testing.T) {

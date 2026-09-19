@@ -429,9 +429,13 @@ export function isEmbedWidgetId(id: string): id is EmbedWidgetId {
 }
 
 /**
- * Mirrors validateEmbedWidget in backend/dashboard_pages.go. Duplicated rather
- * than shared because the config dialog needs synchronous feedback while the
- * server must not trust the client — keep the two rule sets in step.
+ * Mirrors validateEmbedWidget in backend/dashboard_pages.go, with one
+ * exception: the same-origin rejection below has no backend counterpart yet.
+ * See that function's own comment for the full account of why (in short: it
+ * never receives the request it would need to compute the server's own
+ * origin to compare against). Otherwise duplicated rather than shared
+ * because the config dialog needs synchronous feedback while the server
+ * must not trust the client — keep the two rule sets in step.
  */
 export function isValidEmbedUrl(url: string): boolean {
   const trimmed = url.trim()
@@ -448,7 +452,20 @@ export function isValidEmbedUrl(url: string): boolean {
   } catch {
     return false
   }
-  return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.host !== ''
+
+  // F-1 (security audit): reject an embed whose origin equals this app's
+  // own. embed-tile.tsx's iframe sandbox grants allow-same-origin, which a
+  // genuinely third-party embed (Grafana, Node-RED, ...) needs to keep its
+  // own session cookie — but for a same-origin frame that same grant instead
+  // un-sandboxes it against OUR window: window.top.document, this app's
+  // state, and same-origin fetches carrying the SignalK session cookie
+  // (autopilot, CZone, generator control). See the sandbox comment in
+  // embed-tile.tsx for the full picture.
+  return (
+    (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+    && parsed.host !== ''
+    && parsed.origin !== window.location.origin
+  )
 }
 
 /**

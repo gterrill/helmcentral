@@ -135,8 +135,10 @@ func withServiceAccount(t *testing.T, stub *publishStub) {
 	t.Helper()
 	invalidateSignalKToken()
 	t.Cleanup(invalidateSignalKToken)
-	t.Setenv("SIGNALK_USERNAME", "helmcentral-service")
-	t.Setenv("SIGNALK_PASSWORD", "service-secret")
+	withSeededSecretsStore(t, map[string]string{
+		"SIGNALK_USERNAME": "helmcentral-service",
+		"SIGNALK_PASSWORD": "service-secret",
+	})
 	t.Setenv("SETTINGS_FILE", stub.settings(t))
 }
 

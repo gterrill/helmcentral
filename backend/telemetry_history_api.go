@@ -50,6 +50,18 @@ func telemetryHistoryHandler(c echo.Context) error {
 	if len(path) > gaugePathMaxLen {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path is too long"})
 	}
+	// path is interpolated into a Flux string literal too (queryInfluxPathTrend
+	// uses it as the _measurement filter, ADR 0051), and unlike window it can't
+	// be an allowlist -- a SignalK path is open-ended. %q's escaping stops it
+	// breaking the literal open into a new pipeline stage, but does nothing
+	// about Flux's OWN "${...}" string-interpolation syntax, which InfluxDB
+	// evaluates once it parses that literal (E-4). Rejected here at the HTTP
+	// boundary and again in influx.go's fluxStringLiteral, which is also what
+	// Mate's estimate_passage tool goes through with no HTTP handler in front
+	// of it.
+	if containsFluxInterpolationSyntax(path) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path must not contain '$' or '{'"})
+	}
 
 	window := c.QueryParam("window")
 	if window == "" {

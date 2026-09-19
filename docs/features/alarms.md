@@ -69,6 +69,13 @@ Five transports, none of which needs a paid subscription:
 `POST /api/alarm-transports/test` probes every enabled transport so you can
 check delivery before relying on it.
 
+Changing the ntfy server or the SMTP host clears the token or password
+stored for that transport. This is deliberate: a credential is bound to the
+destination it was entered for, and repointing that destination does not
+carry it across. Paste the token or password back in after changing either
+address; the transport stays quiet until you do. Changing the SMTP username
+clears the password too, since AUTH PLAIN sends the two together.
+
 Helmcentral reads `notifications.*` to pick up alarms from other producers,
 so it has to recognise its
 own output coming back. It does that by path: anything under `helmcentral.` is

@@ -215,19 +215,18 @@ func main() {
 	// list and why each is excluded.
 	registerCompressionMiddleware(e)
 
-	// Encrypted secrets store. Must be opened and loaded into the process
-	// environment before any provider registration below, since SignalK
-	// code paths read their secrets via getEnv/os.Getenv. Fail fast on open
-	// error (including a master-key mismatch against existing encrypted
-	// rows) rather than silently running with secrets unavailable.
+	// Encrypted secrets store. Must be opened before any provider
+	// registration below: SignalK and InfluxDB read their secrets from
+	// globalSecretsStore directly at point of use (loadSignalKCredentials,
+	// loadInfluxSettings), not via getEnv/os.Getenv, since the ADR 0023
+	// amendment retired the boot-time process-environment copy. Fail fast on
+	// open error (including a master-key mismatch against existing
+	// encrypted rows) rather than silently running with secrets unavailable.
 	ss, err := newSecretsStore(secretsDBPath(), secretsKeyPath())
 	if err != nil {
 		log.Fatalf("secrets store: %v", err)
 	}
 	globalSecretsStore = ss
-	if err := globalSecretsStore.LoadIntoEnv(); err != nil {
-		log.Fatalf("secrets store: %v", err)
-	}
 
 	// Session store for SignalK delegated authentication (docs/adr/0040).
 	// Fail fast on open error, same reasoning as every other SQLite store
@@ -358,6 +357,17 @@ func main() {
 	} else if sweep.RemovedTemp > 0 || sweep.OrphanFiles > 0 || sweep.MissingFiles > 0 {
 		log.Printf("documents: swept %d abandoned upload(s); %d orphan file(s) and %d missing file(s) logged above",
 			sweep.RemovedTemp, sweep.OrphanFiles, sweep.MissingFiles)
+	}
+
+	// Satellite chart uploads (ADR 0011): same abandoned-temp-file sweep as
+	// documents above (U-5). sweepSatChartsDir tolerates a missing
+	// directory on its own (a brand new install that has never taken an
+	// upload yet), so unlike the documents store above there's no MkdirAll
+	// needed first.
+	if sweep, err := sweepSatChartsDir(satChartsDirPath()); err != nil {
+		log.Fatalf("failed to sweep sat charts directory: %v", err)
+	} else if sweep.RemovedTemp > 0 {
+		log.Printf("sat-charts: swept %d abandoned upload(s)", sweep.RemovedTemp)
 	}
 
 	// Document indexer (ADR 0106, B4): local extraction always, Mate's paid

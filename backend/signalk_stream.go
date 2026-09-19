@@ -136,7 +136,10 @@ func newSignalKStreamClient(snapshot *signalKSnapshot, settingsPath string) *sig
 			return buildSignalKStreamURL(address, port), buildSignalKURL(address, port)
 		},
 		acquireToken: func(httpBaseURL string) (string, error) {
-			username, password := loadSignalKCredentials(settingsPath)
+			username, password, err := loadSignalKCredentials(settingsPath)
+			if err != nil {
+				return "", fmt.Errorf("could not read the SignalK credentials: %w", err)
+			}
 			return acquireSignalKToken(httpBaseURL, username, password)
 		},
 		invalidateToken: invalidateSignalKToken,

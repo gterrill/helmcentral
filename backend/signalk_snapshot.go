@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -26,6 +27,67 @@ type signalKSnapshot struct {
 // vesselContextPrefix separates vessel contexts from the other trees a
 // subscribe=all stream carries (atons, aircraft, meteo).
 const vesselContextPrefix = "vessels."
+
+// signalKDeltaMaxPathSegments caps how many dotted segments a single delta
+// value's path may have before applyDelta rejects it outright, rather than
+// ever building the nested tree for it.
+//
+// signalk_paths.go's own picker walk caps recursion depth at
+// signalKPathMaxDepth with the reasoning this borrows directly: "SignalK
+// trees are shallow; anything deeper is a malformed or cyclic payload, and a
+// runaway walk on a boat computer is worse than a truncated picker." That
+// walk only ever runs over a tree applyDelta already built, though, so it
+// cannot protect against the tree itself being too deep to walk in the first
+// place: a ~3.4MB delta with a 1.7-million-segment path fits comfortably
+// under signalKStreamReadLimit's 4MB, and applyDelta's own segment loop is
+// iterative, so it survives building a million-level-deep nested map. Every
+// *recursive* walker over that tree afterwards -- deepCopyMap/deepCopyValue
+// below, plus freshestTimestampAge and flattenNotificationLeaves elsewhere
+// in this package -- then blows Go's ~1GB goroutine stack, which is a FATAL
+// runtime error recover() cannot catch (K-1, backend security audit).
+//
+// The fix belongs here, at ingestion, so the deep tree is never built at
+// all: rejecting one malformed value is far cheaper and more robust than
+// trying to depth-limit every walker that might ever touch the tree. Reusing
+// signalKPathMaxDepth's own value (rather than picking a new number) keeps
+// the two bounds trivially consistent, since a tree's nesting depth and its
+// paths' segment count are the same thing here.
+const signalKDeltaMaxPathSegments = signalKPathMaxDepth
+
+// signalKContextMaxDistinctPaths caps how many distinct dotted paths a
+// single context's tree may hold, self included.
+//
+// evictStaleVesselContexts (below) only ever drops a WHOLE non-self vessel
+// context -- deliberately never self, because this vessel's own data must
+// not disappear just because it has gone quiet (e.g. sitting at anchor with
+// nothing changing). That is the wrong tool against a device publishing an
+// ever-growing set of DISTINCT paths under self -- no context key at all
+// files a sender under self, per signalKDelta.Context's own doc comment --
+// e.g. environment.sensor.<counter> at 10Hz: none of those paths individually
+// look stale the instant after they arrive, and the whole context is very
+// much alive, so neither existing eviction catches it. buildGaugeValuesPayload
+// deep-copies the whole self tree once per second regardless, so an unbounded
+// path count becomes unbounded per-second CPU and garbage, eventually
+// starving the 1Hz tick and OOM-killing the box -- with nothing in the log to
+// explain why (K-2, backend security audit).
+//
+// A pure age-based eviction (drop a path once its own pathSeen entry is
+// older than some window) was considered and rejected: a real SignalK
+// server can publish a static value -- design.length, mmsi, a tank's
+// capacity -- exactly once at subscribe time and never again unless it
+// changes, so an age cutoff would eventually evict genuinely-still-true
+// vessel data on a perfectly ordinary, healthy boat with no attack
+// happening at all. A count cap only ever activates once a context is
+// already holding far more distinct paths than any real N2K/SignalK
+// installation this codebase has measured (a 3,000-leaf tree,
+// backend-perf-audit.md's own sample) -- so ordinary boat data never
+// approaches it, while a flood is bounded well short of the sizes that made
+// the growth catastrophic. Eviction order still leans on pathSeen's
+// timestamps (oldest first, evictExcessPaths below), so if the cap is ever
+// actually reached on a real boat, what goes first is whatever has gone
+// longest without an update -- the least likely thing anyone is looking at
+// right now.
+const signalKContextMaxDistinctPaths = 10000
 
 // signalKDelta is a SignalK delta message received over the WebSocket stream.
 type signalKDelta struct {
@@ -108,13 +170,23 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 				continue
 			}
 
-			s.pathSeen[d.Context+"|"+val.Path] = now
-
 			// An empty path carries top-level scalars (e.g. name) which the REST
 			// tree presents unwrapped, so they must not gain a "value" key.
 			if val.Path == "" {
+				s.pathSeen[d.Context+"|"+val.Path] = now
 				if valMap, ok := val.Value.(map[string]any); ok {
 					for k, v := range valMap {
+						// A real dotted-path delta may already have built a whole
+						// branch at this key (e.g. "navigation"). The empty-path
+						// merge exists only to carry unwrapped top-level SCALARS
+						// like name, never to replace a subtree wholesale (K-4,
+						// backend security audit) -- the alternative is a single
+						// hostile or malformed {"path":"","value":{"navigation":0}}
+						// delta quietly destroying everything navigation ever held.
+						if _, isBranch := tree[k].(map[string]any); isBranch {
+							log.Printf("signalk snapshot: dropping empty-path merge of %q under %s: would overwrite an existing branch with a scalar", k, d.Context)
+							continue
+						}
 						tree[k] = v
 					}
 				}
@@ -122,6 +194,20 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			}
 
 			segments := strings.Split(val.Path, ".")
+			if len(segments) > signalKDeltaMaxPathSegments {
+				// Reject the whole value before the tree is ever built, rather
+				// than truncate the path or depth-limit the walk below -- see
+				// signalKDeltaMaxPathSegments's doc comment for why the deep
+				// tree must never exist in the first place (K-1, backend
+				// security audit). %.80s keeps one hostile multi-megabyte path
+				// from also blowing out the log.
+				log.Printf("signalk snapshot: dropping delta value for %s: path has %d segments, more than the %d cap (malformed or hostile payload): %.80s...",
+					d.Context, len(segments), signalKDeltaMaxPathSegments, val.Path)
+				continue
+			}
+
+			s.pathSeen[d.Context+"|"+val.Path] = now
+
 			current := tree
 			for i, segment := range segments {
 				child, ok := current[segment].(map[string]any)
@@ -501,15 +587,90 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 	return evicted
 }
 
+// deletePathLocked removes the leaf a dotted path resolves to from context's
+// tree -- applyDelta's own segment-walk, run in reverse: every segment
+// except the last is a branch map to descend into, and the last is the key
+// to remove from its parent (the map itself carries "value"/"timestamp"/
+// "$source", so deleting that key removes the whole leaf in one step). Must
+// be called with s.mu already held for writing.
+//
+// A path with no matching leaf (already evicted, or the tree's shape has
+// since changed under it) is a silent no-op: eviction racing an unrelated
+// delta for the same path is an expected, harmless overlap, not an error.
+func (s *signalKSnapshot) deletePathLocked(context, path string) {
+	tree, ok := s.contexts[context]
+	if !ok {
+		return
+	}
+
+	segments := strings.Split(path, ".")
+	current := tree
+	for i, segment := range segments {
+		if i == len(segments)-1 {
+			delete(current, segment)
+			return
+		}
+		child, ok := current[segment].(map[string]any)
+		if !ok {
+			return
+		}
+		current = child
+	}
+}
+
+// evictExcessPaths bounds every context (self included) at
+// signalKContextMaxDistinctPaths distinct paths, dropping the
+// least-recently-updated ones first until each is back at the cap -- see
+// signalKContextMaxDistinctPaths's own doc comment for why a count cap,
+// rather than an age cutoff, is the trigger here. Returns how many paths
+// were evicted per context, so a caller can log exactly what left.
+func (s *signalKSnapshot) evictExcessPaths() map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	type seenPath struct {
+		path string
+		seen time.Time
+	}
+	byContext := map[string][]seenPath{}
+	for key, seen := range s.pathSeen {
+		context, path, ok := strings.Cut(key, "|")
+		if !ok {
+			continue
+		}
+		byContext[context] = append(byContext[context], seenPath{path: path, seen: seen})
+	}
+
+	evicted := map[string]int{}
+	for context, paths := range byContext {
+		if len(paths) <= signalKContextMaxDistinctPaths {
+			continue
+		}
+
+		sort.Slice(paths, func(i, j int) bool { return paths[i].seen.Before(paths[j].seen) })
+
+		excess := len(paths) - signalKContextMaxDistinctPaths
+		for i := 0; i < excess; i++ {
+			delete(s.pathSeen, context+"|"+paths[i].path)
+			s.deletePathLocked(context, paths[i].path)
+		}
+		evicted[context] = excess
+	}
+
+	return evicted
+}
+
 // vesselContextSweepInterval is how often startVesselContextSweeper checks
 // for stale vessel contexts to evict. A one-minute cadence keeps the scan
 // (one pass over pathSeen, see evictStaleVesselContexts) cheap enough not to
 // measure while staying well under vesselContextStaleAfter's own hour.
 const vesselContextSweepInterval = 1 * time.Minute
 
-// startVesselContextSweeper runs evictStaleVesselContexts on
-// vesselContextSweepInterval until ctx is cancelled (backend-perf-audit.md
-// Tier 1 #3, "the snapshot never forgets"). A dedicated ticker rather than
+// startVesselContextSweeper runs evictStaleVesselContexts and
+// evictExcessPaths on vesselContextSweepInterval until ctx is cancelled
+// (backend-perf-audit.md Tier 1 #3, "the snapshot never forgets"; K-2,
+// backend security audit, extends the same sweep to per-path growth within a
+// context that never itself goes stale). A dedicated ticker rather than
 // piggybacking on the stream watchdog's 15s tick: the sweep's cadence has no
 // reason to track the watchdog's, and keeping them separate means changing
 // one interval can never accidentally change the other.
@@ -525,6 +686,21 @@ func startVesselContextSweeper(ctx context.Context, interval time.Duration) {
 			evicted := globalSignalKSnapshot.evictStaleVesselContexts(now.UTC())
 			if len(evicted) > 0 {
 				log.Printf("signalk snapshot: evicted %d stale vessel context(s): %s", len(evicted), strings.Join(evicted, ", "))
+			}
+
+			if excessByContext := globalSignalKSnapshot.evictExcessPaths(); len(excessByContext) > 0 {
+				contexts := make([]string, 0, len(excessByContext))
+				for context := range excessByContext {
+					contexts = append(contexts, context)
+				}
+				sort.Strings(contexts)
+
+				parts := make([]string, 0, len(contexts))
+				for _, context := range contexts {
+					parts = append(parts, fmt.Sprintf("%s (%d)", context, excessByContext[context]))
+				}
+				log.Printf("signalk snapshot: evicted excess distinct paths, oldest-updated-first, to stay under %d per context: %s",
+					signalKContextMaxDistinctPaths, strings.Join(parts, ", "))
 			}
 		}
 	}

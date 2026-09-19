@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,8 +28,112 @@ type satChartCatalogEntry struct {
 	SizeBytes int64      `json:"size_bytes"`
 }
 
+// satChartMaxUploadBytes caps one upload's total request body (U-2): the
+// only body cap anywhere else in the backend is documentMaxUploadBytes
+// (documents_handlers.go), scoped to /api/documents, so without this one
+// sat-charts had none at all. MBTiles satellite chart exports are
+// legitimately large - a single region's imagery pyramid taken out to a
+// useful zoom level routinely runs into the multiple-GB range - so this
+// can't be anywhere near as tight as the document cap. 4 GiB is chosen as
+// generous headroom for a real chart while still being a hard backstop
+// against an unbounded body filling the disk that also holds
+// documents.sqlite, alarm-log.sqlite, and the tile cache. A var, not a
+// const: TestUploadSatChartHandler_OverCapReturns413 lowers it for the
+// duration of one test so it doesn't have to actually push 4GB of body
+// through httptest to exercise the 413 path.
+var satChartMaxUploadBytes int64 = 4 << 30 // 4 GiB
+
+// satChartMetadataRowLimit and satChartMetadataValueLimit bound how much
+// of an uploaded file's own metadata table readMBTilesMetadata will read
+// (U-4): that table is attacker-controlled bytes, read fresh on every
+// listSatChartsHandler call (there is no cache for it, unlike tile reads -
+// satChartHandleCache covers only satChartTileHandler), so an uploaded
+// file padded with a huge metadata table would otherwise be re-parsed into
+// memory on every dashboard load. Real MBTiles metadata for the five keys
+// this code reads (name, bounds, minzoom, maxzoom, format) is a handful of
+// rows well under a few hundred bytes each; both bounds are generous
+// relative to that. vars, not consts: tests lower them rather than writing
+// megabytes of fixture data to exercise the caps.
+var (
+	satChartMetadataRowLimit   = 100
+	satChartMetadataValueLimit = 4096 // bytes
+)
+
 func satChartsDirPath() string {
 	return cacheFilePath("SAT_CHARTS_DIR", "data/sat-charts")
+}
+
+// satChartReadOnlyDSN is the DSN every read of an uploaded MBTiles file's
+// own SQLite bytes must use - readMBTilesMetadata below and
+// satChartHandleCache.get further down this file (U-7). The file is
+// attacker-supplied (freshly uploaded, or in readMBTilesMetadata's case
+// sometimes not yet proven to even be a real MBTiles export) and must
+// never be opened read-write: without mode=ro, SQLite may write to it -
+// e.g. to roll back a stale journal, or to satisfy WAL's locking protocol
+// if the file's own header says journal_mode=WAL - creating -wal/-shm
+// sidecars next to it that neither the catalog listing's ".mbtiles"
+// filter nor sweepSatChartsDir know to look for, and meaning the bytes
+// later renamed into the catalog aren't necessarily the bytes uploaded.
+//
+// The "file:" prefix is required: without it, modernc.org/sqlite's DSN
+// parser strips everything from the first "?" onward before handing the
+// string to sqlite3_open_v2, so mode=ro and immutable=1 would otherwise be
+// silently dropped (see modernc.org/sqlite's newConn). mode=ro opens
+// read-only regardless of the Go-level open flags; immutable=1
+// additionally tells SQLite the file will never change out from under
+// this connection, letting it skip locking calls, change detection, and
+// WAL-index setup it would otherwise do on every query. That's safe here
+// because nothing else touches these bytes while they're being read this
+// way: satChartHandleCache's own doc comment covers why for the catalog
+// path, and readMBTilesMetadata's callers never mutate tmpPath or an
+// already-renamed chart file while a read is in flight either.
+func satChartReadOnlyDSN(path string) string {
+	return "file:" + path + "?mode=ro&immutable=1"
+}
+
+// satChartSweepResult is sweepSatChartsDir's report: how many abandoned
+// upload temp files it removed. Returned (not just logged) so the boot
+// sweep's behavior is directly assertable in tests without scraping log
+// output, mirroring documentSweepResult (documents_store.go).
+type satChartSweepResult struct {
+	RemovedTemp int
+}
+
+// sweepSatChartsDir runs once at boot (main.go, next to sweepDocumentsDir):
+// it removes abandoned upload-*.mbtiles.tmp files left behind by a crash,
+// OOM kill, or restart mid-upload (U-5) - uploadSatChartHandler's own
+// deferred os.Remove never got to run for them, the catalog listing's
+// ".mbtiles" suffix filter can't see them to report them either, and
+// DELETE can't name a chart id that was never assigned. Unlike
+// sweepDocumentsDir there is no separate catalog to cross-check disk
+// against - each chart's own MBTiles metadata table *is* the catalog (ADR
+// 0011) - so there's no orphan/missing comparison to make here, only the
+// temp files to remove.
+func sweepSatChartsDir(dir string) (satChartSweepResult, error) {
+	var result satChartSweepResult
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return result, nil
+		}
+		return result, fmt.Errorf("sweep sat charts dir: %w", err)
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, "upload-") && strings.HasSuffix(name, ".mbtiles.tmp") {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil {
+				return result, fmt.Errorf("sweep sat charts dir: remove %s: %w", name, err)
+			}
+			result.RemovedTemp++
+		}
+	}
+
+	return result, nil
 }
 
 func satChartFilePath(id string) string {
@@ -80,18 +185,34 @@ func parseMBTilesBounds(raw string) ([4]float64, error) {
 }
 
 func readMBTilesMetadata(dbPath string) (satChartCatalogEntry, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", satChartReadOnlyDSN(dbPath))
 	if err != nil {
 		return satChartCatalogEntry{}, fmt.Errorf("open sqlite: %w", err)
 	}
 	defer db.Close()
+	// This function opens and closes its own connection per call rather
+	// than sharing satChartHandleCache's - unlike that cache, which bounds
+	// a pool shared across many concurrent tile requests for one chart,
+	// only one connection is ever needed here.
+	db.SetMaxOpenConns(1)
 
 	if err := verifyMBTilesSchema(db); err != nil {
 		return satChartCatalogEntry{}, err
 	}
 
+	// U-4: only the keys this function actually reads below, a row LIMIT
+	// past what any real MBTiles file needs for them, and a per-value size
+	// cap via length(value) in the WHERE clause - filtered by SQLite before
+	// a value is ever handed back to Go, so an oversized value's bytes are
+	// never materialized here at all rather than being read and discarded.
 	meta := map[string]string{}
-	rows, err := db.Query("SELECT name, value FROM metadata")
+	rows, err := db.Query(
+		`SELECT name, value FROM metadata
+		 WHERE name IN ('name', 'bounds', 'minzoom', 'maxzoom', 'format')
+		   AND length(value) <= ?
+		 LIMIT ?`,
+		satChartMetadataValueLimit, satChartMetadataRowLimit,
+	)
 	if err != nil {
 		return satChartCatalogEntry{}, fmt.Errorf("query metadata: %w", err)
 	}
@@ -141,8 +262,22 @@ func tileContentType(format string) string {
 
 // POST /api/sat-charts
 func uploadSatChartHandler(c echo.Context) error {
+	// U-2: cap the request body before anything parses it - the same
+	// http.MaxBytesReader approach uploadDocumentHandler uses
+	// (documents_handlers.go), which was previously the only body cap
+	// anywhere in the backend. Without this, c.FormFile below spills an
+	// unbounded body into a temp file via ParseMultipartForm before this
+	// handler gets any say in the matter.
+	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, satChartMaxUploadBytes)
+
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{
+				"error": fmt.Sprintf("upload exceeds the %d byte limit", satChartMaxUploadBytes),
+			})
+		}
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing file field"})
 	}
 
@@ -304,17 +439,10 @@ func (c *satChartHandleCache) get(id string) (*satChartHandle, error) {
 		return nil, err
 	}
 
-	// "file:" + mode=ro + immutable=1: without the "file:" prefix,
-	// modernc.org/sqlite's DSN parser strips everything from the first "?"
-	// onward before handing the string to sqlite3_open_v2, so these two
-	// native SQLite URI parameters would otherwise be silently dropped (see
-	// modernc.org/sqlite's newConn). mode=ro opens read-only regardless of
-	// the Go-level open flags; immutable=1 additionally tells SQLite the
-	// file will never change out from under this handle, letting it skip
-	// locking calls and change detection it would otherwise do on every
-	// query - safe here per this type's doc comment above.
-	dsn := "file:" + path + "?mode=ro&immutable=1"
-	db, err := sql.Open("sqlite", dsn)
+	// satChartReadOnlyDSN's doc comment (above, near satChartsDirPath)
+	// covers why mode=ro&immutable=1 is required; safe here specifically
+	// per this type's own doc comment above.
+	db, err := sql.Open("sqlite", satChartReadOnlyDSN(path))
 	if err != nil {
 		return nil, err
 	}
@@ -387,6 +515,15 @@ func satChartTileHandler(c echo.Context) error {
 		return c.NoContent(http.StatusNotFound)
 	}
 
-	c.Response().Header().Set("Cache-Control", "public, max-age=604800, immutable")
+	// U-6: tileData is bytes straight out of an uploaded SQLite file, and
+	// tileContentType derives from that same file's own metadata.format -
+	// both attacker-controlled. tileContentType can only ever emit
+	// image/png|jpeg|webp, so this isn't an XSS vector, but the headers
+	// documentContentHandler sets deliberately for the same reason
+	// (documents_handlers.go) were simply absent here.
+	header := c.Response().Header()
+	header.Set("Cache-Control", "public, max-age=604800, immutable")
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("Content-Security-Policy", "sandbox")
 	return c.Blob(http.StatusOK, tileContentType(handle.format), tileData)
 }

@@ -111,10 +111,21 @@ export const EmbedTile = memo(function EmbedTile({
             src={src}
             title={title}
             loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
+            // F-3 (security audit): "no-referrer-when-downgrade" sent this
+            // page's full URL — including a deep-link path like
+            // /dashboard/<page id> — as the Referer header on every request
+            // an http-served embed makes. The embed never needs that.
+            referrerPolicy="no-referrer"
             // allow-same-origin is needed for the embedded app's own session
-            // (Grafana will not render without it). It only defeats the sandbox
-            // for a same-origin frame, which an operator-supplied embed is not.
+            // (Grafana will not render without it). isValidEmbedUrl
+            // (lib/dashboard-widgets.ts) rejects any embed URL whose origin
+            // equals this app's own before the config dialog can save it, so
+            // through that dialog allow-same-origin can only ever apply to a
+            // genuinely different origin. It is NOT enforced by the backend
+            // yet — see validateEmbedWidget's comment in
+            // backend/dashboard_pages.go — so a same-origin URL saved by
+            // calling the API directly, bypassing this dialog, would still
+            // render here with the sandbox defeated against this window.
             sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
             className="h-full w-full border-0"
           />
@@ -158,10 +169,21 @@ export const EmbedTile = memo(function EmbedTile({
               src={src}
               title={title}
               loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
+              // F-3 (security audit): "no-referrer-when-downgrade" sent this
+              // page's full URL — including a deep-link path like
+              // /dashboard/<page id> — as the Referer header on every request
+              // an http-served embed makes. The embed never needs that.
+              referrerPolicy="no-referrer"
               // allow-same-origin is needed for the embedded app's own session
-              // (Grafana will not render without it). It only defeats the sandbox
-              // for a same-origin frame, which an operator-supplied embed is not.
+              // (Grafana will not render without it). isValidEmbedUrl
+              // (lib/dashboard-widgets.ts) rejects any embed URL whose origin
+              // equals this app's own before the config dialog can save it, so
+              // through that dialog allow-same-origin can only ever apply to a
+              // genuinely different origin. It is NOT enforced by the backend
+              // yet — see validateEmbedWidget's comment in
+              // backend/dashboard_pages.go — so a same-origin URL saved by
+              // calling the API directly, bypassing this dialog, would still
+              // render here with the sandbox defeated against this window.
               sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
               className={cn(
                 'h-full w-full rounded-md border-0 bg-background',

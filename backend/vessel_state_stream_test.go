@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -293,6 +296,94 @@ func TestTelemetryHub_AlwaysSendEmitterBroadcastsDespiteIdenticalPayload(t *test
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("reader did not finish")
+	}
+}
+
+// ── non-finite payload values (K-3, backend security audit) ────────────────
+
+// TestTelemetryHub_NonFiniteValueIsSanitizedNotFrozen reproduces K-3: a
+// hostile or malformed SignalK reading can, after this codebase's own unit
+// conversions, come out as +Inf or NaN. json.Marshal refuses to encode
+// either ("json: unsupported value"), and before this fix that error
+// propagated straight out of buildAndBroadcast as a bare, unlogged `return`
+// -- silently dropping the ENTIRE event's build, freezing every field it
+// carries (not just the poisoned one) at its last good value for as long as
+// the bad reading sat in the snapshot, with no staleness indication because
+// the staleness badges ride in the very same payload that stopped being
+// sent.
+//
+// This test does not need the real unit-conversion chain in signalk.go
+// (which this file does not own) to prove the hub-level bug: any emitter
+// whose build() can produce a non-finite float64 hits the same failure
+// mode, so a synthetic one stands in for it.
+func TestTelemetryHub_NonFiniteValueIsSanitizedNotFrozen(t *testing.T) {
+	server := streamTestServer(t)
+
+	var buf bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(previous)
+
+	globalTelemetryHub.events = append(globalTelemetryHub.events, &streamEmitter{
+		event:    "test-nonfinite",
+		interval: 1 * time.Second,
+		build: func() map[string]any {
+			return map[string]any{"reading": math.Inf(1), "label": "ok"}
+		},
+	})
+
+	response, err := http.Get(server.URL + "/api/stream")
+	if err != nil {
+		t.Fatalf("GET /api/stream: %v", err)
+	}
+	defer response.Body.Close()
+
+	type frame struct {
+		event string
+		data  string
+	}
+	frames := make(chan frame, 8)
+	go func() {
+		scanner := bufio.NewScanner(response.Body)
+		event := ""
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				frames <- frame{event: event, data: strings.TrimPrefix(line, "data: ")}
+			}
+		}
+	}()
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-frames:
+			if got.event != "test-nonfinite" {
+				continue
+			}
+			// The event must actually arrive -- not freeze -- with the
+			// non-finite leaf turned into an explicit null rather than a
+			// number that looks real, and every other field in the same
+			// payload untouched.
+			if !strings.Contains(got.data, `"reading":null`) {
+				t.Fatalf("expected the non-finite reading sanitized to null, got %s", got.data)
+			}
+			if !strings.Contains(got.data, `"label":"ok"`) {
+				t.Fatalf("expected the unrelated field to survive untouched, got %s", got.data)
+			}
+			if strings.Contains(got.data, "Inf") {
+				t.Fatalf("a non-finite value must never reach the wire: %s", got.data)
+			}
+			if !strings.Contains(buf.String(), "non-finite") {
+				t.Fatalf("expected the sanitization to be logged explicitly (fail-fast, not a silent fallback), got log: %s", buf.String())
+			}
+			return
+		case <-deadline:
+			t.Fatalf("test-nonfinite event never arrived within 5s -- the event froze instead of broadcasting (K-3)")
+		}
 	}
 }
 

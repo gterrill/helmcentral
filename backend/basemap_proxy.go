@@ -446,7 +446,24 @@ func basemapVectorTileHandler(cache *tileCache, fetcher tileFetcher) echo.Handle
 		// compliant MapLibre client never sends z>14 in the first place
 		// (it overzooms client-side instead), so this only ever fires
 		// against a misbehaving client or a manual request.
-		if zInt > cartoBasemapMaxZoom {
+		if zInt < 0 || zInt > cartoBasemapMaxZoom {
+			return c.NoContent(http.StatusBadRequest)
+		}
+
+		// x and y are only meaningful in [0, 2^z-1] for this z - the same
+		// reject-don't-clamp reasoning as the zoom check above, one level
+		// down. strconv.Atoi happily parses a negative coordinate, and
+		// Go's % keeps the sign of its dividend, so an unvalidated
+		// negative x or y used to reach
+		// cartoVectorTileHosts[(x+y)%len(cartoVectorTileHosts)]
+		// (tile_cache.go's fetchCartoVectorTileUpstream) as a negative
+		// slice index and panic - caught by middleware.Recover() as a
+		// 500, but still an unvalidated-input panic reachable by anyone.
+		// An x/y past the top of the range is equally meaningless: there
+		// is no "nearest valid tile" for it that isn't actually some
+		// other, wrong, place.
+		maxIndex := 1 << uint(zInt)
+		if xInt < 0 || yInt < 0 || xInt >= maxIndex || yInt >= maxIndex {
 			return c.NoContent(http.StatusBadRequest)
 		}
 

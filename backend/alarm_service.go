@@ -471,10 +471,22 @@ func testAlarmTransportsHandler(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 20*time.Second)
 	defer cancel()
 
+	// E-3: err.Error() used to go straight into the JSON response -- the
+	// upstream status code, or the raw connect error (host/port, "connection
+	// refused" vs. a real answer). Combined with the webhook URL allowing
+	// RFC1918 destinations (alarm_transports.go's validateWebhookURL), that
+	// turned this endpoint into a scanner an attacker could point at the
+	// compose network and read the result of directly. The detail still has
+	// to go somewhere an operator troubleshooting a misconfigured transport
+	// can find it -- dropping it entirely would be exactly the masking
+	// fallback AGENTS.md's fallback policy forbids -- so it goes to the log
+	// (visible via /api/logs, the same place every other alarm-transport
+	// failure in this file already logs to) instead of the HTTP response.
 	results := map[string]string{}
 	for _, transport := range transports {
 		if err := transport.Send(ctx, msg); err != nil {
-			results[transport.ID()] = err.Error()
+			log.Printf("alarm transport test %s: %v", transport.ID(), err)
+			results[transport.ID()] = "failed: see /api/logs"
 			continue
 		}
 		results[transport.ID()] = "ok"

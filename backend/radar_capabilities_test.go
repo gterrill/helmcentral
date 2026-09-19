@@ -77,6 +77,10 @@ func radarCapabilitiesRequest(radarID string) (echo.Context, *httptest.ResponseR
 // spokesPerRevolution stays 8192, guarding against anything silently
 // reshaping the payload on its way through.
 func TestRadarCapabilitiesHandlerProxiesFixtureVerbatim(t *testing.T) {
+	// Unauthenticated is a supported mode; an empty store is how that
+	// is expressed now that credentials come from the store, not the
+	// process environment.
+	withSeededSecretsStore(t, nil)
 	resetRadarCapabilitiesCache(t)
 	fixture := capabilitiesFixture(t)
 
@@ -123,6 +127,10 @@ func TestRadarCapabilitiesHandlerProxiesFixtureVerbatim(t *testing.T) {
 // on a range change (plan: "Backend" section), so re-fetching on every poll
 // would hit mayara for no reason.
 func TestRadarCapabilitiesHandlerCachesWithinTTL(t *testing.T) {
+	// Unauthenticated is a supported mode; an empty store is how that
+	// is expressed now that credentials come from the store, not the
+	// process environment.
+	withSeededSecretsStore(t, nil)
 	resetRadarCapabilitiesCache(t)
 	fixture := capabilitiesFixture(t)
 

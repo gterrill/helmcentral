@@ -541,7 +541,7 @@ func TestBuildVesselStatePayload_TimezoneFallsBackToUTCForSentinelPosition(t *te
 func TestComputeMaxGustKtsFor_SkipsInMemoryWhenInfluxConfigured(t *testing.T) {
 	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://127.0.0.1:1\n  org: myorg\n  bucket: mybucket\n")
 	t.Setenv("SETTINGS_FILE", path)
-	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
 
 	windGustHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
 	windGustHistory.mu.Lock()

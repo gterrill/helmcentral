@@ -115,6 +115,17 @@ describe('EmbedTile', () => {
     expect(getIframe()).toHaveAttribute('loading', 'lazy')
   })
 
+  // F-3 (security audit): "no-referrer-when-downgrade" sent this page's full
+  // URL — including a deep-link path like /dashboard/<page id> — as the
+  // Referer header on every request an http-served embed makes. Nothing
+  // about the embed needs that.
+  test('sets referrerPolicy to no-referrer so the dashboard URL is never leaked to the embed', () => {
+    render(<EmbedTile config={config} editing={false} />)
+    revealAndMount()
+
+    expect(getIframe()).toHaveAttribute('referrerpolicy', 'no-referrer')
+  })
+
   // Without this, a drag or resize whose mouse-up lands over the frame is
   // swallowed by the embedded document and the gesture never completes.
   test('makes the frame click-through while the dashboard is in layout mode', () => {
@@ -174,6 +185,7 @@ describe('EmbedTile frameless mode', () => {
     expect(sandbox).toContain('allow-scripts')
     expect(sandbox).toContain('allow-same-origin')
     expect(sandbox).not.toContain('allow-top-navigation')
+    expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer')
   })
 
   test('falls back to the framed tile while editing, even when frameless is set', () => {

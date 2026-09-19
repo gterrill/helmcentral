@@ -150,6 +150,14 @@ of the process environment is deliberate: every WASM plugin's `${VAR}`
 configuration expansion reads from the environment, so a value placed there
 is accessible to any plugin.
 
+Changing the SignalK address (or port) clears the stored SignalK username
+and password; changing the InfluxDB URL clears `INFLUXDB_TOKEN`. Both are
+bound to the destination they were entered for, and a save that repoints
+the destination does not carry the credential over to the new one - you
+will need to re-enter it on the Secrets panel. Editing anything else on the
+Settings page, including the rest of the InfluxDB block (org, bucket), never
+touches either credential.
+
 The `assistant:` block in `settings.yaml` holds Mate's non-secret
 configuration:
 

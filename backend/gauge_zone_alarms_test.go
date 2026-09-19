@@ -159,7 +159,7 @@ func TestValidateGaugeConfigRejectsMidRangeZone(t *testing.T) {
 	widget := gaugeWidget("gauge:abcd1234", zoneGaugeConfig(0, 100,
 		gaugeZone{From: 40, To: 60, State: alarmStateWarn},
 	))
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg == "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg == "" {
 		t.Fatal("expected a mid-range alarm band to be rejected")
 	}
 }
@@ -169,7 +169,7 @@ func TestValidateGaugeConfigRejectsMidRangeZone(t *testing.T) {
 func TestValidateGaugeConfigRejectsUnconvertibleZoneUnit(t *testing.T) {
 	config := zoneGaugeConfig(0, 100, gaugeZone{From: 0, To: 15, State: alarmStateAlarm})
 	config.Unit = "furlongs"
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}, ""); msg == "" {
 		t.Fatal("expected an unconvertible zone unit to be rejected")
 	}
 }

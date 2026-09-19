@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -126,6 +128,41 @@ func setAlarmTransports(config alarmTransportConfig) (alarmTransportConfig, erro
 	defer alarmTransportsMu.Unlock()
 
 	previous := alarmTransportsState
+
+	// E-1 (2026-09-19 security audit, ADR 0111 amendment): ntfy.server and
+	// smtp.host are free text, and every transport sends its secret to
+	// whatever they currently name. Repointing one at a server you control
+	// and clicking "test" is enough to read NTFY_TOKEN or SMTP_PASSWORD out
+	// of your own logs. Clearing the bound secret the moment its destination
+	// changes (Option B, chosen over gating these routes behind auth) means
+	// a repointed host gets nothing until the credential is re-entered.
+	//
+	// These checks run against `previous` (the config in memory before this
+	// call) and `config` (already normalized by validateAlarmTransports
+	// above, so whitespace/trailing-slash differences from a resubmitted
+	// form never reach destinationChanged as a false change) - and BEFORE
+	// alarmTransportsState is overwritten below, so a clear failure aborts
+	// the save with the old destination and old secret still paired, never
+	// the new destination next to a secret that should have gone with it.
+	if destinationChanged(previous.Ntfy.Server, config.Ntfy.Server) {
+		reason := fmt.Sprintf("ntfy.server changed from %q to %q", previous.Ntfy.Server, config.Ntfy.Server)
+		if err := clearBoundSecret("NTFY_TOKEN", reason); err != nil {
+			return alarmTransportConfig{}, err
+		}
+	}
+	// SMTP_PASSWORD is bound to Host AND Username: AUTH PLAIN sends them
+	// together, so a password captured for one username has no defined
+	// meaning under a different one. Clearing on either changing (not just
+	// Host) means a username-only edit can't leave a stale password bound
+	// to an identity it was never issued for.
+	if destinationChanged(previous.SMTP.Host, config.SMTP.Host) || destinationChanged(previous.SMTP.Username, config.SMTP.Username) {
+		reason := fmt.Sprintf("smtp host/username changed (host %q -> %q, user %q -> %q)",
+			previous.SMTP.Host, config.SMTP.Host, previous.SMTP.Username, config.SMTP.Username)
+		if err := clearBoundSecret("SMTP_PASSWORD", reason); err != nil {
+			return alarmTransportConfig{}, err
+		}
+	}
+
 	alarmTransportsState = config
 	if err := writeJSONFileAtomic(alarmTransportsFilePath(), config); err != nil {
 		alarmTransportsState = previous
@@ -186,10 +223,100 @@ func validateAlarmTransports(config *alarmTransportConfig) error {
 		if config.Webhook.URL == "" {
 			return fmt.Errorf("webhook requires a url")
 		}
-		if !strings.HasPrefix(config.Webhook.URL, "http://") && !strings.HasPrefix(config.Webhook.URL, "https://") {
-			return fmt.Errorf("webhook url must be http or https")
+		if err := validateWebhookURL(config.Webhook.URL); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+// webhookURLResolver looks up a hostname's addresses. A package variable so
+// tests can supply a fixed answer instead of depending on real DNS (and, for
+// the "rejects an unresolvable host" case, so the test doesn't have to wait
+// out a real resolver timeout).
+var webhookURLResolver = net.LookupIP
+
+// disallowedWebhookIP reports whether ip has no legitimate use as a webhook
+// destination for this container: loopback (the container's own other
+// listeners) and link-local (which also covers the cloud metadata address,
+// 169.254.169.254) and unspecified (0.0.0.0/::). RFC1918/ULA private
+// addresses are deliberately NOT included here -- see validateWebhookURL's
+// doc comment for why.
+func disallowedWebhookIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+// validateWebhookURL is E-3's fix: before this existed, the only check on a
+// webhook URL was its http(s) scheme, and /api/alarm-transports/test
+// (alarm_service.go) reflects the upstream status code or connect error
+// straight into its JSON response -- so an operator's Settings form doubled
+// as an SSRF oracle that could scan the container's own loopback and the
+// compose network, with an attacker-chosen JSON body delivered to whatever
+// answered.
+//
+// Private-address decision: RFC1918 and IPv6 ULA ranges are deliberately
+// ALLOWED. This project's own deployment target is a boat LAN address
+// (192.168.50.240), and a webhook to a LAN-resident Home Assistant or
+// Node-RED instance is exactly the kind of thing an operator legitimately
+// configures here -- blocking all of RFC1918 would break that for no real
+// gain, since whoever can edit Settings already has LAN access. What is
+// blocked is loopback, link-local (169.254.0.0/16, which covers the cloud
+// metadata address 169.254.169.254 -- meaningless on a boat with no cloud
+// metadata service, but excluded anyway since it costs nothing here) and
+// unspecified: none of those have a legitimate webhook use from inside this
+// container, and every one of them is a classic SSRF pivot target. Because
+// RFC1918 stays reachable, this is not a complete SSRF fix on its own -- see
+// the oracle fix in alarm_service.go's testAlarmTransportsHandler, which
+// matters more as a result.
+//
+// A hostname (not an IP literal) is resolved and EVERY returned address is
+// checked, not just the first, so a second A/AAAA record can't slip a
+// disallowed address past this. An unresolvable hostname is rejected rather
+// than silently accepted, matching this function's own "misconfigured is
+// worse than off" doc comment above: a webhook nobody can reach is exactly
+// the failure this whole file exists to catch at save time.
+//
+// This only closes the redirect-based variant of this bug at the point a
+// URL is entered, not at delivery time: the HTTP client that actually POSTs
+// a webhook (notifyHTTPClient, alarm_notify.go) follows redirects with no
+// policy of its own, so a URL that is safe when saved could still redirect
+// into a disallowed range when Helmcentral no longer originates the
+// request. Closing that needs a CheckRedirect policy on that client, which
+// is out of scope for this phase (alarm_notify.go is deliberately
+// untouched here, the same as E-1).
+func validateWebhookURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("webhook url is invalid: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("webhook url must be http or https")
+	}
+
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("webhook url has no host")
+	}
+
+	if literal := net.ParseIP(host); literal != nil {
+		if disallowedWebhookIP(literal) {
+			return fmt.Errorf("webhook url must not point at a loopback, link-local, or unspecified address")
+		}
+		return nil
+	}
+
+	addrs, err := webhookURLResolver(host)
+	if err != nil {
+		return fmt.Errorf("webhook host %q does not resolve: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return fmt.Errorf("webhook host %q does not resolve to any address", host)
+	}
+	for _, addr := range addrs {
+		if disallowedWebhookIP(addr) {
+			return fmt.Errorf("webhook host %q resolves to a loopback, link-local, or unspecified address", host)
+		}
+	}
 	return nil
 }

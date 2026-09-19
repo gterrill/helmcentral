@@ -36,6 +36,18 @@ const (
 	// doesn't hit a write on every single request.
 	sessionRenewThreshold = 1 * time.Hour
 
+	// sessionAbsoluteMaxLifetime bounds how long a session can live from
+	// created_at, no matter how often it's used (S-5, security audit
+	// 2026-09): before this, Validate slid expires_at forward on every use
+	// past sessionRenewThreshold and never once consulted created_at, so a
+	// token used regularly - say, once a week - never actually expired, it
+	// just kept sliding indefinitely. 30 days is four times the sliding
+	// sessionTTL: long enough that a session in ordinary weekly-or-better use
+	// across a season never hits it by surprise mid-passage, short enough
+	// that a token compromised once (a stolen tablet, a leaked cookie) does
+	// not stay valid indefinitely just because someone keeps using it.
+	sessionAbsoluteMaxLifetime = 30 * 24 * time.Hour
+
 	// sessionTokenBytes is the size of the crypto/rand token minted per
 	// login, before base64url encoding for the cookie.
 	sessionTokenBytes = 32
@@ -170,16 +182,29 @@ func (s *sessionStore) Validate(token string) (*sessionRecord, error) {
 	rec.ExpiresAt = time.Unix(expiresAt, 0).UTC()
 	rec.LastSeenAt = time.Unix(lastSeenAt, 0).UTC()
 
-	if now.After(rec.ExpiresAt) {
-		// Delete the expired row eagerly rather than waiting for the next
-		// sweep - the row is provably dead and there is no reason to keep
-		// answering queries about it.
+	// absoluteDeadline is the hard ceiling derived from created_at (S-5):
+	// unlike ExpiresAt, which slides forward on every renewed use below,
+	// this never moves for the life of the row - it is the one thing that
+	// actually bounds a session's total lifetime regardless of how often
+	// it's used.
+	absoluteDeadline := rec.CreatedAt.Add(sessionAbsoluteMaxLifetime)
+
+	if now.After(rec.ExpiresAt) || now.After(absoluteDeadline) {
+		// Delete the expired/over-the-cap row eagerly rather than waiting
+		// for the next sweep - the row is provably dead and there is no
+		// reason to keep answering queries about it.
 		_, _ = s.db.Exec(`DELETE FROM sessions WHERE token_hash = ?`, hash)
 		return nil, nil
 	}
 
 	if now.Sub(rec.LastSeenAt) > sessionRenewThreshold {
 		newExpiresAt := now.Add(sessionTTL)
+		if newExpiresAt.After(absoluteDeadline) {
+			// Keep sliding for convenience, but never past the absolute
+			// cap - once now itself passes absoluteDeadline, the branch
+			// above deletes the row outright on the next Validate.
+			newExpiresAt = absoluteDeadline
+		}
 		if _, err := s.db.Exec(
 			`UPDATE sessions SET expires_at = ?, last_seen_at = ? WHERE token_hash = ?`,
 			newExpiresAt.Unix(), now.Unix(), hash,
@@ -202,6 +227,47 @@ func (s *sessionStore) Delete(token string) error {
 		return fmt.Errorf("session: delete: %w", err)
 	}
 	return nil
+}
+
+// DeleteAllForUser invalidates every session belonging to skUsername at
+// once (S-5, security audit 2026-09): before this, Delete only ever took
+// the single token presented at logout, so there was no "sign out
+// everywhere" for an operator who suspects a device is compromised, and no
+// way to force re-authentication after a SignalK role change - a promotion
+// or demotion of skUsername's userLevel would otherwise leave every
+// already-issued session carrying the OLD role until it happened to expire
+// on its own (up to sessionAbsoluteMaxLifetime away). Returns the number of
+// sessions removed; deleting for a user with none is not an error, mirroring
+// Delete's own no-op-on-missing-row contract.
+func (s *sessionStore) DeleteAllForUser(skUsername string) (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM sessions WHERE sk_username = ?`, skUsername)
+	if err != nil {
+		return 0, fmt.Errorf("session: delete all for user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("session: delete all for user: rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteAll invalidates every session for every user, unconditionally - the
+// blunt "sign out the whole box" primitive S-5 asked for literally ("a way
+// to invalidate all sessions at once"), distinct from DeleteAllForUser's
+// single-user scope above. Intended for an operator-triggered action (e.g.
+// after rotating HELMCENTRAL_MASTER_KEY, or any other suspected
+// box-wide compromise), not something called on any routine path. Returns
+// the number of sessions removed.
+func (s *sessionStore) DeleteAll() (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM sessions`)
+	if err != nil {
+		return 0, fmt.Errorf("session: delete all: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("session: delete all: rows affected: %w", err)
+	}
+	return n, nil
 }
 
 // Sweep deletes every expired row and returns how many were removed. Called

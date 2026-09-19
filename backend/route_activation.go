@@ -142,7 +142,10 @@ func signalkRequestJSON(signalkURL, path, method string, body any, token string)
 // autopilot GET proxies, which must relay SignalK's exact response rather
 // than only knowing whether the call succeeded.
 func signalkRequestJSONWithAuthBody(signalkURL, settingsPath, path, method string, body any) (int, []byte, error) {
-	username, password := loadSignalKCredentials(settingsPath)
+	username, password, err := loadSignalKCredentials(settingsPath)
+	if err != nil {
+		return 0, nil, fmt.Errorf("could not read the SignalK credentials: %w", err)
+	}
 	token, err := acquireSignalKToken(signalkURL, username, password)
 	if err != nil {
 		return 0, nil, err

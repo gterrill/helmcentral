@@ -50,6 +50,10 @@ func TestTelemetryHistoryRejectsBadInput(t *testing.T) {
 		// window is interpolated into Flux, so it is an allowlist, not a parse.
 		{"unknown window", "path=a.b&window=99y"},
 		{"flux injection via window", `path=a.b&window=1h)%20|%3E%20yield(`},
+		// path is interpolated too (queryInfluxPathTrend uses it as the
+		// _measurement filter, ADR 0051), and Flux's own ${...} string
+		// interpolation isn't neutralized by %q's escaping (E-4).
+		{"flux injection via path", `path=${r._measurement}&window=3h`},
 	}
 
 	for _, tc := range cases {

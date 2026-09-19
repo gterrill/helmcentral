@@ -838,6 +838,65 @@ func TestConfigForWasmPlugin_KnownSecretResolvesFromStoreWhenAllowed(t *testing.
 	}
 }
 
+// TestConfigForWasmPlugin_HELMCENTRALMasterKeyIsNeverExpanded is the S-2
+// security-audit finding: HELMCENTRAL_MASTER_KEY is NOT in knownSecretKeys
+// (see secrets_store.go - deliberately so, it is not a storable secret, it
+// is the key that decrypts every stored secret), so before this fix it fell
+// straight through configForWasmPlugin's mapping closure to the raw
+// os.LookupEnv branch every ordinary, non-secret env var reference uses. An
+// operator who sets HELMCENTRAL_MASTER_KEY in the container environment
+// (ADR 0023 §2's own documented option, for a secrets manager injecting it
+// at container start) would hand the base64 master key to any plugin whose
+// config.json referenced "${HELMCENTRAL_MASTER_KEY}" - no allowed_secrets.json
+// entry required, no denial logged. This must be denied the same way a
+// known secret without allowlist coverage is denied.
+func TestConfigForWasmPlugin_HELMCENTRALMasterKeyIsNeverExpanded(t *testing.T) {
+	t.Setenv("HELMCENTRAL_MASTER_KEY", "cGxhY2Vob2xkZXItbWFzdGVyLWtleS0zMi1ieXRlcyE=")
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	companion := filepath.Join(dir, "plugin.config.json")
+	if err := os.WriteFile(companion, []byte(`{"x":"${HELMCENTRAL_MASTER_KEY}"}`), 0o644); err != nil {
+		t.Fatalf("write companion file: %v", err)
+	}
+
+	config, err := configForWasmPlugin(wasmPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v, ok := config["x"]; ok {
+		t.Errorf("expected HELMCENTRAL_MASTER_KEY to never reach a plugin's config, got %q", v)
+	}
+}
+
+// TestConfigForWasmPlugin_HELMCENTRALMasterKeyDenialIsLogged mirrors
+// TestConfigForWasmPlugin_KnownSecretDroppedAndLoggedWhenNotInAllowedSecretsFile's
+// proof that a denial is visible in the server log, not just silently
+// absent from the result - an operator debugging "why is this config key
+// missing" needs the same signal here as for any other denied secret.
+func TestConfigForWasmPlugin_HELMCENTRALMasterKeyDenialIsLogged(t *testing.T) {
+	t.Setenv("HELMCENTRAL_MASTER_KEY", "cGxhY2Vob2xkZXItbWFzdGVyLWtleS0zMi1ieXRlcyE=")
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	companion := filepath.Join(dir, "plugin.config.json")
+	if err := os.WriteFile(companion, []byte(`{"x":"${HELMCENTRAL_MASTER_KEY}"}`), 0o644); err != nil {
+		t.Fatalf("write companion file: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	origOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(origOutput)
+
+	if _, err := configForWasmPlugin(wasmPath); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if logBuf.Len() == 0 {
+		t.Errorf("expected a denial to be logged for a referenced HELMCENTRAL_MASTER_KEY")
+	}
+}
+
 // TestAllowedSecretsForWasmPlugin_NoCompanionFileReturnsNilNoError mirrors
 // allowedHostsForWasmPlugin's missing-file contract: no file is the safe
 // default (no secrets allowed), not an error.

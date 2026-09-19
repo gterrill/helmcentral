@@ -1,13 +1,17 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
 
 func generatorPut(signalkURL, settingsPath, path string, value any) error {
-	username, password := loadSignalKCredentials(settingsPath)
+	username, password, err := loadSignalKCredentials(settingsPath)
+	if err != nil {
+		return fmt.Errorf("could not read the SignalK credentials: %w", err)
+	}
 	token, err := acquireSignalKToken(signalkURL, username, password)
 	if err != nil {
 		return err

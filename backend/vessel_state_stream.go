@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -489,8 +490,38 @@ func (h *telemetryHub) buildAndBroadcast(e *streamEmitter) {
 	}
 	defer e.buildMu.Unlock()
 
-	encoded, err := json.Marshal(e.build())
+	built := e.build()
+
+	// A hostile or merely malformed reading on the SignalK bus can, after
+	// this codebase's own unit conversions (signalk.go, which this file
+	// does not own), come out the other side as +Inf or NaN -- e.g.
+	// environment.wind.speedApparent = 1e308 survives a knots conversion and
+	// roundTo1's *10 as a float64 the size json.Marshal refuses to encode at
+	// all. Before this guard, that marshal error propagated out of this
+	// function as a bare, unlogged `return`, which silently dropped this
+	// event's ENTIRE build -- freezing every field it carries, not just the
+	// poisoned one, at its last good value for as long as the bad reading
+	// sat in the snapshot, with no staleness indication because the
+	// staleness badges ride in this same payload (K-3, backend security
+	// audit). Sanitizing here, at the boundary every event's payload passes
+	// through regardless of which build() produced it, catches
+	// vessel-state/electrical-state/solar-state/alarms alike without
+	// needing a change in signalk.go.
+	//
+	// Replacing with null rather than clamping to some plausible-looking
+	// number is deliberate: a corrupted reading must surface as explicitly
+	// unknown, never as a number that looks real (AGENTS.md fallback
+	// policy) -- and it is logged so the corruption stays visible instead of
+	// silently laundered into "no data".
+	if n := sanitizeNonFiniteValues(built); n > 0 {
+		log.Printf("telemetry hub: %s event carried %d non-finite value(s) (NaN/Inf), replaced with null rather than dropping the whole build", e.event, n)
+	}
+
+	encoded, err := json.Marshal(built)
 	if err != nil {
+		// Loud, per the fallback policy: a build that silently never
+		// broadcasts again is indistinguishable from a stream that died.
+		log.Printf("telemetry hub: %s event failed to marshal, dropping this build: %v", e.event, err)
 		return
 	}
 	payload := string(encoded)
@@ -516,6 +547,54 @@ func (h *telemetryHub) buildAndBroadcast(e *streamEmitter) {
 		return
 	}
 	h.broadcast(telemetryHubFrame{event: e.event, payload: payload})
+}
+
+// sanitizeNonFiniteValues walks v in place, replacing any NaN or +/-Inf
+// float64 leaf with nil (JSON null), and returns how many it replaced. See
+// buildAndBroadcast's call site for why this exists at all (K-3, backend
+// security audit).
+//
+// v is always one of a payload's own map[string]any/[]any/scalar values
+// here, never the snapshot tree itself, so unlike signalk_snapshot.go's
+// deepCopyMap/deepCopyValue this has no need of a depth guard: every
+// build() in telemetryEmitters constructs a fixed-shape payload from this
+// codebase's own struct-to-map conversions, so its nesting depth is bounded
+// by that code, not by anything an attacker on the SignalK bus controls --
+// only the leaf VALUES are theirs to corrupt. Mutating in place rather than
+// copying is safe for the same reason deepCopyMap-style copying is
+// unnecessary here: every build() call constructs a fresh map, never a
+// cached or shared one another goroutine might also be reading.
+func sanitizeNonFiniteValues(v any) int {
+	switch typed := v.(type) {
+	case map[string]any:
+		replaced := 0
+		for k, child := range typed {
+			if f, ok := child.(float64); ok {
+				if math.IsNaN(f) || math.IsInf(f, 0) {
+					typed[k] = nil
+					replaced++
+				}
+				continue
+			}
+			replaced += sanitizeNonFiniteValues(child)
+		}
+		return replaced
+	case []any:
+		replaced := 0
+		for i, child := range typed {
+			if f, ok := child.(float64); ok {
+				if math.IsNaN(f) || math.IsInf(f, 0) {
+					typed[i] = nil
+					replaced++
+				}
+				continue
+			}
+			replaced += sanitizeNonFiniteValues(child)
+		}
+		return replaced
+	default:
+		return 0
+	}
 }
 
 // telemetryStream pushes vessel telemetry to the browser over Server-Sent Events.

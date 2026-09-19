@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	extism "github.com/extism/go-sdk"
 )
@@ -216,6 +217,42 @@ func (p *wasmPOIProvider) fetchFromPlugin(lat, lon float64, radiusM int, categor
 // same way FetchPOI would guard a required export - defence in depth against
 // any future caller that skips that check.
 
+// placeNameMaxRunes bounds a resolved place name before it reaches any
+// consumer - the assistant's system prompt (assistant_prompt.go, which
+// interpolates it into one line with no role boundary to fall back on) and
+// the dashboard's own place-name display alike (M-5 finding). A real
+// charted feature name is never anywhere near this long; capping it here,
+// at the one point every consumer's data passes through, protects all of
+// them at once rather than leaving each caller to remember its own limit.
+const placeNameMaxRunes = 64
+
+// sanitizePlaceName strips newlines and other control/format characters
+// from name and caps it to placeNameMaxRunes (M-5 finding). name is an OSM
+// "name" tag or equivalent from whichever place-names provider is
+// configured (ADR 0101) - operator-editable data on a shared map, not
+// something Helmcentral controls - so nothing upstream stops it from
+// carrying a newline that would close assistant_prompt.go's "Position: ...
+// (near %s)." sentence early and open a forged one, or simply far more
+// bytes than a place name ever needs. Applied once here, at the point this
+// value enters the codebase, rather than left to whichever consumer reads
+// it next to remember to defend itself.
+func sanitizePlaceName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if r == '\n' || r == '\r' || unicode.IsControl(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+
+	cleaned := strings.TrimSpace(b.String())
+	runes := []rune(cleaned)
+	if len(runes) > placeNameMaxRunes {
+		runes = runes[:placeNameMaxRunes]
+	}
+	return string(runes)
+}
+
 // wasmPlaceNameAtInput mirrors the guest's place_name_at input contract.
 type wasmPlaceNameAtInput struct {
 	Lat     float64 `json:"lat"`
@@ -266,13 +303,18 @@ func (p *wasmPOIProvider) PlaceNameAt(lat, lon float64, radiusM int) (result pla
 	if err := json.Unmarshal(out, &parsed); err != nil {
 		return placeNameResult{}, fmt.Errorf("plugin %q: unparseable place_name_at JSON: %w", p.id, err)
 	}
-	if strings.TrimSpace(parsed.Name) == "" {
+	// M-5 finding: sanitize before the emptiness check, not after, so a name
+	// that is nothing but newlines/control characters is correctly treated
+	// as "nothing named here" rather than passed on as a name of literal
+	// whitespace.
+	name := sanitizePlaceName(parsed.Name)
+	if name == "" {
 		return placeNameResult{}, nil
 	}
 	if parsed.Lat == nil || parsed.Lon == nil {
-		return placeNameResult{}, fmt.Errorf("plugin %q: place_name_at returned name %q with no lat/lon", p.id, parsed.Name)
+		return placeNameResult{}, fmt.Errorf("plugin %q: place_name_at returned name %q with no lat/lon", p.id, name)
 	}
-	return placeNameResult{Name: parsed.Name, Kind: parsed.Kind, Lat: *parsed.Lat, Lon: *parsed.Lon}, nil
+	return placeNameResult{Name: name, Kind: parsed.Kind, Lat: *parsed.Lat, Lon: *parsed.Lon}, nil
 }
 
 // wasmSearchPlacesInput mirrors the guest's search_places input contract.
