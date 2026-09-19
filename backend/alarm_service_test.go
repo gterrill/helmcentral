@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -397,6 +400,157 @@ func TestRecordAlarmEventDoesNotBlockOnASlowTransport(t *testing.T) {
 	waitFor(t, 2*time.Second, "the queued delivery to reach the slow transport", func() bool {
 		return transport.count() > 0
 	})
+}
+
+// ── E-3 part 2: /api/alarm-transports/test must stop being an SSRF oracle ──
+//
+// Before this fix, testAlarmTransportsHandler put transport.Send's error
+// straight into the JSON response -- the upstream status code, or the raw
+// connect error text. Combined with E-3 part 1 still allowing RFC1918
+// destinations (deliberately, see alarm_transports_test.go), this endpoint
+// alone was enough to iterate ports on the compose network and read back
+// exactly what answered. The fix: report success/failure and a generic
+// reason in the response, and log the real detail server-side (visible via
+// /api/logs) so the operator does not lose it -- swallowing it entirely
+// would be the masking fallback AGENTS.md forbids, just moved to the log
+// instead of the HTTP response.
+
+// captureLogOutput redirects the stdlib log package's output into a fresh
+// logBuffer for the duration of the test, the same shape
+// initLogCapture/logBufferWriter give it in main.go, and restores the
+// previous output on cleanup.
+func captureLogOutput(t *testing.T) *logBuffer {
+	t.Helper()
+	buf := newLogBuffer(50)
+	log.SetOutput(newLogBufferWriter(io.Discard, buf))
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	return buf
+}
+
+func TestTestAlarmTransportsHandlerDoesNotReflectUpstreamStatusInTheResponse(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+
+	setAlarmTransportsForTest(t, alarmTransportConfig{
+		Webhook: webhookConfig{Enabled: true, URL: upstream.URL},
+	})
+	logs := captureLogOutput(t)
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/alarm-transports/test", nil), rec)
+
+	if err := testAlarmTransportsHandler(c); err != nil {
+		t.Fatalf("testAlarmTransportsHandler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Results map[string]string `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	got, ok := body.Results[transportWebhook]
+	if !ok {
+		t.Fatalf("expected a webhook result, got %+v", body.Results)
+	}
+	if strings.Contains(got, "401") {
+		t.Fatalf("response must not reflect the upstream status code, got %q", got)
+	}
+	if got == "ok" {
+		t.Fatalf("a 401 upstream must not be reported as success, got %q", got)
+	}
+
+	foundInLog := false
+	for _, entry := range logs.entries() {
+		if strings.Contains(entry.Message, "401") {
+			foundInLog = true
+		}
+	}
+	if !foundInLog {
+		t.Fatalf("expected the upstream status to be logged server-side (visible via /api/logs), entries: %+v", logs.entries())
+	}
+}
+
+func TestTestAlarmTransportsHandlerDoesNotReflectConnectionErrorInTheResponse(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	refusedURL := upstream.URL
+	upstream.Close() // nothing is listening here anymore, so Send fails to connect
+
+	setAlarmTransportsForTest(t, alarmTransportConfig{
+		Webhook: webhookConfig{Enabled: true, URL: refusedURL},
+	})
+	logs := captureLogOutput(t)
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/alarm-transports/test", nil), rec)
+
+	if err := testAlarmTransportsHandler(c); err != nil {
+		t.Fatalf("testAlarmTransportsHandler: %v", err)
+	}
+
+	var body struct {
+		Results map[string]string `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	got := body.Results[transportWebhook]
+	for _, leak := range []string{"connection refused", "connect:", "dial", refusedURL} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("response leaked connection detail %q in %q", leak, got)
+		}
+	}
+	if got == "ok" || got == "" {
+		t.Fatalf("expected a non-empty failure reason, got %q", got)
+	}
+
+	foundInLog := false
+	for _, entry := range logs.entries() {
+		if strings.Contains(entry.Message, transportWebhook) {
+			foundInLog = true
+		}
+	}
+	if !foundInLog {
+		t.Fatalf("expected the connection failure to be logged server-side, entries: %+v", logs.entries())
+	}
+}
+
+func TestTestAlarmTransportsHandlerStillReportsOkOnSuccess(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	setAlarmTransportsForTest(t, alarmTransportConfig{
+		Webhook: webhookConfig{Enabled: true, URL: upstream.URL},
+	})
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/api/alarm-transports/test", nil), rec)
+
+	if err := testAlarmTransportsHandler(c); err != nil {
+		t.Fatalf("testAlarmTransportsHandler: %v", err)
+	}
+
+	var body struct {
+		Results map[string]string `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := body.Results[transportWebhook]; got != "ok" {
+		t.Fatalf("expected success to still report ok, got %q", got)
+	}
 }
 
 // Rule alarms advertise the one action the engine has, so the drawer renders

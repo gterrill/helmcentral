@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -218,6 +219,80 @@ func TestFindLastTideTurningPointNoReversal(t *testing.T) {
 
 	if _, ok := findLastTideTurningPoint(points); ok {
 		t.Fatalf("expected no turning point for a monotonic series")
+	}
+}
+
+// ── E-4: Flux injection via values %q alone does not protect ───────────────
+//
+// %q escapes '"' and '\\', which stops a value from breaking a Flux string
+// literal open into a new pipeline stage. It does nothing about Flux's OWN
+// string-interpolation syntax, "${...}", which InfluxDB evaluates when it
+// parses the literal %q produced -- that parsing happens after %q's
+// escaping, in a different grammar entirely. fluxStringLiteral is the one
+// place all six %q-building call sites in this file now go through, so a
+// value containing '$' or '{' is refused before it ever reaches
+// fmt.Sprintf, rather than silently becoming a valid-looking but
+// attacker-influenced predicate.
+
+func TestFluxStringLiteralRejectsDollarSign(t *testing.T) {
+	if _, err := fluxStringLiteral("${r._measurement}"); err == nil {
+		t.Fatal("expected an error for a value containing Flux interpolation syntax")
+	}
+}
+
+func TestFluxStringLiteralRejectsOpenBrace(t *testing.T) {
+	if _, err := fluxStringLiteral("environment{depth}"); err == nil {
+		t.Fatal("expected an error for a value containing '{'")
+	}
+}
+
+func TestFluxStringLiteralQuotesOrdinaryValueLikeQVerb(t *testing.T) {
+	got, err := fluxStringLiteral(`electrical.batteries.house.voltage`)
+	if err != nil {
+		t.Fatalf("unexpected error for an ordinary SignalK path: %v", err)
+	}
+	want := `"electrical.batteries.house.voltage"`
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// The path parameter is the one value in this file that can come straight
+// from an HTTP request (telemetry_history_api.go) or from Mate's
+// estimate_passage tool (assistant_tools.go) -- both reach
+// queryInfluxPathTrend/queryInfluxPathRange directly, so the rejection has
+// to live here, not only behind the HTTP handler's own validation.
+//
+// Settings point at an RFC 5737 TEST-NET address (matching
+// main_timeouts_test.go's convention for "must never actually dial") so a
+// regression that removes the up-front check would hang on a real connect
+// attempt instead of failing fast here.
+
+func TestQueryInfluxPathTrendRejectsFluxInterpolationInPath(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://192.0.2.1:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("SETTINGS_FILE", path)
+	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+
+	_, err := queryInfluxPathTrend("${r._measurement}", "3h")
+	if err == nil {
+		t.Fatal("expected an error for a path containing Flux interpolation syntax")
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("expected rejection of the value itself, not a configuration error: %v", err)
+	}
+}
+
+func TestQueryInfluxPathRangeRejectsFluxInterpolationInPath(t *testing.T) {
+	path := writeInfluxSettingsFixture(t, "influxdb:\n  enabled: true\n  url: http://192.0.2.1:8086\n  org: myorg\n  bucket: mybucket\n")
+	t.Setenv("SETTINGS_FILE", path)
+	t.Setenv("INFLUXDB_TOKEN", "sometoken")
+
+	_, err := queryInfluxPathRange("${r._measurement}", time.Now().Add(-time.Hour), time.Now(), "5m")
+	if err == nil {
+		t.Fatal("expected an error for a path containing Flux interpolation syntax")
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("expected rejection of the value itself, not a configuration error: %v", err)
 	}
 }
 

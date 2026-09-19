@@ -118,6 +118,46 @@ func newInfluxClient() (influxdb2.Client, string, string, bool) {
 	return globalInfluxClient.clientFor(influxURL, org, bucket, token), org, bucket, true
 }
 
+// fluxInterpolationChars are the characters that must never reach a Flux
+// string literal verbatim. Flux has its OWN string-interpolation syntax,
+// "${...}", which InfluxDB evaluates when it parses the query text -- after
+// %q has already escaped the value for Go. %q's escaping (of '"' and '\\')
+// stops a value from breaking out of the string literal into a new pipeline
+// stage; it does nothing to stop InfluxDB from treating "${r._measurement}"
+// inside that literal as an embedded expression rather than literal text.
+// Rejecting outright, instead of trying to escape '$'/'{' into something
+// inert, matches telemetryHistoryWindows' allowlist a few lines up the call
+// stack (telemetry_history_api.go) and AGENTS.md's fail-fast policy: a
+// caller that genuinely needs a literal '$' in a path/measurement/field name
+// gets a clear error, not a silently mis-scoped query.
+const fluxInterpolationChars = "${"
+
+// containsFluxInterpolationSyntax is also used by telemetry_history_api.go
+// to reject the path query parameter at the HTTP boundary, one layer above
+// where fluxStringLiteral enforces the same rule at query construction. Both
+// layers matter: path reaches queryInfluxPathTrend/queryInfluxPathRange from
+// the HTTP API AND from Mate's estimate_passage tool (assistant_tools.go),
+// so a check only in the HTTP handler would miss the second caller.
+func containsFluxInterpolationSyntax(s string) bool {
+	return strings.ContainsAny(s, fluxInterpolationChars)
+}
+
+// fluxStringLiteral renders s as a Flux double-quoted string literal,
+// refusing to build one at all if it contains Flux interpolation syntax
+// (see fluxInterpolationChars above). Every %q-built Flux query in this file
+// goes through here instead of calling %q directly -- not just
+// path/measurement in the two functions reachable from outside this file,
+// but bucket/measurement/field everywhere, so a future call site that starts
+// threading request data through one of those still-fixed-today parameters
+// inherits the same protection instead of reopening this bug in a fourth
+// place (E-4).
+func fluxStringLiteral(s string) (string, error) {
+	if containsFluxInterpolationSyntax(s) {
+		return "", fmt.Errorf("value must not contain '$' or '{': %q", s)
+	}
+	return fmt.Sprintf("%q", s), nil
+}
+
 // queryInfluxMaxWindGustKtsFor returns the max wind gust (in knots) for each
 // requested window, reusing newInfluxClient's shared client across all
 // queries in windows rather than one client per window. Each window still
@@ -146,9 +186,22 @@ func queryInfluxMaxWindGustKtsFor(windows []string) map[string]float64 {
 }
 
 func queryInfluxMaxWindGustKtsForWindow(queryAPI api.QueryAPI, bucket, measurement, field, window string) float64 {
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return -1
+	}
+	measurementLiteral, err := fluxStringLiteral(measurement)
+	if err != nil {
+		return -1
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return -1
+	}
+
 	flux := fmt.Sprintf(
-		`from(bucket: %q) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> max(column: "_value") |> keep(columns: ["_value"])`,
-		bucket, window, measurement, field,
+		`from(bucket: %s) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> max(column: "_value") |> keep(columns: ["_value"])`,
+		bucketLiteral, window, measurementLiteral, fieldLiteral,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -180,16 +233,34 @@ func queryInfluxMaxWindGustKtsForWindow(queryAPI api.QueryAPI, bucket, measureme
 // Unlike queryInfluxDepthTrend it returns an error rather than nil, because
 // its caller has to tell an empty series apart from a failed query.
 func queryInfluxPathTrend(path, window string) ([]telemetryPoint, error) {
+	// Validated before touching the client/config at all: path is the one
+	// value here that can come straight from an HTTP request or from Mate's
+	// estimate_passage tool, so a bad value is rejected on its own terms
+	// rather than as a side effect of whatever newInfluxClient happens to
+	// report (E-4).
+	pathLiteral, err := fluxStringLiteral(path)
+	if err != nil {
+		return nil, fmt.Errorf("path: %w", err)
+	}
+
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {
 		return nil, fmt.Errorf("influxdb is not configured")
 	}
 
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return nil, fmt.Errorf("bucket: %w", err)
+	}
 	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return nil, fmt.Errorf("field: %w", err)
+	}
 
 	flux := fmt.Sprintf(
-		`from(bucket: %q) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> aggregateWindow(every: %s, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
-		bucket, window, path, field, influxTrendResolution(window),
+		`from(bucket: %s) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> aggregateWindow(every: %s, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucketLiteral, window, pathLiteral, fieldLiteral, influxTrendResolution(window),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
@@ -236,16 +307,32 @@ func queryInfluxPathTrend(path, window string) ([]telemetryPoint, error) {
 // Like queryInfluxPathTrend, this returns an error rather than nil so the
 // caller can tell "no discharge happened" apart from "couldn't ask".
 func queryInfluxPathRange(path string, start, stop time.Time, every string) ([]telemetryPoint, error) {
+	// Same up-front rejection as queryInfluxPathTrend, and for the same
+	// reason: this is the call estimate_passage (assistant_tools.go) makes
+	// directly, with no HTTP handler in between to have already checked it.
+	pathLiteral, err := fluxStringLiteral(path)
+	if err != nil {
+		return nil, fmt.Errorf("path: %w", err)
+	}
+
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {
 		return nil, fmt.Errorf("influxdb is not configured")
 	}
 
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return nil, fmt.Errorf("bucket: %w", err)
+	}
 	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return nil, fmt.Errorf("field: %w", err)
+	}
 
 	flux := fmt.Sprintf(
-		`from(bucket: %q) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> aggregateWindow(every: %s, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
-		bucket, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), path, field, every,
+		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> aggregateWindow(every: %s, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), pathLiteral, fieldLiteral, every,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
@@ -296,9 +383,22 @@ func queryInfluxDepthTrend(window string) []depthTrendPoint {
 	measurement := trimEnvValue(getEnv("INFLUX_DEPTH_MEASUREMENT", "environment.depth.belowTransducer"))
 	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
 
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return nil
+	}
+	measurementLiteral, err := fluxStringLiteral(measurement)
+	if err != nil {
+		return nil
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return nil
+	}
+
 	flux := fmt.Sprintf(
-		`from(bucket: %q) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> aggregateWindow(every: 5m, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
-		bucket, window, measurement, field,
+		`from(bucket: %s) |> range(start: -%s) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> aggregateWindow(every: 5m, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucketLiteral, window, measurementLiteral, fieldLiteral,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -350,9 +450,22 @@ func queryInfluxSolarPeakTodayW(now time.Time) float64 {
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
 	start := now.UTC().Truncate(24 * time.Hour)
 
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return -1
+	}
+	measurementLiteral, err := fluxStringLiteral(measurement)
+	if err != nil {
+		return -1
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return -1
+	}
+
 	flux := fmt.Sprintf(
-		`from(bucket: %q) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> max(column: "_value") |> keep(columns: ["_value"])`,
-		bucket, start.Format(time.RFC3339), now.UTC().Format(time.RFC3339), measurement, field,
+		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> max(column: "_value") |> keep(columns: ["_value"])`,
+		bucketLiteral, start.Format(time.RFC3339), now.UTC().Format(time.RFC3339), measurementLiteral, fieldLiteral,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -387,9 +500,22 @@ func queryInfluxSolarEnergyKWhRange(start time.Time, stop time.Time) float64 {
 	measurement := trimEnvValue(getEnv("INFLUX_SOLAR_MEASUREMENT", "electrical.venus.totalPanelPower"))
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
 
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return -1
+	}
+	measurementLiteral, err := fluxStringLiteral(measurement)
+	if err != nil {
+		return -1
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return -1
+	}
+
 	flux := fmt.Sprintf(
-		`from(bucket: %q) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> integral(unit: 1h) |> group() |> sum(column: "_value") |> keep(columns: ["_value"])`,
-		bucket, start.Format(time.RFC3339), stop.Format(time.RFC3339), measurement, field,
+		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> integral(unit: 1h) |> group() |> sum(column: "_value") |> keep(columns: ["_value"])`,
+		bucketLiteral, start.Format(time.RFC3339), stop.Format(time.RFC3339), measurementLiteral, fieldLiteral,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -425,9 +551,22 @@ func queryInfluxSolarTrend24h(now time.Time) []solarTrendPoint {
 	field := trimEnvValue(getEnv("INFLUX_SOLAR_FIELD", "value"))
 	start := now.UTC().Add(-24 * time.Hour)
 
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return nil
+	}
+	measurementLiteral, err := fluxStringLiteral(measurement)
+	if err != nil {
+		return nil
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return nil
+	}
+
 	flux := fmt.Sprintf(
-		`from(bucket: %q) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %q and r._field == %q) |> aggregateWindow(every: 15m, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
-		bucket, start.Format(time.RFC3339), now.UTC().Format(time.RFC3339), measurement, field,
+		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => r._measurement == %s and r._field == %s) |> aggregateWindow(every: 15m, fn: mean, createEmpty: false) |> keep(columns: ["_time", "_value"])`,
+		bucketLiteral, start.Format(time.RFC3339), now.UTC().Format(time.RFC3339), measurementLiteral, fieldLiteral,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)

@@ -518,6 +518,55 @@ func TestBasemapVectorTileHandler_RejectsNonNumericCoords(t *testing.T) {
 	}
 }
 
+// E-7: strconv.Atoi("-1") parses fine, so a negative x/y used to sail past
+// the zoom check straight into resolveCartoVectorTile ->
+// fetchCartoVectorTileUpstream, where
+// cartoVectorTileHosts[(x+y)%len(cartoVectorTileHosts)] (tile_cache.go)
+// indexes a 4-element array with a negative remainder (Go's % keeps the
+// sign of the dividend) and panics with "index out of range". In the real
+// server middleware.Recover() turns that into a 500 per request rather than
+// crashing the process, but it is still an unvalidated-input panic reachable
+// by anyone -- GET /api/basemap/tiles/0/-1/-1.
+func TestBasemapVectorTileHandler_RejectsNegativeCoords(t *testing.T) {
+	cache := newTestTileCache(t)
+	fetcher := respondingFetcher("vectortiles/carto.streets", "application/x-protobuf", "mvt-bytes")
+
+	c, rec := newBasemapTestContext("/api/basemap/tiles/0/-1/-1",
+		[]string{"z", "x", "y"}, []string{"0", "-1", "-1"})
+	if err := basemapVectorTileHandler(cache, fetcher)(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for negative x/y, got %d", rec.Code)
+	}
+	if fetcher.callCount() != 0 {
+		t.Error("negative coords reached upstream")
+	}
+}
+
+// x and y are only meaningful in [0, 2^z-1] for their own z. Rejecting an
+// out-of-range coordinate rather than clamping it matches the reasoning
+// cartoBasemapMaxZoom's doc comment gives for z itself: a request for tile
+// (4,0) at z=2 (valid index range 0-3) has no "nearest valid tile" that
+// isn't actually some other, wrong, place.
+func TestBasemapVectorTileHandler_RejectsCoordsOutOfRangeForZoom(t *testing.T) {
+	cache := newTestTileCache(t)
+	fetcher := respondingFetcher("vectortiles/carto.streets", "application/x-protobuf", "mvt-bytes")
+
+	// z=2 has a valid x/y range of 0-3; 4 is one past it.
+	c, rec := newBasemapTestContext("/api/basemap/tiles/2/4/0",
+		[]string{"z", "x", "y"}, []string{"2", "4", "0"})
+	if err := basemapVectorTileHandler(cache, fetcher)(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for x past the valid range at z=2, got %d", rec.Code)
+	}
+	if fetcher.callCount() != 0 {
+		t.Error("out-of-range coords reached upstream")
+	}
+}
+
 func TestRewriteCartoStyle_FailsLoudlyOnUnexpectedUpstreamShape(t *testing.T) {
 	cases := map[string]string{
 		"no sources":      `{"version":8,"glyphs":"g","sprite":"s","layers":[]}`,
