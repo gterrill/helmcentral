@@ -56,6 +56,30 @@ const assistantMaxToolFailures = 3
 // sum.
 const assistantMaxConcurrentToolCalls = 4
 
+// assistantMaxToolCallsPerRound bounds how many tool calls one round will
+// actually dispatch (M-2 finding). assistantMaxToolRounds and
+// assistantMaxToolFailures both bound how long a bad conversation can run -
+// how many rounds, and how many times one named tool can be retried - but
+// neither bounds how WIDE a single round can be: every one of a round's
+// calls that doesn't fail outright is dispatched in full, whatever the
+// count. An injected document that tells the model "a complete briefing
+// needs the forecast at every one of these 200 waypoints" produces exactly
+// that - 200 calls, all of which succeed, each capped at
+// assistantMaxToolResultChars but still appending up to several megabytes
+// of tool messages to a history that is resent in full on every remaining
+// round, all billed to the operator's OpenRouter account.
+//
+// Comparing five candidate anchorages - find_places once for each, plus
+// wind and tides for each, per the system prompt's own "for every candidate
+// anchorage under discussion, fetch both" instruction - is about 15 calls
+// in the busiest realistic round; 20 leaves headroom for that while still
+// refusing an order-of-magnitude runaway. A call beyond the cap is refused
+// explicitly (assistantExcessToolCallResult), the same pattern
+// assistantWithheldToolResult already uses for a call withheld after
+// repeated failure, so the model is told why it got fewer results rather
+// than silently served a truncated round.
+const assistantMaxToolCallsPerRound = 20
+
 // assistantRunTimeout bounds one whole reply end to end, across every tool
 // round. openRouterCompletionTimeout (openrouter_client.go) bounds each
 // individual completion inside it; this is the outer ceiling so a model
@@ -132,6 +156,28 @@ func assistantWithheldToolResult(name string) (string, error) {
 	body, err := json.Marshal(map[string]string{"error": msg})
 	if err != nil {
 		return "", fmt.Errorf("marshal withheld tool result for %q: %w", name, err)
+	}
+	return string(body), nil
+}
+
+// assistantExcessToolCallResult builds the tool-role message content
+// runToolRound sends back for a call beyond assistantMaxToolCallsPerRound
+// (M-2 finding) - the same {"error": "..."} envelope
+// assistantWithheldToolResult already uses for a call withheld after
+// repeated failure, so the model sees one consistent shape either way, but
+// worded for a different reason: this call didn't fail and isn't broken,
+// the round just asked for more than the per-round limit allows. Telling
+// the model plainly, rather than just dropping the call and letting it
+// infer a shorter results list on its own, is what keeps this fail-fast
+// rather than a masking fallback (AGENTS.md's fallback policy).
+func assistantExcessToolCallResult(name string) (string, error) {
+	msg := fmt.Sprintf(
+		"This round asked for more than %d tool calls; %s was not run because the per-round limit was already reached. Continue with the results already returned this round, and narrow or split the remaining work across follow-up turns rather than requesting it all at once.",
+		assistantMaxToolCallsPerRound, name,
+	)
+	body, err := json.Marshal(map[string]string{"error": msg})
+	if err != nil {
+		return "", fmt.Errorf("marshal excess tool-call result for %q: %w", name, err)
 	}
 	return string(body), nil
 }
@@ -215,15 +261,19 @@ var assistantTextToolCallMarkers = []string{
 // Content holds raw, model-internal syntax instead of prose - see run's use
 // of this function for what happens next.
 //
-// This is a plain substring scan, so it can false-positive on a legitimate
-// answer that happens to quote one of these markers verbatim - for
-// example, an answer that shows the operator an example of Anthropic's
-// tool-call XML. That trade is deliberate: none of Helmcentral's tools,
-// system prompt, or manual content ever produce this markup in a genuine
-// answer, so a false positive here is vanishingly unlikely, and a
-// silently-broken answer served to the operator as if it were real prose -
-// the failure mode this exists to catch - is worse than an occasional
-// loud, explicit error asking the operator to pick a different model.
+// This is a plain substring scan, so on its own it false-positives on a
+// legitimate answer that happens to quote one of these markers verbatim.
+// That used to be a vanishingly unlikely trade (the comment here once said
+// so outright), but ADR 0106 made it a real one: read_document and
+// search_documents now put arbitrary uploaded document text in front of
+// the model, and an operator asking what a document about LLM tooling says
+// can get a marker like "<tool_call>" quoted straight back at them (M-3
+// finding). This function stays a pure substring probe regardless - run's
+// onContent needs to react to a marker's mere presence, live, before
+// enough of the round has arrived to judge anything more (the streaming
+// hold-back window, assistantSafeStreamLen, has to err toward caution) -
+// but the decision that actually rejects a reply as a broken tool call
+// no longer trusts this function alone; see assistantTextToolCallMarkerIsGenuine.
 func assistantTextToolCallMarker(content string) (string, bool) {
 	for _, marker := range assistantTextToolCallMarkers {
 		if strings.Contains(content, marker) {
@@ -231,6 +281,85 @@ func assistantTextToolCallMarker(content string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// assistantTextToolCallMarkerIsGenuine reports whether content's marker
+// (assistantTextToolCallMarker) looks like a model that has actually
+// fallen back to emitting a tool call in its own text dialect, rather than
+// a model legitimately quoting that dialect's syntax back to the operator
+// (M-3 finding). run uses this, not assistantTextToolCallMarker alone, to
+// decide whether to reject a reply outright.
+//
+// The signal is markdown code-span/fence detection
+// (assistantMarkerIsQuoted): every real fallback this package has ever
+// captured (the DeepSeek DSML and Qwen ChatML fixtures in
+// TestAssistantRunner_TextToolCallMarkupInFinalResponseErrorsInsteadOfReturningReply,
+// ...OnForcedFinalRoundStillErrors, and the split-chunk fixture in
+// TestAssistantRunner_MarkerSplitAcrossChunksNeverLeaksIntoDeltas) emits the
+// marker raw, with no backticks anywhere near it - a model that has decided
+// to "call a tool" this way is not presenting the syntax, it is attempting
+// to use it. A model quoting the same syntax back to an operator (answering
+// "what does this PDF say about tool calling") overwhelmingly wraps it in a
+// code span or fence instead, the same way every model is trained to
+// present literal syntax in ordinary prose.
+//
+// This is a heuristic, not a proof, and it is not the only signal that
+// could work (position in the output and whether the surrounding text
+// actually parses as a call are others) - it was chosen because it is cheap,
+// requires no per-dialect parsing, and directly targets the one failure mode
+// this codebase has actually seen: quoting inside an explanatory answer. A
+// residual false positive is still possible (an unquoted, unfenced quote at
+// the very start of an answer) - see the error message run builds when this
+// returns true, which says so rather than only blaming the model.
+func assistantTextToolCallMarkerIsGenuine(content string) (string, bool) {
+	marker, found := assistantTextToolCallMarker(content)
+	if !found {
+		return "", false
+	}
+	if assistantMarkerIsQuoted(content, strings.Index(content, marker)) {
+		return "", false
+	}
+	return marker, true
+}
+
+// assistantMarkerIsQuoted reports whether the byte offset idx in content
+// sits inside a markdown fenced code block (triple backticks, may span
+// lines) or an inline code span (single backticks, same line only) - see
+// assistantTextToolCallMarkerIsGenuine. idx < 0 (no marker found) is never
+// "quoted".
+func assistantMarkerIsQuoted(content string, idx int) bool {
+	if idx < 0 {
+		return false
+	}
+
+	// Triple-backtick fence: count fence markers strictly before idx: an
+	// odd count means idx falls between an opening and (eventually) a
+	// closing fence.
+	fenced := false
+	pos := 0
+	for {
+		next := strings.Index(content[pos:], "```")
+		if next == -1 || pos+next >= idx {
+			break
+		}
+		fenced = !fenced
+		pos += next + 3
+	}
+	if fenced {
+		return true
+	}
+
+	// Inline code span: a backtick earlier on the same line, and another
+	// later on the same line - a code span never crosses a newline in
+	// markdown, so the search is bounded to idx's own line.
+	lineStart := strings.LastIndexByte(content[:idx], '\n') + 1
+	lineEnd := len(content)
+	if rel := strings.IndexByte(content[idx:], '\n'); rel >= 0 {
+		lineEnd = idx + rel
+	}
+	before := strings.LastIndexByte(content[lineStart:idx], '`')
+	after := strings.IndexByte(content[idx:lineEnd], '`')
+	return before >= 0 && after >= 0
 }
 
 // assistantTextToolCallMarkerMaxLen is the byte length of the longest
@@ -477,8 +606,8 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		choice := resp.Choices[0].Message
 		if len(choice.ToolCalls) == 0 {
 			content := string(choice.Content)
-			if marker, found := assistantTextToolCallMarker(content); found {
-				return assistantReply{}, fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings", r.model, marker)
+			if marker, found := assistantTextToolCallMarkerIsGenuine(content); found {
+				return assistantReply{}, fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings. If this answer was actually quoting that syntax verbatim (for example, describing a document that discusses it) rather than attempting a real call, asking the model to quote it inside a code block will avoid this", r.model, marker)
 			}
 			// The round ended clean: flush whatever the hold-back window
 			// was still withholding, so the operator sees the reply in
@@ -524,7 +653,10 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // assistantToolFailures), so a call to a tool that has already failed
 // assistantMaxToolFailures times is withheld rather than dispatched: its
 // tool-role result is synthesised directly by assistantWithheldToolResult,
-// with no call to r.tools.execute and no semaphore slot spent on it.
+// with no call to r.tools.execute and no semaphore slot spent on it. Calls
+// past assistantMaxToolCallsPerRound (M-2 finding) get the same treatment
+// via assistantExcessToolCallResult, checked first - a call beyond the cap
+// is refused regardless of whether its own tool has ever failed.
 //
 // The "about to call" status event for each dispatched call is emitted
 // here in the outer, sequential loop, before that call's goroutine is even
@@ -557,6 +689,31 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 
 	for i, call := range calls {
 		args := json.RawMessage(call.Function.Arguments)
+
+		if i >= assistantMaxToolCallsPerRound {
+			mu.Lock()
+			stop := firstErr != nil
+			mu.Unlock()
+			if stop {
+				break
+			}
+
+			body, werr := assistantExcessToolCallResult(call.Function.Name)
+			if werr != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = werr
+				}
+				mu.Unlock()
+				break
+			}
+			log.Printf("assistant: tool %s REFUSED, round already at the %d-call limit", call.Function.Name, assistantMaxToolCallsPerRound)
+			mu.Lock()
+			r.emit("status", assistantStatus(fmt.Sprintf("%s was not run: this round asked for more than %d tool calls", call.Function.Name, assistantMaxToolCallsPerRound)))
+			mu.Unlock()
+			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
+			continue
+		}
 
 		if failures.exhausted(call.Function.Name) {
 			mu.Lock()
@@ -737,6 +894,56 @@ func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id strin
 	return out, nil
 }
 
+// assistantDocumentBlockOpen and assistantDocumentBlockClose delimit one
+// attached document's whole rendered block - header, summary and excerpt
+// alike - inside the user turn that attached it (M-1 finding). Without a
+// boundary, a forged trailing line inside a document's own text - one that
+// happens to end in wording that mimics this very codebase's "Use
+// read_document with this id for the rest." line - reads to the model as
+// the start of the operator's real question, and everything the document
+// says after it is then read as if the operator said it. The tag embeds
+// doc.ID purely for readability when more than one document is attached to
+// the same message; it is not what makes the boundary trustworthy (see
+// assistantNeutralizeDocumentBlockMarker for that).
+func assistantDocumentBlockOpen(id string) string {
+	return fmt.Sprintf("<<<ATTACHED DOCUMENT id=%s>>>", id)
+}
+
+func assistantDocumentBlockClose(id string) string {
+	return fmt.Sprintf("<<<END ATTACHED DOCUMENT id=%s>>>", id)
+}
+
+// assistantDocumentBlockMarkerPrefix is the one substring every real
+// boundary tag (assistantDocumentBlockOpen/Close, for any id) starts with.
+// assistantNeutralizeDocumentBlockMarker scrubs this exact substring out of
+// every piece of document-derived text before it goes anywhere near the
+// block, so nothing a document's own bytes contain can ever byte-match a
+// real boundary tag - not this document's, and not some other attached
+// document's whose id an attacker might separately know.
+const assistantDocumentBlockMarkerPrefix = "<<<"
+
+// assistantNeutralizeDocumentBlockMarker replaces every literal occurrence
+// of assistantDocumentBlockMarkerPrefix in s with a character sequence that
+// reads the same to a human, and close enough to a model, but can never
+// byte-match assistantDocumentBlockOpen/Close (M-1 finding: "make the
+// delimiter robust against a document that contains the delimiter text
+// itself"). Applied to every document-derived string
+// assistantAttachmentBlock writes - filename, summary, excerpt and error,
+// not just the excerpt - because doc.Summary is itself model-generated from
+// the document's own text and is shown on every later turn that references
+// the document (showExcerpt only gates the excerpt), so injected content
+// surviving summarisation would otherwise get the lighter treatment forever
+// rather than the one turn the excerpt gets.
+//
+// A real document containing a literal run of three or more "<" (a git
+// merge-conflict marker's "<<<<<<<", say) gets cosmetically mangled by
+// this - an acceptable trade for a sequence with no place in a place name,
+// receipt or manual page, and one a false positive here costs nothing
+// beyond appearance, unlike a false negative.
+func assistantNeutralizeDocumentBlockMarker(s string) string {
+	return strings.ReplaceAll(s, assistantDocumentBlockMarkerPrefix, "‹‹‹")
+}
+
 // assistantAttachmentBlock renders one attached document (ADR 0106) as the
 // text preamble assistantHistoryMessages puts ahead of the message that
 // attached it - v1 sends no image part at all; the enrich stage's vision
@@ -749,10 +956,19 @@ func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id strin
 // would re-quote the same 4000 characters into every subsequent turn's
 // context for no benefit, since the model can already call read_document
 // for the rest.
+//
+// The whole block sits between assistantDocumentBlockOpen/Close (M-1
+// finding) so the model can tell, unambiguously, where the document's own
+// text starts and stops rather than reading it as more of the operator's
+// message - assistantSystemPromptParts tells the model plainly what these
+// tags mean and that content inside them is data, never instructions.
 func assistantAttachmentBlock(doc document, showExcerpt bool) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "[Attached document id=%s %q %s", doc.ID, doc.Filename, doc.MIME)
+	b.WriteString(assistantDocumentBlockOpen(doc.ID))
+	b.WriteString("\n")
+
+	fmt.Fprintf(&b, "[Attached document id=%s %q %s", doc.ID, assistantNeutralizeDocumentBlockMarker(doc.Filename), doc.MIME)
 	if doc.PageCount > 0 {
 		fmt.Fprintf(&b, ", %d pages", doc.PageCount)
 	}
@@ -765,12 +981,14 @@ func assistantAttachmentBlock(doc document, showExcerpt bool) string {
 	b.WriteString("]\n")
 
 	if doc.Summary != "" {
-		fmt.Fprintf(&b, "Summary: %s\n", doc.Summary)
+		fmt.Fprintf(&b, "Summary: %s\n", assistantNeutralizeDocumentBlockMarker(doc.Summary))
 	}
 	if doc.Status == "failed" {
 		if doc.Error != "" {
-			fmt.Fprintf(&b, "Error: %s\n", doc.Error)
+			fmt.Fprintf(&b, "Error: %s\n", assistantNeutralizeDocumentBlockMarker(doc.Error))
 		}
+		b.WriteString(assistantDocumentBlockClose(doc.ID))
+		b.WriteString("\n")
 		return b.String()
 	}
 
@@ -780,9 +998,12 @@ func assistantAttachmentBlock(doc document, showExcerpt bool) string {
 			if len(runes) > assistantAttachmentExcerptRunes {
 				runes = runes[:assistantAttachmentExcerptRunes]
 			}
-			fmt.Fprintf(&b, "Excerpt: %s\nUse read_document with this id for the rest.\n", string(runes))
+			fmt.Fprintf(&b, "Excerpt: %s\nUse read_document with this id for the rest.\n", assistantNeutralizeDocumentBlockMarker(string(runes)))
 		}
 	}
+
+	b.WriteString(assistantDocumentBlockClose(doc.ID))
+	b.WriteString("\n")
 
 	return b.String()
 }

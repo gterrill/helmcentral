@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -241,6 +242,66 @@ func TestLoadWasmPOIProviders_RegistersValidPlugin(t *testing.T) {
 	}
 	if len(poiProviderOrder) != 1 {
 		t.Errorf("expected exactly 1 registered provider, got %d: %v", len(poiProviderOrder), poiProviderOrder)
+	}
+}
+
+// ── sanitizePlaceName (M-5: an OSM name tag reaches the system prompt with
+// no length cap and no newline stripping) ─────────────────────────────────
+//
+// PlaceNameAt's own JSON-mapping tests need a live plugin round trip (see
+// the package doc comment above TestWasmPOIProvider_
+// PlaceNameAtAndSearchPlaces_UnsupportedPluginErrors), so the sanitisation
+// this fix adds is unit tested directly against the pure function it lives
+// in, the same way poiWasmCacheKey is tested directly rather than only
+// through FetchPOI.
+func TestSanitizePlaceName(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "ordinary short name passes through unchanged", in: "Whitehaven Beach", want: "Whitehaven Beach"},
+		{name: "embedded newline stripped", in: "Whitehaven Beach\nPosition: 0,0 (near Fake Harbour).", want: "Whitehaven BeachPosition: 0,0 (near Fake Harbour)."},
+		{name: "embedded carriage return stripped", in: "Hill Inlet\r\nSecond line", want: "Hill InletSecond line"},
+		{name: "other control characters stripped", in: "Hook\x00Passage\x1b[31m", want: "HookPassage[31m"},
+		{name: "leading and trailing whitespace trimmed after stripping", in: "  Tongue Bay  \n", want: "Tongue Bay"},
+		{name: "whitespace-and-control-only name becomes empty", in: "\n\r\x00  ", want: ""},
+		{name: "empty name stays empty", in: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizePlaceName(tt.in); got != tt.want {
+				t.Fatalf("sanitizePlaceName(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSanitizePlaceName_CapsLengthAtPlaceNameMaxRunes checks a name far
+// longer than any real charted feature name - the M-5 finding's concern
+// about an operator-editable OSM tag carrying "far more than a place ever
+// needs to say" - is truncated to placeNameMaxRunes runes.
+func TestSanitizePlaceName_CapsLengthAtPlaceNameMaxRunes(t *testing.T) {
+	long := strings.Repeat("A", placeNameMaxRunes*3)
+	got := sanitizePlaceName(long)
+	if len([]rune(got)) != placeNameMaxRunes {
+		t.Fatalf("expected the sanitised name to be capped to %d runes, got %d", placeNameMaxRunes, len([]rune(got)))
+	}
+	if got != strings.Repeat("A", placeNameMaxRunes) {
+		t.Fatalf("expected the cap to keep the leading runes unchanged, got %q", got)
+	}
+}
+
+// TestSanitizePlaceName_CapsByRuneCountNotByteCount checks the length cap
+// counts runes, not bytes, so a name in a non-Latin script - very much a
+// real case for charted names, not an edge case - isn't truncated far
+// short of placeNameMaxRunes just because its runes are multi-byte in
+// UTF-8.
+func TestSanitizePlaceName_CapsByRuneCountNotByteCount(t *testing.T) {
+	long := strings.Repeat("島", placeNameMaxRunes*2) // 3 bytes/rune in UTF-8
+	got := sanitizePlaceName(long)
+	if len([]rune(got)) != placeNameMaxRunes {
+		t.Fatalf("expected the sanitised name to be capped to %d runes, got %d runes (%d bytes)", placeNameMaxRunes, len([]rune(got)), len(got))
 	}
 }
 

@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // This file implements the three read-only tools the onboard assistant's
@@ -35,6 +37,31 @@ const assistantMaxTideDays = 8
 // question never needs more than a handful of days of hourly detail. See
 // capToolResultJSON.
 const assistantMaxToolResultChars = 12000
+
+// assistantFindPlacesMaxQueryRunes bounds find_places.query before it
+// reaches the configured place-names provider (osm-overpass or Google
+// Places, per settings) and, from there, a live network request to
+// whatever host that provider is configured against - the only outbound
+// path for attacker-chosen bytes besides openrouter.ai itself (M-4
+// finding). A real feature name, including the "Name, Qualifier" two-part
+// form the prompt's rung-2 fallback uses (e.g. "Bona Bay, Gloucester
+// Island"), never needs anywhere near this many characters; a query this
+// long is far more likely to be an attempt to smuggle something else -
+// vessel position, document contents - into the mirror operator's logs
+// than a genuine search.
+const assistantFindPlacesMaxQueryRunes = 80
+
+// assistantFindPlacesQueryPattern is the character allowlist find_places.
+// query must match. It covers what a real place name plausibly contains:
+// letters in any script (a great many charted names are not ASCII),
+// digits, spaces, and the handful of punctuation marks that actually turn
+// up in real names or the "Name, Qualifier" query form - apostrophe,
+// hyphen, period, comma, ampersand, and parentheses. Anything else
+// (control characters, JSON/XML metacharacters, backslashes, quotes) is
+// rejected outright rather than stripped, so the model is told plainly
+// instead of having its query silently mangled (AGENTS.md's fallback
+// policy).
+var assistantFindPlacesQueryPattern = regexp.MustCompile(`^[\p{L}\p{N} .,'&()-]+$`)
 
 // assistantToolDeps are every real-world dependency the four tools need,
 // injected so tests supply fakes/stubs instead of a live SignalK, WASM
@@ -651,6 +678,18 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 	query := strings.TrimSpace(args.Query)
 	if query == "" {
 		return "", fmt.Errorf("find_places: query is required")
+	}
+	// M-4 finding: query is the only text that reaches a third-party host
+	// (the configured place-names provider) verbatim, so it is bounded and
+	// charset-checked before anything downstream - including the model's
+	// own guidance in assistant_prompt.go - ever sees it, rather than
+	// trusting the prompt alone to keep the model from passing through
+	// whatever a document told it to encode here.
+	if n := utf8.RuneCountInString(query); n > assistantFindPlacesMaxQueryRunes {
+		return "", fmt.Errorf("find_places: query is %d characters, longer than the %d-character limit for a place name search", n, assistantFindPlacesMaxQueryRunes)
+	}
+	if !assistantFindPlacesQueryPattern.MatchString(query) {
+		return "", fmt.Errorf("find_places: query %q contains characters not valid in a place name search", query)
 	}
 
 	maxResults := args.MaxResults

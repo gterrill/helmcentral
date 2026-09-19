@@ -310,6 +310,86 @@ func TestExecuteFindPlaces_ProviderErrorIsNeverSwallowed(t *testing.T) {
 	}
 }
 
+// ── query bounding (M-4: query reaches a third-party host verbatim) ──────
+//
+// find_places.query is the only text besides openrouter.ai itself that an
+// injected document can get the model to send somewhere else - the
+// configured place-names provider forwards it to Overpass or Google Places
+// (ADR 0101). Both tests below check the query never reaches
+// provider.SearchPlaces at all once it is too long or carries characters a
+// place name search has no business containing.
+
+// TestExecuteFindPlaces_OverlongQueryRejectedBeforeReachingTheProvider
+// checks a query far longer than any real place name (built to look like
+// an attempt to smuggle other data through it - a coordinate pair and
+// filler text) is rejected outright, and never reaches the provider.
+func TestExecuteFindPlaces_OverlongQueryRejectedBeforeReachingTheProvider(t *testing.T) {
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "exact"}}
+	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+
+	longQuery := "Bona Bay " + strings.Repeat("smuggled anchorage name filler text ", 5)
+	if len(longQuery) <= assistantFindPlacesMaxQueryRunes {
+		t.Fatalf("test fixture bug: longQuery (%d runes) must exceed assistantFindPlacesMaxQueryRunes (%d)", len(longQuery), assistantFindPlacesMaxQueryRunes)
+	}
+
+	raw, err := json.Marshal(map[string]string{"query": longQuery})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	_, err = deps.execute(context.Background(), "find_places", raw)
+	if err == nil {
+		t.Fatalf("expected an overlong query to be rejected")
+	}
+	if !strings.Contains(err.Error(), "find_places") {
+		t.Fatalf("expected the error to name find_places, got: %v", err)
+	}
+	if provider.callCount() != 0 {
+		t.Fatalf("expected the overlong query to never reach the provider, got %d calls", provider.callCount())
+	}
+}
+
+// TestExecuteFindPlaces_QueryWithDisallowedCharactersRejected checks a
+// query carrying characters no real place name search needs (here, angle
+// brackets and a semicolon - the kind of bytes an injected document might
+// ask the model to encode) is rejected outright rather than passed through
+// to the provider.
+func TestExecuteFindPlaces_QueryWithDisallowedCharactersRejected(t *testing.T) {
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "exact"}}
+	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+
+	raw, err := json.Marshal(map[string]string{"query": "Bay <script>alert(1)</script>; lat=-20.1"})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	_, err = deps.execute(context.Background(), "find_places", raw)
+	if err == nil {
+		t.Fatalf("expected a query with disallowed characters to be rejected")
+	}
+	if provider.callCount() != 0 {
+		t.Fatalf("expected the invalid query to never reach the provider, got %d calls", provider.callCount())
+	}
+}
+
+// TestExecuteFindPlaces_OrdinaryCompoundQueryStillAccepted is the negative
+// check alongside the two tests above: the "Name, Qualifier" query form the
+// system prompt's own rung-2 fallback relies on (assistant_prompt.go) must
+// still pass the new bounds - this used to be a plain end-to-end assertion
+// in TestExecuteFindPlaces_CentredOnEchoesProviderQualifierHit, but that
+// test doesn't isolate query validation from the rest of the qualifier-
+// resolution behaviour the way this one does.
+func TestExecuteFindPlaces_OrdinaryCompoundQueryStillAccepted(t *testing.T) {
+	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "exact"}}
+	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+
+	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
+	if err != nil {
+		t.Fatalf("expected the ordinary comma-qualified query to be accepted, got: %v", err)
+	}
+	if provider.callCount() != 1 {
+		t.Fatalf("expected the query to reach the provider, got %d calls", provider.callCount())
+	}
+}
+
 // A resolver failure - the configured place-names provider isn't
 // installed, or doesn't support place names - must surface as a
 // find_places error naming the problem, never silently return an empty
