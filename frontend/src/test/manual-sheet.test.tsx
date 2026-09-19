@@ -113,7 +113,7 @@ describe('ManualSheet', () => {
       onAskMate: vi.fn(),
     })
 
-    expect(await screen.findByRole('heading', { name: 'Manual' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Help' })).toBeInTheDocument()
     expect(screen.getByText('--')).toBeInTheDocument()
     expect(screen.getByTestId('manual-sheet-skeleton').children).toHaveLength(3)
 
@@ -313,12 +313,12 @@ describe('ManualSheet', () => {
     })
 
     await screen.findByText('Intro.')
-    expect(screen.getByRole('button', { name: 'Manual contents' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Help contents' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Manual contents' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Help contents' }))
 
     expect(await screen.findByText('Contents body.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Manual contents' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Help contents' })).not.toBeInTheDocument()
   })
 
   it('shows the backend sentence verbatim when the manual is not staged (503)', async () => {

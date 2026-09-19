@@ -1,6 +1,6 @@
 /**
  * ADR 0095: the in-app manual's three entry points, mounted in App.tsx - the
- * header's contextual `?`, the sidebar's Manual item, and (elsewhere,
+ * header's contextual `?`, the sidebar's Help item, and (elsewhere,
  * settings-page.test.tsx) Settings' own Manual button. Preamble copied from
  * app-mate-voice.test.tsx (same App tree, same reasons for each hook mock,
  * same stubFetch router-with-catch-all shape), trimmed of the voice-specific
@@ -202,7 +202,7 @@ describe('the in-app manual (ADR 0095)', () => {
     const fetchMock = stubFetch()
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open the manual' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
     // ManualSheet is lazy-loaded (mounted only on this first open), so the
     // fetch its mount effect fires isn't necessarily on screen yet.
     await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/features/dashboard'))
@@ -211,37 +211,37 @@ describe('the in-app manual (ADR 0095)', () => {
     // the sheet only re-reads its target when it (re)opens.
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open the manual' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
 
     await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/features/forecast'))
   })
 
-  it('carries the title "Manual for this screen" and the CircleHelp icon', () => {
+  it('carries the title "Help for this screen" and the CircleHelp icon', () => {
     stubFetch()
     render(<App />)
 
-    const button = screen.getByRole('button', { name: 'Open the manual' })
-    expect(button).toHaveAttribute('title', 'Manual for this screen')
+    const button = screen.getByRole('button', { name: 'Open help' })
+    expect(button).toHaveAttribute('title', 'Help for this screen')
     expect(button.querySelector('svg')).toHaveClass('lucide-circle-help')
   })
 
-  it('the sidebar Manual item opens the contents page, and is never marked active', async () => {
+  it('the sidebar Help item opens the contents page, and is never marked active', async () => {
     const fetchMock = stubFetch()
     render(<App />)
 
-    const manualNavButton = screen.getByRole('button', { name: 'Manual' })
+    const manualNavButton = screen.getByRole('button', { name: 'Help' })
     fireEvent.click(manualNavButton)
 
     await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/index'))
     expect(manualNavButton).toHaveAttribute('data-active', 'false')
   })
 
-  it('/display/<slug> shows neither the header ? nor a sidebar Manual item', () => {
+  it('/display/<slug> shows neither the header ? nor a sidebar Help item', () => {
     stubFetch()
     window.history.replaceState({}, '', '/display/flybridge')
     render(<App />)
 
-    expect(screen.queryByRole('button', { name: 'Open the manual' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Manual' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open help' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Help' })).not.toBeInTheDocument()
   })
 })

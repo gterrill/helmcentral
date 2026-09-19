@@ -393,6 +393,33 @@ describe('App sidebar navigation', () => {
     fireEvent.click(underwaySubItem)
     expect(mockSetActivePageId).toHaveBeenCalledWith('p2')
   })
+
+  // The order of the top-level sidebar items is a deliberate product
+  // decision, not an accident of the order panels were built in: the
+  // things you reach for underway sit at the top, the reference and
+  // configuration rows at the bottom. Asserted here so a new panel
+  // appended to PANEL_NAV_ITEMS can't quietly land in the middle of it.
+  it('lists the top-level nav items in the shipped order', () => {
+    render(<App />)
+
+    const menu = document.querySelector('[data-sidebar="menu"]') as HTMLElement
+    const labels = Array.from(menu.querySelectorAll('[data-sidebar="menu-button"]'))
+      .map((button) => button.textContent?.trim())
+
+    expect(labels).toEqual([
+      'Dashboard',
+      'Alarms',
+      'Anchor Watch',
+      'Forecast',
+      'Radar',
+      'Routes',
+      'Documents',
+      'Mate',
+      'Wall displays',
+      'Settings',
+      'Help',
+    ])
+  })
 })
 
 /**

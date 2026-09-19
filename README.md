@@ -297,8 +297,8 @@ Start with [docs/index.md](docs/index.md).
 **These pages also ship inside the binary**, so the manual is on the boat whether
 or not the boat has a connection. The `?` button in the app's header opens the
 page and heading for whatever screen you are on, as a sheet beside it; the
-sidebar's **Manual** item opens the contents page for browsing; every Settings
-section carries its own Manual link. Links between manual pages stay in the
+sidebar's **Help** item opens the contents page for browsing; every Settings
+section carries its own Help link. Links between manual pages stay in the
 sheet with working Back; a link to something outside it, an ADR or an example
 plugin's source, opens on GitHub and needs a connection. Mate answers questions
 about Helmcentral from these same pages.

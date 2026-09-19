@@ -206,14 +206,23 @@ import { screenContextFor } from '@/lib/mate-screen'
 import { manualTargetFor, type ManualTarget } from '@/lib/manual-links'
 import { cn } from '@/lib/utils'
 
+/**
+ * Ordered the way the boat is actually run, not the order the panels were
+ * built in: what you want at a glance underway first (Alarms, Anchor Watch,
+ * Forecast, Radar, Routes), then the reference material you go and look
+ * something up in (Documents, Mate), then the rows you touch once and leave
+ * alone (Wall displays, Settings). Inventory belongs after Routes and
+ * Maintenance after Documents once those panels exist. Dashboard is pinned
+ * above this list and Help below it, both rendered separately in the sidebar.
+ */
 const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun }> = [
-  { id: 'forecast', label: 'Forecast', icon: CloudSun },
-  { id: 'routes', label: 'Routes', icon: Route },
-  { id: 'radar', label: 'Radar', icon: RadarIcon },
-  { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
   { id: 'alarms', label: 'Alarms', icon: BellRing },
-  { id: 'assistant', label: 'Mate', icon: Sparkles },
+  { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
+  { id: 'forecast', label: 'Forecast', icon: CloudSun },
+  { id: 'radar', label: 'Radar', icon: RadarIcon },
+  { id: 'routes', label: 'Routes', icon: Route },
   { id: 'documents', label: 'Documents', icon: FileText },
+  { id: 'assistant', label: 'Mate', icon: Sparkles },
   { id: 'wall-displays', label: 'Wall displays', icon: MonitorPlay },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
@@ -2517,9 +2526,9 @@ export function App() {
                 panel of its own) and carries no PanelId or URL - ADR 0074
                 keeps sheets out of the address bar. */}
             <SidebarMenuItem>
-              <SidebarMenuButton tooltip="Manual" onClick={() => openManual(null)}>
+              <SidebarMenuButton tooltip="Help" onClick={() => openManual(null)}>
                 <BookOpen />
-                <span>Manual</span>
+                <span>Help</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -2603,7 +2612,7 @@ export function App() {
                 )}
               </>
             )}
-            {/* ADR 0095: the contextual manual - lands on the current
+            {/* ADR 0095: the contextual help - lands on the current
                 screen's page (and heading, for the three dashboard
                 sub-panels that share features/dashboard). `title` is how
                 neighbouring header buttons carry a tooltip, same as this
@@ -2611,8 +2620,8 @@ export function App() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label="Open the manual"
-              title="Manual for this screen"
+              aria-label="Open help"
+              title="Help for this screen"
               onClick={() => openManual(manualTargetFor({ panel: activePanel, section: settingsSection }))}
             >
               <CircleHelp className="h-4 w-4" />

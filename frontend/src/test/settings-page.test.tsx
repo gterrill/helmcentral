@@ -264,7 +264,7 @@ describe('SettingsPage Manual button', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Alarms' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open the manual for this section' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open help for this section' }))
 
     expect(onOpenManual).toHaveBeenCalledWith({ page: 'features/alarms', heading: 'Getting told' })
   })
@@ -272,6 +272,6 @@ describe('SettingsPage Manual button', () => {
   it('renders no Manual button when onOpenManual is not passed - existing callers are untouched', () => {
     render(<SettingsPage />)
 
-    expect(screen.queryByRole('button', { name: 'Open the manual for this section' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open help for this section' })).not.toBeInTheDocument()
   })
 })

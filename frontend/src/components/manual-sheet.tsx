@@ -109,7 +109,7 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
     // 'external' never reaches here - ManualMarkdown opens it directly.
   }
 
-  const title = manual.loading || isIndex ? 'Manual' : manual.page?.title ?? 'Manual'
+  const title = manual.loading || isIndex ? 'Help' : manual.page?.title ?? 'Help'
   const groupLabel = manual.loading ? '--' : manualGroupLabel(current.page)
   // A page whose title hasn't loaded yet (still loading, or failed) falls
   // back to the same question the contents page uses - always a coherent
@@ -142,7 +142,7 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
               </Button>
             )}
             {!isIndex && (
-              <Button variant="ghost" size="icon" aria-label="Manual contents" title="Manual contents" onClick={openContents}>
+              <Button variant="ghost" size="icon" aria-label="Help contents" title="Help contents" onClick={openContents}>
                 <BookOpen className="h-4 w-4" />
               </Button>
             )}

@@ -243,11 +243,11 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
             <Button
               variant="ghost"
               className="h-10 gap-2 text-primary"
-              aria-label="Open the manual for this section"
+              aria-label="Open help for this section"
               onClick={() => onOpenManual(SETTINGS_MANUAL_TARGETS[activeSectionId])}
             >
               <BookOpen className="h-4 w-4" />
-              Manual
+              Help
             </Button>
           </div>
         )}
