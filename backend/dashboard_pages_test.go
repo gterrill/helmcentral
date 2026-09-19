@@ -1144,7 +1144,7 @@ func TestValidateDashboardWidgets_AcceptsEmbedInstance(t *testing.T) {
 		{ID: "wind", X: 0, Y: 0, W: 4, H: 8},
 		embedWidget("m1x8abcd", "Windrose", "http://boat.local:3000/d-solo/abc/windrose?panelId=2"),
 	}
-	if msg := validateDashboardWidgets(widgets); msg != "" {
+	if msg := validateDashboardWidgets(widgets, ""); msg != "" {
 		t.Fatalf("expected embed widget to validate, got %q", msg)
 	}
 }
@@ -1156,7 +1156,7 @@ func TestValidateDashboardWidgets_AcceptsMultipleEmbedInstances(t *testing.T) {
 		embedWidget("m1x8abcd", "Windrose", "https://grafana.local/d-solo/a?panelId=1"),
 		embedWidget("m1x8efgh", "Polars", "https://grafana.local/d-solo/a?panelId=2"),
 	}
-	if msg := validateDashboardWidgets(widgets); msg != "" {
+	if msg := validateDashboardWidgets(widgets, ""); msg != "" {
 		t.Fatalf("expected two distinct embeds to validate, got %q", msg)
 	}
 }
@@ -1166,7 +1166,7 @@ func TestValidateDashboardWidgets_RejectsDuplicateEmbedInstance(t *testing.T) {
 		embedWidget("m1x8abcd", "Windrose", "https://grafana.local/d-solo/a?panelId=1"),
 		embedWidget("m1x8abcd", "Windrose Again", "https://grafana.local/d-solo/a?panelId=2"),
 	}
-	if msg := validateDashboardWidgets(widgets); msg == "" {
+	if msg := validateDashboardWidgets(widgets, ""); msg == "" {
 		t.Fatal("expected duplicate embed token to be rejected")
 	}
 }
@@ -1198,7 +1198,7 @@ func TestValidateDashboardWidgets_RejectsBadEmbeds(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 				t.Fatalf("expected %s to be rejected", tc.name)
 			}
 		})
@@ -1210,7 +1210,7 @@ func TestValidateDashboardWidgets_RejectsEmbedConfigOnBuiltinWidget(t *testing.T
 	widgets := []dashboardLayoutItem{
 		{ID: "wind", X: 0, Y: 0, W: 4, H: 8, Embed: &dashboardEmbedConfig{URL: "https://grafana.local/a"}},
 	}
-	if msg := validateDashboardWidgets(widgets); msg == "" {
+	if msg := validateDashboardWidgets(widgets, ""); msg == "" {
 		t.Fatal("expected embed config on a builtin widget id to be rejected")
 	}
 }
@@ -1353,7 +1353,7 @@ func validGaugeConfig() *dashboardGaugeConfig {
 
 func TestValidateDashboardWidgets_AcceptsAutopilotBuiltin(t *testing.T) {
 	widgets := []dashboardLayoutItem{{ID: "autopilot", X: 0, Y: 0, W: 4, H: 6}}
-	if msg := validateDashboardWidgets(widgets); msg != "" {
+	if msg := validateDashboardWidgets(widgets, ""); msg != "" {
 		t.Fatalf("expected the autopilot builtin id to be accepted, got %q", msg)
 	}
 }
@@ -1366,7 +1366,7 @@ func TestValidateDashboardWidgets_AcceptsAutopilotBuiltin(t *testing.T) {
 func TestValidateDashboardWidgets_AcceptsWallDisplayAndRadarTargetsBuiltins(t *testing.T) {
 	for _, id := range []string{"radar-targets", "clock", "current-conditions", "forecast-days", "sea-state"} {
 		widgets := []dashboardLayoutItem{{ID: id, X: 0, Y: 0, W: 4, H: 6}}
-		if msg := validateDashboardWidgets(widgets); msg != "" {
+		if msg := validateDashboardWidgets(widgets, ""); msg != "" {
 			t.Errorf("expected builtin id %q to be accepted, got %q", id, msg)
 		}
 	}
@@ -1376,20 +1376,20 @@ func TestValidateDashboardWidgets_RejectsEmbedConfigOnAutopilotWidget(t *testing
 	widgets := []dashboardLayoutItem{
 		{ID: "autopilot", X: 0, Y: 0, W: 4, H: 6, Embed: &dashboardEmbedConfig{URL: "https://grafana.local/a"}},
 	}
-	if msg := validateDashboardWidgets(widgets); msg == "" {
+	if msg := validateDashboardWidgets(widgets, ""); msg == "" {
 		t.Fatal("expected embed config on the autopilot widget to be rejected")
 	}
 }
 
 func TestValidateDashboardWidgets_RejectsGaugeConfigOnAutopilotWidget(t *testing.T) {
 	widget := dashboardLayoutItem{ID: "autopilot", X: 0, Y: 0, W: 4, H: 6, Gauge: validGaugeConfig()}
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg == "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg == "" {
 		t.Fatal("expected gauge config on the autopilot widget to be rejected")
 	}
 }
 
 func TestValidateGaugeWidgetAcceptsAWellFormedGauge(t *testing.T) {
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", validGaugeConfig())}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", validGaugeConfig())}, ""); msg != "" {
 		t.Fatalf("expected a valid gauge to be accepted, got %q", msg)
 	}
 }
@@ -1406,7 +1406,7 @@ func TestValidateGaugeWidgetRejectsBadInput(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
 	}
@@ -1418,7 +1418,7 @@ func TestValidateGaugeWidgetRejectsInvertedRange(t *testing.T) {
 	low, high := 100.0, 10.0
 	config.Min, config.Max = &low, &high
 
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}, ""); msg == "" {
 		t.Fatalf("expected an inverted range to be rejected")
 	}
 }
@@ -1429,7 +1429,7 @@ func TestValidateGaugeWidgetRejectsUnknownZoneState(t *testing.T) {
 	config := validGaugeConfig()
 	config.Zones = []gaugeZone{{From: 0, To: 10, State: "spicy"}}
 
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}, ""); msg == "" {
 		t.Fatalf("expected an unknown zone state to be rejected")
 	}
 }
@@ -1439,7 +1439,7 @@ func TestValidateGaugeWidgetRejectsUnknownZoneState(t *testing.T) {
 func TestValidateDashboardWidgetsRejectsGaugeConfigOnABuiltinWidget(t *testing.T) {
 	widget := dashboardLayoutItem{ID: "wind", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig()}
 
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg == "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg == "" {
 		t.Fatalf("expected gauge config on a builtin id to be rejected")
 	}
 }
@@ -1490,7 +1490,7 @@ func validGaugeGroupConfig() *dashboardGaugeGroupConfig {
 
 func TestValidateGaugeGroupAcceptsAWellFormedGroup(t *testing.T) {
 	widget := gaugeGroupWidget("gauge-group:abcd1234", validGaugeGroupConfig())
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg != "" {
 		t.Fatalf("expected a valid gauge group to be accepted, got %q", msg)
 	}
 }
@@ -1500,7 +1500,7 @@ func TestValidateGaugeGroupAcceptsHeroIndexInRange(t *testing.T) {
 	hero := 0
 	config.Hero = &hero
 	widget := gaugeGroupWidget("gauge-group:abcd1234", config)
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg != "" {
 		t.Fatalf("expected a valid hero index to be accepted, got %q", msg)
 	}
 }
@@ -1562,7 +1562,7 @@ func TestValidateGaugeGroupRejectsBadInput(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
 	}
@@ -1584,7 +1584,7 @@ func TestValidateDashboardWidgetsRejectsMismatchedGroupConfig(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
 	}
@@ -1683,7 +1683,7 @@ func validPoiMapConfig() *dashboardPoiMapConfig {
 
 func TestValidateDashboardWidgets_AcceptsPoiMapInstance(t *testing.T) {
 	widget := poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig())
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg != "" {
 		t.Fatalf("expected a valid poi map widget to be accepted, got %q", msg)
 	}
 }
@@ -1693,7 +1693,7 @@ func TestValidateDashboardWidgets_AcceptsMultiplePoiMapInstances(t *testing.T) {
 		poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig()),
 		poiMapWidget("poi-map:m1x8efgh", validPoiMapConfig()),
 	}
-	if msg := validateDashboardWidgets(widgets); msg != "" {
+	if msg := validateDashboardWidgets(widgets, ""); msg != "" {
 		t.Fatalf("expected two distinct poi map instances to validate, got %q", msg)
 	}
 }
@@ -1703,7 +1703,7 @@ func TestValidateDashboardWidgets_RejectsDuplicatePoiMapInstance(t *testing.T) {
 		poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig()),
 		poiMapWidget("poi-map:m1x8abcd", validPoiMapConfig()),
 	}
-	if msg := validateDashboardWidgets(widgets); msg == "" {
+	if msg := validateDashboardWidgets(widgets, ""); msg == "" {
 		t.Fatal("expected duplicate poi map token to be rejected")
 	}
 }
@@ -1743,7 +1743,7 @@ func TestValidatePoiMapWidget_RejectsBadInput(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 				t.Fatalf("expected %s to be rejected", tc.name)
 			}
 		})
@@ -1773,7 +1773,7 @@ func TestValidateDashboardWidgetsRejectsMismatchedPoiMapConfig(t *testing.T) {
 		if i == len(cases)-1 {
 			tc.widget.Gauge = validGaugeConfig()
 		}
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
 	}
@@ -1836,7 +1836,7 @@ func validLampStripConfig() *dashboardLampStripConfig {
 
 func TestValidateLampStripAcceptsAWellFormedStrip(t *testing.T) {
 	widget := lampStripWidget("lamps:abcd1234", validLampStripConfig())
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg != "" {
 		t.Fatalf("expected a valid lamp strip to be accepted, got %q", msg)
 	}
 }
@@ -1845,7 +1845,7 @@ func TestValidateLampStripAcceptsAWellFormedStrip(t *testing.T) {
 // a useful thing to pin to a page.
 func TestValidateLampStripAcceptsCheckOnlyStrip(t *testing.T) {
 	config := &dashboardLampStripConfig{Title: "Status", ShowCheck: true}
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{lampStripWidget("lamps:abcd1234", config)}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{lampStripWidget("lamps:abcd1234", config)}, ""); msg != "" {
 		t.Fatalf("expected a check-only strip to be accepted, got %q", msg)
 	}
 }
@@ -1878,7 +1878,7 @@ func TestValidateLampStripRejectsBadInput(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
 	}
@@ -1897,7 +1897,7 @@ func TestValidateDashboardWidgetsRejectsMismatchedLampConfig(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
 	}
@@ -2198,7 +2198,7 @@ func validClusterConfig() *dashboardClusterConfig {
 }
 
 func TestValidateClusterAcceptsAWellFormedCluster(t *testing.T) {
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", validClusterConfig())}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", validClusterConfig())}, ""); msg != "" {
 		t.Fatalf("expected a valid cluster to be accepted, got %q", msg)
 	}
 }
@@ -2245,7 +2245,7 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
 	}
@@ -2292,7 +2292,7 @@ func TestValidateDashboardWidgetsRejectsMismatchedClusterConfig(t *testing.T) {
 		{"gauge on a cluster", dashboardLayoutItem{ID: "cluster:abcd1234", X: 0, Y: 0, W: 4, H: 4, Gauge: validGaugeConfig(), Cluster: cluster}},
 	}
 	for _, tc := range cases {
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{tc.widget}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", tc.name)
 		}
 	}
@@ -2344,7 +2344,7 @@ func TestValidateClusterRejectsUnknownIcons(t *testing.T) {
 		"corner icon": badCorner,
 		"centre icon": badCentre,
 	} {
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", config)}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", config)}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", name)
 		}
 	}
@@ -2353,7 +2353,7 @@ func TestValidateClusterRejectsUnknownIcons(t *testing.T) {
 	ok := validClusterConfig()
 	ok.Corners[0].Icon = "cog"
 	ok.CentreIcon = ""
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", ok)}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", ok)}, ""); msg != "" {
 		t.Fatalf("expected a known icon and an absent one to be accepted, got %q", msg)
 	}
 }
@@ -2413,7 +2413,7 @@ func TestValidateGaugeConfigRejectsUnknownRingOptions(t *testing.T) {
 	} {
 		config := validGaugeConfig()
 		mutate(config)
-		if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+		if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}, ""); msg == "" {
 			t.Fatalf("%s: expected rejection", name)
 		}
 	}
@@ -2424,7 +2424,7 @@ func TestValidateGaugeConfigRejectsANonPositiveLabelDivisor(t *testing.T) {
 	config := validGaugeConfig()
 	zero := 0.0
 	config.LabelDivisor = &zero
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}); msg == "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{gaugeWidget("gauge:abcd1234", config)}, ""); msg == "" {
 		t.Fatal("expected a zero label divisor to be rejected")
 	}
 }
@@ -2457,7 +2457,7 @@ func clusterWithFuel() *dashboardClusterConfig {
 }
 
 func TestValidateClusterAcceptsAFuelRail(t *testing.T) {
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", clusterWithFuel())}); msg != "" {
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", clusterWithFuel())}, ""); msg != "" {
 		t.Fatalf("expected the live vessel's fuel rail to be accepted, got %q", msg)
 	}
 }
@@ -2492,7 +2492,7 @@ func TestValidateClusterRejectsFuelSlotsWithTheWrongQuantity(t *testing.T) {
 		{"capacity measured as pressure", pressureCapacity},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", tc.config)}); msg == "" {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", tc.config)}, ""); msg == "" {
 				t.Fatal("expected a fuel slot with the wrong quantity to be rejected")
 			}
 		})
@@ -2526,7 +2526,7 @@ func TestValidateClusterRejectsBadFuelRails(t *testing.T) {
 		{"capacity with no path", noCapacityPath},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", tc.config)}); msg == "" {
+			if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", tc.config)}, ""); msg == "" {
 				t.Fatal("expected the rail to be rejected")
 			}
 		})
@@ -2949,5 +2949,53 @@ func TestDashboardPageData_OmitsKioskKeysWhenUnset(t *testing.T) {
 		if strings.Contains(string(encoded), `"`+key+`"`) {
 			t.Fatalf("expected no %q key for an unflagged page, got %s", key, encoded)
 		}
+	}
+}
+
+// TestEmbedWidgetRejectsSameOriginURL covers F-1 from the 2026-09-19 security
+// audit. embed-tile.tsx renders the embed in an iframe carrying
+// allow-scripts + allow-same-origin. That pair is fine for a third-party
+// embed - the frame keeps its own origin, so the grant buys it nothing
+// against us - but a frame whose URL is OUR origin is then not sandboxed at
+// all: it reaches window.top.document, the app's state, and same-origin
+// fetches carrying the session cookie, which on this deployment includes
+// autopilot and generator control.
+//
+// The frontend validator rejects these, but a validator that only runs in the
+// config dialog is bypassed by posting to the API directly, so the check has
+// to exist here too.
+func TestEmbedWidgetRejectsSameOriginURL(t *testing.T) {
+	widget := dashboardLayoutItem{
+		ID:    embedWidgetIDPrefix + "abcd1234",
+		X:     0,
+		Y:     0,
+		W:     4,
+		H:     4,
+		Embed: &dashboardEmbedConfig{URL: "http://helm.local:9091/anything"},
+	}
+
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, "http://helm.local:9091"); msg == "" {
+		t.Fatal("expected a same-origin embed url to be rejected, got no error")
+	}
+
+	// A genuinely different origin is the supported case (Grafana, Windy) and
+	// must still pass.
+	widget.Embed.URL = "https://grafana.example/d/abc"
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, "http://helm.local:9091"); msg != "" {
+		t.Fatalf("expected a cross-origin embed url to be accepted, got %q", msg)
+	}
+
+	// Same host, different port is a different origin and stays allowed.
+	widget.Embed.URL = "http://helm.local:3000/panel"
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, "http://helm.local:9091"); msg != "" {
+		t.Fatalf("expected a different-port url to be accepted, got %q", msg)
+	}
+
+	// Proves the rejection above is the origin comparison and not some other
+	// rule the fixture trips: the identical URL passes when the caller could
+	// not determine an own-origin to compare against.
+	widget.Embed.URL = "http://helm.local:9091/anything"
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{widget}, ""); msg != "" {
+		t.Fatalf("expected the same url to pass with no own-origin, got %q", msg)
 	}
 }

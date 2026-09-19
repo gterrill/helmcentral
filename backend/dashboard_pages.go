@@ -450,7 +450,18 @@ func saveDashboardPagesLocked() error {
 // validateEmbedWidget guards the one widget whose content is operator-supplied.
 // The frontend's isValidEmbedUrl in lib/dashboard-widgets.ts applies the same
 // rules for synchronous feedback in the config dialog; keep the two in step.
-func validateEmbedWidget(w dashboardLayoutItem) string {
+//
+// The embed is rendered in an iframe carrying allow-scripts +
+// allow-same-origin (see embed-tile.tsx). That pair is safe for a
+// third-party embed - the frame keeps its own origin, so the grant buys it
+// nothing against us, and Grafana and similar need it for their own session
+// - but a frame pointed at OUR origin is then not sandboxed at all: it
+// reaches window.top.document, the app's state, and same-origin fetches
+// carrying the session cookie. Hence ownOrigin, derived by the caller the
+// way corsOwnOrigin does it. An empty ownOrigin means the caller could not
+// determine one; the check is skipped rather than guessed, which is why
+// every request-bound caller passes a real value.
+func validateEmbedWidget(w dashboardLayoutItem, ownOrigin string) string {
 	token := strings.TrimPrefix(w.ID, embedWidgetIDPrefix)
 	if !embedWidgetTokenPattern.MatchString(token) {
 		return "invalid embed widget id: " + w.ID
@@ -481,14 +492,17 @@ func validateEmbedWidget(w dashboardLayoutItem) string {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return "embed url must be an http(s) URL"
 	}
+	if ownOrigin != "" && strings.EqualFold(parsed.Scheme+"://"+parsed.Host, ownOrigin) {
+		return "embed url cannot point at Helmcentral itself"
+	}
 	return ""
 }
 
-func validateDashboardWidgets(widgets []dashboardLayoutItem) string {
+func validateDashboardWidgets(widgets []dashboardLayoutItem, ownOrigin string) string {
 	seen := make(map[string]bool, len(widgets))
 	for _, w := range widgets {
 		if strings.HasPrefix(w.ID, embedWidgetIDPrefix) {
-			if msg := validateEmbedWidget(w); msg != "" {
+			if msg := validateEmbedWidget(w, ownOrigin); msg != "" {
 				return msg
 			}
 		} else if strings.HasPrefix(w.ID, clusterWidgetIDPrefix) {
@@ -760,7 +774,7 @@ func createDashboardPageHandler(c echo.Context) error {
 		body.Widgets = []dashboardLayoutItem{}
 	}
 
-	if msg := validateDashboardWidgets(body.Widgets); msg != "" {
+	if msg := validateDashboardWidgets(body.Widgets, corsOwnOrigin(c.Request())); msg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 
@@ -840,7 +854,7 @@ func patchDashboardPageHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown page skin: " + *body.Skin})
 	}
 	if body.Widgets != nil {
-		if msg := validateDashboardWidgets(*body.Widgets); msg != "" {
+		if msg := validateDashboardWidgets(*body.Widgets, corsOwnOrigin(c.Request())); msg != "" {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 		}
 	}

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import {
   DASHBOARD_WIDGET_CATEGORY,
@@ -78,6 +78,42 @@ describe('isValidEmbedUrl', () => {
 
   test('rejects a URL past the length the backend accepts', () => {
     expect(isValidEmbedUrl(`https://grafana.local/?q=${'x'.repeat(2048)}`)).toBe(false)
+  })
+})
+
+/**
+ * F-1 (security audit, phase 1): an embed URL whose origin is this app's own
+ * used to pass every check here, which mattered because embed-tile.tsx's
+ * iframe sandbox grants allow-same-origin — fine for a genuinely third-party
+ * embed keeping its own session, but for a same-origin frame that grant
+ * instead un-sandboxes it against OUR window (window.top.document, app
+ * state, same-origin fetches carrying the SignalK session cookie). See the
+ * updated comment on isValidEmbedUrl and on the sandbox attribute in
+ * embed-tile.tsx.
+ */
+describe('isValidEmbedUrl same-origin rejection (F-1)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  test('rejects a URL whose origin is this app\'s own, even though it passes every other check', () => {
+    vi.stubGlobal('location', { ...window.location, origin: 'http://192.168.50.240:9091' })
+    expect(isValidEmbedUrl('http://192.168.50.240:9091/anything')).toBe(false)
+  })
+
+  test('still accepts a different host reachable on the same LAN', () => {
+    vi.stubGlobal('location', { ...window.location, origin: 'http://192.168.50.240:9091' })
+    expect(isValidEmbedUrl('http://192.168.50.240:3030/d-solo/abc')).toBe(true)
+  })
+
+  test('still accepts the same host on a different port -- a distinct origin', () => {
+    vi.stubGlobal('location', { ...window.location, origin: 'http://192.168.50.240:9091' })
+    expect(isValidEmbedUrl('http://192.168.50.240:3000/')).toBe(true)
+  })
+
+  test('same host and port but a different scheme is still a distinct origin', () => {
+    vi.stubGlobal('location', { ...window.location, origin: 'https://192.168.50.240:9091' })
+    expect(isValidEmbedUrl('http://192.168.50.240:9091/anything')).toBe(true)
   })
 })
 
