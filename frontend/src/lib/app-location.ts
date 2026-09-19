@@ -7,7 +7,7 @@ import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings
 // Pure and React-free so it can be unit tested without mounting anything,
 // and so PANEL_IDS can be validated here without importing App.tsx (which
 // would create a cycle: App needs the parser, the parser must not need App).
-export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents'] as const
+export const PANEL_IDS = ['forecast', 'routes', 'charts', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'wall-displays'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface AppLocation {
@@ -32,6 +32,22 @@ export interface AppLocation {
    * no fallback to "the first display", which would silently put one
    * display's geometry on another screen. */
   displaySlug?: string | null
+  /** ADR 0112: the wall-displays management editor's `/wall-displays/<slug>`
+   * segment (the "editor" name, not "displaySlug", keeps it from being
+   * confused with the wall route's field above). null on a bare
+   * `/wall-displays`, absent everywhere else.
+   *
+   * `/display/<slug>` (above) and `/wall-displays/<slug>` are deliberately
+   * NOT one character apart from each other. `/display/<slug>` is the wall
+   * itself - what gets typed into a kiosk browser and rendered at kiosk
+   * scale on a screen as narrow as 1920x360. `/wall-displays/<slug>` is the
+   * admin editor for that display's configuration, meant for a normal
+   * browser. Resist the urge to "tidy" these into `/displays/<slug>` next to
+   * `/display/<slug>` - a one-character typo (or a stale bookmark from
+   * before a rename) would then silently swap one for the other, and the
+   * failure mode is a 1920x360 strip showing the management UI, or the
+   * editor rendering nothing because it hit the wall shell instead. */
+  displayEditSlug?: string | null
 }
 
 export interface LocationContext {
@@ -111,6 +127,15 @@ export function parseAppLocation(pathname: string): AppLocation {
     return { panel: 'display', displaySlug: second !== undefined ? decodeSegment(second) : null }
   }
 
+  // ADR 0112: the wall-displays management editor. Same shape as /display
+  // above (an optional slug segment), kept as its own branch for the same
+  // reason: it carries an extra segment the generic PANEL_ID_SET branch
+  // below doesn't know how to read. See the displayEditSlug doc comment on
+  // AppLocation for why this path is spelled so differently from /display.
+  if (first === 'wall-displays') {
+    return { panel: 'wall-displays', displayEditSlug: second !== undefined ? decodeSegment(second) : null }
+  }
+
   if (PANEL_ID_SET.has(first)) {
     return { panel: first as PanelId }
   }
@@ -150,6 +175,11 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
   if (loc.panel === 'display') {
     if (!loc.displaySlug) return '/display'
     return `/display/${encodeURIComponent(loc.displaySlug)}`
+  }
+
+  if (loc.panel === 'wall-displays') {
+    if (!loc.displayEditSlug) return '/wall-displays'
+    return `/wall-displays/${encodeURIComponent(loc.displayEditSlug)}`
   }
 
   return `/${loc.panel}`

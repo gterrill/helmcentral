@@ -13,6 +13,7 @@ import {
   Route,
   Settings,
   Sparkles,
+  MonitorPlay,
 } from 'lucide-react'
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
@@ -88,8 +89,8 @@ import { nextWaypoint, etaToWaypoint } from '@/lib/next-waypoint'
 import { DisplayShell } from '@/components/display-shell'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
-import { DisplaySidebarGroup } from '@/components/display-sidebar-group'
-import { DisplaysDialog } from '@/components/displays-dialog'
+import { WallDisplaysPanel } from '@/components/wall-displays-panel'
+import { DisplayEditorPanel } from '@/components/display-editor-panel'
 import type { DisplayPatch } from '@/components/page-display-select'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
@@ -217,6 +218,7 @@ const PANEL_NAV_ITEMS: Array<{ id: PanelId; label: string; icon: typeof CloudSun
   { id: 'alarms', label: 'Alarms', icon: BellRing },
   { id: 'assistant', label: 'Mate', icon: Sparkles },
   { id: 'documents', label: 'Documents', icon: FileText },
+  { id: 'wall-displays', label: 'Wall displays', icon: MonitorPlay },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
 
@@ -495,7 +497,6 @@ export function App() {
   // "Wall displays" group and from PageDisplaySelect's "no displays yet"
   // dead-end, not a route - same precedent as the ribbon dialog above
   // (ADR 0074: dialogs carry no URL).
-  const [displaysDialogOpen, setDisplaysDialogOpen] = useState(false)
 
   // The Mate sheet (ADR 0093 voice phase): a quick channel over whatever
   // page is on screen, opened by the header's "Ask Mate" button (and later
@@ -533,6 +534,9 @@ export function App() {
   // panel once as an initial prop rather than tracked in App state at all:
   // nothing here needs to know which document is open, only which folder.
   const [documentsFolderId, setDocumentsFolderId] = useState<string | null>(initialLocation.documentFolderId ?? null)
+  // ADR 0112: which display the management panel is editing, or null for its
+  // index. Seeded from the deep link the same way documentsFolderId is.
+  const [wallDisplaysSlug, setWallDisplaysSlug] = useState<string | null>(initialLocation.displayEditSlug ?? null)
   // Ditto latch pattern (mateSheetHasOpenedRef/manualSheetHasOpenedRef
   // above), but the opposite direction - tracking that the operator has
   // left Documents at least once, rather than that something has opened. A
@@ -711,6 +715,9 @@ export function App() {
     if (loc.panel === 'assistant') {
       setMatePanelConversationId(loc.conversationId ?? null)
     }
+    if (loc.panel === 'wall-displays') {
+      setWallDisplaysSlug(loc.displayEditSlug ?? null)
+    }
     if (loc.panel === 'documents') {
       setDocumentsFolderId(loc.documentFolderId ?? null)
     }
@@ -748,6 +755,7 @@ export function App() {
       pageId: activePageId,
       section: settingsSection,
       conversationId: activePanel === 'assistant' ? matePanelConversationId : null,
+      displayEditSlug: activePanel === 'wall-displays' ? wallDisplaysSlug : null,
       documentFolderId: activePanel === 'documents' ? documentsFolderId : null,
     }, ctx)
     // documents is the one panel whose canonical URL can carry a query
@@ -763,7 +771,7 @@ export function App() {
     // current bar non-canonical.
     const replace = first || firstPageChanged || !isCanonicalAppPath(path, { firstPageId: ctx.firstPageId, knownPageIds: ctx.knownPageIds, canAdmin })
     window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
-  }, [shellVisible, isDisplay, activePanel, activePageId, settingsSection, matePanelConversationId, documentsFolderId, pages, pagesLoading, canAdmin])
+  }, [shellVisible, isDisplay, activePanel, activePageId, settingsSection, matePanelConversationId, documentsFolderId, wallDisplaysSlug, pages, pagesLoading, canAdmin])
 
   // Handles Back/Forward. Goes through requestNavigate so a dirty Settings
   // page still gets to veto the navigation exactly as a sidebar click
@@ -1822,9 +1830,27 @@ export function App() {
     return () => clearInterval(timer)
   }, [isDisplay, displaysError, refetchDisplays])
 
-  const handleDuplicateToDisplay = (pageId: string, displayId: string | null) => {
+  // ADR 0107's create-and-name flow, applied to a screen: make one with
+  // workable defaults and land the operator in its editor rather than asking
+  // for a name up front in a dialog this ADR just removed. The default name
+  // steps past any it would collide with, because the slug is derived from
+  // it and a duplicate slug is refused rather than auto-suffixed (ADR 0110).
+  const handleCreateDisplay = async () => {
+    const taken = new Set(displays.map((d) => d.name))
+    let name = 'New display'
+    for (let n = 2; taken.has(name); n += 1) name = `New display ${n}`
+    const created = await createDisplay({ name, width: 1920, height: 1080, scale: 1, rotate: 0 })
+    if (created) setWallDisplaysSlug(created.slug)
+  }
+
+  // Both duplicate paths build the same copy; they differ only in what
+  // happens afterwards, which is a property of where you started, not of
+  // the copy. From a page's own toolbar you follow the new page (ADR 0107);
+  // from a display editor the copy lands on a *different* screen, so
+  // following it would throw you out of the rotation you are composing.
+  const duplicatePageToDisplay = (pageId: string, displayId: string | null) => {
     const source = pages.find((p) => p.id === pageId)
-    if (!source) return
+    if (!source) return Promise.resolve(null)
     const init: CreatePageInit = {
       widgets: structuredClone(source.widgets),
       skin: source.skin,
@@ -1841,7 +1867,11 @@ export function App() {
     } else if (source.hero) {
       init.hero = source.hero
     }
-    void createPage('Untitled page', init).then((created) => {
+    return createPage('Untitled page', init)
+  }
+
+  const handleDuplicateToDisplay = (pageId: string, displayId: string | null) => {
+    void duplicatePageToDisplay(pageId, displayId).then((created) => {
       if (created) {
         setActivePageId(created.id)
         setNamingPageId(created.id)
@@ -1882,7 +1912,7 @@ export function App() {
           onSetHero={(id, hero) => { void updatePage(id, { hero }) }}
           displays={displays}
           onDisplayPatch={handleDisplayPatch}
-          onManageDisplays={() => setDisplaysDialogOpen(true)}
+          onManageDisplays={() => requestNavigate('wall-displays', () => setActivePanel('wall-displays'))}
           onDuplicateToDisplay={handleDuplicateToDisplay}
           onDeletePage={(id) => {
             void deletePage(id).then((ok) => {
@@ -2155,6 +2185,82 @@ export function App() {
             onActiveConversationChange={setMatePanelConversationId}
           />
         )
+      case 'wall-displays': {
+        // ADR 0112: the index and the per-display editor are one panel, the
+        // same way DocumentsPanel owns its own folder drill-down. Which one
+        // renders is the presence of a slug, and the editor resolves it
+        // itself rather than App keeping a second piece of state in step.
+        const editing = wallDisplaysSlug !== null
+          ? displays.find((d) => d.slug === wallDisplaysSlug) ?? null
+          : null
+        if (wallDisplaysSlug !== null) {
+          return (
+            <DisplayEditorPanel
+              display={editing}
+              pages={pages}
+              displays={displays}
+              onBack={() => setWallDisplaysSlug(null)}
+              onUpdate={async (id, patch) => {
+                const updated = await updateDisplay(id, patch)
+                // The route names the display by slug, and the slug is one
+                // of the fields this panel edits: without following it, a
+                // rename resolves to nothing and the editor flips to "could
+                // not be found" on a display that is fine.
+                if (updated && updated.id === editing?.id) setWallDisplaysSlug(updated.slug)
+                return updated
+              }}
+              onDelete={async (id) => {
+                const released = await deleteDisplay(id)
+                // Without this the released pages keep a stale display_id
+                // and show in neither the Dashboard list nor any display
+                // until a reload.
+                if (released) await refetchPages()
+                return released
+              }}
+              onDisplayPatch={handleDisplayPatch}
+              onDuplicateToDisplay={(pageId, targetDisplayId) => {
+                // Unlike the layout toolbar's duplicate, this copy lands on
+                // a different screen than the one being edited, so ADR
+                // 0107's follow-the-new-page flow would throw the operator
+                // out of the rotation they are composing. Report it instead.
+                const target = displays.find((d) => d.id === targetDisplayId)
+                void duplicatePageToDisplay(pageId, targetDisplayId).then((created) => {
+                  if (created && target) toast.success(`Copied to ${target.name}.`)
+                })
+              }}
+              onCreatePage={async (displayId) => await createPage('Untitled page', {
+                widgets: [],
+                display_id: displayId,
+                dwell_seconds: DEFAULT_DWELL_SECONDS,
+              })}
+              onOpenPage={(id) => requestNavigate(null, () => {
+                setActivePanel(null)
+                setActivePageId(id)
+                setLayoutEditing(true)
+              })}
+              onReorder={reorderPages}
+              reordering={reordering}
+              canWrite={canWrite}
+            />
+          )
+        }
+        return (
+          <WallDisplaysPanel
+            displays={displays}
+            pages={pages}
+            loading={displaysLoading}
+            error={displaysError}
+            onRetry={() => { void refetchDisplays() }}
+            onOpenDisplay={(id) => {
+              const target = displays.find((d) => d.id === id)
+              if (target) setWallDisplaysSlug(target.slug)
+            }}
+            onCreateDisplay={() => { void handleCreateDisplay() }}
+            onOpenManual={openManual}
+            canWrite={canWrite}
+          />
+        )
+      }
       case 'documents': {
         const documentDeepLinkId = documentsLeftOnceRef.current ? null : (initialLocation.documentId ?? null)
         return (
@@ -2429,25 +2535,6 @@ export function App() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
-            {/* ADR 0110 (superseding ADR 0089's single "Wall display" link):
-                one row per configured display, each opening its own
-                `/display/<slug>` in a new tab - a wall is a separate,
-                unattended screen, not a place this operator's own session
-                navigates to and back from - with that display's own pages
-                nested underneath. The group header always renders (even
-                with zero displays) since it's also how the management
-                dialog is reached. */}
-            <DisplaySidebarGroup
-              displays={displays}
-              pages={pages}
-              activePageId={activePageId}
-              dashboardActive={activePanel === null}
-              onSelectPage={(id) => requestNavigate(null, () => {
-                setActivePanel(null)
-                setActivePageId(id)
-              })}
-              onOpenDisplaysDialog={() => setDisplaysDialogOpen(true)}
-            />
             {/* ADR 0095: opens the contents page of the in-app manual. Never
                 `isActive` (it's a sheet over whatever's on screen, not a
                 panel of its own) and carries no PanelId or URL - ADR 0074
@@ -2655,23 +2742,6 @@ export function App() {
         />
       )}
 
-      <DisplaysDialog
-        open={displaysDialogOpen}
-        onOpenChange={setDisplaysDialogOpen}
-        displays={displays}
-        pages={pages}
-        onCreate={createDisplay}
-        onUpdate={updateDisplay}
-        onDelete={async (id) => {
-          const released = await deleteDisplay(id)
-          // The released pages keep a stale display_id in local state
-          // otherwise, which renders them in neither the Dashboard
-          // sub-list nor the sidebar group until a reload.
-          if (released) await refetchPages()
-          return released
-        }}
-        canWrite={canWrite}
-      />
 
       <AlertDialog
         open={pendingNavigation !== null}

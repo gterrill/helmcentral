@@ -58,6 +58,41 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/display/%E0%A4%A')).toEqual({ panel: 'display', displaySlug: null })
   })
 
+  // The wall-displays management editor: /display/<slug> is the wall itself
+  // (typed into a kiosk browser), /wall-displays/<slug> is the admin editor
+  // for that display's config. Same parse/format shape as /display, on a
+  // deliberately dissimilar path so a typo in either can never land on the
+  // other's route.
+  it('parses /wall-displays with no slug as the index', () => {
+    expect(parseAppLocation('/wall-displays')).toEqual({ panel: 'wall-displays', displayEditSlug: null })
+  })
+
+  it('parses /wall-displays/<slug> as that display\'s editor', () => {
+    expect(parseAppLocation('/wall-displays/flybridge')).toEqual({ panel: 'wall-displays', displayEditSlug: 'flybridge' })
+  })
+
+  it('decodes a percent-encoded wall-displays edit slug', () => {
+    expect(parseAppLocation('/wall-displays/saloon%20tv')).toEqual({ panel: 'wall-displays', displayEditSlug: 'saloon tv' })
+  })
+
+  it('treats a malformed percent-escape in the wall-displays edit slug as no slug rather than throwing', () => {
+    expect(parseAppLocation('/wall-displays/%E0%A4%A')).toEqual({ panel: 'wall-displays', displayEditSlug: null })
+  })
+
+  // Regression guard: /display and /wall-displays are one word apart, not
+  // one character apart, specifically so a typo can't silently swap the
+  // kiosk wall route for the management editor (or vice versa). Assert they
+  // parse to different panels with different slug fields, not just
+  // "different strings".
+  it('parses /display/x and /wall-displays/x to different panels', () => {
+    const wall = parseAppLocation('/display/x')
+    const editor = parseAppLocation('/wall-displays/x')
+    expect(wall.panel).toBe('display')
+    expect(editor.panel).toBe('wall-displays')
+    expect(wall).toEqual({ panel: 'display', displaySlug: 'x' })
+    expect(editor).toEqual({ panel: 'wall-displays', displayEditSlug: 'x' })
+  })
+
   // ADR 0106 F1: the Documents panel carries its current folder (and, on a
   // deep link from a Mate attachment chip, which document to open in the
   // viewer) as query params rather than path segments, since either can be
@@ -166,6 +201,19 @@ describe('formatAppLocation', () => {
     expect(formatAppLocation({ panel: 'display', displaySlug: 'saloon tv' }, ctx)).toBe('/display/saloon%20tv')
   })
 
+  it('formats the wall-displays panel with no slug as /wall-displays', () => {
+    expect(formatAppLocation({ panel: 'wall-displays' }, ctx)).toBe('/wall-displays')
+    expect(formatAppLocation({ panel: 'wall-displays', displayEditSlug: null }, ctx)).toBe('/wall-displays')
+  })
+
+  it('formats a wall-displays edit slug as /wall-displays/<slug>', () => {
+    expect(formatAppLocation({ panel: 'wall-displays', displayEditSlug: 'flybridge' }, ctx)).toBe('/wall-displays/flybridge')
+  })
+
+  it('encodes the wall-displays edit slug', () => {
+    expect(formatAppLocation({ panel: 'wall-displays', displayEditSlug: 'saloon tv' }, ctx)).toBe('/wall-displays/saloon%20tv')
+  })
+
   it('formats the Mate panel as /mate', () => {
     expect(formatAppLocation({ panel: 'assistant' }, ctx)).toBe('/mate')
   })
@@ -213,6 +261,7 @@ describe('parse/format fixed point', () => {
     '/', '/dashboard/p2', '/dashboard/a%20b', '/forecast', '/routes', '/charts',
     '/radar', '/anchor-watch', '/alarms', '/mate', '/mate/12345', '/settings', '/settings/signalk',
     '/display', '/display/flybridge',
+    '/wall-displays', '/wall-displays/flybridge',
     '/documents', '/documents?folder=f1', '/documents?document=d1', '/documents?folder=f1&document=d1',
   ]
 

@@ -38,3 +38,50 @@ export function mergeVisibleOrder(
     return id
   })
 }
+
+/**
+ * ADR 0112 decision 3: moves one page up or down within its own wall
+ * display's feed order, and returns the complete page-id list
+ * `PUT /api/dashboard-pages/order` needs (the endpoint rejects a partial
+ * list the same way the reorder endpoint mergeVisibleOrder serves does).
+ *
+ * The subtlety this exists to hide: a wall display's feed order *is* the
+ * global page order (there's no separate wall ordering - see
+ * mergeVisibleOrder's own comment), but "move up" in the per-display editor
+ * has to mean "swap with the previous page on *this* display", not "swap
+ * with whatever page happens to sit before it in the global list". Those
+ * differ the moment another display's page (or an unassigned dashboard
+ * page) sits between two of this display's pages: swapping globally-adjacent
+ * pages would either do nothing (they're not this display's neighbour) or
+ * silently move the interloping page.
+ *
+ * So this filters `allPages` down to the pages on `displayId`, in their
+ * current relative order, swaps `pageId` with its neighbour *within that
+ * filtered list*, and feeds the result through mergeVisibleOrder using the
+ * display's own pages as the "visible" subset. That's what keeps every
+ * other page - another display's, or a plain dashboard page - pinned to its
+ * own absolute slot while only this display's pages permute through the
+ * slots they occupy.
+ *
+ * Returns null - never a partial or malformed list - when the move can't be
+ * made: `pageId` isn't in `allPages` at all, it's not on `displayId`, or
+ * it's already at the end it's being moved toward.
+ */
+export function moveWithinDisplay(
+  allPages: readonly (PageOrderPage & { display_id?: string })[],
+  displayId: string,
+  pageId: string,
+  direction: 'up' | 'down',
+): string[] | null {
+  const onDisplay = allPages.filter((page) => page.display_id === displayId)
+  const index = onDisplay.findIndex((page) => page.id === pageId)
+  if (index === -1) return null
+
+  const swapIndex = direction === 'up' ? index - 1 : index + 1
+  if (swapIndex < 0 || swapIndex >= onDisplay.length) return null
+
+  const reordered = onDisplay.map((page) => page.id)
+  ;[reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]]
+
+  return mergeVisibleOrder(allPages, reordered)
+}

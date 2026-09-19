@@ -38,6 +38,9 @@ export const PANEL_MANUAL_TARGETS: Record<PanelId, ManualTarget> = {
   alarms: { page: 'features/alarms' },
   assistant: { page: 'features/assistant' },
   documents: { page: 'features/documents' },
+  // Reachable, unlike the two below: the management surface (ADR 0112)
+  // mounts the ordinary header, so its Manual affordance resolves here.
+  'wall-displays': { page: 'features/dashboard', heading: 'Wall displays' },
   // Unreachable (see above) - set to General's target for totality.
   settings: { page: 'index' },
   // Unreachable (see above) - the manual index, for totality.

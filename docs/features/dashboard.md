@@ -148,8 +148,9 @@ displays, each with its own pages.
 
 Each one is a record you create and name, holding what is particular to that
 screen: how big it is, how much to magnify it, and whether it is mounted
-upside down. Open **Wall displays** in the sidebar to add or edit one. The
-fields are:
+upside down. **Wall displays** in the sidebar lists the screens you have
+configured; opening one gives you its settings and the pages it cycles
+through. The fields are:
 
 | Field | What it is for |
 | --- | --- |
@@ -170,12 +171,17 @@ means everywhere else.
 
 ### Putting pages on a display
 
-In layout mode, the toolbar's display select holds every screen you have
-configured. Pick one, set how many seconds the page shows (5 to 3600), and
-choose a condition: **Always**, or one of the vessel's own states, such as
-**While anchored**, to show the page only then. Setting it back to "Not on a
-wall" keeps the duration and condition, so putting it back later remembers
-both.
+A screen's own page is where you compose its rotation: **Add page** offers
+every dashboard page not already on a screen, and the table below holds the
+ones already there, each with its dwell (5 to 3600 seconds), its condition
+(**Always**, or a vessel state such as **While anchored**), and arrows that
+set the order the screen cycles through them. Reordering there moves a page
+only against the others on that screen.
+
+You can also assign from the page itself: in layout mode, the toolbar's
+display select puts the page you are looking at onto a screen. Setting it
+back to "Not on a wall" keeps the duration and condition, so putting it back
+later remembers both.
 
 A page belongs to one display. That is deliberate: a board laid out for a
 1920 by 360 strip is not a board you want filling a 55 inch television, and

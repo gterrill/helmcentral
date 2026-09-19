@@ -1,7 +1,12 @@
 # ADR 0110: Wall Displays Are Records
 
 ## Status
-Accepted
+
+Accepted. Section 8's management surface (the dialog, and the sidebar group
+that nested each display's pages) is superseded by ADR 0112, which moves both
+onto routed pages at /wall-displays. The rest of section 8 stands: wall pages
+still leave the Dashboard page list, and the reorder and switcher-label
+consequences it records are unchanged.
 
 ## Context
 
@@ -260,7 +265,9 @@ from the page list it renders, so it takes the active page's name separately
 or it would read "Dashboard" while an operator is authoring a wall page.
 
 Displays are managed in a dialog opened from that sidebar group, following
-ADR 0074's rule that dialogs carry no URL.
+ADR 0074's rule that dialogs carry no URL. (Superseded by ADR 0112: the
+dialog could not hold the per-display page ordering this ADR deferred, and
+that ordering is the thing the surface exists to do.)
 
 Rejected: a `/settings/displays` section. Settings is gated on admin and page
 editing is gated on write, which would leave an operator able to author wall

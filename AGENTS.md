@@ -6,9 +6,9 @@
 - Do not create date-based or ad-hoc tags.
 - If tagging is requested, determine the next SemVer from existing tags.
 
-## Code Review Before Commit And Release
+## Checks Before Commit And Release
 
-- Run `/code-review medium` on the working tree before committing a batch of changes.
+- Run `/code-review medium` and `/security-review' on the working tree before committing a batch of changes.
 - Run `/code-review high` on the commits since the last tag before creating a release tag. For large migrations (framework or major dependency upgrades), use `/code-review ultra` instead.
 - Check each finding against the code before acting on it. `high` and above report uncertain findings.
 - Findings applied with `--fix` still have to follow the Fallback and Test-First policies below.

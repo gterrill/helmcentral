@@ -59,7 +59,9 @@ the band the panel will actually show.
 
 ## 2. Add the display
 
-Open **Wall displays** in the sidebar and choose **New display**. Fill in:
+Open **Wall displays** in the sidebar. That lists every screen you have
+configured, with its address, size and how many pages are on it. Choose
+**New display** and it opens the new screen's own page. Fill in:
 
 - **Name**, what you call the screen: "Flybridge", "Saloon TV".
 - **Address**, the last part of its web address. `flybridge` gives
@@ -80,16 +82,28 @@ you lay out every other page.
 
 ## 3. Put pages on it
 
-With write access, in layout mode on each page you want cycling:
+The display's own page is the easiest way. **Add page** lists every dashboard
+page not already on a screen; pick one and it joins the rotation. The table
+below it holds the pages already there, where you set each one's dwell (5 to
+3600 seconds) and its condition: **Always**, or a vessel state such as
+**While anchored** to show it only then.
 
-1. Toggle layout mode in the header (needs a screen 1024px wide or more).
-2. Pick the display from the toolbar's display select.
-3. Set how long the page shows, in seconds (5 to 3600).
-4. Choose a condition: **Always**, or a vessel state such as **While
-   anchored** to show the page only then.
+The arrows in the **Order** column set the sequence the screen cycles
+through. Moving a page here only moves it relative to the other pages on
+that screen; the rest of your dashboard keeps its own order.
 
-An amber dashed line marks where that screen cuts the page off, measured for
-that screen. Everything above it is what the screen shows.
+**Duplicate** copies a page onto another screen, which is how you start a
+television version of a strip page. **Remove from this display** takes a page
+off the rotation without deleting it: it returns to the ordinary page list.
+
+You can also do the assignment from the other end. In layout mode on any
+page, the toolbar's display select puts that page on a screen, which is
+quicker when you are already looking at the page you want to move.
+
+To arrange the tiles themselves, click the page's name in that table. That
+opens it in layout mode, where an amber dashed line marks where this
+particular screen cuts the page off. Everything above the line is what the
+screen shows; anything below it is real and invisible there.
 
 Putting a page on a wall display clears its hero tile, because the hero's
 extra row spends the vertical room the screen is measuring.
@@ -98,10 +112,10 @@ The wall never shows the pinned indicator ribbon. If a page needs status
 lamps there, put a lamp strip tile on that page's own layout, in the space
 the dashed line marks as visible.
 
-Feed order is page order. To change which page shows first, reorder pages the
-way you always do (see [Reorder dashboard
-pages](reorder-dashboard-pages.md)). Pages on a display keep their place in
-that order even though they no longer appear in the ordinary page list.
+A page on a screen keeps its place in that screen's rotation whatever you do
+to the rest of the dashboard: reordering your ordinary pages (see [Reorder
+dashboard pages](reorder-dashboard-pages.md)) never disturbs a rotation it
+had nothing to do with.
 
 ## 4. Point the screen's browser at it
 

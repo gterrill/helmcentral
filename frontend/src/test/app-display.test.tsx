@@ -8,7 +8,7 @@
  * (to control which wall displays exist without a real /api/displays fetch).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
@@ -234,11 +234,12 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
 
 // Mutable the same way mockPagesState is - ADR 0110's own wall-display
 // record, fetched by App.tsx via useDisplays() rather than pages.
-const { mockDisplaysState } = vi.hoisted(() => ({
+const { mockDisplaysState, mockUpdateDisplay } = vi.hoisted(() => ({
   mockDisplaysState: {
     displays: [] as Display[],
     loading: false,
   },
+  mockUpdateDisplay: vi.fn(),
 }))
 
 vi.mock('@/hooks/use-displays', () => ({
@@ -248,7 +249,7 @@ vi.mock('@/hooks/use-displays', () => ({
     error: null,
     refetch: vi.fn(),
     createDisplay: vi.fn(),
-    updateDisplay: vi.fn(),
+    updateDisplay: mockUpdateDisplay,
     deleteDisplay: vi.fn(),
   }),
 }))
@@ -556,31 +557,32 @@ describe('App at / (dashboard authoring)', () => {
     mockPagesState.loading = false
   })
 
-  it('lists each display under the sidebar\'s "Wall displays" group, linking to /display/<slug> in a new tab, and opens the management dialog from the group header', () => {
+  it('reaches the wall displays index from one sidebar item, listing every display and its address', () => {
     window.history.replaceState({}, '', '/')
     render(<App />)
 
-    const link = screen.getByRole('link', { name: /flybridge/i })
-    expect(link).toHaveAttribute('href', '/display/flybridge')
-    expect(link).toHaveAttribute('target', '_blank')
-
     fireEvent.click(screen.getByRole('button', { name: 'Wall displays' }))
-    const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByText('Wall displays')).toBeInTheDocument()
+
+    expect(screen.getByRole('button', { name: 'Flybridge' })).toBeInTheDocument()
+    expect(screen.getByText('/display/flybridge')).toBeInTheDocument()
+    // The preview opens the wall itself, which is a separate unattended
+    // screen rather than somewhere this session navigates to and back from.
+    const preview = screen.getByRole('link', { name: /preview flybridge/i })
+    expect(preview).toHaveAttribute('href', '/display/flybridge')
+    expect(preview).toHaveAttribute('target', '_blank')
   })
 
-  it('keeps a page assigned to a display out of the Dashboard sub-list, and lists it nested under its display in the sidebar', () => {
+  it('keeps a page assigned to a display out of the Dashboard sub-list, and lists it in that display\'s editor', () => {
     window.history.replaceState({}, '', '/')
     render(<App />)
 
     expect(screen.getByRole('button', { name: 'Other page' })).toBeInTheDocument()
+    // Absent from the sidebar entirely: it belongs to a screen now.
+    expect(screen.queryByText(/wall engines/i)).not.toBeInTheDocument()
 
-    const flybridgeLi = screen.getByRole('link', { name: /flybridge/i }).closest('li')
-    expect(flybridgeLi).not.toBeNull()
-    expect(within(flybridgeLi as HTMLElement).getByText(/wall engines/i)).toBeInTheDocument()
-    // Exactly one occurrence in the whole document - proof it isn't ALSO
-    // sitting in the Dashboard sub-list somewhere else.
-    expect(screen.getAllByText(/wall engines/i)).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Wall displays' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Flybridge' }))
+    expect(screen.getByText(/wall engines/i)).toBeInTheDocument()
   })
 
   // App.tsx:674/716 used to compute `pages[0]?.id` directly - a wall page at
@@ -596,10 +598,11 @@ describe('App at / (dashboard authoring)', () => {
   })
 
   it('shows the fold guide in edit mode on a page assigned to a display with a measured canvas, not on an unassigned one', () => {
-    window.history.replaceState({}, '', '/')
+    // A wall page has left the sidebar but is still an ordinary dashboard
+    // page at its own URL, which is how the editor's page name reaches it.
+    window.history.replaceState({}, '', '/dashboard/p1')
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /wall engines/i }))
     fireEvent.click(screen.getByLabelText('Enter edit mode'))
     expect(screen.getByTestId('display-fold')).toBeInTheDocument()
 
@@ -631,10 +634,9 @@ describe('App at / (dashboard authoring)', () => {
       page('p2', 'Other page', [WIND_WIDGET]),
     ]
     mockCreatePage.mockResolvedValueOnce(page('p3', 'Untitled page', [DEPTH_TIDE_WIDGET], { display_id: 'd1' }))
-    window.history.replaceState({}, '', '/')
+    window.history.replaceState({}, '', '/dashboard/p1')
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /wall engines/i }))
     fireEvent.click(screen.getByLabelText('Enter edit mode'))
     fireEvent.click(screen.getByRole('button', { name: /duplicate to/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Flybridge' }))
@@ -731,4 +733,40 @@ describe('App at / (dashboard authoring)', () => {
     await waitFor(() => expect(mockUpdatePage).toHaveBeenCalled())
     expect(screen.queryByText(/hero tile was cleared/)).not.toBeInTheDocument()
   })
+
+  it('follows a renamed slug instead of stranding the editor on a stale one', async () => {
+    // The route names the display by slug and the editor edits the slug, so
+    // without following it a rename resolves to nothing and the panel says
+    // the display could not be found.
+    // The real useDisplays updates its own list on a successful patch;
+    // without that here the rename would "fail" for a mock artifact rather
+    // than for the bug under test.
+    mockUpdateDisplay.mockImplementationOnce(async (id: string, patch: Record<string, unknown>) => {
+      const updated = { ...mockDisplaysState.displays.find((d) => d.id === id)!, ...patch }
+      mockDisplaysState.displays = mockDisplaysState.displays.map((d) => (d.id === id ? updated : d))
+      return updated
+    })
+    window.history.replaceState({}, '', '/wall-displays/flybridge')
+    render(<App />)
+
+    const slug = screen.getByLabelText('Address')
+    fireEvent.change(slug, { target: { value: 'flybridge-2' } })
+    fireEvent.blur(slug)
+
+    await waitFor(() => expect(mockUpdateDisplay).toHaveBeenCalled())
+    expect(screen.queryByText(/could not be found/i)).not.toBeInTheDocument()
+  })
+
+  it('moves the editor, not just the URL, on Back and Forward', () => {
+    window.history.replaceState({}, '', '/wall-displays/flybridge')
+    render(<App />)
+    expect(screen.queryByText(/could not be found/i)).not.toBeInTheDocument()
+
+    window.history.replaceState({}, '', '/wall-displays')
+    fireEvent.popState(window)
+
+    // The index, not the editor still showing the previous display.
+    expect(screen.getByRole('button', { name: 'Flybridge' })).toBeInTheDocument()
+  })
 })
+
