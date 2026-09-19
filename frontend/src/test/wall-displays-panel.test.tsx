@@ -30,7 +30,7 @@ function baseProps(overrides: Partial<WallDisplaysPanelProps> = {}): WallDisplay
     onRetry: vi.fn(),
     onOpenDisplay: vi.fn(),
     onCreateDisplay: vi.fn(),
-    onOpenManual: vi.fn(),
+    onOpenHelp: vi.fn(),
     canWrite: true,
     ...overrides,
   }
@@ -69,11 +69,11 @@ describe('WallDisplaysPanel', () => {
       expect(screen.getByRole('button', { name: /New display/i })).toBeInTheDocument()
     })
 
-    it('links to the wall-display how-to in the manual', () => {
-      const onOpenManual = vi.fn()
-      render(<WallDisplaysPanel {...baseProps({ displays: [], onOpenManual })} />)
+    it('links to the wall-display how-to in the help', () => {
+      const onOpenHelp = vi.fn()
+      render(<WallDisplaysPanel {...baseProps({ displays: [], onOpenHelp })} />)
       screen.getByRole('button', { name: /How to set up a wall display/i }).click()
-      expect(onOpenManual).toHaveBeenCalledWith({ page: 'how-to/set-up-a-wall-display' })
+      expect(onOpenHelp).toHaveBeenCalledWith({ page: 'how-to/set-up-a-wall-display' })
     })
 
     it('hides New display when read-only', () => {

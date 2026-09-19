@@ -1,24 +1,24 @@
 import { ArrowLeft, BookOpen, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import { ManualMarkdown } from '@/components/manual-markdown'
+import { HelpMarkdown } from '@/components/help-markdown'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useManualPage } from '@/hooks/use-manual'
+import { useHelpPage } from '@/hooks/use-help'
 import {
-  MANUAL_INDEX,
-  manualBodyWithoutTitle,
+  HELP_INDEX,
+  helpBodyWithoutTitle,
   slugifyHeading,
-  type ManualLink,
-  type ManualTarget,
-} from '@/lib/manual-links'
+  type HelpLink,
+  type HelpTarget,
+} from '@/lib/help-links'
 
-interface ManualSheetProps {
+interface HelpSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Where to land when the sheet opens - null means the contents page. */
-  target: ManualTarget | null
+  target: HelpTarget | null
   onAskMate: (question: string) => void
 }
 
@@ -26,7 +26,7 @@ interface ManualSheetProps {
 // derived from the page id's own directory, the same three-way split
 // docs/ itself uses (AGENTS.md's Diátaxis table) plus the hand-written
 // contents page.
-function manualGroupLabel(pageId: string): string {
+function helpGroupLabel(pageId: string): string {
   if (pageId === 'index') return 'Contents'
   if (pageId.startsWith('features/')) return 'Feature'
   if (pageId.startsWith('how-to/')) return 'How-to'
@@ -35,35 +35,35 @@ function manualGroupLabel(pageId: string): string {
 }
 
 /**
- * The in-app manual (ADR 0095): a right-hand sheet, same chrome as
- * mate-sheet.tsx, that renders one page of the embedded operator manual at a
+ * The in-app help (ADR 0095): a right-hand sheet, same chrome as
+ * mate-sheet.tsx, that renders one page of the embedded help at a
  * time with its own back stack. Opened by the header's contextual `?`
- * (landing on the current screen's page/heading) or the sidebar's Manual
+ * (landing on the current screen's page/heading) or the sidebar's Help
  * item (landing on the contents page, `target: null`).
  */
-export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualSheetProps) {
-  const [history, setHistory] = useState<ManualTarget[]>([target ?? MANUAL_INDEX])
+export function HelpSheet({ open, onOpenChange, target, onAskMate }: HelpSheetProps) {
+  const [history, setHistory] = useState<HelpTarget[]>([target ?? HELP_INDEX])
 
   // Resets to the caller's target every time the sheet opens - same idiom as
   // mate-sheet.tsx's own open-keyed effects. The sheet is modal while open
-  // (Base UI's Dialog), so the header `?` and sidebar Manual item that
+  // (Base UI's Dialog), so the header `?` and sidebar Help item that
   // supply `target` can't be reached again until it closes: `open` alone is
   // the whole story for "a new target has arrived".
   useEffect(() => {
-    if (open) setHistory([target ?? MANUAL_INDEX])
+    if (open) setHistory([target ?? HELP_INDEX])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const current = history[history.length - 1]
   const isIndex = current.page === 'index'
   // Fetches nothing before the sheet has ever been opened.
-  const manual = useManualPage(open ? current.page : null)
+  const help = useHelpPage(open ? current.page : null)
 
   const bodyRef = useRef<HTMLDivElement>(null)
   const [missingHeading, setMissingHeading] = useState<string | null>(null)
-  // Bumped every time ManualMarkdown's lazy impl actually renders this
-  // content (onRendered below). manual.page/current.heading alone aren't
-  // enough to key the scroll effect on: ManualMarkdown is now behind
+  // Bumped every time HelpMarkdown's lazy impl actually renders this
+  // content (onRendered below). help.page/current.heading alone aren't
+  // enough to key the scroll effect on: HelpMarkdown is now behind
   // React.lazy (kiosk bundle-split), so the first time a page with a
   // deep-linked heading opens, the impl chunk may still be loading when this
   // effect first runs - the heading element doesn't exist yet, and neither
@@ -77,7 +77,7 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
   // looking at a page that doesn't seem to match what they asked for.
   useEffect(() => {
     setMissingHeading(null)
-    if (!manual.page) return
+    if (!help.page) return
     if (!current.heading) {
       if (bodyRef.current) bodyRef.current.scrollTop = 0
       return
@@ -90,11 +90,11 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
       if (bodyRef.current) bodyRef.current.scrollTop = 0
       setMissingHeading(current.heading)
     }
-  }, [manual.page, current.heading, renderTick])
+  }, [help.page, current.heading, renderTick])
 
-  const openContents = () => setHistory((prev) => [...prev, MANUAL_INDEX])
+  const openContents = () => setHistory((prev) => [...prev, HELP_INDEX])
 
-  const handleNavigate = (link: ManualLink) => {
+  const handleNavigate = (link: HelpLink) => {
     if (link.kind === 'anchor') {
       // Same page, different heading: replaces the current entry rather
       // than pushing, so an in-page jump doesn't grow the Back stack.
@@ -106,18 +106,18 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
     } else if (link.kind === 'page') {
       setHistory((prev) => [...prev, { page: link.page, heading: link.hash }])
     }
-    // 'external' never reaches here - ManualMarkdown opens it directly.
+    // 'external' never reaches here - HelpMarkdown opens it directly.
   }
 
-  const title = manual.loading || isIndex ? 'Help' : manual.page?.title ?? 'Help'
-  const groupLabel = manual.loading ? '--' : manualGroupLabel(current.page)
+  const title = help.loading || isIndex ? 'Help' : help.page?.title ?? 'Help'
+  const groupLabel = help.loading ? '--' : helpGroupLabel(current.page)
   // A page whose title hasn't loaded yet (still loading, or failed) falls
   // back to the same question the contents page uses - always a coherent
   // sentence, never a question about an undefined page. The title is quoted
   // rather than wrapped in "the ... page", so "The dashboard" and "Set up
   // Mate" read naturally.
   const askMateQuestion =
-    isIndex || !manual.page ? 'What can Helmcentral do?' : `What does the manual say about "${manual.page.title}"?`
+    isIndex || !help.page ? 'What can Helmcentral do?' : `What does the help say about "${help.page.title}"?`
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -162,28 +162,28 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
             chain note in mate-sheet.tsx applies - this is what gives the
             scrolling region a bounded height instead of growing forever. */}
         <div ref={bodyRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          {manual.loading ? (
-            <div className="space-y-2" data-testid="manual-sheet-skeleton">
+          {help.loading ? (
+            <div className="space-y-2" data-testid="help-sheet-skeleton">
               <Skeleton className="h-4 w-3/4" />
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-4 w-5/6" />
             </div>
-          ) : manual.error ? (
-            <ManualLoadErrorCard
-              error={manual.error}
+          ) : help.error ? (
+            <HelpLoadErrorCard
+              error={help.error}
               pageId={current.page}
               isIndex={isIndex}
-              onRetry={manual.reload}
+              onRetry={help.reload}
               onOpenContents={openContents}
             />
-          ) : manual.page ? (
+          ) : help.page ? (
             <>
               {missingHeading && (
                 <p className="mb-3 text-sm text-muted-foreground">Section "{missingHeading}" is not on this page</p>
               )}
-              <ManualMarkdown
-                content={manualBodyWithoutTitle(manual.page.body)}
-                pageId={manual.page.id}
+              <HelpMarkdown
+                content={helpBodyWithoutTitle(help.page.body)}
+                pageId={help.page.id}
                 onNavigate={handleNavigate}
                 onRendered={() => setRenderTick((t) => t + 1)}
               />
@@ -195,7 +195,7 @@ export function ManualSheet({ open, onOpenChange, target, onAskMate }: ManualShe
   )
 }
 
-interface ManualLoadErrorCardProps {
+interface HelpLoadErrorCardProps {
   error: { status: number; message: string }
   pageId: string
   isIndex: boolean
@@ -203,16 +203,16 @@ interface ManualLoadErrorCardProps {
   onOpenContents: () => void
 }
 
-// Three distinct shapes, per ADR 0095: the manual isn't staged in this
+// Three distinct shapes, per ADR 0095: help isn't staged in this
 // build (503, retryable once a rebuild stages it), this id doesn't exist
 // (404, not retryable - only "go to the contents" makes sense, and not even
 // that when the contents page is itself what 404'd), or anything else
 // (a transient failure, retryable).
-function ManualLoadErrorCard({ error, pageId, isIndex, onRetry, onOpenContents }: ManualLoadErrorCardProps) {
+function HelpLoadErrorCard({ error, pageId, isIndex, onRetry, onOpenContents }: HelpLoadErrorCardProps) {
   if (error.status === 503) {
     return (
       <div className="space-y-3 rounded-lg border border-border bg-card p-4">
-        <p className="text-sm text-foreground">The manual is not in this build.</p>
+        <p className="text-sm text-foreground">Help is not in this build.</p>
         <p className="text-sm text-muted-foreground">{error.message}</p>
         <div className="flex gap-2">
           <Button onClick={onRetry}>Try again</Button>
@@ -224,7 +224,7 @@ function ManualLoadErrorCard({ error, pageId, isIndex, onRetry, onOpenContents }
   if (error.status === 404) {
     return (
       <div className="space-y-3 rounded-lg border border-border bg-card p-4">
-        <p className="text-sm text-foreground">This build's manual has no page "{pageId}".</p>
+        <p className="text-sm text-foreground">This build's help has no page "{pageId}".</p>
         {!isIndex && (
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onOpenContents}>
@@ -238,7 +238,7 @@ function ManualLoadErrorCard({ error, pageId, isIndex, onRetry, onOpenContents }
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-card p-4">
-      <p className="text-sm text-foreground">Could not load the manual.</p>
+      <p className="text-sm text-foreground">Could not load help.</p>
       <p className="text-sm text-muted-foreground">{error.message}</p>
       <div className="flex gap-2">
         <Button onClick={onRetry}>Try again</Button>

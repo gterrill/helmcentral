@@ -27,7 +27,7 @@ import {
   initialRegularSettingsDraft,
   type RegularSettingsDraft,
 } from '@/components/settings/settings-draft'
-import { SETTINGS_MANUAL_TARGETS, type ManualTarget } from '@/lib/manual-links'
+import { SETTINGS_HELP_TARGETS, type HelpTarget } from '@/lib/help-links'
 
 interface SettingsPageProps {
   onDirtyChange?: (dirty: boolean) => void
@@ -41,12 +41,12 @@ interface SettingsPageProps {
   activeSectionId?: SettingsSectionId
   onSectionChange?: (id: SettingsSectionId) => void
   /**
-   * ADR 0095: one Manual button above the active section, rather than each
+   * ADR 0095: one Help button above the active section, rather than each
    * of the ten sections growing its own. Optional for the same reason
    * `activeSectionId` is - omitted, no button renders, so every existing
    * caller and test is untouched.
    */
-  onOpenManual?: (target: ManualTarget) => void
+  onOpenHelp?: (target: HelpTarget) => void
   onAskMate?: (question: string, options?: { newConversation?: boolean }) => void
 }
 
@@ -71,7 +71,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     onDirtyChange,
     activeSectionId: controlledSectionId,
     onSectionChange,
-    onOpenManual,
+    onOpenHelp,
     onAskMate,
   },
   ref,
@@ -238,13 +238,13 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
       <SettingsNav activeSectionId={activeSectionId} onSelect={handleSectionSelect} />
 
       <div className="min-w-0 flex-1 space-y-4">
-        {onOpenManual && (
+        {onOpenHelp && (
           <div className="mx-auto flex max-w-3xl justify-end">
             <Button
               variant="ghost"
               className="h-10 gap-2 text-primary"
               aria-label="Open help for this section"
-              onClick={() => onOpenManual(SETTINGS_MANUAL_TARGETS[activeSectionId])}
+              onClick={() => onOpenHelp(SETTINGS_HELP_TARGETS[activeSectionId])}
             >
               <BookOpen className="h-4 w-4" />
               Help

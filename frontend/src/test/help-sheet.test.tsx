@@ -2,16 +2,16 @@ import { useEffect, useState } from 'react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
-import type { ManualTarget } from '@/lib/manual-links'
+import type { HelpTarget } from '@/lib/help-links'
 
 // ADR 0095: same fetch-router pattern as mate-sheet.test.tsx - a fake
-// `GET /api/manual/<id>` keyed by a small set of fixture ids, driving the
-// sheet's own useManualPage hook exactly the way the real backend endpoint
-// would (200 page / 404 unknown id / 503 manual not staged, per the
-// contract backend/manual_handlers.go implements).
+// `GET /api/help/<id>` keyed by a small set of fixture ids, driving the
+// sheet's own useHelpPage hook exactly the way the real backend endpoint
+// would (200 page / 404 unknown id / 503 help not staged, per the
+// contract backend/help_handlers.go implements).
 //
-// use-manual.ts keeps a module-level page cache (deliberately - see its own
-// comment: the manual can't change without a new binary, and the cache is
+// use-help.ts keeps a module-level page cache (deliberately - see its own
+// comment: the help can't change without a new binary, and the cache is
 // what makes the sheet's Back button instant). That means every test needs
 // its own fresh copy of the module graph, not just a fresh fetch mock, or an
 // earlier test's cached page would silently answer a later test that expects
@@ -20,21 +20,21 @@ import type { ManualTarget } from '@/lib/manual-links'
 // use-radar-capabilities.test.ts and web-push-section.test.tsx already use
 // for the same reason.
 
-interface ManualPageFixture {
+interface HelpPageFixture {
   id: string
   title: string
   body: string
 }
 
-type ManualFixtureEntry = ManualPageFixture | { status: number; error: string }
+type HelpFixtureEntry = HelpPageFixture | { status: number; error: string }
 
-function buildFetch(pages: Record<string, ManualFixtureEntry>) {
+function buildFetch(pages: Record<string, HelpFixtureEntry>) {
   return vi.fn(async (url: string) => {
-    const match = /\/api\/manual\/(.+)$/.exec(url)
+    const match = /\/api\/help\/(.+)$/.exec(url)
     if (!match) throw new Error(`Unhandled fetch in test: ${url}`)
     const id = decodeURIComponent(match[1])
     const entry = pages[id]
-    if (!entry) throw new Error(`no fixture registered for manual page "${id}"`)
+    if (!entry) throw new Error(`no fixture registered for help page "${id}"`)
     if ('status' in entry) {
       return { ok: false, status: entry.status, json: async () => ({ error: entry.error }) }
     }
@@ -42,34 +42,34 @@ function buildFetch(pages: Record<string, ManualFixtureEntry>) {
   })
 }
 
-interface RenderManualSheetProps {
+interface RenderHelpSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  target: ManualTarget | null
+  target: HelpTarget | null
   onAskMate: (question: string) => void
 }
 
-async function renderManualSheet(props: RenderManualSheetProps) {
+async function renderHelpSheet(props: RenderHelpSheetProps) {
   vi.resetModules()
-  const { ManualSheet } = await import('@/components/manual-sheet')
-  return render(<ManualSheet {...props} />)
+  const { HelpSheet } = await import('@/components/help-sheet')
+  return render(<HelpSheet {...props} />)
 }
 
-describe('ManualSheet', () => {
+describe('HelpSheet', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.resetModules()
     // A no-op unless the deep-linked-heading test below registered it -
     // clears that per-test mock so it can never leak into a later test that
-    // needs the real ManualMarkdown.
-    vi.doUnmock('@/components/manual-markdown')
+    // needs the real HelpMarkdown.
+    vi.doUnmock('@/components/help-markdown')
   })
 
   it('does not render while closed, and fetches nothing', async () => {
     const fetchMock = buildFetch({})
     vi.stubGlobal('fetch', fetchMock)
 
-    await renderManualSheet({ open: false, onOpenChange: vi.fn(), target: null, onAskMate: vi.fn() })
+    await renderHelpSheet({ open: false, onOpenChange: vi.fn(), target: null, onAskMate: vi.fn() })
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -83,7 +83,7 @@ describe('ManualSheet', () => {
       }),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/forecast' },
@@ -91,11 +91,11 @@ describe('ManualSheet', () => {
     })
 
     expect(await screen.findByRole('heading', { name: 'Forecast' })).toBeInTheDocument()
-    // Body content renders through the now-lazy ManualMarkdown, so this is
+    // Body content renders through the now-lazy HelpMarkdown, so this is
     // the assertion that has to await - the sheet's own title (above) loads
     // independently of that chunk.
     expect(await screen.findByText('Body text.')).toBeInTheDocument()
-    // The group line under the title names which part of the manual this is.
+    // The group line under the title names which part of the help this is.
     expect(screen.getByText('Feature')).toBeInTheDocument()
   })
 
@@ -106,7 +106,7 @@ describe('ManualSheet', () => {
       vi.fn(() => new Promise((resolve) => { resolveFetch = resolve })),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/forecast' },
@@ -115,7 +115,7 @@ describe('ManualSheet', () => {
 
     expect(await screen.findByRole('heading', { name: 'Help' })).toBeInTheDocument()
     expect(screen.getByText('--')).toBeInTheDocument()
-    expect(screen.getByTestId('manual-sheet-skeleton').children).toHaveLength(3)
+    expect(screen.getByTestId('help-sheet-skeleton').children).toHaveLength(3)
 
     resolveFetch({
       ok: true,
@@ -139,7 +139,7 @@ describe('ManualSheet', () => {
     )
     const scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/dashboard', heading: 'Route planning' },
@@ -152,13 +152,13 @@ describe('ManualSheet', () => {
     await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled())
   })
 
-  // ManualMarkdown renders behind React.lazy now (kiosk bundle-split), so
+  // HelpMarkdown renders behind React.lazy now (kiosk bundle-split), so
   // the scroll-to-heading effect above can no longer assume the heading
-  // element exists the moment manual.page/current.heading settle - the impl
-  // chunk might still be loading. manual-sheet.tsx's fix is a second trigger
+  // element exists the moment help.page/current.heading settle - the impl
+  // chunk might still be loading. help-sheet.tsx's fix is a second trigger
   // (onRendered -> renderTick) tied to the renderer actually mounting. A
   // real React.lazy() resolves in a single microtask, too fast to expose
-  // the race, so this mocks ManualMarkdown itself with a fake that holds
+  // the race, so this mocks HelpMarkdown itself with a fake that holds
   // back both the heading markup and the onRendered call until a
   // test-controlled promise resolves - same "capture a resolver, control
   // the timing by hand" idiom as the "shows three loading skeletons before
@@ -169,14 +169,14 @@ describe('ManualSheet', () => {
       resolveRendered = resolve
     })
 
-    // Inlines renderManualSheet's own reset+import steps instead of calling
+    // Inlines renderHelpSheet's own reset+import steps instead of calling
     // it, because vi.doMock has to be registered *after* vi.resetModules()
     // - the same order buildFetch's sibling suite (web-push-section.test.tsx)
-    // uses - or the reset wipes out the registration before manual-sheet.tsx
+    // uses - or the reset wipes out the registration before help-sheet.tsx
     // ever gets a chance to import the mocked module.
     vi.resetModules()
-    vi.doMock('@/components/manual-markdown', () => ({
-      ManualMarkdown: ({ onRendered }: { onRendered?: () => void }) => {
+    vi.doMock('@/components/help-markdown', () => ({
+      HelpMarkdown: ({ onRendered }: { onRendered?: () => void }) => {
         const [ready, setReady] = useState(false)
         useEffect(() => {
           let cancelled = false
@@ -193,7 +193,7 @@ describe('ManualSheet', () => {
         return ready ? <h3 id="route-planning">Route planning</h3> : null
       },
     }))
-    const { ManualSheet } = await import('@/components/manual-sheet')
+    const { HelpSheet } = await import('@/components/help-sheet')
 
     vi.stubGlobal(
       'fetch',
@@ -214,7 +214,7 @@ describe('ManualSheet', () => {
     scrollIntoViewSpy.mockClear()
 
     render(
-      <ManualSheet
+      <HelpSheet
         open
         onOpenChange={vi.fn()}
         target={{ page: 'features/dashboard', heading: 'Route planning' }}
@@ -245,7 +245,7 @@ describe('ManualSheet', () => {
       }),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/dashboard', heading: 'Nonexistent section' },
@@ -253,7 +253,7 @@ describe('ManualSheet', () => {
     })
 
     expect(await screen.findByText('Section "Nonexistent section" is not on this page')).toBeInTheDocument()
-    // Body content renders through the now-lazy ManualMarkdown independently
+    // Body content renders through the now-lazy HelpMarkdown independently
     // of the notice above, so this still needs its own await.
     expect(await screen.findByText('Intro text.')).toBeInTheDocument()
   })
@@ -275,7 +275,7 @@ describe('ManualSheet', () => {
       }),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/dashboard' },
@@ -305,7 +305,7 @@ describe('ManualSheet', () => {
       }),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/dashboard' },
@@ -321,27 +321,27 @@ describe('ManualSheet', () => {
     expect(screen.queryByRole('button', { name: 'Help contents' })).not.toBeInTheDocument()
   })
 
-  it('shows the backend sentence verbatim when the manual is not staged (503)', async () => {
+  it('shows the backend sentence verbatim when help is not staged (503)', async () => {
     vi.stubGlobal(
       'fetch',
       buildFetch({
         'features/dashboard': {
           status: 503,
-          error: 'the manual is not embedded in this build (run make manual-stage)',
+          error: 'help is not embedded in this build (run make help-stage)',
         },
       }),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/dashboard' },
       onAskMate: vi.fn(),
     })
 
-    expect(await screen.findByText('The manual is not in this build.')).toBeInTheDocument()
+    expect(await screen.findByText('Help is not in this build.')).toBeInTheDocument()
     expect(
-      screen.getByText('the manual is not embedded in this build (run make manual-stage)'),
+      screen.getByText('help is not embedded in this build (run make help-stage)'),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
@@ -350,27 +350,27 @@ describe('ManualSheet', () => {
     vi.stubGlobal(
       'fetch',
       buildFetch({
-        'features/nope': { status: 404, error: 'unknown manual page "features/nope"' },
+        'features/nope': { status: 404, error: 'unknown help page "features/nope"' },
       }),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/nope' },
       onAskMate: vi.fn(),
     })
 
-    expect(await screen.findByText('This build\'s manual has no page "features/nope".')).toBeInTheDocument()
+    expect(await screen.findByText('This build\'s help has no page "features/nope".')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open the contents' })).toBeInTheDocument()
   })
 
   it('omits the contents button when the index page itself 404s', async () => {
-    vi.stubGlobal('fetch', buildFetch({ index: { status: 404, error: 'unknown manual page "index"' } }))
+    vi.stubGlobal('fetch', buildFetch({ index: { status: 404, error: 'unknown help page "index"' } }))
 
-    await renderManualSheet({ open: true, onOpenChange: vi.fn(), target: null, onAskMate: vi.fn() })
+    await renderHelpSheet({ open: true, onOpenChange: vi.fn(), target: null, onAskMate: vi.fn() })
 
-    expect(await screen.findByText('This build\'s manual has no page "index".')).toBeInTheDocument()
+    expect(await screen.findByText('This build\'s help has no page "index".')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open the contents' })).not.toBeInTheDocument()
   })
 
@@ -386,14 +386,14 @@ describe('ManualSheet', () => {
       })),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/dashboard' },
       onAskMate: vi.fn(),
     })
 
-    expect(await screen.findByText('Could not load the manual.')).toBeInTheDocument()
+    expect(await screen.findByText('Could not load help.')).toBeInTheDocument()
     expect(screen.getByText('HTTP 502')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
@@ -407,7 +407,7 @@ describe('ManualSheet', () => {
       }),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/forecast' },
@@ -417,7 +417,7 @@ describe('ManualSheet', () => {
     await screen.findByText('Body.')
     fireEvent.click(screen.getByRole('button', { name: 'Ask Mate about this page' }))
 
-    expect(onAskMate).toHaveBeenCalledWith('What does the manual say about "Forecast"?')
+    expect(onAskMate).toHaveBeenCalledWith('What does the help say about "Forecast"?')
   })
 
   it('Ask Mate seeds the contents question on the index page', async () => {
@@ -429,7 +429,7 @@ describe('ManualSheet', () => {
       }),
     )
 
-    await renderManualSheet({ open: true, onOpenChange: vi.fn(), target: null, onAskMate })
+    await renderHelpSheet({ open: true, onOpenChange: vi.fn(), target: null, onAskMate })
 
     await screen.findByText('Body.')
     fireEvent.click(screen.getByRole('button', { name: 'Ask Mate about this page' }))
@@ -445,7 +445,7 @@ describe('ManualSheet', () => {
       }),
     )
 
-    await renderManualSheet({
+    await renderHelpSheet({
       open: true,
       onOpenChange: vi.fn(),
       target: { page: 'features/forecast' },

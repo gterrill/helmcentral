@@ -17,10 +17,10 @@ import remarkGfm from 'remark-gfm'
 // so a reply repaints correctly across the light/dark/instrument themes
 // the same as every other surface in the app.
 //
-// Exported as assistantMarkdownComponents (ADR 0095) so manual-markdown.tsx
-// can spread this same map and override only the handful of tags the Manual
+// Exported as assistantMarkdownComponents (ADR 0095) so help-markdown.tsx
+// can spread this same map and override only the handful of tags the Help
 // sheet needs to behave differently - heading ids for scroll targets, and
-// links resolved against the manual tree instead of always opening a new
+// links resolved against the help tree instead of always opening a new
 // tab - rather than maintaining a second, near-identical style sheet.
 export const assistantMarkdownComponents: Components = {
   // One visible step above h2 (impeccable critique 2026-09-12, P3) - the two

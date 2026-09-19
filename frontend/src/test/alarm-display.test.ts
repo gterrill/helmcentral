@@ -190,6 +190,57 @@ describe('alarmConditionSentence', () => {
   // third path, so it has to stay caught by the op === 'stale' branch above
   // rather than falling into the path-keyed forecast branch, which would
   // print a warning-level word for a reading that isn't there.
+  // ADR 0114: when the caller is rendering a real bulletin link next to the
+  // sentence, the trailing "Details on the Forecast page." clause is
+  // redundant and drops out. Every other caller (and every assertion above
+  // this one) keeps calling alarmConditionSentence with no options argument
+  // at all, and its behaviour is unchanged.
+  describe('forecastDetailsLinked option', () => {
+    it('drops the Forecast-page clause from the wind ladder sentences when linked', () => {
+      expect(alarmConditionSentence(
+        makeAlarm({ path: FORECAST_WIND_WARNING_PATH, op: 'above', unit: '', value: 1 }),
+        { forecastDetailsLinked: true },
+      )).toBe('Strong wind warning in force.')
+
+      expect(alarmConditionSentence(
+        makeAlarm({ path: FORECAST_WIND_WARNING_PATH, op: 'above', unit: '', value: 2 }),
+        { forecastDetailsLinked: true },
+      )).toBe('Gale warning in force.')
+
+      expect(alarmConditionSentence(
+        makeAlarm({ path: FORECAST_WIND_WARNING_PATH, op: 'above', unit: '', value: 3 }),
+        { forecastDetailsLinked: true },
+      )).toBe('Storm warning in force.')
+    })
+
+    it('drops the Forecast-page clause from the surf warning sentence when linked', () => {
+      expect(alarmConditionSentence(
+        makeAlarm({ path: FORECAST_SURF_WARNING_PATH, op: 'above', unit: '', value: 1 }),
+        { forecastDetailsLinked: true },
+      )).toBe('Surf warning in force.')
+    })
+
+    it('keeps the Forecast-page clause when forecastDetailsLinked is false', () => {
+      expect(alarmConditionSentence(
+        makeAlarm({ path: FORECAST_WIND_WARNING_PATH, op: 'above', unit: '', value: 2 }),
+        { forecastDetailsLinked: false },
+      )).toBe('Gale warning in force. Details on the Forecast page.')
+    })
+
+    it('has no effect on a non-forecast sentence', () => {
+      const alarm = makeAlarm({
+        label: 'House bank low',
+        path: 'electrical.batteries.house.voltage',
+        op: 'above',
+        threshold: 14.9,
+        clear_value: 14.4,
+        value: 14.9,
+        unit: 'V',
+      })
+      expect(alarmConditionSentence(alarm, { forecastDetailsLinked: true })).toBe('Now 14.9 V. Clears below 14.4 V.')
+    })
+  })
+
   it('still reports no data for a stale rule on the forecast wind path', () => {
     const alarm = makeAlarm({
       path: FORECAST_WIND_WARNING_PATH,

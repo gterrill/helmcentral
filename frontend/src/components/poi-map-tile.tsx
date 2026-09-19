@@ -3,7 +3,7 @@ import { lazy, Suspense } from 'react'
 import type { PoiMapTileProps } from '@/components/poi-map-tile-impl'
 
 // Same kiosk bundle-split reasoning as assistant-markdown.tsx /
-// manual-markdown.tsx: this widget imports maplibre-gl and react-map-gl at
+// help-markdown.tsx: this widget imports maplibre-gl and react-map-gl at
 // module scope, and every /kiosk page loaded that whole map-vendor chunk
 // (1048 KB raw / 280 KB gzip) at startup even on pages with no map at all,
 // because App.tsx mounts PoiMapTile eagerly for any dashboard that has a

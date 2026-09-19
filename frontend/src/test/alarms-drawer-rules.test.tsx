@@ -58,6 +58,7 @@ function renderDrawer(rules: AlarmRule[], alarms: ActiveAlarm[] = [], paths: Sig
       updateRule={vi.fn()}
       deleteRule={deleteRuleMock}
       collisionTuningUrl={null}
+      forecastWarnings={null}
     />,
   )
   return container

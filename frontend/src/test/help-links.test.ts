@@ -7,50 +7,50 @@ import { describe, it, expect } from 'vitest'
 import { PANEL_IDS } from '@/lib/app-location'
 import { SETTINGS_SECTIONS } from '@/components/settings/settings-nav'
 import {
-  CREATE_PAGE_MANUAL_TARGET,
-  DASHBOARD_MANUAL_TARGET,
-  MANUAL_INDEX,
-  PANEL_MANUAL_TARGETS,
-  SETTINGS_MANUAL_TARGETS,
-  manualBodyWithoutTitle,
-  manualTargetFor,
-  resolveManualHref,
+  CREATE_PAGE_HELP_TARGET,
+  DASHBOARD_HELP_TARGET,
+  HELP_INDEX,
+  PANEL_HELP_TARGETS,
+  SETTINGS_HELP_TARGETS,
+  helpBodyWithoutTitle,
+  helpTargetFor,
+  resolveHelpHref,
   slugifyHeading,
-} from '@/lib/manual-links'
+} from '@/lib/help-links'
 
-describe('manualTargetFor', () => {
-  it('sends the dashboard (panel null) to the dashboard manual page', () => {
-    expect(manualTargetFor({ panel: null })).toEqual(DASHBOARD_MANUAL_TARGET)
+describe('helpTargetFor', () => {
+  it('sends the dashboard (panel null) to the dashboard help page', () => {
+    expect(helpTargetFor({ panel: null })).toEqual(DASHBOARD_HELP_TARGET)
   })
 
   it('sends every non-settings panel to its own table entry', () => {
     for (const id of PANEL_IDS) {
       if (id === 'settings') continue
-      expect(manualTargetFor({ panel: id })).toEqual(PANEL_MANUAL_TARGETS[id])
+      expect(helpTargetFor({ panel: id })).toEqual(PANEL_HELP_TARGETS[id])
     }
   })
 
   it('sends settings to the section table, defaulting to general when no section is set', () => {
-    expect(manualTargetFor({ panel: 'settings' })).toEqual(SETTINGS_MANUAL_TARGETS.general)
+    expect(helpTargetFor({ panel: 'settings' })).toEqual(SETTINGS_HELP_TARGETS.general)
     for (const section of SETTINGS_SECTIONS) {
-      expect(manualTargetFor({ panel: 'settings', section: section.id })).toEqual(
-        SETTINGS_MANUAL_TARGETS[section.id],
+      expect(helpTargetFor({ panel: 'settings', section: section.id })).toEqual(
+        SETTINGS_HELP_TARGETS[section.id],
       )
     }
   })
 
   it('gives the settings panel-table entry the same target as the general section, for totality', () => {
-    expect(PANEL_MANUAL_TARGETS.settings).toEqual(SETTINGS_MANUAL_TARGETS.general)
+    expect(PANEL_HELP_TARGETS.settings).toEqual(SETTINGS_HELP_TARGETS.general)
   })
 
-  it('gives the display panel-table entry the manual index, unreachable but total', () => {
-    expect(PANEL_MANUAL_TARGETS.display).toEqual(MANUAL_INDEX)
+  it('gives the display panel-table entry the help index, unreachable but total', () => {
+    expect(PANEL_HELP_TARGETS.display).toEqual(HELP_INDEX)
   })
 })
 
 // The lookup table is verified against the docs' actual headings so a docs
-// rename fails the frontend build instead of the Manual sheet silently
-// scrolling nowhere. Resolved the same way manual-links.test.ts's own module
+// rename fails the frontend build instead of the Help sheet silently
+// scrolling nowhere. Resolved the same way help-links.test.ts's own module
 // resolves - relative to the frontend package dir, one level up to the repo
 // root, then into docs/.
 function readDocsFile(pageId: string): string {
@@ -61,27 +61,27 @@ function readDocsFile(pageId: string): string {
   return readFileSync(resolve(docsRoot, relativePath), 'utf8')
 }
 
-function allManualTargets(): ManualTargetLike[] {
-  const targets: ManualTargetLike[] = [DASHBOARD_MANUAL_TARGET, MANUAL_INDEX, CREATE_PAGE_MANUAL_TARGET]
-  for (const id of PANEL_IDS) targets.push(PANEL_MANUAL_TARGETS[id])
-  for (const section of SETTINGS_SECTIONS) targets.push(SETTINGS_MANUAL_TARGETS[section.id])
+function allHelpTargets(): HelpTargetLike[] {
+  const targets: HelpTargetLike[] = [DASHBOARD_HELP_TARGET, HELP_INDEX, CREATE_PAGE_HELP_TARGET]
+  for (const id of PANEL_IDS) targets.push(PANEL_HELP_TARGETS[id])
+  for (const section of SETTINGS_SECTIONS) targets.push(SETTINGS_HELP_TARGETS[section.id])
   return targets
 }
 
-interface ManualTargetLike {
+interface HelpTargetLike {
   page: string
   heading?: string
 }
 
 describe('the lookup table against the docs on disk', () => {
   it('resolves every mapped page to a file that exists', () => {
-    for (const target of allManualTargets()) {
+    for (const target of allHelpTargets()) {
       expect(() => readDocsFile(target.page), `docs page for "${target.page}" is missing`).not.toThrow()
     }
   })
 
   it('finds every mapped heading as a ## or ### line on its page', () => {
-    for (const target of allManualTargets()) {
+    for (const target of allHelpTargets()) {
       if (!target.heading) continue
       const body = readDocsFile(target.page)
       const headingLines = body
@@ -114,23 +114,23 @@ describe('slugifyHeading', () => {
   })
 })
 
-describe('resolveManualHref', () => {
+describe('resolveHelpHref', () => {
   it('resolves a bare #hash to an anchor, regardless of the current page', () => {
-    expect(resolveManualHref('#nearby-map', 'features/dashboard')).toEqual({
+    expect(resolveHelpHref('#nearby-map', 'features/dashboard')).toEqual({
       kind: 'anchor',
       hash: 'nearby-map',
     })
   })
 
   it('resolves a same-directory .md link to a page', () => {
-    expect(resolveManualHref('alarms.md', 'features/dashboard')).toEqual({
+    expect(resolveHelpHref('alarms.md', 'features/dashboard')).toEqual({
       kind: 'page',
       page: 'features/alarms',
     })
   })
 
   it('resolves a same-directory .md link with a hash to a page and hash', () => {
-    expect(resolveManualHref('dashboard.md#instrument-tiles', 'features/forecast')).toEqual({
+    expect(resolveHelpHref('dashboard.md#instrument-tiles', 'features/forecast')).toEqual({
       kind: 'page',
       page: 'features/dashboard',
       hash: 'instrument-tiles',
@@ -138,14 +138,14 @@ describe('resolveManualHref', () => {
   })
 
   it('resolves a ../ link across directories', () => {
-    expect(resolveManualHref('../how-to/talk-to-mate.md', 'features/assistant')).toEqual({
+    expect(resolveHelpHref('../how-to/talk-to-mate.md', 'features/assistant')).toEqual({
       kind: 'page',
       page: 'how-to/talk-to-mate',
     })
   })
 
   it('resolves a ../ link with a hash across directories', () => {
-    expect(resolveManualHref('../reference/configuration.md#web-push-over-tailscale', 'features/alarms')).toEqual({
+    expect(resolveHelpHref('../reference/configuration.md#web-push-over-tailscale', 'features/alarms')).toEqual({
       kind: 'page',
       page: 'reference/configuration',
       hash: 'web-push-over-tailscale',
@@ -153,22 +153,22 @@ describe('resolveManualHref', () => {
   })
 
   it('resolves a link from the root index page with no directory to strip', () => {
-    expect(resolveManualHref('features/dashboard.md', 'index')).toEqual({
+    expect(resolveHelpHref('features/dashboard.md', 'index')).toEqual({
       kind: 'page',
       page: 'features/dashboard',
     })
   })
 
-  it('sends a directory link outside the manual tree to the GitHub tree view', () => {
-    expect(resolveManualHref('adr/', 'index')).toEqual({
+  it('sends a directory link outside the help tree to the GitHub tree view', () => {
+    expect(resolveHelpHref('adr/', 'index')).toEqual({
       kind: 'external',
       url: 'https://github.com/gterrill/helmcentral/tree/main/docs/adr',
     })
   })
 
-  it('sends a file link outside the manual tree, with a hash, to the GitHub blob view', () => {
+  it('sends a file link outside the help tree, with a hash, to the GitHub blob view', () => {
     expect(
-      resolveManualHref('../examples/poi-plugins/osm-overpass/README.md#usage', 'reference/plugins'),
+      resolveHelpHref('../examples/poi-plugins/osm-overpass/README.md#usage', 'reference/plugins'),
     ).toEqual({
       kind: 'external',
       url: 'https://github.com/gterrill/helmcentral/blob/main/docs/examples/poi-plugins/osm-overpass/README.md#usage',
@@ -176,44 +176,44 @@ describe('resolveManualHref', () => {
   })
 
   it('resolves a link that climbs above docs/ entirely, with a hash, to the GitHub blob view', () => {
-    expect(resolveManualHref('../../README.md#configuration', 'how-to/upgrading')).toEqual({
+    expect(resolveHelpHref('../../README.md#configuration', 'how-to/upgrading')).toEqual({
       kind: 'external',
       url: 'https://github.com/gterrill/helmcentral/blob/main/README.md#configuration',
     })
   })
 
   it('resolves a link into a dotfile directory outside docs/ to the GitHub blob view', () => {
-    expect(resolveManualHref('../../.github/workflows/release.yml', 'how-to/development')).toEqual({
+    expect(resolveHelpHref('../../.github/workflows/release.yml', 'how-to/development')).toEqual({
       kind: 'external',
       url: 'https://github.com/gterrill/helmcentral/blob/main/.github/workflows/release.yml',
     })
   })
 
   it('treats an absolute http(s) URL as external, unchanged', () => {
-    expect(resolveManualHref('https://wazero.io/', 'reference/plugins')).toEqual({
+    expect(resolveHelpHref('https://wazero.io/', 'reference/plugins')).toEqual({
       kind: 'external',
       url: 'https://wazero.io/',
     })
   })
 
   it('treats a mailto: URL as external, unchanged', () => {
-    expect(resolveManualHref('mailto:skipper@example.com', 'features/assistant')).toEqual({
+    expect(resolveHelpHref('mailto:skipper@example.com', 'features/assistant')).toEqual({
       kind: 'external',
       url: 'mailto:skipper@example.com',
     })
   })
 })
 
-describe('manualBodyWithoutTitle', () => {
+describe('helpBodyWithoutTitle', () => {
   it('strips the leading # heading line and the blank line after it', () => {
-    expect(manualBodyWithoutTitle('# Mate\n\nBody text.')).toBe('Body text.')
+    expect(helpBodyWithoutTitle('# Mate\n\nBody text.')).toBe('Body text.')
   })
 
   it('leaves the body alone when it has no leading # heading', () => {
-    expect(manualBodyWithoutTitle('Body text with no title.')).toBe('Body text with no title.')
+    expect(helpBodyWithoutTitle('Body text with no title.')).toBe('Body text with no title.')
   })
 
   it('returns an empty string for a page that is only a title', () => {
-    expect(manualBodyWithoutTitle('# Mate')).toBe('')
+    expect(helpBodyWithoutTitle('# Mate')).toBe('')
   })
 })

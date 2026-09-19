@@ -16,7 +16,7 @@
 // tree (mdast-util-gfm-autolink-literal) carried a lookbehind literal into
 // the entry chunk and blanked the kiosk. The fix was code-splitting the
 // markdown renderers behind React.lazy so that literal no longer ships in
-// the entry chunk (see assistant-markdown.tsx / manual-markdown.tsx and
+// the entry chunk (see assistant-markdown.tsx / help-markdown.tsx and
 // docs/adr/0046-frontend-build-toolchain-and-css-browser-floor.md's
 // addendum). This script is the mechanical guard so the next dependency (or
 // hand-written regex) that reintroduces the pattern into an eagerly loaded

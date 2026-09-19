@@ -41,13 +41,13 @@ backend/data/*.sqlite-shm
 !backend/dist/
 backend/dist/*
 !backend/dist/.gitkeep
-# Same reasoning as backend/dist above, for the operator manual staged into
-# backend/manual for //go:embed (the Makefile's manual-stage target, the
+# Same reasoning as backend/dist above, for the in-app help staged into
+# backend/help for //go:embed (the Makefile's help-stage target, the
 # Dockerfile and the GoReleaser hooks copy docs/features, docs/how-to and
 # docs/reference there) - the docs tree is the source of truth, not this copy.
-!backend/manual/
-backend/manual/*
-!backend/manual/.gitkeep
+!backend/help/
+backend/help/*
+!backend/help/.gitkeep
 settings.yaml
 .claude/settings.json
 /backend-data/

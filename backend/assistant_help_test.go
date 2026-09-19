@@ -9,29 +9,29 @@ import (
 	"testing/fstest"
 )
 
-// testManualFS is a small fstest.MapFS standing in for the staged
-// backend/manual tree, exercising loadManual/manualSection/manualIndexLine
-// against exactly the shapes assistant_manual.go must handle: a page with
+// testHelpFS is a small fstest.MapFS standing in for the staged
+// backend/help tree, exercising loadHelp/helpSection/helpIndexLine
+// against exactly the shapes assistant_help.go must handle: a page with
 // an H1 title, a page with no H1 at all (falls back to its ID), a page with
 // two "## " sections (the last one running to EOF), and the tracked
 // .gitkeep placeholder (skipped, not treated as a page).
-func testManualFS() fstest.MapFS {
+func testHelpFS() fstest.MapFS {
 	return fstest.MapFS{
-		"manual/.gitkeep": &fstest.MapFile{Data: []byte{}},
-		"manual/features/forecast.md": &fstest.MapFile{Data: []byte(
+		"help/.gitkeep": &fstest.MapFile{Data: []byte{}},
+		"help/features/forecast.md": &fstest.MapFile{Data: []byte(
 			"# Forecast\n\nIntro text.\n\n" +
 				"## Steepness, not height\n\nBody one.\n\n" +
 				"## Upper air, days ahead\n\nBody two.\nSecond line.\n",
 		)},
-		"manual/features/alarms.md": &fstest.MapFile{Data: []byte("# Alarms\n\nAlarm body.\n")},
-		"manual/how-to/no-title.md": &fstest.MapFile{Data: []byte("Just a body, no H1 heading at all.\n")},
+		"help/features/alarms.md": &fstest.MapFile{Data: []byte("# Alarms\n\nAlarm body.\n")},
+		"help/how-to/no-title.md": &fstest.MapFile{Data: []byte("Just a body, no H1 heading at all.\n")},
 	}
 }
 
-func TestLoadManual_SortsByIDAndSkipsNonMarkdown(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestLoadHelp_SortsByIDAndSkipsNonMarkdown(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
 	if len(pages) != 3 {
 		t.Fatalf("expected 3 pages (.gitkeep excluded), got %d: %+v", len(pages), pages)
@@ -48,24 +48,24 @@ func TestLoadManual_SortsByIDAndSkipsNonMarkdown(t *testing.T) {
 	}
 }
 
-// TestLoadManual_RootLevelPageIDHasNoDirectory pins loadManual's handling of
-// a page staged directly at the manual root - docs/index.md, staged as
-// backend/manual/index.md by the Makefile's manual-stage target - rather
+// TestLoadHelp_RootLevelPageIDHasNoDirectory pins loadHelp's handling of
+// a page staged directly at the help root - docs/index.md, staged as
+// backend/help/index.md by the Makefile's help-stage target - rather
 // than under one of the three directories: its ID must be the bare filename
 // with the extension stripped ("index"), not "/index" or "index/index",
-// since manualIndexLine and the in-app Manual sheet's /api/manual endpoint
+// since helpIndexLine and the in-app Help sheet's /api/help endpoint
 // both use ID as the page's address.
-func TestLoadManual_RootLevelPageIDHasNoDirectory(t *testing.T) {
+func TestLoadHelp_RootLevelPageIDHasNoDirectory(t *testing.T) {
 	fsys := fstest.MapFS{
-		"manual/index.md":           &fstest.MapFile{Data: []byte("# Helmcentral documentation\n\nContents.\n")},
-		"manual/features/alarms.md": &fstest.MapFile{Data: []byte("# Alarms\n\nAlarm body.\n")},
+		"help/index.md":           &fstest.MapFile{Data: []byte("# Helmcentral documentation\n\nContents.\n")},
+		"help/features/alarms.md": &fstest.MapFile{Data: []byte("# Alarms\n\nAlarm body.\n")},
 	}
-	pages, err := loadManual(fsys, "manual")
+	pages, err := loadHelp(fsys, "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
 
-	byID := map[string]manualPage{}
+	byID := map[string]helpPage{}
 	for _, p := range pages {
 		byID[p.ID] = p
 	}
@@ -75,19 +75,19 @@ func TestLoadManual_RootLevelPageIDHasNoDirectory(t *testing.T) {
 		for id := range byID {
 			ids = append(ids, id)
 		}
-		t.Fatalf(`expected a root-level manual/index.md to load as page id "index", got ids %v`, ids)
+		t.Fatalf(`expected a root-level help/index.md to load as page id "index", got ids %v`, ids)
 	}
 	if index.Title != "Helmcentral documentation" {
 		t.Fatalf("expected the root page's H1 as its title, got %q", index.Title)
 	}
 }
 
-func TestLoadManual_TitleFromH1OrIDFallback(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestLoadHelp_TitleFromH1OrIDFallback(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	byID := map[string]manualPage{}
+	byID := map[string]helpPage{}
 	for _, p := range pages {
 		byID[p.ID] = p
 	}
@@ -99,12 +99,12 @@ func TestLoadManual_TitleFromH1OrIDFallback(t *testing.T) {
 	}
 }
 
-func TestManualSection_CaseInsensitiveLastSectionToEOFAndMissing(t *testing.T) {
+func TestHelpSection_CaseInsensitiveLastSectionToEOFAndMissing(t *testing.T) {
 	body := "# Forecast\n\nIntro.\n\n" +
 		"## Steepness, not height\n\nBody one.\n\n" +
 		"## Upper air, days ahead\n\nBody two.\nSecond line.\n"
 
-	got, ok := manualSection(body, "upper air, days ahead")
+	got, ok := helpSection(body, "upper air, days ahead")
 	if !ok {
 		t.Fatalf("expected a case-insensitive match")
 	}
@@ -112,42 +112,42 @@ func TestManualSection_CaseInsensitiveLastSectionToEOFAndMissing(t *testing.T) {
 		t.Fatalf("expected the last section to run to EOF, got %q want %q", got, want)
 	}
 
-	got2, ok2 := manualSection(body, "Steepness, not height")
+	got2, ok2 := helpSection(body, "Steepness, not height")
 	if !ok2 || got2 != "Body one." {
 		t.Fatalf("expected the middle section bounded by the next heading, got %q ok=%v", got2, ok2)
 	}
 
-	if _, ok3 := manualSection(body, "does not exist"); ok3 {
+	if _, ok3 := helpSection(body, "does not exist"); ok3 {
 		t.Fatalf("expected no match for a heading that isn't on the page")
 	}
 }
 
-func TestManualIndexLine(t *testing.T) {
-	pages := []manualPage{
+func TestHelpIndexLine(t *testing.T) {
+	pages := []helpPage{
 		{ID: "features/alarms", Title: "Alarms"},
 		{ID: "features/forecast", Title: "Forecast"},
 	}
-	want := "Manual pages: features/alarms (Alarms), features/forecast (Forecast)"
-	if got := manualIndexLine(pages); got != want {
+	want := "Help pages: features/alarms (Alarms), features/forecast (Forecast)"
+	if got := helpIndexLine(pages); got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
-	if got := manualIndexLine(nil); got != "" {
+	if got := helpIndexLine(nil); got != "" {
 		t.Fatalf("expected an empty index line for no pages, got %q", got)
 	}
 }
 
-func TestExecuteReadManual_SuccessWholePage(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestExecuteReadHelp_SuccessWholePage(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	deps := assistantToolDeps{manual: func() []manualPage { return pages }}
+	deps := assistantToolDeps{help: func() []helpPage { return pages }}
 
-	raw, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"features/forecast"}`))
+	raw, err := deps.executeReadHelp(context.Background(), json.RawMessage(`{"page":"features/forecast"}`))
 	if err != nil {
-		t.Fatalf("executeReadManual: %v", err)
+		t.Fatalf("executeReadHelp: %v", err)
 	}
-	var result assistantReadManualResult
+	var result assistantReadHelpResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -159,18 +159,18 @@ func TestExecuteReadManual_SuccessWholePage(t *testing.T) {
 	}
 }
 
-func TestExecuteReadManual_SuccessWithSection(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestExecuteReadHelp_SuccessWithSection(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	deps := assistantToolDeps{manual: func() []manualPage { return pages }}
+	deps := assistantToolDeps{help: func() []helpPage { return pages }}
 
-	raw, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"features/forecast","section":"upper air, days ahead"}`))
+	raw, err := deps.executeReadHelp(context.Background(), json.RawMessage(`{"page":"features/forecast","section":"upper air, days ahead"}`))
 	if err != nil {
-		t.Fatalf("executeReadManual: %v", err)
+		t.Fatalf("executeReadHelp: %v", err)
 	}
-	var result assistantReadManualResult
+	var result assistantReadHelpResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -182,60 +182,60 @@ func TestExecuteReadManual_SuccessWithSection(t *testing.T) {
 	}
 }
 
-func TestExecuteReadManual_UnknownPageListsValidIDs(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestExecuteReadHelp_UnknownPageListsValidIDs(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	deps := assistantToolDeps{manual: func() []manualPage { return pages }}
+	deps := assistantToolDeps{help: func() []helpPage { return pages }}
 
-	if _, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"nope"}`)); err == nil {
+	if _, err := deps.executeReadHelp(context.Background(), json.RawMessage(`{"page":"nope"}`)); err == nil {
 		t.Fatalf("expected an error for an unknown page")
 	} else if !strings.Contains(err.Error(), "features/forecast") {
 		t.Fatalf("expected the error to list valid page ids, got %v", err)
 	}
 }
 
-func TestExecuteReadManual_UnknownSectionListsHeadings(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestExecuteReadHelp_UnknownSectionListsHeadings(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	deps := assistantToolDeps{manual: func() []manualPage { return pages }}
+	deps := assistantToolDeps{help: func() []helpPage { return pages }}
 
-	if _, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"features/forecast","section":"nope"}`)); err == nil {
+	if _, err := deps.executeReadHelp(context.Background(), json.RawMessage(`{"page":"features/forecast","section":"nope"}`)); err == nil {
 		t.Fatalf("expected an error for an unknown section")
 	} else if !strings.Contains(err.Error(), "Upper air, days ahead") {
 		t.Fatalf("expected the error to list the page's valid headings, got %v", err)
 	}
 }
 
-func TestExecuteReadManual_EmptyManualIsError(t *testing.T) {
-	deps := assistantToolDeps{manual: func() []manualPage { return nil }}
+func TestExecuteReadHelp_EmptyHelpIsError(t *testing.T) {
+	deps := assistantToolDeps{help: func() []helpPage { return nil }}
 
-	if _, err := deps.executeReadManual(context.Background(), json.RawMessage(`{"page":"features/forecast"}`)); err == nil {
-		t.Fatalf("expected an error when the manual is empty")
-	} else if !strings.Contains(err.Error(), "make manual-stage") {
+	if _, err := deps.executeReadHelp(context.Background(), json.RawMessage(`{"page":"features/forecast"}`)); err == nil {
+		t.Fatalf("expected an error when help is empty")
+	} else if !strings.Contains(err.Error(), "make help-stage") {
 		t.Fatalf("expected the error to name the fix, got %v", err)
 	}
 }
 
-// TestLoadManual_RealDocsTreeHasForecastPageWithUpperAirSection loads the
+// TestLoadHelp_RealDocsTreeHasForecastPageWithUpperAirSection loads the
 // repo's actual docs/ tree (not the fstest fixture above) to catch drift
-// between this loader and the real manual content it will actually serve -
+// between this loader and the real help content it will actually serve -
 // skipped when docs/features isn't present in this checkout (e.g. a build
 // running from an extracted source archive without the docs tree).
-func TestLoadManual_RealDocsTreeHasForecastPageWithUpperAirSection(t *testing.T) {
+func TestLoadHelp_RealDocsTreeHasForecastPageWithUpperAirSection(t *testing.T) {
 	if _, err := os.Stat("../docs/features"); err != nil {
 		t.Skip("../docs/features not present in this checkout")
 	}
 
-	pages, err := loadManual(os.DirFS(".."), "docs")
+	pages, err := loadHelp(os.DirFS(".."), "docs")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
 
-	var forecast *manualPage
+	var forecast *helpPage
 	for i := range pages {
 		if pages[i].ID == "features/forecast" {
 			forecast = &pages[i]
@@ -245,7 +245,7 @@ func TestLoadManual_RealDocsTreeHasForecastPageWithUpperAirSection(t *testing.T)
 	if forecast == nil {
 		t.Fatalf("expected docs/features/forecast.md to load as features/forecast")
 	}
-	if _, ok := manualSection(forecast.Body, "Upper air, days ahead"); !ok {
+	if _, ok := helpSection(forecast.Body, "Upper air, days ahead"); !ok {
 		t.Fatalf(`expected features/forecast to have an "Upper air, days ahead" section`)
 	}
 }

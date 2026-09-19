@@ -252,24 +252,24 @@ describe('SettingsPage imperative save handle', () => {
   })
 })
 
-// ADR 0095: one Manual button per section, calling back with that section's
-// manual target rather than each section rendering its own.
-describe('SettingsPage Manual button', () => {
-  it('calls onOpenManual with the active section\'s manual target', () => {
-    const onOpenManual = vi.fn()
+// ADR 0095: one Help button per section, calling back with that section's
+// help target rather than each section rendering its own.
+describe('SettingsPage Help button', () => {
+  it('calls onOpenHelp with the active section\'s help target', () => {
+    const onOpenHelp = vi.fn()
     render(
       <SettingsPage
-        onOpenManual={onOpenManual}
+        onOpenHelp={onOpenHelp}
       />,
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Alarms' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open help for this section' }))
 
-    expect(onOpenManual).toHaveBeenCalledWith({ page: 'features/alarms', heading: 'Getting told' })
+    expect(onOpenHelp).toHaveBeenCalledWith({ page: 'features/alarms', heading: 'Getting told' })
   })
 
-  it('renders no Manual button when onOpenManual is not passed - existing callers are untouched', () => {
+  it('renders no Help button when onOpenHelp is not passed - existing callers are untouched', () => {
     render(<SettingsPage />)
 
     expect(screen.queryByRole('button', { name: 'Open help for this section' })).not.toBeInTheDocument()

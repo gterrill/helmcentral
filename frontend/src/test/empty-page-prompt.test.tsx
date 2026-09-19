@@ -8,32 +8,32 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { EmptyPagePrompt } from '@/components/empty-page-prompt'
-import { CREATE_PAGE_MANUAL_TARGET } from '@/lib/manual-links'
+import { CREATE_PAGE_HELP_TARGET } from '@/lib/help-links'
 
 describe('EmptyPagePrompt', () => {
   it('in layout mode, prompts to use Add Tile and links to the how-to', () => {
-    const onOpenManual = vi.fn()
-    render(<EmptyPagePrompt editing canEditLayout onOpenManual={onOpenManual} />)
+    const onOpenHelp = vi.fn()
+    render(<EmptyPagePrompt editing canEditLayout onOpenHelp={onOpenHelp} />)
 
     expect(screen.getByText(/add tile/i)).toBeInTheDocument()
     expect(screen.getByText(/drag tiles to rearrange/i)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /how/i }))
-    expect(onOpenManual).toHaveBeenCalledWith(CREATE_PAGE_MANUAL_TARGET)
+    expect(onOpenHelp).toHaveBeenCalledWith(CREATE_PAGE_HELP_TARGET)
   })
 
   it('outside layout mode at lg and above, points at Edit', () => {
-    render(<EmptyPagePrompt editing={false} canEditLayout onOpenManual={vi.fn()} />)
+    render(<EmptyPagePrompt editing={false} canEditLayout onOpenHelp={vi.fn()} />)
     expect(screen.getByText(/press edit to add tiles/i)).toBeInTheDocument()
   })
 
   it('below lg, explains layout mode needs a wider screen', () => {
-    render(<EmptyPagePrompt editing={false} canEditLayout={false} onOpenManual={vi.fn()} />)
+    render(<EmptyPagePrompt editing={false} canEditLayout={false} onOpenHelp={vi.fn()} />)
     expect(screen.getByText(/at least 1024px wide/i)).toBeInTheDocument()
   })
 
   it('never renders on the wall display', () => {
-    const { container } = render(<EmptyPagePrompt editing canEditLayout onOpenManual={vi.fn()} isKiosk />)
+    const { container } = render(<EmptyPagePrompt editing canEditLayout onOpenHelp={vi.fn()} isKiosk />)
     expect(container).toBeEmptyDOMElement()
   })
 })

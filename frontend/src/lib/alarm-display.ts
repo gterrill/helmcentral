@@ -95,16 +95,22 @@ export function formatAlarmReading(value: number, siUnit?: string): string {
  * an off-integer reading (the rule evaluates in SI, so it can land between
  * whole numbers even though the backend only ever publishes 0-3) landing
  * between two words instead of on one of them.
+ *
+ * `linked` is true when the caller is rendering a real bulletin link
+ * (ADR 0114, `forecastWarningDetailsUrl`) right next to this sentence; the
+ * trailing "Details on the Forecast page." clause is then dropped, because
+ * pointing at the page is redundant with a link straight to the bulletin.
  */
-function forecastWarningSentence(alarm: ActiveAlarm): string | null {
+function forecastWarningSentence(alarm: ActiveAlarm, linked: boolean): string | null {
+  const detail = linked ? '' : ' Details on the Forecast page.'
   if (alarm.path === FORECAST_SURF_WARNING_PATH) {
-    return 'Surf warning in force. Details on the Forecast page.'
+    return `Surf warning in force.${detail}`
   }
   if (alarm.path === FORECAST_WIND_WARNING_PATH) {
     const level = Math.round(alarm.value)
-    if (level >= 3) return 'Storm warning in force. Details on the Forecast page.'
-    if (level === 2) return 'Gale warning in force. Details on the Forecast page.'
-    return 'Strong wind warning in force. Details on the Forecast page.'
+    if (level >= 3) return `Storm warning in force.${detail}`
+    if (level === 2) return `Gale warning in force.${detail}`
+    return `Strong wind warning in force.${detail}`
   }
   return null
 }
@@ -163,8 +169,12 @@ function lawOfStormsSentence(alarm: ActiveAlarm): string | null {
  * what will clear it. A rule alarm renders its own sentence from the
  * structured fields; a bus notification (no rule behind it, so no op) has
  * only its message, plus a note that it clears on its own.
+ *
+ * `options.forecastDetailsLinked` (ADR 0114) only affects the two forecast
+ * sentences below; every other branch ignores it. Every existing caller
+ * omits the options argument, which keeps its default behaviour.
  */
-export function alarmConditionSentence(alarm: ActiveAlarm): string {
+export function alarmConditionSentence(alarm: ActiveAlarm, options?: { forecastDetailsLinked?: boolean }): string {
   const { op, unit, value, clear_value: clearValue, message } = alarm
 
   if (op === undefined) {
@@ -187,7 +197,7 @@ export function alarmConditionSentence(alarm: ActiveAlarm): string {
   // forecast path gets its own sentence here, ahead of every other
   // op-based branch below, none of which know what a bare 0-3 or 0-1
   // integer is supposed to mean.
-  const forecastSentence = forecastWarningSentence(alarm)
+  const forecastSentence = forecastWarningSentence(alarm, options?.forecastDetailsLinked === true)
   if (forecastSentence !== null) return forecastSentence
 
   // Same reasoning, same ordering: a stale Law of Storms rule was already

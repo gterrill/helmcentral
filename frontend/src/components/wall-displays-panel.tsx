@@ -11,7 +11,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { displayScale, type Display } from '@/lib/displays'
-import type { ManualTarget } from '@/lib/manual-links'
+import type { HelpTarget } from '@/lib/help-links'
 import { cn } from '@/lib/utils'
 
 // ADR 0112: the wall-displays index. Follows documents-panel.tsx's shell
@@ -30,10 +30,10 @@ const LINK_BUTTON_CLASSNAME =
   'flex min-h-10 items-center gap-2 rounded-sm text-left font-medium hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
 
 /** The empty-state's link to the how-to doc (docs/how-to/set-up-a-wall-display.md).
- * Built inline rather than imported from lib/manual-links.ts (which this
- * component doesn't touch): a ManualTarget is just `{ page, heading? }`, and
+ * Built inline rather than imported from lib/help-links.ts (which this
+ * component doesn't touch): a HelpTarget is just `{ page, heading? }`, and
  * this is the only place that needs this one. */
-const SET_UP_WALL_DISPLAY_MANUAL_TARGET: ManualTarget = { page: 'how-to/set-up-a-wall-display' }
+const SET_UP_WALL_DISPLAY_HELP_TARGET: HelpTarget = { page: 'how-to/set-up-a-wall-display' }
 
 /** The subset of a dashboard page this index needs - just enough to count
  * how many pages sit on each display (the Pages column). Structurally
@@ -71,10 +71,10 @@ export interface WallDisplaysPanelProps {
    * only asks for that to happen; it has no opinion on the placeholder name.
    */
   onCreateDisplay: () => void
-  /** Opens the in-app manual at a target (App.tsx already threads this
+  /** Opens the in-app help at a target (App.tsx already threads this
    * exact callback into empty-page-prompt.tsx). Only the empty state uses
    * it, to link to docs/how-to/set-up-a-wall-display.md. */
-  onOpenManual: (target: ManualTarget) => void
+  onOpenHelp: (target: HelpTarget) => void
   canWrite?: boolean
 }
 
@@ -103,11 +103,11 @@ function SkeletonRow() {
 
 function WallDisplaysEmptyState({
   onCreateDisplay,
-  onOpenManual,
+  onOpenHelp,
   canWrite,
 }: {
   onCreateDisplay: () => void
-  onOpenManual: (target: ManualTarget) => void
+  onOpenHelp: (target: HelpTarget) => void
   canWrite: boolean
 }) {
   return (
@@ -126,7 +126,7 @@ function WallDisplaysEmptyState({
       </div>
       <button
         type="button"
-        onClick={() => onOpenManual(SET_UP_WALL_DISPLAY_MANUAL_TARGET)}
+        onClick={() => onOpenHelp(SET_UP_WALL_DISPLAY_HELP_TARGET)}
         className="text-xs font-semibold uppercase tracking-[0.1em] text-primary hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
       >
         How to set up a wall display
@@ -149,7 +149,7 @@ export function WallDisplaysPanel({
   onRetry,
   onOpenDisplay,
   onCreateDisplay,
-  onOpenManual,
+  onOpenHelp,
   canWrite = true,
 }: WallDisplaysPanelProps) {
   const pageCountFor = (displayId: string) => pages.filter((p) => p.display_id === displayId).length
@@ -179,7 +179,7 @@ export function WallDisplaysPanel({
             <Button type="button" variant="outline" size="sm" onClick={onRetry}>Retry</Button>
           </div>
         ) : !loading && displays.length === 0 ? (
-          <WallDisplaysEmptyState onCreateDisplay={onCreateDisplay} onOpenManual={onOpenManual} canWrite={canWrite} />
+          <WallDisplaysEmptyState onCreateDisplay={onCreateDisplay} onOpenHelp={onOpenHelp} canWrite={canWrite} />
         ) : (
           <Table>
             <TableHeader>

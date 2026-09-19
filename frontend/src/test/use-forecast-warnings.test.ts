@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
-import { findActiveSurfBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
+import { findActiveSurfBulletin, forecastWarningDetailsUrl, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import type { ForecastWarnings } from '@/hooks/use-forecast-warnings'
+import { FORECAST_SURF_WARNING_PATH, FORECAST_WIND_WARNING_PATH } from '@/lib/alarm-display'
 
 describe('useForecastWarnings', () => {
   beforeEach(() => {
@@ -224,5 +225,62 @@ describe('findActiveSurfBulletin', () => {
 
   it('returns undefined for null warnings', () => {
     expect(findActiveSurfBulletin(null)).toBeUndefined()
+  })
+})
+
+// The alarm carries only a path, not a URL (ADR 0114); this is the one
+// place that joins the two so the banner and the drawer can both render a
+// real link instead of pointing at the Forecast page.
+describe('forecastWarningDetailsUrl', () => {
+  const warnings: ForecastWarnings = {
+    provider: 'bom',
+    region: 'Capricornia Coast',
+    bulletins: [
+      {
+        id: 'IDQ20085',
+        title: 'Marine Wind Warning Summary for Queensland',
+        issuedAt: null,
+        detailsUrl: 'http://www.bom.gov.au/qld/forecasts/map.shtml',
+        category: 'wind',
+        sections: [{ day: 'Sunday 5 July', warningType: 'Gale Warning' }],
+      },
+      {
+        id: 'IDQ21285',
+        title: 'Hazardous Surf Warning Summary for Queensland',
+        issuedAt: null,
+        detailsUrl: 'http://www.bom.gov.au/qld/warnings/surf.shtml',
+        category: 'surf',
+        sections: [{ day: 'Sunday 5 July', warningType: 'Hazardous Surf Warning' }],
+      },
+    ],
+  }
+
+  it('returns the active wind bulletin details url for the wind warning path', () => {
+    expect(forecastWarningDetailsUrl(warnings, FORECAST_WIND_WARNING_PATH))
+      .toBe('http://www.bom.gov.au/qld/forecasts/map.shtml')
+  })
+
+  it('returns the active surf bulletin details url for the surf warning path', () => {
+    expect(forecastWarningDetailsUrl(warnings, FORECAST_SURF_WARNING_PATH))
+      .toBe('http://www.bom.gov.au/qld/warnings/surf.shtml')
+  })
+
+  it('returns null for a path that is not one of the two forecast-warning paths', () => {
+    expect(forecastWarningDetailsUrl(warnings, 'electrical.batteries.house.voltage')).toBeNull()
+  })
+
+  it('returns null when there is no active bulletin for that category', () => {
+    const windOnly: ForecastWarnings = { provider: 'bom', region: 'Capricornia Coast', bulletins: [warnings.bulletins[0]] }
+    expect(forecastWarningDetailsUrl(windOnly, FORECAST_SURF_WARNING_PATH)).toBeNull()
+    expect(forecastWarningDetailsUrl(null, FORECAST_WIND_WARNING_PATH)).toBeNull()
+  })
+
+  it('returns null when the matching bulletin has an empty details url', () => {
+    const noUrl: ForecastWarnings = {
+      provider: 'bom',
+      region: 'Capricornia Coast',
+      bulletins: [{ ...warnings.bulletins[0], detailsUrl: '' }],
+    }
+    expect(forecastWarningDetailsUrl(noUrl, FORECAST_WIND_WARNING_PATH)).toBeNull()
   })
 })

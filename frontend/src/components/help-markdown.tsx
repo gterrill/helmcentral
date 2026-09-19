@@ -1,33 +1,33 @@
 import { lazy, Suspense } from 'react'
 
-import type { ManualLink } from '@/lib/manual-links'
+import type { HelpLink } from '@/lib/help-links'
 
 // Same kiosk bundle-split reasoning as assistant-markdown.tsx: this keeps
 // react-markdown's module graph (and the regex lookbehind literal in its
 // mdast-util-gfm-autolink-literal dependency, unparseable by a pre-16.4
-// Safari) out of the entry chunk. The Manual sheet never mounts on the kiosk
-// route in the first place, but a lazy import here still stops manual
+// Safari) out of the entry chunk. The Help sheet never mounts on the kiosk
+// route in the first place, but a lazy import here still stops help
 // content from pulling that graph back into the shared bundle every other
 // route loads.
-const ManualMarkdownImpl = lazy(() => import('./manual-markdown-impl'))
+const HelpMarkdownImpl = lazy(() => import('./help-markdown-impl'))
 
-interface ManualMarkdownProps {
+interface HelpMarkdownProps {
   content: string
-  /** The manual page id this content came from - relative links (e.g.
+  /** The help page id this content came from - relative links (e.g.
    * "alarms.md" or "../reference/configuration.md#…") are resolved against
    * it, the same way a browser resolves a relative href against the current
    * document's URL. */
   pageId: string
-  onNavigate: (link: ManualLink) => void
+  onNavigate: (link: HelpLink) => void
   /** Fired after every render this content mounts - see
-   * manual-markdown-impl.tsx's own comment on the prop. */
+   * help-markdown-impl.tsx's own comment on the prop. */
   onRendered?: () => void
 }
 
-export function ManualMarkdown({ content, pageId, onNavigate, onRendered }: ManualMarkdownProps) {
+export function HelpMarkdown({ content, pageId, onNavigate, onRendered }: HelpMarkdownProps) {
   return (
     <Suspense fallback={<div className="min-w-0 text-sm leading-relaxed text-muted-foreground" />}>
-      <ManualMarkdownImpl content={content} pageId={pageId} onNavigate={onNavigate} onRendered={onRendered} />
+      <HelpMarkdownImpl content={content} pageId={pageId} onNavigate={onNavigate} onRendered={onRendered} />
     </Suspense>
   )
 }

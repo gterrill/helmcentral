@@ -1,20 +1,20 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs manual-stage
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage
 
-# Stages the operator manual into backend/manual for the assistant's
-# read_manual tool and the in-app Manual sheet's /api/manual endpoint
-# (backend/assistant_manual.go's //go:embed all:manual), the same copy the
+# Stages the in-app help into backend/help for the assistant's
+# read_help tool and the in-app Help sheet's /api/help endpoint
+# (backend/assistant_help.go's //go:embed all:help), the same copy the
 # Dockerfile and .goreleaser.yaml do for a container or release build.
 # docs/index.md is staged alongside the three directories as page "index" -
-# it is the hand-written contents page both read_manual and the Manual sheet
-# land on. Needed before `go build`/`go run` picks up manual pages at all -
-# without it the binary still runs, just with read_manual and /api/manual
-# reporting the manual isn't staged.
-manual-stage:
-	rm -rf backend/manual
-	mkdir -p backend/manual
-	cp -R docs/features docs/how-to docs/reference backend/manual/
-	cp docs/index.md backend/manual/index.md
-	touch backend/manual/.gitkeep
+# it is the hand-written contents page both read_help and the Help sheet
+# land on. Needed before `go build`/`go run` picks up help pages at all -
+# without it the binary still runs, just with read_help and /api/help
+# reporting help isn't staged.
+help-stage:
+	rm -rf backend/help
+	mkdir -p backend/help
+	cp -R docs/features docs/how-to docs/reference backend/help/
+	cp docs/index.md backend/help/index.md
+	touch backend/help/.gitkeep
 
 dev:
 	# --force-recreate: frontend-dev only runs `npm install` once at container

@@ -1197,7 +1197,7 @@ func TestDescribeAssistantToolCall(t *testing.T) {
 		{"get_tides", `{"lat":-20.1,"lon":149.1,"name":"Blue Pearl Bay"}`, "Fetching tides near Blue Pearl Bay…"},
 		{"estimate_passage", `{"distance_nm":42,"speed_kts":8.5}`, "Estimating 42 nm at 8.5 kts from the log…"},
 		{"estimate_passage", `{"distance_nm":42}`, "Estimating 42 nm at cruising speed from the log…"},
-		{"read_manual", `{"page":"features/forecast"}`, "Reading the manual: features/forecast…"},
+		{"read_help", `{"page":"features/forecast"}`, "Reading the help: features/forecast…"},
 		{"search_documents", `{"query":"impeller"}`, `Searching documents for "impeller"…`},
 		{"read_document", `{"document_id":"doc-1"}`, "Reading document doc-1…"},
 	}
@@ -1246,7 +1246,7 @@ func TestAssistantToolDefinitions_SevenToolsIncludingDocumentTools(t *testing.T)
 		names = append(names, tool.Function.Name)
 	}
 	for _, want := range []string{
-		"find_places", "get_wind_forecast", "get_tides", "estimate_passage", "read_manual",
+		"find_places", "get_wind_forecast", "get_tides", "estimate_passage", "read_help",
 		"search_documents", "read_document",
 	} {
 		found := false
@@ -1345,13 +1345,13 @@ func TestCapToolResultJSON_FallsBackWhenNothingLeftToShrink(t *testing.T) {
 }
 
 func TestAssistantToolDeps_ExecuteReturnsContextErrorWhenAlreadyCancelled(t *testing.T) {
-	deps := assistantToolDeps{manual: func() []manualPage {
-		return []manualPage{{ID: "features/forecast", Title: "Forecast", Body: "# Forecast"}}
+	deps := assistantToolDeps{help: func() []helpPage {
+		return []helpPage{{ID: "features/forecast", Title: "Forecast", Body: "# Forecast"}}
 	}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := deps.execute(ctx, "read_manual", json.RawMessage(`{"page":"features/forecast"}`))
+	_, err := deps.execute(ctx, "read_help", json.RawMessage(`{"page":"features/forecast"}`))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected a cancelled context to short-circuit the tool, got %v", err)
 	}
@@ -1806,17 +1806,17 @@ func TestExecuteReadDocument_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
 	}
 }
 
-// TestExecuteReadManual_UnsetDependencyReturnsErrorNotPanic pins the
-// review finding at assistant_tools.go:1475-1476: d.manual is a func field
-// too, and executeReadManual called it unconditionally before ever checking
+// TestExecuteReadHelp_UnsetDependencyReturnsErrorNotPanic pins the
+// review finding at assistant_tools.go:1475-1476: d.help is a func field
+// too, and executeReadHelp called it unconditionally before ever checking
 // whether it was set.
-func TestExecuteReadManual_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
+func TestExecuteReadHelp_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
 	deps := assistantToolDeps{}
-	_, err := deps.execute(context.Background(), "read_manual", json.RawMessage(`{"page":"features/forecast"}`))
+	_, err := deps.execute(context.Background(), "read_help", json.RawMessage(`{"page":"features/forecast"}`))
 	if err == nil {
-		t.Fatalf("expected an error when d.manual is unset")
+		t.Fatalf("expected an error when d.help is unset")
 	}
-	if !strings.Contains(err.Error(), "manual") {
-		t.Fatalf("expected a plain \"manual\" error, got %v", err)
+	if !strings.Contains(err.Error(), "help") {
+		t.Fatalf("expected a plain \"help\" error, got %v", err)
 	}
 }

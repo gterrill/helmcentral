@@ -31,7 +31,7 @@ const FALLBACK_HEIGHT = 220
 // recharts (~395 KB raw) is otherwise the only thing pulling dashboard-vendor
 // into every route's startup bundle, including /kiosk pages that never
 // render this tile at all. Same lazy-split pattern as
-// assistant-markdown.tsx/manual-markdown.tsx: only the chart itself is
+// assistant-markdown.tsx/help-markdown.tsx: only the chart itself is
 // behind the boundary — the Tile chrome, the measured box and the "Loading
 // wave data…" text below all stay eager, so the tile's own shape never
 // jumps while the chart chunk loads.

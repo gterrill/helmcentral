@@ -179,6 +179,7 @@ vi.mock('@/hooks/use-route-activation', () => ({
 vi.mock('@/hooks/use-forecast-warnings', () => ({
   useForecastWarnings: () => ({ activeWarning: null }),
   findActiveWindBulletin: () => null,
+  forecastWarningDetailsUrl: () => null,
 }))
 
 vi.mock('@/hooks/use-server-trails', () => ({

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
-// Kiosk bundle-split: assistant-markdown.tsx and manual-markdown.tsx now
+// Kiosk bundle-split: assistant-markdown.tsx and help-markdown.tsx now
 // load react-markdown's whole module graph - and, through it,
 // mdast-util-gfm-autolink-literal's regex lookbehind literal, which a
 // pre-16.4 Safari (the wall-display kiosk's WPE WebKit 2.38.5) can't even
@@ -12,12 +12,12 @@ import { render, screen } from '@testing-library/react'
 //
 // React.lazy() memoises its resolved promise on the lazy()-wrapped object
 // itself, which lives on the module instance created the first time
-// assistant-markdown.tsx/manual-markdown.tsx is imported - once any test
+// assistant-markdown.tsx/help-markdown.tsx is imported - once any test
 // resolves it, every later render of that same component within the same
 // module graph mounts synchronously, never suspending again. Each test below
 // therefore resets the module registry and re-imports the wrapper fresh, the
-// same pattern manual-sheet.test.tsx already uses for its own module-level
-// cache (use-manual.ts's page cache) - otherwise only the first test to
+// same pattern help-sheet.test.tsx already uses for its own module-level
+// cache (use-help.ts's page cache) - otherwise only the first test to
 // touch each wrapper would ever see the pre-resolution state.
 
 const { markdownSpy } = vi.hoisted(() => ({ markdownSpy: vi.fn() }))
@@ -40,10 +40,10 @@ async function importFreshAssistantMarkdown() {
   return AssistantMarkdown
 }
 
-async function importFreshManualMarkdown() {
+async function importFreshHelpMarkdown() {
   vi.resetModules()
-  const { ManualMarkdown } = await import('@/components/manual-markdown')
-  return ManualMarkdown
+  const { HelpMarkdown } = await import('@/components/help-markdown')
+  return HelpMarkdown
 }
 
 describe('markdown renderers are lazy (kiosk bundle-split)', () => {
@@ -58,9 +58,9 @@ describe('markdown renderers are lazy (kiosk bundle-split)', () => {
     expect(await screen.findByText('Hook Reef anchorages')).toBeInTheDocument()
   })
 
-  it('ManualMarkdown renders the real markdown output once the lazy chunk resolves', async () => {
-    const ManualMarkdown = await importFreshManualMarkdown()
-    render(<ManualMarkdown content="## The kiosk feed" pageId="features/dashboard" onNavigate={vi.fn()} />)
+  it('HelpMarkdown renders the real markdown output once the lazy chunk resolves', async () => {
+    const HelpMarkdown = await importFreshHelpMarkdown()
+    render(<HelpMarkdown content="## The kiosk feed" pageId="features/dashboard" onNavigate={vi.fn()} />)
 
     expect(await screen.findByText('The kiosk feed')).toBeInTheDocument()
   })
@@ -78,9 +78,9 @@ describe('markdown renderers are lazy (kiosk bundle-split)', () => {
     expect(markdownSpy).toHaveBeenCalled()
   })
 
-  it('never calls react-markdown synchronously when ManualMarkdown first mounts', async () => {
-    const ManualMarkdown = await importFreshManualMarkdown()
-    render(<ManualMarkdown content="Safe text" pageId="features/dashboard" onNavigate={vi.fn()} />)
+  it('never calls react-markdown synchronously when HelpMarkdown first mounts', async () => {
+    const HelpMarkdown = await importFreshHelpMarkdown()
+    render(<HelpMarkdown content="Safe text" pageId="features/dashboard" onNavigate={vi.fn()} />)
 
     expect(markdownSpy).not.toHaveBeenCalled()
 

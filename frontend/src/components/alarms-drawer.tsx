@@ -18,6 +18,7 @@ import {
   type AlarmRuleDraft,
 } from '@/hooks/use-alarm-rules'
 import { COLLISION_ALARM_RULE_PREFIX, type ActiveAlarm } from '@/hooks/use-alarms'
+import { forecastWarningDetailsUrl, type ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 
 function formatTime(value?: string): string {
@@ -52,6 +53,11 @@ interface AlarmsDrawerProps {
   // Computed in App from the configured SignalK address (ADR 0090); null
   // when unconfigured, in which case no tuning link renders.
   collisionTuningUrl: string | null
+  // The forecast-warnings payload App already holds (ADR 0087), read only
+  // to resolve each forecast alarm card's own bulletin link (ADR 0114).
+  // Null before the first fetch lands, in which case the card's sentence
+  // keeps pointing at the Forecast page instead.
+  forecastWarnings: ForecastWarnings | null
 }
 
 export const AlarmsDrawer = memo(function AlarmsDrawer({
@@ -65,6 +71,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
   updateRule,
   deleteRule,
   collisionTuningUrl,
+  forecastWarnings,
 }: AlarmsDrawerProps) {
   const { entries, refresh: refreshLog } = useAlarmLog(true)
   const { paths: signalKPaths } = useSignalKPaths(true)
@@ -183,6 +190,12 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
               // on the meta line would just repeat the headline.
               const showPath = displayPath !== alarm.label
               const hasMeta = timeParts.length > 0 || showPath
+              // The URL lives on the forecast-warnings payload, not on the
+              // alarm (ADR 0114); null for every non-forecast alarm and for
+              // a forecast alarm with no currently-active matching
+              // bulletin, in which case the sentence keeps its own
+              // "Details on the Forecast page." clause.
+              const forecastDetailsUrl = forecastWarningDetailsUrl(forecastWarnings, alarm.path)
 
               return (
                 <div key={alarm.rule_id} className="rounded-md border bg-background/60 px-3 py-3">
@@ -191,7 +204,22 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                       <p className={`wrap-break-word font-display text-lg leading-none sm:truncate ${severityClass(alarm.state)}`}>
                         {alarm.label}
                       </p>
-                      <p className="mt-1.5 text-sm text-foreground/90">{alarmConditionSentence(alarm)}</p>
+                      <p className="mt-1.5 text-sm text-foreground/90">
+                        {alarmConditionSentence(alarm, { forecastDetailsLinked: forecastDetailsUrl !== null })}
+                        {forecastDetailsUrl && (
+                          <>
+                            {' '}
+                            <a
+                              href={forecastDetailsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline underline-offset-2 hover:opacity-80"
+                            >
+                              View details →
+                            </a>
+                          </>
+                        )}
+                      </p>
                       {/*
                         The COLREGS "situation + role" line (ADR 0098):
                         what kind of encounter this is and what the rules

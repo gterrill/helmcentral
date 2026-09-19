@@ -45,12 +45,12 @@ const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((m
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
 const RoutePlannerDrawer = lazy(() => import('@/components/route-planner-drawer').then((mod) => ({ default: mod.RoutePlannerDrawer })))
 const SettingsPage = lazy(() => import('@/components/settings/settings-page').then((mod) => ({ default: mod.SettingsPage })))
-// MateSheet and ManualSheet (unlike the panels above) fetch nothing and run
+// MateSheet and HelpSheet (unlike the panels above) fetch nothing and run
 // no effects until they've actually been opened - see the `hasOpened` latches
 // below, next to where each is rendered, for why that makes them safe to
 // lazy-load and mount only on first open rather than always up front.
 const MateSheet = lazy(() => import('@/components/mate-sheet').then((mod) => ({ default: mod.MateSheet })))
-const ManualSheet = lazy(() => import('@/components/manual-sheet').then((mod) => ({ default: mod.ManualSheet })))
+const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ default: mod.HelpSheet })))
 import {
   AlertDialog,
   AlertDialogAction,
@@ -203,7 +203,7 @@ import {
   type PanelId,
 } from '@/lib/app-location'
 import { screenContextFor } from '@/lib/mate-screen'
-import { manualTargetFor, type ManualTarget } from '@/lib/manual-links'
+import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
 import { cn } from '@/lib/utils'
 
 /**
@@ -535,7 +535,7 @@ export function App() {
   // ADR 0112: which display the management panel is editing, or null for its
   // index. Seeded from the deep link the same way documentsFolderId is.
   const [wallDisplaysSlug, setWallDisplaysSlug] = useState<string | null>(initialLocation.displayEditSlug ?? null)
-  // Ditto latch pattern (mateSheetHasOpenedRef/manualSheetHasOpenedRef
+  // Ditto latch pattern (mateSheetHasOpenedRef/helpSheetHasOpenedRef
   // above), but the opposite direction - tracking that the operator has
   // left Documents at least once, rather than that something has opened. A
   // Mate attachment chip's link should open its document once, for the
@@ -608,21 +608,21 @@ export function App() {
   // explicit rather than incidental.
   useMateAnswerWatcher(viewedMateConversationIds, openMateConversationFromToast, !isDisplay)
 
-  // The in-app manual (ADR 0095): a right-hand sheet, rendered once here
+  // The in-app help (ADR 0095): a right-hand sheet, rendered once here
   // beside the Mate sheet, opened by the header's contextual `?`, the
-  // sidebar's Manual item, or Settings' own Manual button - each hands
-  // openManual a ManualTarget (or null for the contents page).
-  const [manualOpen, setManualOpen] = useState(false)
-  const [manualTarget, setManualTarget] = useState<ManualTarget | null>(null)
+  // sidebar's Help item, or Settings' own Help button - each hands
+  // openHelp a HelpTarget (or null for the contents page).
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [helpTarget, setHelpTarget] = useState<HelpTarget | null>(null)
   // Same lazy-mount-on-first-open latch as mateSheetHasOpenedRef above:
-  // ManualSheet fetches nothing before it has ever been opened (see
-  // use-manual.ts), so there is nothing lost by not mounting it until then,
+  // HelpSheet fetches nothing before it has ever been opened (see
+  // use-help.ts), so there is nothing lost by not mounting it until then,
   // and its back-stack history then survives later closes.
-  const manualSheetHasOpenedRef = useRef(false)
-  if (manualOpen) manualSheetHasOpenedRef.current = true
-  const openManual = useCallback((target: ManualTarget | null) => {
-    setManualTarget(target)
-    setManualOpen(true)
+  const helpSheetHasOpenedRef = useRef(false)
+  if (helpOpen) helpSheetHasOpenedRef.current = true
+  const openHelp = useCallback((target: HelpTarget | null) => {
+    setHelpTarget(target)
+    setHelpOpen(true)
   }, [])
 
   // App-wide voice (ADR 0093 voice phase, "App-wide voice"): mounted once
@@ -1959,7 +1959,7 @@ export function App() {
           yet either, which reads the same as "empty" — without this the
           prompt flashed on every load, not just on a genuinely empty page. */}
       {!pagesLoading && effectiveWidgets.length === 0 && !activePage?.hero ? (
-        <EmptyPagePrompt editing={layoutEditing} canEditLayout={canEditLayout} onOpenManual={openManual} isKiosk={isDisplay} />
+        <EmptyPagePrompt editing={layoutEditing} canEditLayout={canEditLayout} onOpenHelp={openHelp} isKiosk={isDisplay} />
       ) : (
         // relative so DisplayFoldGuide (ADR 0110, superseding ADR 0089) can
         // position itself against exactly the content the wall route shows:
@@ -2132,6 +2132,7 @@ export function App() {
             updateRule={updateAlarmRule}
             deleteRule={deleteAlarmRule}
             collisionTuningUrl={collisionTuningHref}
+            forecastWarnings={activeForecastWarning}
           />
         )
       case 'routes':
@@ -2242,7 +2243,7 @@ export function App() {
               if (target) setWallDisplaysSlug(target.slug)
             }}
             onCreateDisplay={() => { void handleCreateDisplay() }}
-            onOpenManual={openManual}
+            onOpenHelp={openHelp}
             canWrite={canWrite}
           />
         )
@@ -2264,7 +2265,7 @@ export function App() {
             onDirtyChange={setSettingsDirty}
             activeSectionId={settingsSection}
             onSectionChange={setSettingsSection}
-            onOpenManual={openManual}
+            onOpenHelp={openHelp}
             onAskMate={openMate}
           />
         )
@@ -2383,9 +2384,9 @@ export function App() {
   // directly rather than the ordinary shell: no sidebar, no header, no
   // SidebarProvider. toastRef already null-checks everywhere it's read and
   // no tile calls useSidebar, so nothing downstream depends on
-  // SidebarProvider being mounted. This also means the manual (ADR 0095)
-  // needs no separate wall gating - the header `?`, the sidebar Manual item
-  // and <ManualSheet> itself are all declared below this return and never
+  // SidebarProvider being mounted. This also means the help (ADR 0095)
+  // needs no separate wall gating - the header `?`, the sidebar Help item
+  // and <HelpSheet> itself are all declared below this return and never
   // reached on an unattended screen.
   if (isDisplay) {
     // Still resolving which displays exist at all - a beat before the slug
@@ -2521,12 +2522,12 @@ export function App() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
-            {/* ADR 0095: opens the contents page of the in-app manual. Never
+            {/* ADR 0095: opens the contents page of the in-app help. Never
                 `isActive` (it's a sheet over whatever's on screen, not a
                 panel of its own) and carries no PanelId or URL - ADR 0074
                 keeps sheets out of the address bar. */}
             <SidebarMenuItem>
-              <SidebarMenuButton tooltip="Help" onClick={() => openManual(null)}>
+              <SidebarMenuButton tooltip="Help" onClick={() => openHelp(null)}>
                 <BookOpen />
                 <span>Help</span>
               </SidebarMenuButton>
@@ -2622,7 +2623,7 @@ export function App() {
               size="icon"
               aria-label="Open help"
               title="Help for this screen"
-              onClick={() => openManual(manualTargetFor({ panel: activePanel, section: settingsSection }))}
+              onClick={() => openHelp(helpTargetFor({ panel: activePanel, section: settingsSection }))}
             >
               <CircleHelp className="h-4 w-4" />
             </Button>
@@ -2698,7 +2699,12 @@ export function App() {
                 above all dialogs, because a tooltip can be anchored to a
                 trigger inside any of them and must remain readable. */}
             <div className="relative z-55" data-testid="alarm-banner-stack">
-              <AlarmBanner alarms={alarms} onOpen={openAlarmsPanel} />
+              <AlarmBanner
+                alarms={alarms}
+                onOpen={openAlarmsPanel}
+                onAcknowledge={acknowledgeAlarm}
+                forecastWarnings={activeForecastWarning}
+              />
             </div>
 
             <div className="min-h-0 flex-1">
@@ -2806,15 +2812,15 @@ export function App() {
         </Suspense>
       )}
 
-      {/* Same reasoning as the Mate sheet above - see manualSheetHasOpenedRef. */}
-      {manualSheetHasOpenedRef.current && (
+      {/* Same reasoning as the Mate sheet above - see helpSheetHasOpenedRef. */}
+      {helpSheetHasOpenedRef.current && (
         <Suspense fallback={null}>
-          <ManualSheet
-            open={manualOpen}
-            onOpenChange={setManualOpen}
-            target={manualTarget}
+          <HelpSheet
+            open={helpOpen}
+            onOpenChange={setHelpOpen}
+            target={helpTarget}
             onAskMate={(question) => {
-              setManualOpen(false)
+              setHelpOpen(false)
               openMate(question)
             }}
           />

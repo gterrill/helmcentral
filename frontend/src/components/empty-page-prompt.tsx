@@ -1,5 +1,5 @@
-import type { ManualTarget } from '@/lib/manual-links'
-import { CREATE_PAGE_MANUAL_TARGET } from '@/lib/manual-links'
+import type { HelpTarget } from '@/lib/help-links'
+import { CREATE_PAGE_HELP_TARGET } from '@/lib/help-links'
 
 interface EmptyPagePromptProps {
   /** Layout mode is on — the operator can act on this prompt right now. */
@@ -7,7 +7,7 @@ interface EmptyPagePromptProps {
   /** Whether the screen is wide enough for layout mode to exist at all (the
    * `lg` breakpoint DashboardBentoGrid itself gates on). */
   canEditLayout: boolean
-  onOpenManual: (target: ManualTarget) => void
+  onOpenHelp: (target: HelpTarget) => void
   /** Never shown on the wall display — there is nothing there to click, and
    * an unattended screen should never sit on an instruction meant for an
    * operator with a mouse. */
@@ -21,7 +21,7 @@ const PROMPT_CLASSNAME = 'flex min-h-40 flex-col items-center justify-center gap
  * this, an empty page was just a blank stretch of background — nothing told
  * a first-time operator that Add Tile was the way in.
  */
-export function EmptyPagePrompt({ editing, canEditLayout, onOpenManual, isKiosk = false }: EmptyPagePromptProps) {
+export function EmptyPagePrompt({ editing, canEditLayout, onOpenHelp, isKiosk = false }: EmptyPagePromptProps) {
   if (isKiosk) return null
 
   if (editing) {
@@ -33,7 +33,7 @@ export function EmptyPagePrompt({ editing, canEditLayout, onOpenManual, isKiosk 
         </p>
         <button
           type="button"
-          onClick={() => onOpenManual(CREATE_PAGE_MANUAL_TARGET)}
+          onClick={() => onOpenHelp(CREATE_PAGE_HELP_TARGET)}
           className="text-xs font-semibold uppercase tracking-[0.1em] text-primary hover:underline"
         >
           How to build a page

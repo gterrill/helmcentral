@@ -41,6 +41,7 @@ function renderDrawer(alarms: ActiveAlarm[]) {
       updateRule={vi.fn()}
       deleteRule={vi.fn()}
       collisionTuningUrl={null}
+      forecastWarnings={null}
     />,
   )
   return container

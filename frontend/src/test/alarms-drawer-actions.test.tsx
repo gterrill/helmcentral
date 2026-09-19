@@ -52,6 +52,7 @@ function renderDrawer(alarms: ActiveAlarm[], handlers: Partial<{
       updateRule={vi.fn()}
       deleteRule={vi.fn()}
       collisionTuningUrl={null}
+      forecastWarnings={null}
     />,
   )
   return { onAcknowledge, onSilence }

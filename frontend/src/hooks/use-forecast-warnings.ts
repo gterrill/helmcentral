@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { FORECAST_SURF_WARNING_PATH, FORECAST_WIND_WARNING_PATH } from '@/lib/alarm-display'
+
 export interface ForecastWarningSection {
   day: string
   warningType: string
@@ -36,6 +38,24 @@ export function findActiveWindBulletin(warnings: ForecastWarnings | null): Forec
 export function findActiveSurfBulletin(warnings: ForecastWarnings | null): ForecastWarningBulletin | undefined {
   if (!warnings) return undefined
   return warnings.bulletins.find((bulletin) => bulletin.category === 'surf' && bulletin.sections.length > 0)
+}
+
+/**
+ * The active bulletin's own link for a forecast alarm on `path`, or null
+ * when there is none to show: a path that is not one of the two forecast
+ * derived paths, no active bulletin for that path's category, or a
+ * bulletin whose details_url the provider left empty. The alarm itself
+ * carries only the path and a ranked value (ADR 0087), not a URL, so the
+ * banner and the drawer both join the two here rather than the alarm
+ * carrying a link that would go stale the moment the bulletin does.
+ */
+export function forecastWarningDetailsUrl(warnings: ForecastWarnings | null, path: string): string | null {
+  let bulletin: ForecastWarningBulletin | undefined
+  if (path === FORECAST_WIND_WARNING_PATH) bulletin = findActiveWindBulletin(warnings)
+  else if (path === FORECAST_SURF_WARNING_PATH) bulletin = findActiveSurfBulletin(warnings)
+  else return null
+
+  return bulletin && bulletin.detailsUrl !== '' ? bulletin.detailsUrl : null
 }
 
 interface ForecastWarningsSectionApi {

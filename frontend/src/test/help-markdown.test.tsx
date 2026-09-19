@@ -1,23 +1,23 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
-import { ManualMarkdown } from '@/components/manual-markdown'
+import { HelpMarkdown } from '@/components/help-markdown'
 
-// ADR 0095: the Manual sheet renders a page's markdown through the same
+// ADR 0095: the Help sheet renders a page's markdown through the same
 // visual language as assistant-markdown.tsx (ADR 0093), plus two things a
 // chat reply never needs - heading ids the sheet can scroll to, and links
-// resolved against the manual tree instead of always opening a new tab.
+// resolved against the help tree instead of always opening a new tab.
 
-// ManualMarkdown now renders through a React.lazy-loaded impl chunk (kiosk
+// HelpMarkdown now renders through a React.lazy-loaded impl chunk (kiosk
 // bundle-split), so the markdown output isn't there on the first synchronous
 // render - only the Suspense fallback is. The first content-bearing
 // assertion in each test below awaits it with findBy*; whatever follows on
 // the same rendered tree can stay a plain getBy*/queryBy* once that first
 // await has resolved.
 
-describe('ManualMarkdown heading ids', () => {
+describe('HelpMarkdown heading ids', () => {
   it('gives an h2 (## in the markdown) the GitHub slug id', async () => {
-    render(<ManualMarkdown content="## The kiosk feed" pageId="features/dashboard" onNavigate={vi.fn()} />)
+    render(<HelpMarkdown content="## The kiosk feed" pageId="features/dashboard" onNavigate={vi.fn()} />)
 
     const heading = await screen.findByText('The kiosk feed')
     expect(heading).toHaveAttribute('id', 'the-kiosk-feed')
@@ -27,18 +27,18 @@ describe('ManualMarkdown heading ids', () => {
   // h3 (not just h2) has to gain an id too, or the sheet's scroll-to-heading
   // silently lands nowhere for exactly those panels.
   it('gives an h3 (### in the markdown) the GitHub slug id too', async () => {
-    render(<ManualMarkdown content="### Route planning" pageId="features/dashboard" onNavigate={vi.fn()} />)
+    render(<HelpMarkdown content="### Route planning" pageId="features/dashboard" onNavigate={vi.fn()} />)
 
     const heading = await screen.findByText('Route planning')
     expect(heading).toHaveAttribute('id', 'route-planning')
   })
 })
 
-describe('ManualMarkdown links', () => {
+describe('HelpMarkdown links', () => {
   it('prevents the default navigation and calls onNavigate for an in-tree page link', async () => {
     const onNavigate = vi.fn()
     render(
-      <ManualMarkdown content="[Alarms](alarms.md)" pageId="features/dashboard" onNavigate={onNavigate} />,
+      <HelpMarkdown content="[Alarms](alarms.md)" pageId="features/dashboard" onNavigate={onNavigate} />,
     )
 
     const link = await screen.findByRole('link', { name: 'Alarms' })
@@ -50,7 +50,7 @@ describe('ManualMarkdown links', () => {
 
   it('treats a #hash link as an anchor and calls onNavigate with the anchor kind', async () => {
     const onNavigate = vi.fn()
-    render(<ManualMarkdown content="[Tiles](#tiles)" pageId="features/dashboard" onNavigate={onNavigate} />)
+    render(<HelpMarkdown content="[Tiles](#tiles)" pageId="features/dashboard" onNavigate={onNavigate} />)
 
     const link = await screen.findByRole('link', { name: 'Tiles' })
     fireClickReturningWhetherDefaultRan(link)
@@ -61,7 +61,7 @@ describe('ManualMarkdown links', () => {
   it('keeps target=_blank and rel=noreferrer, and does not call onNavigate, for an external link', async () => {
     const onNavigate = vi.fn()
     render(
-      <ManualMarkdown
+      <HelpMarkdown
         content="[wazero](https://wazero.io/)"
         pageId="reference/plugins"
         onNavigate={onNavigate}
@@ -86,10 +86,10 @@ describe('ManualMarkdown links', () => {
   }
 })
 
-describe('ManualMarkdown img handling', () => {
+describe('HelpMarkdown img handling', () => {
   it('drops an <img> tag from the rendered output', async () => {
     const { container } = render(
-      <ManualMarkdown
+      <HelpMarkdown
         content="![alt](https://example.com/x.png)\n\nSafe text"
         pageId="features/dashboard"
         onNavigate={vi.fn()}

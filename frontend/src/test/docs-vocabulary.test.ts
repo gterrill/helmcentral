@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest'
 // were written, and they are the historical record, not documentation.
 // docs/examples/ is third-party plugin source, not our prose.
 //
-// Resolved the same way manual-links.test.ts resolves the docs root: relative
+// Resolved the same way help-links.test.ts resolves the docs root: relative
 // to the frontend package dir, one level up to the repo root, then into docs/.
 const USER_FACING_DIRS = ['features', 'how-to', 'reference', 'tutorials']
 
@@ -57,9 +57,9 @@ function offendingLines(): string[] {
     ...USER_FACING_DIRS.flatMap((d) => markdownFilesUnder(join(root, d))),
     join(root, 'index.md'),
     // The README is the project's front page and describes the product to an
-    // operator, so it is bound by the same rule as the manual. It sat outside
-    // this check on the first pass and kept saying "widgets" while every page
-    // it links to had stopped.
+    // operator, so it is bound by the same rule as the help pages. It sat
+    // outside this check on the first pass and kept saying "widgets" while
+    // every page it links to had stopped.
     join(repoRoot(), 'README.md'),
   ]
 

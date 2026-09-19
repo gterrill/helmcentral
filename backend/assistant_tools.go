@@ -98,16 +98,16 @@ type assistantToolDeps struct {
 	// freshEnoughToPublish), which estimate_passage reports as "unknown"
 	// rather than a fabricated zero.
 	fuelAboardM3 func() (float64, bool)
-	// manual names the embedded operator manual pages read_manual serves
-	// (assistant_manual.go). Production returns globalManual, loaded once
+	// help names the embedded help pages read_help serves
+	// (assistant_help.go). Production returns globalHelp, loaded once
 	// at startup; tests inject a fixed slice with no embedding involved.
-	manual func() []manualPage
+	help func() []helpPage
 	// documents is the boat's document library (ADR 0106), read fresh on
 	// every call for search_documents and read_document - production
 	// returns globalDocumentStore; tests inject a t.TempDir()-backed
 	// *documentStore with no upload/indexer pipeline involved. nil (the
 	// zero value in a test that never sets it) is a real possibility, not
-	// just a test artefact: this store is optional the same way the manual
+	// just a test artefact: this store is optional the same way help
 	// is, so both tools report a plain error rather than panicking when
 	// it's unset.
 	documents func() *documentStore
@@ -145,7 +145,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxRange:       queryInfluxPathRange,
 		fuelRateInstances: fuelRateInstancesFromSnapshot,
 		fuelAboardM3:      fuelAboardM3FromDerivedPaths,
-		manual:            func() []manualPage { return globalManual },
+		help:              func() []helpPage { return globalHelp },
 		documents:         func() *documentStore { return globalDocumentStore },
 		documentSearchReadiness: func() (assistantReadiness, string, error) {
 			return checkAssistantReadiness(settingsPath)
@@ -319,16 +319,16 @@ func assistantToolDefinitions() []openRouterTool {
 		{
 			Type: "function",
 			Function: openRouterFunctionDef{
-				Name: "read_manual",
-				Description: "Read one page of Helmcentral's own operator manual, or one section of it by " +
+				Name: "read_help",
+				Description: "Read one page of Helmcentral's own in-app help, or one section of it by " +
 					"heading. Use it before answering any question about how Helmcentral itself works, what a " +
-					"panel or tile shows, or how to set something up; quote the manual rather than guessing.",
+					"panel or tile shows, or how to set something up; quote the help rather than guessing.",
 				Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
 						"page": {
 							"type": "string",
-							"description": "A manual page id from the manual index, e.g. \"features/forecast\"."
+							"description": "A help page id from the help index, e.g. \"features/forecast\"."
 						},
 						"section": {
 							"type": "string",
@@ -422,8 +422,8 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return d.executeGetTides(ctx, args)
 	case "estimate_passage":
 		return d.executeEstimatePassage(ctx, args)
-	case "read_manual":
-		return d.executeReadManual(ctx, args)
+	case "read_help":
+		return d.executeReadHelp(ctx, args)
 	case "search_documents":
 		return d.executeSearchDocuments(ctx, args)
 	case "read_document":
@@ -461,8 +461,8 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 			return fmt.Sprintf("Estimating %g nm at %g kts from the log…", a.DistanceNm, *a.SpeedKts)
 		}
 		return fmt.Sprintf("Estimating %g nm at cruising speed from the log…", a.DistanceNm)
-	case "read_manual":
-		var a assistantReadManualArgs
+	case "read_help":
+		var a assistantReadHelpArgs
 		page := ""
 		if json.Unmarshal(args, &a) == nil {
 			page = strings.TrimSpace(a.Page)
@@ -470,7 +470,7 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		if page == "" {
 			page = "a page"
 		}
-		return fmt.Sprintf("Reading the manual: %s…", page)
+		return fmt.Sprintf("Reading the help: %s…", page)
 	case "search_documents":
 		var a assistantSearchDocumentsArgs
 		query := ""
@@ -484,8 +484,8 @@ func describeAssistantToolCall(name string, args json.RawMessage) string {
 		return fmt.Sprintf("Searching documents for %q…", query)
 	case "read_document":
 		// No access to the document store here (describeAssistantToolCall is
-		// a pure function of name+args, the same as read_manual's case just
-		// above it, which shows the manual's own page id rather than
+		// a pure function of name+args, the same as read_help's case just
+		// above it, which shows the help's own page id rather than
 		// resolving a title) - the document id is what's shown, not a
 		// filename.
 		var a assistantReadDocumentArgs
@@ -1495,14 +1495,14 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	return capToolResultJSON(&result, shrink)
 }
 
-// ── read_manual ─────────────────────────────────────────────────────────
+// ── read_help ───────────────────────────────────────────────────────────
 
-type assistantReadManualArgs struct {
+type assistantReadHelpArgs struct {
 	Page    string `json:"page"`
 	Section string `json:"section"`
 }
 
-type assistantReadManualResult struct {
+type assistantReadHelpResult struct {
 	Page    string `json:"page"`
 	Title   string `json:"title"`
 	Section string `json:"section,omitempty"`
@@ -1514,31 +1514,31 @@ type assistantReadManualResult struct {
 	Truncated bool `json:"truncated,omitempty"`
 }
 
-func (d assistantToolDeps) executeReadManual(ctx context.Context, raw json.RawMessage) (string, error) {
+func (d assistantToolDeps) executeReadHelp(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 
-	var args assistantReadManualArgs
+	var args assistantReadHelpArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return "", fmt.Errorf("parse read_manual arguments: %w", err)
+		return "", fmt.Errorf("parse read_help arguments: %w", err)
 	}
 
-	// d.manual is a func field: assistantToolDeps' zero value (a test that
+	// d.help is a func field: assistantToolDeps' zero value (a test that
 	// never sets it, same as documents below) leaves it nil, and calling a
-	// nil func panics - the doc comment on the manual field promises a
+	// nil func panics - the doc comment on the help field promises a
 	// plain error instead, so this is checked before ever calling it.
-	if d.manual == nil {
-		return "", fmt.Errorf("the manual is not embedded in this build (run make manual-stage)")
+	if d.help == nil {
+		return "", fmt.Errorf("help is not embedded in this build (run make help-stage)")
 	}
-	pages := d.manual()
+	pages := d.help()
 	if len(pages) == 0 {
-		return "", fmt.Errorf("the manual is not embedded in this build (run make manual-stage)")
+		return "", fmt.Errorf("help is not embedded in this build (run make help-stage)")
 	}
 
 	page := strings.TrimSpace(args.Page)
 	ids := make([]string, 0, len(pages))
-	var found *manualPage
+	var found *helpPage
 	for i := range pages {
 		ids = append(ids, pages[i].ID)
 		if pages[i].ID == page {
@@ -1546,16 +1546,16 @@ func (d assistantToolDeps) executeReadManual(ctx context.Context, raw json.RawMe
 		}
 	}
 	if found == nil {
-		return "", fmt.Errorf("read_manual: unknown page %q; valid ids are: %s", page, strings.Join(ids, ", "))
+		return "", fmt.Errorf("read_help: unknown page %q; valid ids are: %s", page, strings.Join(ids, ", "))
 	}
 
-	result := assistantReadManualResult{Page: found.ID, Title: found.Title, Content: found.Body}
+	result := assistantReadHelpResult{Page: found.ID, Title: found.Title, Content: found.Body}
 
 	if section := strings.TrimSpace(args.Section); section != "" {
-		text, ok := manualSection(found.Body, section)
+		text, ok := helpSection(found.Body, section)
 		if !ok {
-			headings := manualPageHeadings(found.Body)
-			return "", fmt.Errorf("read_manual: unknown section %q on page %q; valid headings are: %s", section, found.ID, strings.Join(headings, ", "))
+			headings := helpPageHeadings(found.Body)
+			return "", fmt.Errorf("read_help: unknown section %q on page %q; valid headings are: %s", section, found.ID, strings.Join(headings, ", "))
 		}
 		result.Section = section
 		result.Content = text
@@ -1563,7 +1563,7 @@ func (d assistantToolDeps) executeReadManual(ctx context.Context, raw json.RawMe
 
 	// Halve the content string until the encoding fits the tool-result
 	// budget, rather than one of the list-trimming shrinks the other tools
-	// use above - a manual page's content is prose, not a list of rows.
+	// use above - a help page's content is prose, not a list of rows.
 	shrink := func() bool {
 		runes := []rune(result.Content)
 		if len(runes) == 0 {
@@ -1851,7 +1851,7 @@ func (d assistantToolDeps) executeReadDocument(ctx context.Context, raw json.Raw
 		})
 	}
 
-	// Shrink by halving - the same strategy executeReadManual applies to its
+	// Shrink by halving - the same strategy executeReadHelp applies to its
 	// (single, prose) content string above, adapted to a list: halve the
 	// number of chunks kept rather than the characters of each, since a
 	// chunk is already bounded to ~2000 characters by B2's own chunking

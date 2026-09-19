@@ -667,7 +667,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 // from inside a goroutine below is serialised through mu.
 //
 // Every tool assistant_tools.go defines (find_places, get_wind_forecast,
-// get_tides, estimate_passage, read_manual) only reads: none of them writes
+// get_tides, estimate_passage, read_help) only reads: none of them writes
 // to the conversation store, settings, or any other shared state, so
 // running a round's calls in parallel needs no locking beyond r.emit's own
 // and failures' own (see assistantToolFailures's doc comment for why that

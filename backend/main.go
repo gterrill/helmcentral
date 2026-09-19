@@ -393,22 +393,22 @@ func main() {
 	documentIndexerStartBackfill = docIndexer.StartBackfill
 	documentIndexerBackfillStatus = docIndexer.BackfillStatus
 
-	// The assistant's read_manual tool (mate-voice-assistant plan, "App-wide
+	// The assistant's read_help tool (mate-voice-assistant plan, "App-wide
 	// voice"): docs/features, docs/how-to and docs/reference staged into
-	// backend/manual (Makefile's manual-stage target, the Dockerfile and
+	// backend/help (Makefile's help-stage target, the Dockerfile and
 	// .goreleaser.yaml, mirroring how backend/dist stages the frontend for
 	// static.go's //go:embed). Not fatal when empty: a host `go build` with
-	// no staging step is a legitimate developer build, and read_manual
+	// no staging step is a legitimate developer build, and read_help
 	// itself reports the gap to the model rather than failing startup.
-	manualPages, err := loadManual(manualFS, "manual")
+	helpPages, err := loadHelp(helpFS, "help")
 	if err != nil {
-		log.Fatalf("failed to load the embedded operator manual: %v", err)
+		log.Fatalf("failed to load the embedded help: %v", err)
 	}
-	globalManual = manualPages
-	if len(globalManual) == 0 {
-		log.Printf("manual not staged; read_manual will report it")
+	globalHelp = helpPages
+	if len(globalHelp) == 0 {
+		log.Printf("help not staged; read_help will report it")
 	} else {
-		log.Printf("loaded %d operator manual page(s)", len(globalManual))
+		log.Printf("loaded %d help page(s)", len(globalHelp))
 	}
 
 	// Registered web push devices. Its own file rather than the alarm log's:
@@ -681,11 +681,11 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// SSE if a run is in flight, 204 if not - read-only, same tier as
 		// the conversation read above.
 		{http.MethodGet, "/api/assistant/conversations/:id/run", tierRead, getAssistantRunHandler},
-		// The in-app Manual sheet's page fetch (ADR 0095), same embedded
-		// pages as read_manual above, reached by direct id instead of a tool
+		// The in-app Help sheet's page fetch (ADR 0095), same embedded
+		// pages as read_help above, reached by direct id instead of a tool
 		// call. Wildcard path, not a :id param: page ids contain a slash
 		// ("features/dashboard").
-		{http.MethodGet, "/api/manual/*", tierRead, getManualPageHandler(func() []manualPage { return globalManual })},
+		{http.MethodGet, "/api/help/*", tierRead, getHelpPageHandler(func() []helpPage { return globalHelp })},
 		// Settings -> Logs: in-memory log buffer retrieval and live SSE stream
 		{http.MethodGet, "/api/logs", tierRead, getLogsHandler},
 		{http.MethodGet, "/api/logs/stream", tierRead, logsStreamHandler},

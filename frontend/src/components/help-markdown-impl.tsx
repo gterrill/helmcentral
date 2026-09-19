@@ -3,7 +3,7 @@ import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { assistantMarkdownComponents } from '@/components/assistant-markdown-impl'
-import { resolveManualHref, slugifyHeading, type ManualLink } from '@/lib/manual-links'
+import { resolveHelpHref, slugifyHeading, type HelpLink } from '@/lib/help-links'
 
 // Reads the plain text out of a heading's hast node (react-markdown v10
 // always passes `node`, regardless of any option - see toJsxRuntime's
@@ -49,17 +49,17 @@ function headingComponent(level: keyof typeof HEADING_STYLE) {
   }
 }
 
-interface ManualMarkdownImplProps {
+interface HelpMarkdownImplProps {
   content: string
-  /** The manual page id this content came from - relative links (e.g.
+  /** The help page id this content came from - relative links (e.g.
    * "alarms.md" or "../reference/configuration.md#…") are resolved against
    * it, the same way a browser resolves a relative href against the current
    * document's URL. */
   pageId: string
-  onNavigate: (link: ManualLink) => void
+  onNavigate: (link: HelpLink) => void
   /** Fired after every render this content mounts (ADR: kiosk bundle-split
-   * follow-up). manual-sheet.tsx's scroll-to-heading effect only has
-   * `[manual.page, current.heading]` to key on, neither of which changes
+   * follow-up). help-sheet.tsx's scroll-to-heading effect only has
+   * `[help.page, current.heading]` to key on, neither of which changes
    * once this impl chunk finishes loading - without this, a deep link
    * arriving before the lazy chunk resolves would find no heading element
    * yet and wrongly report the section missing, with nothing left to
@@ -68,16 +68,16 @@ interface ManualMarkdownImplProps {
 }
 
 /**
- * Renders one manual page's markdown (ADR 0095) in the Manual sheet, reusing
+ * Renders one help page's markdown (ADR 0095) in the Help sheet, reusing
  * assistant-markdown-impl.tsx's whole visual language (ADR 0093) - Geist Sans
- * prose, semantic tokens, the same heading/list/table rhythm - so a manual
+ * prose, semantic tokens, the same heading/list/table rhythm - so a help
  * page and a Mate reply read as the same product. Two things a chat reply
  * never needs: headings carry a GitHub-style slug id so the sheet can scroll
- * to a specific section, and a link is resolved against the manual tree
+ * to a specific section, and a link is resolved against the help tree
  * (another in-tree page, an anchor on this one, or external GitHub for
- * anything the manual doesn't stage) rather than always opening a new tab.
+ * anything the help doesn't stage) rather than always opening a new tab.
  */
-export default function ManualMarkdownImpl({ content, pageId, onNavigate, onRendered }: ManualMarkdownImplProps) {
+export default function HelpMarkdownImpl({ content, pageId, onNavigate, onRendered }: HelpMarkdownImplProps) {
   useEffect(() => {
     onRendered?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,7 +91,7 @@ export default function ManualMarkdownImpl({ content, pageId, onNavigate, onRend
     h4: headingComponent('h4'),
     a: ({ children, href }) => {
       if (!href) return <a>{children}</a>
-      const link = resolveManualHref(href, pageId)
+      const link = resolveHelpHref(href, pageId)
 
       if (link.kind === 'external') {
         return (

@@ -182,14 +182,14 @@ configuration:
 `allowed_models`, `excluded_models`, and `cost_tier` only affect routing when
 `model` is `openrouter/auto` (or `openrouter/auto-beta`).
 
-`ASSISTANT_DB_PATH` holds conversations, not the operator manual Mate reads
-from when a question is about Helmcentral itself. That manual is staged into
-`backend/manual` from `docs/features`, `docs/how-to` and `docs/reference`,
+`ASSISTANT_DB_PATH` holds conversations, not the in-app help Mate reads
+from when a question is about Helmcentral itself. That help is staged into
+`backend/help` from `docs/features`, `docs/how-to` and `docs/reference`,
 the same way the built frontend is staged into `backend/dist`: `make
-manual-stage` does it for a local `go build`/`go run`, and both a container
+help-stage` does it for a local `go build`/`go run`, and both a container
 build and a release build stage it themselves as part of their own build
 steps. A binary built without that step still runs; Mate just says the
-manual isn't embedded rather than answering from an empty one.
+help isn't embedded rather than answering from an empty one.
 
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception to being managed
 from the UI. The VAPID keypair is self-issued, generated automatically on first

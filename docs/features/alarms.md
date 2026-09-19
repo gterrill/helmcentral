@@ -300,7 +300,9 @@ paths above, and ships four rules bound to them, created once on first run:
 calibrate: the source is the met service's own call for your zone, not a
 threshold read from a book. A gale warning issued while you are ashore reaches
 every transport you have enabled, and shows in the alarm banner on every
-screen until it is acknowledged there.
+screen until you acknowledge it there. The banner carries its own Acknowledge
+button now, right beside View, so silencing the sound never needs a trip to
+the Active Alarms tile.
 
 "Unavailable" means what it says. It raises when there is no forecast-warnings
 plugin installed, when the boat has had no position fix, or when the provider
@@ -308,5 +310,6 @@ has been down for half an hour. It exists so a dead provider looks like a dead
 provider rather than a quiet sea. If your boat has no plugin and you do not
 want the standing alert, disable that rule like any other.
 
-The alarm card says which warning is in force. The region, the days it covers
-and the link to the bulletin are on the Forecast page.
+The alarm card says which warning is in force, with a link straight to the
+bulletin right there on the card, both in the banner and on the Active
+Alarms tile. The region and the days it covers stay on the Forecast page.

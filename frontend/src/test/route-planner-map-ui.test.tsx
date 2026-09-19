@@ -187,7 +187,7 @@ describe('RoutePlannerMap', () => {
   // to sit above the MapLibre canvas. Without a stacking context on the
   // wrapper those values escape into the page and beat the Sheet
   // primitive's z-[70], so the controls drew through the mobile sidebar
-  // and the manual sheet. `isolate` keeps them inside.
+  // and the help sheet. `isolate` keeps them inside.
   it('isolates its overlays so they cannot draw above a sheet', () => {
     render(
       <RoutePlannerMap

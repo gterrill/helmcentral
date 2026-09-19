@@ -25,7 +25,7 @@ vi.mock('react-map-gl/maplibre', async () => {
 // stack at z-index 900 to 2100 so they sit above MapLibre's canvas. Without
 // a stacking context on the wrapper those values escape into the page and
 // beat the Sheet primitive's z-[70], so the controls drew through the
-// manual sheet on the Anchor Watch panel. `isolate` keeps them inside.
+// help sheet on the Anchor Watch panel. `isolate` keeps them inside.
 describe('AnchorWatchMap stacking', () => {
   it('isolates its overlays so they cannot draw above a sheet', () => {
     render(

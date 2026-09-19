@@ -10,11 +10,11 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// newManualEchoContext mirrors newAssistantEchoContext (assistant_handlers_test.go)
-// but sets the "*" wildcard param getManualPageHandler reads, since a manual
+// newHelpEchoContext mirrors newAssistantEchoContext (assistant_handlers_test.go)
+// but sets the "*" wildcard param getHelpPageHandler reads, since a help
 // page id contains a slash ("features/dashboard") and cannot be a normal
 // echo :param.
-func newManualEchoContext(path, wildcard string) (echo.Context, *httptest.ResponseRecorder) {
+func newHelpEchoContext(path, wildcard string) (echo.Context, *httptest.ResponseRecorder) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
@@ -24,14 +24,14 @@ func newManualEchoContext(path, wildcard string) (echo.Context, *httptest.Respon
 	return c, rec
 }
 
-func TestGetManualPageHandler_NestedIDReturns200(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestGetHelpPageHandler_NestedIDReturns200(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	handler := getManualPageHandler(func() []manualPage { return pages })
+	handler := getHelpPageHandler(func() []helpPage { return pages })
 
-	c, rec := newManualEchoContext("/api/manual/features/forecast", "features/forecast")
+	c, rec := newHelpEchoContext("/api/help/features/forecast", "features/forecast")
 	if err := handler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -58,14 +58,14 @@ func TestGetManualPageHandler_NestedIDReturns200(t *testing.T) {
 	}
 }
 
-func TestGetManualPageHandler_UnknownIDReturns404(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestGetHelpPageHandler_UnknownIDReturns404(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	handler := getManualPageHandler(func() []manualPage { return pages })
+	handler := getHelpPageHandler(func() []helpPage { return pages })
 
-	c, rec := newManualEchoContext("/api/manual/nope", "nope")
+	c, rec := newHelpEchoContext("/api/help/nope", "nope")
 	if err := handler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -77,19 +77,19 @@ func TestGetManualPageHandler_UnknownIDReturns404(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if want := `unknown manual page "nope"`; body["error"] != want {
+	if want := `unknown help page "nope"`; body["error"] != want {
 		t.Errorf("expected error %q, got %q", want, body["error"])
 	}
 }
 
-func TestGetManualPageHandler_EmptyIDReturns404(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+func TestGetHelpPageHandler_EmptyIDReturns404(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	handler := getManualPageHandler(func() []manualPage { return pages })
+	handler := getHelpPageHandler(func() []helpPage { return pages })
 
-	c, rec := newManualEchoContext("/api/manual/", "")
+	c, rec := newHelpEchoContext("/api/help/", "")
 	if err := handler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -98,19 +98,19 @@ func TestGetManualPageHandler_EmptyIDReturns404(t *testing.T) {
 	}
 }
 
-// TestGetManualPageHandler_PathTraversalIsJustAnUnknownID guards against
-// treating ".." specially: manual page ids are matched by exact string
-// comparison over the loaded slice (getManualPageHandler), so a
+// TestGetHelpPageHandler_PathTraversalIsJustAnUnknownID guards against
+// treating ".." specially: help page ids are matched by exact string
+// comparison over the loaded slice (getHelpPageHandler), so a
 // "../etc/passwd"-shaped id can never resolve to anything outside the
-// staged manual tree - it simply isn't a known id.
-func TestGetManualPageHandler_PathTraversalIsJustAnUnknownID(t *testing.T) {
-	pages, err := loadManual(testManualFS(), "manual")
+// staged help tree - it simply isn't a known id.
+func TestGetHelpPageHandler_PathTraversalIsJustAnUnknownID(t *testing.T) {
+	pages, err := loadHelp(testHelpFS(), "help")
 	if err != nil {
-		t.Fatalf("loadManual: %v", err)
+		t.Fatalf("loadHelp: %v", err)
 	}
-	handler := getManualPageHandler(func() []manualPage { return pages })
+	handler := getHelpPageHandler(func() []helpPage { return pages })
 
-	c, rec := newManualEchoContext("/api/manual/../etc/passwd", "../etc/passwd")
+	c, rec := newHelpEchoContext("/api/help/../etc/passwd", "../etc/passwd")
 	if err := handler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -119,16 +119,16 @@ func TestGetManualPageHandler_PathTraversalIsJustAnUnknownID(t *testing.T) {
 	}
 }
 
-// TestGetManualPageHandler_EmptyManualReturns503 covers a build that never
-// ran `make manual-stage`: the route exists, so this is 503 (a build
+// TestGetHelpPageHandler_EmptyHelpReturns503 covers a build that never
+// ran `make help-stage`: the route exists, so this is 503 (a build
 // problem the operator can fix), never 404 (an unknown page). Same sentence
-// executeReadManual uses (assistant_tools.go), so the operator sees one
+// executeReadHelp uses (assistant_tools.go), so the operator sees one
 // consistent message regardless of whether they hit this from Mate or the
-// Manual sheet.
-func TestGetManualPageHandler_EmptyManualReturns503(t *testing.T) {
-	handler := getManualPageHandler(func() []manualPage { return nil })
+// Help sheet.
+func TestGetHelpPageHandler_EmptyHelpReturns503(t *testing.T) {
+	handler := getHelpPageHandler(func() []helpPage { return nil })
 
-	c, rec := newManualEchoContext("/api/manual/index", "index")
+	c, rec := newHelpEchoContext("/api/help/index", "index")
 	if err := handler(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -140,27 +140,27 @@ func TestGetManualPageHandler_EmptyManualReturns503(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if !strings.Contains(body["error"], "make manual-stage") {
+	if !strings.Contains(body["error"], "make help-stage") {
 		t.Errorf("expected the error to name the fix, got %q", body["error"])
 	}
 }
 
-// TestManualRoute_RegisteredAtTierReadAndMatchesNestedWildcard registers the
+// TestHelpRoute_RegisteredAtTierReadAndMatchesNestedWildcard registers the
 // real production route table (buildAPIRoutes/registerAPIRoutes, the same
 // pattern static_routing_test.go's TestStaticHandler_APIRoutesStillWin
 // uses) and drives a request through the live Echo router rather than
 // calling the handler directly, so a change to the route's tier or its "*"
 // wildcard shape fails here rather than only in the handler-level tests
 // above.
-func TestManualRoute_RegisteredAtTierReadAndMatchesNestedWildcard(t *testing.T) {
+func TestHelpRoute_RegisteredAtTierReadAndMatchesNestedWildcard(t *testing.T) {
 	sessions := newTestSessionStore(t)
 
 	e := echo.New()
 	registry := registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, newWorldImageryHTTPClient()))
 
-	tier, ok := registry[http.MethodGet+" /api/manual/*"]
+	tier, ok := registry[http.MethodGet+" /api/help/*"]
 	if !ok {
-		t.Fatal("expected GET /api/manual/* to be registered")
+		t.Fatal("expected GET /api/help/* to be registered")
 	}
 	if tier != tierRead {
 		t.Fatalf("expected tierRead, got %v", tier)
@@ -171,7 +171,7 @@ func TestManualRoute_RegisteredAtTierReadAndMatchesNestedWildcard(t *testing.T) 
 	// here proves the wildcard matched a nested id at the router level, not
 	// merely that the request was rejected before reaching the handler.
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/manual/features/dashboard", nil))
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/help/features/dashboard", nil))
 	if rec.Code == http.StatusNotFound && strings.Contains(rec.Body.String(), "Not Found") {
 		t.Fatalf("expected the wildcard route to match a nested id, got echo's own 404: %s", rec.Body.String())
 	}

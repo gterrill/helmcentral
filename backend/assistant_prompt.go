@@ -70,12 +70,12 @@ type assistantPromptContext struct {
 	// on a rising tide" live (ADR 0093).
 	Notes string
 
-	// ManualPages is globalManual (assistant_manual.go) at the time this
-	// context was collected - the embedded operator manual's index, listed
-	// in the prompt so the model knows what read_manual can return before
-	// calling it. Empty on a build with no manual staged, in which case the
+	// HelpPages is globalHelp (assistant_help.go) at the time this
+	// context was collected - the embedded help index, listed
+	// in the prompt so the model knows what read_help can return before
+	// calling it. Empty on a build with no help staged, in which case the
 	// prompt simply omits the index line.
-	ManualPages []manualPage
+	HelpPages []helpPage
 
 	// DocumentCount and DocumentFolderNames describe globalDocumentStore
 	// (ADR 0106) at the time this context was collected: how many documents
@@ -178,7 +178,7 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 		pc.WarningFetchedAt = reading.FetchedAt
 	}
 
-	pc.ManualPages = globalManual
+	pc.HelpPages = globalHelp
 
 	if globalDocumentStore != nil {
 		// Count, not List(nil, false, "", 0, 0) merely to take len() of the
@@ -310,9 +310,9 @@ func providerLabelOrNotConfigured(id string) string {
 
 // assistantSystemPromptParts renders pc into the system prompt's stable
 // prefix and live suffix, in that order. Identity, the fixed tool-use
-// guidance, the manual index and the operator's standing notes are
+// guidance, the help index and the operator's standing notes are
 // byte-identical for every turn of a conversation that hasn't had its
-// settings or manual changed, so they go in the stable prefix; position,
+// settings or help changed, so they go in the stable prefix; position,
 // time, heading, speed, wind, marine warnings, configured providers, screen
 // context and the spoken-summary instruction can all differ turn to turn,
 // so they go in the live suffix, last.
@@ -350,7 +350,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 
 	// 2. Tool-use guidance - fixed wording, identical for every turn.
 	b.WriteString("When the question is about Helmcentral itself, what a panel or chart shows or how to " +
-		"configure it, call read_manual for the relevant page first and answer from it; when it is about the " +
+		"configure it, call read_help for the relevant page first and answer from it; when it is about the " +
 		"sea, use the forecast, tide and passage tools as usual.\n\n")
 
 	// 2a. Document library (ADR 0106) - fixed wording, identical for every
@@ -379,7 +379,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	// training prior is heavily weighted toward the word this product used to
 	// use for a dashboard component, so left unpinned it keeps using that
 	// word in fluent prose even though every string in Helmcentral, and the
-	// manual read_manual serves, now say "tile" instead. A find-and-replace
+	// help read_help serves, now say "tile" instead. A find-and-replace
 	// cannot reach a channel that regenerates its own vocabulary every turn.
 	b.WriteString("The composable units of a Helmcentral dashboard page are called tiles, and tile is the word " +
 		"to use when talking to the operator about one. Widget is not a term this product uses.\n\n")
@@ -445,9 +445,9 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"like \"Good!\", no closing verdict line like \"looks like a comfortable passage\". Let length follow the " +
 		"question; use markdown headings and a comparison table when weighing two or more options.\n\n")
 
-	// 3. Manual index - stable for the life of this build (globalManual is
+	// 3. Help index - stable for the life of this build (globalHelp is
 	// loaded once at startup).
-	if indexLine := manualIndexLine(pc.ManualPages); indexLine != "" {
+	if indexLine := helpIndexLine(pc.HelpPages); indexLine != "" {
 		b.WriteString(indexLine)
 		b.WriteString("\n\n")
 	}

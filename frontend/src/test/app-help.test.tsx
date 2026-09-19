@@ -1,7 +1,7 @@
 /**
- * ADR 0095: the in-app manual's three entry points, mounted in App.tsx - the
+ * ADR 0095: the in-app help's three entry points, mounted in App.tsx - the
  * header's contextual `?`, the sidebar's Help item, and (elsewhere,
- * settings-page.test.tsx) Settings' own Manual button. Preamble copied from
+ * settings-page.test.tsx) Settings' own Help button. Preamble copied from
  * app-mate-voice.test.tsx (same App tree, same reasons for each hook mock,
  * same stubFetch router-with-catch-all shape), trimmed of the voice-specific
  * pieces this suite doesn't touch.
@@ -167,9 +167,9 @@ function stubFetch() {
     if (url.endsWith('/api/assistant/conversations')) {
       return { ok: true, json: async () => ({ conversations: [] }) }
     }
-    if (url.includes('/api/manual/')) {
+    if (url.includes('/api/help/')) {
       // Never resolved: these tests only assert *that* the sheet fetched
-      // the right id, not how it renders once loaded (manual-sheet.test.tsx
+      // the right id, not how it renders once loaded (help-sheet.test.tsx
       // already covers every load state on its own).
       return new Promise(() => {})
     }
@@ -182,13 +182,13 @@ function stubFetch() {
   return fetchMock
 }
 
-function manualFetchCalls(fetchMock: ReturnType<typeof stubFetch>): string[] {
+function helpFetchCalls(fetchMock: ReturnType<typeof stubFetch>): string[] {
   return fetchMock.mock.calls
     .map(([url]) => url as string)
-    .filter((url) => url.includes('/api/manual/'))
+    .filter((url) => url.includes('/api/help/'))
 }
 
-describe('the in-app manual (ADR 0095)', () => {
+describe('the in-app help (ADR 0095)', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     window.history.replaceState({}, '', '/')
@@ -198,14 +198,14 @@ describe('the in-app manual (ADR 0095)', () => {
     vi.unstubAllGlobals()
   })
 
-  it('the header ? opens the manual for the current screen - the dashboard, then Forecast after navigating there', async () => {
+  it('the header ? opens help for the current screen - the dashboard, then Forecast after navigating there', async () => {
     const fetchMock = stubFetch()
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
-    // ManualSheet is lazy-loaded (mounted only on this first open), so the
+    // HelpSheet is lazy-loaded (mounted only on this first open), so the
     // fetch its mount effect fires isn't necessarily on screen yet.
-    await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/features/dashboard'))
+    await waitFor(() => expect(helpFetchCalls(fetchMock)).toContain('/api/help/features/dashboard'))
 
     // Close the sheet (Escape) and move to Forecast before asking again -
     // the sheet only re-reads its target when it (re)opens.
@@ -213,7 +213,7 @@ describe('the in-app manual (ADR 0095)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Forecast' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
 
-    await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/features/forecast'))
+    await waitFor(() => expect(helpFetchCalls(fetchMock)).toContain('/api/help/features/forecast'))
   })
 
   it('carries the title "Help for this screen" and the CircleHelp icon', () => {
@@ -229,11 +229,11 @@ describe('the in-app manual (ADR 0095)', () => {
     const fetchMock = stubFetch()
     render(<App />)
 
-    const manualNavButton = screen.getByRole('button', { name: 'Help' })
-    fireEvent.click(manualNavButton)
+    const helpNavButton = screen.getByRole('button', { name: 'Help' })
+    fireEvent.click(helpNavButton)
 
-    await waitFor(() => expect(manualFetchCalls(fetchMock)).toContain('/api/manual/index'))
-    expect(manualNavButton).toHaveAttribute('data-active', 'false')
+    await waitFor(() => expect(helpFetchCalls(fetchMock)).toContain('/api/help/index'))
+    expect(helpNavButton).toHaveAttribute('data-active', 'false')
   })
 
   it('/display/<slug> shows neither the header ? nor a sidebar Help item', () => {

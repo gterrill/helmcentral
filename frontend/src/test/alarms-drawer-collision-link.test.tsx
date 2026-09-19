@@ -52,6 +52,7 @@ function renderDrawer(alarms: ActiveAlarm[], collisionTuningUrl: string | null) 
       updateRule={vi.fn()}
       deleteRule={vi.fn()}
       collisionTuningUrl={collisionTuningUrl}
+      forecastWarnings={null}
     />,
   )
   return container
@@ -116,6 +117,7 @@ describe('AlarmsDrawer COLREGS encounter line', () => {
         updateRule={vi.fn()}
         deleteRule={vi.fn()}
         collisionTuningUrl={TUNING_URL}
+        forecastWarnings={null}
       />,
     )
 

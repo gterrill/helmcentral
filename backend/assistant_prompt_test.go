@@ -349,33 +349,33 @@ func TestBuildAssistantSystemPrompt_SpokenFalseOmitsSummaryInstruction(t *testin
 	}
 }
 
-// ── operator manual (read_manual tool, mate-voice-assistant plan) ──────
+// ── in-app help (read_help tool, mate-voice-assistant plan) ────────────
 
-func TestBuildAssistantSystemPrompt_ManualIndexLinePresentWhenPagesExist(t *testing.T) {
+func TestBuildAssistantSystemPrompt_HelpIndexLinePresentWhenPagesExist(t *testing.T) {
 	pc := basePromptContext()
-	pc.ManualPages = []manualPage{
+	pc.HelpPages = []helpPage{
 		{ID: "features/alarms", Title: "Alarms"},
 		{ID: "features/forecast", Title: "Forecast"},
 	}
 
 	prompt := buildAssistantSystemPrompt(pc)
-	want := "Manual pages: features/alarms (Alarms), features/forecast (Forecast)"
+	want := "Help pages: features/alarms (Alarms), features/forecast (Forecast)"
 	if !strings.Contains(prompt, want) {
-		t.Fatalf("expected the manual index line, got:\n%s", prompt)
+		t.Fatalf("expected the help index line, got:\n%s", prompt)
 	}
 }
 
-func TestBuildAssistantSystemPrompt_ManualIndexLineOmittedWhenNoPages(t *testing.T) {
+func TestBuildAssistantSystemPrompt_HelpIndexLineOmittedWhenNoPages(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(basePromptContext())
-	if strings.Contains(prompt, "Manual pages:") {
-		t.Fatalf("expected no manual index line when no pages are embedded, got:\n%s", prompt)
+	if strings.Contains(prompt, "Help pages:") {
+		t.Fatalf("expected no help index line when no pages are embedded, got:\n%s", prompt)
 	}
 }
 
-func TestBuildAssistantSystemPrompt_ReadManualGuidancePresent(t *testing.T) {
+func TestBuildAssistantSystemPrompt_ReadHelpGuidancePresent(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(basePromptContext())
-	if !strings.Contains(prompt, "call read_manual for the relevant page first") {
-		t.Fatalf("expected the read_manual tool-use guidance, got:\n%s", prompt)
+	if !strings.Contains(prompt, "call read_help for the relevant page first") {
+		t.Fatalf("expected the read_help tool-use guidance, got:\n%s", prompt)
 	}
 }
 
@@ -552,16 +552,16 @@ func TestCollectAssistantPromptContext_NoAnchorWatchUsesRoamingPlaceName(t *test
 	}
 }
 
-func TestCollectAssistantPromptContext_CopiesGlobalManual(t *testing.T) {
+func TestCollectAssistantPromptContext_CopiesGlobalHelp(t *testing.T) {
 	settingsPath := writeAssistantPromptSettings(t)
 
-	prevManual := globalManual
-	globalManual = []manualPage{{ID: "features/forecast", Title: "Forecast"}}
-	t.Cleanup(func() { globalManual = prevManual })
+	prevHelp := globalHelp
+	globalHelp = []helpPage{{ID: "features/forecast", Title: "Forecast"}}
+	t.Cleanup(func() { globalHelp = prevHelp })
 
 	pc := collectAssistantPromptContext(settingsPath, time.Now())
-	if len(pc.ManualPages) != 1 || pc.ManualPages[0].ID != "features/forecast" {
-		t.Fatalf("expected collectAssistantPromptContext to copy globalManual, got %+v", pc.ManualPages)
+	if len(pc.HelpPages) != 1 || pc.HelpPages[0].ID != "features/forecast" {
+		t.Fatalf("expected collectAssistantPromptContext to copy globalHelp, got %+v", pc.HelpPages)
 	}
 }
 
@@ -622,18 +622,18 @@ func TestCollectAssistantPromptContext_FailedVesselStateFetchLeavesSentinels(t *
 
 // ── prompt-caching split (backend perf audit, Tier 3 item 3) ───────────
 
-func TestAssistantSystemPromptParts_ManualIndexBeforeLiveContext(t *testing.T) {
+func TestAssistantSystemPromptParts_HelpIndexBeforeLiveContext(t *testing.T) {
 	pc := basePromptContext()
-	pc.ManualPages = []manualPage{{ID: "features/forecast", Title: "Forecast"}}
+	pc.HelpPages = []helpPage{{ID: "features/forecast", Title: "Forecast"}}
 	pc.Latitude, pc.Longitude = -20.1, 149.1
 	pc.PlaceName = "Tongue Bay"
 
 	stable, live := assistantSystemPromptParts(pc)
-	if !strings.Contains(stable, "Manual pages:") {
-		t.Fatalf("expected the manual index in the stable prefix, got:\n%s", stable)
+	if !strings.Contains(stable, "Help pages:") {
+		t.Fatalf("expected the help index in the stable prefix, got:\n%s", stable)
 	}
-	if strings.Contains(live, "Manual pages:") {
-		t.Fatalf("expected the manual index NOT to be in the live suffix, got:\n%s", live)
+	if strings.Contains(live, "Help pages:") {
+		t.Fatalf("expected the help index NOT to be in the live suffix, got:\n%s", live)
 	}
 	if !strings.Contains(live, "Position:") {
 		t.Fatalf("expected the position line in the live suffix, got:\n%s", live)

@@ -241,6 +241,7 @@ describe('AlarmsDrawer', () => {
         updateRule={vi.fn()}
         deleteRule={vi.fn()}
         collisionTuningUrl={null}
+        forecastWarnings={null}
       />,
     )
 

@@ -21,7 +21,7 @@ import { formatDataAge, isStale } from '@/lib/staleness'
 // by App.tsx (it's the dashboard's 'anchor-watch' case, not behind any
 // React.lazy panel) - so that whole chunk used to load at startup on every
 // route, including /kiosk pages with no anchor-watch tile on them. Same lazy
-// -split pattern as assistant-markdown.tsx/manual-markdown.tsx, just with
+// -split pattern as assistant-markdown.tsx/help-markdown.tsx, just with
 // the boundary drawn inside this component instead of a matching *-impl
 // file: the tile's own chrome (alarm strips, distance KPI, Drop/Raise) stays
 // eager, and only the map slot below waits on the dynamic import.

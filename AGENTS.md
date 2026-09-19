@@ -72,7 +72,7 @@ directories or placeholder pages in advance.
 1. **No Implementation Details in User Docs:** Never mention Go, WebAssembly (WASM), Web Components, WebSocket lifecycles, JSON schemas, or internal data pipelines in user/operator documentation.
 2. **Marine Terminology First:**
    - Use "vessel telemetry," "live instrument data," or "NMEA network feeds" instead of "Signal K paths / tree."
-   - Use "tile" for a component placed on a dashboard page. One word, every time. Never "widget," and never a synonym picked per sentence: this bullet used to offer four alternatives and no default, which is how the manual ended up carrying both "Widgets" and "Tile state" as peer headings for the same object. "Gauge," "dial" and "lamp" remain correct for the specific kinds of tile that are those things.
+   - Use "tile" for a component placed on a dashboard page. One word, every time. Never "widget," and never a synonym picked per sentence: this bullet used to offer four alternatives and no default, which is how the help pages ended up carrying both "Widgets" and "Tile state" as peer headings for the same object. "Gauge," "dial" and "lamp" remain correct for the specific kinds of tile that are those things.
    - Use "operating modes" or "helm profiles" (e.g., Underway, At Anchor, Passage, Refueling) instead of "UI pages / dashboard grids."
    - Use "alarm thresholds" or "system warnings" instead of "boolean state triggers."
 3. **Operational Context First:** Start every feature doc with 1–2 sentences explaining the physical onboard benefit (e.g., preventing engine overheat, monitoring battery health at anchor, passage navigation).

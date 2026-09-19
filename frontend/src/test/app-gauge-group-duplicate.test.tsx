@@ -211,7 +211,7 @@ beforeEach(() => {
       return Promise.resolve({ ok: true, json: async () => serverPage })
     }
 
-    // Everything else (equipment profiles, signalk paths, manual, auth
+    // Everything else (equipment profiles, signalk paths, help, auth
     // mode…) — fails gracefully, same fallback App.smoke.test.tsx uses.
     return Promise.resolve({ ok: false, json: async () => ({}) })
   }))

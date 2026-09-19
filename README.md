@@ -68,7 +68,7 @@ rearrange without editing a config file.
   and it answers from the boat's live position, your forecast providers and
   your tide station, by typing or by voice. You bring an OpenRouter account and
   pick the model; every reply shows what that reply cost.
-- **The manual is in the binary.** The `?` button in the header opens the page
+- **The help is in the binary.** The `?` button in the header opens the page
   for the screen you are on, with no connection needed. Mate reads the same
   pages when you ask it how something works.
 - **Forecasts with no API key.** Open-Meteo and Open-Meteo Marine are the
@@ -211,8 +211,8 @@ resolves both places, pulls wind, wave and tide for each from the providers you
 have configured, and answers in your units and time zone. It works out wind and
 sea angle against your planned course arithmetically rather than leaving it to
 the model, and with InfluxDB configured it estimates passage time and fuel burn
-from your own logged speed and fuel-rate history. It reads the shipped manual
-when you ask how Helmcentral itself works. Open it from the sidebar, or from the
+from your own logged speed and fuel-rate history. It reads the shipped help
+pages when you ask how Helmcentral itself works. Open it from the sidebar, or from the
 header's sparkle button as a sheet over whatever you are looking at. Voice is
 push-to-talk on `Alt+M`, with an experimental "Hey Mate" mode that is off by
 default and documented with its costs. You bring your own OpenRouter account and
@@ -294,11 +294,11 @@ Contracts, the sandbox model, and how to build a plugin:
 
 Start with [docs/index.md](docs/index.md).
 
-**These pages also ship inside the binary**, so the manual is on the boat whether
+**These pages also ship inside the binary**, so the help is on the boat whether
 or not the boat has a connection. The `?` button in the app's header opens the
 page and heading for whatever screen you are on, as a sheet beside it; the
 sidebar's **Help** item opens the contents page for browsing; every Settings
-section carries its own Help link. Links between manual pages stay in the
+section carries its own Help link. Links between help pages stay in the
 sheet with working Back; a link to something outside it, an ADR or an example
 plugin's source, opens on GitHub and needs a connection. Mate answers questions
 about Helmcentral from these same pages.
@@ -310,9 +310,9 @@ about Helmcentral from these same pages.
 | [docs/reference/](docs/reference/) | Configuration, plugin contracts, POI categories, engine profiles |
 | [docs/adr/](docs/adr/) | Architecture decisions and their rationale |
 
-Editing a page under `docs/` is the only place to edit it. `make manual-stage`
-copies them into `backend/manual/` for the embed, and a build without that step
-reports the manual as unstaged rather than serving stale pages.
+Editing a page under `docs/` is the only place to edit it. `make help-stage`
+copies them into `backend/help/` for the embed, and a build without that step
+reports the help as unstaged rather than serving stale pages.
 
 ## Development
 
@@ -320,7 +320,7 @@ Requires Go 1.22 and Node.js 20 or newer. From the repository root, in two
 terminals:
 
 ```sh
-make manual-stage                           # stage docs/ for the embedded manual
+make help-stage                             # stage docs/ for the embedded help
 cd backend && go run .                      # API on :8080
 ```
 
@@ -340,7 +340,7 @@ Docker workflows, the isolated E2E stack and release builds:
 
 ```
 helmcentral/
-├── backend/          # Go REST API; embeds the built frontend and the manual
+├── backend/          # Go REST API; embeds the built frontend and the help
 ├── frontend/         # React + TypeScript + Vite dashboard
 ├── plugins/          # WASM providers, by category
 ├── packaging/        # systemd unit, plugin build script
