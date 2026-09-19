@@ -531,3 +531,374 @@ func TestDeleteSatChartHandler_RejectsPathTraversalID(t *testing.T) {
 		t.Fatalf("expected 400 for a path-traversal id, got %d", rec.Code)
 	}
 }
+
+// ── U-2: unbounded upload body ──────────────────────────────────────────
+
+// TestUploadSatChartHandler_OverCapReturns413 is U-2's regression test:
+// before the fix, uploadSatChartHandler had no http.MaxBytesReader at all,
+// so a multipart body of any size would stream straight through c.FormFile
+// into a temp file on SAT_CHARTS_DIR's volume - the same volume holding
+// documents.sqlite, alarm-log.sqlite and the tile cache. satChartMaxUploadBytes
+// is a var (not a const), same reasoning as documentMaxUploadBytes
+// (documents_handlers.go): this test lowers it so it doesn't have to push
+// a multi-GB body through httptest to exercise the 413 path.
+func TestUploadSatChartHandler_OverCapReturns413(t *testing.T) {
+	dir := setupSatChartsTest(t)
+
+	origCap := satChartMaxUploadBytes
+	satChartMaxUploadBytes = 1024
+	t.Cleanup(func() { satChartMaxUploadBytes = origCap })
+
+	content := bytes.Repeat([]byte("x"), 4096)
+	c, rec := newMultipartUploadRequest(t, "/api/sat-charts", "huge.mbtiles", content)
+	if err := uploadSatChartHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read storage dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no files left behind by a rejected oversized upload, found %d", len(entries))
+	}
+}
+
+// ── U-4: unbounded metadata read ────────────────────────────────────────
+
+// TestReadMBTilesMetadata_CapsRowCount is U-4's row-cap regression test.
+// Before the fix, "SELECT name, value FROM metadata" had no LIMIT, so an
+// uploaded file could pad the metadata table with junk rows ahead of the
+// ones the code actually needs. This inserts 500 padding rows (under an
+// allowed key, so key-filtering alone can't save it) before the required
+// name/bounds/minzoom/maxzoom rows, then lowers satChartMetadataRowLimit
+// far below 500: with the cap enforced, the query's LIMIT is reached
+// before the required rows (inserted, and therefore read back in rowid
+// order, last) are ever seen, so bounds is missing and parsing fails.
+func TestReadMBTilesMetadata_CapsRowCount(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "row-flood.mbtiles")
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	schema := []string{
+		`CREATE TABLE metadata (name TEXT, value TEXT)`,
+		`CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB)`,
+	}
+	for _, stmt := range schema {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec schema %q: %v", stmt, err)
+		}
+	}
+	for i := 0; i < 500; i++ {
+		if _, err := db.Exec(`INSERT INTO metadata (name, value) VALUES ('format', 'png')`); err != nil {
+			t.Fatalf("insert padding row %d: %v", i, err)
+		}
+	}
+	required := [][2]string{
+		{"name", "Flood Test"},
+		{"bounds", "150.0,-25.0,151.0,-24.0"},
+		{"minzoom", "5"},
+		{"maxzoom", "5"},
+	}
+	for _, row := range required {
+		if _, err := db.Exec(`INSERT INTO metadata (name, value) VALUES (?, ?)`, row[0], row[1]); err != nil {
+			t.Fatalf("insert required row %q: %v", row[0], err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	origLimit := satChartMetadataRowLimit
+	satChartMetadataRowLimit = 10
+	t.Cleanup(func() { satChartMetadataRowLimit = origLimit })
+
+	if _, err := readMBTilesMetadata(path); err == nil {
+		t.Fatalf("expected an error: the required bounds/name/minzoom/maxzoom rows were inserted after 500 padding rows, so a row limit of 10 should never reach them")
+	}
+}
+
+// TestReadMBTilesMetadata_CapsValueSize is U-4's value-size-cap regression
+// test. Before the fix, a metadata row's value had no length limit, so a
+// single row could hold an arbitrarily large payload. This lowers
+// satChartMetadataValueLimit below the length of a perfectly ordinary
+// bounds string: with the cap enforced, that row is excluded from the
+// query's result set entirely, leaving bounds unset and parsing fails.
+func TestReadMBTilesMetadata_CapsValueSize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big-value.mbtiles")
+	buildTestMBTiles(t, path, 5, 10, 12, "Test", "150.0,-25.0,151.0,-24.0")
+
+	origLimit := satChartMetadataValueLimit
+	satChartMetadataValueLimit = 8 // shorter than "150.0,-25.0,151.0,-24.0"
+	t.Cleanup(func() { satChartMetadataValueLimit = origLimit })
+
+	if _, err := readMBTilesMetadata(path); err == nil {
+		t.Fatalf("expected an error: the bounds value is longer than the (test-lowered) value size cap and should have been excluded from the result, leaving bounds unparseable")
+	}
+}
+
+// TestReadMBTilesMetadata_IgnoresUnrelatedMetadataKeys checks the other
+// half of U-4's fix: only the handful of metadata keys the code actually
+// reads (name, bounds, minzoom, maxzoom, format) are selected at all, so
+// padding under any other key never competes for a slot in the
+// row-limited result set in the first place - this holds even without
+// lowering any cap.
+func TestReadMBTilesMetadata_IgnoresUnrelatedMetadataKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "padded.mbtiles")
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	schema := []string{
+		`CREATE TABLE metadata (name TEXT, value TEXT)`,
+		`CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB)`,
+	}
+	for _, stmt := range schema {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec schema %q: %v", stmt, err)
+		}
+	}
+	for i := 0; i < satChartMetadataRowLimit*3; i++ {
+		if _, err := db.Exec(
+			`INSERT INTO metadata (name, value) VALUES (?, 'filler')`,
+			fmt.Sprintf("padding-%d", i),
+		); err != nil {
+			t.Fatalf("insert padding row %d: %v", i, err)
+		}
+	}
+	required := map[string]string{
+		"name": "Padded Chart", "bounds": "150.0,-25.0,151.0,-24.0", "minzoom": "5", "maxzoom": "5", "format": "png",
+	}
+	for k, v := range required {
+		if _, err := db.Exec(`INSERT INTO metadata (name, value) VALUES (?, ?)`, k, v); err != nil {
+			t.Fatalf("insert required row %q: %v", k, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	entry, err := readMBTilesMetadata(path)
+	if err != nil {
+		t.Fatalf("readMBTilesMetadata: %v", err)
+	}
+	if entry.Name != "Padded Chart" {
+		t.Errorf("expected name %q, got %q", "Padded Chart", entry.Name)
+	}
+	if entry.Bounds != [4]float64{150.0, -25.0, 151.0, -24.0} {
+		t.Errorf("unexpected bounds: %v", entry.Bounds)
+	}
+}
+
+// ── U-5: abandoned temp files never swept ───────────────────────────────
+
+// TestSweepSatChartsDir_RemovesAbandonedTempUploads is U-5's regression
+// test, mirroring TestSweepDocumentsDir_RemovesAbandonedTempUploads
+// (documents_store_test.go): a crash, OOM kill, or restart mid-upload
+// leaves an upload-*.mbtiles.tmp file behind that nothing previously swept.
+func TestSweepSatChartsDir_RemovesAbandonedTempUploads(t *testing.T) {
+	dir := t.TempDir()
+
+	tmpPath := filepath.Join(dir, "upload-abc123.mbtiles.tmp")
+	if err := os.WriteFile(tmpPath, []byte("partial"), 0o644); err != nil {
+		t.Fatalf("write temp upload: %v", err)
+	}
+	// A real chart file must never be swept just because it also lives in
+	// this directory.
+	realPath := filepath.Join(dir, "real-chart.mbtiles")
+	if err := os.WriteFile(realPath, []byte("bytes"), 0o644); err != nil {
+		t.Fatalf("write real chart: %v", err)
+	}
+
+	result, err := sweepSatChartsDir(dir)
+	if err != nil {
+		t.Fatalf("sweepSatChartsDir: %v", err)
+	}
+	if result.RemovedTemp != 1 {
+		t.Fatalf("expected 1 removed temp file, got %d", result.RemovedTemp)
+	}
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Fatalf("expected the temp upload to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(realPath); err != nil {
+		t.Fatalf("expected the real chart file to remain, got %v", err)
+	}
+}
+
+func TestSweepSatChartsDir_MissingDirectoryIsNotAnError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "does-not-exist-yet")
+
+	result, err := sweepSatChartsDir(dir)
+	if err != nil {
+		t.Fatalf("sweepSatChartsDir: %v", err)
+	}
+	if result.RemovedTemp != 0 {
+		t.Fatalf("expected 0 removed temp files for a missing directory, got %d", result.RemovedTemp)
+	}
+}
+
+// ── U-7: attacker-supplied SQLite opened read-write ─────────────────────
+
+// buildWALModeMBTilesFixture writes a minimal valid MBTiles file at path,
+// then switches it into WAL journal mode. journal_mode is persisted in a
+// SQLite file's own header, not the connection that set it, so this stays
+// in effect for whoever opens the file next - a real WAL-mode export
+// toolchain would leave a file in exactly this state, and so would an
+// attacker deliberately crafting one for U-7.
+func buildWALModeMBTilesFixture(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	schema := []string{
+		`CREATE TABLE metadata (name TEXT, value TEXT)`,
+		`CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB)`,
+	}
+	for _, stmt := range schema {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec schema %q: %v", stmt, err)
+		}
+	}
+	meta := map[string]string{
+		"name": "WAL Chart", "bounds": "150,-25,151,-24", "minzoom": "5", "maxzoom": "5", "format": "png",
+	}
+	for k, v := range meta {
+		if _, err := db.Exec(`INSERT INTO metadata (name, value) VALUES (?, ?)`, k, v); err != nil {
+			t.Fatalf("insert metadata %q: %v", k, err)
+		}
+	}
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		t.Fatalf("set WAL journal mode: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close fixture db: %v", err)
+	}
+}
+
+// TestPlainSQLiteOpenOnWALModeFile_TransientlyCreatesSidecars characterizes
+// the mechanism U-7 is about, independent of this package's own code: a
+// bare sql.Open (what readMBTilesMetadata used to use) reading a WAL-mode
+// file makes SQLite create -wal/-shm sidecars while a statement is open
+// against it. A clean return auto-checkpoints and removes them again - the
+// harm is a crash, OOM kill, or restart while that connection is open,
+// which leaves them behind permanently (invisible to the catalog's
+// ".mbtiles" filter and to sweepSatChartsDir). That means the sidecars
+// have to be checked for *before* the connection closes, not after; this
+// test exists so the regression test below (on the fixed DSN) has
+// something real to regress against in this environment.
+func TestPlainSQLiteOpenOnWALModeFile_TransientlyCreatesSidecars(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wal-mode-plain.mbtiles")
+	buildWALModeMBTilesFixture(t, path)
+
+	db, err := sql.Open("sqlite", path) // the old, unguarded form
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT name, value FROM metadata`)
+	if err != nil {
+		t.Fatalf("query metadata: %v", err)
+	}
+	for rows.Next() {
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("rows.Close: %v", err)
+	}
+
+	foundWAL := statExists(t, path+"-wal")
+	foundSHM := statExists(t, path+"-shm")
+	if !foundWAL || !foundSHM {
+		t.Fatalf("expected a bare sql.Open to create -wal/-shm sidecars while reading a WAL-mode file (foundWAL=%v foundSHM=%v) - if this stops reproducing, the mode=ro&immutable=1 test below is no longer proving anything", foundWAL, foundSHM)
+	}
+}
+
+// TestSatChartReadOnlyDSN_NeverCreatesWALSidecars is U-7's actual
+// regression test: satChartReadOnlyDSN is the DSN both readMBTilesMetadata
+// and satChartHandleCache.get open uploaded/attacker-supplied MBTiles
+// bytes with. Unlike the bare form above, mode=ro&immutable=1 must never
+// create -wal/-shm sidecars for a WAL-mode file, checked here while the
+// connection is still open so a close-time auto-checkpoint can't hide a
+// transient creation the way it would for the plain form.
+func TestSatChartReadOnlyDSN_NeverCreatesWALSidecars(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wal-mode-readonly.mbtiles")
+	buildWALModeMBTilesFixture(t, path)
+
+	db, err := sql.Open("sqlite", satChartReadOnlyDSN(path))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT name, value FROM metadata`)
+	if err != nil {
+		t.Fatalf("query metadata: %v", err)
+	}
+	for rows.Next() {
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("rows.Close: %v", err)
+	}
+
+	if statExists(t, path+"-wal") || statExists(t, path+"-shm") {
+		t.Fatalf("satChartReadOnlyDSN created a -wal/-shm sidecar while reading a WAL-mode file - expected mode=ro&immutable=1 to avoid needing WAL machinery at all (U-7)")
+	}
+}
+
+func statExists(t *testing.T, path string) bool {
+	t.Helper()
+	if _, err := os.Stat(path); err == nil {
+		return true
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return false
+}
+
+// ── U-6: tiles serve without nosniff/CSP ────────────────────────────────
+
+// TestSatChartTileHandler_SetsNosniffAndCSPHeaders is U-6's regression
+// test, mirroring documentContentHandler's headers (documents_handlers.go).
+func TestSatChartTileHandler_SetsNosniffAndCSPHeaders(t *testing.T) {
+	dir := setupSatChartsTest(t)
+	id := "header-test-chart"
+	buildTestMBTiles(t, filepath.Join(dir, id+".mbtiles"), 5, 10, 12, "Header Test", "150,-25,151,-24")
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/sat-charts/"+id+"/5/10/12", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id", "z", "x", "y")
+	c.SetParamValues(id, "5", "10", "12")
+
+	if err := satChartTileHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected X-Content-Type-Options: nosniff, got %q", got)
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); got != "sandbox" {
+		t.Fatalf("expected Content-Security-Policy: sandbox, got %q", got)
+	}
+}

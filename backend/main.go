@@ -360,6 +360,17 @@ func main() {
 			sweep.RemovedTemp, sweep.OrphanFiles, sweep.MissingFiles)
 	}
 
+	// Satellite chart uploads (ADR 0011): same abandoned-temp-file sweep as
+	// documents above (U-5). sweepSatChartsDir tolerates a missing
+	// directory on its own (a brand new install that has never taken an
+	// upload yet), so unlike the documents store above there's no MkdirAll
+	// needed first.
+	if sweep, err := sweepSatChartsDir(satChartsDirPath()); err != nil {
+		log.Fatalf("failed to sweep sat charts directory: %v", err)
+	} else if sweep.RemovedTemp > 0 {
+		log.Printf("sat-charts: swept %d abandoned upload(s)", sweep.RemovedTemp)
+	}
+
 	// Document indexer (ADR 0106, B4): local extraction always, Mate's paid
 	// OCR/summarise-and-tag enrichment only when a document's own consent
 	// flag says so. Its own *http.Client, not openRouterHTTPClient (the
