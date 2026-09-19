@@ -51,6 +51,30 @@ func TestHostAllowedForFTP_NoPortInHostStillMatches(t *testing.T) {
 	}
 }
 
+// TestHostAllowedForFTP_NonStandardPortRejected is the E-6 security-audit
+// finding: net.SplitHostPort strips the port before matching, so an
+// allowlisted "ftp.bom.gov.au" previously let a guest dial ANY port on that
+// host - "ftp.bom.gov.au:8080" passed the hostname check even though 8080
+// has nothing to do with FTP. allowed_hosts.json has no existing convention
+// for encoding a port (it's shared verbatim with the HTTP allowlist, which
+// also only ever matches a hostname), so the fix pins every FTP connection
+// to the standard control port rather than trusting a port the guest itself
+// supplied in the request.
+func TestHostAllowedForFTP_NonStandardPortRejected(t *testing.T) {
+	if hostAllowedForFTP("ftp.bom.gov.au:8080", []string{"ftp.bom.gov.au"}) {
+		t.Fatalf("expected a non-standard port on an otherwise-allowed host to be rejected")
+	}
+}
+
+// TestHostAllowedForFTP_StandardPortExplicitlyStatedStillMatches proves the
+// fix doesn't break the ordinary case: a request that explicitly names the
+// standard FTP port must still match exactly like before.
+func TestHostAllowedForFTP_StandardPortExplicitlyStatedStillMatches(t *testing.T) {
+	if !hostAllowedForFTP("ftp.bom.gov.au:21", []string{"ftp.bom.gov.au"}) {
+		t.Fatalf("expected the standard FTP port stated explicitly to still match")
+	}
+}
+
 // --- End-to-end: prove the wiring in newWasmPluginBase actually works, not
 // just wasm_ftp_spike_test.go's standalone ad-hoc manifest. Both tests below
 // use the SAME compiled fixture (ftpfetch.wasm, which unlike the spike's
@@ -145,6 +169,72 @@ func TestFTPFetch_DisallowedHostPanicsAndIsRecoveredIntoCleanError(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "not allowed") {
 		t.Errorf("expected the error to mention the host was not allowed, got: %v", err)
+	}
+}
+
+// TestValidateFTPPath_ControlCharactersRejected is the E-5 security-audit
+// finding: conn.Retr(path) reaches jlaffaye/ftp's textproto.Writer.PrintfLine
+// as `RETR <path>`, which appends the protocol's CRLF terminator but does
+// not itself strip or escape one embedded in path - so a guest sending
+// "/x\r\nPORT 10,0,0,5,0,80" would inject a second, arbitrary FTP command
+// onto the already-authenticated control connection. Any ASCII control
+// character (not just CR/LF) must be rejected before the path ever reaches
+// Retr.
+func TestValidateFTPPath_ControlCharactersRejected(t *testing.T) {
+	cases := []string{
+		"/x\r\nPORT 10,0,0,5,0,80",
+		"/x\nPORT 10,0,0,5,0,80",
+		"/x\rPORT 10,0,0,5,0,80",
+		"/x\x00y",
+		"/x\x7fy", // DEL
+	}
+	for _, path := range cases {
+		if err := validateFTPPath(path); err == nil {
+			t.Errorf("expected validateFTPPath to reject %q", path)
+		}
+	}
+}
+
+func TestValidateFTPPath_OrdinaryPathAccepted(t *testing.T) {
+	if err := validateFTPPath("/anon/gen/fwo/IDQ20085.txt"); err != nil {
+		t.Errorf("expected an ordinary path to be accepted, got: %v", err)
+	}
+}
+
+// TestFTPFetch_CRLFInjectedPathPanicsAndIsRecoveredIntoCleanError proves the
+// CR/LF rejection is wired into the real host-function call path (not just
+// the standalone validateFTPPath helper) and, like the disallowed-host
+// check right next to it in newFTPFetchHostFunction, panics rather than
+// returning an ordinary {"error": "..."} response - this is a
+// security-boundary violation from a misbehaving guest, not a legitimate
+// operational fetch failure, so it must be treated the same way. This
+// never dials the network: the check runs before fetchOverFTP is ever
+// called, the same way the disallowed-host check does.
+func TestFTPFetch_CRLFInjectedPathPanicsAndIsRecoveredIntoCleanError(t *testing.T) {
+	manifest := extism.Manifest{
+		Wasm:         []extism.Wasm{extism.WasmFile{Path: ftpFetchFixtureWasm}},
+		AllowedHosts: []string{"ftp.bom.gov.au"},
+	}
+
+	base, err := newWasmPluginBase(manifest, "plugins/test")
+	if err != nil {
+		t.Fatalf("newWasmPluginBase failed: %v", err)
+	}
+
+	input, err := json.Marshal(ftpFetchFixtureInput{
+		Host: "ftp.bom.gov.au:21",
+		Path: "/anon/gen/fwo/IDQ20085.txt\r\nPORT 10,0,0,5,0,80",
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	_, err = base.call("fetch_ftp", input)
+	if err == nil {
+		t.Fatalf("expected a clean Go error for a CRLF-injected path, got nil")
+	}
+	if !strings.Contains(err.Error(), "control character") {
+		t.Errorf("expected the error to mention the control character, got: %v", err)
 	}
 }
 

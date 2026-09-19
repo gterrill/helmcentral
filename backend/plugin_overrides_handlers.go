@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gobwas/glob"
 	"github.com/labstack/echo/v4"
 )
 
@@ -229,6 +230,58 @@ type pluginOverridesRequest struct {
 	AllowedSecrets []string `json:"allowed_secrets"`
 }
 
+// hostAllowlistEntryIsOverlyBroad reports whether pattern, once its glob
+// wildcard characters ('*' and '?') are stripped, has no literal hostname
+// content left at all - i.e. it matches every possible hostname (or so vast
+// a swath of them as to be functionally the same thing) rather than scoping
+// egress to a specific host or host family. A bare "*" is the sharpest
+// case named by the E-2 finding - allowedHostsForWasmPlugin
+// (wasm_plugin.go) hands this verbatim to BOTH Extism's built-in HTTP host
+// function and wasm_ftp_fetch.go's hostAllowedForFTP, so ["*"] disables the
+// WASM sandbox's only egress control for both protocols at once - but "**",
+// "***", or any pattern built from nothing but wildcard characters has the
+// identical effect and is rejected the same way. A pattern that DOES carry
+// literal content, like "*.bom.gov.au" (any BOM subdomain) or
+// "mirror.example.org" (ADR 0101's Overpass-mirror use case: pointing a
+// plugin at a specific alternate host), is intentionally left alone - an
+// operator scoping egress to a host family they name is exactly the
+// allowlist working as designed, not the control being defeated.
+func hostAllowlistEntryIsOverlyBroad(pattern string) bool {
+	trimmed := strings.TrimSpace(pattern)
+	if trimmed == "" {
+		return false
+	}
+	stripped := strings.NewReplacer("*", "", "?", "").Replace(trimmed)
+	return strings.TrimSpace(stripped) == ""
+}
+
+// validateAllowedHosts is the actual security fix for E-2: allowedHosts was
+// previously stored verbatim by postPluginOverridesHandler with no
+// validation at all, and read back verbatim by allowedHostsForWasmPlugin
+// for both Extism's built-in HTTP host function and wasm_ftp_fetch.go's
+// FTP allowlist. Every entry must be BOTH a well-formed glob pattern -
+// checked with glob.Compile, never glob.MustCompile, which panics on
+// something like "[" (currently recovered into a per-call error deep
+// inside hostAllowedForFTP/Extism's own matcher, silently breaking the
+// plugin on every call instead of being caught once, here, at save time) -
+// and not so broad that it defeats host allowlisting altogether
+// (hostAllowlistEntryIsOverlyBroad). Called before ANY entry is persisted,
+// so a request with one bad entry among several good ones saves nothing at
+// all, matching this handler's existing all-or-nothing validation posture
+// for config fields (postPluginConfigHandler).
+func validateAllowedHosts(hosts []string) error {
+	for _, h := range hosts {
+		trimmed := strings.TrimSpace(h)
+		if _, err := glob.Compile(trimmed); err != nil {
+			return fmt.Errorf("allowed host %q is not a valid pattern: %w", h, err)
+		}
+		if hostAllowlistEntryIsOverlyBroad(trimmed) {
+			return fmt.Errorf("allowed host %q is too broad and would match every hostname, disabling the plugin sandbox's egress control", h)
+		}
+	}
+	return nil
+}
+
 // postPluginOverridesHandler is POST /api/plugins/:type/:id/overrides. A
 // resolved provider that isn't WASM-backed is an invariant violation (see
 // pluginPathProvider doc comment), not a client-triggerable condition -
@@ -262,6 +315,10 @@ func postPluginOverridesHandler(c echo.Context) error {
 	}
 	if req.AllowedSecrets == nil {
 		req.AllowedSecrets = []string{}
+	}
+
+	if err := validateAllowedHosts(req.AllowedHosts); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
 	if err := globalPluginOverridesStore.Set(pp.Path(), req.AllowedHosts, req.AllowedSecrets); err != nil {

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -86,10 +87,34 @@ type secretsStore struct {
 // returns an error rather than proceeding - no silent regeneration, no
 // plaintext fallback, per this repo's fail-fast/no-masking-fallback policy.
 // The caller (main.go) is expected to log.Fatalf on this error.
+// ensureDirMode0700 creates dir if needed (like os.MkdirAll) and then
+// explicitly chmods it to 0700, closing the S-3 security-audit finding:
+// os.MkdirAll returns nil WITHOUT touching the mode of a directory that
+// already exists, so a bare `os.MkdirAll(dir, 0o700)` only ever produces
+// 0700 the very first time a directory is created (and even then, only if
+// nothing upstream of it in the process - e.g. an earlier, wider-mode
+// MkdirAll call on the very same path - got there first). This data
+// directory holds secrets.sqlite (ciphertext + nonce - the plaintext is
+// safe, but the "key" column names which secret each row is, and the S-4
+// fix below binds that name into the AAD rather than treating it as
+// non-sensitive), sessions.sqlite's token-hash table, and the alarm log -
+// none of which modernc.org/sqlite creates more restrictively than 0644, so
+// the directory mode is the only thing standing between those files and any
+// other local account on the box.
+func ensureDirMode0700(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	return nil
+}
+
 func newSecretsStore(dbPath, keyPath string) (*secretsStore, error) {
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := ensureDirMode0700(dir); err != nil {
 			return nil, fmt.Errorf("create secrets store directory: %w", err)
 		}
 	}
@@ -163,7 +188,7 @@ func resolveMasterKey(keyPath string) ([32]byte, error) {
 	}
 	dir := filepath.Dir(keyPath)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := ensureDirMode0700(dir); err != nil {
 			return key, fmt.Errorf("secrets store: create master key directory: %w", err)
 		}
 	}
@@ -179,12 +204,47 @@ func resolveMasterKey(keyPath string) ([32]byte, error) {
 // lost, or mismatched between HELMCENTRAL_MASTER_KEY and keyPath) and the
 // store must refuse to proceed rather than silently treating those secrets
 // as absent.
+//
+// It also performs a one-time AAD migration (S-4, security audit 2026-09):
+// every row is now encrypted with its "key" column (the secret's NAME)
+// bound in as AES-GCM's additional authenticated data, so a (ciphertext,
+// nonce) pair can no longer be swapped onto a different row's key and still
+// decrypt - see encrypt/decrypt's own doc comments. A row written before
+// this change used a nil AAD, so it will fail decrypt(key, ...) here even
+// though the master key is perfectly correct; for each row that fails the
+// AAD-bound attempt, a second attempt with a nil AAD (decryptWithAAD(nil,
+// ...)) checks whether it's simply pre-migration rather than genuinely
+// undecryptable. A row that decrypts under nil AAD is re-encrypted
+// AAD-bound and the new (ciphertext, nonce) persisted immediately, logged
+// individually - this is the ONE place in this file nil AAD is ever tried,
+// and it only ever runs once per row (the next open finds it already
+// AAD-bound and takes the fast path above). This is deliberately NOT a
+// per-call fallback inside decrypt() itself - Get/Set never try nil AAD -
+// so nothing about the store's steady-state behavior silently accepts the
+// weaker pre-migration format going forward.
+//
+// This project has a single operator and no installed base (AGENTS.md), so
+// a clean re-encrypt-on-open was chosen over failing the boot check and
+// requiring a separate operator-triggered migration step: there is no real
+// fleet of existing installs whose data a botched automatic migration could
+// put at risk, and re-encrypting is safe to run unconditionally (a row
+// already in the new format never reaches the nil-AAD branch at all).
+//
+// A row that fails BOTH the AAD-bound and nil-AAD attempts is a genuine
+// integrity failure (wrong/rotated key) and still refuses to open the
+// store, exactly as before this change.
 func (s *secretsStore) verifyExistingRowsDecrypt(keyPath string) error {
 	rows, err := s.db.Query(`SELECT key, ciphertext, nonce FROM secrets`)
 	if err != nil {
 		return fmt.Errorf("secrets store: list existing secrets: %w", err)
 	}
 	defer rows.Close()
+
+	type legacyRow struct {
+		key       string
+		plaintext string
+	}
+	var toMigrate []legacyRow
 
 	failed := 0
 	for rows.Next() {
@@ -193,9 +253,18 @@ func (s *secretsStore) verifyExistingRowsDecrypt(keyPath string) error {
 		if err := rows.Scan(&key, &ciphertext, &nonce); err != nil {
 			return fmt.Errorf("secrets store: scan existing secret row: %w", err)
 		}
-		if _, err := s.decrypt(ciphertext, nonce); err != nil {
-			failed++
+		if _, err := s.decrypt(key, ciphertext, nonce); err == nil {
+			continue // already AAD-bound (current format) - nothing to do
 		}
+		plaintext, legacyErr := s.decryptWithAAD(nil, ciphertext, nonce)
+		if legacyErr != nil {
+			// Fails under both the current AAD-bound key and the legacy
+			// nil-AAD format: a genuine integrity failure, not a format
+			// difference.
+			failed++
+			continue
+		}
+		toMigrate = append(toMigrate, legacyRow{key: key, plaintext: plaintext})
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("secrets store: iterate existing secrets: %w", err)
@@ -204,10 +273,28 @@ func (s *secretsStore) verifyExistingRowsDecrypt(keyPath string) error {
 	if failed > 0 {
 		return fmt.Errorf("secrets store: cannot decrypt %d existing secret(s) with the current master key — check HELMCENTRAL_MASTER_KEY or %s", failed, keyPath)
 	}
+
+	for _, row := range toMigrate {
+		ciphertext, nonce, err := s.encrypt(row.key, row.plaintext)
+		if err != nil {
+			return fmt.Errorf("secrets store: AAD migration: re-encrypt %s: %w", row.key, err)
+		}
+		if _, err := s.db.Exec(`UPDATE secrets SET ciphertext = ?, nonce = ? WHERE key = ?`, ciphertext, nonce, row.key); err != nil {
+			return fmt.Errorf("secrets store: AAD migration: persist %s: %w", row.key, err)
+		}
+		log.Printf("secrets store: migrated %q from nil-AAD to key-bound-AAD encryption (S-4, one-time)", row.key)
+	}
+	if len(toMigrate) > 0 {
+		log.Printf("secrets store: AAD migration complete, %d secret(s) re-encrypted", len(toMigrate))
+	}
+
 	return nil
 }
 
-func (s *secretsStore) encrypt(plaintext string) (ciphertext, nonce []byte, err error) {
+// encrypt seals plaintext under the store's master key, binding key (the
+// secret's own name, e.g. "SIGNALK_PASSWORD") in as AES-GCM's additional
+// authenticated data. See decrypt's doc comment for why.
+func (s *secretsStore) encrypt(key, plaintext string) (ciphertext, nonce []byte, err error) {
 	block, err := aes.NewCipher(s.key[:])
 	if err != nil {
 		return nil, nil, fmt.Errorf("secrets store: create AES cipher: %w", err)
@@ -220,11 +307,37 @@ func (s *secretsStore) encrypt(plaintext string) (ciphertext, nonce []byte, err 
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, nil, fmt.Errorf("secrets store: generate nonce: %w", err)
 	}
-	ciphertext = gcm.Seal(nil, nonce, []byte(plaintext), nil)
+	ciphertext = gcm.Seal(nil, nonce, []byte(plaintext), []byte(key))
 	return ciphertext, nonce, nil
 }
 
-func (s *secretsStore) decrypt(ciphertext, nonce []byte) (string, error) {
+// decrypt opens ciphertext/nonce under the store's master key, requiring
+// key (the row's own "key" column) as AES-GCM's additional authenticated
+// data (S-4, security audit 2026-09).
+//
+// Before this, Seal/Open both passed a nil AAD, so the "key" column was
+// authenticated by nothing: gcm.Open only checks that ciphertext+nonce are
+// internally consistent with the master key, never that they were sealed
+// FOR this particular row. A (ciphertext, nonce) pair copied from one row
+// into another - a botched restore, a migration bug, direct sqlite
+// tampering - would decrypt successfully under the wrong key name, handing
+// back a real, validly-decrypted secret that just isn't the one the caller
+// asked for (e.g. reading SIGNALK_PASSWORD back with OPENROUTER_API_KEY's
+// value). Binding key as AAD makes gcm.Open's authentication tag itself
+// depend on which row it's being opened for, so a swapped pair now fails
+// closed instead of silently decrypting into the wrong secret.
+func (s *secretsStore) decrypt(key string, ciphertext, nonce []byte) (string, error) {
+	return s.decryptWithAAD([]byte(key), ciphertext, nonce)
+}
+
+// decryptWithAAD is decrypt's shared implementation, taking the AAD
+// explicitly rather than always deriving it from a key name. It exists
+// ONLY so verifyExistingRowsDecrypt's one-time migration can attempt the
+// legacy nil-AAD format (aad == nil) without duplicating the AES/GCM setup
+// - ordinary callers (Get, Set, decrypt) always go through decrypt(key,
+// ...) and never call this directly, so nothing in the store's normal
+// read/write path ever tries more than one AAD per call.
+func (s *secretsStore) decryptWithAAD(aad, ciphertext, nonce []byte) (string, error) {
 	block, err := aes.NewCipher(s.key[:])
 	if err != nil {
 		return "", fmt.Errorf("secrets store: create AES cipher: %w", err)
@@ -233,7 +346,7 @@ func (s *secretsStore) decrypt(ciphertext, nonce []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("secrets store: create GCM: %w", err)
 	}
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, aad)
 	if err != nil {
 		return "", fmt.Errorf("secrets store: decrypt: %w", err)
 	}
@@ -251,7 +364,7 @@ func (s *secretsStore) Get(key string) (value string, ok bool, err error) {
 		return "", false, fmt.Errorf("secrets store: read %s: %w", key, err)
 	}
 
-	plaintext, err := s.decrypt(ciphertext, nonce)
+	plaintext, err := s.decrypt(key, ciphertext, nonce)
 	if err != nil {
 		return "", false, fmt.Errorf("secrets store: decrypt %s: %w", key, err)
 	}
@@ -269,7 +382,7 @@ func (s *secretsStore) Set(key, value string) error {
 		return nil
 	}
 
-	ciphertext, nonce, err := s.encrypt(value)
+	ciphertext, nonce, err := s.encrypt(key, value)
 	if err != nil {
 		return err
 	}

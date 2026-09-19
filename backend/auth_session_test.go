@@ -226,6 +226,172 @@ func TestSessionStore_ValidateDoesNotRenewWithinThreshold(t *testing.T) {
 	}
 }
 
+// TestSessionStore_ValidateExpiresPastAbsoluteMaxLifetimeEvenIfRecentlyUsed
+// is the S-5 security-audit finding: Validate slides expires_at forward on
+// every use more than sessionRenewThreshold old, and never once consults
+// created_at, so a token used regularly (say, weekly) never actually
+// expires - it just keeps sliding forever. This inserts a row whose
+// created_at is far beyond sessionAbsoluteMaxLifetime in the past, but
+// whose expires_at/last_seen_at look exactly like a session that has been
+// kept alive by recent, regular use (the sliding-window check alone would
+// call this valid). Validate must still refuse it.
+func TestSessionStore_ValidateExpiresPastAbsoluteMaxLifetimeEvenIfRecentlyUsed(t *testing.T) {
+	store := newTestSessionStore(t)
+
+	token, hash, err := generateSessionToken()
+	if err != nil {
+		t.Fatalf("generateSessionToken: %v", err)
+	}
+
+	now := time.Now().UTC()
+	createdAt := now.Add(-sessionAbsoluteMaxLifetime - 24*time.Hour) // well past the absolute cap
+	lastSeen := now.Add(-10 * time.Minute)                           // "used" recently
+	expiresAt := now.Add(sessionTTL)                                 // sliding window says "comfortably valid"
+	if _, err := store.db.Exec(
+		`INSERT INTO sessions (token_hash, sk_username, role, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		hash, "skipper", roleAdmin, createdAt.Unix(), expiresAt.Unix(), lastSeen.Unix(),
+	); err != nil {
+		t.Fatalf("inserting a row past the absolute cap directly: %v", err)
+	}
+
+	rec, err := store.Validate(token)
+	if err != nil {
+		t.Fatalf("Validate: unexpected error: %v", err)
+	}
+	if rec != nil {
+		t.Fatalf("expected a session older than sessionAbsoluteMaxLifetime to be invalid regardless of sliding expiry, got %+v", rec)
+	}
+}
+
+// TestSessionStore_ValidateSlideNeverExceedsAbsoluteMaxLifetime proves the
+// sliding renewal itself is capped: a session inside the absolute lifetime
+// but close to its edge must not be slid a full fresh sessionTTL past
+// created_at - only up to the absolute deadline.
+func TestSessionStore_ValidateSlideNeverExceedsAbsoluteMaxLifetime(t *testing.T) {
+	store := newTestSessionStore(t)
+
+	token, hash, err := generateSessionToken()
+	if err != nil {
+		t.Fatalf("generateSessionToken: %v", err)
+	}
+
+	now := time.Now().UTC()
+	// Created just under 1 hour short of the absolute cap, last used long
+	// enough ago to trigger a slide, with a sliding expiry that (before this
+	// fix) would jump a full sessionTTL past now - well beyond the absolute
+	// deadline computed from created_at.
+	createdAt := now.Add(-sessionAbsoluteMaxLifetime + 30*time.Minute)
+	lastSeen := now.Add(-2 * time.Hour)
+	expiresAt := now.Add(1 * time.Hour)
+	if _, err := store.db.Exec(
+		`INSERT INTO sessions (token_hash, sk_username, role, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		hash, "skipper", roleReadwrite, createdAt.Unix(), expiresAt.Unix(), lastSeen.Unix(),
+	); err != nil {
+		t.Fatalf("inserting a near-cap row directly: %v", err)
+	}
+
+	rec, err := store.Validate(token)
+	if err != nil {
+		t.Fatalf("Validate: unexpected error: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("expected the session to still be valid (inside the absolute cap)")
+	}
+
+	absoluteDeadline := createdAt.Add(sessionAbsoluteMaxLifetime)
+	if rec.ExpiresAt.After(absoluteDeadline.Add(time.Second)) {
+		t.Fatalf("expected the slid expiry to be capped at the absolute deadline %v, got %v", absoluteDeadline, rec.ExpiresAt)
+	}
+	naiveSlide := now.Add(sessionTTL)
+	if rec.ExpiresAt.After(naiveSlide.Add(-time.Hour)) {
+		t.Fatalf("expected the slide to be visibly capped short of a naive now+sessionTTL (%v), got %v", naiveSlide, rec.ExpiresAt)
+	}
+}
+
+// TestSessionStore_DeleteAllForUserInvalidatesOnlyThatUsersSessions is the
+// S-5 "no sign-out-everywhere, no role-change revocation" finding:
+// Delete(token) only ever takes the single token presented at logout, so
+// there was no way to revoke every session belonging to one SignalK
+// username at once - needed both for an operator-initiated "sign out all
+// my devices" and for invalidating existing sessions after a SignalK role
+// change. A second, unrelated user's session must be left untouched.
+func TestSessionStore_DeleteAllForUserInvalidatesOnlyThatUsersSessions(t *testing.T) {
+	store := newTestSessionStore(t)
+
+	tokenA1, err := store.Create("skipper", roleAdmin)
+	if err != nil {
+		t.Fatalf("Create (skipper, device 1): %v", err)
+	}
+	tokenA2, err := store.Create("skipper", roleAdmin)
+	if err != nil {
+		t.Fatalf("Create (skipper, device 2): %v", err)
+	}
+	tokenB, err := store.Create("mate", roleReadonly)
+	if err != nil {
+		t.Fatalf("Create (mate): %v", err)
+	}
+
+	n, err := store.DeleteAllForUser("skipper")
+	if err != nil {
+		t.Fatalf("DeleteAllForUser: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected DeleteAllForUser to report 2 rows removed, got %d", n)
+	}
+
+	for _, tok := range []string{tokenA1, tokenA2} {
+		rec, err := store.Validate(tok)
+		if err != nil {
+			t.Fatalf("Validate (skipper token after DeleteAllForUser): %v", err)
+		}
+		if rec != nil {
+			t.Fatalf("expected skipper's session to be invalidated, got %+v", rec)
+		}
+	}
+
+	rec, err := store.Validate(tokenB)
+	if err != nil {
+		t.Fatalf("Validate (mate token after skipper's DeleteAllForUser): %v", err)
+	}
+	if rec == nil {
+		t.Fatal("expected mate's unrelated session to survive skipper's DeleteAllForUser")
+	}
+}
+
+// TestSessionStore_DeleteAllInvalidatesEverySession proves the box-wide
+// revocation primitive (S-5) removes every session for every user, not just
+// one.
+func TestSessionStore_DeleteAllInvalidatesEverySession(t *testing.T) {
+	store := newTestSessionStore(t)
+
+	tokenA, err := store.Create("skipper", roleAdmin)
+	if err != nil {
+		t.Fatalf("Create (skipper): %v", err)
+	}
+	tokenB, err := store.Create("mate", roleReadonly)
+	if err != nil {
+		t.Fatalf("Create (mate): %v", err)
+	}
+
+	n, err := store.DeleteAll()
+	if err != nil {
+		t.Fatalf("DeleteAll: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected DeleteAll to report 2 rows removed, got %d", n)
+	}
+
+	for _, tok := range []string{tokenA, tokenB} {
+		rec, err := store.Validate(tok)
+		if err != nil {
+			t.Fatalf("Validate after DeleteAll: %v", err)
+		}
+		if rec != nil {
+			t.Fatalf("expected every session to be invalidated by DeleteAll, got %+v", rec)
+		}
+	}
+}
+
 func TestSessionStore_SweepRemovesOnlyExpiredRows(t *testing.T) {
 	store := newTestSessionStore(t)
 

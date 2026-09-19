@@ -118,6 +118,19 @@ func fetchOverFTP(host, path string) (string, error) {
 	return string(body), nil
 }
 
+// ftpStandardPort is the standard FTP control-connection port.
+// hostAllowedForFTP pins every allowed FTP host to this port (E-6, security
+// audit 2026-09): allowed_hosts.json's entries are bare hostnames, shared
+// verbatim with the HTTP allowlist (which also only ever matches a parsed
+// URL's Hostname(), never a port) - there is no existing convention for an
+// operator to encode a non-standard port in the allowlist at all. Without
+// this pin, allowlisting "ftp.bom.gov.au" for its marine-warnings FTP
+// bulletins also let a guest dial ANY OTHER port on that host, since
+// net.SplitHostPort below discards the guest-supplied port before matching
+// - turning a narrow, host-scoped grant into "any TCP port on this box",
+// nothing to do with FTP.
+const ftpStandardPort = "21"
+
 // hostAllowedForFTP reports whether host (an FTP "host" value such as
 // "ftp.bom.gov.au:21") is permitted by allowedHosts, using EXACTLY the same
 // enforcement go-sdk@v1.7.1's host.go httpRequest uses for the built-in HTTP
@@ -126,15 +139,21 @@ func fetchOverFTP(host, path string) (string, error) {
 // where the hostname comes from - httpRequest matches against a parsed
 // url.URL's Hostname() (which never includes a port); here it's derived by
 // stripping an optional ":<port>" suffix from host, since the FTP contract's
-// host field is a bare "host[:port]" string, not a URL.
+// host field is a bare "host[:port]" string, not a URL. The port, once
+// split off, is checked separately against ftpStandardPort - see its own
+// doc comment.
 //
 // A nil or empty allowedHosts rejects every host - the same default-deny
 // posture manifestForWasmPlugin already documents for HTTP: no
 // <name>.allowed_hosts.json file means no network access for that plugin.
 func hostAllowedForFTP(host string, allowedHosts []string) bool {
 	hostname := host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		hostname = h
+	port := ftpStandardPort
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		hostname, port = h, p
+	}
+	if port != ftpStandardPort {
+		return false
 	}
 
 	for _, allowedHost := range allowedHosts {
@@ -147,6 +166,27 @@ func hostAllowedForFTP(host string, allowedHosts []string) bool {
 	}
 
 	return false
+}
+
+// validateFTPPath rejects any FTP path containing a carriage return, line
+// feed, or other ASCII control character (E-5, security audit 2026-09).
+// jlaffaye/ftp's conn.Retr(path) issues `RETR <path>` via
+// textproto.Writer.PrintfLine, which appends the protocol's own CRLF
+// terminator but does not itself strip or escape one embedded in path - so
+// a guest sending "/x\r\nPORT 10,0,0,5,0,80" as its path would inject a
+// second, arbitrary FTP command onto the already-authenticated control
+// connection, immediately after the RETR line the host intended to send
+// alone. Checked against every byte below 0x20 (not just CR 0x0D and LF
+// 0x0A) plus DEL (0x7F), the full ASCII control range, since any of them
+// embedded in a command line is the same class of problem even where CRLF
+// itself isn't involved.
+func validateFTPPath(path string) error {
+	for _, r := range path {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("path %q contains a control character, refusing to send it to the FTP server", path)
+		}
+	}
+	return nil
 }
 
 // newFTPFetchHostFunction builds the "ftp_fetch" custom Extism host
@@ -162,10 +202,14 @@ func hostAllowedForFTP(host string, allowedHosts []string) bool {
 // conditions, not legitimate operational failures. A disallowed host ALSO
 // panics (mirroring Extism's own built-in http_request behavior for a
 // disallowed host) - this is a security-boundary violation, not a normal
-// fetch failure. wasmPluginBase.call already wraps every guest call in a
-// deferred recover(), so any of these panics surface to the caller as a
-// clean Go error, not a crash. A legitimate FTP fetch failure (dial
-// timeout, 550 no such file, etc.) is NOT a panic: it's returned to the
+// fetch failure - and so does a path containing a control character
+// (validateFTPPath, E-5): a CRLF-injection attempt is the same class of
+// misbehaving-guest problem as a disallowed host, not an ordinary fetch
+// failure a well-behaved plugin might legitimately hit. wasmPluginBase.call
+// already wraps every guest call in a deferred recover(), so any of these
+// panics surface to the caller as a clean Go error, not a crash. A
+// legitimate FTP fetch failure (dial timeout, 550 no such file, etc.) is
+// NOT a panic: it's returned to the
 // guest as a normal {"body":"","error":"..."} response, since a plugin
 // might reasonably want to try a different path if one fetch fails.
 func newFTPFetchHostFunction(allowedHosts []string) extism.HostFunction {
@@ -182,6 +226,9 @@ func newFTPFetchHostFunction(allowedHosts []string) extism.HostFunction {
 
 		if !hostAllowedForFTP(req.Host, allowedHosts) {
 			panic(fmt.Errorf("ftp_fetch: FTP request to %q is not allowed", req.Host))
+		}
+		if err := validateFTPPath(req.Path); err != nil {
+			panic(fmt.Errorf("ftp_fetch: %w", err))
 		}
 
 		var resp ftpFetchResponse

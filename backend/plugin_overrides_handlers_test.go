@@ -249,6 +249,103 @@ func TestPostPluginOverridesHandler_SetsOverrideAndGetReflectsIt(t *testing.T) {
 	}
 }
 
+// TestPostPluginOverridesHandler_BareWildcardHostRejected is the E-2
+// security-audit finding: req.AllowedHosts was stored verbatim with no
+// validation, and Extism/hostAllowedForFTP both treat a bare "*" as a glob
+// matching every hostname - so an operator (or an installer script copying
+// a plugin's own suggested overrides without reading them closely) saving
+// ["*"] disables the WASM sandbox's only egress control for both the
+// built-in HTTP host function and wasm_ftp_fetch.go's ftp_fetch. This must
+// be rejected at save time, and the store must be left untouched (no
+// override saved) rather than partially applied.
+func TestPostPluginOverridesHandler_BareWildcardHostRejected(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	store := withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithCompanionFiles(t, []string{"file.example.com"}, nil)
+	registerTideProvider(provider)
+
+	body := `{"allowed_hosts":["*"],"allowed_secrets":[]}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/overrides", body, "tide", "valid-fixture")
+	if err := postPluginOverridesHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a bare wildcard host, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if _, _, overridden, err := store.Get(provider.Path()); err != nil {
+		t.Fatalf("Get: %v", err)
+	} else if overridden {
+		t.Fatalf("expected the rejected wildcard host to leave no saved override")
+	}
+}
+
+// TestPostPluginOverridesHandler_OverlyBroadPatternRejected covers a pattern
+// that is not the literal string "*" but has the exact same effect - purely
+// wildcard characters with no literal hostname content at all.
+func TestPostPluginOverridesHandler_OverlyBroadPatternRejected(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithCompanionFiles(t, []string{"file.example.com"}, nil)
+	registerTideProvider(provider)
+
+	body := `{"allowed_hosts":["**"],"allowed_secrets":[]}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/overrides", body, "tide", "valid-fixture")
+	if err := postPluginOverridesHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an overly broad wildcard-only pattern, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPostPluginOverridesHandler_MalformedGlobPatternRejected is the second
+// half of E-2: allowedHostsForWasmPlugin/hostAllowedForFTP both call
+// glob.MustCompile on a stored pattern, which PANICS on something like "[" -
+// currently recovered into a per-call error at read time, silently breaking
+// the plugin on every call rather than being caught once, at save time, with
+// a clear 400. This proves the save path now validates with glob.Compile
+// (not MustCompile) before ever persisting the value.
+func TestPostPluginOverridesHandler_MalformedGlobPatternRejected(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithCompanionFiles(t, []string{"file.example.com"}, nil)
+	registerTideProvider(provider)
+
+	body := `{"allowed_hosts":["["],"allowed_secrets":[]}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/overrides", body, "tide", "valid-fixture")
+	if err := postPluginOverridesHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a malformed glob pattern, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPostPluginOverridesHandler_ScopedGlobPatternAccepted proves the fix
+// doesn't overreach: a normal, scoped glob pattern like an operator would
+// use to point a plugin at an Overpass mirror (ADR 0101) or any other
+// alternate host family must still be accepted.
+func TestPostPluginOverridesHandler_ScopedGlobPatternAccepted(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithCompanionFiles(t, []string{"file.example.com"}, nil)
+	registerTideProvider(provider)
+
+	body := `{"allowed_hosts":["*.bom.gov.au","mirror.example.org"],"allowed_secrets":[]}`
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/overrides", body, "tide", "valid-fixture")
+	if err := postPluginOverridesHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for a legitimately scoped pattern, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestDeletePluginOverridesHandler_ClearsOverrideAndGetReverts(t *testing.T) {
 	withCleanTideProviderRegistry(t)
 	withTestPluginOverridesStore(t)
