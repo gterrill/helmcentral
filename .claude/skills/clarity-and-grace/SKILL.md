@@ -1,42 +1,54 @@
 ---
 name: clarity-and-grace
-description: Edits and drafts text following Joseph Williams's "Style: Lessons in Clarity and Grace" (diagnosing nominalizations, subject-action alignment, old-to-new flow, and concision).
+description: Edits and drafts documentation and technical prose combining Joseph Williams's "Style: Lessons in Clarity and Grace" and Virginia Tufte's "Artful Sentences: Syntax as Style", balancing conversational clarity and concrete operational depth with tight editorial structure.
 ---
 
-# Style: Lessons in Clarity and Grace
+# Style: Clarity, Grace, and Artful Architecture
 
-Apply Joseph Williams's diagnostic framework to all written human communication (documentation, commit messages, PR descriptions, guides, and prose). Prioritize reader cognitive load over mechanical grammar rules.
+Apply this framework to technical guides, feature documentation, and narrative prose. Deliver concrete, conversational explanations anchored by strict editorial discipline: tight prose, prominent structural scaffolding, explicit failure modes, and deliberate sentence architecture.
 
-## 1. The Core Engine: Characters and Actions
-- **Match Characters to Subjects:** Ensure the real-world actor or main entity is the grammatical subject of the sentence. Avoid abstract placeholders.
-- **Match Actions to Verbs:** Diagnose and unpack **nominalizations** (verbs masked as abstract nouns ending in *-tion*, *-ment*, *-ance*, *-ing*). Turn them back into strong verbs.
+## 1. Editorial Scaffolding & Structural Discipline
+- **Prominent Canonical Headings:** Use direct, authoritative headings (e.g., `## What it knows`, `## What leaves the boat`, `## What it is not`, `## When it can't run`). Avoid vague meta-labels.
+- **Categorical & Parallel Chunking:** When an architecture spans multiple operational domains, organize it into clean, parallel components (e.g., a 4-part data sourcing taxonomy, a 2-mode entry model).
+- **Targeted Bullet Lists:** Use scannable bullet points for itemized behaviors, system constraints, retrieval paths, and troubleshooting diagnostics. Keep them punchy and parallel.
+- **Aggressive Tightness:** Prune discursive fluff and conversational filler while retaining the natural, conversational voice. Convey technical mechanics efficiently without meandering.
+
+## 2. Concrete Operational & Technical Substance
+- **Definitive Knowledge Boundaries:** Explicitly delineate what the system knows, what it infers, and what it cannot know. Highlight fallback behaviors (e.g., marking unknown sensor feeds strictly as `"unknown"`).
+- **Explicit Failure & Degradation Modes:** Document circuit breakers, timeout thresholds, upstream API failures, and missing dependencies directly. Detail what the user sees when an integration fails.
+- **Privacy, Security & Data Egress:** Detail exactly what data leaves the local environment, when it leaves, which third-party endpoints receive it, and what remains purely local or read-only.
+- **Hard Operational Limitations & Warnings:** Distinctly isolate read-only constraints, physical safety warnings, and navigational boundaries. Never soften safety caveats.
+- **Anchoring Examples:** Embed realistic, concrete user queries, sample configurations, and realistic outputs to ground abstract explanations.
+
+## 3. The Core Engine: Characters and Actions (Williams)
+- **Match Characters to Subjects:** Ensure the real-world actor, subsystem, or tool is the grammatical subject. Eliminate passive placeholders (*there is*, *it is worth noting*).
+- **Match Actions to Verbs:** Diagnose and unpack **nominalizations** (verbs frozen into abstract nouns ending in *-tion*, *-ment*, *-ance*, *-ence*, *-ing*). Convert them into dynamic verbs.
   - *Reject:* "The execution of data serialization is performed by the worker."
   - *Adopt:* "The worker serializes the data."
+- **Aggressive Deadwood Purge:**
+  - Strip filler words (*actually, virtually, essentially, generally, in order to* -> *to*).
+  - Eliminate redundant doublets (*any and all*, *first and foremost*) and implied modifiers (*past history*, *final outcome*).
+  - Replace compound prepositions (*due to the fact that* -> *because*; *prior to* -> *before*; *in the event that* -> *if*).
+  - Silence metadiscourse (*"It is important to remember that..."*).
 
-## 2. Cohesion and Information Flow (Old-to-New)
-- **Sentence Openings:** Begin sentences with information already familiar to the reader from previous context.
-- **Sentence Endings (The Stress Position):** Push unfamiliar, complex, or critical ideas to the end of the clause. Save key technical terms or punchlines for the words directly before the period.
-- **Topic Strings:** Keep grammatical subjects relatively consistent across sentences within a paragraph to prevent perspective drift.
+## 4. Cohesion & Flow: Old-to-New (Williams)
+- **Sentence Openings (Old Information):** Anchor sentence openings in concepts already established in previous context.
+- **The Stress Position (New Information):** Push complex terms, critical technical details, and punchlines to the end of the clause, immediately before the period.
+- **Topic Consistency:** Maintain consistent grammatical subjects across sentences within a paragraph to prevent perspective drift.
+- **Deliberate Passive:** Use the passive voice only when the actor is unknown, or when shifting the receiver of the action to the subject position preserves old-to-new continuity.
 
-## 3. Concision and Cutting Deadwood
-- **Delete Meaningless Words:** Strip filler (*actually, virtually, essentially, generally, in order to* -> *to*).
-- **Purge Redundancy:** Cut paired words (*any and all*, *basic and fundamental*) and implied modifiers (*past history*, *future plans*, *final outcome*).
-- **Replace Phrases with Words:**
-  - *due to the fact that* -> *because*
-  - *in the event that* -> *if*
-  - *prior to* -> *before*
-  - *make an assumption* -> *assume*
-- **Silence Metadiscourse:** Remove throat-clearing declarations (*"It is worth noting that..."*, *"I will now demonstrate..."*).
-
-## 4. Sentence Architecture & Shape
-- **Subject-Verb Proximity:** Keep the subject and its main verb close together. Avoid wedging long, parenthetical dependent clauses between them.
-- **Parallelism:** Match grammatical structures across coordinate phrases or bullet points.
-- **Passive Voice Rule:** Use passive voice deliberately only when:
-  1. The actor is unknown or unimportant.
-  2. Shifting the object to the subject position preserves old-to-new cohesion from the preceding sentence.
+## 5. Artful Syntax & Cadence (Tufte)
+- **Cumulative (Loose) Sentences:** Front-load the base clause, trailing a cascading series of qualifying details, appositives, or participial phrases. Mimics observation and layers technical nuance without cognitive stalling.
+- **Periodic (Suspensive) Sentences:** Delay the main predicate until the period by stacking dependent conditions or clauses up front. Use for suspense, formal gravity, or intellectual climax.
+- **Kernel Isolation:** Place a crisp, short sentence directly after an expansive, multi-clause period to reset reader fatigue and create sudden emphasis.
+- **Subject-Verb Proximity:** Keep grammatical subjects and their verbs close together; let modifiers cluster *after* the core nexus (cumulative) or deliberately *before* it (periodic).
+- **Appositives over Relative Clauses:** Rename nouns directly beside the base noun without relative pronouns (*which is*, *who was*).
+- **Kinetic Participles:** Leverage present (*-ing*) and past (*-ed*) participles to inject motion into processes without subordinate clause overhead.
 
 ## Execution Workflow
-When asked to review or edit:
-1. **Diagnose:** Identify heavy nominalizations, buried agents, separated subject-verbs, and throat-clearing.
-2. **Rewrite:** Present the revised version applying the principles above.
-3. **Explain (if requested):** Briefly highlight which nominalizations were converted and how the information flow was reordered.
+When reviewing, editing, or drafting:
+1. **Establish Structure:** Map the topic into clear, authoritative headings, parallel taxonomies, and itemized bullet points.
+2. **Inject Operational Reality:** Verify that failure states, data-egress details, operational boundaries, and concrete examples are explicitly represented.
+3. **Diagnose & Tighten (Williams):** Surface buried agents, unpack nominalizations, purge deadwood, and enforce old-to-new sentence cohesion.
+4. **Sculpt Syntax (Tufte):** Apply cumulative structures for layered explanations, periodic shapes for conditional outcomes, and isolated kernels for decisive authority.
+5. **Review Output:** Confirm the result reads naturally and conversationally while maintaining dense, scannable technical discipline.
