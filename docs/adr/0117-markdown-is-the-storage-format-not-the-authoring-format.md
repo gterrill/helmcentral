@@ -5,8 +5,9 @@
 Accepted (2026-09-20). Phase 2b of the plan
 [ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md) opened:
 the note editor. ADR 0116 built the substrate (a note is a Markdown file
-with YAML frontmatter) and ADR 0118 will cover checklist runs, when that
-phase ships; this one covers what actually writes the bytes.
+with YAML frontmatter) and [ADR 0118](0118-a-checklist-is-a-run-not-a-checkbox.md)
+covers checklist runs (Phase 4); this one covers what actually writes the
+bytes.
 
 ## Context
 

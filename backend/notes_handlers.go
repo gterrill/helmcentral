@@ -138,10 +138,13 @@ func listNotesHandler(c echo.Context) error {
 // ── GET /api/notes/:id ───────────────────────────────────────────────────
 
 // getNoteHandler is GET /api/notes/:id: a note's metadata plus its body,
-// read fresh off disk - one call serving both an editor and a read-only
-// view (plan §4). It does not yet return checklist/active_run: those
-// belong to the checklist-runs feature (plan §3), which has its own
-// tables and is a later phase this one deliberately does not build.
+// read fresh off disk - one call serving both an editor and a reader (plan
+// §4). checklist is the CURRENT body's own checklist items
+// (parseChecklistItems, notes_format.go) - the template, with no tick
+// state, present even with no active run so a reader knows whether "Start
+// checklist" belongs on screen at all. active_run is that note's open
+// checklist run (checklist_runs_store.go), or null when there isn't one -
+// "you haven't started one" is a normal state, not an error.
 func getNoteHandler(c echo.Context) error {
 	doc, err := getNoteOrError(c.Param("id"))
 	if err != nil {
@@ -158,7 +161,25 @@ func getNoteHandler(c echo.Context) error {
 		log.Printf("notes: get %s: %v", doc.ID, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "note file missing or unreadable on disk"})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"document": toDocumentJSON(doc), "body": body})
+
+	checklist := parseChecklistItems(body)
+	if checklist == nil {
+		checklist = []checklistItem{}
+	}
+	activeRun, found, err := globalDocumentStore.ActiveChecklistRun(doc.ID)
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+	var activeRunJSON any
+	if found {
+		activeRunJSON = activeRun
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"document":   toDocumentJSON(doc),
+		"body":       body,
+		"checklist":  checklist,
+		"active_run": activeRunJSON,
+	})
 }
 
 // ── POST /api/notes ──────────────────────────────────────────────────────

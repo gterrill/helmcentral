@@ -449,6 +449,53 @@ var documentStoreSchema = []string{
 		created_at INTEGER NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS document_chunk_embeddings_model ON document_chunk_embeddings (model)`,
+
+	// Checklist runs (plan "Notes and the Boat's Manual" §3, ADR 0118): a
+	// run stores WHICH items are ticked, never the item list itself - the
+	// current note body is always the item list (parseChecklistItems,
+	// notes_format.go). Added straight into this schema (not
+	// applyDocumentStoreMigrations below) because both tables are brand
+	// new - CREATE TABLE IF NOT EXISTS is already the correct idiom for a
+	// table that has never existed on any boat's documents.sqlite, unlike
+	// the notes/manuals columns below, which had to be ALTER TABLE'd onto
+	// an ALREADY-EXISTING documents table.
+	`CREATE TABLE IF NOT EXISTS note_checklist_runs (
+		id            TEXT PRIMARY KEY,
+		document_id   TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+		source_sha256 TEXT NOT NULL,
+		started_at    INTEGER NOT NULL,
+		completed_at  INTEGER,
+		abandoned_at  INTEGER
+	)`,
+	`CREATE INDEX IF NOT EXISTS note_checklist_runs_document
+		ON note_checklist_runs (document_id, started_at DESC)`,
+	// The whole "resume, don't duplicate" story: at most one row per
+	// document_id where both completed_at and abandoned_at are still NULL.
+	// StartOrResumeChecklistRun (checklist_runs_store.go) reads FOR this
+	// row before ever inserting, but the index is what makes that read
+	// authoritative rather than merely conventional.
+	`CREATE UNIQUE INDEX IF NOT EXISTS note_checklist_runs_active
+		ON note_checklist_runs (document_id) WHERE completed_at IS NULL AND abandoned_at IS NULL`,
+
+	// One row per ticked item, keyed to the item's own normalised TEXT
+	// (item_key = sha256 hex of normalizeChecklistItemText's output,
+	// notes_format.go) plus occurrence (which same-key line within the
+	// body this is - duplicate identical lines stay distinct). Deliberately
+	// NOT keyed to position: reordering the body, or editing a line that
+	// isn't this one, must never touch this row. text is a second copy of
+	// what was ticked, kept here (not re-derived) purely so a tick whose
+	// key later vanishes from the body can still show the operator what it
+	// used to say - the "edited since you ticked it - re-check" surface,
+	// which is the entire reason this column exists rather than the run
+	// storing bare keys.
+	`CREATE TABLE IF NOT EXISTS note_checklist_run_ticks (
+		run_id     TEXT NOT NULL REFERENCES note_checklist_runs(id) ON DELETE CASCADE,
+		item_key   TEXT NOT NULL,
+		occurrence INTEGER NOT NULL DEFAULT 0,
+		text       TEXT NOT NULL,
+		checked_at INTEGER NOT NULL,
+		PRIMARY KEY (run_id, item_key, occurrence)
+	)`,
 }
 
 // applyDocumentStoreMigrations adds columns that arrived after this store's

@@ -206,3 +206,163 @@ func TestDeriveNoteTitle(t *testing.T) {
 		})
 	}
 }
+
+// ── checklist items (plan §3) ────────────────────────────────────────────
+
+// TestNormalizeChecklistItemText mirrors, fixture for fixture,
+// frontend/src/test/checklist-item-text.test.ts's own cases against
+// normalizeChecklistItemText (frontend/src/lib/checklist-item-text.ts) -
+// this is the Go side's INDEPENDENT implementation of the identical stated
+// rule ("strip the leading task marker, strip inline emphasis/code
+// delimiters, collapse internal whitespace, trim"), not a port of the TS
+// one, but both must agree on every one of these lines or a tick keyed on
+// one side and read on the other would silently disagree.
+func TestNormalizeChecklistItemText(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"strips a leading unchecked GFM marker", "- [ ] Seacocks open", "Seacocks open"},
+		{"strips a leading checked GFM marker", "- [x] Seacocks open", "Seacocks open"},
+		{"strips a leading checked GFM marker, uppercase X", "- [X] Seacocks open", "Seacocks open"},
+		{"strips a leading marker using * instead of -", "* [ ] Seacocks open", "Seacocks open"},
+		{"is unaffected by bolding a word", "- [ ] **Seacocks** open", "Seacocks open"},
+		{"is unaffected by italicising a word", "- [ ] Seacocks *open*", "Seacocks open"},
+		{"is unaffected by inline code marks", "- [ ] Check the `raw water` strainer", "Check the raw water strainer"},
+		{"collapses internal whitespace", "- [ ] Seacocks   open", "Seacocks open"},
+		{"trims leading and trailing whitespace", "- [ ]   Seacocks open  ", "Seacocks open"},
+		{"leaves plain text with no checkbox marker alone", "Seacocks open", "Seacocks open"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeChecklistItemText(tc.line); got != tc.want {
+				t.Fatalf("normalizeChecklistItemText(%q) = %q, want %q", tc.line, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeChecklistItemText_EmphasisChangeIsInvisible is the specific
+// property the whole function exists for, asserted directly rather than
+// only via two cases above happening to produce the same "want": a
+// checklist item's key must not move when the WYSIWYG editor round-trips
+// emphasis differently than it was typed (plan §3's own worked example).
+func TestNormalizeChecklistItemText_EmphasisChangeIsInvisible(t *testing.T) {
+	before := normalizeChecklistItemText("- [ ] Seacocks open")
+	after := normalizeChecklistItemText("- [ ] **Seacocks** open")
+	if before != after {
+		t.Fatalf("expected emphasis to be invisible to normalisation: before=%q after=%q", before, after)
+	}
+}
+
+// TestParseChecklistItems is the pure, no-store half of plan §3's checklist
+// runs: given a note's raw body, which lines are checklist items, what
+// their normalised text and nesting depth are, and - the case a run's
+// PRIMARY KEY (run_id, item_key, occurrence) exists for - that two
+// identical lines get distinct occurrences rather than colliding.
+func TestParseChecklistItems(t *testing.T) {
+	t.Run("an unchecked dash item", func(t *testing.T) {
+		items := parseChecklistItems("- [ ] Seacocks open")
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d: %+v", len(items), items)
+		}
+		if items[0].Text != "Seacocks open" {
+			t.Fatalf("unexpected text: %q", items[0].Text)
+		}
+		if items[0].Occurrence != 0 {
+			t.Fatalf("expected occurrence 0, got %d", items[0].Occurrence)
+		}
+		if items[0].Depth != 0 {
+			t.Fatalf("expected depth 0, got %d", items[0].Depth)
+		}
+	})
+
+	t.Run("a checked dash item", func(t *testing.T) {
+		items := parseChecklistItems("- [x] Seacocks open")
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d: %+v", len(items), items)
+		}
+		if items[0].Text != "Seacocks open" {
+			t.Fatalf("unexpected text: %q", items[0].Text)
+		}
+	})
+
+	t.Run("a star-marker item", func(t *testing.T) {
+		items := parseChecklistItems("* [ ] Seacocks open")
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d: %+v", len(items), items)
+		}
+		if items[0].Text != "Seacocks open" {
+			t.Fatalf("unexpected text: %q", items[0].Text)
+		}
+	})
+
+	t.Run("nested depth", func(t *testing.T) {
+		body := "- [ ] Top item\n  - [ ] Sub item\n    - [ ] Sub sub item\n- [ ] Second top item"
+		items := parseChecklistItems(body)
+		if len(items) != 4 {
+			t.Fatalf("expected 4 items, got %d: %+v", len(items), items)
+		}
+		wantDepths := []int{0, 1, 2, 0}
+		for i, want := range wantDepths {
+			if items[i].Depth != want {
+				t.Fatalf("item %d (%q): expected depth %d, got %d", i, items[i].Text, want, items[i].Depth)
+			}
+		}
+	})
+
+	t.Run("a line merely containing [x] mid-sentence is not an item", func(t *testing.T) {
+		body := "- Remember to flip the switch [x] before starting\nNote: [x] means done"
+		items := parseChecklistItems(body)
+		if len(items) != 0 {
+			t.Fatalf("expected no checklist items, got %d: %+v", len(items), items)
+		}
+	})
+
+	t.Run("duplicate identical lines get distinct occurrences", func(t *testing.T) {
+		body := "- [ ] Check bilge\n- [ ] Check bilge\n- [ ] Check bilge"
+		items := parseChecklistItems(body)
+		if len(items) != 3 {
+			t.Fatalf("expected 3 items, got %d: %+v", len(items), items)
+		}
+		key := items[0].Key
+		for i, item := range items {
+			if item.Key != key {
+				t.Fatalf("item %d: expected identical lines to share a key, got %q vs %q", i, item.Key, key)
+			}
+			if item.Occurrence != i {
+				t.Fatalf("item %d: expected occurrence %d, got %d", i, i, item.Occurrence)
+			}
+		}
+	})
+
+	t.Run("an emphasis-only difference still keys identically", func(t *testing.T) {
+		items := parseChecklistItems("- [ ] Seacocks open\n- [ ] **Seacocks** open")
+		if len(items) != 2 {
+			t.Fatalf("expected 2 items, got %d: %+v", len(items), items)
+		}
+		if items[0].Key != items[1].Key {
+			t.Fatalf("expected the two items to share a key despite the emphasis difference: %q vs %q", items[0].Key, items[1].Key)
+		}
+		if items[1].Occurrence != 1 {
+			t.Fatalf("expected the second identical-by-key item to get occurrence 1, got %d", items[1].Occurrence)
+		}
+	})
+
+	t.Run("a plain bullet with no checkbox is not an item", func(t *testing.T) {
+		items := parseChecklistItems("- Just a plain bullet\n1. A numbered line")
+		if len(items) != 0 {
+			t.Fatalf("expected no checklist items, got %d: %+v", len(items), items)
+		}
+	})
+
+	t.Run("no checklist items in an empty or prose-only body", func(t *testing.T) {
+		if items := parseChecklistItems(""); len(items) != 0 {
+			t.Fatalf("expected no items for an empty body, got %+v", items)
+		}
+		if items := parseChecklistItems("Just some prose.\nNo lists here."); len(items) != 0 {
+			t.Fatalf("expected no items for a prose-only body, got %+v", items)
+		}
+	})
+}

@@ -720,6 +720,11 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		{http.MethodGet, "/api/notes", tierRead, listNotesHandler},
 		{http.MethodGet, "/api/notes/:id", tierRead, getNoteHandler},
 
+		// Checklist runs (plan "Notes and the Boat's Manual" §3/§4, ADR
+		// 0118): a run stores which of a note's checklist items are
+		// ticked (checklist_runs_store.go), never the item list itself.
+		{http.MethodGet, "/api/notes/:id/checklist-runs/active", tierRead, getActiveChecklistRunHandler},
+
 		// Manuals (plan "Notes and the Boat's Manual" §4, ADR 0114/0116): a
 		// manual is a document_folders row with role='manual'
 		// (manuals_store.go). "/api/manuals/:id/tree" registered after the
@@ -805,6 +810,15 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// Notes writes (plan "Notes and the Boat's Manual", ADR 0114).
 		{http.MethodPost, "/api/notes", tierWrite, createNoteHandler},
 		{http.MethodPatch, "/api/notes/:id", tierWrite, patchNoteHandler},
+
+		// Checklist runs writes (plan "Notes and the Boat's Manual" §3/§4,
+		// ADR 0118). DELETE clears abandoned_at only - see
+		// abandonChecklistRunHandler's own doc comment
+		// (checklist_runs_handlers.go).
+		{http.MethodPost, "/api/notes/:id/checklist-runs", tierWrite, createChecklistRunHandler},
+		{http.MethodPatch, "/api/checklist-runs/:runId/items", tierWrite, tickChecklistItemHandler},
+		{http.MethodPost, "/api/checklist-runs/:runId/complete", tierWrite, completeChecklistRunHandler},
+		{http.MethodDelete, "/api/checklist-runs/:runId", tierWrite, abandonChecklistRunHandler},
 
 		// Manuals writes (plan "Notes and the Boat's Manual" §4, ADR
 		// 0114/0116). DELETE clears the role flag only - see

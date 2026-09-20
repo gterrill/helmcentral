@@ -260,6 +260,19 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusConflict, errNotAManual.Error()
 	case errors.Is(err, errManualNotTopLevel):
 		return http.StatusConflict, errManualNotTopLevel.Error()
+	// Checklist runs (plan §3, ADR 0118, checklist_runs_store.go): a run or
+	// item id the store doesn't recognise is 404 (the same footing
+	// errDocumentNotFound already gets); a note with nothing to run, or a
+	// run that is already completed/abandoned, is 409 - a real, expected
+	// conflict, not a database failure.
+	case errors.Is(err, errChecklistRunNotFound):
+		return http.StatusNotFound, errChecklistRunNotFound.Error()
+	case errors.Is(err, errChecklistItemNotFound):
+		return http.StatusNotFound, errChecklistItemNotFound.Error()
+	case errors.Is(err, errNoteHasNoChecklist):
+		return http.StatusConflict, errNoteHasNoChecklist.Error()
+	case errors.Is(err, errChecklistRunClosed):
+		return http.StatusConflict, errChecklistRunClosed.Error()
 	default:
 		return http.StatusInternalServerError, err.Error()
 	}

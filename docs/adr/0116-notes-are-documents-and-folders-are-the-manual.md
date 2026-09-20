@@ -473,4 +473,5 @@ covers the one case that genuinely wanted a notes-only listing.
   covers why the editor is WYSIWYG when the file is Markdown.
 - [ADR 0119](0119-capture-is-an-action-not-a-place.md) covers where capture
   lives now that Notes is not a panel, and the `Auto` type default.
-- ADR 0118 will cover checklist runs, when that phase ships.
+- [ADR 0118](0118-a-checklist-is-a-run-not-a-checkbox.md) covers checklist
+  runs: text-keyed ticks and where a run's state lives.

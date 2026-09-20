@@ -225,6 +225,63 @@ func TestGetNoteHandler_ReturnsDocumentAndBody(t *testing.T) {
 	}
 }
 
+// TestGetNoteHandler_IncludesChecklistAndActiveRun is plan §4's extension
+// of GET /api/notes/:id from {document, body} to {document, body,
+// checklist, active_run} - one call serving both the reader and the
+// runner. checklist is the note's current template items (no tick state);
+// active_run is null until a run is actually started, then reflects it.
+func TestGetNoteHandler_IncludesChecklistAndActiveRun(t *testing.T) {
+	withTestDocumentStore(t)
+	created := mustCreateTestNote(t, "- [ ] Seacocks open\n- [ ] Check bilge", "Shutdown")
+
+	type getNoteResponse struct {
+		Document  documentJSON      `json:"document"`
+		Body      string            `json:"body"`
+		Checklist []checklistItem   `json:"checklist"`
+		ActiveRun *checklistRunView `json:"active_run"`
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodGet, "/api/notes/"+created.ID, "", created.ID)
+	if err := getNoteHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	var resp getNoteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Checklist) != 2 {
+		t.Fatalf("expected 2 checklist items, got %+v", resp.Checklist)
+	}
+	if resp.ActiveRun != nil {
+		t.Fatalf("expected active_run to be null before any run is started, got %+v", resp.ActiveRun)
+	}
+
+	c, rec = newDocumentEchoContext(http.MethodPost, "/api/notes/"+created.ID+"/checklist-runs", "", created.ID)
+	if err := createChecklistRunHandler(c); err != nil {
+		t.Fatalf("createChecklistRunHandler: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 starting a fresh run, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	c, rec = newDocumentEchoContext(http.MethodGet, "/api/notes/"+created.ID, "", created.ID)
+	if err := getNoteHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.ActiveRun == nil {
+		t.Fatalf("expected active_run to be populated once a run is started")
+	}
+	if resp.ActiveRun.DocumentID != created.ID {
+		t.Fatalf("expected active_run.document_id to be the note's id, got %q", resp.ActiveRun.DocumentID)
+	}
+	if resp.ActiveRun.Total != 2 {
+		t.Fatalf("expected active_run.total 2, got %d", resp.ActiveRun.Total)
+	}
+}
+
 func TestGetNoteHandler_KindFileIDReturns409(t *testing.T) {
 	withTestDocumentStore(t)
 	fileDoc := mustInsertDocument(t, globalDocumentStore, "a-file-sha", "manual.pdf", nil)
