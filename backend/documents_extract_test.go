@@ -133,6 +133,55 @@ func TestExtractDocumentText_TextFileAtCapSucceeds(t *testing.T) {
 	}
 }
 
+func TestExtractTextFile_StripsYAMLFrontmatterFromMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	raw := "---\nid: abc-123\ntitle: Genset start-up\ntype: procedure\ntags: [genset]\ncreated: \"2026-09-20T04:11:07Z\"\n---\n" +
+		"1. Warm up for five minutes\n2. Bring on load gradually\n"
+	path := writeTestFile(t, dir, "genset-start-up.md", []byte(raw))
+
+	ex, err := extractDocumentText(context.Background(), path, "text/markdown")
+	if err != nil {
+		t.Fatalf("extractDocumentText: %v", err)
+	}
+	if strings.Contains(ex.Markdown, "id: abc-123") || strings.Contains(ex.Markdown, "---") {
+		t.Fatalf("expected the frontmatter block stripped from the indexed text, got %q", ex.Markdown)
+	}
+	if !strings.Contains(ex.Markdown, "Warm up for five minutes") {
+		t.Fatalf("expected the body to survive frontmatter stripping, got %q", ex.Markdown)
+	}
+
+	// The same MIME sniff, but text/plain rather than text/markdown - the
+	// frontmatter must NOT be stripped for any other text-family MIME type,
+	// only text/markdown.
+	plainPath := writeTestFile(t, dir, "genset-start-up.txt", []byte(raw))
+	plainEx, err := extractDocumentText(context.Background(), plainPath, "text/plain")
+	if err != nil {
+		t.Fatalf("extractDocumentText (text/plain): %v", err)
+	}
+	if !strings.Contains(plainEx.Markdown, "id: abc-123") {
+		t.Fatalf("expected a text/plain file's leading frontmatter-shaped block to survive unstripped, got %q", plainEx.Markdown)
+	}
+}
+
+func TestExtractTextFile_LeavesAHorizontalRuleAlone(t *testing.T) {
+	dir := t.TempDir()
+	// A leading "---" with no closing fence anywhere in the file is an
+	// ordinary Markdown horizontal rule opening the document, not
+	// frontmatter - it must survive extraction untouched, not have its
+	// first paragraph silently eaten as if it were a YAML block with no
+	// closing delimiter.
+	raw := "---\nThis is an ordinary paragraph that happens to follow a horizontal rule.\nIt has no closing fence.\n"
+	path := writeTestFile(t, dir, "notes.md", []byte(raw))
+
+	ex, err := extractDocumentText(context.Background(), path, "text/markdown")
+	if err != nil {
+		t.Fatalf("extractDocumentText: %v", err)
+	}
+	if ex.Markdown != raw {
+		t.Fatalf("expected an unclosed leading rule left untouched, got %q, want %q", ex.Markdown, raw)
+	}
+}
+
 func TestExtractDocumentText_Image(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestFile(t, dir, "photo.jpg", []byte{0xFF, 0xD8, 0xFF, 0xE0})

@@ -162,7 +162,7 @@ type extractedDocument struct {
 func extractDocumentText(ctx context.Context, path, mimeType string) (extractedDocument, error) {
 	switch {
 	case textMIMETypes[mimeType]:
-		return extractTextFile(path)
+		return extractTextFile(path, mimeType)
 	case mimeType == "application/pdf":
 		return extractPDF(ctx, path)
 	case strings.HasPrefix(mimeType, "image/"):
@@ -177,8 +177,15 @@ func extractDocumentText(ctx context.Context, path, mimeType string) (extractedD
 
 // extractTextFile reads path whole (capped at maxTextExtractBytes - an
 // oversized file is an error, never a silent truncation) and sanitises it to
-// valid UTF-8.
-func extractTextFile(path string) (extractedDocument, error) {
+// valid UTF-8. For mimeType "text/markdown" it also strips a leading YAML
+// frontmatter block (stripLeadingYAMLFrontmatter below) before the text
+// ever reaches chunking: without this, every note's first FTS5 chunk would
+// open with "id: 0f3b…", and search would rank a query on that opaque UUID
+// above a query on what the note actually says. This changes behaviour for
+// any already-uploaded .md file that happens to carry its own frontmatter -
+// intended, and named in this change's own commit (plan §1's "One
+// existing-behaviour change to flag").
+func extractTextFile(path, mimeType string) (extractedDocument, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return extractedDocument{}, fmt.Errorf("stat text file: %w", err)
@@ -193,7 +200,28 @@ func extractTextFile(path string) (extractedDocument, error) {
 	}
 
 	text := strings.ToValidUTF8(string(raw), "")
+	if mimeType == "text/markdown" {
+		text = stripLeadingYAMLFrontmatter(text)
+	}
 	return extractedDocument{Markdown: text}, nil
+}
+
+// stripLeadingYAMLFrontmatter removes a leading "---"-fenced YAML block
+// from text, structurally only - it never validates the YAML between the
+// fences, because this function's only job is to keep frontmatter bytes
+// out of what gets indexed as searchable body text, not to validate a
+// note's shape (that's parseNoteFile's job, notes_format.go, and it is
+// deliberately stricter). A leading "---" with no closing "---" line is
+// left alone: that is an ordinary Markdown horizontal rule opening the
+// document, not a frontmatter fence, and stripping it would silently eat
+// the first paragraph of every plain markdown file that happens to start
+// with one.
+func stripLeadingYAMLFrontmatter(text string) string {
+	_, body, ok := splitFrontmatterFence(text)
+	if !ok {
+		return text
+	}
+	return body
 }
 
 // extractPDF extracts text from a PDF one page at a time via
