@@ -686,4 +686,48 @@ describe('AssistantThread', () => {
       expect(chip.closest('a')).toHaveAttribute('href', '/documents?document=doc-1')
     })
   })
+
+  // [shadcn 2026-06 chat composer] attach and send now live inside the same
+  // bordered InputGroup panel as the textarea, rather than a button row
+  // below it - matching upstream's InputGroup + block-end addon composer
+  // shape from the 2026-06 chat components changelog. These pin the new
+  // structure ahead of the JSX rebuild.
+  describe('composer layout (shadcn 2026-06 chat composer)', () => {
+    beforeEach(() => {
+      FakeXHR.instances = []
+      vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    })
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('puts the textarea, the attach button and the send button inside one input-group panel', () => {
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+
+      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const group = textarea.closest('[data-slot="input-group"]')
+      expect(group).not.toBeNull()
+
+      const sendButton = screen.getByRole('button', { name: 'Send' })
+      const attachButton = screen.getByRole('button', { name: 'Attach files' })
+      expect(group as HTMLElement).toContainElement(sendButton)
+      expect(group as HTMLElement).toContainElement(attachButton)
+    })
+
+    it('puts the staged-attachment chips inside the same input-group panel', () => {
+      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+
+      const fileInput = screen.getByTestId('composer-file-input')
+      fireEvent.change(fileInput, {
+        target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] },
+      })
+
+      const chips = screen.getByTestId('composer-attachments')
+      const textarea = screen.getByPlaceholderText('Ask about a passage, an anchorage, or how a panel works…')
+      const group = textarea.closest('[data-slot="input-group"]')
+      expect(group).not.toBeNull()
+      expect(group as HTMLElement).toContainElement(chips)
+    })
+  })
 })

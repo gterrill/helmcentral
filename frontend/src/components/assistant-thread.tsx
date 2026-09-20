@@ -1,9 +1,10 @@
-import { Loader2, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, Loader2, Paperclip, Square, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type Ref } from 'react'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Button } from '@/components/ui/button'
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group'
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker'
 import { Message, MessageContent, MessageFooter } from '@/components/ui/message'
 import {
@@ -14,7 +15,6 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller'
-import { Textarea } from '@/components/ui/textarea'
 import type { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
@@ -406,6 +406,15 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
         </Bubble>
       )}
 
+      {/* [shadcn 2026-06 chat composer] attach and send used to sit in a
+          plain row below the textarea; this rebuilds the composer as one
+          InputGroup panel - the bordered, focus-ringed shape upstream's
+          chat components changelog ships - with both buttons living inside
+          it as a block-end addon, the same way upstream's own demo wires
+          PlusIcon/ArrowUpIcon. The drop target and its dragOver ring stay
+          on this outer wrapper rather than moving onto InputGroup, since a
+          file can be dropped anywhere over the composer, not just the
+          panel itself. */}
       <div
         className={cn(
           'flex flex-col gap-1 rounded-md',
@@ -420,56 +429,91 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
         onDrop={handleDrop}
         data-testid="composer-dropzone"
       >
-        {uploads.items.length > 0 && (
-          <div className="flex flex-wrap gap-1.5" data-testid="composer-attachments">
-            {uploads.items.map((item) => (
-              <div
-                key={item.key}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]',
-                  item.status === 'failed' ? 'border-destructive/40 bg-destructive/10' : 'border-border bg-muted/50',
-                )}
-              >
-                {item.status === 'uploading' && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
-                <span className="max-w-40 truncate" title={item.filename}>
-                  {item.filename}
-                </span>
-                <span
+        <InputGroup>
+          {uploads.items.length > 0 && (
+            // block-start puts the staged chips inside the panel, above the
+            // textarea, rather than floating above it as a separate block -
+            // flex-wrap because chips wrap onto more than one line once a
+            // few are staged.
+            <InputGroupAddon align="block-start" className="flex-wrap" data-testid="composer-attachments">
+              {uploads.items.map((item) => (
+                <div
+                  key={item.key}
                   className={cn(
-                    'tabular-nums',
-                    item.status === 'failed' ? 'text-destructive' : 'text-muted-foreground',
+                    'flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]',
+                    item.status === 'failed' ? 'border-destructive/40 bg-destructive/10' : 'border-border bg-muted/50',
                   )}
                 >
-                  {stagedDocumentStatusLabel(item)}
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${item.filename}`}
-                  onClick={() => uploads.remove(item.key)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+                  {item.status === 'uploading' && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+                  <span className="max-w-40 truncate" title={item.filename}>
+                    {item.filename}
+                  </span>
+                  <span
+                    className={cn(
+                      'tabular-nums',
+                      item.status === 'failed' ? 'text-destructive' : 'text-muted-foreground',
+                    )}
+                  >
+                    {stagedDocumentStatusLabel(item)}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item.filename}`}
+                    onClick={() => uploads.remove(item.key)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </InputGroupAddon>
+          )}
+
+          <InputGroupTextarea
+            ref={composerRef}
+            rows={3}
+            placeholder="Ask about a passage, an anchorage, or how a panel works…"
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={!canWrite}
+            autoFocus={autoFocus}
+          />
+
+          <InputGroupAddon align="block-end">
+            <InputGroupButton
+              aria-label="Attach files"
+              title="Attach files"
+              size="icon-sm"
+              disabled={!canWrite}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip className="h-4 w-4" />
+            </InputGroupButton>
+            {/* Send is an icon button here, matching upstream's ArrowUpIcon
+                composer control - ml-auto is what actually pushes it to the
+                far edge, since the addon itself packs its children to the
+                start. The sr-only span is load-bearing: it is the button's
+                whole accessible name ("Send"), not decoration - tests and
+                assistive tech both read this button by that name. */}
+            <InputGroupButton
+              variant="default"
+              size="icon-sm"
+              className="ml-auto"
+              disabled={sendDisabled}
+              onClick={() => void handleSend()}
+            >
+              <ArrowUp className="h-4 w-4" />
+              <span className="sr-only">Send</span>
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+
         {uploads.error && (
           <p className="text-[11px] text-destructive" role="alert">
             {uploads.error}
           </p>
         )}
-
-        <Textarea
-          ref={composerRef}
-          rows={3}
-          placeholder="Ask about a passage, an anchorage, or how a panel works…"
-          value={content}
-          onChange={(event) => setContent(event.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={!canWrite}
-          autoFocus={autoFocus}
-        />
         {!canWrite && <p className="text-[11px] text-muted-foreground">Read-only session</p>}
         {/* Send's disabled-attachment reason is a visible line, not just a
             hover title: the operator most likely to hit this is on the wall
@@ -486,22 +530,6 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
           data-testid="composer-file-input"
           onChange={(event) => handleFilesChosen(event.target.files)}
         />
-        <div className="flex justify-between">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Attach files"
-            title="Attach files"
-            disabled={!canWrite}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
-          <Button onClick={() => void handleSend()} disabled={sendDisabled}>
-            Send
-          </Button>
-        </div>
       </div>
     </div>
   )
