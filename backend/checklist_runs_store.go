@@ -219,6 +219,13 @@ func buildChecklistRunView(q sqlQueryer, run checklistRunRow, body string) (chec
 		CompletedAt: run.CompletedAt,
 		AbandonedAt: run.AbandonedAt,
 		Items:       make([]checklistItemView, 0, len(items)),
+		// Non-nil, like Items: a nil slice marshals as `null`, and
+		// use-checklist-run.ts declares `changed: ChecklistChangedItem[]`
+		// while checklist-runner.tsx dereferences `run.changed.length`
+		// unguarded. A fresh run - the normal path - has nothing changed,
+		// so this is the difference between the runner opening and the
+		// render tree throwing.
+		Changed: make([]checklistChangedView, 0),
 	}
 	for _, item := range items {
 		mapKey := checklistTickMapKey(item.Key, item.Occurrence)

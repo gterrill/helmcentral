@@ -56,6 +56,9 @@ type createManualRequest struct {
 // 409 on a non-top-level folder (errManualNotTopLevel) or a duplicate name
 // (errFolderNameTaken) - both mapped by documentErrorStatus.
 func createManualHandler(c echo.Context) error {
+	// Same bound as the note write paths: refuse an oversized request
+	// while it is still being read, not after it is in memory.
+	limitNoteRequestBody(c)
 	var req createManualRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -125,6 +128,9 @@ type reorderManualRequest struct {
 // GET .../tree returns, so the caller never has to make a second request
 // just to see what it committed.
 func reorderManualHandler(c echo.Context) error {
+	// Same bound as the note write paths: refuse an oversized request
+	// while it is still being read, not after it is in memory.
+	limitNoteRequestBody(c)
 	id := c.Param("id")
 
 	var req reorderManualRequest

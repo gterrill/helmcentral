@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -927,5 +928,35 @@ func TestNotesEnrichBackfillHandler_RunSetsEnrichAndWakesIndexer(t *testing.T) {
 	}
 	if !got.Enrich {
 		t.Fatalf("expected the note's enrich flag now set")
+	}
+}
+
+// A note's title and tags are rendered into its YAML frontmatter, so they
+// are FILE BYTES, not just database columns - and only `body` was ever
+// capped. A one-byte body with a megabyte title passes noteMaxBodyBytes and
+// writes a megabyte blob into DOCUMENTS_DIR, with a fresh sha256 every time,
+// so it is additive: repeat it and the disk fills one request at a time.
+//
+// That is precisely the bypass noteMaxBodyBytes' own comment says the cap
+// exists to prevent, so the check has to be on what actually reaches disk.
+func TestCreateNote_RejectsANoteWhoseRenderedBytesExceedTheCap(t *testing.T) {
+	withTestDocumentStore(t)
+
+	body := map[string]any{
+		"body":  "x",
+		"title": strings.Repeat("t", noteMaxBodyBytes+1),
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/notes", string(raw), "")
+	if err := createNoteHandler(c); err != nil {
+		t.Fatalf("createNoteHandler: %v", err)
+	}
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413 - an oversized title is an oversized note", rec.Code)
 	}
 }

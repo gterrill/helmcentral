@@ -37,6 +37,42 @@ import (
 // documentMaxUploadBytes entirely.
 const noteMaxBodyBytes = 1 << 20 // 1 MB
 
+// noteMaxRequestBytes bounds the whole JSON request, envelope included, so
+// an oversized one is refused while it is still being read rather than after
+// it is in memory. Generous relative to the body cap: JSON escaping can
+// inflate the body, and the exact limit is enforced on the rendered bytes.
+const noteMaxRequestBytes = 4 << 20 // 4 MB
+
+// noteRenderedTooLarge reports whether a rendered note exceeds the cap.
+//
+// The cap has to be on the RENDERED bytes, not on req.Body alone. Title and
+// tags are written into the YAML frontmatter, so they are file content: a
+// one-byte body with a megabyte title passed the body-only check and wrote a
+// megabyte blob, with a fresh sha256 each time, which made it additive - the
+// exact "unbounded upload channel hiding behind ordinary JSON" the constant's
+// own comment says it exists to prevent.
+func noteRenderedTooLarge(rendered []byte) bool {
+	return len(rendered) > noteMaxBodyBytes
+}
+
+// limitNoteRequestBody bounds what a JSON note request can pull into memory
+// BEFORE it is decoded.
+//
+// noteMaxBodyBytes alone does not do this: c.Bind and json.Decode read the
+// whole request first, so the bytes are already resident by the time any cap
+// runs, and peak RSS equals request size. A multi-gigabyte POST would
+// OOM-kill the backend, which under ADR 0111 is the availability failure
+// that matters more on this box than anything confidentiality-shaped.
+//
+// Same treatment, same reason, as uploadDocumentHandler's own
+// http.MaxBytesReader (documents_handlers.go). The allowance is the body cap
+// plus room for the rest of the JSON envelope and its escaping; the precise
+// limit on what reaches disk is noteRenderedTooLarge, after decoding.
+func limitNoteRequestBody(c echo.Context) {
+	req := c.Request()
+	req.Body = http.MaxBytesReader(c.Response(), req.Body, noteMaxRequestBytes)
+}
+
 func sha256Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
@@ -208,6 +244,7 @@ type createNoteRequest struct {
 // on why it honours a caller-supplied ID/CreatedAt instead of always
 // generating fresh ones.
 func createNoteHandler(c echo.Context) error {
+	limitNoteRequestBody(c)
 	var req createNoteRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -239,6 +276,9 @@ func createNoteHandler(c echo.Context) error {
 	id := uuid.NewString()
 	created := time.Now().UTC().Truncate(time.Second)
 	rendered := renderNoteFile(noteFileMeta{ID: id, Title: title, Type: noteType, Tags: req.Tags, Created: created}, req.Body)
+	if noteRenderedTooLarge(rendered) {
+		return writeDocumentError(c, errNoteBodyTooLarge)
+	}
 	sha := sha256Hex(rendered)
 
 	dir := documentsDirPath()
@@ -407,6 +447,7 @@ func applyNoteMetadata(id string, title *string, tags []string, folderID *string
 //     exactly as plan §1 numbers them, each commented at its own step
 //     below.
 func patchNoteHandler(c echo.Context) error {
+	limitNoteRequestBody(c)
 	id := c.Param("id")
 
 	doc, err := getNoteOrError(id)
@@ -552,6 +593,9 @@ func patchNoteHandler(c echo.Context) error {
 			}
 		}
 		rendered = renderNoteFile(noteFileMeta{ID: doc.ID, Title: effectiveTitle, Type: effectiveType, Tags: effectiveTags, Created: doc.CreatedAt}, effectiveBody)
+		if noteRenderedTooLarge(rendered) {
+			return writeDocumentError(c, errNoteBodyTooLarge)
+		}
 		newSHA = sha256Hex(rendered)
 	}
 

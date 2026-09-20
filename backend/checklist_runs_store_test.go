@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -334,5 +336,37 @@ func TestDocumentStore_ChecklistRun_UntickingRemovesTheTick(t *testing.T) {
 	}
 	if updated.CheckedCount != 0 {
 		t.Fatalf("expected checked_count 0 after unticking, got %d", updated.CheckedCount)
+	}
+}
+
+// A fresh run has no changed items, and that must serialise as [] not null.
+// use-checklist-run.ts declares `changed: ChecklistChangedItem[]` and
+// checklist-runner.tsx dereferences `run.changed.length` unguarded, so a nil
+// slice here is a TypeError that tears down the render tree - on the normal
+// path, the first tap of Start checklist, not some edge case.
+//
+// This is the mirror of the omitempty trap ADR 0115 §7 records: there, a
+// zero was dropped from the wire; here, an empty slice arrives as null
+// against a type that promises an array. Marshalling is asserted rather than
+// len() checked, because len(nil) is 0 and would pass while the wire is
+// still wrong - which is exactly how this got through.
+func TestChecklistRunView_EmptyChangedMarshalsAsArrayNotNull(t *testing.T) {
+	store := withTestDocumentStore(t)
+	note := mustCreateTestNote(t, "- [ ] Seacocks open\n", "Shutdown")
+
+	view, _, err := store.StartOrResumeChecklistRun(note.ID)
+	if err != nil {
+		t.Fatalf("StartOrResumeChecklistRun: %v", err)
+	}
+
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if bytes.Contains(encoded, []byte(`"changed":null`)) {
+		t.Errorf("changed serialised as null, which the frontend dereferences as an array:\n%s", encoded)
+	}
+	if !bytes.Contains(encoded, []byte(`"changed":[]`)) {
+		t.Errorf("want \"changed\":[], got:\n%s", encoded)
 	}
 }

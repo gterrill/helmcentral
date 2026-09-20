@@ -67,6 +67,9 @@ type checklistTickRequest struct {
 // reasoning: this call may be the last thing that happens before the
 // operator walks away from the screen.
 func tickChecklistItemHandler(c echo.Context) error {
+	// Same bound as the note write paths: refuse an oversized request
+	// while it is still being read, not after it is in memory.
+	limitNoteRequestBody(c)
 	var req checklistTickRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})

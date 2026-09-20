@@ -179,7 +179,19 @@ function TableCellHeaderElement(props: PlateElementProps) {
 
 function LinkElement(props: PlateElementProps) {
   const url = (props.element as unknown as { url?: string }).url ?? ''
-  const external = /^https?:/i.test(url)
+  // Through resolveNoteHref, like every other point on this boundary: the
+  // reader's own anchors, both image renderers, and LinkButton's insert
+  // check. A note body is not all operator-typed - it can be a hand-edited
+  // blob off a backup, or one of Mate's answers saved verbatim - and this
+  // was the one place a url reached an href unvalidated.
+  //
+  // An unsafe href renders as inert text, exactly as the reader does it, so
+  // the editor and the reader agree about what a link is.
+  const link = resolveNoteHref(url)
+  if (link.kind === 'unsafe') {
+    return <PlateElement {...props} as="span" className="text-muted-foreground" />
+  }
+  const external = link.kind === 'external'
   return (
     <PlateElement
       {...props}

@@ -710,16 +710,49 @@ export function DocumentsPanel({
     }
   }, [viewerId, documents.documents])
 
+  // Covers both reading a note and saving one - same banner either way.
+  const [viewerError, setViewerError] = useState<string | null>(null)
+  const { getNote: getViewerNote } = unfiled
   useEffect(() => {
     if (!viewerDoc || !viewerId) return
     const isText = !viewerDoc.mime.startsWith('image/') && viewerDoc.mime !== 'application/pdf'
     if (!isText) { setViewerText(null); return }
     setViewerLoading(true)
-    void fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(viewerId)}/text`)
-      .then((res) => (res.ok ? res.json() : { text: '' }))
-      .then((data) => setViewerText(data.text ?? ''))
-      .finally(() => setViewerLoading(false))
-  }, [viewerDoc, viewerId])
+
+    // A NOTE is read from its own bytes, never from /text.
+    //
+    // /text reassembles the indexed chunks, and splitMarkdownSections
+    // (documents_chunk.go) lifts each section's heading into its own
+    // column and strips it out of the chunk body - so a note read that
+    // way comes back with every "#" line missing, blank lines
+    // normalised, and, past documentTextChunkCharCap, simply truncated.
+    // Harmless for search, which is what chunks are for. Ruinous here,
+    // because this same string seeds NoteEditor, and Save replaces the
+    // note's whole body: one edit would delete every heading in it, and
+    // with them a manual's section structure.
+    //
+    // GET /api/notes/:id is readNoteBody straight off disk - the real
+    // bytes, which are the note's identity. It is also fresh regardless
+    // of whether the indexer has caught up, where chunks may still be
+    // stale or absent for a note captured seconds ago.
+    let cancelled = false
+    const load = viewerDoc.kind === 'note'
+      ? getViewerNote(viewerId).then((detail) => detail.body)
+      : fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(viewerId)}/text`)
+          .then((res) => (res.ok ? res.json() : { text: '' }))
+          .then((data) => data.text ?? '')
+
+    void load
+      .then((text) => { if (!cancelled) setViewerText(text) })
+      .catch((err) => {
+        // Fail loud (AGENTS.md): an unreadable note must not render as an
+        // empty one, which looks exactly like a note the operator emptied.
+        if (!cancelled) setViewerText(null)
+        if (!cancelled) setViewerError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => { if (!cancelled) setViewerLoading(false) })
+    return () => { cancelled = true }
+  }, [viewerDoc, viewerId, getViewerNote])
 
   // ── editing a note from the general viewer (revision "one panel, not
   // three") - the Edit toggle NoteEditor is reachable through, moved out of
@@ -728,17 +761,16 @@ export function DocumentsPanel({
   // belongs to the document that was open when it started.
   const [viewerEditing, setViewerEditing] = useState(false)
   useEffect(() => { setViewerEditing(false) }, [viewerId])
-  const [viewerSaveError, setViewerSaveError] = useState<string | null>(null)
   const { patchNote: patchViewerNote } = unfiled
   const handleSaveViewerNote = useCallback(async (body: string) => {
     if (!viewerId) return
     try {
       const updated = await patchViewerNote(viewerId, { body })
       setViewerText(updated.body)
-      setViewerSaveError(null)
+      setViewerError(null)
       setViewerEditing(false)
     } catch (err) {
-      setViewerSaveError(err instanceof Error ? err.message : String(err))
+      setViewerError(err instanceof Error ? err.message : String(err))
       throw err // NoteEditor keeps its dirty flag on a failed save
     }
   }, [viewerId, patchViewerNote])
@@ -765,7 +797,6 @@ export function DocumentsPanel({
   // fetched here rather than folded into the fetch above, since it's only
   // ever relevant for kind='note'.
   const [viewerHasChecklist, setViewerHasChecklist] = useState(false)
-  const { getNote: getViewerNote } = unfiled
   useEffect(() => {
     if (!viewerDoc || viewerDoc.kind !== 'note') {
       setViewerHasChecklist(false)
@@ -1498,7 +1529,7 @@ export function DocumentsPanel({
           )}
           <div className="min-h-0 flex-1 overflow-auto rounded-md border">
             {viewerLoading && <p className="p-4 text-sm text-muted-foreground">Loading…</p>}
-            {viewerSaveError && <p role="alert" className="p-4 text-sm text-destructive">{viewerSaveError}</p>}
+            {viewerError && <p role="alert" className="p-4 text-sm text-destructive">{viewerError}</p>}
             {!viewerLoading && viewerDoc?.mime === 'application/pdf' && (
               <iframe title={documentDisplayName(viewerDoc)} src={contentUrlFor(viewerDoc.id)} className="h-full min-h-[70vh] w-full" />
             )}

@@ -176,7 +176,11 @@ function makeNotesMock(overrides: Partial<NotesMock> = {}): NotesMock {
     loading: false,
     error: null,
     refresh: vi.fn(),
-    getNote: vi.fn(),
+    // A note's body now comes from GET /api/notes/:id, not from the
+    // chunk-reassembling /text endpoint, so the default has to resolve -
+    // an un-stubbed getNote would make every viewer test fail on an
+    // undefined detail rather than on what it is actually asserting.
+    getNote: vi.fn().mockResolvedValue({ document: note(), body: 'Open the seacock first.' }),
     createNote: vi.fn(),
     patchNote: vi.fn(),
     ...overrides,
@@ -1280,6 +1284,41 @@ describe('DocumentsPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
       await waitFor(() => expect(patchNote).toHaveBeenCalledWith('note-1', { body: 'Open the seacock first. edited' }))
+    })
+
+    // GET /api/documents/:id/text reassembles the INDEXED CHUNKS, and
+    // splitMarkdownSections lifts each heading into its own column and
+    // drops it from the chunk's text. So a note read through /text comes
+    // back with every "#" line gone - fine for search, catastrophic as the
+    // seed for an editor whose Save replaces the note's whole body.
+    //
+    // A note's real bytes come from GET /api/notes/:id (readNoteBody, off
+    // disk). This asserts the viewer uses that, by making the two sources
+    // disagree and requiring the note's own heading to win.
+    it('reads a note from its own bytes, not from the reassembled chunks', async () => {
+      const realBody = '# Genset start-up\n\nOpen the seacock first.\n'
+      const getNote = vi.fn().mockResolvedValue({
+        document: note({ id: 'note-1', title: 'Genset start-up' }),
+        body: realBody,
+      })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ getNote }))
+      // What the chunk endpoint would return: heading stripped.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the seacock first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+
+      await waitFor(() => expect(getNote).toHaveBeenCalledWith('note-1'))
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      expect(screen.getByText(/editor:.*# Genset start-up/)).toBeInTheDocument()
     })
 
     it('a plain file (kind file) never shows an Edit toggle', async () => {
