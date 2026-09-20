@@ -99,4 +99,25 @@ describe('HelpMarkdown img handling', () => {
     await screen.findByText(/Safe text/)
     expect(container.querySelector('img')).toBeNull()
   })
+
+  // Regression guard (ADR 0116): note-markdown-impl.tsx introduced a SECOND
+  // markdown renderer that DOES permit an <img>, but only for one narrow,
+  // validated src shape (hc-doc:<uuid>). This pins that HelpMarkdown itself
+  // never grew that hole - disallowedElements={['img']} keeps dropping every
+  // image regardless of src, including the exact hc-doc: shape the notes
+  // renderer allows, so the two renderers' trust levels stay genuinely
+  // separate rather than quietly converging because someone found it
+  // convenient to relax one of them.
+  it('drops an <img> even for the hc-doc: src shape the notes renderer trusts', async () => {
+    const { container } = render(
+      <HelpMarkdown
+        content="![Fuel manifold](hc-doc:0f3b1c2e-8a4d-4f21-9c33-1d2e3f4a5b6c)\n\nSafe text"
+        pageId="features/dashboard"
+        onNavigate={vi.fn()}
+      />,
+    )
+
+    await screen.findByText(/Safe text/)
+    expect(container.querySelector('img')).toBeNull()
+  })
 })
