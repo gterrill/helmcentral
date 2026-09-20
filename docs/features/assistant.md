@@ -225,6 +225,13 @@ thousand characters between them actually reach Mate, and going over that is
 loud rather than silent: the prompt says outright how many notes it left out
 rather than truncating one mid-sentence.
 
+Traffic runs the other way too. When an answer is worth keeping - a
+procedure Mate has just walked you through, a figure it worked out - **Save
+as note** under that answer keeps it, without retyping. Mate does not write
+it: the note is created by your tap, lands unfiled like any other capture,
+and you file or edit it afterwards. Mate has no tool that can write
+anything, which is deliberate and explained below.
+
 Mate is also always told which manuals exist and, for each, the names of its
 top-level sections - "Operations Manual (Before Leaving, Getting Underway),
 Crew Training (Watchkeeping)" - so it knows which book to point you at by
