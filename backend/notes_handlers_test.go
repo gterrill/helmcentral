@@ -709,3 +709,223 @@ func TestSweepDocumentsDir_ReportsASupersededNoteBlobAsAnOrphan(t *testing.T) {
 		t.Fatalf("expected the orphaned blob left on disk (sweep reports, never deletes a content file): %v", err)
 	}
 }
+
+// ── PATCH /api/notes/:id - pinned (plan §8: the operator-facing way to
+// pin/unpin a note, without which the pinned-notes prompt feature is
+// unreachable) ──────────────────────────────────────────────────────────
+
+func TestPatchNoteHandler_PinnedSetsFlagWithoutTouchingTheBlob(t *testing.T) {
+	withTestDocumentStore(t)
+	created := mustCreateTestNote(t, "flick the switch off", "Shower drain")
+
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/notes/"+created.ID, `{"pinned":true}`, created.ID)
+	if err := patchNoteHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Document documentJSON `json:"document"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.Document.Pinned {
+		t.Fatalf("expected pinned=true in the response")
+	}
+	if resp.Document.SHA256 != created.SHA256 {
+		t.Fatalf("expected sha256 unchanged (pinned isn't part of the note's rendered frontmatter): before=%q after=%q", created.SHA256, resp.Document.SHA256)
+	}
+}
+
+func TestPatchNoteHandler_PinnedFalseUnpins(t *testing.T) {
+	withTestDocumentStore(t)
+	created := mustCreateTestNote(t, "flick the switch off", "Shower drain")
+	if err := globalDocumentStore.SetNotePinned(created.ID, true); err != nil {
+		t.Fatalf("SetNotePinned: %v", err)
+	}
+
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/notes/"+created.ID, `{"pinned":false}`, created.ID)
+	if err := patchNoteHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Document documentJSON `json:"document"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Document.Pinned {
+		t.Fatalf("expected pinned=false in the response")
+	}
+}
+
+// ── POST /api/notes/classify/backfill ───────────────────────────────────
+
+func TestNotesClassifyBackfillHandler_DryRunSetsNothing(t *testing.T) {
+	withTestDocumentStore(t)
+	mustCreateTestNote(t, "call the yard on 555-0142", "")
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/notes/classify/backfill?dry_run=1", "", "")
+	if err := notesClassifyBackfillHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// The note above was already classified at creation time (note_type_
+	// source="auto"), so it's still a candidate - dry_run must report it
+	// without having changed anything.
+	if resp.Count != 1 {
+		t.Fatalf("expected count=1, got %d", resp.Count)
+	}
+}
+
+func TestNotesClassifyBackfillHandler_SkipsOperatorTouchesAutoAndBlank(t *testing.T) {
+	withTestDocumentStore(t)
+
+	// An operator override must survive the backfill untouched.
+	operatorNote := mustCreateTestNote(t, "call the yard on 555-0142", "")
+	c, rec := newDocumentEchoContext(http.MethodPatch, "/api/notes/"+operatorNote.ID, `{"type":"quirk"}`, operatorNote.ID)
+	if err := patchNoteHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("setup PATCH type=quirk failed: err=%v code=%d body=%s", err, rec.Code, rec.Body.String())
+	}
+
+	// A pre-classifier note: note_type_source='' (simulated directly - no
+	// API path leaves a note in this state today, but it's exactly the
+	// historical row shape the backfill exists for).
+	blank, err := globalDocumentStore.InsertNote(document{SHA256: "blank-note-sha", Filename: "blank.md", MIME: "text/markdown"})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+	blankPath := filepath.Join(documentsDirPath(), "blank-note-sha")
+	if err := os.WriteFile(blankPath, renderNoteFile(noteFileMeta{ID: blank.ID, Title: "Blank", Created: blank.CreatedAt}, "call Dave at 555-0142"), 0o644); err != nil {
+		t.Fatalf("write blank note blob: %v", err)
+	}
+
+	c2, rec2 := newDocumentEchoContext(http.MethodPost, "/api/notes/classify/backfill", "", "")
+	if err := notesClassifyBackfillHandler(c2); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	updatedOperator, err := globalDocumentStore.Get(operatorNote.ID)
+	if err != nil {
+		t.Fatalf("Get operator note: %v", err)
+	}
+	if updatedOperator.NoteType != "quirk" || updatedOperator.NoteTypeSource != "operator" {
+		t.Fatalf("expected the operator override untouched, got type=%q source=%q", updatedOperator.NoteType, updatedOperator.NoteTypeSource)
+	}
+
+	updatedBlank, err := globalDocumentStore.Get(blank.ID)
+	if err != nil {
+		t.Fatalf("Get blank note: %v", err)
+	}
+	if updatedBlank.NoteType != noteTypeContact || updatedBlank.NoteTypeSource != "auto" {
+		t.Fatalf("expected the blank-source note reclassified to contact/auto, got type=%q source=%q", updatedBlank.NoteType, updatedBlank.NoteTypeSource)
+	}
+}
+
+// ── POST /api/notes/enrich/backfill ─────────────────────────────────────
+
+func TestNotesEnrichBackfillHandler_DryRunReturnsCountAndEstimateWithoutSettingAnything(t *testing.T) {
+	withTestDocumentStore(t)
+	created := mustCreateTestNote(t, "ring Dave about the mooring, 0412 555 555", "")
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/notes/enrich/backfill?dry_run=1", "", "")
+	if err := notesEnrichBackfillHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Count          int `json:"count"`
+		TokensEstimate int `json:"tokens_estimate"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Count != 1 {
+		t.Fatalf("expected count=1, got %d", resp.Count)
+	}
+
+	got, err := globalDocumentStore.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Enrich {
+		t.Fatalf("expected the dry run to set nothing, but enrich is now true")
+	}
+}
+
+func TestNotesEnrichBackfillHandler_NotReadyReturns400AndSetsNothing(t *testing.T) {
+	withTestDocumentStore(t)
+	withTestSecretsStore(t) // an empty-but-real store: no OPENROUTER_API_KEY set
+	created := mustCreateTestNote(t, "ring Dave about the mooring, 0412 555 555", "")
+	// No settings fixture either - assistant readiness fails
+	// (checkAssistantReadiness's own "assistant is switched off" branch).
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/notes/enrich/backfill", "", "")
+	if err := notesEnrichBackfillHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	got, err := globalDocumentStore.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Enrich {
+		t.Fatalf("expected a rejected (not-ready) backfill to set nothing")
+	}
+}
+
+func TestNotesEnrichBackfillHandler_RunSetsEnrichAndWakesIndexer(t *testing.T) {
+	withTestDocumentStore(t)
+	secrets := withTestSecretsStore(t)
+	if err := secrets.Set("OPENROUTER_API_KEY", "sk-test"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	t.Setenv("SETTINGS_FILE", writeDocumentEmbeddingsSettingsFixture(t, "openai/text-embedding-3-small", 512))
+	created := mustCreateTestNote(t, "ring Dave about the mooring, 0412 555 555", "")
+
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/notes/enrich/backfill", "", "")
+	if err := notesEnrichBackfillHandler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Count != 1 {
+		t.Fatalf("expected count=1, got %d", resp.Count)
+	}
+
+	got, err := globalDocumentStore.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Enrich {
+		t.Fatalf("expected the note's enrich flag now set")
+	}
+}

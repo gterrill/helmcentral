@@ -354,7 +354,13 @@ func createNoteHandler(c echo.Context) error {
 // atomically with the folder move that files it there in the first place:
 // PatchDocument applies folder_id and sort_index in the SAME transaction,
 // so a request carrying both either takes both or neither.
-func applyNoteMetadata(id string, title *string, tags []string, folderID *string, moveFolder bool, sortIndex *int, setType bool, noteType, noteTypeSource string) error {
+//
+// pinned (plan §8) is neither part of a note's rendered frontmatter nor of
+// PatchDocument's own field set - it goes through the dedicated
+// SetNotePinned instead, the same "not every metadata field is a
+// PatchDocument column" split note_type/note_type_source already draw via
+// SetNoteTypeIfNotOperator just below.
+func applyNoteMetadata(id string, title *string, tags []string, folderID *string, moveFolder bool, sortIndex *int, setType bool, noteType, noteTypeSource string, pinned *bool) error {
 	if title != nil || tags != nil || moveFolder || sortIndex != nil {
 		if _, err := globalDocumentStore.PatchDocument(id, title, nil, tags, folderID, moveFolder, sortIndex); err != nil {
 			return err
@@ -362,6 +368,11 @@ func applyNoteMetadata(id string, title *string, tags []string, folderID *string
 	}
 	if setType {
 		if err := globalDocumentStore.SetNoteTypeIfNotOperator(id, noteType, noteTypeSource); err != nil {
+			return err
+		}
+	}
+	if pinned != nil {
+		if err := globalDocumentStore.SetNotePinned(id, *pinned); err != nil {
 			return err
 		}
 	}
@@ -417,6 +428,7 @@ func patchNoteHandler(c echo.Context) error {
 	var moveFolder bool
 	var noteTypeOverride *string
 	var sortIndex *int
+	var pinned *bool
 
 	if v, ok := raw["title"]; ok {
 		var s string
@@ -479,6 +491,17 @@ func patchNoteHandler(c echo.Context) error {
 		}
 		sortIndex = &n
 	}
+	// pinned (plan §8): the operator-facing way to pin/unpin a note for
+	// Mate's pinned-notes prompt (assistant_prompt.go). Like sort_index, it
+	// plays no part in the note's rendered frontmatter, so it never feeds
+	// needsRender below.
+	if v, ok := raw["pinned"]; ok {
+		var p bool
+		if err := json.Unmarshal(v, &p); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid pinned"})
+		}
+		pinned = &p
+	}
 
 	needsRender := title != nil || tags != nil || noteTypeOverride != nil || bodyPatch != nil
 
@@ -536,7 +559,7 @@ func patchNoteHandler(c echo.Context) error {
 		// Nothing about the serialised bytes changed - see this
 		// function's own doc comment on why. Only the database side of
 		// whatever was actually patched needs to land.
-		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, sortIndex, setType, resolvedType, resolvedSource); err != nil {
+		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, sortIndex, setType, resolvedType, resolvedSource, pinned); err != nil {
 			return writeDocumentError(c, err)
 		}
 	} else {
@@ -617,7 +640,7 @@ func patchNoteHandler(c echo.Context) error {
 			return writeDocumentError(c, err)
 		}
 
-		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, sortIndex, setType, resolvedType, resolvedSource); err != nil {
+		if err := applyNoteMetadata(doc.ID, title, tags, folderID, moveFolder, sortIndex, setType, resolvedType, resolvedSource, pinned); err != nil {
 			return writeDocumentError(c, err)
 		}
 
@@ -651,4 +674,252 @@ func patchNoteHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "note file missing or unreadable on disk"})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"document": toDocumentJSON(updated), "body": body})
+}
+
+// ── POST /api/notes/classify/backfill ────────────────────────────────────
+//
+// The no-Mate half of plan §9's two backfills: runs classifyNoteType (a
+// pure Go function, notes_classify.go) over every note the operator never
+// classified themselves. No network call, no OpenRouter spend, no Mate -
+// the more important of the two backfills, because a note captured before
+// the classifier shipped has note_type == "".
+
+// reclassifyNote re-runs classifyNoteType over doc's current on-disk body
+// and, if the result differs from what's already stored (or doc has never
+// been classified at all), applies it exactly the way an ordinary
+// type-only PATCH does (patchNoteHandler's own edit protocol): re-render
+// the frontmatter under the new type, take both sha256 locks, write the
+// new blob, ReplaceNoteFrontmatter, then SetNoteTypeIfNotOperator, then
+// remove the superseded blob. This keeps the on-disk frontmatter
+// and the database in agreement about note_type - the SAME invariant every
+// other type-changing path in this codebase already keeps (ADR 0116:
+// "Frontmatter is for portability" - a reclassified note that only changed
+// in the database would report the wrong type to a crew member reading the
+// raw file, or to a restored backup with no app in front of it).
+//
+// source is always "auto", never "operator": nothing about a backfill pass
+// run over the whole library is the operator making a deliberate choice
+// about this ONE note (that's what the type picker is for), and
+// SetNoteTypeIfNotOperator's own precedence rule already refuses to let
+// "auto" overwrite "operator" regardless - this is a second, cheaper guard
+// (doc.NoteTypeSource == "operator" is checked before doing any work at
+// all), not the only one.
+//
+// Returns changed=false, with nothing written anywhere, when the
+// classifier's answer already matches doc.NoteType AND doc.NoteTypeSource
+// is already "auto" - the ordinary case for a backfill run a second time
+// over a library it already processed once.
+func reclassifyNote(doc document) (changed bool, err error) {
+	if doc.NoteTypeSource == "operator" {
+		return false, nil
+	}
+
+	body, err := readNoteBody(doc)
+	if err != nil {
+		return false, err
+	}
+	newType := classifyNoteType(body)
+	if newType == doc.NoteType && doc.NoteTypeSource == "auto" {
+		return false, nil
+	}
+
+	rendered := renderNoteFile(noteFileMeta{ID: doc.ID, Title: doc.Title, Type: newType, Tags: doc.OperatorTags, Created: doc.CreatedAt}, body)
+	newSHA := sha256Hex(rendered)
+
+	if newSHA == doc.SHA256 {
+		// Only reachable if the rendered bytes happen not to depend on the
+		// type field changing (they always do - type is part of the
+		// frontmatter - so this is a defensive no-op path, not one this
+		// function's own tests expect to exercise) - the database side
+		// alone still needs to land.
+		if err := globalDocumentStore.SetNoteTypeIfNotOperator(doc.ID, newType, "auto"); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	// Steps 2-6 of the edit protocol (plan §1 / patchNoteHandler's own doc
+	// comment), driven here instead of through the HTTP layer.
+	unlockA, unlockB := lockTwoDocumentSHAs(doc.SHA256, newSHA)
+	defer unlockA()
+	defer unlockB()
+
+	if existing, ok, err := globalDocumentStore.GetBySHA(newSHA); err != nil {
+		return false, err
+	} else if ok {
+		return false, fmt.Errorf("note reclassify collides with existing document %s: %w", existing.ID, errDocumentDuplicate)
+	}
+
+	dir := documentsDirPath()
+	tmp, err := os.CreateTemp(dir, "upload-*.tmp")
+	if err != nil {
+		return false, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	removeTemp := func() {
+		if tmpPath != "" {
+			os.Remove(tmpPath)
+		}
+	}
+	if _, err := tmp.Write(rendered); err != nil {
+		tmp.Close()
+		removeTemp()
+		return false, fmt.Errorf("failed to write note: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		removeTemp()
+		return false, fmt.Errorf("failed to write note: %w", err)
+	}
+
+	finalPath := filepath.Join(dir, newSHA)
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		removeTemp()
+		return false, fmt.Errorf("failed to store note: %w", err)
+	}
+	tmpPath = ""
+
+	// ReplaceNoteFrontmatter, NOT ReplaceNoteBody: only the `type:` line
+	// changed, and extractTextFile strips the frontmatter fence before
+	// extracting, so the indexer would rebuild byte-identical chunks and
+	// buy byte-identical embeddings again for every note this touches. The
+	// classify backfill is the FREE one - it ships with no "this bills
+	// you" confirmation, unlike the enrich backfill beside it, so silently
+	// requeueing every reclassified note would make that promise false.
+	// doc.SHA256 is the compare-and-swap expectation: this loop runs over a
+	// snapshot, and the operator may have edited this very note since it
+	// was taken. ReplaceNoteFrontmatter refuses rather than reverting them,
+	// and sets note_type in the same transaction so the blob on disk and
+	// the row can never disagree about it.
+	oldSHA, err := globalDocumentStore.ReplaceNoteFrontmatter(doc.ID, doc.SHA256, newSHA, newType, int64(len(rendered)))
+	if err != nil {
+		os.Remove(finalPath)
+		return false, err
+	}
+
+	oldPath := filepath.Join(dir, oldSHA)
+	if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("notes: classify backfill %s: failed to remove superseded blob %s: %v", doc.ID, oldPath, err)
+	}
+
+	// No wakeDocumentIndexer() here, deliberately: nothing was queued.
+	return true, nil
+}
+
+type notesClassifyBackfillDryRunJSON struct {
+	Count int `json:"count"`
+}
+
+type notesClassifyBackfillJSON struct {
+	Count int `json:"count"`
+	// Skipped is notes the operator edited while the pass was running, so
+	// their snapshot went stale and rewriting from it would have reverted
+	// the edit. Unconditional (no omitempty): a client rendering "3
+	// reclassified, 0 skipped" needs the zero, and this project has been
+	// bitten by omitempty hiding a genuine zero before (ADR 0115 §7).
+	Skipped int `json:"skipped"`
+}
+
+// notesClassifyBackfillHandler is POST /api/notes/classify/backfill[?dry_run=1]:
+// dry_run reports how many notes are currently candidates (note_type_source
+// IN (empty, 'auto')) without touching anything; the real call runs
+// reclassifyNote over every one of them and reports how many actually
+// changed. Fail-fast, not best-effort: a failure reclassifying one note
+// stops the pass and reports the error rather than silently skipping it and
+// reporting a success count that doesn't match what the operator asked for
+// - notes already reclassified before the failure keep their new
+// classification (there is no whole-pass rollback), the same "no masking
+// fallbacks" reasoning as every other write path in this codebase.
+func notesClassifyBackfillHandler(c echo.Context) error {
+	candidates, err := globalDocumentStore.NoteClassifyBackfillCandidates()
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+
+	if parseDocumentBool(c.QueryParam("dry_run")) {
+		return c.JSON(http.StatusOK, notesClassifyBackfillDryRunJSON{Count: len(candidates)})
+	}
+
+	changed := 0
+	skipped := 0
+	for _, doc := range candidates {
+		wasChanged, err := reclassifyNote(doc)
+		// A note the operator edited while this pass was running is not a
+		// failure - the edit path reclassifies it on its own, and stopping
+		// the whole run over one would make the backfill unusable on any
+		// library big enough to want it. It is still reported rather than
+		// swallowed: the response says how many were left behind.
+		if errors.Is(err, errNoteChangedUnderfoot) {
+			log.Printf("notes: classify backfill: %s changed while running, left for its own edit to reclassify", doc.ID)
+			skipped++
+			continue
+		}
+		if err != nil {
+			log.Printf("notes: classify backfill: reclassify %s: %v", doc.ID, err)
+			return writeDocumentError(c, err)
+		}
+		if wasChanged {
+			changed++
+		}
+	}
+	return c.JSON(http.StatusOK, notesClassifyBackfillJSON{Count: changed, Skipped: skipped})
+}
+
+// ── POST /api/notes/enrich/backfill ──────────────────────────────────────
+//
+// The Mate half of plan §9's two backfills: sets enrich=1 on every note
+// that doesn't already carry it and wakes the indexer, so Mate summarises
+// and (if semantic search is configured) embeds them the same way it does
+// any note captured with enrichment offered and accepted. Reuses the
+// ?dry_run=1 shape and "this bills you" consent wording of
+// POST /api/documents/embeddings/backfill (documents_handlers.go):
+// dry_run costs nothing and starts nothing; making the real call - not a
+// separate confirmation step - IS the operator's consent for this text to
+// reach OpenRouter, the same as that embeddings endpoint's own comment.
+
+type notesEnrichBackfillDryRunJSON struct {
+	Count int `json:"count"`
+	// TokensEstimate is CharsPending/4, the same rough characters-per-token
+	// estimate documentEmbeddingsBackfillDryRunJSON already gives its own
+	// caller (documents_handlers.go) - a scale-setting figure for the
+	// confirmation dialog, not a price quote.
+	TokensEstimate int `json:"tokens_estimate"`
+}
+
+type notesEnrichBackfillJSON struct {
+	Count int `json:"count"`
+}
+
+// notesEnrichBackfillHandler is POST /api/notes/enrich/backfill[?dry_run=1].
+// dry_run needs no assistant readiness check at all - it only counts and
+// estimates, the same as the embeddings backfill's own dry run. The real
+// call does: reindexDocumentHandler's own per-document "Reindex…" action
+// checks documentEnrichReadinessProblem before ever setting enrich=1 on a
+// single document, and a library-wide backfill gets no lighter a gate.
+func notesEnrichBackfillHandler(c echo.Context) error {
+	if parseDocumentBool(c.QueryParam("dry_run")) {
+		counts, err := globalDocumentStore.NoteEnrichBackfillCounts()
+		if err != nil {
+			return writeDocumentError(c, err)
+		}
+		return c.JSON(http.StatusOK, notesEnrichBackfillDryRunJSON{
+			Count:          counts.NotesPending,
+			TokensEstimate: counts.CharsPending / 4,
+		})
+	}
+
+	readiness, _, err := checkAssistantReadiness(assistantSettingsPath())
+	if err != nil {
+		log.Printf("notes: enrich backfill: check assistant readiness: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if problem := documentEnrichReadinessProblem(readiness); problem != "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": problem})
+	}
+
+	n, err := globalDocumentStore.EnrichBackfillNotes()
+	if err != nil {
+		return writeDocumentError(c, err)
+	}
+	wakeDocumentIndexer()
+	return c.JSON(http.StatusOK, notesEnrichBackfillJSON{Count: n})
 }

@@ -810,6 +810,13 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 		// Notes writes (plan "Notes and the Boat's Manual", ADR 0114).
 		{http.MethodPost, "/api/notes", tierWrite, createNoteHandler},
 		{http.MethodPatch, "/api/notes/:id", tierWrite, patchNoteHandler},
+		// Backfills for the operator who enables Mate, or upgrades the
+		// classifier, after notes already exist (plan §9's "no-Mate path").
+		// Static segments, not "/:id" routes - no ordering issue with the
+		// PATCH above either way (Echo's router: static > param > any, see
+		// the read-tier comment above the document library's own routes).
+		{http.MethodPost, "/api/notes/classify/backfill", tierWrite, notesClassifyBackfillHandler},
+		{http.MethodPost, "/api/notes/enrich/backfill", tierWrite, notesEnrichBackfillHandler},
 
 		// Checklist runs writes (plan "Notes and the Boat's Manual" §3/§4,
 		// ADR 0118). DELETE clears abandoned_at only - see

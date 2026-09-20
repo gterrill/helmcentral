@@ -71,7 +71,12 @@ Mate can read your notes too, and answers questions from them in preference
 to what it knows in general. A note you have pinned is put in front of Mate
 on every question, which is worth doing for the handful of facts you find
 yourself asking about constantly: cruise RPM, the tender's engine oil, the
-combination on the aft locker.
+combination on the aft locker. **Pin for Mate**, in the same viewer you read
+the note in, turns this on; the button becomes **Unpin** once it is, so
+taking a note back off is exactly as easy. Pin sparingly: there is a limit to
+how many notes and how much text actually rides along on every question, and
+Helmcentral says so outright rather than quietly dropping the ones that don't
+fit.
 
 ## Filing, and where notes go next
 
@@ -166,6 +171,31 @@ either way, the record of what was ticked and when stays with the boat, it
 is only ever cleared by deleting the note itself. Finishing or abandoning a
 run does not touch the note. The next time anyone taps **Start checklist**,
 it opens fresh and unticked, ready to be run again.
+
+## Catching up older notes
+
+Two things happen to a note automatically when it is captured: it is typed,
+and, if Mate is switched on and you have said yes to it, it is summarised and
+made searchable by meaning as well as by word. Neither is retroactive on its
+own, so a note captured before you turned the classifier on, or before you
+had Mate configured at all, can be left behind. Documents offers a way to
+catch both up in one pass, and only shows the offer when there is actually
+something to do.
+
+**Classifying older notes** re-runs the same offline classifier every fresh
+capture already gets, over every note that was never given a type by you
+specifically. It costs nothing and needs no Mate: it is the same plain text
+matching that decides Contact from Procedure from Spec on the way in, just
+run once over the backlog instead of once per note. A type you chose
+yourself is never touched.
+
+**Enriching older notes** is the one that costs something: it turns on
+summarising and semantic search for every note that has never had it,
+the same as ticking it on for one note at a time, just for all of them at
+once. Documents shows how many notes are waiting and an estimate of what it
+will send to OpenRouter before you confirm, the same estimate the document
+library's own semantic-search backfill gives. Clicking through is the
+consent; nothing is sent until you do.
 
 ## What this is not
 

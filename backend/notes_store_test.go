@@ -539,3 +539,337 @@ func TestListNotes_NewestFirst(t *testing.T) {
 		t.Fatalf("expected newest-first order [%s, %s], got %+v", second.ID, first.ID, notes)
 	}
 }
+
+// ── SetNotePinned / PinnedNotes (plan §8: Mate's pinned-note prompt) ────
+
+func TestSetNotePinned_TogglesTheFlag(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertTestNote(t, store, "note-pin-1")
+
+	if err := store.SetNotePinned(doc.ID, true); err != nil {
+		t.Fatalf("SetNotePinned(true): %v", err)
+	}
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Pinned {
+		t.Fatalf("expected pinned=true after SetNotePinned(true)")
+	}
+
+	if err := store.SetNotePinned(doc.ID, false); err != nil {
+		t.Fatalf("SetNotePinned(false): %v", err)
+	}
+	got, err = store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Pinned {
+		t.Fatalf("expected pinned=false after SetNotePinned(false)")
+	}
+}
+
+func TestSetNotePinned_KindFileIDReturnsNotANote(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc := mustInsertDocument(t, store, "a-file-sha-pin", "manual.pdf", nil)
+
+	if err := store.SetNotePinned(doc.ID, true); !errors.Is(err, errNotANote) {
+		t.Fatalf("expected errNotANote, got %v", err)
+	}
+}
+
+func TestSetNotePinned_UnknownIDReturnsNotFound(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if err := store.SetNotePinned("does-not-exist", true); !errors.Is(err, errDocumentNotFound) {
+		t.Fatalf("expected errDocumentNotFound, got %v", err)
+	}
+}
+
+// TestPinnedNotes_OnlyPinningSelectsANote is the store-level guard the plan
+// asks for explicitly: pinning is what selects a note for PinnedNotes, and
+// an unpinned note - however recent, however interesting - must never come
+// back from this call. assistant_prompt_test.go's
+// TestCollectAssistantPromptContext_PinnedNoteReachesPromptUnpinnedDoesNot
+// re-asserts the same thing one layer up, all the way into the rendered
+// prompt.
+func TestPinnedNotes_OnlyPinningSelectsANote(t *testing.T) {
+	store := newTestDocumentStore(t)
+	pinned := mustInsertTestNote(t, store, "note-pinned")
+	unpinned := mustInsertTestNote(t, store, "note-unpinned")
+	_ = mustInsertDocument(t, store, "file-not-a-note", "manual.pdf", nil)
+
+	if err := store.SetNotePinned(pinned.ID, true); err != nil {
+		t.Fatalf("SetNotePinned: %v", err)
+	}
+
+	got, err := store.PinnedNotes()
+	if err != nil {
+		t.Fatalf("PinnedNotes: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != pinned.ID {
+		t.Fatalf("expected exactly the one pinned note back, got %+v", got)
+	}
+	for _, d := range got {
+		if d.ID == unpinned.ID {
+			t.Fatalf("expected the unpinned note to never be returned by PinnedNotes")
+		}
+	}
+}
+
+// ── NoteClassifyBackfillCandidates (plan §9's classify backfill) ────────
+
+func TestNoteClassifyBackfillCandidates_SkipsOperatorSource(t *testing.T) {
+	store := newTestDocumentStore(t)
+	operatorNote, err := store.InsertNote(document{SHA256: "note-op", Filename: "op.md", MIME: "text/markdown", NoteType: "spec", NoteTypeSource: "operator"})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+	autoNote, err := store.InsertNote(document{SHA256: "note-auto", Filename: "auto.md", MIME: "text/markdown", NoteType: "note", NoteTypeSource: "auto"})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+	blankNote, err := store.InsertNote(document{SHA256: "note-blank", Filename: "blank.md", MIME: "text/markdown"})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	got, err := store.NoteClassifyBackfillCandidates()
+	if err != nil {
+		t.Fatalf("NoteClassifyBackfillCandidates: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, d := range got {
+		ids[d.ID] = true
+	}
+	if ids[operatorNote.ID] {
+		t.Fatalf("expected an operator-sourced note to be excluded from backfill candidates")
+	}
+	if !ids[autoNote.ID] || !ids[blankNote.ID] {
+		t.Fatalf("expected auto and blank-source notes to be candidates, got %+v", got)
+	}
+}
+
+// ── EnrichBackfillNotes / NoteEnrichBackfillCounts (plan §9's enrich backfill) ──
+
+func TestNoteEnrichBackfillCounts_OnlyCountsUnenrichedNotes(t *testing.T) {
+	store := newTestDocumentStore(t)
+	if _, err := store.InsertNote(document{SHA256: "note-unenriched", Filename: "a.md", MIME: "text/markdown", Markdown: "hello world", Enrich: false}); err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+	if _, err := store.InsertNote(document{SHA256: "note-enriched", Filename: "b.md", MIME: "text/markdown", Markdown: "already enriched", Enrich: true}); err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+	if _, err := store.Insert(document{SHA256: "file-unenriched", Filename: "c.pdf", MIME: "application/pdf", Markdown: "not a note", Enrich: false}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	counts, err := store.NoteEnrichBackfillCounts()
+	if err != nil {
+		t.Fatalf("NoteEnrichBackfillCounts: %v", err)
+	}
+	if counts.NotesPending != 1 {
+		t.Fatalf("expected exactly one pending note, got %d", counts.NotesPending)
+	}
+	if counts.CharsPending != len("hello world") {
+		t.Fatalf("expected CharsPending %d, got %d", len("hello world"), counts.CharsPending)
+	}
+}
+
+func TestEnrichBackfillNotes_SetsEnrichAndLeavesAlreadyEnrichedAlone(t *testing.T) {
+	store := newTestDocumentStore(t)
+	pending, err := store.InsertNote(document{SHA256: "note-pending-enrich", Filename: "a.md", MIME: "text/markdown", Enrich: false})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+	already, err := store.InsertNote(document{SHA256: "note-already-enrich", Filename: "b.md", MIME: "text/markdown", Enrich: true})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	n, err := store.EnrichBackfillNotes()
+	if err != nil {
+		t.Fatalf("EnrichBackfillNotes: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly one note flipped, got %d", n)
+	}
+
+	got, err := store.Get(pending.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Enrich {
+		t.Fatalf("expected the pending note's enrich flag to now be set")
+	}
+
+	gotAlready, err := store.Get(already.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !gotAlready.Enrich {
+		t.Fatalf("expected the already-enriched note to remain enrich=true")
+	}
+}
+
+func TestNoteEnrichBackfillCounts_DryRunSetsNothing(t *testing.T) {
+	store := newTestDocumentStore(t)
+	doc, err := store.InsertNote(document{SHA256: "note-dry-run", Filename: "a.md", MIME: "text/markdown", Enrich: false})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	if _, err := store.NoteEnrichBackfillCounts(); err != nil {
+		t.Fatalf("NoteEnrichBackfillCounts: %v", err)
+	}
+
+	got, err := store.Get(doc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Enrich {
+		t.Fatalf("expected the dry-run count query to set nothing, but enrich is now true")
+	}
+}
+
+// The classify backfill rewrites a note's frontmatter (its `type:` line) so
+// a portable backup never disagrees with the database. That rewrite changes
+// the blob's bytes, and therefore its sha256 - but NOT one byte of what the
+// indexer actually reads, because extractTextFile strips the frontmatter
+// fence before extracting (documents_extract.go). Re-extracting would
+// produce byte-identical chunks and byte-identical embeddings, at full
+// OpenRouter cost, for every note the backfill touches.
+//
+// That matters because the classify backfill is the one the plan describes
+// as costing nothing and which therefore ships with no "this bills you"
+// confirmation, unlike the enrich backfill beside it. If it silently
+// requeued indexing it would quietly bill an operator who was told it was
+// free.
+func TestReplaceNoteFrontmatter_DoesNotRequeueIndexing(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	doc, err := store.InsertNote(document{
+		SHA256:   "sha-original",
+		Filename: "Genset.md",
+		Title:    "Genset",
+		MIME:     "text/markdown",
+		NoteType: "note",
+	})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	// Pretend the indexer already finished with it.
+	if _, err := store.db.Exec(
+		`UPDATE documents SET status = 'indexed', stage = 'done', reindex_seq = 7 WHERE id = ?`, doc.ID,
+	); err != nil {
+		t.Fatalf("seed indexed state: %v", err)
+	}
+
+	if _, err := store.ReplaceNoteFrontmatter(doc.ID, "sha-original", "sha-reclassified", "note", 104); err != nil {
+		t.Fatalf("ReplaceNoteFrontmatter: %v", err)
+	}
+
+	var sha, status, stage string
+	var reindexSeq int
+	if err := store.db.QueryRow(
+		`SELECT sha256, status, stage, reindex_seq FROM documents WHERE id = ?`, doc.ID,
+	).Scan(&sha, &status, &stage, &reindexSeq); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+
+	if sha != "sha-reclassified" {
+		t.Errorf("sha256 = %q, want the rewritten blob's sha - disk and DB must not drift", sha)
+	}
+	if status != "indexed" || stage != "done" {
+		t.Errorf("status/stage = %q/%q, want indexed/done - a frontmatter-only rewrite must not requeue extraction", status, stage)
+	}
+	if reindexSeq != 7 {
+		t.Errorf("reindex_seq = %d, want 7 - re-embedding a note whose indexed text did not change is pure spend", reindexSeq)
+	}
+}
+
+// The classify backfill loops over a snapshot of candidates taken once, then
+// rewrites each note's frontmatter from that snapshot. On a boat that is one
+// operator clicking Classify and carrying on editing notes in the same panel
+// while it runs - entirely ordinary use of the UI this ships with.
+//
+// Without a compare-and-swap, a note edited after the snapshot was taken gets
+// its row pointed back at the stale blob AND has the blob holding the fresh
+// edit handed back as "the superseded one" for the caller to delete. The edit
+// is then gone from disk, not merely from the row.
+//
+// So the write must refuse when the note moved underfoot, and say so, rather
+// than overwrite (AGENTS.md: fail fast, never mask an upstream change).
+func TestReplaceNoteFrontmatter_RefusesWhenTheNoteChangedUnderfoot(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	doc, err := store.InsertNote(document{
+		SHA256: "sha-original", Filename: "Genset.md", Title: "Genset",
+		MIME: "text/markdown", NoteType: "note",
+	})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	// The operator edits the note after the backfill snapshotted it.
+	if _, err := store.ReplaceNoteBody(doc.ID, "sha-operator-edit", 200); err != nil {
+		t.Fatalf("operator edit: %v", err)
+	}
+
+	// The backfill now arrives holding the STALE sha.
+	_, err = store.ReplaceNoteFrontmatter(doc.ID, "sha-original", "sha-reclassified", "note", 104)
+	if !errors.Is(err, errNoteChangedUnderfoot) {
+		t.Fatalf("want errNoteChangedUnderfoot, got %v", err)
+	}
+
+	var sha string
+	if err := store.db.QueryRow(`SELECT sha256 FROM documents WHERE id = ?`, doc.ID).Scan(&sha); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if sha != "sha-operator-edit" {
+		t.Errorf("sha256 = %q, want the operator's edit preserved - the backfill must not revert it", sha)
+	}
+}
+
+// The type update has to land in the SAME transaction as the sha swap. Two
+// separately-locked calls leave a window where the blob on disk already says
+// the new type while the database still says the old one - the precise
+// invariant reclassifyNote exists to maintain.
+func TestReplaceNoteFrontmatter_SetsTypeAtomicallyAndLeavesOperatorTypeAlone(t *testing.T) {
+	store := newTestDocumentStore(t)
+
+	auto, err := store.InsertNote(document{
+		SHA256: "auto-1", Filename: "a.md", Title: "A", MIME: "text/markdown",
+		NoteType: "note", NoteTypeSource: "auto",
+	})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+	if _, err := store.ReplaceNoteFrontmatter(auto.ID, "auto-1", "auto-2", "procedure", 10); err != nil {
+		t.Fatalf("ReplaceNoteFrontmatter: %v", err)
+	}
+	var noteType, source string
+	if err := store.db.QueryRow(`SELECT note_type, note_type_source FROM documents WHERE id = ?`, auto.ID).Scan(&noteType, &source); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if noteType != "procedure" || source != "auto" {
+		t.Errorf("note_type/source = %q/%q, want procedure/auto", noteType, source)
+	}
+
+	op, err := store.InsertNote(document{
+		SHA256: "op-1", Filename: "b.md", Title: "B", MIME: "text/markdown",
+		NoteType: "quirk", NoteTypeSource: "operator",
+	})
+	if err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+	if _, err := store.ReplaceNoteFrontmatter(op.ID, "op-1", "op-2", "procedure", 10); err != nil {
+		t.Fatalf("ReplaceNoteFrontmatter: %v", err)
+	}
+	if err := store.db.QueryRow(`SELECT note_type, note_type_source FROM documents WHERE id = ?`, op.ID).Scan(&noteType, &source); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if noteType != "quirk" || source != "operator" {
+		t.Errorf("note_type/source = %q/%q, want quirk/operator - an operator override is sticky", noteType, source)
+	}
+}

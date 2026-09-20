@@ -1300,6 +1300,74 @@ describe('DocumentsPanel', () => {
     })
   })
 
+  // Plan §8: pinning a note is the only operator-facing way documents.pinned
+  // (already a real column, already on the wire) ever becomes true - without
+  // it, Mate's pinned-notes prompt feature has no way to ever hold anything.
+  // Lives in the viewer, the one place "where a note is read".
+  describe('the viewer: pinning a note for Mate', () => {
+    it('an unpinned note offers "Pin for Mate", which PATCHes pinned:true', async () => {
+      const patchNote = vi.fn().mockResolvedValue({ document: note({ pinned: true }), body: 'Open the seacock first.' })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ patchNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the seacock first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note', pinned: false })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+      await screen.findByText(/Open the/)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pin for Mate' }))
+
+      await waitFor(() => expect(patchNote).toHaveBeenCalledWith('note-1', { pinned: true }))
+      await screen.findByRole('button', { name: 'Unpin' })
+    })
+
+    it('a pinned note offers "Unpin", which PATCHes pinned:false', async () => {
+      const patchNote = vi.fn().mockResolvedValue({ document: note({ pinned: false }), body: 'Open the seacock first.' })
+      mockedUseNotes.mockReturnValue(makeNotesMock({ patchNote }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'Open the seacock first.' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'note-1', mime: 'text/markdown', filename: 'genset.md', title: 'Genset start-up', kind: 'note', pinned: true })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Genset start-up' }))
+      await screen.findByText(/Open the/)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Unpin' }))
+
+      await waitFor(() => expect(patchNote).toHaveBeenCalledWith('note-1', { pinned: false }))
+      await screen.findByRole('button', { name: 'Pin for Mate' })
+    })
+
+    it('a plain file (kind file) never shows a pin control', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: 'raw log output' }),
+      }))
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({
+        documents: [doc({ id: 'log-1', mime: 'text/plain', filename: 'engine.log', title: 'Engine log', kind: 'file' })],
+      }))
+
+      render(<DocumentsPanel />)
+      fireEvent.click(screen.getByRole('button', { name: 'Engine log' }))
+      await screen.findByText('raw log output')
+
+      expect(screen.queryByRole('button', { name: 'Pin for Mate' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Unpin' })).not.toBeInTheDocument()
+    })
+  })
+
   // Plan §7 / ADR 0118: "Start checklist" is the general viewer's own
   // route into the checklist runner - a mode of this same Sheet, gated on
   // GET /api/notes/:id's own `checklist` field (use-notes.ts's getNote).

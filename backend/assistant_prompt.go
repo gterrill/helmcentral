@@ -89,6 +89,31 @@ type assistantPromptContext struct {
 	DocumentCount       int
 	DocumentFolderNames []string
 
+	// PinnedNotes and ManualSections back plan §8 (Mate): the operator's
+	// pinned notes (documents.pinned=1, kind='note') and, for each boat
+	// manual (a top-level document_folders row with role='manual'), the
+	// names of its top-level sections. Both are collected by
+	// collectAssistantPinnedNotes/collectAssistantManualSections and left at
+	// their zero value (nil) on a failed lookup - the SAME "leave the
+	// sentinel rather than break the prompt" rule DocumentCount/
+	// DocumentFolderNames above already follow, and the one explicitly
+	// sanctioned exception to AGENTS.md's fail-fast fallback policy: a
+	// broken note or manual read must never take the whole system prompt
+	// (and therefore Mate entirely) down over content that is, at worst,
+	// missing from context this turn. Rendered into the STABLE prefix
+	// (assistantSystemPromptParts), not the live suffix, because both only
+	// change when the operator edits a note or a manual's sections, not
+	// turn to turn - see that function's own doc comment on why the split
+	// exists.
+	PinnedNotes []assistantPinnedNote
+	// PinnedNotesTotal is how many notes are pinned in all, which is NOT
+	// len(PinnedNotes): collection stops reading bodies at
+	// assistantMaxPinnedNotes so a heavily-pinned library doesn't cost a
+	// pile of disk reads on every turn. The prompt still has to report the
+	// true number it left out, so the count travels separately.
+	PinnedNotesTotal int
+	ManualSections   []assistantManual
+
 	// Spoken and Screen are turn-scoped: postAssistantMessageHandler sets
 	// them straight from that one POST's body, after calling
 	// collectAssistantPromptContext, rather than reading them from settings
@@ -99,6 +124,262 @@ type assistantPromptContext struct {
 	// voice").
 	Spoken bool
 	Screen assistantScreenContext
+}
+
+// assistantPinnedNote is one of the operator's pinned notes (plan §8): a
+// documents row with kind='note' and pinned=1. Title is the note's own
+// title (deriveNoteTitle at create time, or an operator edit); Body is its
+// current markdown body, read fresh off disk the same way getNoteHandler
+// does (readNoteBody, notes_handlers.go) rather than from documents.markdown,
+// which can lag a just-saved edit until the indexer's own extract stage
+// catches up.
+type assistantPinnedNote struct {
+	Title string
+	Body  string
+}
+
+// assistantManual is one boat manual and the names of its top-level
+// sections (its immediate child folders, in reading order) - manualIndexLine's
+// input. Sections only, not documents filed loose at the manual's own top
+// level: a section is what has sub-contents worth naming as its own clause
+// (see ManualSectionNames' doc comment, manuals_store.go).
+type assistantManual struct {
+	Name     string
+	Sections []string
+}
+
+// assistantMaxPinnedNotes and assistantMaxPinnedNoteChars cap the pinned-
+// notes prompt section (plan §8). A system prompt has no role boundary, so
+// this is untrusted operator-authored content being handed real authority
+// over every turn of a conversation for as long as the note stays pinned -
+// caps exist so an operator who pins a lot (or pins one enormous note)
+// can't silently balloon the stable prefix past what provider-side caching
+// and the model's own context window comfortably carry. Chosen the same
+// way assistantMaxToolCallsPerRound's own comment reasons about headroom
+// (assistant_run.go): 8 notes is generous for what pinning is actually for
+// - a handful of the boat's own load-bearing facts, not a second copy of
+// the manual - and 4000 characters is comfortably more than 8 notes'
+// worth of the kind of terse, practical text a pinned note is (a checklist,
+// a spec, a contact), while still bounding a single ballooning note.
+const (
+	assistantMaxPinnedNotes     = 8
+	assistantMaxPinnedNoteChars = 4000
+)
+
+// assistantMaxManualIndexSections caps manualIndexLine's total section
+// count across every manual combined (plan §8: "capped at 60 sections
+// overall"). A boat's manual is meant to stay to the size a skipper
+// actually maintains, not to enumerate hundreds of sections into a prompt
+// every turn pays for - 60 is generous headroom over what the plan's own
+// worked example (a handful of sections per manual, a handful of manuals)
+// ever needs, while still bounding a library that has grown far past what
+// this index line is for (telling the model which BOOK holds what -
+// search_documents does the actual finding).
+const assistantMaxManualIndexSections = 60
+
+// manualIndexLine renders manuals as the system prompt's manual index -
+// modelled on helpIndexLine (assistant_help.go), one clause per manual so
+// the model knows which book holds what, e.g. "Boat manuals: Operations
+// Manual (Before Leaving, Getting Underway), Crew Training (Watchkeeping)".
+// A manual with no sections yet renders as its bare name, not an empty
+// "()" - a freshly flagged manual with nothing filed into it is a real,
+// expected state (plan §3's "none/one/several" Manuals panel), not
+// something to hide from the model.
+//
+// "" when manuals is empty, so assistantSystemPromptParts can omit the line
+// entirely on a boat with no manual flagged yet - the ordinary starting
+// state, and not something worth a permanent empty line in every prompt.
+//
+// The section budget is spent in manual order, each manual taking as many
+// of its OWN sections as remain in the budget - never a bare name standing
+// in for a manual whose sections didn't fit, which would misreport it as
+// having none. A manual reached after the budget is exhausted is left out
+// of the line entirely for the same reason (unless it has no sections of
+// its own to omit, in which case its bare name costs nothing and is always
+// shown). The trailing "… and N more" - present only when the combined
+// section count actually exceeds the cap - reports how many sections were
+// left unlisted, across every manual, not how many manuals were skipped:
+// what the model loses by the cap is sections it could ask search_documents
+// about by name, not whole books.
+func manualIndexLine(manuals []assistantManual) string {
+	if len(manuals) == 0 {
+		return ""
+	}
+
+	total := 0
+	for _, m := range manuals {
+		total += len(m.Sections)
+	}
+
+	remaining := assistantMaxManualIndexSections
+	shown := 0
+	parts := make([]string, 0, len(manuals))
+	for _, m := range manuals {
+		switch {
+		case len(m.Sections) == 0:
+			parts = append(parts, m.Name)
+		case remaining <= 0:
+			// No budget left for any of this manual's sections - see the
+			// doc comment above on why it's left out entirely rather than
+			// shown bare (which would wrongly claim it has none).
+			continue
+		default:
+			sections := m.Sections
+			if len(sections) > remaining {
+				sections = sections[:remaining]
+			}
+			remaining -= len(sections)
+			shown += len(sections)
+			parts = append(parts, fmt.Sprintf("%s (%s)", m.Name, strings.Join(sections, ", ")))
+		}
+	}
+
+	line := "Boat manuals: " + strings.Join(parts, ", ")
+	if total > assistantMaxManualIndexSections {
+		line += fmt.Sprintf(" … and %d more", total-shown)
+	}
+	return line
+}
+
+// pinnedNotesPromptSection renders notes as the second standing-notes block
+// plan §8 asks for - "Standing notes from the boat's manual:" - following,
+// never replacing, assistant.notes' own "Operator standing notes:" block
+// (assistantSystemPromptParts' section 4). "" when notes is empty, so the
+// stable prefix carries no permanent empty block on a boat with nothing
+// pinned yet.
+//
+// Every title and body is scrubbed with assistantNeutralizeDocumentBlockMarker
+// (assistant_run.go) before it's written, so a note's bytes can't forge an
+// attachment-block boundary tag elsewhere in the same prompt.
+//
+// Be honest about how much that buys here, because it is easy to read as
+// more than it is. Place names got the same treatment in 03da088 because
+// OSM place names are untrusted network data; a pinned note is
+// operator-authored and already trusted by the time it reaches this
+// function - which is the actual reason it is safe to put in a prompt that
+// has no role boundary. Nothing here defends against a note body carrying
+// fake section headers or outright instructions to the model, and nothing
+// is meant to: the long-standing assistant.notes block rendered immediately
+// above this one has always gone in unscrubbed, at the same trust tier.
+// The scrub is cheap and worth keeping; it is not a trust boundary.
+//
+// The CHARACTER cap is applied here. The COUNT cap is applied twice: once
+// at collection, so a boat with thirty pinned notes does not pay thirty
+// full file reads on every single turn to render at most eight of them
+// (ADR 0111 puts availability first, and a note body may be 1 MiB), and
+// again here as the backstop that keeps this function correct on its own.
+// `total` is the TRUE number of pinned notes, carried separately precisely
+// because `notes` is deliberately short by then - collectAssistantPinnedNotes hands back
+// the operator's WHOLE pinned set, unfiltered, the same "collect
+// everything, cap at render" split manualIndexLine's own caller draws.
+// Over either cap, this says so explicitly in the rendered text rather than
+// truncating silently (plan §8's own requirement: "a system prompt has no
+// role boundary" is exactly why a silent drop here is worse than an ugly
+// one) - an operator who relies on a pinned note Mate can no longer see
+// needs to find out from Mate's own answers being wrong, not from a diff
+// against a prompt they never read.
+//
+// A note whose own rendered entry doesn't fit the REMAINING character
+// budget is left out whole, never truncated mid-body - a half-sentence
+// safety note ("if the genset won't start, do NOT—") is worse than no note
+// at all.
+func pinnedNotesPromptSection(notes []assistantPinnedNote, total int) string {
+	if len(notes) == 0 {
+		return ""
+	}
+
+	limited := notes
+	if len(limited) > assistantMaxPinnedNotes {
+		limited = limited[:assistantMaxPinnedNotes]
+	}
+
+	var b strings.Builder
+	b.WriteString("Standing notes from the boat's manual:\n")
+
+	chars := 0
+	shown := 0
+	for _, n := range limited {
+		title := assistantNeutralizeDocumentBlockMarker(strings.TrimSpace(n.Title))
+		body := assistantNeutralizeDocumentBlockMarker(strings.TrimSpace(n.Body))
+		entry := fmt.Sprintf("- %s: %s\n", title, body)
+		if chars+len(entry) > assistantMaxPinnedNoteChars {
+			// continue, NOT break: this note is too big for what's left,
+			// but a later one may still fit. Pinned notes arrive ordered
+			// by lower(title), so breaking here would let one fat note
+			// near the top of the alphabet silently suppress every
+			// smaller note below it.
+			continue
+		}
+		b.WriteString(entry)
+		chars += len(entry)
+		shown++
+	}
+
+	if omitted := total - shown; omitted > 0 {
+		noun := "notes"
+		if omitted == 1 {
+			noun = "note"
+		}
+		fmt.Fprintf(&b, "(%d more pinned %s not shown here - over the %d-note/%d-character limit for this section.)\n",
+			omitted, noun, assistantMaxPinnedNotes, assistantMaxPinnedNoteChars)
+	}
+
+	return b.String()
+}
+
+// collectAssistantPinnedNotes reads every currently pinned note
+// (documentStore.PinnedNotes) and its current body off disk (readNoteBody,
+// notes_handlers.go - the same freshest-available read getNoteHandler
+// itself uses). Called only when globalDocumentStore is non-nil
+// (collectAssistantPromptContext's own guard); a failed lookup here is
+// returned to the caller, which - per assistantPromptContext's own doc
+// comment on PinnedNotes - leaves the field at its zero value rather than
+// letting a broken note take the whole system prompt down with it.
+func collectAssistantPinnedNotes() ([]assistantPinnedNote, int, error) {
+	docs, err := globalDocumentStore.PinnedNotes()
+	if err != nil {
+		return nil, 0, err
+	}
+	// Row metadata for every pinned note is one bounded query; reading the
+	// BODIES is the expensive part, so it stops at the count cap. Anything
+	// past it could never be rendered anyway (pinnedNotesPromptSection
+	// slices to the same constant), and this function runs on every single
+	// assistant turn.
+	total := len(docs)
+	if len(docs) > assistantMaxPinnedNotes {
+		docs = docs[:assistantMaxPinnedNotes]
+	}
+	out := make([]assistantPinnedNote, 0, len(docs))
+	for _, doc := range docs {
+		body, err := readNoteBody(doc)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, assistantPinnedNote{Title: doc.Title, Body: body})
+	}
+	return out, total, nil
+}
+
+// collectAssistantManualSections reads every boat manual
+// (documentStore.ListManuals) and, for each, its top-level section names
+// (documentStore.ManualSectionNames) - manualIndexLine's input. Same
+// failure handling as collectAssistantPinnedNotes above: an error here is
+// returned to the caller rather than papered over, and
+// collectAssistantPromptContext leaves ManualSections at nil on it.
+func collectAssistantManualSections() ([]assistantManual, error) {
+	manuals, err := globalDocumentStore.ListManuals()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]assistantManual, 0, len(manuals))
+	for _, m := range manuals {
+		sections, err := globalDocumentStore.ManualSectionNames(m.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, assistantManual{Name: m.Name, Sections: sections})
+	}
+	return out, nil
 }
 
 // assistantScreenContext is what the frontend was showing when the operator
@@ -191,6 +472,23 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 		}
 		if names, err := globalDocumentStore.TopLevelFolderNames(); err == nil {
 			pc.DocumentFolderNames = names
+		}
+
+		// Pinned notes and the manual index (plan §8). Deliberate exception
+		// to AGENTS.md's fail-fast fallback policy, commented as one here
+		// rather than left to look like an oversight: a failed read leaves
+		// PinnedNotes/ManualSections at their zero value (nil) instead of
+		// erroring collectAssistantPromptContext itself, for the same
+		// reason the DocumentCount/DocumentFolderNames reads just above
+		// already tolerate a failure - a broken note or manual read must
+		// never take the whole system prompt, and therefore Mate entirely,
+		// down over content that is at worst missing from this one turn.
+		if pinned, total, err := collectAssistantPinnedNotes(); err == nil {
+			pc.PinnedNotes = pinned
+			pc.PinnedNotesTotal = total
+		}
+		if manuals, err := collectAssistantManualSections(); err == nil {
+			pc.ManualSections = manuals
 		}
 	}
 
@@ -452,6 +750,17 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		b.WriteString("\n\n")
 	}
 
+	// 3a. Manual index (plan §8) - which book holds what, so the model
+	// knows to reach for search_documents (scoped with its own folder
+	// argument, when it's obviously one manual) rather than guess. Changes
+	// only when the operator flags/clears a manual or adds/renames a
+	// section, not per turn - stable prefix, same as the help index just
+	// above it.
+	if manualLine := manualIndexLine(pc.ManualSections); manualLine != "" {
+		b.WriteString(manualLine)
+		b.WriteString("\n\n")
+	}
+
 	// 4. Operator standing notes - changes only when the operator edits
 	// settings.yaml's assistant.notes in Settings, not per turn.
 	notes := strings.TrimSpace(pc.Notes)
@@ -459,6 +768,17 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		notes = "(none)"
 	}
 	fmt.Fprintf(&b, "Operator standing notes:\n%s\n\n", notes)
+
+	// 4a. Pinned notes (plan §8) - a second, distinct block that AUGMENTS
+	// assistant.notes above rather than replacing it: silently folding the
+	// operator's pinned notes into the same settings-backed field would be
+	// a storage change the operator never asked for. Changes only when the
+	// operator pins/unpins or edits a pinned note, not per turn - stable
+	// prefix, same reasoning as the manual index above.
+	if pinnedSection := pinnedNotesPromptSection(pc.PinnedNotes, pc.PinnedNotesTotal); pinnedSection != "" {
+		b.WriteString(pinnedSection)
+		b.WriteString("\n\n")
+	}
 
 	stable = b.String()
 

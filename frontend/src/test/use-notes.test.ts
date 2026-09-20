@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 
-import { useNotes } from '@/hooks/use-notes'
+import {
+  useNotes,
+  dryRunNotesClassifyBackfill,
+  runNotesClassifyBackfill,
+  dryRunNotesEnrichBackfill,
+  runNotesEnrichBackfill,
+} from '@/hooks/use-notes'
 
 // ADR 0116 / plan §7: use-notes.ts owns list/get/create/patch for the Notes
 // inbox. Same routedFetch idiom as use-documents.test.ts (a small router by
@@ -250,5 +256,87 @@ describe('useNotes', () => {
 
     await act(async () => { resolveFirst(ok({ notes: [notePayload({ id: 'note-stale' })] })) })
     expect(result.current.notes.map((n) => n.id)).toEqual(['note-new'])
+  })
+
+  it('patchNote PATCHes pinned alone, without any of the note-content fields', async () => {
+    const { fn, calls } = routedFetch({
+      'GET /api/notes': () => ok({ notes: [] }),
+      'PATCH /api/notes/note-1': () => ok({ document: notePayload({ pinned: true }), body: 'text' }),
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const { result } = renderHook(() => useNotes({ unfiledOnly: true }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let updated
+    await act(async () => {
+      updated = await result.current.patchNote('note-1', { pinned: true })
+    })
+
+    expect(updated).toMatchObject({ document: { pinned: true } })
+    const patchCall = calls.find((c) => c.method === 'PATCH')
+    expect(patchCall?.body).toEqual({ pinned: true })
+  })
+})
+
+// ── notes backfills (plan §9's "no-Mate path") - free functions, not hook
+// state, so each is tested as a direct call against a stubbed fetch rather
+// than through renderHook. ──────────────────────────────────────────────
+
+describe('notes backfills', () => {
+  it('dryRunNotesClassifyBackfill GETs nothing and POSTs with dry_run=1, starting nothing', async () => {
+    const { fn, calls } = routedFetch({
+      'POST /api/notes/classify/backfill': (url) => {
+        expect(url.searchParams.get('dry_run')).toBe('1')
+        return ok({ count: 3 })
+      },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const result = await dryRunNotesClassifyBackfill()
+
+    expect(result).toEqual({ count: 3 })
+    expect(calls).toHaveLength(1)
+  })
+
+  it('runNotesClassifyBackfill POSTs with no dry_run and returns the changed count', async () => {
+    const { fn, calls } = routedFetch({
+      'POST /api/notes/classify/backfill': (url) => {
+        expect(url.searchParams.has('dry_run')).toBe(false)
+        return ok({ count: 2 })
+      },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const result = await runNotesClassifyBackfill()
+
+    expect(result).toEqual({ count: 2 })
+    expect(calls[0].method).toBe('POST')
+  })
+
+  it('dryRunNotesEnrichBackfill returns a count and a token estimate, starting nothing', async () => {
+    const { fn } = routedFetch({
+      'POST /api/notes/enrich/backfill': (url) => {
+        expect(url.searchParams.get('dry_run')).toBe('1')
+        return ok({ count: 4, tokens_estimate: 512 })
+      },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    const result = await dryRunNotesEnrichBackfill()
+
+    expect(result).toEqual({ count: 4, tokens_estimate: 512 })
+  })
+
+  it('runNotesEnrichBackfill POSTs with no dry_run and surfaces the server error on a 400 (not ready)', async () => {
+    const { fn } = routedFetch({
+      'POST /api/notes/enrich/backfill': (url) => {
+        expect(url.searchParams.has('dry_run')).toBe(false)
+        return failed(400, 'No OpenRouter API key is configured. Add one in Settings → Assistant.')
+      },
+    })
+    vi.stubGlobal('fetch', fn)
+
+    await expect(runNotesEnrichBackfill()).rejects.toThrow(/OpenRouter API key/)
   })
 })

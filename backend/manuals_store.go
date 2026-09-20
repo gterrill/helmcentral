@@ -430,6 +430,42 @@ func (s *documentStore) manualTreeChildren(q sqlQueryer, parentID string) ([]man
 	return out, nil
 }
 
+// ManualSectionNames returns manualID's immediate child FOLDER names only -
+// not the documents filed directly under it - ordered sort_index then
+// lower(name), the same ordering manualTreeChildren uses for a manual's
+// full subtree, one level deep. This is Mate's manual index
+// (manualIndexLine, assistant_prompt.go): a section is something with its
+// own sub-contents, which is what makes it worth naming to the model as a
+// clause of its own ("Operations Manual (Before Leaving, Getting
+// Underway)") - a document filed loose at the manual's top level isn't a
+// section and would only pad that line with titles a search_documents call
+// already finds. Deliberately its own query rather than reusing
+// manualTreeChildren (which interleaves folders and documents, and
+// recurses): this needs exactly one level, folders only.
+func (s *documentStore) ManualSectionNames(manualID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`SELECT name FROM document_folders WHERE parent_id = ? ORDER BY sort_index, lower(name)`, manualID)
+	if err != nil {
+		return nil, fmt.Errorf("manual section names: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("manual section names: scan: %w", err)
+		}
+		out = append(out, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("manual section names: %w", err)
+	}
+	return out, nil
+}
+
 // ReorderManualChildren applies a fresh sort_index to every item in items,
 // all under parentID, in ONE transaction - following MoveDocuments'
 // precedent (documents_store.go): an id items names that isn't actually a

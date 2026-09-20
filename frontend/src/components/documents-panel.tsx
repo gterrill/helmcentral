@@ -12,6 +12,8 @@ import {
   Loader2,
   MoreVertical,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   RefreshCw,
   Trash2,
@@ -77,7 +79,16 @@ import {
   type DocumentSearchResult,
 } from '@/hooks/use-documents'
 import { useManuals } from '@/hooks/use-manuals'
-import { useNotes, type NoteType } from '@/hooks/use-notes'
+import {
+  useNotes,
+  type NoteType,
+  type NotesClassifyBackfillDryRun,
+  type NotesEnrichBackfillDryRun,
+  dryRunNotesClassifyBackfill,
+  runNotesClassifyBackfill,
+  dryRunNotesEnrichBackfill,
+  runNotesEnrichBackfill,
+} from '@/hooks/use-notes'
 import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-display'
 import type { HelpTarget } from '@/lib/help-links'
 import type { NoteLink } from '@/lib/note-links'
@@ -616,6 +627,62 @@ export function DocumentsPanel({
     })
   }
 
+  // ── notes backfills (plan §9's "no-Mate path") ──────────────────────
+  // Both dry runs are fetched on mount and after every run, the same "is
+  // there anything to do" check EmbeddingsStatusRow gets for free from its
+  // own polled GET /api/documents/embeddings - there is no equivalent GET
+  // status endpoint for notes (a dry-run POST starts nothing either way,
+  // so calling it just to look is the same shape), so this component holds
+  // that state itself rather than useNotes owning it for every one of its
+  // several call sites.
+  const [classifyDryRun, setClassifyDryRun] = useState<NotesClassifyBackfillDryRun | null>(null)
+  const [enrichDryRun, setEnrichDryRun] = useState<NotesEnrichBackfillDryRun | null>(null)
+  const refreshNotesBackfillDryRuns = useCallback(async () => {
+    try {
+      setClassifyDryRun(await dryRunNotesClassifyBackfill())
+    } catch {
+      // Same "convenience overlay, not load-bearing" reasoning as
+      // useDocuments.ts's refreshEmbeddingsStatus - a failed dry-run read
+      // must not disturb the folder/search view it sits beside.
+      setClassifyDryRun(null)
+    }
+    try {
+      setEnrichDryRun(await dryRunNotesEnrichBackfill())
+    } catch {
+      setEnrichDryRun(null)
+    }
+  }, [])
+  useEffect(() => { void refreshNotesBackfillDryRuns() }, [refreshNotesBackfillDryRuns])
+
+  // Classify costs nothing (a pure local function, no OpenRouter, no Mate)
+  // so there's no consent to gate behind a confirmation dialog the way
+  // embeddings/enrich need - the click IS the whole action.
+  const submitClassifyBackfill = () => {
+    void runAction(async () => {
+      await runNotesClassifyBackfill()
+      await unfiled.refresh() // note_type may have changed for rows the inbox shows
+      await documents.refresh() // ...and for rows the current folder shows
+      await refreshNotesBackfillDryRuns()
+    })
+  }
+
+  // Enrich bills the operator's OpenRouter account, so it gets the same
+  // dry-run-then-confirm gate embeddings/backfill uses - the AlertDialog
+  // below, keyed on this same dry-run result being non-null.
+  const [enrichBackfillConfirm, setEnrichBackfillConfirm] = useState<NotesEnrichBackfillDryRun | null>(null)
+  const handleEnrichBackfillClick = () => {
+    void runAction(async () => {
+      setEnrichBackfillConfirm(await dryRunNotesEnrichBackfill())
+    })
+  }
+  const submitEnrichBackfill = async () => {
+    await runAction(async () => {
+      await runNotesEnrichBackfill()
+      setEnrichBackfillConfirm(null)
+      await refreshNotesBackfillDryRuns()
+    })
+  }
+
   // ── viewer ───────────────────────────────────────────────────────────
   const [viewerId, setViewerId] = useState<string | null>(initialDocumentId)
   const [viewerDoc, setViewerDoc] = useState<DocumentRecord | null>(null)
@@ -675,6 +742,20 @@ export function DocumentsPanel({
       throw err // NoteEditor keeps its dirty flag on a failed save
     }
   }, [viewerId, patchViewerNote])
+
+  // ── pinning a note for Mate (plan §8) - "a control in the Documents UI
+  // where a note is read", so it lives beside Edit/Start checklist in this
+  // same viewer toolbar rather than as a new surface of its own. Without
+  // this, documents.pinned (already a real column, already on the wire)
+  // has no operator-facing way to ever become true, and the whole
+  // pinned-notes prompt feature is unreachable.
+  const handleTogglePin = useCallback(async () => {
+    if (!viewerDoc || viewerDoc.kind !== 'note') return
+    await runAction(async () => {
+      const updated = await patchViewerNote(viewerDoc.id, { pinned: !viewerDoc.pinned })
+      setViewerDoc((prev) => (prev && prev.id === updated.document.id ? { ...prev, pinned: updated.document.pinned } : prev))
+    })
+  }, [viewerDoc, patchViewerNote, runAction])
 
   // ── running a checklist from the general viewer (plan §7, ADR 0118) - a
   // MODE of this same Sheet, not a navigation elsewhere. viewerText above
@@ -943,6 +1024,12 @@ export function DocumentsPanel({
           Unfiled notes ({unfiled.notes.length})
         </Button>
         <EmbeddingsStatusRow status={documents.embeddingsStatus} onIndexClick={handleIndexClick} />
+        <NotesBackfillStatusRow
+          classifyDryRun={classifyDryRun}
+          enrichDryRun={enrichDryRun}
+          onClassifyClick={submitClassifyBackfill}
+          onEnrichClick={handleEnrichBackfillClick}
+        />
       </div>
 
       {uploads.items.length > 0 && (
@@ -1317,6 +1404,25 @@ export function DocumentsPanel({
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── Enrich notes for Mate (plan §9's enrich backfill) confirmation ── */}
+      <AlertDialog open={enrichBackfillConfirm !== null} onOpenChange={(open) => { if (!open) setEnrichBackfillConfirm(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enrich notes for Mate?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This sends the text of {enrichBackfillConfirm?.count ?? 0}{' '}
+              {enrichBackfillConfirm?.count === 1 ? 'note' : 'notes'} (about{' '}
+              {enrichBackfillConfirm?.tokens_estimate ?? 0} tokens) to OpenRouter, which bills for it.
+              Capture, filing and keyword search keep working either way.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { void submitEnrichBackfill() }}>Enrich</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* ── Viewer ─────────────────────────────────────────────────── */}
       <Sheet open={viewerId !== null} onOpenChange={(open) => { if (!open) setViewerId(null) }}>
         <SheetContent side="right" className="w-full sm:max-w-2xl">
@@ -1344,6 +1450,26 @@ export function DocumentsPanel({
                 <Button type="button" size="sm" variant="outline" onClick={() => setViewerChecklistRunning(true)}>
                   <ListChecks className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
                   Start checklist
+                </Button>
+              )}
+              {/* Pin for Mate (plan §8) - gated on kind='note' the same way
+                  every note-only control here is; a pinned note rides in
+                  Mate's system prompt until unpinned, so the label always
+                  says which state a click leads TO, not which state is
+                  current. */}
+              {viewerDoc.kind === 'note' && (
+                <Button type="button" size="sm" variant="outline" aria-pressed={viewerDoc.pinned} onClick={() => { void handleTogglePin() }}>
+                  {viewerDoc.pinned ? (
+                    <>
+                      <PinOff className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                      Unpin
+                    </>
+                  ) : (
+                    <>
+                      <Pin className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                      Pin for Mate
+                    </>
+                  )}
                 </Button>
               )}
               {/* The Edit toggle NoteEditor is reachable through (moved out
@@ -1459,6 +1585,49 @@ function EmbeddingsStatusRow({
         <span className="rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-amber-600 dark:text-amber-400">
           {backfill.last_error}
         </span>
+      )}
+    </div>
+  )
+}
+
+// Plan §9's two backfills, surfaced the same way EmbeddingsStatusRow is:
+// invisible when there's nothing to do (both counts at 0, or the dry runs
+// haven't loaded yet), never a permanent nag once the library's caught up.
+// The two halves are independent - a boat can have unclassified notes with
+// nothing left to enrich, or the reverse - so each renders (or doesn't) on
+// its own count rather than sharing one active/inactive gate.
+function NotesBackfillStatusRow({
+  classifyDryRun,
+  enrichDryRun,
+  onClassifyClick,
+  onEnrichClick,
+}: {
+  classifyDryRun: NotesClassifyBackfillDryRun | null
+  enrichDryRun: NotesEnrichBackfillDryRun | null
+  onClassifyClick: () => void
+  onEnrichClick: () => void
+}) {
+  const classifyCount = classifyDryRun?.count ?? 0
+  const enrichCount = enrichDryRun?.count ?? 0
+  if (classifyCount === 0 && enrichCount === 0) return null
+
+  return (
+    <div data-testid="notes-backfill-status" className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {classifyCount > 0 && (
+        <>
+          <span>{classifyCount} note{classifyCount === 1 ? '' : 's'} not yet classified</span>
+          <Button type="button" size="sm" variant="outline" onClick={onClassifyClick}>
+            Classify
+          </Button>
+        </>
+      )}
+      {enrichCount > 0 && (
+        <>
+          <span>{enrichCount} note{enrichCount === 1 ? '' : 's'} not yet enriched</span>
+          <Button type="button" size="sm" variant="outline" onClick={onEnrichClick}>
+            Enrich for Mate
+          </Button>
+        </>
       )}
     </div>
   )

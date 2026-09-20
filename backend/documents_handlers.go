@@ -252,6 +252,8 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusRequestEntityTooLarge, errNoteBodyTooLarge.Error()
 	case errors.Is(err, errNotANote):
 		return http.StatusConflict, errNotANote.Error()
+	case errors.Is(err, errNoteChangedUnderfoot):
+		return http.StatusConflict, errNoteChangedUnderfoot.Error()
 	// errNotAManual and errManualNotTopLevel back the manuals feature
 	// (manuals_store.go): both are the same kind of "a specific, expected
 	// condition, not a database failure" sentinel as errNotANote just
