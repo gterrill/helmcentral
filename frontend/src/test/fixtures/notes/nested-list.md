@@ -1,0 +1,5 @@
+- Engine room
+  - Fuel filter
+  - Raw water strainer
+- Deck
+  - Anchor windlass

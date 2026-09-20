@@ -1,0 +1,3 @@
+- [ ] Seacocks open
+- [x] Bilge pump tested
+- [ ] Fenders stowed
